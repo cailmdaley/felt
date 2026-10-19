@@ -29,7 +29,6 @@ export interface OverviewOptions {
 }
 export type OverviewLens = 'recent' | 'projects' | 'hosts'
 const WINDOW_MS = 30 * 86400000
-const RECEIPT_OVERLAP_MS = 60000
 const MAX_CHANGE_ROWS = 8
 /** An unreachable owner's metadata read retries within this long. */
 const RETRY_MS = 30000
@@ -41,36 +40,6 @@ const DAY_GROUPS = ['Today', 'Yesterday', 'This week', 'Earlier'] as const
 const HOST_MARKS = ['○', '■', '▲', '◇', '◐', '□', '△', '◆']
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0
 const uidOf = (card: KanbanCard): string => card.uid ?? card.id
-
-/** Merge incremental pages by send identity while bounding the in-memory window. */
-export function mergeReceiptFiles(previous: readonly ShelfFile[], incoming: readonly ShelfFile[], since: number): ShelfFile[] {
-  const merged = new Map<string, ShelfFile>()
-  for (const file of [...previous, ...incoming]) {
-    if (!Number.isFinite(file.timestamp) || file.timestamp <= 0 || file.timestamp < since) continue
-    const identity = JSON.stringify([file.host ?? '', file.uid ?? '', file.fullPath, file.timestamp, file.sessionId ?? ''])
-    merged.set(identity, file)
-  }
-  return [...merged.values()]
-}
-
-/** A composite's slowest temporal origin bounds how far the shared cursor can move. */
-function receiptWatermark(origins: unknown, sampledAt: number, previous: number | undefined, since: number): number {
-  const hold = previous ?? since
-  if (!origins || typeof origins !== 'object' || Array.isArray(origins)) return hold
-  const entries = Object.values(origins as Record<string, unknown>)
-  if (!entries.length) return hold
-  let through = sampledAt
-  for (const raw of entries) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return hold
-    const origin = raw as Record<string, unknown>
-    if (origin.kind === 'local') continue
-    if (origin.kind !== 'remote' || typeof origin.last_polled_at !== 'string') return hold
-    const polledAt = Date.parse(origin.last_polled_at)
-    if (!Number.isFinite(polledAt)) return hold
-    through = Math.min(through, polledAt)
-  }
-  return through
-}
 
 /** Calendar-day arithmetic in the viewer's zone, including 23/25-hour DST days. */
 export function overviewDayGroup(timestamp: number, now: number): string {
@@ -249,9 +218,6 @@ export class Overview {
   private readonly resizeObserver?: ResizeObserver
   private marks = new Map<string, string>()
   private files: ShelfFile[] = []
-  private receiptCursor?: number
-  private originHosts?: Set<string>
-  private receiptBackfill = false
   private fleetHosts: string[] = []
   private lens: OverviewLens = 'recent'
   private order: KanbanCard[] = []
@@ -370,10 +336,7 @@ export class Overview {
     const controller = new AbortController()
     this.request = controller
     const sampledAt = Date.now()
-    const windowStart = sampledAt - WINDOW_MS
-    const backfill = this.receiptBackfill
-    const since = backfill ? windowStart : Math.max(windowStart, this.receiptCursor === undefined ? windowStart : this.receiptCursor - RECEIPT_OVERLAP_MS)
-    let discoveredOrigin = false
+    const since = sampledAt - WINDOW_MS
     const timeout = setTimeout(() => controller.abort(), 25000)
     void (async () => {
       try {
@@ -383,23 +346,14 @@ export class Overview {
         if (this.disposed) return
         if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { files?: unknown }).files)) throw new Error('Invalid receipt feed')
         const incoming = normalizeShelfFiles(raw)
-        this.files = mergeReceiptFiles(this.files, incoming, Date.now() - WINDOW_MS)
+        this.files = incoming.filter(file => Number.isFinite(file.timestamp) && file.timestamp > 0 && file.timestamp >= Date.now() - WINDOW_MS)
         const origins = (raw as { origins?: unknown }).origins
         if (origins && typeof origins === 'object' && !Array.isArray(origins)) {
           const hosts = Object.keys(origins)
           if (hosts.length) {
-            const nextOrigins = new Set(hosts)
-            const knownOrigins = this.originHosts
-            const grew = knownOrigins !== undefined && hosts.some(host => !knownOrigins.has(host))
             this.fleetHosts = hosts
-            this.originHosts = nextOrigins
-            if (grew && !backfill) {
-              this.receiptBackfill = true
-              discoveredOrigin = true
-            } else if (backfill) this.receiptBackfill = false
           }
         }
-        this.receiptCursor = receiptWatermark(origins, sampledAt, this.receiptCursor, since)
         text(this.status, '')
         this.reconcile()
       } catch {
@@ -407,7 +361,6 @@ export class Overview {
       } finally {
         clearTimeout(timeout)
         if (this.request === controller) this.request = undefined
-        if (discoveredOrigin && !this.disposed) this.refresh()
       }
     })()
   }

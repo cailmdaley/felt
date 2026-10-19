@@ -160,25 +160,21 @@ describe('Overview receipt membership and identity', () => {
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
   })
 
-  it('increments from a safe per-origin watermark, merges identities, and keeps the overlap on failures', async () => {
+  it('replaces receipts with each authoritative rolling snapshot while failures retain the last sheet', async () => {
     const started = now()
-    const remoteAt = started - 5 * 60_000
-    const kept = receipt('alpha', '/report.html', started - 1000, 'host-b', { sessionId: 'session-a' })
-    feed.origins = receiptOrigins(remoteAt, true)
-    feed.files = [kept]
+    const first = receipt('alpha', '/report.html', started - 1000, 'host-b', { sessionId: 'session-a' })
+    feed.origins = receiptOrigins(started - 5 * 60_000, true)
+    feed.files = [first]
     await refresh()
     expect(fetchMock.mock.calls[0][0]).toBe(`http://daemon/api/v1/sent-files/all/composite?since_ms=${started - 30 * 86400000}`)
 
     vi.setSystemTime(started + 5000)
-    feed.files = [kept,
-      receipt('alpha', '/report.html', started + 4000, 'host-b', { sessionId: 'session-b' }),
+    feed.files = [receipt('alpha', '/report.html', started + 4000, 'host-b', { sessionId: 'session-b' }),
       receipt('alpha', '/report.html', started + 4000, 'host-a', { sessionId: 'session-b' })]
     await refresh()
-    const incremental = new URL(fetchMock.mock.calls[1][0])
-    expect(incremental.searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started + 5000 - 30 * 86400000))
     const retained = (overview as unknown as { files: Array<{ uid?: string; host?: string; fullPath: string; timestamp: number; sessionId?: string }> }).files
     expect(retained.map(({ host, uid, fullPath, timestamp, sessionId }) => [host, uid, fullPath, timestamp, sessionId])).toEqual([
-      ['host-b', 'alpha', '/report.html', started - 1000, 'session-a'],
       ['host-b', 'alpha', '/report.html', started + 4000, 'session-b'],
       ['host-a', 'alpha', '/report.html', started + 4000, 'session-b'],
     ])
@@ -186,44 +182,33 @@ describe('Overview receipt membership and identity', () => {
     vi.setSystemTime(started + 6000)
     fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))
     overview.refresh(); await settle()
-    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
-    expect((overview as unknown as { files: unknown[] }).files).toHaveLength(3)
+    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(started + 6000 - 30 * 86400000))
+    expect((overview as unknown as { files: unknown[] }).files).toHaveLength(2)
 
-    feed.origins = receiptOrigins(started + 7000, false)
-    feed.files = [...feed.files, receipt('alpha', '/recovered.html', started + 8000, 'host-b', { sessionId: 'session-c' })]
+    feed.files = [receipt('alpha', '/recovered.html', started + 8000, 'host-b', { sessionId: 'session-c' })]
     await refresh()
-    expect(new URL(fetchMock.mock.calls[3][0]).searchParams.get('since_ms')).toBe(String(remoteAt - 60_000))
-    expect((overview as unknown as { files: unknown[] }).files).toHaveLength(4)
+    expect(new URL(fetchMock.mock.calls[3][0]).searchParams.get('since_ms')).toBe(String(started + 6000 - 30 * 86400000))
+    expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/recovered.html'])
 
     vi.setSystemTime(started + 31 * 86400000)
-    feed.origins = receiptOrigins(now(), false)
     feed.files = [receipt('alpha', '/fresh.html', now(), 'host-a')]
     await refresh()
-    expect(new URL(fetchMock.mock.calls[4][0]).searchParams.get('since_ms')).toBe(String(now() - 30 * 86400000))
     expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/fresh.html'])
   })
 
-  it('backfills the rolling window when a new origin joins after the cursor advanced', async () => {
+  it('includes historical receipts immediately when a new origin joins the fleet', async () => {
     const started = now()
-    const local = { 'host-a': { kind: 'local', stale: false, last_polled_at: null } }
-    const grown = { ...local, 'host-c': { kind: 'remote', stale: true, last_polled_at: new Date(started - 3 * 86400000).toISOString() } }
+    const grown = { ...receiptOrigins(), 'host-c': { kind: 'remote', stale: true, last_polled_at: new Date(started - 3 * 86400000).toISOString() } }
     const historical = receipt('alpha', '/new-host/history.html', started - 2 * 86400000, 'host-c')
-    let reads = 0
-    fetchMock.mockImplementation(async (url: string) => {
-      if (!url.includes('/sent-files/all/composite')) return new Response('', { status: 404 })
-      reads++
-      const body = reads === 1 ? { files: [], origins: local }
-        : reads === 2 ? { files: [], origins: grown }
-          : { files: [historical], origins: grown }
-      return new Response(JSON.stringify(body))
-    })
+    feed.files = []
     await refresh()
     vi.setSystemTime(started + 10_000)
+    feed.origins = grown
+    feed.files = [historical]
     await refresh()
 
-    expect(reads).toBe(3)
-    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started - 60_000))
-    expect(new URL(fetchMock.mock.calls[2][0]).searchParams.get('since_ms')).toBe(String(now() - 30 * 86400000))
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(new URL(fetchMock.mock.calls[1][0]).searchParams.get('since_ms')).toBe(String(started + 10_000 - 30 * 86400000))
     expect((overview as unknown as { files: Array<{ fullPath: string }> }).files.map(file => file.fullPath)).toEqual(['/new-host/history.html'])
   })
 
@@ -253,8 +238,9 @@ describe('Overview receipt membership and identity', () => {
     feed.files = [receipt('beta', '/new.html', now() - 1)]
     await refresh()
     expect(folio('beta').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
+    overview.opened(cards[1])
     feed.files = []; await refresh()
-    expect(overview.orderedCards()).toEqual([cards[1]]) // An empty incremental page does not erase receipts.
+    expect(overview.orderedCards()).toEqual([cards[1]]) // Session membership survives an authoritative empty receipt snapshot.
     overview.dispose()
     overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen })
     document.body.append(overview.el); await refresh()
@@ -309,6 +295,22 @@ describe('Overview receipt membership and identity', () => {
     for (let poll = 0; poll < 4; poll++) { vi.advanceTimersByTime(15000); await refresh() }
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/v1/fibers/'))).toHaveLength(0)
     expect(name('other:bytes-host')).toBe('Unfiled · bytes-host')
+  })
+
+  it('replaces receipts after an external clear and retains the last snapshot while offline', async () => {
+    feed.files = [receipt('alpha', '/report.html')]
+    await refresh()
+    expect(folio('alpha')).toBeTruthy()
+    feed.files = []
+    await refresh()
+    expect(overview.el.querySelector('.ws-overview-folio[data-uid="alpha"]')).toBeNull()
+
+    feed.files = [receipt('alpha', '/restored.html')]
+    await refresh()
+    const prior = folio('alpha')
+    fetchMock.mockResolvedValueOnce(new Response('', { status: 503 }))
+    overview.refresh(); await settle()
+    expect(folio('alpha')).toBe(prior)
   })
 
   it('coalesces refresh reads and retains the sheet on feed failure', async () => {
