@@ -409,6 +409,18 @@ The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
 The daemon also reads `SendUserFile` hook events as sends.
 
+### `shuttle sent-files clear <fiber>`
+
+Hide a fiber's sent-files trail without deleting artifact files or changing body embeds.
+The command resolves the fiber's canonical UID and appends a `sent_files_cleared` event through the same host-local writer as `send-file`.
+Both the Desk gallery and the Board feed hide sends at or before the latest clear timestamp for that UID; newer sends appear normally.
+Recording must be enabled and works while the daemon is offline.
+
+A fiber assigned to another host is refused, even with `--local`.
+Run the command on that host or use the gallery's **Clear** control, which routes through the daemon to each host holding sends.
+Unowned notes can be cleared locally.
+The daemon uses the internal form `shuttle sent-files clear <UID> --uid --local` after routing to the stream host; it bypasses fiber lookup, requires a canonical UID, and never routes again.
+
 ### `shuttle follow <transcript>`
 
 Stream a live meeting transcript to an agent in batches, each followed by one
