@@ -120,6 +120,68 @@ defmodule Shuttle.SentFilesProjectionTest do
     assert [%{timestamp: 11}] = SentFiles.for_uid(@match_ulid, opts)
   end
 
+  test "path cutoffs filter multi-path sends, combine with global clears, and allow resends", %{
+    events: events,
+    ledger: ledger
+  } do
+    append(events, sent_line(ts: 10, files: ["a.html", "/tmp/b.html"]))
+    append(events, sent_line(ts: 20, files: ["/tmp/a.html", "/tmp/b.html"]))
+    append(events, sent_line(ts: 21, files: ["/tmp/a.html"]))
+    append(events, sent_line(ts: 10, tmux: "other-#{@other_ulid}-shuttle"))
+    clear = %{type: "sent_files_cleared", uid: @match_ulid, timestamp: 20, path: "/tmp/a.html"}
+    append(events, Jason.encode!(clear))
+    append(events, Jason.encode!(%{clear | timestamp: 5}))
+    name = start_stream(events)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [
+               %{fullPath: "/tmp/a.html", timestamp: 21},
+               %{fullPath: "/tmp/b.html", timestamp: 20}
+             ] =
+               SentFiles.for_uid(@match_ulid, opts)
+
+      assert [
+               %{fullPath: "/tmp/b.html", timestamp: 10},
+               %{fullPath: "/tmp/a.html", uid: @other_ulid},
+               %{fullPath: "/tmp/b.html", timestamp: 20},
+               %{fullPath: "/tmp/a.html", timestamp: 21}
+             ] = SentFiles.all_since(0, opts)
+
+      refute Enum.any?(
+               SentFiles.for_uid(@session, opts),
+               &(&1.fullPath == "/tmp/a.html" and &1.timestamp <= 20)
+             )
+    end
+
+    append(events, Jason.encode!(Map.delete(%{clear | timestamp: 15}, :path)))
+    append(events, Jason.encode!(%{clear | path: "/tmp/b.html", timestamp: 25}))
+    append(events, sent_line(ts: 26, files: ["/tmp/b.html"]))
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [
+               %{fullPath: "/tmp/b.html", timestamp: 26},
+               %{fullPath: "/tmp/a.html", timestamp: 21}
+             ] =
+               SentFiles.for_uid(@match_ulid, opts)
+
+      assert [%{uid: @other_ulid}, %{timestamp: 21}, %{timestamp: 26}] =
+               SentFiles.all_since(0, opts)
+    end
+  end
+
+  test "malformed path clears cannot become whole-fiber clears" do
+    clear = %{"type" => "sent_files_cleared", "uid" => @match_ulid, "timestamp" => 20}
+
+    for path <- [nil, "", "relative.html", "~/report.html", 42, [], %{}] do
+      assert [] = SentFiles.project(Map.put(clear, "path", path))
+    end
+
+    assert [%{cleared_path: nil}] = SentFiles.project(clear)
+
+    assert [%{cleared_path: "/tmp/a.html"}] =
+             SentFiles.project(Map.put(clear, "path", "/tmp/a.html"))
+  end
+
   # ── stream ──
 
   defp start_stream(events) do

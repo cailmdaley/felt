@@ -41,6 +41,9 @@ func TestSentFilesClearResolvesCanonicalUID(t *testing.T) {
 			if event["type"] != "sent_files_cleared" || event["uid"] != clearTestUID || event["originName"] != "test-host" || event["timestamp"].(float64) <= 0 || event["id"] == "" {
 				t.Fatalf("bad clear: %s", raw)
 			}
+			if event["path"] != nil {
+				t.Fatalf("whole-fiber clear must omit path: %s", raw)
+			}
 			if event["sessionId"] != "" || event["tool"] != nil {
 				t.Fatalf("invented session activity: %s", raw)
 			}
@@ -102,6 +105,40 @@ func TestSentFilesClearRawUIDRequiresLocalAndValidUID(t *testing.T) {
 	}
 }
 
+func TestSentFilesClearPathFlag(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"", "relative.html", "~/report.html", "/tmp/missing/../report.html"} {
+		t.Run("path="+path, func(t *testing.T) {
+			t.Parallel()
+			env, sink, _ := sendFileTestEnv(t)
+			_, err := runIn(t, env, t.TempDir(), "sent-files", "clear", clearTestUID, "--uid", "--local", "--path", path)
+			if !strings.HasPrefix(path, "/") {
+				if err == nil || !strings.Contains(err.Error(), "absolute path") {
+					t.Fatalf("expected invalid path refusal: %v", err)
+				}
+				if _, err := os.Stat(sink); !os.IsNotExist(err) {
+					t.Fatalf("recorded invalid clear: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event map[string]any
+			if err := json.Unmarshal(raw, &event); err != nil {
+				t.Fatal(err)
+			}
+			if event["path"] != path || event["uid"] != clearTestUID {
+				t.Fatalf("path was changed or omitted: %s", raw)
+			}
+		})
+	}
+}
+
 func TestSentFilesClearUsesEventSinkAndRotation(t *testing.T) {
 	t.Parallel()
 	env, sink, artifact := sendFileTestEnv(t)
@@ -111,7 +148,7 @@ func TestSentFilesClearUsesEventSinkAndRotation(t *testing.T) {
 	}
 	a := newApp(env)
 	a.eventNow = func() time.Time { return time.UnixMilli(123456) }
-	if err := a.clearSentFiles(clearTestUID); err != nil {
+	if err := a.clearSentFiles(clearTestUID, ""); err != nil {
 		t.Fatal(err)
 	}
 	rotated, err := os.ReadFile(sink + ".1")
@@ -123,7 +160,7 @@ func TestSentFilesClearUsesEventSinkAndRotation(t *testing.T) {
 		t.Fatalf("bad event: %s %v", raw, err)
 	}
 	env.Set("SHUTTLE_EVENTS", "off")
-	if err := a.clearSentFiles(clearTestUID); err == nil {
+	if err := a.clearSentFiles(clearTestUID, ""); err == nil {
 		t.Fatal("recorded with recording disabled")
 	}
 	after, _ := os.ReadFile(sink)
@@ -132,7 +169,7 @@ func TestSentFilesClearUsesEventSinkAndRotation(t *testing.T) {
 	}
 	env.Set("SHUTTLE_EVENTS", "")
 	env.Set("SHUTTLE_EVENTS_FILE", artifact+"/events.jsonl")
-	if err := a.clearSentFiles(clearTestUID); err == nil {
+	if err := a.clearSentFiles(clearTestUID, ""); err == nil {
 		t.Fatal("ignored write failure")
 	}
 }

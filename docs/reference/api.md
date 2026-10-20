@@ -477,11 +477,15 @@ covers the `events.jsonl` pair and the session ledger. The trail is whatever
 `events.jsonl.1` and `events.jsonl` hold, so a send survives one rotation and is
 gone after the second.
 
-`POST /sent-files/clear` takes `{uid, origin}` and returns `{ok: true}` after appending a `sent_files_cleared` event on the selected stream host.
+`POST /sent-files/clear` takes `{uid, origin, path?}` and returns `{ok: true}` after appending a `sent_files_cleared` event on the selected stream host.
 `uid` must be a canonical fiber ULID; a missing or invalid UID or an unknown `origin` returns 400.
+When supplied, `path` must be a nonempty absolute string or the request returns 400 before writing or forwarding.
+The path is an exact `fullPath` from the sent-files response and is forwarded unchanged, without expansion or normalization on either host.
 The route forwards through `OriginRouter` for a remote origin, relays the owner's response, and returns 502 if forwarding fails.
 A local writer refusal returns 422; an unavailable CLI returns 503.
-Both sent-files read surfaces hide sends at or before the latest clear timestamp for that UID, while newer sends remain visible.
+Without `path`, both sent-files read surfaces hide sends at or before the latest whole-fiber clear timestamp for that UID.
+With `path`, only that file is hidden, including when it shares a send event with other files.
+Each file uses the latest of its path-specific and whole-fiber cutoffs; later resends remain visible.
 Artifact files and body embeds are untouched.
 A successful forwarded clear invalidates the remote sent-files cache so a composite refetch bypasses its freshness gate.
 

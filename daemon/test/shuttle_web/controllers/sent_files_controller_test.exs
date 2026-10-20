@@ -369,6 +369,71 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       assert stamp == ts + 1
     end
 
+    @tag :tmp_dir
+    test "local path clear records the exact path and keeps siblings visible", %{tmp_dir: dir} do
+      artifact = Path.join(dir, "missing/../report.html")
+      sibling = Path.join(dir, "sibling.html")
+
+      path =
+        write_fixture([
+          event(%{"timestamp" => 10, "toolInput" => %{"files" => [artifact, sibling]}})
+        ])
+
+      with_events_file(path)
+      Shuttle.Test.Env.put_env("SHUTTLE_EVENTS", "")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
+      Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/sent-files/clear",
+          Jason.encode!(%{uid: @match_ulid, path: artifact})
+        )
+
+      assert %{"ok" => true} = json_response(conn, 200)
+
+      [_, clear] =
+        path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+
+      assert %{"path" => ^artifact} = clear
+
+      assert %{"files" => [%{"fullPath" => ^sibling}]} =
+               json_response(get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}"), 200)
+
+      assert %{"files" => [%{"fullPath" => ^sibling}]} =
+               json_response(get(api_conn(), "/api/v1/sent-files/all"), 200)
+    end
+
+    test "rejects invalid supplied paths before local writing or forwarding" do
+      alias Shuttle.Test.StubPostClient
+      path = write_fixture([])
+      with_events_file(path)
+
+      stub_forward(
+        "test-remote",
+        "http://localhost:4001",
+        {:ok, 200, ~s({"ok":true})},
+        StubPostClient
+      )
+
+      for origin <- [nil, "test-remote"],
+          invalid <- [nil, "", "relative.html", "~/report.html", 42, [], %{}] do
+        conn =
+          post(
+            api_conn(),
+            "/api/v1/sent-files/clear",
+            Jason.encode!(%{uid: @match_ulid, origin: origin, path: invalid})
+          )
+
+        assert %{"ok" => false, "error" => "path must be a nonempty absolute path"} =
+                 json_response(conn, 400)
+      end
+
+      assert File.read!(path) == "\n"
+      assert StubPostClient.last() == nil
+    end
+
     test "refuses missing or invalid UID and unknown stream host" do
       assert %{"ok" => false} =
                json_response(post(api_conn(), "/api/v1/sent-files/clear", "{}"), 400)
@@ -443,6 +508,20 @@ defmodule ShuttleWeb.SentFilesControllerTest do
              } = StubPostClient.last()
 
       assert %{"uid" => @match_ulid} == Jason.decode!(forwarded_body)
+
+      exact_path = "/tmp/missing/../report.html"
+
+      path_clear =
+        post(
+          api_conn(),
+          "/api/v1/sent-files/clear",
+          Jason.encode!(%{uid: @match_ulid, origin: "test-remote", path: exact_path})
+        )
+
+      assert %{"ok" => true} = json_response(path_clear, 200)
+
+      assert %{"uid" => @match_ulid, "path" => ^exact_path} =
+               Jason.decode!(StubPostClient.last().body)
 
       assert :sys.get_state(registry).entries["test-remote"].feeds.sent_files.last_attempt_at ==
                nil

@@ -409,11 +409,14 @@ The event stream uses the same configuration as `shuttle hook event`; recording
 works offline and confirms registration, not a completed client download.
 The daemon also reads `SendUserFile` hook events as sends.
 
-### `shuttle sent-files clear <fiber>`
+### `shuttle sent-files clear <fiber> [--path <file>]`
 
 Hide a fiber's sent-files trail without deleting artifact files or changing body embeds.
 The command resolves the fiber's canonical UID and appends a `sent_files_cleared` event through the same host-local writer as `send-file`.
-Both the Desk gallery and the Board feed hide sends at or before the latest clear timestamp for that UID; newer sends appear normally.
+Without `--path`, both the Desk gallery and the Board feed hide sends at or before the latest whole-fiber clear timestamp for that UID.
+With `--path`, the clear applies only to the exact absolute `fullPath`, leaving other files from the same send visible.
+The path must be a nonempty absolute path; the command doesn't expand `~`, resolve relative paths, normalize the path, or require the file to exist.
+Each path is hidden through the latest of its path-specific and whole-fiber cutoffs; a later resend appears normally.
 Recording must be enabled and works while the daemon is offline.
 
 A fiber assigned to another host is refused, even with `--local`.

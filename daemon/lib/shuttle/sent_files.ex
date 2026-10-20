@@ -52,7 +52,10 @@ defmodule Shuttle.SentFiles do
 
   A `sent_files_cleared` event carries a fiber `uid` and an epoch-millisecond
   `timestamp`. Both views hide sends attributed to that UID at or before its
-  latest clear, regardless of file order. Attribution still happens at read
+  latest clear, regardless of file order. An optional absolute `path` restricts
+  the clear to that exact `fullPath`; paths in the same send are independent.
+  A path is hidden through the latest of its path-specific and whole-UID cutoffs.
+  Attribution still happens at read
   time, so a later session-ledger claim also respects the cutoff. Sends with
   no integer timestamp remain visible in `for_uid/2`; they cannot be compared
   to a cutoff. Clearing never changes files on disk or the raw event history.
@@ -80,7 +83,7 @@ defmodule Shuttle.SentFiles do
             tmux_session: String.t() | nil,
             timestamp: term()
           }
-          | %{cleared_uid: String.t(), timestamp: integer()}
+          | %{cleared_uid: String.t(), cleared_path: String.t() | nil, timestamp: integer()}
 
   @doc """
   Return the sent-files trail for `uid` as a list of
@@ -145,9 +148,20 @@ defmodule Shuttle.SentFiles do
   read from.
   """
   @spec project(map()) :: [event()]
-  def project(%{"type" => "sent_files_cleared", "uid" => uid, "timestamp" => ts})
+  def project(%{"type" => "sent_files_cleared", "uid" => uid, "timestamp" => ts} = event)
       when is_binary(uid) and uid != "" and is_integer(ts) do
-    [%{cleared_uid: :binary.copy(uid), timestamp: ts}]
+    case Map.fetch(event, "path") do
+      :error ->
+        [%{cleared_uid: :binary.copy(uid), cleared_path: nil, timestamp: ts}]
+
+      {:ok, path} when is_binary(path) and path != "" ->
+        if Path.type(path) == :absolute,
+          do: [%{cleared_uid: :binary.copy(uid), cleared_path: :binary.copy(path), timestamp: ts}],
+          else: []
+
+      _ ->
+        []
+    end
   end
 
   def project(%{"type" => "sent_files_cleared"}), do: []
@@ -205,17 +219,28 @@ defmodule Shuttle.SentFiles do
   defp uncleared(events, session_uids) do
     cutoffs =
       Enum.reduce(events, %{}, fn
-        %{cleared_uid: uid, timestamp: ts}, acc -> Map.update(acc, uid, ts, &max(&1, ts))
-        _event, acc -> acc
+        %{cleared_uid: uid, cleared_path: path, timestamp: ts}, acc ->
+          Map.update(acc, {uid, path}, ts, &max(&1, ts))
+
+        _event, acc ->
+          acc
       end)
 
-    Enum.filter(events, fn
+    Enum.flat_map(events, fn
       %{cleared_uid: _uid} ->
-        false
+        []
 
       event ->
-        cutoff = Map.get(cutoffs, event_uid(event, session_uids))
-        not (is_integer(cutoff) and is_integer(event.timestamp) and event.timestamp <= cutoff)
+        uid = event_uid(event, session_uids)
+
+        paths =
+          Enum.reject(event.paths, fn path ->
+            Enum.any?([Map.get(cutoffs, {uid, nil}), Map.get(cutoffs, {uid, path})], fn cutoff ->
+              is_integer(cutoff) and is_integer(event.timestamp) and event.timestamp <= cutoff
+            end)
+          end)
+
+        if paths == [], do: [], else: [%{event | paths: paths}]
     end)
   end
 
