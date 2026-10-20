@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,7 +101,7 @@ func writeMessageIdentityLedger(t *testing.T, env *sysenv.Env, records []Session
 func TestWorkerSenderAdvertisesFiberReplyTarget(t *testing.T) {
 	t.Parallel()
 	store := writeMessageTargetFiber(t, map[string]any{"host": "worker-node", "runtime": map[string]any{"session_uuid": "worker-A"}})
-	for _, source := range []string{"dispatch-env", "ledger", "default-ledger"} {
+	for _, source := range []string{"dispatch-env", "ledger", "default-ledger", "rotated-ledger"} {
 		for _, session := range []string{"worker-A", "nested-nonworker"} {
 			t.Run(source+"/"+session, func(t *testing.T) {
 				env := messageHookEnv(t, "worker-node")
@@ -111,6 +112,12 @@ func TestWorkerSenderAdvertisesFiberReplyTarget(t *testing.T) {
 					env.Set("SHUTTLE_FIBER_PATH", felt.NewStorage(store).Path("work/worker"))
 				} else {
 					writeMessageIdentityLedger(t, env, []SessionProvenance{{Fiber: "work/worker", Session: "worker-A", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 1}})
+					if source == "rotated-ledger" {
+						path := env.Getenv("SHUTTLE_SESSIONS_FILE")
+						if err := os.Rename(path, path+".1"); err != nil {
+							t.Fatal(err)
+						}
+					}
 					if source == "default-ledger" {
 						if err := os.Rename(env.Getenv("SHUTTLE_SESSIONS_FILE"), filepath.Join(env.Getenv("SHUTTLE_DATA_DIR"), "sessions.jsonl")); err != nil {
 							t.Fatal(err)
@@ -181,6 +188,132 @@ func TestExplicitEndedWorkerReplyNamesFiberAndSuccessor(t *testing.T) {
 	unavailable := newApp(env).enrichUnavailableSession(messaging.Request{Address: receipt.Address}, messaging.Receipt{Status: messaging.StatusRejected, Detail: "native endpoint unavailable"})
 	if strings.Contains(unavailable.Detail, "ended") || !strings.Contains(unavailable.Detail, "worker-B") {
 		t.Fatalf("unavailable: %#v", unavailable)
+	}
+}
+
+// Mutation: discard runtime/peer evidence or return without guidance when a
+// Codex ledger row lacks thread_id. Exercise the strict request-json CLI path.
+func TestEndedWorkerReplyResolvesCodexCLISuccessor(t *testing.T) {
+	t.Parallel()
+	for _, evidence := range []string{"runtime", "peer", "unresolved"} {
+		t.Run(evidence, func(t *testing.T) {
+			env := messageHookEnv(t, "worker-node")
+			runtime := ""
+			if evidence == "runtime" {
+				runtime = "worker-B"
+			}
+			store := writeMessageTargetFiber(t, map[string]any{"host": "worker-node", "runtime": map[string]any{"session_uuid": runtime}})
+			isolateMessageFiberStore(env, store)
+			records := []SessionProvenance{
+				{Fiber: "work/worker", UID: messageTargetFiberUID, Session: "worker-A", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 1},
+				{Fiber: "work/worker", UID: messageTargetFiberUID, Session: "worker-B", Harness: "codex", Host: "worker-node", Kind: "dispatch", At: 2},
+			}
+			writeMessageIdentityLedger(t, env, records)
+			var peers []messaging.Session
+			if evidence == "peer" {
+				peers = []messaging.Session{{Address: "shuttle://worker-node/codex/worker-B", Fiber: "work/worker", FiberUID: messageTargetFiberUID, TranscriptID: "worker-B"}}
+			}
+			messageTargetDaemon(t, env, peers, records)
+			receipt := endedWorkerRequestJSON(t, env)
+			for _, want := range []string{"session has ended", "work/worker", "worker-B", "shuttle message work/worker ...", "not forwarded"} {
+				if !strings.Contains(receipt.Detail, want) {
+					t.Fatalf("missing %q: %#v", want, receipt)
+				}
+			}
+			if evidence != "unresolved" && !strings.Contains(receipt.Detail, "shuttle://worker-node/codex/worker-B") {
+				t.Fatalf("usable address lost: %#v", receipt)
+			}
+			if evidence == "unresolved" && !strings.Contains(receipt.Detail, "exact address unresolved") {
+				t.Fatalf("unresolved address not explained: %#v", receipt)
+			}
+		})
+	}
+}
+
+func endedWorkerRequestJSON(t *testing.T, env *sysenv.Env) messageRequestReceipt {
+	t.Helper()
+	for _, active := range []bool{true, false} {
+		if err := messaging.RegisterMailbox(env, "pi", "worker-A", "worker-node", "/project", os.Getpid(), active); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var output bytes.Buffer
+	env.Stdout = &output
+	env.Stdin = strings.NewReader(`{"address":"shuttle://worker-node/pi/worker-A","text":"reply","message_id":"reply-ended","wake":true}` + "\n")
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"message", "--local", "--json", "--request-json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("ended session accepted reply")
+	}
+	var receipt messageRequestReceipt
+	if err := json.Unmarshal(output.Bytes(), &receipt); err != nil {
+		t.Fatalf("%s: %v", output.String(), err)
+	}
+	if receipt.Address != "shuttle://worker-node/pi/worker-A" || receipt.Status != messaging.StatusRejected {
+		t.Fatalf("explicit session changed: %#v", receipt)
+	}
+	return receipt
+}
+
+// Mutation: read only the live ledger. Rotation must not erase A's fiber
+// pairing, either for replies addressed to A or messages still sent by A.
+func TestMessageIdentityReadsRotatedAndLiveLedger(t *testing.T) {
+	t.Parallel()
+	env := messageHookEnv(t, "worker-node")
+	isolateMessageFiberStore(env, "")
+	writeMessageIdentityLedger(t, env, []SessionProvenance{{Fiber: "work/worker", Session: "worker-A", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 1}})
+	path := env.Getenv("SHUTTLE_SESSIONS_FILE")
+	if err := os.Rename(path, path+".1"); err != nil {
+		t.Fatal(err)
+	}
+	live, _ := json.Marshal(SessionProvenance{Fiber: "work/worker", Session: "worker-B", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 2})
+	if err := os.WriteFile(path, append(live, '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	receipt := endedWorkerRequestJSON(t, env)
+	if !strings.Contains(receipt.Detail, "shuttle://worker-node/pi/worker-B") || !strings.Contains(receipt.Detail, "shuttle message work/worker ...") {
+		t.Fatalf("rotated pairing lost: %#v", receipt)
+	}
+	env.Set("AI_AGENT", "pi")
+	env.Set("PI_SESSION_ID", "worker-A")
+	env.Unset("SHUTTLE_FIBER_PATH")
+	request, err := newApp(env).buildMessageRequest(strings.NewReader(""), []string{"shuttle://peer/pi/receiver", "hello"}, &messageOptions{id: "rotated-sender"})
+	if err != nil || request.ReplyTo != "work/worker" {
+		t.Fatalf("rotated sender pairing lost: %#v %v", request, err)
+	}
+	// Missing live files still leave usable history.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := newApp(env).messageReplyTarget("shuttle://worker-node/pi/worker-A"); got != "work/worker" {
+		t.Fatalf("rotated-only target: %q", got)
+	}
+}
+
+func TestRotatedSenderPairingUsesLedgerTimestampAndLiveTieOrder(t *testing.T) {
+	t.Parallel()
+	for _, rotatedAt := range []int64{2, 3} {
+		t.Run(fmt.Sprint(rotatedAt), func(t *testing.T) {
+			env := messageHookEnv(t, "worker-node")
+			row := SessionProvenance{Fiber: "work/rotated", UID: messageTargetFiberUID, Session: "worker-A", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: rotatedAt}
+			writeMessageIdentityLedger(t, env, []SessionProvenance{row})
+			path := env.Getenv("SHUTTLE_SESSIONS_FILE")
+			if err := os.Rename(path, path+".1"); err != nil {
+				t.Fatal(err)
+			}
+			row.Fiber, row.At = "work/live", 2
+			live, _ := json.Marshal(row)
+			if err := os.WriteFile(path, append(live, '\n'), 0600); err != nil {
+				t.Fatal(err)
+			}
+			want := "work/live"
+			if rotatedAt > row.At {
+				want = "work/rotated"
+			}
+			if got := newApp(env).messageReplyTarget("shuttle://worker-node/pi/worker-A"); got != want {
+				t.Fatalf("reply target %q, want latest pairing %q", got, want)
+			}
+		})
 	}
 }
 

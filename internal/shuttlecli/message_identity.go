@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
@@ -19,24 +20,32 @@ func (a *app) localMessageLedger() []SessionProvenance {
 	if path == "" {
 		return nil
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	var records []SessionProvenance
-	for scanner.Scan() {
-		var row SessionProvenance
-		if json.Unmarshal(scanner.Bytes(), &row) != nil {
+	// Match the daemon's ledger window: rotated history first, live rows
+	// second, then stable timestamp order, retaining live-after-rotated order
+	// at equal timestamps. Conflicting newest worker identities still refuse.
+	for _, source := range []string{path + ".1", path} {
+		file, err := os.Open(source)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
 			return nil
 		}
-		records = append(records, row)
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 4096), 1024*1024)
+		for scanner.Scan() {
+			var row SessionProvenance
+			if json.Unmarshal(scanner.Bytes(), &row) == nil {
+				records = append(records, row)
+			}
+		}
+		file.Close()
+		if scanner.Err() != nil {
+			return nil
+		}
 	}
-	if scanner.Err() != nil {
-		return nil
-	}
+	sort.SliceStable(records, func(i, j int) bool { return records[i].At < records[j].At })
 	return records
 }
 
@@ -107,9 +116,31 @@ func (a *app) enrichUnavailableSession(req messaging.Request, receipt messaging.
 	if err != nil || worker == nil {
 		return receipt
 	}
-	current, err := fiberWorkerAddress(f, worker, messaging.NormalizeHarness(worker.Harness), "", nil)
-	if err != nil || current == req.Address {
+	harness := messaging.NormalizeHarness(worker.Harness)
+	if worker.Host == address.Host && harness == address.Harness && worker.nativeSessionID() == address.ID {
 		return receipt
+	}
+	// Reuse the normal fiber resolver's runtime and peer evidence. A Codex
+	// CLI row can name its native session without a separate thread_id.
+	query := f.ID
+	if f.UID != "" {
+		query = f.UID
+	}
+	if lookup, err := a.lookupShuttleAddressFibers(query); err == nil && len(lookup.Fibers) == 1 {
+		f = lookup.Fibers[0]
+	}
+	runtimeID := shuttleRuntimeSessionID(f)
+	current, resolveErr := fiberWorkerAddress(f, worker, harness, runtimeID, nil)
+	if resolveErr != nil {
+		if directory, err := a.fetchPeerDirectory(worker.Host, harness); err == nil {
+			current, resolveErr = fiberWorkerAddress(f, worker, harness, runtimeID, directory.Sessions)
+		}
+	}
+	if resolveErr == nil && current == req.Address {
+		return receipt
+	}
+	if resolveErr != nil {
+		current = fmt.Sprintf("session %s on %s/%s (exact address unresolved)", worker.Session, worker.Host, harness)
 	}
 	hint := fmt.Sprintf("fiber %s has current worker %s; use shuttle message %s ... to address its current worker; this explicit session message is not forwarded", f.ID, current, f.ID)
 	receipt.Detail = strings.TrimSpace(receipt.Detail + "; " + hint)

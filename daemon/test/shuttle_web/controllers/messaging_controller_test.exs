@@ -762,7 +762,25 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert context |> Jason.decode!() |> get_in(["hookSpecificOutput", "additionalContext"]) =~
              "[Shuttle message real-reply from shuttle://peer/pi/sender; reply to peer/work]"
 
-    write_jsonl!(path, [
+    # A's pairing is rotated; B is a Codex CLI worker without thread_id.
+    # Its native address is established by the fiber's runtime, not guessed.
+    fiber_dir = Path.join(root, ".felt/work/fiber")
+    File.mkdir_p!(fiber_dir)
+
+    File.write!(Path.join(fiber_dir, "fiber.md"), """
+    ---
+    id: 01ARZ3NDEKTSV4RRFFQ69G5FAV
+    name: Work fiber
+    shuttle:
+      host: #{host}
+      runtime:
+        session_uuid: worker-B
+    ---
+    """)
+
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", root)
+
+    write_jsonl!(path <> ".1", [
       %{
         session: "worker-A",
         fiber: "work/fiber",
@@ -770,11 +788,14 @@ defmodule ShuttleWeb.MessagingControllerTest do
         host: host,
         kind: "dispatch",
         at: 1
-      },
+      }
+    ])
+
+    write_jsonl!(path, [
       %{
         session: "worker-B",
         fiber: "work/fiber",
-        harness: "pi",
+        harness: "codex",
         host: host,
         kind: "dispatch",
         at: 2
@@ -789,7 +810,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     assert address == request["address"]
     assert detail =~ "session has ended"
-    assert detail =~ "shuttle://#{host}/pi/worker-B"
+    assert detail =~ "shuttle://#{host}/codex/worker-B"
     assert detail =~ "shuttle message work/fiber ..."
     assert detail =~ "not forwarded"
   end
