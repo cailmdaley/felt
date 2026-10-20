@@ -393,6 +393,7 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 | `shuttle remotes add <name>` | Add or replace a remote in the file (`--port` or `--url`, `--ssh`, `--remote-port`, `--remote-socket`, `--display`, `--checkout`, `--multiplex`, `--tunnel-manager`) |
 | `shuttle remotes rm <name>` | Remove a remote from the file; a discovered peer is suppressed with an `"enabled": false` entry instead |
 | `shuttle remotes path` | Print the fleet file path (`~/.config/shuttle/remotes.json`) |
+| `shuttle remote-control` | Show this daemon's managed Claude Remote Control host, its last exit screen and retry time; `--json` returns the full reconciled status from `/api/v1/remote_control` |
 | `shuttle host` | Print this host's id, class and daemon listener (`--json` gives `{id, class, class_source, listen, listen_source, file, data_dir}`; the daemon reads its host id from it at boot, and the stop scripts put `heartbeat.stopped` in `data_dir`) |
 | `shuttle host seed` | Write this host's id to `~/.shuttle/host` (or `$SHUTTLE_HOST_FILE`) unless it already holds one: `$SHUTTLE_HOST`, else the normalized hostname. `shuttle daemon install` runs it |
 | `shuttle host class <class>` | Set this host's trust class in `~/.config/shuttle/host.json` (`single-user`, `shared-multi-user`, `exposed`) |

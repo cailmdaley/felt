@@ -62,6 +62,59 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "remote_control/0" do
+    @describetag :tmp_dir
+    setup %{tmp_dir: dir} do
+      file = Path.join(dir, "host.json")
+      Shuttle.Test.Env.put_env("SHUTTLE_HOST_CONFIG_FILE", file)
+      Shuttle.Test.Env.put_env("HOME", dir)
+      %{host_file: file, home: dir}
+    end
+
+    test "absent disables; every read sees fresh dir and args", %{host_file: file, home: home} do
+      assert Host.remote_control() == nil
+      File.write!(file, ~s({"remote_control":{"dir":"~/projects"}}))
+      assert {:ok, %{dir: dir, args: []}} = Host.remote_control()
+      assert dir == Path.join(home, "projects")
+
+      File.write!(
+        file,
+        ~s({"remote_control":{"dir":"/path/to/projects","args":["--verbose","a'b"]}})
+      )
+
+      assert {:ok, %{dir: "/path/to/projects", args: ["--verbose", "a'b"]}} =
+               Host.remote_control()
+
+      File.write!(file, "{}")
+      assert Host.remote_control() == nil
+    end
+
+    test "invalid config warns and disables instead of guessing", %{host_file: file} do
+      for value <- [
+            nil,
+            false,
+            [],
+            "bad",
+            %{},
+            %{"dir" => "relative"},
+            %{"dir" => 5},
+            %{"dir" => "/tmp", "args" => nil},
+            %{"dir" => "/tmp", "args" => "--verbose"},
+            %{"dir" => "/tmp", "args" => [1]},
+            %{"dir" => "/tmp", "args" => [<<0>>]},
+            %{"dir" => "/tmp" <> <<0>>}
+          ] do
+        File.write!(file, Jason.encode!(%{remote_control: value}))
+        assert capture_log(fn -> assert Host.remote_control() == nil end) =~ "remote_control"
+      end
+
+      for text <- ["not json", ~s({"remote_control":{"dir":"/a","dir":"/b"}})] do
+        File.write!(file, text)
+        assert capture_log(fn -> assert Host.remote_control() == nil end) =~ "remote_control"
+      end
+    end
+  end
+
   describe "quarantine_auto_release?/0" do
     setup do
       dir = Path.join(System.tmp_dir!(), "shuttle-host-#{System.unique_integer([:positive])}")

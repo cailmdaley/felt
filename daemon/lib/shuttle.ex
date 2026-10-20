@@ -122,6 +122,7 @@ defmodule Shuttle.Application do
     {:start_event_stream, Shuttle.EventStream},
     {:start_interrupt_watcher, Shuttle.InterruptWatcher},
     {:start_log_rotator, Shuttle.LogRotator},
+    {:start_remote_control, Shuttle.RemoteControl},
     {:start_poller, Shuttle.Poller}
   ]
 

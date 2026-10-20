@@ -221,6 +221,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.shuttleDaemonCmd(),
 		a.shuttleVersionCmd(),
 		a.shuttleSnapshotCmd(),
+		a.remoteControlCmd(),
 		a.shuttleDispatchCmd(),
 		a.doctorCmd(),
 		a.shuttleFollowCmd(),

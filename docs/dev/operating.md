@@ -36,6 +36,19 @@ shuttle validate-identity                # fiber UID invariants across daemon fe
 felt setup receipt --json                     # Felt binary and loaded plugin generations
 ```
 
+## Remote Control host
+
+`shuttle remote-control` reads this daemon's managed Claude Remote Control status; `--json` returns the complete snapshot from `GET /api/v1/remote_control`.
+Configure its folder and literal arguments through host.json's `remote_control` object, as described in [installation](../shuttle/installation.md#claude-remote-control-host).
+Changes take effect within 30 seconds without restarting the daemon.
+Removing the key stops the managed tmux session `shuttle-remote-control`; a daemon restart leaves it alive and adopts it.
+The boot quarantine doesn't hold this host.
+
+For `waiting` or `error`, inspect `message`, `last_exit.screen`, and `next_attempt_at` before intervening.
+Authentication errors and a folder already served by another host appear in the retained screen.
+A short failure doubles the retry delay from 2 seconds to a 300-second cap.
+Uncertain tmux visibility holds rather than launching a duplicate; the missing-socket recovery below applies to this host too.
+
 ## Message identity and handoffs
 
 A delivered message header keeps the sending session in `from` and shows a worker's fiber separately as `reply to <fiber>` (`reply_to` in JSON).

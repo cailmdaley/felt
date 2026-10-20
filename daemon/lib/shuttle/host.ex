@@ -165,6 +165,51 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc "Remote Control configuration, read fresh; invalid settings warn and disable the host."
+  @spec remote_control() :: nil | {:ok, %{dir: String.t(), args: [String.t()]}}
+  def remote_control do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, doc} ->
+        case Map.fetch(doc, "remote_control") do
+          :error -> nil
+          {:ok, value} -> remote_control_config(value, path)
+        end
+
+      {:error, _kind, message} ->
+        Logger.warning("#{message}; remote_control disabled")
+        nil
+    end
+  end
+
+  defp remote_control_config(%Jason.OrderedObject{values: pairs}, path) do
+    config = Map.new(pairs)
+    dir = config["dir"]
+    args = Map.get(config, "args", [])
+
+    valid_dir =
+      is_binary(dir) and dir != "" and not String.contains?(dir, <<0>>) and
+        (Path.type(dir) == :absolute or dir == "~" or String.starts_with?(dir, "~/"))
+
+    if length(pairs) == map_size(config) and valid_dir and is_list(args) and
+         Enum.all?(args, &(is_binary(&1) and not String.contains?(&1, <<0>>))) do
+      {:ok, %{dir: Shuttle.Env.expand(dir), args: args}}
+    else
+      remote_control_warning(path)
+    end
+  end
+
+  defp remote_control_config(_value, path), do: remote_control_warning(path)
+
+  defp remote_control_warning(path) do
+    Logger.warning(
+      "#{path}: remote_control requires an absolute dir (or ~/path) and args as a list of strings; remote_control disabled"
+    )
+
+    nil
+  end
+
   @doc "`resolve/1`, raising `ArgumentError` with the message on a refusal."
   @spec resolve!(pos_integer()) :: settings()
   def resolve!(fallback_port \\ @default_port) do

@@ -5,6 +5,7 @@ config :shuttle,
   # tests inject process-global config instead of mutating it.
   scoped_env: true,
   start_poller: false,
+  start_remote_control: false,
   # Tests boot pollers constantly; quarantining every one would park the very
   # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:
   # true` to Poller.start_link explicitly.

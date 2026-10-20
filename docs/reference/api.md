@@ -168,6 +168,29 @@ resume of a session whose `resume-<uuid>` is open is refused
 (`session_open_in_resume`) and the fiber shows as blocked, rather than two
 harness processes sharing one transcript.
 
+## Remote Control status
+
+`GET /api/v1/remote_control` is host-scoped and returns this daemon's last reconciled Claude Remote Control status.
+Reading it does not trigger reconciliation or start a host.
+The daemon reads host.json's `remote_control` configuration every 30 seconds; the host runs independently of the worker boot quarantine.
+
+| Field | Meaning |
+|---|---|
+| `state` | `disabled`, `running`, `waiting`, `starting`, or `error` |
+| `dir`, `args` | Configured absolute directory and literal extra arguments; `null` and `[]` while disabled |
+| `pid` | tmux pane PID, or `null` when not observed running |
+| `started_at` | Session creation time, retained across daemon adoption, or `null` |
+| `restarts` | Successful starts during this daemon lifetime, including its first launch; adoption doesn't increment it |
+| `last_exit` | `null` or `{status, at, screen}`; status is an exit code or `null` when unknown, and screen is up to 20 nonempty lines |
+| `next_attempt_at` | Retry time, or `null` |
+| `message` | Diagnostic text, or `null` |
+
+Timestamps use UTC ISO 8601.
+A dead pane's own death timestamp measures lifetime even when the daemon adopts it later.
+A missing session without that timestamp counts as a short failure.
+Uncertain tmux or process observations hold instead of authorizing a launch.
+`shuttle remote-control [--json]` reads this endpoint using the local daemon transport.
+
 ## Read plane
 
 | Route | Routing | Purpose |
@@ -177,6 +200,7 @@ harness processes sharing one transcript.
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
 | `GET /roles` | local | Shared role charters as an array of `{slug, name, outcome}`; shells `shuttle roles --json` in configured stores, deduplicates by slug, and sorts by slug. CLI failures or malformed responses contribute no roles (200, empty array when none are available). Role charters are synchronized documents, not owner-routed host state |
+| `GET /remote_control` | host-scoped | Reconciled Claude Remote Control host status, last exit screen, and retry time; see [status fields](#remote-control-status) |
 | `GET /agents` | host-addressed | The effective agent registry (shells `shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's shuttle binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |

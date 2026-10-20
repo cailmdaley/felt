@@ -697,6 +697,38 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 A fetched daemon installation writes `~/.shuttle/repo` with its release directory, which lets `shuttle-launch` locate it during remote revival.
 If you move the release manually, update that path too.
 
+## Claude Remote Control host
+
+The daemon can keep one `claude remote-control` host running so claude.ai and the mobile app can open sessions in a folder on this machine.
+Add `remote_control` to the existing `~/.config/shuttle/host.json`, preserving its other keys:
+
+```json
+{"remote_control": {"dir": "/path/to/projects", "args": ["--permission-mode", "auto"]}}
+```
+
+`dir` is required and absolute (`~/projects` also expands against the daemon's home).
+`args` is an optional list of literal strings, passed after `remote-control`; it defaults to `[]`.
+The Claude binary must be installed and authenticated for this user and available in a login bash's PATH.
+The script uses `command claude`, bypassing shell functions that add flags intended for ordinary Claude sessions.
+Remote Control child sessions don't receive Shuttle's worker prompt or task assignment.
+
+The daemon reads this setting every 30 seconds without a restart.
+It owns the tmux session `shuttle-remote-control`, adopts it across daemon restarts, replaces it when the directory or arguments change, and stops it when the key is absent or invalid.
+Invalid settings also log a warning.
+The host starts independently of the boot quarantine because it waits for a human to open a session.
+On macOS it uses the same terminal-rooted tmux server policy as workers.
+
+Inspect it with `shuttle remote-control` or `shuttle remote-control --json`.
+The status reports the pane PID, start time, starts during this daemon lifetime (`restarts`), last exit status and up to 20 nonempty screen lines, and the next retry time.
+Short-lived hosts retry after 2 seconds, doubling to a 300-second cap; an actual lifetime of at least 60 seconds resets the wait to 2 seconds.
+The daemon retains a dead pane to collect its exit evidence and holds rather than spawning when tmux or process liveness is uncertain.
+A lost session without a death timestamp counts conservatively as a short failure.
+
+A manually started host in the same folder can refuse the managed host with an “already served” message.
+The status preserves that message while retries back off; stop the manual host or remove `remote_control` to choose which one runs.
+A killed host's child sessions lose their running turn, though Claude retains their conversation history server-side.
+Changing this setting can stop those children too.
+
 ## Configuring stores
 
 The daemon polls felt stores. It resolves them in this order:
