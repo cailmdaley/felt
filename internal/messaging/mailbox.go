@@ -33,12 +33,13 @@ type mailboxRegistration struct {
 	LastSeen int64  `json:"last_seen"`
 	PID      int    `json:"pid,omitempty"`
 	Start    string `json:"start,omitempty"`
+	Ended    bool   `json:"ended,omitempty"`
 }
 
 // live reports whether the registration's receiver process still runs. A
 // registration without a process identity cannot be verified and is not live.
 func (r mailboxRegistration) live() bool {
-	return r.PID > 0 && processAlive(r.PID, r.Start)
+	return !r.Ended && r.PID > 0 && processAlive(r.PID, r.Start)
 }
 
 // hookShells are the launchers a harness may interpose between itself and a
@@ -84,6 +85,13 @@ func mailboxDir(env *sysenv.Env, harness, id string) string {
 // the receiver's harness process (see HookReceiverPID). A SessionEnd withdraws
 // availability without deleting already queued messages.
 func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, active bool) error {
+	return registerMailboxWith(env, harness, id, host, cwd, pid, active, mailboxWrite)
+}
+
+// Each transition publishes one complete state by atomic rename. Concurrent
+// register/end hooks cannot split a transition across two independently
+// removed files; the last publication wins, regardless of completion order.
+func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int, active bool, publish func(string, []byte, bool) error) error {
 	if harness != "claude" && harness != "codex" && harness != "pi" {
 		return errCode("invalid_request", "unsupported mailbox harness")
 	}
@@ -94,44 +102,23 @@ func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, ac
 		return err
 	}
 	dir := mailboxDir(env, harness, id)
-	if !active {
-		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-			return nil
+	reg := mailboxRegistration{ID: id, Host: host, Ended: !active}
+	if active {
+		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
+		if !reg.live() {
+			return errCode("unavailable", "mailbox receiver process %d is not running", pid)
 		}
-		ended, err := json.Marshal(mailboxRegistration{ID: id, Host: host})
-		if err != nil {
+		if err := ensureDir(dir, 0700); err != nil {
 			return err
 		}
-		if err := mailboxWrite(filepath.Join(dir, "ended.json"), ended, false); err != nil {
-			return err
-		}
-		err = os.Remove(filepath.Join(dir, "receiver.json"))
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return syncDir(dir)
-	}
-	reg := mailboxRegistration{ID: id, Host: host, CWD: cwd, LastSeen: time.Now().UnixMilli(), PID: pid, Start: processStartToken(pid)}
-	if !reg.live() {
-		return errCode("unavailable", "mailbox receiver process %d is not running", pid)
-	}
-	if err := ensureDir(dir, 0700); err != nil {
-		return err
+	} else if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return nil
 	}
 	b, err := json.Marshal(reg)
 	if err != nil {
 		return err
 	}
-	if err := mailboxWrite(filepath.Join(dir, "receiver.json"), b, false); err != nil {
-		return err
-	}
-	if err := os.Remove(filepath.Join(dir, "ended.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return syncDir(dir)
+	return publish(filepath.Join(dir, "receiver.json"), b, false)
 }
 
 func MailboxAvailable(env *sysenv.Env, harness, id, host string) bool {
@@ -151,6 +138,9 @@ func mailboxUnavailable(env *sysenv.Env, harness, id, host string) string {
 	}
 	if err != nil || r.ID != id || r.Host != host {
 		return "session has not registered a Shuttle message hook on this host"
+	}
+	if r.Ended {
+		return "session has ended; its Shuttle message hook is withdrawn"
 	}
 	if !r.live() {
 		return "session's registered receiver process is no longer running; no hook would offer this message"

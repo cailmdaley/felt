@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMailboxReservationIgnoresPostLinkCleanupFailures(t *testing.T) {
@@ -127,6 +128,58 @@ func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
 		if n != 1 {
 			t.Fatalf("%s offered %d times", id, n)
 		}
+	}
+}
+
+// Mutation: publish ended.json then remove receiver.json on end, and publish
+// receiver.json then remove ended.json on register. The barriers reproduce
+// both two-file interleavings deterministically; neither may erase all state.
+func TestMailboxConcurrentRegistrationAndEndHaveOneAtomicState(t *testing.T) {
+	t.Parallel()
+	for _, firstActive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("first-active=%v", firstActive), func(t *testing.T) {
+			env := testEnv(t)
+			if err := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			published, resume := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(resume) }) }
+			defer release()
+			done := make(chan error, 1)
+			go func() {
+				done <- registerMailboxWith(env, "pi", "session", "host", "/project", os.Getpid(), firstActive, func(path string, b []byte, exclusive bool) error {
+					if err := mailboxWrite(path, b, exclusive); err != nil {
+						return err
+					}
+					close(published)
+					<-resume
+					return nil
+				})
+			}()
+			select {
+			case <-published:
+			case err := <-done:
+				t.Fatalf("first transition did not publish: %v", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("first transition did not reach publication barrier")
+			}
+			secondErr := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), !firstActive)
+			release()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if secondErr != nil {
+				t.Fatal(secondErr)
+			}
+			reason := mailboxUnavailable(env, "pi", "session", "host")
+			if firstActive && reason != "session has ended; its Shuttle message hook is withdrawn" {
+				t.Fatalf("last publication is ended, got %q", reason)
+			}
+			if !firstActive && reason != "" {
+				t.Fatalf("last publication is registered, got %q", reason)
+			}
+		})
 	}
 }
 
