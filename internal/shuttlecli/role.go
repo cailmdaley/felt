@@ -68,7 +68,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 						ID: "roles/" + args[1], Name: newName,
 						Body: fmt.Sprintf("The %s office serves the constitution %q. Its holders grow this charter with the office's remit, playbooks, and human gates.\n", newName, f.Name),
 					}
-					if err := roleStorage(st).Write(charter); err != nil {
+					if err := createRoleCharter(roleStorage(st), charter); err != nil {
 						return fmt.Errorf("creating role charter: %w", err)
 					}
 				}
@@ -103,6 +103,24 @@ func roleStorage(st *felt.Storage) *felt.Storage {
 		return felt.NewStorage(external.ProjectDir())
 	}
 	return st
+}
+
+// createRoleCharter checks the destination independently of the metadata index,
+// which omits malformed documents. The lock serializes competing role creators;
+// availability is checked again under it before the write.
+func createRoleCharter(st *felt.Storage, charter *felt.Felt) error {
+	if err := st.CheckAvailableID(charter.ID); err != nil {
+		return err
+	}
+	unlock, err := st.LockFiber(charter.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := st.CheckAvailableID(charter.ID); err != nil {
+		return err
+	}
+	return st.Write(charter)
 }
 
 func (a *app) rolesCmd() *cobra.Command {
