@@ -43,6 +43,7 @@ export interface GalleryOptions {
   shuttleBase: string
   open: (send: FiberSend) => void
   clear?: () => void | Promise<void>
+  dismiss?: (send: FiberSend) => Promise<void>
   now?: number
 }
 
@@ -71,6 +72,12 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
     })
     el.append(clear)
   }
+
+  const error = document.createElement('p')
+  error.className = 'kbn-preview-gallery-error'
+  error.setAttribute('role', 'alert')
+  error.hidden = true
+  el.append(error)
 
   const thumbs: Thumbnail[] = []
   let settled = false
@@ -132,16 +139,47 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
     caption.append(name, when)
     item.append(caption)
 
+    const tile = document.createElement('div')
+    tile.className = 'kbn-preview-send-wrap'
+    tile.append(item)
+    if (sent && o.dismiss) {
+      const dismiss = document.createElement('button')
+      dismiss.type = 'button'
+      dismiss.className = 'kbn-preview-send-dismiss'
+      dismiss.textContent = '×'
+      dismiss.title = `Dismiss ${send.basename}; the file on disk is untouched`
+      dismiss.setAttribute('aria-label', `Dismiss ${send.basename}`)
+      dismiss.addEventListener('click', async event => {
+        event.stopPropagation()
+        if (dismiss.disabled) return
+        dismiss.disabled = true
+        error.hidden = true
+        tile.hidden = true
+        try {
+          await o.dismiss!(send)
+        } catch (reason) {
+          tile.hidden = false
+          error.textContent = `Couldn't dismiss ${send.basename}: ${reason instanceof Error ? reason.message : String(reason)}`
+          error.hidden = false
+          dismiss.disabled = false
+          dismiss.focus()
+        } finally {
+          dismiss.disabled = false
+        }
+      })
+      tile.append(dismiss)
+    }
+
     if (slot === 'tile') {
       if (!tiles) {
         tiles = document.createElement('div')
         tiles.className = 'kbn-preview-tiles'
         el.append(tiles)
       }
-      tiles.append(item)
+      tiles.append(tile)
     } else {
       tiles = null
-      el.append(item)
+      el.append(tile)
     }
   })
   if (sends.length > shown.length) {

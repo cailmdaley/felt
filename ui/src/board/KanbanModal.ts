@@ -391,6 +391,14 @@ export class KanbanModal {
           this.workspace?.overview.refresh(true)
         }
       },
+      dismissSentFile: async (card, send) => {
+        try {
+          await this.fiberSends?.dismiss(card, send)
+          this.announce(`Dismissed ${send.basename}.`)
+        } finally {
+          this.workspace?.overview.refresh(true)
+        }
+      },
       openCardDocument: (card, doc) => this.openDocumentChannel(card, false, doc),
       shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,

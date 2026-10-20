@@ -28,6 +28,39 @@ describe('sendsByFiber', () => {
 })
 
 describe('FiberSends', () => {
+  it('dismisses only the selected path on its stream host and replaces the snapshot', async () => {
+    const target = card({ id: 'work/a', uid: 'uid', originId: 'owner' })
+    const files = [
+      { fullPath: '/a.html', timestamp: 1, uid: 'uid', host: 'host-a' },
+      { fullPath: '/a.html', timestamp: 2, uid: 'uid', host: 'host-b' },
+      { fullPath: '/b.html', timestamp: 3, uid: 'uid', host: 'host-a' },
+    ]
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files, origins: {} })))
+      .mockResolvedValueOnce(new Response('{"ok":true}'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: files.slice(1), origins: {} })))
+    vi.stubGlobal('fetch', fetcher)
+    const reports = new FiberSends('http://daemon', () => {})
+    await reports.refresh()
+    const selected = reports.all(target).find(send => send.owner === 'host-a' && send.fullPath === '/a.html')!
+    await reports.dismiss(target, selected)
+    expect(JSON.parse(fetcher.mock.calls[1][1].body)).toEqual({ uid: 'uid', origin: 'host-a', path: '/a.html' })
+    expect(fetcher.mock.calls.filter((args: unknown[]) => String(args[0]).endsWith('/clear'))).toHaveLength(1)
+    expect(reports.all(target).map(send => send.key)).toEqual(['host-a:/b.html', 'host-b:/a.html'])
+  })
+
+  it('retains the snapshot when dismissal fails', async () => {
+    const target = card({ id: 'work/a', uid: 'uid', originId: 'host' })
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [{ fullPath: '/a.html', timestamp: 1, uid: 'uid', host: 'host' }] })))
+      .mockResolvedValueOnce(new Response('', { status: 503 }))
+    vi.stubGlobal('fetch', fetcher)
+    const reports = new FiberSends('', () => {})
+    await reports.refresh()
+    await expect(reports.dismiss(target, reports.all(target)[0])).rejects.toThrow('503')
+    expect(reports.all(target)).toHaveLength(1)
+  })
+
   afterEach(() => { vi.unstubAllGlobals() })
 
   const feed = (files: unknown[]) => vi.fn(async () => new Response(JSON.stringify({ files, origins: {} })))

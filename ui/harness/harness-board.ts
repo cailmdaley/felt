@@ -1188,6 +1188,12 @@ const MOCK_ORIGINS: TemporalOrigins = {
  * receipt from a stale remote. Their bodies do not load over `file://`, so the
  * overview shows thumbnails.
  */
+const dismissedSends: Array<{ uid: string; origin?: string; path?: string }> = []
+const visibleSends = <T extends Record<string, unknown>>(files: T[]): T[] =>
+  files.filter(file => !dismissedSends.some(clear => clear.uid === file.uid
+    && (!clear.origin || clear.origin === file.host)
+    && (!clear.path || clear.path === file.fullPath)))
+
 const MOCK_SENT_FILES = ([
   { fullPath: '/work/shear/results/b-mode-null.png', uid: 'work/euclid/photoz-systematics/reread', at: -40 * 60_000 },
   { fullPath: '/work/shear/report/null-tests.html', uid: 'work/euclid/photoz-systematics/reread', at: -3 * 3_600_000 },
@@ -1650,10 +1656,14 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ host: LOCAL_HOST, records, origins: MOCK_ORIGINS })
   }
 
+  if (url.includes('/api/v1/sent-files/clear') && method === 'POST') {
+    dismissedSends.push(body() as { uid: string; origin?: string; path?: string })
+    return json({ ok: true })
+  }
   if (url.includes('/api/v1/sent-files/all/composite')) {
-    if (workspaceFixture) return json({ files: workspaceFixture.receipts, origins: workspaceFixture.feed.origins })
+    if (workspaceFixture) return json({ files: visibleSends(workspaceFixture.receipts), origins: workspaceFixture.feed.origins })
     if (docsExample) return json({ files: [], origins: docsExample.feed.origins })
-    return json({ files: MOCK_SENT_FILES, origins: MOCK_ORIGINS })
+    return json({ files: visibleSends(MOCK_SENT_FILES), origins: MOCK_ORIGINS })
   }
   // A text card's body. Images, pages and PDFs load by URL, not through
   // fetch, so offline they stay faces.

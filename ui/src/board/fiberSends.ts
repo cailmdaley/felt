@@ -122,6 +122,17 @@ export class FiberSends {
     if (failed) throw failed.reason
   }
 
+  /** Dismiss one path on the stream host represented by its gallery tile. */
+  async dismiss(card: KanbanCard, send: FiberSend): Promise<void> {
+    if (!card.uid) throw new Error('Cannot dismiss a send without a canonical fiber UID')
+    const response = await fetch(`${this.base}/api/v1/sent-files/clear`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ uid: card.uid, origin: send.owner, path: send.fullPath }),
+    })
+    if (!response.ok) throw new Error(`Could not dismiss sent file on ${send.owner} (${response.status})`)
+    await this.refresh(Date.now(), true, [send.owner])
+  }
+
   /** Read the fleet feed unless a read is in flight or happened within the throttle. */
   refresh(nowMs = Date.now(), force = false, clearedHosts: readonly string[] = []): Promise<void> {
     if (this.inflight) {
