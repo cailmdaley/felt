@@ -314,7 +314,8 @@ deadline. A later Claude-native retry of a completed `queued`, `submitted`, or
 `unknown` receipt rechecks the transcript for up to two seconds from its saved
 offset and upgrades the status when it finds later evidence; it never resends
 the message. Records without an offset return their stored receipt unchanged.
-Changed content requires a new message ID.
+Changed content, including a changed `reply_to` target, requires a new message ID.
+Requests without `reply_to` retain the same deduplication fingerprint; adding a reply target to an existing request is changed content.
 
 Claude preserves its native inbound hold/refuse policy. For a wake, `queued`
 means Claude put the message behind its current turn; `submitted` means the
@@ -339,9 +340,18 @@ No receipt proves that a model read, acted on, or integrated the message.
 Hook offers can repeat if the receiver crashes after writing context but before
 recording the offer; message IDs remain stable. Repeating the identical send
 with the same `--message-id` retrieves its recorded result without redelivery.
-Sender labels are self-reported. Automatic `--from` detection supplies a native
-session address; if the receiver uses another routing alias for that host,
-resolve the reply address through its own `sessions` output.
+Sender labels are self-reported, not authenticated instructions.
+Automatic `--from` detection supplies the exact sending session address.
+A fiber worker also supplies `reply_to`, a separate fiber target shown as `reply to <fiber>` in every delivered header.
+Reply with `shuttle message <fiber> ...` to reach the fiber's current worker across handoffs; the `from` address continues to name the session that sent the message.
+Nonworker messages omit `reply_to`.
+If the receiver uses another routing alias for the sender's host, resolve an explicit session reply through its own `sessions` output.
+
+An explicit session target never forwards to a successor.
+A receiver's `SessionEnd` withdraws its hook and records that the session ended; a missing or unreachable native endpoint alone only establishes unavailability.
+For a rejected or unknown explicit-session delivery, the receiving owner's CLI consults its session ledger.
+When that ledger pairs the session with a fiber whose current worker differs, the receipt names the fiber and current worker and advises `shuttle message <fiber> ...`.
+Without an unambiguous ledger pairing, the receipt keeps the transport's reason without inventing a successor.
 
 Receipts and queued payloads stay under `$SHUTTLE_DATA_DIR` (default
 `~/.shuttle`; trimmed, with a leading `~` expanded), outside the project. Payloads offered by hooks are retained there

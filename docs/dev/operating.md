@@ -36,6 +36,22 @@ shuttle validate-identity                # fiber UID invariants across daemon fe
 felt setup receipt --json                     # Felt binary and loaded plugin generations
 ```
 
+## Message identity and handoffs
+
+A delivered message header keeps the sending session in `from` and shows a worker's fiber separately as `reply to <fiber>` (`reply_to` in JSON).
+The sending CLI checks the daemon-exported `SHUTTLE_FIBER_PATH` against the caller's native session, then falls back to the local session ledger.
+An inherited dispatch path does not make a nested, unrelated session the fiber's worker.
+Native adapters and hook offers share the header formatter in `internal/messaging`; Claude's native wire `from` remains its UDS policy-receipt endpoint, while the content header carries the sender and fiber labels.
+The daemon validates and retains `reply_to` through local request-json frames and remote routing.
+Deduplication includes a nonempty reply target and preserves fingerprints for requests that omit it.
+
+`SessionEnd` writes an owner/identity-scoped mailbox end marker before withdrawing `receiver.json`; a new registration clears the marker.
+The mailbox layer reports ended, never registered, or a registered receiver process that is no longer running, without interpreting fibers.
+Directory existence alone is not end evidence: native endpoint registration also creates that directory.
+The owner-local CLI enriches rejected or unknown session receipts from its local session ledger when another worker holds the fiber.
+This enrichment survives daemon routing and never changes the explicit recipient.
+If a marker or ledger pairing is absent, preserve uncertainty rather than inferring an end or successor.
+
 ## Inspecting state
 
 ```bash
