@@ -1,9 +1,11 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -73,6 +75,113 @@ func writeMessageTargetFiberWithID(t *testing.T, id, uid string, block map[strin
 		t.Fatal(err)
 	}
 	return store
+}
+
+func writeMessageIdentityLedger(t *testing.T, env *sysenv.Env, records []SessionProvenance) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "sessions.jsonl")
+	var content strings.Builder
+	for _, row := range records {
+		b, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content.Write(b)
+		content.WriteByte('\n')
+	}
+	if err := os.WriteFile(path, []byte(content.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("SHUTTLE_SESSIONS_FILE", path)
+}
+
+// Mutation: drop messageReplyTarget or trust an inherited dispatch path without
+// checking the native identity. Only the assigned worker advertises the fiber.
+func TestWorkerSenderAdvertisesFiberReplyTarget(t *testing.T) {
+	t.Parallel()
+	store := writeMessageTargetFiber(t, map[string]any{"host": "worker-node", "runtime": map[string]any{"session_uuid": "worker-A"}})
+	for _, source := range []string{"dispatch-env", "ledger", "default-ledger"} {
+		for _, session := range []string{"worker-A", "nested-nonworker"} {
+			t.Run(source+"/"+session, func(t *testing.T) {
+				env := messageHookEnv(t, "worker-node")
+				isolateMessageFiberStore(env, store)
+				env.Set("PI_SESSION_ID", session)
+				env.Set("AI_AGENT", "pi")
+				if source == "dispatch-env" {
+					env.Set("SHUTTLE_FIBER_PATH", felt.NewStorage(store).Path("work/worker"))
+				} else {
+					writeMessageIdentityLedger(t, env, []SessionProvenance{{Fiber: "work/worker", Session: "worker-A", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 1}})
+					if source == "default-ledger" {
+						if err := os.Rename(env.Getenv("SHUTTLE_SESSIONS_FILE"), filepath.Join(env.Getenv("SHUTTLE_DATA_DIR"), "sessions.jsonl")); err != nil {
+							t.Fatal(err)
+						}
+						env.Unset("SHUTTLE_SESSIONS_FILE")
+					}
+				}
+				request, err := newApp(env).buildMessageRequest(strings.NewReader(""), []string{"shuttle://peer/claude/receiver", "hello"}, &messageOptions{id: "sender-test", wake: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if request.From != "shuttle://worker-node/pi/"+session {
+					t.Fatalf("sender changed: %#v", request)
+				}
+				want := ""
+				if session == "worker-A" {
+					want = "work/worker"
+				}
+				if request.ReplyTo != want {
+					t.Fatalf("reply target = %q, want %q", request.ReplyTo, want)
+				}
+				wire, _ := json.Marshal(request)
+				if want == "" && strings.Contains(string(wire), "reply_to") {
+					t.Fatalf("nonworker has reply_to: %s", wire)
+				}
+			})
+		}
+	}
+}
+
+// Mutation: bypass owner-local enrichment or forward to B. A remains the exact
+// destination even though the owner's ledger has handed its fiber to B.
+func TestExplicitEndedWorkerReplyNamesFiberAndSuccessor(t *testing.T) {
+	t.Parallel()
+	env := messageHookEnv(t, "worker-node")
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Fiber: "work/worker", Session: "worker-A", Harness: "claude", Host: "worker-node", Kind: "dispatch", At: 1},
+		{Fiber: "work/worker", Session: "worker-B", Harness: "pi", Host: "worker-node", Kind: "dispatch", At: 2},
+	})
+	if err := messaging.RegisterMailbox(env, "claude", "worker-A", "worker-node", "/project", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := messaging.RegisterMailbox(env, "claude", "worker-A", "worker-node", "/project", os.Getpid(), false); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	env.Stdout = &output
+	frame := `{"address":"shuttle://worker-node/claude/worker-A","text":"reply","reply_to":"peer/work","message_id":"handoff-reply","wake":true}` + "\n"
+	env.Stdin = strings.NewReader(frame)
+	cmd := NewRootCmd(env)
+	cmd.SetArgs([]string{"message", "--local", "--json", "--request-json"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("ended session accepted reply")
+	}
+	var receipt messageRequestReceipt
+	if err := json.Unmarshal(output.Bytes(), &receipt); err != nil {
+		t.Fatalf("%s: %v", output.String(), err)
+	}
+	for _, want := range []string{"session has ended", "work/worker", "shuttle://worker-node/pi/worker-B", "shuttle message work/worker ...", "not forwarded"} {
+		if !strings.Contains(receipt.Detail, want) {
+			t.Fatalf("missing %q: %#v", want, receipt)
+		}
+	}
+	if receipt.Address != "shuttle://worker-node/claude/worker-A" || receipt.Status != messaging.StatusRejected || receipt.FeltErrorCode != "unavailable" {
+		t.Fatalf("receipt: %#v", receipt)
+	}
+	// No SessionEnd evidence means unavailable, not ended, even with a successor.
+	unavailable := newApp(env).enrichUnavailableSession(messaging.Request{Address: receipt.Address}, messaging.Receipt{Status: messaging.StatusRejected, Detail: "native endpoint unavailable"})
+	if strings.Contains(unavailable.Detail, "ended") || !strings.Contains(unavailable.Detail, "worker-B") {
+		t.Fatalf("unavailable: %#v", unavailable)
+	}
 }
 
 func TestResolveMessageTargetCanonicalAddress(t *testing.T) {

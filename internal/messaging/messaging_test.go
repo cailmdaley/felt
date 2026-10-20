@@ -19,6 +19,18 @@ import (
 	"time"
 )
 
+func TestReplyTargetValidation(t *testing.T) {
+	t.Parallel()
+	for _, target := range []string{"work/fiber", "", "bad\nheader", "bad\x00header", string(make([]byte, 1025))} {
+		req := Request{Address: "shuttle://host/pi/s", Text: "hello", MessageID: "validation", ReplyTo: target}
+		err := validateRequest("host", req)
+		valid := target == "work/fiber" || target == ""
+		if (err == nil) != valid {
+			t.Fatalf("reply_to %q: %v", target, err)
+		}
+	}
+}
+
 func TestAddressRoundTrip(t *testing.T) {
 	t.Parallel()
 	raw, err := FormatAddress("host-1", "codex", "id/with spaces?yes")
@@ -117,6 +129,35 @@ func plainSend(send func() (Receipt, error)) func(context.Context) dedupSendResu
 	return func(context.Context) dedupSendResult {
 		receipt, err := send()
 		return dedupSendResult{Receipt: receipt, Err: err}
+	}
+}
+
+// Mutation: omit ReplyTo from requestHash; changed reply targets must conflict.
+func TestDedupReplyTargetRetryAndConflict(t *testing.T) {
+	t.Parallel()
+	for _, original := range []string{"", "work/fiber"} {
+		t.Run(original, func(t *testing.T) {
+			env := testEnv(t)
+			req := Request{Address: "shuttle://h/claude/s", Text: "hello", MessageID: "reply-dedup", ReplyTo: original}
+			calls := 0
+			send := plainSend(func() (Receipt, error) {
+				calls++
+				return Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusQueued, Transport: "test"}, nil
+			})
+			first, err := withDedup(context.Background(), env, req, send)
+			if err != nil {
+				t.Fatal(err)
+			}
+			retry, err := withDedup(context.Background(), env, req, send)
+			if err != nil || !reflect.DeepEqual(first, retry) || calls != 1 {
+				t.Fatalf("retry: %#v %v calls=%d", retry, err, calls)
+			}
+			req.ReplyTo = "work/another"
+			conflict, err := withDedup(context.Background(), env, req, send)
+			if ErrorCode(err) != "message_id_conflict" || conflict.Status != StatusRejected || calls != 1 {
+				t.Fatalf("changed reply target: %#v %v calls=%d", conflict, err, calls)
+			}
+		})
 	}
 }
 
@@ -419,7 +460,7 @@ func socketTempDir(t *testing.T) string {
 	return dir
 }
 
-func piFixture(t *testing.T, reply string) (string, string) {
+func piFixture(t *testing.T, reply string, observe ...func([]byte)) (string, string) {
 	t.Helper()
 	root := socketTempDir(t)
 	sock := filepath.Join(root, "worker.sock")
@@ -437,7 +478,10 @@ func piFixture(t *testing.T, reply string) (string, string) {
 			return
 		}
 		defer c.Close()
-		bufio.NewReader(c).ReadBytes('\n')
+		frame, _ := bufio.NewReader(c).ReadBytes('\n')
+		for _, fn := range observe {
+			fn(frame)
+		}
 		c.Write([]byte(reply))
 	}()
 	jobs := filepath.Join(root, "project", "jobs")

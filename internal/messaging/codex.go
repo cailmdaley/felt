@@ -184,12 +184,20 @@ func mergeSessions(primary, additions []Session) []Session {
 	return merged
 }
 
-func labeled(r Request) string {
+// Labeled renders the peer header shared by native adapters and hook mailboxes.
+// From identifies the sending session; ReplyTo is a separate, durable target.
+func Labeled(r Request) string {
+	header := "[Shuttle message " + r.MessageID
 	if r.From != "" {
-		return "[Shuttle message " + r.MessageID + " from " + r.From + "]\n" + r.Text
+		header += " from " + r.From
 	}
-	return "[Shuttle message " + r.MessageID + "]\n" + r.Text
+	if r.ReplyTo != "" {
+		header += "; reply to " + r.ReplyTo
+	}
+	return header + "]\n" + r.Text
 }
+
+func labeled(r Request) string { return Labeled(r) }
 func userInput(text string) []map[string]any {
 	return []map[string]any{{"type": "text", "text": text, "text_elements": []any{}}}
 }

@@ -2,10 +2,12 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -138,6 +140,35 @@ func (f *fakeCodex) methodCount(method string) int {
 		}
 	}
 	return n
+}
+
+func TestCodexHeadersHaveExactSenderAndFiberReplyTarget(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		state, method string
+		wake          bool
+		reply         any
+	}{
+		{"idle", "thread/inject_items", false, map[string]any{}},
+		{"idle", "turn/start", true, map[string]any{"turn": map[string]any{"id": "new", "status": "inProgress"}}},
+		{"active", "turn/steer", true, map[string]any{"turnId": "turn-1"}},
+	} {
+		t.Run(tc.method, func(t *testing.T) {
+			env := testEnv(t)
+			fake := &fakeCodex{t: t, state: tc.state, mutation: tc.method, mutationReply: tc.reply}
+			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, fake))
+			req := Request{Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "codex-header", Wake: tc.wake, From: "shuttle://peer/pi/A", ReplyTo: "work/fiber"}
+			if receipt, err := Send(context.Background(), env, "h", req); err != nil {
+				t.Fatalf("%#v %v", receipt, err)
+			}
+			fake.mu.Lock()
+			wire, err := json.Marshal(fake.mutationParams)
+			fake.mu.Unlock()
+			if err != nil || !strings.Contains(string(wire), "[Shuttle message codex-header from shuttle://peer/pi/A; reply to work/fiber]\\nhello") {
+				t.Fatalf("header: %s %v", wire, err)
+			}
+		})
+	}
 }
 
 func TestCodexMutationReceipts(t *testing.T) {

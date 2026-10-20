@@ -95,7 +95,17 @@ func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, ac
 	}
 	dir := mailboxDir(env, harness, id)
 	if !active {
-		err := os.Remove(filepath.Join(dir, "receiver.json"))
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		ended, err := json.Marshal(mailboxRegistration{ID: id, Host: host})
+		if err != nil {
+			return err
+		}
+		if err := mailboxWrite(filepath.Join(dir, "ended.json"), ended, false); err != nil {
+			return err
+		}
+		err = os.Remove(filepath.Join(dir, "receiver.json"))
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
@@ -115,7 +125,13 @@ func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, ac
 	if err != nil {
 		return err
 	}
-	return mailboxWrite(filepath.Join(dir, "receiver.json"), b, false)
+	if err := mailboxWrite(filepath.Join(dir, "receiver.json"), b, false); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dir, "ended.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return syncDir(dir)
 }
 
 func MailboxAvailable(env *sysenv.Env, harness, id, host string) bool {
@@ -126,6 +142,13 @@ func MailboxAvailable(env *sysenv.Env, harness, id, host string) bool {
 // returns "" when a live receiver on host registered it.
 func mailboxUnavailable(env *sysenv.Env, harness, id, host string) string {
 	r, err := mailboxRegistrationFor(env, harness, id)
+	if errors.Is(err, os.ErrNotExist) {
+		b, readErr := readBounded(filepath.Join(mailboxDir(env, harness, id), "ended.json"), 16384)
+		var ended mailboxRegistration
+		if readErr == nil && json.Unmarshal(b, &ended) == nil && ended.ID == id && ended.Host == host {
+			return "session has ended; its Shuttle message hook is withdrawn"
+		}
+	}
 	if err != nil || r.ID != id || r.Host != host {
 		return "session has not registered a Shuttle message hook on this host"
 	}

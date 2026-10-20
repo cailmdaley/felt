@@ -35,7 +35,8 @@ func requestHash(r Request) string {
 		Address, Text, From string
 		Wake                bool
 		Attachments         []Attachment `json:"attachments,omitempty"`
-	}{r.Address, r.Text, r.From, r.Wake, r.Attachments})
+		ReplyTo             string       `json:"reply_to,omitempty"`
+	}{r.Address, r.Text, r.From, r.Wake, r.Attachments, r.ReplyTo})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }

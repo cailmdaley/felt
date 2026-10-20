@@ -93,6 +93,28 @@ func piNativeFixture(t *testing.T, reply any) (string, func()) {
 	}
 }
 
+func TestPiNativeHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	seen := make(chan map[string]any, 1)
+	socket, closeFixture := piNativeFixture(t, func(frame map[string]any) any {
+		seen <- frame
+		return map[string]any{"ok": true, "requestId": frame["requestId"], "sessionId": frame["sessionId"], "delivery": "follow_up"}
+	})
+	defer closeFixture()
+	if err := RegisterPiNative(env, "session", "host", "/project", socket, "", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Address: "shuttle://host/pi/session", Text: "hello", MessageID: "pi-header", Wake: true, From: "shuttle://peer/pi/A", ReplyTo: "work/fiber"}
+	receipt, err := Send(context.Background(), env, "host", req)
+	if err != nil || receipt.Status != StatusAccepted {
+		t.Fatalf("%#v %v", receipt, err)
+	}
+	if frame := <-seen; frame["message"] != "[Shuttle message pi-header from shuttle://peer/pi/A; reply to work/fiber]\nhello" {
+		t.Fatalf("header: %#v", frame)
+	}
+}
+
 func TestPiNativeRegistrationAndDiscovery(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

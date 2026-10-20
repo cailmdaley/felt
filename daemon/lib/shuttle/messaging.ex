@@ -469,6 +469,7 @@ defmodule Shuttle.Messaging do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
     from = Map.get(payload, "from", "")
+    reply_to = Map.get(payload, "reply_to", "")
     # Ordinary messages are task requests. Context-only delivery is explicit
     # with `wake: false`; keeping the default here also applies to public JSON
     # callers that omit the field entirely.
@@ -476,11 +477,11 @@ defmodule Shuttle.Messaging do
     id = Map.get(payload, "message_id")
 
     with {:ok, attachments} <- validate_attachments(Map.get(payload, "attachments", []), mode) do
-      validate_message_fields(payload, address, text, from, wake, id, attachments)
+      validate_message_fields(payload, address, text, from, reply_to, wake, id, attachments)
     end
   end
 
-  defp validate_message_fields(payload, address, text, from, wake, id, attachments) do
+  defp validate_message_fields(payload, address, text, from, reply_to, wake, id, attachments) do
     cond do
       not is_binary(address) or byte_size(address) > 8_192 ->
         {:error, 400, "address must be a bounded string"}
@@ -495,6 +496,10 @@ defmodule Shuttle.Messaging do
       not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) ->
         {:error, 400, "from must be a string of at most 1024 bytes without control characters"}
 
+      not is_binary(reply_to) or byte_size(reply_to) > 1_024 or has_control?(reply_to) ->
+        {:error, 400,
+         "reply_to must be a string of at most 1024 bytes without control characters"}
+
       not is_boolean(wake) ->
         {:error, 400, "wake must be a boolean"}
 
@@ -504,7 +509,7 @@ defmodule Shuttle.Messaging do
       true ->
         raw =
           payload
-          |> Map.take(["address", "text", "from", "wake", "message_id"])
+          |> Map.take(["address", "text", "from", "reply_to", "wake", "message_id"])
           |> Map.put("wake", wake)
 
         raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)

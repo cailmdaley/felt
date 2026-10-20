@@ -62,6 +62,39 @@ func TestMailboxOfExitedReceiverLeavesDiscoveryAndRejects(t *testing.T) {
 	}
 }
 
+// Mutation: remove the missing-receiver/directory distinction in mailboxUnavailable.
+func TestMailboxSessionEndDiffersFromNeverRegistered(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"claude", "codex", "pi"} {
+		t.Run(harness, func(t *testing.T) {
+			env := testEnv(t)
+			if err := RegisterMailbox(env, harness, "ended", "host", "/project", os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			if err := RegisterMailbox(env, harness, "ended", "host", "/project", os.Getpid(), false); err != nil {
+				t.Fatal(err)
+			}
+			for _, wake := range []bool{false, true} {
+				req := Request{Address: "shuttle://host/" + harness + "/ended", Text: "reply", MessageID: "ended-" + strconv.FormatBool(wake), Wake: wake}
+				receipt, err := Send(context.Background(), env, "host", req)
+				if err == nil || receipt.Status != StatusRejected || !strings.Contains(receipt.Detail, "session has ended") || strings.Contains(receipt.Detail, "not registered") {
+					t.Fatalf("ended: %#v %v", receipt, err)
+				}
+			}
+			if got := mailboxUnavailable(env, harness, "never", "host"); !strings.Contains(got, "has not registered") {
+				t.Fatalf("never registered: %s", got)
+			}
+			// A resumed registration is available again.
+			if err := RegisterMailbox(env, harness, "ended", "host", "/project", os.Getpid(), true); err != nil {
+				t.Fatal(err)
+			}
+			if !MailboxAvailable(env, harness, "ended", "host") {
+				t.Fatal("resumed receiver remains ended")
+			}
+		})
+	}
+}
+
 func TestMailboxRegistrationWithoutReceiverProcessIsNotLive(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

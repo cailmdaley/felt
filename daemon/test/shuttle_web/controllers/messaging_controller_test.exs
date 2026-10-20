@@ -29,6 +29,11 @@ defmodule ShuttleWeb.MessagingControllerTest do
     def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
       request = opts[:input] |> String.trim() |> Jason.decode!()
 
+      send(
+        Process.whereis(ShuttleWeb.MessagingControllerTest.Client),
+        {:local_message_frame, request}
+      )
+
       if request["message_id"] == "malformed-local" do
         {Jason.encode!(%{error: "receipt lost"}), 0}
       else
@@ -157,6 +162,17 @@ defmodule ShuttleWeb.MessagingControllerTest do
              status: "rejected",
              transport: "dedup",
              detail: "message_id was already used for a different request"
+           })}
+
+        "ended-worker" ->
+          {:ok, 200,
+           Jason.encode!(%{
+             message_id: request["message_id"],
+             address: request["address"],
+             status: "rejected",
+             transport: "pi-hook",
+             detail:
+               "session has ended; fiber work/fiber has current worker shuttle://edge/pi/worker-B; use shuttle message work/fiber ...; this explicit session message is not forwarded"
            })}
 
         "preflight" ->
@@ -640,13 +656,142 @@ defmodule ShuttleWeb.MessagingControllerTest do
       "text" => "hello",
       "from" => "test",
       "wake" => true,
-      "message_id" => "m-1"
+      "message_id" => "m-1",
+      "reply_to" => "work/fiber"
     }
 
     receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
-    assert_receive {:forwarded, %{"address" => "shuttle://local/pi/p%2F1"}}
+
+    assert_receive {:forwarded,
+                    %{"address" => "shuttle://local/pi/p%2F1", "reply_to" => "work/fiber"}}
+
     assert receipt["address"] == request["address"]
     assert receipt["status"] == "accepted"
+  end
+
+  test "remote rejection keeps the owner's handoff hint and exact session target" do
+    request = %{
+      "address" => "shuttle://edge/pi/worker-A",
+      "text" => "reply",
+      "reply_to" => "peer/work",
+      "message_id" => "ended-worker"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:forwarded,
+                    %{"address" => "shuttle://local/pi/worker-A", "reply_to" => "peer/work"}}
+
+    assert receipt["address"] == request["address"]
+    assert receipt["status"] == "rejected"
+    assert receipt["detail"] =~ "session has ended"
+    assert receipt["detail"] =~ "shuttle://edge/pi/worker-B"
+    assert receipt["detail"] =~ "shuttle message work/fiber ..."
+  end
+
+  test "local request-json frame retains reply target", %{host: host} do
+    request = %{
+      "address" => "shuttle://#{host}/codex/native%2Fid",
+      "text" => "hello",
+      "from" => "shuttle://peer/pi/A",
+      "reply_to" => "work/fiber",
+      "message_id" => "local-reply"
+    }
+
+    assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:local_message_frame,
+                    %{"reply_to" => "work/fiber", "from" => "shuttle://peer/pi/A"}}
+  end
+
+  test "reply targets reject nonstrings and control characters", %{host: host} do
+    for reply_to <- [nil, 12, %{}, "work\nfiber", String.duplicate("x", 1025)] do
+      request = %{
+        "address" => "shuttle://#{host}/codex/native%2Fid",
+        "text" => "hello",
+        "reply_to" => reply_to,
+        "message_id" => "invalid-reply"
+      }
+
+      assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(400)
+    end
+  end
+
+  # Mutation: drop reply_to from validate_message_fields' Map.take. This runs
+  # the real Go CLI through the production Port wrapper, not a fake runner.
+  @tag :tmp_dir
+  test "real CLI request-json delivery renders reply target and owner handoff rejection", %{
+    host: host,
+    tmp_dir: root
+  } do
+    Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", host)
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
+    path = Path.join(root, "sessions.jsonl")
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", path)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", "")
+
+    hook = fn name ->
+      payload =
+        Jason.encode!(%{
+          hook_event_name: name,
+          harness: "pi",
+          session_id: "worker-A",
+          native_pid: String.to_integer(System.pid()),
+          cwd: root
+        }) <> "\n"
+
+      # Hooks consume EOF; message --request-json consumes one newline frame.
+      Shuttle.Env.cmd("sh", ["-c", "printf '%s' \"$1\" | shuttle hook event", "hook", payload])
+    end
+
+    assert {_, 0} = hook.("SessionStart")
+
+    request = %{
+      "address" => "shuttle://#{host}/pi/worker-A",
+      "text" => "hello",
+      "from" => "shuttle://peer/pi/sender",
+      "reply_to" => "peer/work",
+      "wake" => false,
+      "message_id" => "real-reply"
+    }
+
+    assert {:ok, 200, %{"status" => "queued"}} = Shuttle.Messaging.send_message(request)
+    assert {context, 0} = hook.("UserPromptSubmit")
+
+    assert context |> Jason.decode!() |> get_in(["hookSpecificOutput", "additionalContext"]) =~
+             "[Shuttle message real-reply from shuttle://peer/pi/sender; reply to peer/work]"
+
+    write_jsonl!(path, [
+      %{
+        session: "worker-A",
+        fiber: "work/fiber",
+        harness: "pi",
+        host: host,
+        kind: "dispatch",
+        at: 1
+      },
+      %{
+        session: "worker-B",
+        fiber: "work/fiber",
+        harness: "pi",
+        host: host,
+        kind: "dispatch",
+        at: 2
+      }
+    ])
+
+    assert {_, 0} = hook.("SessionEnd")
+    rejected = request |> Map.put("message_id", "real-ended") |> Map.put("wake", true)
+
+    assert {:ok, _, %{"status" => "rejected", "detail" => detail, "address" => address}} =
+             Shuttle.Messaging.send_message(rejected)
+
+    assert address == request["address"]
+    assert detail =~ "session has ended"
+    assert detail =~ "shuttle://#{host}/pi/worker-B"
+    assert detail =~ "shuttle message work/fiber ..."
+    assert detail =~ "not forwarded"
   end
 
   test "ledger harness aliases normalize to canonical addresses" do
@@ -743,6 +888,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       "from" => "test",
       "wake" => false,
       "message_id" => "files-1",
+      "reply_to" => "work/fiber",
       "attachments" => [
         %{"name" => "sample.bin", "data" => Base.encode64(data), "sha256" => sha256}
       ]
@@ -757,6 +903,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
                     %{
                       "address" => "shuttle://local/codex/native%2Fid",
                       "message_id" => "files-1",
+                      "reply_to" => "work/fiber",
                       "attachments" => [forwarded]
                     }, 90_000}
 

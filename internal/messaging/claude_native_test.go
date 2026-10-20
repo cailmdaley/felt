@@ -75,6 +75,28 @@ func nativeClaudeFixture(t *testing.T, env *sysenv.Env, respond func(map[string]
 	return Request{Address: "shuttle://host/claude/session", Text: "hello", MessageID: "native-test", Wake: true}, &sent
 }
 
+// Mutation: remove reply metadata from the native content header. The wire
+// `from` remains the UDS policy-receipt endpoint, not the human sender label.
+func TestClaudeNativeHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	seen := make(chan map[string]any, 1)
+	req, _ := nativeClaudeFixture(t, env, func(frame map[string]any, f *os.File) { seen <- frame; nativeRows(frame, f, false) })
+	req.From = "shuttle://peer/pi/A"
+	req.ReplyTo = "work/fiber"
+	receipt, err := Send(context.Background(), env, "host", req)
+	if err != nil || receipt.Status != StatusAccepted {
+		t.Fatalf("%#v %v", receipt, err)
+	}
+	frame := <-seen
+	if content := frame["message"].(map[string]any)["content"]; content != "[Shuttle message native-test from shuttle://peer/pi/A; reply to work/fiber]\nhello" {
+		t.Fatalf("header: %v", content)
+	}
+	if !strings.HasPrefix(frame["from"].(string), "uds:") {
+		t.Fatalf("policy receipt endpoint lost: %#v", frame)
+	}
+}
+
 func nativeRows(frame map[string]any, f *os.File, synthetic bool) {
 	uuid := frame["uuid"].(string)
 	rows := []map[string]any{

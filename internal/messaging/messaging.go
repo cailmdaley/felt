@@ -80,6 +80,9 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 			receipt := rejected(req, "validation", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
 		}
+		if reason := mailboxUnavailable(env, addr.Harness, addr.ID, addr.Host); strings.HasPrefix(reason, "session has ended;") {
+			return dedupSendResult{Receipt: rejected(req, addr.Harness+"-hook", reason), Err: errCode("unavailable", "%s", reason)}
+		}
 		files, err := materializeAttachments(env, req.MessageID, req.Attachments)
 		if err != nil {
 			receipt := rejected(req, "attachments", err.Error())
@@ -124,6 +127,9 @@ func validateRequest(host string, r Request) error {
 	}
 	if len(r.From) > 1024 || hasControl(r.From) {
 		return errCode("invalid_request", "from is too long or contains NUL")
+	}
+	if len(r.ReplyTo) > 1024 || hasControl(r.ReplyTo) {
+		return errCode("invalid_request", "reply_to is too long or contains control characters")
 	}
 	return validateAttachments(r.Attachments)
 }

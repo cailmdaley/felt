@@ -207,6 +207,11 @@ exit 1 means rejected, unknown, or another command error.`,
 					return hostErr
 				}
 				receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
+				originalDetail := receipt.Detail
+				receipt = a.enrichUnavailableSession(request, receipt)
+				if receipt.Detail != originalDetail && err != nil {
+					err = fmt.Errorf("%s: %w", receipt.Detail, err)
+				}
 				if messageOpts.requestJSON && err != nil {
 					feltErrorCode = messaging.ErrorCode(err)
 				}
@@ -271,6 +276,9 @@ func messageReceiptError(id string, receipt messaging.Receipt, err error) error 
 		if err != nil {
 			return fmt.Errorf("message %s: %w", id, err)
 		}
+		if receipt.Detail != "" {
+			return fmt.Errorf("message %s: %s: %s", id, receipt.Status, receipt.Detail)
+		}
 		return fmt.Errorf("message %s: %s", id, receipt.Status)
 	default:
 		if err != nil {
@@ -299,7 +307,8 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 			return messaging.Request{}, err
 		}
 	}
-	return messaging.Request{Address: args[0], Text: text, From: a.resolveMessageSender(o.from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments}, nil
+	from := a.resolveMessageSender(o.from)
+	return messaging.Request{Address: args[0], Text: text, From: from, ReplyTo: a.messageReplyTarget(from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments}, nil
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {

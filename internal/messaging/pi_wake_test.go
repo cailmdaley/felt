@@ -8,6 +8,21 @@ import (
 	"testing"
 )
 
+func TestPiConferHeaderHasExactSenderAndFiberReplyTarget(t *testing.T) {
+	t.Parallel()
+	seen := make(chan []byte, 1)
+	root, _ := piFixture(t, `{"ok":true,"phase":"rpc_acknowledged","jobId":"job-1","requestId":"rpc-1","rpcType":"prompt","delivery":"follow_up"}`+"\n", func(frame []byte) { seen <- frame })
+	env := testEnv(t)
+	env.Set("SHUTTLE_CONFER_STATE_DIR", root)
+	req := Request{Address: "shuttle://h/pi/job-1", Text: "hello", MessageID: "confer-header", Wake: true, From: "shuttle://peer/pi/A", ReplyTo: "work/fiber"}
+	if receipt, err := Send(context.Background(), env, "h", req); err != nil {
+		t.Fatalf("%#v %v", receipt, err)
+	}
+	if wire := <-seen; !strings.Contains(string(wire), "[Shuttle message confer-header from shuttle://peer/pi/A; reply to work/fiber]\\nhello") {
+		t.Fatalf("header: %s", wire)
+	}
+}
+
 func TestPiWakeAcknowledgements(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

@@ -50,6 +50,7 @@ type Request struct {
 	Address     string       `json:"address"`
 	Text        string       `json:"text"`
 	From        string       `json:"from,omitempty"`
+	ReplyTo     string       `json:"reply_to,omitempty"`
 	Wake        bool         `json:"wake"`
 	MessageID   string       `json:"message_id"`
 	Attachments []Attachment `json:"attachments,omitempty"`

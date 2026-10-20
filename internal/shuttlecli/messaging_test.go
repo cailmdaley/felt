@@ -36,6 +36,23 @@ func (b *synchronizedMessageBuffer) String() string {
 	return b.Buffer.String()
 }
 
+func TestMessageReceiptErrorShowsOwnerHandoffHint(t *testing.T) {
+	t.Parallel()
+	receipt := messaging.Receipt{Status: messaging.StatusRejected, Detail: "session has ended; fiber work/fiber has current worker shuttle://owner/pi/B; use shuttle message work/fiber ..."}
+	err := messageReceiptError("reply", receipt, nil)
+	if err == nil || !strings.Contains(err.Error(), receipt.Detail) {
+		t.Fatalf("owner hint hidden: %v", err)
+	}
+}
+
+func TestReadMessageRequestFramePreservesReplyTarget(t *testing.T) {
+	t.Parallel()
+	request, err := readMessageRequestFrame(strings.NewReader(`{"address":"shuttle://host/claude/s","text":"reply","from":"shuttle://peer/pi/A","reply_to":"work/fiber","message_id":"reply-frame"}` + "\n"))
+	if err != nil || request.ReplyTo != "work/fiber" || request.From != "shuttle://peer/pi/A" {
+		t.Fatalf("request: %#v %v", request, err)
+	}
+}
+
 func TestReadMessageRequestFrameReturnsAtNewline(t *testing.T) {
 	t.Parallel()
 	reader, writer := io.Pipe()
@@ -356,7 +373,7 @@ func TestReadMessageRequestFrameDefaultsWakeToTrue(t *testing.T) {
 
 func TestPostMessagePreservesRequestAndReceipt(t *testing.T) {
 	t.Parallel()
-	want := messaging.Request{Address: "shuttle://host/codex/native%2Fid", Text: "a\n'b; $(noop)", From: "external", Wake: true, MessageID: "msg-fixed"}
+	want := messaging.Request{Address: "shuttle://host/codex/native%2Fid", Text: "a\n'b; $(noop)", From: "shuttle://sender/pi/session-A", ReplyTo: "work/fiber", Wake: true, MessageID: "msg-fixed"}
 	env := testEnv(t)
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/messages" {
