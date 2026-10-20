@@ -41,7 +41,7 @@ defmodule ShuttleWeb.RemoteControlControllerTest do
     config = %{dir: "/path/to/projects", args: ["--verbose"]}
 
     digest =
-      :crypto.hash(:sha256, Shuttle.RemoteControl.script(config)) |> Base.encode16(case: :lower)
+      Shuttle.RemoteControl.digest(config)
 
     Env.put_app_env(:remote_control_pane, "#{digest}|0||123|1000|")
 

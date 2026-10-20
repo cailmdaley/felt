@@ -2,8 +2,8 @@ defmodule Shuttle.RemoteControl do
   @moduledoc """
   Reconciles one host-local Claude Remote Control environment in tmux.
 
-  tmux owns the process across daemon restarts. Its script digest identifies
-  the desired launch, and session creation / pane death timestamps measure
+  tmux owns the process across daemon restarts. A digest of its configuration
+  identifies the desired launch, and session creation / pane death timestamps measure
   lifetime even when a fresh daemon adopts a dead pane. Uncertain observations
   hold the session rather than authorizing another host.
   """
@@ -126,7 +126,8 @@ defmodule Shuttle.RemoteControl do
 
   defp reconcile_desired(state, {:ok, config}, observation, now) do
     script = script(config)
-    digest = :crypto.hash(:sha256, script) |> Base.encode16(case: :lower)
+    digest = digest(config)
+
     changed = state.digest != nil and state.digest != digest
     state = %{state | digest: digest}
     state = update(state, dir: config.dir, args: config.args)
@@ -374,6 +375,12 @@ defmodule Shuttle.RemoteControl do
       {:error, reason} -> {:error, "Cannot write Remote Control script: #{inspect(reason)}"}
     end
   end
+
+  @doc false
+  # The digest names the configuration, not the script text, so a daemon
+  # upgrade that rewrites the script template adopts the running host.
+  def digest(%{dir: dir, args: args}),
+    do: :crypto.hash(:sha256, Jason.encode!([dir, args])) |> Base.encode16(case: :lower)
 
   @doc false
   def script(%{dir: dir, args: args}) do
