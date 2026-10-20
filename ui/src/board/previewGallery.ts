@@ -97,6 +97,8 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
     item.className = 'kbn-preview-send'
     item.dataset.slot = slot
     item.dataset.kind = documentKind(send.fullPath)
+    item.dataset.path = send.fullPath
+    item.dataset.owner = send.owner
     const sent = send.timestamp > 0
     const age = sent ? `${humanizeIdleAge(now - send.timestamp)} ago` : 'in the body'
     item.title = sent ? `Open ${send.basename} — sent ${age}` : `Open ${send.basename} — embedded in the constitution`
@@ -152,11 +154,26 @@ export function buildSendGallery(sends: readonly FiberSend[], o: GalleryOptions)
       dismiss.addEventListener('click', async event => {
         event.stopPropagation()
         if (dismiss.disabled) return
+        const hadFocus = tile.contains(document.activeElement)
+        // The preview panel outlives gallery rebuilds during the feed refresh.
+        const focusAnchor = el.closest<HTMLElement>('.kbn-preview') ?? el
+        const nextSend = shown[i + 1] ?? shown[i - 1]
+        if (hadFocus) {
+          focusAnchor.tabIndex = -1
+          focusAnchor.focus({ preventScroll: true })
+        }
         dismiss.disabled = true
         error.hidden = true
         tile.hidden = true
         try {
           await o.dismiss!(send)
+          if (hadFocus && document.activeElement === focusAnchor) {
+            const next = [...focusAnchor.querySelectorAll<HTMLButtonElement>('.kbn-preview-send')]
+              .find(button => button.dataset.path === nextSend?.fullPath && button.dataset.owner === nextSend?.owner
+                && !button.closest<HTMLElement>('.kbn-preview-send-wrap')?.hidden)
+            const fallback = focusAnchor.querySelector<HTMLButtonElement>('.kbn-preview-gallery-clear')
+            ;(next ?? fallback ?? focusAnchor).focus({ preventScroll: true })
+          }
         } catch (reason) {
           tile.hidden = false
           error.textContent = `Couldn't dismiss ${send.basename}: ${reason instanceof Error ? reason.message : String(reason)}`

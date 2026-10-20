@@ -179,7 +179,7 @@ function resolve(card: KanbanCard, file: ShelfFile): FiberSend | undefined {
   const key = docKey(file.host ?? '', file.fullPath, card.originId, card.fiberDir)
   const parsed = parseDocKey(key)
   if (!parsed) return undefined
-  return { key, fullPath: parsed.path, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
+  return { key, fullPath: file.fullPath, basename: file.basename, timestamp: file.timestamp, owner: parsed.owner }
 }
 
 function sameSends(a: Map<string, ShelfFile[]>, b: Map<string, ShelfFile[]>): boolean {

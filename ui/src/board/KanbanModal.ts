@@ -2658,6 +2658,19 @@ export class KanbanModal {
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
 
     const active = document.activeElement as HTMLElement | null
+    const preview = this.cardPreview
+    if (active && preview?.isOpen) {
+      if (preview.panel.contains(active)) return
+      if (!e.shiftKey && preview.openRow?.contains(active)) {
+        const first = preview.panel.querySelector<HTMLButtonElement>('button:not(:disabled)')
+        if (first) {
+          e.preventDefault()
+          e.stopPropagation()
+          first.focus()
+          return
+        }
+      }
+    }
     const heads = Array.from(this.body.querySelectorAll<HTMLElement>('.kbn-col-head'))
       .filter(head => head.offsetParent !== null)
     if (heads.length === 0) return

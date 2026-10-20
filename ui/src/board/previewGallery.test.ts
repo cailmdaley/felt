@@ -26,6 +26,28 @@ describe('send gallery clear control', () => {
     gallery.dispose()
   })
 
+  it('keeps keyboard focus on the next file across a gallery rebuild', async () => {
+    const next: FiberSend = { ...send, key: 'host:/next.html', fullPath: '/next.html', basename: 'next.html' }
+    const panel = document.createElement('div')
+    panel.className = 'kbn-preview'
+    document.body.append(panel)
+    let replacement!: ReturnType<typeof buildSendGallery>
+    const gallery = buildSendGallery([send, next], { shuttleBase: '', open: vi.fn(), dismiss: async () => {
+      replacement = buildSendGallery([next], { shuttleBase: '', open: vi.fn() })!
+      gallery.el.replaceWith(replacement.el)
+    } })!
+    panel.append(gallery.el)
+    const button = gallery.el.querySelector<HTMLButtonElement>('.kbn-preview-send-dismiss')!
+    button.focus()
+    button.click()
+    expect(document.activeElement).toBe(panel)
+    await Promise.resolve()
+    expect(document.activeElement).toBe(replacement!.el.querySelector('.kbn-preview-send'))
+    gallery.dispose()
+    replacement!.dispose()
+    panel.remove()
+  })
+
   it('restores a tile and reports a failed dismissal visibly', async () => {
     const dismiss = vi.fn().mockRejectedValue(new Error('host unavailable'))
     const gallery = buildSendGallery([send], { shuttleBase: '', open: vi.fn(), dismiss })!

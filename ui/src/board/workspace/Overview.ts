@@ -887,7 +887,8 @@ export class Overview {
     next.scrollIntoView?.({ block: 'nearest', inline: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' })
   }
   private readonly keydown = (event: KeyboardEvent): void => {
-    if (!this.visible || blockingDialogOpen()) return
+    if (!this.shown || blockingDialogOpen()) return
+    if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')) return
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
     event.preventDefault()

@@ -49,6 +49,24 @@ describe('FiberSends', () => {
     expect(reports.all(target).map(send => send.key)).toEqual(['host-a:/b.html', 'host-b:/a.html'])
   })
 
+  it('preserves the exact receipt path when the document key normalizes it', async () => {
+    const target = card({ id: 'work/a', uid: 'uid', originId: 'host' })
+    const exact = '/tmp/missing/../report.html'
+    const files = [exact, '/tmp/report.html'].map(fullPath => ({ fullPath, timestamp: 1, uid: 'uid', host: 'host' }))
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files })))
+      .mockResolvedValueOnce(new Response('{"ok":true}'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: files.slice(1), origins: {} })))
+    vi.stubGlobal('fetch', fetcher)
+    const reports = new FiberSends('', () => {})
+    await reports.refresh()
+    const selected = reports.all(target).find(send => send.fullPath === exact)!
+    expect(selected.key).toBe('host:/tmp/report.html')
+    await reports.dismiss(target, selected)
+    expect(JSON.parse(fetcher.mock.calls[1][1].body).path).toBe(exact)
+    expect(reports.all(target).map(send => send.fullPath)).toEqual(['/tmp/report.html'])
+  })
+
   it('retains the snapshot when dismissal fails', async () => {
     const target = card({ id: 'work/a', uid: 'uid', originId: 'host' })
     const fetcher = vi.fn()

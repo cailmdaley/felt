@@ -640,6 +640,22 @@ describe('Overview news, visits and graduated density', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle()
     expect(onOpen).toHaveBeenLastCalledWith(cards[0], 'host-a:/unique-title-report.html')
   })
+  it('leaves native button activation and disconnected-sheet keys alone', async () => {
+    feed.files = [receipt('alpha', '/report.html')]
+    await refresh()
+    const button = document.createElement('button')
+    document.body.append(button)
+    const native = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    button.dispatchEvent(native)
+    expect(native.defaultPrevented).toBe(false)
+    button.remove()
+    overview.el.remove()
+    const disconnected = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    document.dispatchEvent(disconnected)
+    expect(disconnected.defaultPrevented).toBe(false)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
   it('assigns full, compact and line densities with a temporal boundary', async () => {
     reset(now() - 3 * 3600000)
     cards = ['today', 'yesterday', 'week', 'earlier'].map(uid => card({ id: uid, uid }))
