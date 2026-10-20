@@ -322,6 +322,11 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("role payload = %#v", body)
 			}
 		}},
+		{"newrole", felt.StatusOpen, remoteShuttleBlock(project), []string{"role", "newrole", "editor", "--new", "Office editor"}, "role", func(t *testing.T, body map[string]any) {
+			if body["role"] != "editor" || body["new_name"] != "Office editor" {
+				t.Fatalf("role --new payload = %#v", body)
+			}
+		}},
 		{"unrole", felt.StatusOpen, remoteShuttleBlock(project), []string{"role", "unrole", "--clear"}, "role", func(t *testing.T, body map[string]any) {
 			if body["clear"] != true || body["role"] != nil {
 				t.Fatalf("role --clear payload = %#v", body)

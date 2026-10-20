@@ -207,8 +207,9 @@ defmodule ShuttleWeb.LifecycleController do
   defp args_for("role", %{"fiber" => fiber, "clear" => true}),
     do: {:ok, ["role", fiber, "--clear"]}
 
-  defp args_for("role", %{"fiber" => fiber, "role" => role}) when is_binary(role) and role != "",
-    do: {:ok, ["role", fiber, role]}
+  defp args_for("role", %{"fiber" => fiber, "role" => role} = params)
+       when is_binary(role) and role != "",
+       do: {:ok, add_string_flag(["role", fiber, role], "--new", params["new_name"])}
 
   defp args_for("seat", %{"fiber" => fiber, "clear" => true}),
     do: {:ok, ["seat", fiber, "--clear"]}

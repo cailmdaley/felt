@@ -437,6 +437,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
     for {action, params, office_args} <- [
           {"role", %{"role" => "cmbx-chair"}, ["cmbx-chair"]},
+          {"role", %{"role" => "editor", "new_name" => "Office editor"},
+           ["editor", "--new", "Office editor"]},
           {"role", %{"clear" => true}, ["--clear"]},
           {"seat", %{}, []},
           {"seat", %{"clear" => true}, ["--clear"]}

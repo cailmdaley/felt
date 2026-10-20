@@ -65,6 +65,8 @@ fields, and runs the matching `shuttle <action>` on the owning host:
 `set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
 `uninstall`.
 The `role` action takes `role: <role-slug>`, or `clear: true` to remove both role and seat.
+An optional `new_name: "Office name"` passes `--new "Office name"` to the CLI to create a missing charter in the shared namespace.
+Existing charters are preserved, and without `new_name` the charter must already exist.
 The `seat` action sets `shuttle.seat: true` and requires an assigned role; `clear: true` removes the seat field.
 `accept`, `resume`, `role`, `seat` and `rest` run the Shuttle CLI's write verb (`shuttle <verb> <fiber> --local`) inside the
 owning daemon's Poller, serialized with its state changes — a rest then stops
@@ -174,6 +176,7 @@ harness processes sharing one transcript.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
+| `GET /roles` | local | Shared role charters as an array of `{slug, name, outcome}`; shells `shuttle roles --json` in configured stores, deduplicates by slug, and sorts by slug. CLI failures or malformed responses contribute no roles (200, empty array when none are available). Role charters are synchronized documents, not owner-routed host state |
 | `GET /agents` | host-addressed | The effective agent registry (shells `shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's shuttle binary |
 | `GET /felt-stores` | fleet-aggregating | The registered store list, this host's live and each remote's off the cached owner feed (`stores` block) |
 | `GET /config` | host-addressed | Every operator file on a host: path, whether it exists, size, mtime, and any environment variable overriding it |

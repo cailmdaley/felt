@@ -69,6 +69,7 @@ defmodule ShuttleWeb.Router do
     # `felt ls --body --has-field shuttle -s all` for. Local stores only.
     get("/search", SearchController, :show)
     get("/agents", AgentsController, :show)
+    get("/roles", RolesController, :index)
     # One agent's default-effort override, owner-routed; shells `shuttle
     # agents effort`, which stays the only writer of that grammar.
     post("/agents/effort", AgentsController, :effort)
