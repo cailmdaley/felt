@@ -1586,6 +1586,11 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/tunnels')) {
     return json({ ok: true, host: bodyOrigin(), output: 'would install hub-a -> ~/Library/LaunchAgents/io.shuttle.shuttle-tunnel-hub-a.plist' })
   }
+  if (url.includes('/api/v1/roles')) return json([
+    { slug: 'analyst', name: 'Analyst', outcome: 'Keeps scientific results sound and reproducible.' },
+    { slug: 'editor', name: 'Editor', outcome: 'Keeps the writing clear, current and useful.' },
+    { slug: 'vizier', name: 'Vizier', outcome: 'Keeps the personal desk and its commitments in view.' },
+  ])
   if (url.includes('/api/v1/agents')) return json(MOCK_AGENTS)
   // NOT owner-routed, on purpose (see settingsApi's loadVersion doc) — always
   // this harness's own local-host state, regardless of any `?origin=`.

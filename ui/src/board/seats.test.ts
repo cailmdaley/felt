@@ -164,9 +164,9 @@ describe('the Roles band', () => {
     onRefresh: () => {},
   })
 
-  it('is absent when no seat is at rest', () => {
+  it('keeps an empty drop target reachable for the first seat', () => {
     const resp = board([])
-    expect(renderer(resp).renderRolesSection(resp.roles, resp.staleness)).toBeNull()
+    expect(renderer(resp).renderRolesSection(resp.roles, resp.staleness).textContent).toContain('drag a constitution here')
   })
 
   it('draws every seat as a chip that opens its fiber, a standing one wearing its next firing', () => {
@@ -192,6 +192,7 @@ describe('the Roles band', () => {
       { id: 'work/draft', uid: 'u2', name: 'Draft', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk' } },
     ])
     const stack = vi.fn()
+    const makeSeat = vi.fn()
     const band = new KanbanSurfaceRenderer({
       getDragSourceId: () => 'work/draft',
       setDragSourceId: () => {},
@@ -200,6 +201,7 @@ describe('the Roles band', () => {
       transition: () => {},
       setSurface: () => {},
       stack,
+      makeSeat,
       reorderQueue: () => {},
       unqueueRow: () => {},
       openDetail: vi.fn(),
@@ -224,6 +226,7 @@ describe('the Roles band', () => {
     expect(chip.classList.contains('kbn-card-stack-target')).toBe(true)
     chip.dispatchEvent(drag('drop'))
     expect(stack).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/draft' }), 'life/vizier')
+    expect(makeSeat).not.toHaveBeenCalled()
     document.body.replaceChildren()
     vi.restoreAllMocks()
   })

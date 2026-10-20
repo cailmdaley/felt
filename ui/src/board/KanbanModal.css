@@ -872,6 +872,51 @@
   box-shadow: 0 18px 60px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
   outline: none;
 }
+.kbn-role-scrim { position: fixed; inset: 0; z-index: 10600; }
+.kbn-role-popover {
+  position: fixed;
+  width: min(380px, calc(100vw - 32px));
+  box-sizing: border-box;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  gap: 10px;
+  padding: 18px;
+}
+.kbn-role-popover input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+  background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kbn-ink) 25%, transparent);
+  border-radius: 5px;
+}
+.kbn-role-options { display: grid; max-height: 210px; overflow-y: auto; }
+.kbn-role-option, .kbn-role-cancel {
+  border: 0;
+  border-radius: 5px;
+  padding: 9px 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.kbn-role-option { display: grid; gap: 3px; }
+.kbn-role-option span, .kbn-role-message, .kbn-role-new label {
+  font-size: .8rem;
+  color: var(--kbn-ink-muted);
+}
+.kbn-role-message { margin: 0; }
+.kbn-role-message:empty { display: none; }
+.kbn-role-option:hover, .kbn-role-option:focus-visible, .kbn-role-cancel:hover {
+  background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent);
+}
+.kbn-role-new { display: grid; gap: 10px; }
+.kbn-role-new[hidden] { display: none; }
+.kbn-role-new label { display: grid; gap: 4px; }
+.kbn-role-popover :focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 1px; }
 .kbn-rest-title { margin: 0; font-size: 1.5rem; font-weight: 400; }
 .kbn-rest-subject {
   margin: -8px 0 0;

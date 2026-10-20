@@ -77,6 +77,13 @@ import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWor
 
 export const FALLBACK_DEFAULT_AGENT = 'claude-opus'
 
+/** A seat is a constitution, never a temporal cycle or an ordinary note. */
+export function seatDropRefusal(card: KanbanCard): string | null {
+  if (card.isCycle) return 'A cycle marks time and cannot become a seat.'
+  if (!card.shuttleKind) return 'Only a constitution with a Shuttle block can become a seat.'
+  return null
+}
+
 export const COLUMN_TITLES: Record<ColumnKind, string> = {
   drafts: 'Drafts',
   inFlight: 'In flight',
@@ -242,6 +249,8 @@ interface KanbanSurfaceRendererOptions {
     horizon: HorizonKind,
     opts?: { cold?: boolean; due?: string | null },
   ) => void | Promise<void>
+  /** Make this constitution a seat, choosing an office when it has none. */
+  makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>
   /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
    *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
    *  and resolved the chain tail. */
@@ -810,20 +819,19 @@ export class KanbanSurfaceRenderer {
    * no "+N more", because a launcher you reach for daily must never be on page
    * two. Click opens the fiber; drag it to In flight to start it.
    *
-   * Rendered only when there is a seat to show. The band is not a drop target:
-   * a card becomes a seat through `shuttle seat`, and a seat dragged into
-   * Resting rests and comes back here. Each chip is a stack target, though:
-   * drop a card on a seat to queue it behind that office's work.
+   * Drop a constitution on the band to make it a seat and let it rest,
+   * choosing an office first when it has none. The empty band stays reachable
+   * for the first seat. Chips keep their own stack meaning: drop a card on a
+   * seat to queue it behind that office's work.
    */
   renderRolesSection(
     roles: KanbanCard[],
     staleness: Record<string, KanbanOriginStaleness>,
-  ): HTMLElement | null {
-    if (roles.length === 0) return null
+  ): HTMLElement {
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-roles'
     section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', `Roles (${roles.length}) — seats at rest; drag one to In flight to start it`)
+    section.setAttribute('aria-label', `Roles (${roles.length}) — drop a constitution here to make a seat; drop on a seat to queue work`)
 
     const head = renderBandHead('Roles', roles.length)
     section.append(head)
@@ -833,7 +841,19 @@ export class KanbanSurfaceRenderer {
     row.className = 'kbn-roles-row'
     row.setAttribute('role', 'list')
     for (const card of roles) row.append(this.renderRoleSeat(card, staleness[card.originId]))
+    if (roles.length === 0) {
+      const empty = document.createElement('div')
+      empty.className = 'kbn-cluster-empty'
+      empty.textContent = '— drag a constitution here to make a seat —'
+      row.append(empty)
+    }
     section.append(row)
+    this.installSectionDragHandlers(section, {
+      skipColHead: false,
+      skipTarget: '.kbn-role-chip, .kbn-role-queue',
+      refusal: seatDropRefusal,
+      commit: card => void this.o.makeSeat?.(card, section),
+    })
     return section
   }
 
@@ -871,8 +891,8 @@ export class KanbanSurfaceRenderer {
     el.draggable = !isStale && !coarsePointer()
     if (!isStale) this.installDraggable(el, card, true)
     this.installLongPressMove(el, card)
-    // The whole chip is the target: the band under it takes no drop, so there
-    // is no column the chip's edges need to yield to.
+    // The whole chip queues work; its edges never yield to the band's
+    // make-seat gesture.
     this.installStackTarget(el, card, { wholeChip: true })
 
     const dot = document.createElement('span')
@@ -1066,7 +1086,7 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Install drop handlers on a section (Now, Resting). A drop outside
+  /** Install drop handlers on a section (Now, Resting, Roles). A drop outside
    *  a column header calls `commit`; `rowDrop` also accepts a peek-list row,
    *  which leaves the queue and takes that horizon. */
   private installSectionDragHandlers(
@@ -1074,26 +1094,49 @@ export class KanbanSurfaceRenderer {
     spec: {
       rowDrop?: HorizonKind
       skipColHead: boolean
+      skipTarget?: string
+      refusal?: (card: KanbanCard) => string | null
       commit: (card: KanbanCard) => void
     },
   ): void {
     const overHead = (e: Event): boolean =>
-      spec.skipColHead && !!(e.target as HTMLElement).closest('.kbn-col-head')
+      (spec.skipColHead && !!(e.target as HTMLElement).closest('.kbn-col-head')) ||
+      (!!spec.skipTarget && !!(e.target as HTMLElement).closest(spec.skipTarget))
+    let watchingEnd = false
+    const clear = (): void => {
+      section.classList.remove('kbn-section-drop')
+      section.removeAttribute('title')
+      this.setAim(section, null)
+    }
     const rowInFlight = (): boolean => spec.rowDrop !== undefined && this.queueDrag !== null
     section.addEventListener('dragover', (e) => {
       if (!this.o.getDragSourceId() && !rowInFlight()) return
-      if (overHead(e)) return
+      if (!watchingEnd) {
+        watchingEnd = true
+        document.addEventListener('dragend', () => { watchingEnd = false; clear() }, { once: true })
+      }
+      if (overHead(e)) { clear(); return }
+      const id = this.o.getDragSourceId()
+      const card = id ? findCardById(this.o.getLastResponse(), id) : null
+      const refusal = card ? spec.refusal?.(card) : null
+      if (refusal) {
+        clear()
+        section.title = refusal
+        this.setAim(section, refusal)
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+        return
+      }
       e.preventDefault()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
       section.classList.add('kbn-section-drop')
     })
     section.addEventListener('dragleave', (e) => {
       if (e.relatedTarget && section.contains(e.relatedTarget as Node)) return
-      section.classList.remove('kbn-section-drop')
+      clear()
     })
     section.addEventListener('drop', (e) => {
       if (overHead(e)) return
-      section.classList.remove('kbn-section-drop')
+      clear()
       // A peek-list row landing here leaves the queue; Now surfaces the card,
       // while Resting keeps it at rest.
       if (rowInFlight() && spec.rowDrop) {
@@ -1107,7 +1150,7 @@ export class KanbanSurfaceRenderer {
       if (!fiberId) return
       e.preventDefault()
       const card = findCardById(this.o.getLastResponse(), fiberId)
-      if (!card) return
+      if (!card || spec.refusal?.(card)) return
       spec.commit(card)
     })
   }

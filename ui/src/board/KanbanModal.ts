@@ -60,11 +60,12 @@ import type {
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
-import { moveDestinations, queueTargets } from './MoveDestinations.js'
+import { moveDestinations, queueTargets, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
+import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
 import {
   dueBouncesFromResting,
@@ -407,6 +408,7 @@ export class KanbanModal {
       stopDragAutoScroll: () => this.stopDragAutoScroll(),
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
+      makeSeat: (card, anchor) => this.makeSeat(card, anchor),
       stack: (card, tailId) => this.stackBehind(card, tailId),
       stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
       reorderQueue: (writes) => this.reorderQueue(writes),
@@ -613,6 +615,7 @@ export class KanbanModal {
     this.activeView?.unmount()
     this.activeView = null
     this.closeRestPopover?.()
+    this.closeRolePopover?.()
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
@@ -2586,6 +2589,54 @@ export class KanbanModal {
     if (this.lastResponse) this.render(this.lastResponse)
   }
 
+  private closeRolePopover?: () => void
+
+  private makeSeat(card: KanbanCard, anchor: HTMLElement): void {
+    this.closeRolePopover?.()
+    if (card.shuttleRole) {
+      void this.commitSeat(card)
+      return
+    }
+    this.closeRolePopover = rolePopover(card, anchor, async () => {
+      const response = await daemonFetch(`${this.shuttleBase}/api/v1/roles`)
+      if (!response.ok) throw new Error(await response.text())
+      return await response.json() as RoleProfile[]
+    }, choice => this.commitSeat(card, choice))
+  }
+
+  /** Office assignment and seat marking precede the ordinary Resting drop.
+   * Standing seats keep their schedule and their current run untouched. */
+  private async commitSeat(card: KanbanCard, choice?: RoleChoice): Promise<void> {
+    try {
+      if (choice) {
+        await this.postJson('/api/v1/lifecycle', {
+          action: 'role', fiber: card.id, origin: card.originId, ...choice,
+        }, 'Role assignment failed')
+      }
+      await this.postJson('/api/v1/lifecycle', {
+        action: 'seat', fiber: card.id, origin: card.originId,
+      }, 'Seat assignment failed')
+      const seated = { ...card, shuttleRole: choice?.role ?? card.shuttleRole, shuttleSeat: true }
+      const optimistic = applyOptimisticSeat(this.lastResponse, seated)
+      if (optimistic) this.applyResponse(optimistic)
+      if (card.shuttleKind === 'standing') {
+        const message = `“${card.name}” is a seat. It keeps its schedule; its current run is unchanged.`
+        this.showBanner(message, 'info')
+        this.announce(message)
+      } else if (!this.sameSurface(card, 'stashed', { cold: card.cold })) {
+        this.setSurface(seated, 'stashed')
+        return
+      } else {
+        this.announce(`${card.name} is a seat of ${seated.shuttleRole}.`)
+      }
+    } catch (error) {
+      const message = `Couldn't make “${card.name}” a seat: ${errText(error)}`
+      this.showBanner(message, 'error')
+      this.announce(message)
+    }
+    await this.fetchAndRender()
+  }
+
   private closeRestPopover?: () => void
 
   private openRestPopover(card: KanbanCard): void {
@@ -3152,6 +3203,21 @@ function applyOptimisticTransition(
   }
 
   return withSurfaces(resp, { now, timeline, stash, roles, folded })
+}
+
+/** Optimistically mark the seat without changing a running or closed lifecycle. */
+export function applyOptimisticSeat(resp: KanbanResponse | null, seat: KanbanCard): KanbanResponse | null {
+  if (!resp) return null
+  const patch = (cards: KanbanCard[]): KanbanCard[] => cards.map(card => card.id === seat.id
+    ? { ...card, shuttleRole: seat.shuttleRole, shuttleSeat: true } : card)
+  const updated = withSurfaces(resp, {
+    now: { drafts: patch(resp.now.drafts), inFlight: patch(resp.now.inFlight), awaitingReview: patch(resp.now.awaitingReview) },
+    timeline: { ...resp.timeline, past: patch(resp.timeline.past), futureDated: patch(resp.timeline.futureDated) },
+    stash: patch(resp.stash), roles: patch(resp.roles), folded: patch(resp.folded),
+  })
+  return seatAtRest(seat) && seat.foldedUnder === undefined
+    ? placeOptimistically(updated, seat.id, () => ({}))
+    : updated
 }
 
 /** `roles` with `seat` placed where the read model's name order puts it. */
