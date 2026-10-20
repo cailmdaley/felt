@@ -45,10 +45,15 @@ Native adapters and hook offers share the header formatter in `internal/messagin
 The daemon validates and retains `reply_to` through local request-json frames and remote routing.
 Deduplication includes a nonempty reply target and preserves fingerprints for requests that omit it.
 
-`SessionEnd` writes an owner/identity-scoped mailbox end marker before withdrawing `receiver.json`; a new registration clears the marker.
+Registration and `SessionEnd` each atomically replace one owner/identity-scoped `receiver.json` state record with a live receiver or an ended state.
+Concurrent transitions cannot erase both states; the last atomic publication wins.
+A separate `ended.json` marker is also recognized when `receiver.json` is absent.
 The mailbox layer reports ended, never registered, or a registered receiver process that is no longer running, without interpreting fibers.
 Directory existence alone is not end evidence: native endpoint registration also creates that directory.
-The owner-local CLI enriches rejected or unknown session receipts from its local session ledger when another worker holds the fiber.
+The owner-local CLI enriches rejected or unknown session receipts from its rotated and live session ledger when another worker holds the fiber.
+Rows are stably ordered by timestamp, with live rows after rotated rows at equal timestamps.
+Successor addresses use the normal fiber resolver's runtime and peer evidence, including Codex CLI workers without `thread_id`.
+If an exact successor address cannot be established, the receipt still names the recorded successor session and advises the fiber target, without guessing an address.
 This enrichment survives daemon routing and never changes the explicit recipient.
 If a marker or ledger pairing is absent, preserve uncertainty rather than inferring an end or successor.
 
