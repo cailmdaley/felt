@@ -1,16 +1,6 @@
 import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord, type MeetingMode } from '../board/meeting'
 export type { MeetingMode } from '../board/meeting'
 
-/**
- * What hark records: `call` this machine's mic and system audio, `room` its mic
- * alone, `phone` a browser's mic streamed from the board.
- */
-export const MEETING_MODES: ReadonlyArray<{ value: MeetingMode; label: string }> = [
-  { value: 'call', label: 'Live' },
-  { value: 'room', label: 'Mic only' },
-  { value: 'phone', label: 'Phone' },
-]
-
 export interface CaptureMeetingCapabilities {
   available: boolean
   modes: MeetingMode[]

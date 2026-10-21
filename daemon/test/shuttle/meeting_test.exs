@@ -79,7 +79,7 @@ defmodule Shuttle.MeetingTest do
 
   # Mutation control: omit modes from inspect_current/1 or ignore executable permission.
   test "GET reports platform-supported modes only when hark is executable", %{hark_path: path} do
-    for {os, modes} <- [{:darwin, ~w(call room phone)}, {:linux, ~w(phone)}] do
+    for {os, modes} <- [{:darwin, ~w(call phone)}, {:linux, ~w(phone)}] do
       Env.put_app_env(:host_capabilities_os_type, {:unix, os})
 
       body =
@@ -110,11 +110,32 @@ defmodule Shuttle.MeetingTest do
     end
   end
 
+  test "room and unknown modes are rejected before any recording", %{hark_dir: dir} do
+    for os <- [:darwin, :linux],
+        mode <- ["room", "unknown"],
+        route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+      Env.put_app_env(:host_capabilities_os_type, {:unix, os})
+
+      conn =
+        api_conn()
+        |> post(
+          route,
+          Jason.encode!(%{"meeting" => %{"mode" => mode}, "fiber_id" => "proj/fiber"})
+        )
+
+      assert conn.status == 422
+      assert Jason.decode!(conn.resp_body)["error"] == "meeting.mode must be 'call' or 'phone'"
+    end
+
+    assert Shuttle.Test.MeetingRunner.calls() == []
+    refute File.exists?(Path.join(dir, "meetings"))
+  end
+
   # Mutation control: remove validate_supported_mode/2 from do_start/5.
   test "Linux rejects device capture before inspecting or launching hark", %{hark_dir: dir} do
     Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})
 
-    for mode <- ~w(call room), route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+    for mode <- ~w(call), route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
       conn =
         api_conn()
         |> post(
@@ -232,10 +253,8 @@ defmodule Shuttle.MeetingTest do
 
   test "meeting message carries the facts and points at the skill's meeting reference" do
     call = Meeting.meeting_message("call", "/tmp/meetings/session.txt")
-    room = Meeting.meeting_message("room", "/tmp/meetings/session.txt")
 
     assert call =~ "Meeting mode (call)."
-    assert room =~ "Meeting mode (room)."
     assert call =~ "`/tmp/meetings/session.txt` on this host"
     assert call =~ "references/meeting.md"
     assert call =~ "The user's note about the meeting follows (it may be empty)."
@@ -247,7 +266,7 @@ defmodule Shuttle.MeetingTest do
     assert phone =~ "Meeting mode (phone)."
     assert phone =~ "in-person meeting, recorded through a phone's microphone"
     assert phone =~ "`/tmp/meetings/session.txt` on this host"
-    refute Meeting.meeting_message("room", "x") =~ "phone"
+    refute Meeting.meeting_message("call", "x") =~ "phone"
   end
 
   test "phone mode launches hark with --phone and its row says it takes phone audio", %{
@@ -323,7 +342,7 @@ defmodule Shuttle.MeetingTest do
 
     set_current_meeting_handler("launch-current", 321)
 
-    # A room meeting is live: there is no phone to feed.
+    # A call meeting is live: there is no phone to feed.
     write_meeting(hark_dir, Map.merge(base, %{"phase" => "live", "phone" => nil}))
     assert {:error, :not_phone} = Meeting.phone_socket()
     assert {:ok, %{meeting: %{phone: false, launch: "launch-current"}}} = Meeting.show()
@@ -340,9 +359,9 @@ defmodule Shuttle.MeetingTest do
   end
 
   test "a joined meeting's message names the constitution it joins" do
-    joined = Meeting.meeting_message("room", "~/.hark/meetings/x.txt", {:fiber, "proj/shear"})
+    joined = Meeting.meeting_message("call", "~/.hark/meetings/x.txt", {:fiber, "proj/shear"})
 
-    assert joined =~ "Meeting mode (room)."
+    assert joined =~ "Meeting mode (call)."
     assert joined =~ "`~/.hark/meetings/x.txt` on this host"
     assert joined =~ "This meeting joins this constitution (`proj/shear`)"
     assert joined =~ "references/meeting.md"
@@ -350,7 +369,7 @@ defmodule Shuttle.MeetingTest do
     refute joined =~ "Do not ask the user for a title"
     refute joined =~ "provisional date-based name"
     refute joined =~ "rename it when the transcript clarifies the subject"
-    refute Meeting.meeting_message("room", "x", {:capture, "cli"}) =~ "joins this constitution"
+    refute Meeting.meeting_message("call", "x", {:capture, "cli"}) =~ "joins this constitution"
   end
 
   test "joining a constitution records locally, names the fiber, and delivers to its owner", %{
@@ -491,7 +510,7 @@ defmodule Shuttle.MeetingTest do
           Jason.encode!(%{
             "fiber_id" => "cosmo/shear-bmodes",
             "origin" => "project-host",
-            "meeting" => %{"mode" => "room"},
+            "meeting" => %{"mode" => "call"},
             "note" => "B-mode telecon"
           })
         )
@@ -543,7 +562,7 @@ defmodule Shuttle.MeetingTest do
         Jason.encode!(%{
           "fiber_id" => "cosmo/shear-bmodes",
           "origin" => "project-host",
-          "meeting" => %{"mode" => "room"}
+          "meeting" => %{"mode" => "call"}
         })
       )
 
@@ -901,7 +920,7 @@ defmodule Shuttle.MeetingTest do
       |> post(
         "/api/v1/capture",
         Jason.encode!(%{
-          "meeting" => %{"mode" => "room"},
+          "meeting" => %{"mode" => "call"},
           "prompt" => "Shear review\nDiscuss the residuals",
           "project_dir" => Path.join(tmp_dir, "remote-project"),
           "origin" => "project-host",
@@ -921,7 +940,7 @@ defmodule Shuttle.MeetingTest do
       |> post(
         "/api/v1/capture",
         Jason.encode!(%{
-          "meeting" => %{"mode" => "room"},
+          "meeting" => %{"mode" => "call"},
           "prompt" => "Shear review\nDiscuss the residuals",
           "project_dir" => Path.join(tmp_dir, "remote-project"),
           "origin" => "project-host"
@@ -948,7 +967,7 @@ defmodule Shuttle.MeetingTest do
     refute Map.has_key?(request, "meeting")
     refute Map.has_key?(request, "origin")
     assert request["surface"] == "cli"
-    assert request["prompt"] =~ "Meeting mode (room)."
+    assert request["prompt"] =~ "Meeting mode (call)."
     assert request["prompt"] =~ "Discuss the residuals"
 
     new_session =

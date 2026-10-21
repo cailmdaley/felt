@@ -63,10 +63,9 @@ defmodule Shuttle.MeetingRouterTest do
 
   defp mac_responses do
     %{
-      {:get, "http://agent-host.example/api/v1/meeting"} =>
-        capability(~w(call room phone), false),
+      {:get, "http://agent-host.example/api/v1/meeting"} => capability(~w(call phone), false),
       {:get, "http://linux-recorder.example/api/v1/meeting"} => capability(~w(phone)),
-      {:get, "http://mac-recorder.example/api/v1/meeting"} => capability(~w(call room phone))
+      {:get, "http://mac-recorder.example/api/v1/meeting"} => capability(~w(call))
     }
   end
 
@@ -110,7 +109,7 @@ defmodule Shuttle.MeetingRouterTest do
         {:ok, 200, "application/json",
          Jason.encode!(%{
            available: true,
-           modes: ~w(call room phone),
+           modes: ~w(call phone),
            meeting: %{launch: "L1", phone: true}
          })}
       )
@@ -125,7 +124,7 @@ defmodule Shuttle.MeetingRouterTest do
     assert %{
              "recorder" => "mac-recorder",
              "available" => true,
-             "modes" => ["call", "room", "phone"],
+             "modes" => ["call", "phone"],
              "meeting" => %{"recorder" => "mac-recorder", "launch" => "L1"}
            } = Jason.decode!(selected.resp_body)
 

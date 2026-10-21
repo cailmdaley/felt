@@ -17,7 +17,7 @@ const hosts: Host[] = [
 const projects: Project[] = hosts.map((host) => ({
   id: `${host.id}:/work`, name: 'Work', path: '/work', originId: host.id, loomPrefix: '',
 }))
-const modes: MeetingMode[] = ['call', 'room', 'phone']
+const modes: MeetingMode[] = ['call', 'phone']
 const agents = [
   { id: 'claude-opus', default: true, chrome_capable: true },
   { id: 'claude-sonnet', default: false, chrome_capable: false },
@@ -147,34 +147,29 @@ describe('rendered Capture capabilities', () => {
     expect(query('.form-error').textContent).toMatch(/Inspect the recorder/)
   })
 
-  it.each(modes)('desktop offers the recorder modes and submits %s', async (mode) => {
+  it.each([['call'], ['phone', 'call'], ['call', 'phone']])('desktop always submits call with capabilities %j', async (...offered) => {
+    status = { available: true, modes: offered, meeting: null }
     await mount()
     expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
-    expect(query('[role="radiogroup"]').hasAttribute('hidden')).toBe(true)
     click('.capture-meeting-toggle')
-    expect(query('[role="radiogroup"]').hasAttribute('hidden')).toBe(false)
-    expect([...document.querySelectorAll('[role="radio"]')].map((node) => node.textContent)).toEqual(['Live', 'Mic only', 'Phone'])
-    click(`[role="radio"]:nth-child(${modes.indexOf(mode) + 1})`)
-    expect(query('[aria-checked="true"]').textContent).toBe(['Live', 'Mic only', 'Phone'][modes.indexOf(mode)])
+    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(document.querySelector('[role="radio"]')).toBeNull()
     click('.form-submit')
     await tick()
-    expect(captureBody()).toMatchObject({ origin: 'local', meeting: { mode } })
-    expect(begin).toHaveBeenCalledTimes(mode === 'phone' ? 1 : 0)
+    expect(captureBody()).toMatchObject({ origin: 'local', meeting: { mode: 'call' } })
+    expect(begin).not.toHaveBeenCalled()
     expect(meetingResult).toHaveBeenCalledOnce()
   })
 
-  it('phone-only desktop has no selector and toggles into a phone submission', async () => {
+  it('disables phone-only desktop instead of falling back to phone', async () => {
     status = { available: true, modes: ['phone'], meeting: null }
     await mount()
-    expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
-    expect(document.querySelector('[role="radiogroup"]')).toBeNull()
+    expect(query<HTMLButtonElement>('.capture-meeting-toggle').disabled).toBe(true)
     click('.capture-meeting-toggle')
-    expect(query('.form-submit').textContent).toBe('Start meeting')
-    click('.form-submit')
-    await tick()
-    expect(captureBody()).toMatchObject({ meeting: { mode: 'phone' } })
-    expect(begin).toHaveBeenCalledOnce()
-    expect(bind).toHaveBeenCalledWith(7, expect.objectContaining({ launch: 'fake-launch' }))
+    expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
+    expect(query('.form-submit').textContent).toBe('Spawn')
+    expect(begin).not.toHaveBeenCalled()
+    expect(fetcher.mock.calls.some(([url]) => url.endsWith('/capture'))).toBe(false)
   })
 
   it('mobile narrows Mac modes to phone, starts off, and offers no selector', async () => {
@@ -196,23 +191,22 @@ describe('rendered Capture capabilities', () => {
   })
 
   it.each([
-    ['Mac', modes], ['phone-only', ['phone'] as MeetingMode[]],
+    ['Mac', modes], ['call-only', ['call'] as MeetingMode[]],
   ])('remote scribe preserves %s recorder modes without origin routing or refetch', async (_name, offered) => {
     status = { available: true, modes: offered, recorder: 'local', meeting: null }
     // Remote first guards against treating picker order as recorder identity.
     await mount({ hosts: [...hosts].reverse() })
     expect(query('.capture-meeting-host-label').textContent).toBe('Records on Recorder · scribe on Recorder')
     click('.capture-meeting-toggle')
-    if (offered.length > 1) click('[role="radio"]:nth-child(2)')
     select(0, 'remote')
     await tick()
     expect(meetingReads().map(([url]) => url)).toEqual([`${base}/api/v1/meeting`])
     expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('true')
     expect(query('.capture-meeting-host-label').textContent).toBe('Records on Recorder · scribe on Scribe')
-    expect([...document.querySelectorAll('[role="radio"]')].map((node) => node.textContent)).toEqual(offered.length > 1 ? ['Live', 'Mic only', 'Phone'] : [])
+    expect(document.querySelector('[role="radio"]')).toBeNull()
     click('.form-submit')
     await tick()
-    expect(captureBody()).toMatchObject({ origin: 'remote', meeting: { mode: offered.length > 1 ? 'room' : 'phone' } })
+    expect(captureBody()).toMatchObject({ origin: 'remote', meeting: { mode: 'call' } })
     expect(meetingResult).toHaveBeenCalledWith(expect.objectContaining({ host: 'Scribe' }))
   })
 
@@ -231,7 +225,7 @@ describe('rendered Capture capabilities', () => {
     select(0, 'remote')
     await tick()
     expect(meetingReads().map(([url]) => url)).toEqual([`${base}/api/v1/meeting`])
-    expect(document.querySelector('.capture-meeting-toggle')).toBeNull()
+    expect(query<HTMLButtonElement>('.capture-meeting-toggle').disabled).toBe(true)
     yap()
     click('.form-submit')
     await tick()
@@ -242,12 +236,12 @@ describe('rendered Capture capabilities', () => {
 
   it.each([
     ['missing modes', false, { available: true, meeting: null }],
-    ['mobile without phone', true, { available: true, modes: ['call', 'room'], meeting: null }],
+    ['mobile without phone', true, { available: true, modes: ['call'], meeting: null }],
   ])('does not invent meeting choices for %s', async (_name, narrow, localStatus) => {
     mobile = narrow
     status = localStatus
     await mount()
-    expect(document.querySelector('.capture-meeting-toggle')).toBeNull()
+    expect(query<HTMLButtonElement>('.capture-meeting-toggle').disabled).toBe(true)
     expect(query('.form-submit').textContent).toBe('Spawn')
     expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
   })

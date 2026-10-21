@@ -30,21 +30,20 @@
   background: var(--kbn-lift);
 }
 
-:root[data-ws-appearance='dark'] :is(.form-btn, .set-btn, .projpick-addpath-go, .projpick-addpath-cancel, .capture-meeting-toggle, .capture-meeting-mode):disabled {
+:root[data-ws-appearance='dark'] :is(.form-btn, .set-btn, .projpick-addpath-go, .projpick-addpath-cancel, .capture-meeting-toggle):disabled {
   opacity: 1;
   background: transparent;
   border: 1px dashed var(--kbn-lift-edge);
   box-shadow: none;
   color: var(--kbn-ink-muted);
 }
-:root[data-ws-appearance='dark'] .capture-meeting-mode:disabled { border-color: transparent; }
 
 /* Segments: the chosen one is the lifted plate. */
-:root[data-ws-appearance='dark'] :is(.stash-segmented, .capture-meeting-modes) {
+:root[data-ws-appearance='dark'] .stash-segmented {
   background: var(--kbn-sheet);
   border-color: var(--kbn-lift-edge);
 }
-:root[data-ws-appearance='dark'] :is(.stash-segment-active, .capture-meeting-mode[aria-checked='true']) {
+:root[data-ws-appearance='dark'] .stash-segment-active {
   background: var(--kbn-lift-hover);
   box-shadow: 0 0 0 1px var(--kbn-lift-edge);
 }

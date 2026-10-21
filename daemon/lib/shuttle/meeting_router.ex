@@ -74,7 +74,7 @@ defmodule Shuttle.MeetingRouter do
             {:ok, body} ->
               case Jason.decode(body) do
                 {:ok, %{"available" => true, "modes" => modes}} when is_list(modes) ->
-                  if Enum.all?(~w(room call), &(&1 in modes)), do: remote, else: nil
+                  if "call" in modes, do: remote, else: nil
 
                 _ ->
                   nil

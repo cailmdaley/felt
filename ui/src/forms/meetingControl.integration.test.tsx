@@ -18,34 +18,24 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('rendered MeetingControl capabilities', () => {
-  it('singleton toggle chooses the offered mode rather than an unsupported default', () => {
+describe('rendered MeetingControl', () => {
+  it('toggles intent on and off without a mode picker', () => {
     const change = vi.fn()
-    act(() => root.render(<MeetingControl enabled={false} mode={null} modes={['phone']} disabled={false} onChange={change} />))
-    expect(container.querySelector('[role="radiogroup"]')).toBeNull()
-    act(() => container.querySelector<HTMLButtonElement>('button')!.click())
-    expect(change).toHaveBeenLastCalledWith('phone')
-    act(() => root.render(<MeetingControl enabled mode="phone" modes={['phone']} disabled={false} onChange={change} />))
-    act(() => container.querySelector<HTMLButtonElement>('button')!.click())
-    expect(change).toHaveBeenLastCalledWith(null)
+    for (const enabled of [false, true]) {
+      act(() => root.render(<MeetingControl enabled={enabled} disabled={false} onChange={change} />))
+      expect(container.querySelectorAll('button')).toHaveLength(1)
+      expect(container.querySelector('[role="radiogroup"]')).toBeNull()
+      act(() => container.querySelector<HTMLButtonElement>('button')!.click())
+      expect(change).toHaveBeenLastCalledWith(!enabled)
+    }
   })
 
-  it('renders only offered segments, preserves the default, and disables every interaction', () => {
+  it('cannot enable a disabled meeting', () => {
     const change = vi.fn()
-    act(() => root.render(<MeetingControl enabled={false} mode={null} modes={['room', 'phone']} defaultMode="phone" disabled={false} onChange={change} />))
-    expect([...container.querySelectorAll('[role="radio"]')].map((node) => node.textContent)).toEqual(['Mic only', 'Phone'])
-    expect(container.querySelector('[role="radiogroup"]')?.hasAttribute('hidden')).toBe(true)
-    act(() => container.querySelector<HTMLButtonElement>('.capture-meeting-toggle')!.click())
-    expect(change).toHaveBeenLastCalledWith('phone')
-    act(() => root.render(<MeetingControl enabled mode="phone" modes={['room', 'phone']} disabled={false} onChange={change} />))
-    act(() => container.querySelector<HTMLButtonElement>('[role="radio"]')!.click())
-    expect(change).toHaveBeenLastCalledWith('room')
-    act(() => root.render(<MeetingControl enabled mode="phone" modes={['room', 'phone']} disabled onChange={change} />))
-    change.mockClear()
-    for (const button of container.querySelectorAll<HTMLButtonElement>('button')) {
-      expect(button.disabled).toBe(true)
-      act(() => button.click())
-    }
+    act(() => root.render(<MeetingControl enabled={false} disabled onChange={change} />))
+    const button = container.querySelector<HTMLButtonElement>('button')!
+    expect(button.disabled).toBe(true)
+    act(() => button.click())
     expect(change).not.toHaveBeenCalled()
   })
 })

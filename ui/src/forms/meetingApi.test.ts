@@ -8,7 +8,7 @@ describe('parseCaptureMeetingCapabilities', () => {
   it('keeps only known unique modes in daemon order', () => {
     expect(parseCaptureMeetingCapabilities({
       available: true, modes: ['phone', 'room', 'phone', 'unknown', 3, null, 'call'], meeting: null,
-    })).toEqual({ available: true, modes: ['phone', 'room', 'call'], recorder: null })
+    })).toEqual({ available: true, modes: ['phone', 'call'], recorder: null })
   })
 
   it('does not infer modes from missing or malformed capabilities', () => {
@@ -52,10 +52,10 @@ describe('stopMeeting', () => {
 
 describe('joinMeeting', () => {
   it('names the constitution, its owner and the mode, and carries a note only when there is one', () => {
-    expect(joinMeetingBody({ fiberId: 'loom/shear', origin: 'cluster', mode: 'room', note: '  ' })).toEqual({
+    expect(joinMeetingBody({ fiberId: 'loom/shear', origin: 'cluster', mode: 'call', note: '  ' })).toEqual({
       fiber_id: 'loom/shear',
       origin: 'cluster',
-      meeting: { mode: 'room' },
+      meeting: { mode: 'call' },
     })
     expect(joinMeetingBody({ fiberId: 'loom/shear', mode: 'call', note: 'B-mode telecon' })).toEqual({
       fiber_id: 'loom/shear',
@@ -81,7 +81,7 @@ describe('joinMeeting', () => {
     const current = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ meeting: { state: 'live' }, delivery: { delivered: null, delivery: 'message', detail, receipt: { status: 'unknown', detail } } }, 202),
     )
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, current))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, current))
       .resolves.toMatchObject({ kind: 'unconfirmed', detail, meeting: { state: 'live' } })
 
     // A daemon that still renders an unknown receipt as a failure: the receipt decides.
@@ -97,7 +97,7 @@ describe('joinMeeting', () => {
         },
       }, 400),
     )
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, older))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, older))
       .resolves.toMatchObject({ kind: 'unconfirmed', detail: 'native message sent; no correlated receiver turn observed: context deadline exceeded', meeting: { state: 'live' } })
 
     const refused = vi.fn<typeof fetch>().mockResolvedValue(
@@ -108,7 +108,7 @@ describe('joinMeeting', () => {
         delivery: { delivered: false, delivery: 'message', receipt: { status: 'rejected' } },
       }, 502),
     )
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, refused))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, refused))
       .resolves.toMatchObject({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started', meeting: { state: 'live' } })
   })
 
@@ -116,17 +116,17 @@ describe('joinMeeting', () => {
     const recording = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ recording: true, error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } }, 422),
     )
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, recording))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, recording))
       .resolves.toMatchObject({ kind: 'recording', error: 'Fiber is closed — reopen it before dispatching.', meeting: { state: 'live' } })
 
     const busy = vi.fn<typeof fetch>().mockResolvedValue(
       reply({ error: 'a meeting is already active', meeting: { state: 'live' } }, 409),
     )
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, busy))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, busy))
       .resolves.toEqual({ kind: 'error', message: 'A meeting is already starting or running.' })
 
     const offline = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection refused'))
-    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'room' }, offline))
+    await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, offline))
       .resolves.toMatchObject({ kind: 'error', uncertain: true, message: expect.stringContaining('Inspect the recorder before starting another meeting') })
   })
 })

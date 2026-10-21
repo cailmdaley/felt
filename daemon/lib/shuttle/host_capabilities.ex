@@ -22,7 +22,7 @@ defmodule Shuttle.HostCapabilities do
   def meeting_modes(false, _opts), do: []
 
   def meeting_modes(true, opts) do
-    if os_type(opts) == {:unix, :darwin}, do: ~w(call room phone), else: ~w(phone)
+    if os_type(opts) == {:unix, :darwin}, do: ~w(call phone), else: ~w(phone)
   end
 
   @spec browser_capable?(keyword()) :: boolean()

@@ -3,7 +3,7 @@ import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
-import { MEETING_MODES, type MeetingMode } from '../../forms/meetingApi.js'
+import type { MeetingMode } from '../../forms/meetingApi.js'
 import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
 import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../../forms/executionSurface.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
@@ -11,7 +11,7 @@ import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
 import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
-import { coarsePointer } from '../mobile.js'
+import { coarsePointer, isMobileViewport } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
@@ -280,9 +280,6 @@ function buildStrip(card: KanbanCard): HTMLElement {
   }
   return strip
 }
-
-/** The meeting kind last picked, offered first by every composer this session. */
-let lastMeetingMode: MeetingMode = MEETING_MODES[0].value
 
 function ctlButton(label: string, cls: string): HTMLButtonElement {
   const btn = document.createElement('button')
@@ -1213,16 +1210,16 @@ export class Dock {
 
   /**
    * Meeting, for this constitution: a switch in the composer's control row.
-   * Off by default. On, it shows the meeting's kind (Call, Room, Phone) and
-   * the composer's verbs become one, Start meeting, which records on the
-   * daemon — nothing records before that press; Phone opens this tab's mic in
+   * Off by default. On, the composer's verbs become Start meeting, recording on the
+   * daemon — nothing records before that press; mobile opens this tab's mic in
    * the press's gesture and keeps its controls on the board. The composer's
    * message, with its images' lines, becomes the meeting's note, and the
    * worker — live or not — receives the meeting as a joined constitution.
    *
    * One meeting records at a time. While any does, the switch stays in its
-   * place, off and inert, naming the recording on hover; it is absent only
-   * where hark is not available. It follows the board's meeting poll.
+   * place, off and inert, naming the recording on hover. The switch is also
+   * disabled when the device's required audio mode is unavailable.
+   * It follows the board's meeting poll.
    * `onArm` hears the switch so the composer can trade its verbs.
    */
   private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean) => void = () => {}): HTMLElement {
@@ -1239,17 +1236,8 @@ export class Dock {
     const word = document.createElement('span')
     word.textContent = 'Meeting'
     toggle.append(input, track, word)
-    const modeChoices = (): typeof MEETING_MODES => MEETING_MODES.filter(({ value }) => this.meeting?.modes().includes(value))
-    const buildModes = (): Segmented<MeetingMode> => {
-      const choices = modeChoices()
-      const initial = choices.some(({ value }) => value === lastMeetingMode) ? lastMeetingMode : choices[0]?.value ?? 'phone'
-      const result = segmented<MeetingMode>('Meeting kind', choices.map(({ value, label }) => [value, label] as const), initial)
-      result.el.classList.add('kbn-ctl-meet-modes')
-      result.onPick(mode => { lastMeetingMode = mode })
-      return result
-    }
-    let modes = buildModes()
-    let modesSignature = modeChoices().map(({ value }) => value).join(':')
+    const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
+    const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
     const verb = ctlButton('', 'kbn-ctl-send kbn-ctl-meet-start')
     verb.setAttribute('aria-label', 'Start meeting')
     // The phone's narrow row drops the noun the switch beside it already says.
@@ -1266,7 +1254,7 @@ export class Dock {
     const arm = (on: boolean): void => {
       input.checked = on
       wrap.classList.toggle('kbn-ctl-meet-on', on)
-      modes.el.hidden = verb.hidden = !on
+      verb.hidden = !on
       onArm(on)
     }
     arm(false)
@@ -1277,30 +1265,20 @@ export class Dock {
     const paint = (): void => {
       const control = this.meeting
       if (!control) return
-      const signature = modeChoices().map(({ value }) => value).join(':')
-      if (signature !== modesSignature && !starting) {
-        const old = modes.el
-        modes = buildModes()
-        modesSignature = signature
-        old.replaceWith(modes.el)
-        modes.el.hidden = !input.checked
-      }
       const recorder = control.recorder?.()
       word.textContent = recorder ? `Meeting · ${recorder}` : 'Meeting'
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
-      wrap.hidden = !control.canJoin() && !recording
-      const held = starting || send.busy() || !control.canJoin()
+      const held = starting || send.busy() || !canJoin()
       input.disabled = held
-      modes.setDisabled(held)
       verb.disabled = held
       toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
-      if (!control.canJoin() && input.checked && !starting) arm(false)
+      if (!canJoin() && input.checked && !starting) arm(false)
     }
     this.meetingPaint = paint
 
     const start = (): void => {
-      if (!input.checked || starting || send.busy() || !this.meeting?.canJoin() || !this.meeting.modes().includes(modes.value)) return
+      if (!input.checked || starting || send.busy() || !canJoin()) return
       starting = true
       send.setBusy(true)
       verbFace(true)
@@ -1309,7 +1287,7 @@ export class Dock {
       // mic; it resolves the note (uploading any images) after that.
       const epoch = this.epoch
       let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, modes.value, send.compose) }
+      try { joined = this.meeting!.join(card, requiredMode(), send.compose) }
       catch (error) { joined = Promise.reject(error) }
       let began = false
       void joined.then(({ error, delivered }) => {
@@ -1340,7 +1318,7 @@ export class Dock {
       start()
     })
 
-    wrap.append(toggle, modes.el, verb)
+    wrap.append(toggle, verb)
     paint()
     return wrap
   }

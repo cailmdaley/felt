@@ -81,7 +81,7 @@ unknown action or a missing field is 400.
 
 `POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
 terminal execution. It also accepts an optional
-`meeting: {mode: "call" | "room" | "phone"}` object and an optional `recorder` host id.
+`meeting: {mode: "call" | "phone"}` object and an optional `recorder` host id.
 Meeting mode starts hark on the selected recorder before owner-routing the capture, so recording and the scribe can run on different hosts.
 Meeting mode rejects `surface: "app"`,
 allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
@@ -226,11 +226,12 @@ Full metadata and `body=true` listings without `fields=index` stay live.
 
 `GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
 `origin=<host>` also supports host-addressed reads.
-`modes` lists the recording inputs that host supports: `call` (its microphone and system audio), `room` (its microphone), or `phone` (streamed phone microphone).
+`modes` lists the recording inputs that host supports: `call` (its microphone and system audio) or `phone` (streamed phone microphone).
 Without hark, the list is empty.
-`GET /meeting?prefer=phone` asks the serving daemon to select a reachable remote recorder advertising `available: true` and both `room` and `call`; it uses the local recorder if no remote qualifies.
+`GET /meeting?prefer=phone` asks the serving daemon to select a reachable remote recorder advertising `available: true` and `call`; it uses the local recorder if no remote qualifies.
 Capability probes belong to the daemon and have short bounded deadlines; the browser never probes remote hosts.
-Capture and Join use the selected recorder's capabilities and narrow them to `phone` on mobile.
+Capture and Join offer one Meeting toggle: desktop uses `call`, and mobile uses `phone`.
+The toggle is disabled when the selected recorder lacks the device's required mode; desktop never falls back to `phone`.
 A remote Mac still records in `phone` mode when the microphone is on the phone.
 The board's host picker chooses the scribe host, not the recorder, and the controls name the selected recorder.
 The preview recorder is advisory for a new phone start: Capture and Join omit an explicit recorder so the daemon checks reachability again before recording.
@@ -302,7 +303,7 @@ prevents an older daemon from silently dropping fields it does not recognize.
 The answer includes `{available, modes, recorder, meeting}`.
 Use `recorder=<host>` for an explicit read, or `prefer=phone` for capability-based selection.
 Hark exposes no capability-reporting CLI protocol, and its help includes device flags even on Linux.
-The daemon therefore derives `modes` from hark availability and the OS: macOS offers call/room/phone; other hosts offer phone.
+The daemon therefore derives `modes` from hark availability and the OS: macOS offers call/phone; other hosts offer phone.
 The row is `null` when the addressed daemon has no meeting capture to report. Otherwise it carries
 `state`, `title`, `started_at`, `tail`, `transcript`, `mirror_host`,
 `fiber`, `joined`, `phone`, `launch`, `recorder`, `tmux_session`, and `error`.
@@ -321,10 +322,10 @@ reach this daemon, and a renamed fiber is still found. `mirror_host` is the conf
 the transcript mirror's SSH alias matches a remote; otherwise it is the alias.
 A `null` mirror host means the transcript is local.
 
-`POST /capture` accepts `meeting: {mode: "call" | "room" | "phone"}`. `call`
-records this machine's microphone and system audio, `room` its microphone
-alone, and `phone` a phone's microphone streamed in over `GET /meeting/audio`
-(hark `--phone`, an in-person meeting diarized like `room`). The daemon derives
+`POST /capture` accepts `meeting: {mode: "call" | "phone"}`.
+`call` records this machine's microphone and system audio, including in-person meetings with silent system audio.
+`phone` records a phone's microphone streamed in over `GET /meeting/audio` (hark `--phone`).
+The daemon derives
 the meeting title and transcript name from the first line of `prompt`, or uses
 `Meeting` when no note is supplied.
 It starts hark in the selected recorder's `hark-meeting` tmux session, then continues the ordinary owner-routed capture flow.

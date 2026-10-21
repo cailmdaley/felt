@@ -1461,7 +1461,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     return json({ meeting: mockMeeting }, 202)
   }
   if (url.split('?')[0].endsWith('/api/v1/meeting')) return json({
-    available: true, modes: ['call', 'room', 'phone'], recorder: recorderHost, meeting: mockMeeting,
+    available: true, modes: ['call', 'phone'], recorder: recorderHost, meeting: mockMeeting,
   })
   if (url.endsWith('/api/v1/meeting/join') && init?.method === 'POST') {
     const request = body()

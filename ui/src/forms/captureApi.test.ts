@@ -11,13 +11,13 @@ const common = {
 
 describe('meeting capture request', () => {
   it('adds the mode to an ordinary capture body, permits an empty note, and forces the terminal surface', () => {
-    expect(captureRequestBody({ ...common, prompt: '  ', surface: 'app', meetingMode: 'room' })).toEqual({
+    expect(captureRequestBody({ ...common, prompt: '  ', surface: 'app', meetingMode: 'call' })).toEqual({
       project_dir: '/projects/shear',
       origin: 'remote-project',
       agent: 'claude-opus',
       effort: 'high',
       surface: 'cli',
-      meeting: { mode: 'room' },
+      meeting: { mode: 'call' },
     })
     expect(captureRequestBody({ ...common, meetingMode: 'call' })).toEqual({
       prompt: 'UNIONS shear telecon',
@@ -44,7 +44,7 @@ describe('meeting capture response', () => {
     expect(captureOutcome(
       { ok: false, status: 502 },
       { recording: true, error: 'owner host is unreachable' },
-      { projectDir: common.projectDir, meetingMode: 'room', host: 'project host' },
+      { projectDir: common.projectDir, meetingMode: 'call', host: 'project host' },
     )).toEqual({
       kind: 'meeting-recording',
       host: 'project host',

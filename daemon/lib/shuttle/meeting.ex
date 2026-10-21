@@ -43,7 +43,7 @@ defmodule Shuttle.Meeting do
   the stamp travels with the fiber either way.
 
   The mode picks hark's audio: `call` records this machine's mic and system
-  audio, `room` its mic alone, and `phone` a Unix socket that a phone's mic
+  audio, and `phone` a Unix socket that a phone's mic
   streams into through `ShuttleWeb.MeetingAudioSocket`; `phone_socket/1` names
   that socket.
   """
@@ -52,7 +52,7 @@ defmodule Shuttle.Meeting do
   require Logger
 
   @session "hark-meeting"
-  @modes ~w(call room phone)
+  @modes ~w(call phone)
   @launch_option "@hark_launch"
   @fiber_option "@hark_fiber"
   @active_phases ~w(loading live stopping)
@@ -347,7 +347,7 @@ defmodule Shuttle.Meeting do
   defp validate_meeting(%{"mode" => mode}) when mode in @modes, do: {:ok, mode}
 
   defp validate_meeting(_),
-    do: {:error, {:validation, "meeting.mode must be 'call', 'room' or 'phone'"}}
+    do: {:error, {:validation, "meeting.mode must be 'call' or 'phone'"}}
 
   defp validate_supported_mode(mode, opts) do
     if mode in HostCapabilities.meeting_modes(true, opts),
@@ -407,7 +407,6 @@ defmodule Shuttle.Meeting do
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end
 
-  defp mode_flag("room"), do: ["--room"]
   defp mode_flag("phone"), do: ["--phone"]
   defp mode_flag("call"), do: []
 

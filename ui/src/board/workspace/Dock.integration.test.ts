@@ -96,7 +96,7 @@ describe('anchored pickers', () => {
     let recording: { title: string; state: 'live' } | null = null
     let canJoin = true
     const join = vi.fn(async () => ({ error: null, delivered: true }))
-    const control = { canJoin: () => canJoin, modes: () => ['call', 'room', 'phone'], current: () => recording, join }
+    const control = { canJoin: () => canJoin, modes: () => ['call', 'phone'], current: () => recording, join }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task({ sessionUuid: 'session-1', status: 'active' }))
     document.body.append(meetingBand.el)
@@ -104,17 +104,16 @@ describe('anchored pickers', () => {
     const toggle = q<HTMLInputElement>('.kbn-ctl-meet-switch input')
     const field = q<HTMLTextAreaElement>('textarea')
     expect([toggle.getAttribute('role'), toggle.checked]).toEqual(['switch', false])
-    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-modes').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([false, true, true])
+    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([false, true])
 
     toggle.click()
-    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-modes').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([true, false, false])
-    expect([...meetingBand.el.querySelectorAll('.kbn-ctl-meet-modes [role="radio"]')].map(r => r.textContent)).toEqual(['Live', 'Mic only', 'Phone'])
+    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([true, false])
+    expect(meetingBand.el.querySelector('[aria-label="Meeting kind"]')).toBeNull()
     expect(field.placeholder).toBe('A note for the meeting (optional)')
-    ;[...meetingBand.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-meet-modes [role="radio"]')].find(r => r.textContent === 'Mic only')!.click()
     vi.mocked(fetch).mockClear()
     field.value = 'agenda'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'room', expect.any(Function))
+    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function))
     expect(writes()).toEqual([])
     await flush()
     expect(toggle.checked).toBe(false)
@@ -160,7 +159,7 @@ describe('anchored pickers', () => {
   })
 
   it('keeps the switch on when a meeting fails to start', async () => {
-    const control = { canJoin: () => true, modes: () => ['call', 'room', 'phone'], current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
+    const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)

@@ -3,8 +3,8 @@ import type { KanbanCard } from './KanbanTypes.js'
 export const MEETING_POLL_IDLE_MS = 15_000
 export const MEETING_POLL_ACTIVE_MS = 2_000
 
-export type MeetingMode = 'call' | 'room' | 'phone'
-const MEETING_MODES = new Set<MeetingMode>(['call', 'room', 'phone'])
+export type MeetingMode = 'call' | 'phone'
+const MEETING_MODES = new Set<MeetingMode>(['call', 'phone'])
 
 export type MeetingState = 'starting' | 'loading' | 'live' | 'stopping' | 'failed'
 
@@ -40,7 +40,7 @@ export interface MeetingStatus {
 
 /** Fail closed on unknown capabilities; mobile audio always comes from this tab. */
 export function supportedMeetingModes(status: MeetingStatus, mobile: boolean): MeetingMode[] {
-  return status.available ? (status.modes ?? []).filter(mode => !mobile || mode === 'phone') : []
+  return status.available ? (status.modes ?? []).filter(mode => mode === (mobile ? 'phone' : 'call')) : []
 }
 
 /** Active recordings stay addressed even if capability probes would select another host. */

@@ -270,7 +270,7 @@ describe('the composer takes pasted images', () => {
 
   it('holds every verb and freezes the chips while a send is in flight', async () => {
     const meeting: MeetingJoinControl = {
-      canJoin: () => true, modes: () => ['phone'], current: () => null, join: vi.fn(async () => ({ error: null, delivered: true })),
+      canJoin: () => true, modes: () => ['call'], current: () => null, join: vi.fn(async () => ({ error: null, delivered: true })),
     }
     mount({ meeting })
     const upload = defer<unknown>()
@@ -298,7 +298,7 @@ describe('the composer takes pasted images', () => {
   it('a meeting keeps text typed during its upload and clears only what it sent', async () => {
     const meeting: MeetingJoinControl = {
       canJoin: () => true,
-      modes: () => ['phone'],
+      modes: () => ['call'],
       current: () => null,
       join: async (_card, _mode, note) => {
         await note()
@@ -323,7 +323,7 @@ describe('the composer takes pasted images', () => {
     let delivered = false
     const meeting: MeetingJoinControl = {
       canJoin: () => true,
-      modes: () => ['phone'],
+      modes: () => ['call'],
       current: () => null,
       join: async (_card, _mode, note) => {
         await note()

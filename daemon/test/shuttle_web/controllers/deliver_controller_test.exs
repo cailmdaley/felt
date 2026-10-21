@@ -173,7 +173,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
         "/api/v1/deliver",
         Jason.encode!(%{
           "fiber_id" => fiber_id,
-          "text" => "Meeting mode (room).",
+          "text" => "Meeting mode (call).",
           "from" => "shuttle meeting"
         })
       )
@@ -184,7 +184,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     assert_received {:message, request}
     assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
-    assert request["text"] == "Meeting mode (room)."
+    assert request["text"] == "Meeting mode (call)."
     assert request["from"] == "shuttle meeting"
     assert request["wake"] == true
 

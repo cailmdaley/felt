@@ -190,9 +190,6 @@
 .ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-switch { color: var(--ws-ink); }
 .ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track { background: var(--ws-ink); border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track::after { left: 11px; background: var(--ws-paper); }
-/* The kinds are words; the chosen one wears the selection plate. */
-.ws-dock .kbn-ctl-meet-modes { gap: 0; padding: 0; border: 0; background: transparent; }
-.ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { min-height: var(--ctl-h); padding-inline: 8px; }
 /* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
 @media (hover: none) {
   .ws-dock .kbn-ctl-composer .kbn-ctl-secondary:hover { background-color: transparent; }
@@ -200,7 +197,6 @@
 @media (hover: hover) {
   .ws-dock .kbn-ctl-composer .kbn-ctl-btn:hover:not(:disabled) { color: var(--ws-ink); background-color: var(--ws-hover); }
   .ws-dock .kbn-ctl-meet-switch:hover:not(:has(input:disabled)) { color: var(--ws-ink); background: var(--ws-hover); }
-  .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment:hover:not(:disabled, [aria-checked='true']) { color: var(--ws-ink); background: var(--ws-hover); }
 }
 .ws-dock .kbn-detail-directive::placeholder { color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }
@@ -296,7 +292,6 @@
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
   .ws-dock .kbn-ctl-composer-foot, .ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; justify-self: stretch; }
   .ws-dock .kbn-ctl-meet-noun { display: none; }
-  .ws-dock .kbn-ctl-meet-modes .kbn-ctl-segment { min-width: var(--ws-phone-target); padding-inline: 7px; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-ctl-menu-item, .kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }
   .ws-dock .kbn-ctl-image { width: 80px; height: 80px; }

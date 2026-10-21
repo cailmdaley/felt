@@ -38,7 +38,7 @@ import { isMobileViewport } from '../board/mobile'
 import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeting'
 import { meetingStatusUrl, parseMeetingRecord, type MeetingRecord } from '../board/meeting'
 import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
-import { MEETING_MODES, parseCaptureMeetingCapabilities, type MeetingMode } from './meetingApi'
+import { parseCaptureMeetingCapabilities, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import type { Host, Project } from './projectModel'
@@ -113,7 +113,6 @@ export function CaptureForm({
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [mobileMeeting] = useState(() => isMobileViewport())
   const [meetingIntent, setMeetingIntent] = useState(false)
-  const [meetingMode, setMeetingMode] = useState<MeetingMode | null>(() => mobileMeeting ? 'phone' : null)
   const [meetingCapabilities, setMeetingCapabilities] = useState({
     loading: true,
     available: false,
@@ -153,14 +152,9 @@ export function CaptureForm({
     initialSelection,
   })
 
-  const meetingModes = meetingCapabilities.available
-    ? (mobileMeeting ? meetingCapabilities.modes.filter((mode) => mode === 'phone') : meetingCapabilities.modes)
-    : []
-  const meetingAvailable = meetingModes.length > 0
-  const selectedMeetingMode = meetingMode && meetingModes.includes(meetingMode)
-    ? meetingMode
-    : meetingModes[0] ?? null
-  const meetingEnabled = meetingIntent && selectedMeetingMode !== null
+  const selectedMeetingMode: MeetingMode = mobileMeeting ? 'phone' : 'call'
+  const meetingAvailable = meetingCapabilities.available && meetingCapabilities.modes.includes(selectedMeetingMode)
+  const meetingEnabled = meetingIntent && meetingAvailable
   const recorderHost = hosts.find(host => host.id === meetingCapabilities.recorder)
   const recorderLabel = recorderHost?.label ?? meetingCapabilities.recorder
   const meetingHostLabel = recorderLabel
@@ -208,15 +202,6 @@ export function CaptureForm({
   const handleCaptureHostChange = (id: string): void => {
     setChrome(false)
     handleHostChange(id)
-  }
-
-  const handleMeetingChange = (mode: MeetingMode | null): void => {
-    if (mode === null) {
-      setMeetingIntent(false)
-    } else {
-      setMeetingMode(mode)
-      setMeetingIntent(true)
-    }
   }
 
   const submit = async (): Promise<void> => {
@@ -335,17 +320,12 @@ export function CaptureForm({
           placeholder={meetingEnabled ? 'Optional — the scribe works it out as you talk' : 'Speak the idea — a session will write the card'}
           rows={mobileMeeting && meetingEnabled ? 2 : 6}
         />
-        {(meetingCapabilities.loading || meetingAvailable) && (
-          <MeetingControl
-            enabled={meetingIntent}
-            mode={meetingIntent ? selectedMeetingMode : null}
-            modes={meetingModes}
-            disabled={submitting || meetingCapabilities.loading}
-            onChange={handleMeetingChange}
-            defaultMode={meetingModes[0] ?? (mobileMeeting ? 'phone' : 'call')}
-            hostLabel={meetingHostLabel}
-          />
-        )}
+        <MeetingControl
+          enabled={meetingEnabled}
+          disabled={submitting || meetingCapabilities.loading || !meetingAvailable}
+          onChange={setMeetingIntent}
+          hostLabel={meetingAvailable ? meetingHostLabel : undefined}
+        />
         <div className="form-controls">
           {(projects.length > 0 || onProjectAdded) && (
             <HostProjectFields
@@ -395,7 +375,7 @@ export function CaptureForm({
           verb={meetingEnabled ? 'start meeting' : 'spawn'}
           submitLabel={submitting ? (meetingEnabled ? 'Starting…' : 'Spawning…') : meetingEnabled ? 'Start meeting' : 'Spawn'}
           submitting={submitting}
-          disabled={submitting || startUncertain || (meetingIntent && meetingCapabilities.loading) || (!meetingEnabled && !prompt.trim())}
+          disabled={submitting || startUncertain || (meetingIntent && !meetingAvailable) || (!meetingEnabled && !prompt.trim())}
           tone="cobalt"
           onCancel={onCancel}
           onSubmit={() => void submit()}
@@ -405,17 +385,13 @@ export function CaptureForm({
   )
 }
 
-/** Meeting toggle with mode segments only when the serving daemon offers a choice. */
-export function MeetingControl({ enabled, mode, modes, disabled, onChange, defaultMode = 'call', hostLabel }: {
+/** One toggle; the device determines the audio source. */
+export function MeetingControl({ enabled, disabled, onChange, hostLabel }: {
   enabled: boolean
-  mode: MeetingMode | null
-  modes: MeetingMode[]
   disabled: boolean
-  onChange: (mode: MeetingMode | null) => void
-  defaultMode?: MeetingMode
+  onChange: (enabled: boolean) => void
   hostLabel?: string
 }): JSX.Element {
-  const initialMode = modes.includes(defaultMode) ? defaultMode : modes[0] ?? null
   return (
     <div className="capture-meeting-control">
       <div className="capture-meeting-row">
@@ -424,35 +400,10 @@ export function MeetingControl({ enabled, mode, modes, disabled, onChange, defau
           className="capture-meeting-toggle"
           aria-pressed={enabled}
           disabled={disabled}
-          onClick={() => onChange(enabled ? null : initialMode)}
+          onClick={() => onChange(!enabled)}
         >
           Meeting
         </button>
-        {modes.length > 1 && (
-          <div
-            className="capture-meeting-modes"
-            role="radiogroup"
-            aria-label="Meeting mode"
-            hidden={!enabled}
-          >
-            {modes.map((value) => {
-              const label = MEETING_MODES.find((item) => item.value === value)?.label ?? value
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  className="capture-meeting-mode"
-                  aria-checked={mode === value}
-                  disabled={disabled}
-                  onClick={() => onChange(value)}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-        )}
       </div>
       {hostLabel && <span className="capture-meeting-host-label">{hostLabel}</span>}
     </div>
@@ -471,8 +422,6 @@ export function injectCaptureFormStyles(): void {
       .capture-mobile-meeting { gap: 10px; }
       .capture-mobile-meeting .capture-meeting-row { min-height: 48px; height: auto; gap: 6px; }
       .capture-mobile-meeting .capture-meeting-toggle { height: 48px; }
-      .capture-mobile-meeting .capture-meeting-modes { height: 48px; padding: 1px; }
-      .capture-mobile-meeting .capture-meeting-mode { padding: 0 10px; }
     }
     /* The yap. 17px because this is the dialog's one piece of prose — the
        controls beneath it read at 15px, the labels at 11px. */
@@ -500,7 +449,7 @@ export function injectCaptureFormStyles(): void {
       border-color: color-mix(in srgb, var(--kbn-agent) 70%, var(--kbn-blank));
       box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-agent) 16%, transparent);
     }
-    /* Keep the toggle and optional mode segments on one control row. */
+    /* Keep the toggle and recorder label together. */
     .capture-meeting-control {
       display: flex;
       flex-direction: column;
@@ -560,48 +509,11 @@ export function injectCaptureFormStyles(): void {
       background: var(--kbn-tempered);
       border-color: var(--kbn-tempered);
     }
-    .capture-meeting-modes {
-      box-sizing: border-box;
-      height: 32px;
-      display: inline-flex;
-      gap: 2px;
-      padding: 2px;
-      background: color-mix(in srgb, var(--kbn-graphite) 3.5%, transparent);
-      border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
-      border-radius: 3px;
-    }
-    /* Keep the box, drop the paint, the tab stops and the a11y node. */
-    .capture-meeting-modes[hidden] {
-      display: inline-flex;
-      visibility: hidden;
-    }
-    .capture-meeting-mode {
-      padding: 0 14px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
-      line-height: 1;
-      color: var(--kbn-graphite-muted);
-      background: transparent;
-      border: none;
-      border-radius: 2px;
-      cursor: pointer;
-    }
-    .capture-meeting-mode:hover:not([aria-checked="true"]):not(:disabled) {
-      color: var(--kbn-graphite);
-    }
-    .capture-meeting-mode[aria-checked="true"] {
-      color: var(--kbn-graphite);
-      background: var(--kbn-blank);
-      box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-graphite) 12%, transparent), 0 1px 2px color-mix(in srgb, var(--kbn-shade) 10%, transparent);
-      cursor: default;
-    }
-    .capture-meeting-toggle:focus-visible,
-    .capture-meeting-mode:focus-visible {
+    .capture-meeting-toggle:focus-visible {
       outline: 2px solid color-mix(in srgb, var(--kbn-owed) 45%, transparent);
       outline-offset: 1px;
     }
-    .capture-meeting-toggle:disabled,
-    .capture-meeting-mode:disabled {
+    .capture-meeting-toggle:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
