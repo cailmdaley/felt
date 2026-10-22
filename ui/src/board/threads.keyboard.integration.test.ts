@@ -159,3 +159,25 @@ describe('thread families across Desk repaints', () => {
     expect(peek().hidden).toBe(true)
   })
 })
+
+describe('the keyboard selection on a sub-entry', () => {
+  it('stays drawn on a visible row when the pointer expands its family and a poll repaints it', () => {
+    saveWaitingThreadEntries(true)
+    draw(data())
+    press('j')
+    expect(selected()).toBe('hub-uid')
+    press('j')
+    expect(selected()).toBe('ask-uid')
+    const sel = () => document.querySelector<HTMLElement>('.kbn-key-selected')!
+    expect(sel().closest('.kbn-thread-subentries')).not.toBeNull()
+    const enter = new Event('pointerenter'); Object.assign(enter, { pointerType: 'mouse' }); family().dispatchEvent(enter)
+    expect(peek().hidden).toBe(false)
+    draw(data())
+    expect(document.querySelectorAll('.kbn-key-selected')).toHaveLength(1)
+    expect(sel().dataset.cardUid).toBe('ask-uid')
+    expect(sel().closest('[hidden]')).toBeNull()
+    press('j')
+    expect(selected()).toBe('draft-uid')
+    expect(sel().closest('[hidden]')).toBeNull()
+  })
+})

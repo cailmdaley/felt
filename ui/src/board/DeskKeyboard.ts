@@ -24,7 +24,7 @@ export class DeskKeyboard {
   /** The row drawn for the selection, when one is on the Desk. */
   get selectedRow(): HTMLElement | null { return this.node() ?? null }
 
-  /** The reader's column is exactly the Desk's navigable order, including expanded queues. */
+  /** The reader's column is exactly the Desk's navigable order, including expanded thread families. */
   columnFor(address: DeskAddress): HTMLElement[] {
     return this.regions().find(region => region.some(el => matches(el, address))) ?? []
   }
@@ -58,7 +58,9 @@ export class DeskKeyboard {
       el.classList.remove('kbn-key-selected')
       el.removeAttribute('aria-current')
     }
-    const el = this.selected ? [...this.root.querySelectorAll<HTMLElement>('[data-card-uid]')].find(node => matches(node, this.selected!)) : undefined
+    // A drawn row before a folded one: the selection is shown where the eye is.
+    const candidates = this.selected ? [...this.root.querySelectorAll<HTMLElement>('[data-card-uid]')].filter(node => matches(node, this.selected!)) : []
+    const el = candidates.find(node => !node.closest('[hidden]')) ?? candidates[0]
     if (!el) return
     if (el.matches('.kbn-cluster-item[hidden]')) el.parentElement?.querySelector<HTMLButtonElement>('.kbn-cluster-more')?.click()
     revealThreadFamily(el)
