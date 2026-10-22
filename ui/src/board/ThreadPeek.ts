@@ -43,6 +43,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     ['Waiting', waiting],
     ['To review', review],
     ['Working', live.filter(c => threadState(c) === 'working')],
+    ['Drafts', live.filter(c => threadState(c) === 'drafts')],
     ['Resting', live.filter(c => threadState(c) === 'resting')],
   ] as const) {
     if (!members.length) continue

@@ -2,19 +2,20 @@ import { hasLiveWorker, type KanbanCard } from './KanbanTypes.js'
 import { leftQueues } from './KanbanRules.js'
 import { turnOf } from './turn.js'
 
-export type ThreadState = 'waiting-cail' | 'to-review' | 'working' | 'resting' | 'archived'
+export type ThreadState = 'waiting-cail' | 'to-review' | 'working' | 'drafts' | 'resting' | 'archived'
 export const THREAD_LABEL: Record<ThreadState, string> = {
-  'waiting-cail': 'Waiting', 'to-review': 'To review', working: 'Working', resting: 'Resting', archived: 'Archived',
+  'waiting-cail': 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', resting: 'Resting', archived: 'Archived',
 }
 export function threadState(card: KanbanCard): ThreadState {
   if (leftQueues(card)) return 'archived'
   if (card.status === 'closed') return 'to-review'
+  if (card.status === 'open') return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'
   if (turnOf(card).yours) return 'waiting-cail'
   if (hasLiveWorker(card) && !card.originStale) return 'working'
   return 'resting'
 }
 export function compareThreads(a: KanbanCard, b: KanbanCard): number {
-  const order: ThreadState[] = ['waiting-cail', 'to-review', 'working', 'resting', 'archived']
+  const order: ThreadState[] = ['waiting-cail', 'to-review', 'working', 'drafts', 'resting', 'archived']
   return order.indexOf(threadState(a)) - order.indexOf(threadState(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
 }
 /** A wire edge names a path, not a machine: threads can run on another host.

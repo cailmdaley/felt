@@ -38,7 +38,7 @@ export class ThreadRail {
     const seen = new Set<KanbanCard>([card])
     let parent = orchestratorOf(card, cards)
     while (parent && !seen.has(parent)) { seen.add(parent); ancestors.unshift(parent); parent = orchestratorOf(parent, cards) }
-    const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError])])
+    const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon])])
     if (signature === this.signature) return
     this.signature = signature
     for (const waiting of descendants.filter(c => threadState(c) === 'waiting-cail')) {
@@ -95,11 +95,11 @@ export class ThreadRail {
       return list
     }
     this.tree.replaceChildren()
-    for (const [label, state] of [['Waiting', 'waiting-cail'], ['To review', 'to-review']] as const) {
+    for (const [label, state] of [['Waiting', 'waiting-cail'], ['To review', 'to-review'], ['Drafts', 'drafts']] as const) {
       const members = subtree.filter(c => threadState(c) === state)
       if (!members.length) continue
-      const group = document.createElement(state === 'to-review' ? 'details' : 'section'); group.className = 'ws-thread-pointers'
-      const heading = document.createElement(state === 'to-review' ? 'summary' : 'h3')
+      const group = document.createElement(state !== 'waiting-cail' ? 'details' : 'section'); group.className = 'ws-thread-pointers'
+      const heading = document.createElement(state !== 'waiting-cail' ? 'summary' : 'h3')
       heading.textContent = `${label} · ${members.length}`; group.append(heading)
       for (const card of members) {
         const row = threadRow(card, this.open)

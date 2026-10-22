@@ -8,7 +8,7 @@ it('keeps pure containment beside flat waiting pointers, folds archives, navigat
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
   const deep = card({ id: 'hub/child/folder/deep', orchestrator: child.id, status: 'active', ask: { text: 'Choose a cut', at: '2026-07-02T12:00:00Z' }, name: 'Deep review' })
-  const rest = card({ id: 'hub/rest', orchestrator: root.id, name: 'A resting' })
+  const rest = card({ id: 'hub/rest', orchestrator: root.id, effectiveHorizon: 'stashed', name: 'A resting' })
   const done = card({ id: 'hub/done', orchestrator: root.id, status: 'closed', tempered: true })
   const all = [root, rest, child, deep, done], open = vi.fn(), rail = new ThreadRail(open, vi.fn())
   rail.show({ ...root }, all)
