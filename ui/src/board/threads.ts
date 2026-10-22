@@ -8,12 +8,20 @@ export const THREAD_LABEL: Record<ThreadState, string> = {
   'waiting-cail': 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', resting: 'Resting', archived: 'Archived',
 }
 const STATE_ORDER: readonly ThreadState[] = ['waiting-cail', 'to-review', 'working', 'drafts', 'resting', 'archived']
+/**
+ * A thread's state, read the way the Desk reads a card: a verdict archives,
+ * a close awaits review, and a live worker puts the card In flight whatever
+ * its status (as `classifyFiber` does), where `turnOf` decides Waiting from
+ * Working. Only an open constitution with no live worker is a draft, or
+ * resting when put down.
+ */
 export function threadState(card: KanbanCard): ThreadState {
   if (leftQueues(card)) return 'archived'
   if (card.status === 'closed') return 'to-review'
-  if (card.status === 'open') return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'
+  const live = hasLiveWorker(card)
+  if (card.status === 'open' && !live) return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'
   if (turnOf(card).yours) return 'waiting-cail'
-  if (hasLiveWorker(card) && !card.originStale) return 'working'
+  if (live && !card.originStale) return 'working'
   return 'resting'
 }
 /** The Desk column a family's most urgent unfinished thread asks for; undefined when nothing in it needs the Desk. */
