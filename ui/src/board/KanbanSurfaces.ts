@@ -2415,19 +2415,6 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
   return null
 }
 
-/**
- * The part of an element a cursor can actually reach: its box, clipped by every
- * scrolling ancestor and by the viewport.
- *
- * The board's columns are `overflow-y: auto`, so a card near the bottom of a
- * full column is partly — sometimes mostly — outside the box that shows it.
- * Any geometry the drag reads off `getBoundingClientRect()` alone is therefore
- * geometry about a rectangle the human cannot point at, which is exactly how
- * one card ends up looking inert while its neighbours light up.
- *
- * Returns null when the element is scrolled entirely out of view — there is no
- * point on it to hit, and callers should treat that as "not over it".
- */
 /** Every card the response holds, once each. */
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []

@@ -1656,8 +1656,6 @@ class ChronicleView implements TemporalView {
       response.now.inFlight,
       response.now.awaitingReview,
       response.timeline.futureDated,
-      // Folding and unfolding move a card between `folded` and a column, so a
-      // poll whose only change is one of those has to repaint.
     ]) {
       parts.push(list.map((c) => c.id).join(','))
     }
