@@ -282,6 +282,10 @@ defmodule ShuttleWeb.FiberDocumentsController do
   cross-observer disagreement, so the kanban can classify directly without a
   second tmux read.
 
+  Every constitution's `orchestrator` is computed here, over the merged rows, so
+  containment crosses hosts: a thread and its hub may be owned by different
+  daemons but share a store (`Shuttle.Threads.put_board_orchestrators/2`).
+
   Each fiber row carries an `origin` field (the owning host/remote name) so the
   view can route worker-badge focus and transitions without re-deriving owner
   from the `shuttle.host` block. `origins` reports per-origin staleness so the
@@ -295,10 +299,11 @@ defmodule ShuttleWeb.FiberDocumentsController do
     remote_feeds = Shuttle.RemoteFiberRegistry.feeds()
 
     fibers =
-      Enum.map(local_owner_entries, &Map.put(&1, :origin, local_origin)) ++
-        Enum.flat_map(remote_feeds, fn {name, feed} ->
-          Enum.map(feed.fibers, &stamp_origin(&1, name))
-        end)
+      (Enum.map(local_owner_entries, &Map.put(&1, :origin, local_origin)) ++
+         Enum.flat_map(remote_feeds, fn {name, feed} ->
+           Enum.map(feed.fibers, &stamp_origin(&1, name))
+         end))
+      |> Shuttle.Threads.put_board_orchestrators(Shuttle.Poller.fiber_stores())
 
     origins =
       remote_feeds

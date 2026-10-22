@@ -392,6 +392,20 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
+  The store each fiber in the document cache roots in, as `%{uid => felt_store}`.
+
+  The cache holds every shuttle fiber in the configured stores, including those
+  another host owns, so this is how a composite reader recognizes a remote
+  feed's store as one of ours. Empty when the poller is unavailable.
+  """
+  @spec fiber_stores(GenServer.server()) :: %{String.t() => String.t()}
+  def fiber_stores(server \\ Shuttle.Env.server(__MODULE__)) do
+    GenServer.call(server, :fiber_stores, @orchestrator_state_call_timeout_ms)
+  catch
+    :exit, _ -> %{}
+  end
+
+  @doc """
   Re-read one fiber from disk and replace (or evict) its entry in the document
   cache — the single post-mutation seam.
 
@@ -1224,6 +1238,16 @@ defmodule Shuttle.Poller do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
+  end
+
+  def handle_call(:fiber_stores, _from, state) do
+    stores =
+      for {_key, %{entry: %{fiber: %{"uid" => uid}, felt_store: store}}} <- state.document_cache,
+          is_binary(uid),
+          into: %{},
+          do: {uid, store}
+
+    {:reply, stores, state}
   end
 
   def handle_call(:parked_index, _from, state) do
