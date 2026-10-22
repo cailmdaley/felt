@@ -95,6 +95,72 @@ defmodule Shuttle.ThreadsTest do
     assert length(pending(data)) == 4
   end
 
+  test "failed close and ask publications survive cleared stamps and publisher restart", %{
+    store: store
+  } do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    remotes = Path.join(store, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        defaults: %{discover: false},
+        remotes: [%{name: "parent-host", url: "http://127.0.0.1:43210"}]
+      })
+    )
+
+    Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+    Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
+    parent_path = Path.join(store, ".felt/hub/hub.md")
+
+    File.write!(
+      parent_path,
+      File.read!(parent_path) |> String.replace("host: test-host", "host: parent-host")
+    )
+
+    for {verb, args, clear} <- [
+          {"close", [], ["reopen", "hub/child", "--local"]},
+          {"ask", ["Keep this question"], ["ask", "hub/child", "--clear"]}
+        ] do
+      StubPostClient.set_response({:error, :unavailable})
+
+      assert {:ok, _} =
+               CLI.run_in_store(
+                 store,
+                 [verb, "hub/child" | args] ++ if(verb == "close", do: ["--local"], else: [])
+               )
+
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.deliver_results(entries, "test-host")
+      original = StubPostClient.last().body |> Jason.decode!()
+      assert {:ok, _} = CLI.run_in_store(store, clear)
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, [
+                 "set-outcome",
+                 "hub/child",
+                 "--outcome",
+                 "Changed after publication",
+                 "--local"
+               ])
+
+      assert {:ok, %{fibers: cleared}} = FiberDocuments.list(felt_stores: [store])
+      StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+      # A new publisher process has no memory of the observed close or ask.
+      StubPostClient.set_get_response({:error, :not_set})
+      Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
+      task = Task.async(fn -> Threads.deliver_results(cleared, "test-host") end)
+      Task.await(task, 30_000)
+      assert %{body: body} = StubPostClient.last()
+      assert Jason.decode!(body) == original
+      Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
+      Threads.deliver_results(entries, "test-host")
+      assert StubPostClient.last() == nil
+    end
+  end
+
   test "fresh, resume and standing prompts identify the nearest current orchestrator", %{
     store: store
   } do

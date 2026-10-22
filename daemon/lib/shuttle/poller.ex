@@ -2443,6 +2443,8 @@ defmodule Shuttle.Poller do
   defp deliver_thread_results(state) do
     entries = Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end)
     own_host = state.own_host_id
+    # Commit observed lifecycle signals before scheduling fallible delivery.
+    Shuttle.Threads.capture_results(entries, own_host)
     callers = Shuttle.Env.callers()
 
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->

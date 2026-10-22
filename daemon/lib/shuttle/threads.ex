@@ -1,7 +1,7 @@
 defmodule Shuttle.Threads do
   @moduledoc "Constitution containment and owner-local result delivery."
 
-  alias Shuttle.{Delivery, OriginRouter}
+  alias Shuttle.{Delivery, OriginRouter, ThreadOutbox}
 
   @doc "Nearest strict ancestor carrying a shuttle block, in the same felt store."
   def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
@@ -69,19 +69,8 @@ defmodule Shuttle.Threads do
 
   @doc "Reconcile durable lifecycle signals. Only a child's owner publishes its results."
   def deliver_results(entries, own_host) do
-    index = index(entries)
-
-    Enum.each(entries, fn entry ->
-      if get_in(entry.fiber, ["shuttle", "host"]) == own_host do
-        if parent = orchestrator(entry, index) do
-          Enum.each(signals(entry.fiber), fn {verb, stamp, text} ->
-            id = "thread-" <> digest({entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
-            message = "thread #{address(entry.fiber)} #{verb}: #{text}"
-            deliver(parent, message, id, verb in ["closed", "asked"])
-          end)
-        end
-      end
-    end)
+    capture_results(entries, own_host)
+    retry_results(own_host)
 
     # A parent can receive remote results while dormant. Its next live worker
     # drains the same mailbox, even when no child changes during this poll.
@@ -90,6 +79,57 @@ defmodule Shuttle.Threads do
         do: Delivery.flush_context(entry)
     end)
   end
+
+  @doc "Persist immutable publications before any asynchronous network attempt."
+  def capture_results(entries, own_host) do
+    index = index(entries)
+
+    records =
+      for entry <- entries,
+          get_in(entry.fiber, ["shuttle", "host"]) == own_host,
+          parent = orchestrator(entry, index),
+          parent != nil,
+          {verb, stamp, text} <- signals(entry.fiber) do
+        id =
+          "thread-" <>
+            digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
+
+        {id,
+         %{
+           "owner" => own_host,
+           "store" => parent.felt_store,
+           "parent" => parent.fiber,
+           "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
+           "wake" => verb in ["closed", "asked"]
+         }}
+      end
+
+    ThreadOutbox.capture(records)
+  end
+
+  @doc "Retry persisted publications; acknowledgment means recipient mailbox enqueue, not worker consumption."
+  def retry_results(own_host) do
+    for {id, record} <- ThreadOutbox.pending(own_host) do
+      parent = %{felt_store: record["store"], fiber: record["parent"]}
+
+      if acknowledged?(deliver(parent, record["text"], id, record["wake"])) do
+        ThreadOutbox.acknowledge(id)
+      end
+    end
+
+    :ok
+  end
+
+  defp acknowledged?({:ok, :queued}), do: true
+
+  defp acknowledged?({:forwarded, 202, body}) do
+    case Jason.decode(body) do
+      {:ok, %{"delivery" => "context", "queued" => true}} -> true
+      _ -> false
+    end
+  end
+
+  defp acknowledged?(_), do: false
 
   defp deliver(parent, text, id, wake) do
     case OriginRouter.route_host(get_in(parent.fiber, ["shuttle", "host"])) do
@@ -105,8 +145,8 @@ defmodule Shuttle.Threads do
           "message_id" => id
         })
 
-      {:error, _} ->
-        :ok
+      {:error, _} = error ->
+        error
     end
   end
 
