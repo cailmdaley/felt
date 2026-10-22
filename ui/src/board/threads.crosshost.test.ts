@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { card } from './testFixtures.js'
 import { ThreadIndex } from './threads.js'
+import { mapFeltJsonToFiber } from './KanbanFiber.js'
 import type { KanbanCard } from './KanbanTypes.js'
 
 const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard => card({ shuttleKind: 'oneshot', ...over })
@@ -26,5 +27,19 @@ describe('a thread resolves its root across hosts', () => {
   it('a copy of the thread the index never saw still finds its root', () => {
     const index = new ThreadIndex([rootCineca, child])
     expect(index.isOrphan({ ...child, originId: 'cineca', feltStore: '/leonardo/loom' })).toBe(false)
+  })
+})
+
+describe('orchestrator resolves against uids when ids are slugs', () => {
+  const parentFiber = mapFeltJsonToFiber({ id: '01HZPARENT0000000000000000', slug: 'science/cmbx', uid: '01HZPARENT0000000000000000', status: 'active' })!
+  const childFiber = mapFeltJsonToFiber({ id: '01HZCHILD00000000000000000', slug: 'science/cmbx/child', uid: '01HZCHILD00000000000000000', status: 'active' })!
+  const parent = thread({ id: parentFiber.id, uid: parentFiber.uid, status: 'active' })
+  const child = thread({ id: childFiber.id, uid: childFiber.uid, orchestrator: parentFiber.uid, status: 'active', workerState: 'running', runtimePhase: 'working' })
+  it('the child finds its slug-identified parent', () => {
+    expect(parent.id).toBe('science/cmbx')
+    const index = new ThreadIndex([parent, child])
+    expect(index.isOrphan(child)).toBe(false)
+    expect(index.parentOf(child)?.id).toBe('science/cmbx')
+    expect(index.summary(parent)).toMatchObject({ unfinished: 1, working: 1 })
   })
 })

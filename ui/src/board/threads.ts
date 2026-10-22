@@ -68,8 +68,9 @@ export class ThreadIndex {
       const key = threadKey(card)
       if (this.cards.has(key)) continue
       this.cards.set(key, card)
-      if (!this.firstOf.has(card.id)) this.firstOf.set(card.id, key)
-      if (!card.isCycle) byId.set(card.id, [...(byId.get(card.id) ?? []), card])
+      const fid = card.uid ?? card.id
+      if (!this.firstOf.has(fid)) this.firstOf.set(fid, key)
+      if (!card.isCycle) byId.set(fid, [...(byId.get(fid) ?? []), card])
     }
     // The graph has one node per fiber, its first copy; every copy reads it.
     for (const key of new Set(this.firstOf.values())) this.states.set(key, threadState(this.cards.get(key)!))
@@ -83,7 +84,7 @@ export class ThreadIndex {
       const owner = candidates.find(c => c.originId === card.originId && c.feltStore === card.feltStore)
         ?? candidates.find(c => !!c.shuttleHost && c.originId === c.shuttleHost)
         ?? candidates[0]
-      if (owner && owner.id !== card.id) this.parents.set(key, owner)
+      if (owner && (owner.uid ?? owner.id) !== (card.uid ?? card.id)) this.parents.set(key, owner)
     }
     this.breakCycles()
     for (const [key, owner] of this.parents) {
@@ -148,7 +149,7 @@ export class ThreadIndex {
   card(card: KanbanCard): KanbanCard { return this.cards.get(threadKey(card)) ?? this.cards.get(this.key(card)) ?? card }
   parentOf(card: KanbanCard): KanbanCard | undefined { return this.parents.get(this.key(card)) }
   /** The fiber's node, whichever host's copy asks. */
-  private key(card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'>): string { return this.firstOf.get(card.id) ?? threadKey(card) }
+  private key(card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id' | 'uid'>): string { return this.firstOf.get(card.uid ?? card.id) ?? threadKey(card) }
   /** A thread whose orchestrator is named but not on the board. */
   isOrphan(card: KanbanCard): boolean { return !!card.orchestrator && !this.parents.has(this.key(card)) }
   /** Direct threads, in feed order. */
