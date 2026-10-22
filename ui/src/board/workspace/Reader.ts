@@ -18,11 +18,11 @@ import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import { buildCardPaper } from '../KanbanSurfaces.js'
-import { overviewHostMarks } from './Overview.js'
 import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { groupJump, groupStops, stopLanding } from './groupJump.js'
 import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from './measures.js'
 import { workerPlate } from './workerPlate.js'
+import { TURN_WORD, type Turn } from '../turn.js'
 import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
@@ -69,6 +69,26 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   return el
 }
 /** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
+/** What a row's marks mean: the lifecycle glyph, then the worker's dot by turn, drawn as the rows draw them. */
+function sidebarLegend(): HTMLElement {
+  const legend = element('div', 'ws-sidebar-legend')
+  legend.setAttribute('aria-label', 'Row marks')
+  const entry = (mark: HTMLElement, word: string): void => {
+    const item = element('span', 'ws-sidebar-legend-entry')
+    item.append(mark, word)
+    legend.append(item)
+  }
+  const glyph = (kind: 'agent' | 'human', text: string): HTMLElement => element('span', `kbn-card-glyph kbn-card-glyph-${kind}`, text)
+  const dot = (turn: Turn): HTMLElement => {
+    const mark = element('span', 'ws-sidebar-legend-dot')
+    mark.dataset.turn = turn
+    return mark
+  }
+  entry(glyph('agent', '◐'), 'agent')
+  entry(glyph('human', '✓'), 'you')
+  for (const turn of ['working', 'question', 'idle'] as const) entry(dot(turn), TURN_WORD[turn])
+  return legend
+}
 const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
@@ -163,7 +183,6 @@ export class Reader {
   private readonly picker: ConstitutionPicker
   private readonly sidebarFlight: SidebarFlight
   private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
-  private sidebarSnapshot: { marks: Map<string, string> } | null = null
   private readonly flightRoots = new Set<HTMLElement>()
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
@@ -252,18 +271,14 @@ export class Reader {
       // Escape on a card leaves the reader, as it does anywhere else in it.
       onEscape: () => { this.handleIntent('back') },
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
-      onBeforeRefresh: () => {
-        const cards = this.opts.cards()
-        this.sidebarSnapshot = { marks: overviewHostMarks(cards.map(card => card.originId)) }
-      },
-      revision: card => sidebarRevision(card, this.sidebarHostMark(card)),
+      revision: sidebarRevision,
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
         if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
         else this.opts.themes?.unbind(el)
       },
       onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
-      onRefresh: () => { try { this.renderIndex() } finally { this.sidebarSnapshot = null } },
+      onRefresh: () => this.renderIndex(),
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)
     this.picker = new ConstitutionPicker(pickerOptions)
@@ -277,7 +292,7 @@ export class Reader {
     this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
     this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
-    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
+    this.sidebar.append(this.sidebarIndex, sidebarLegend(), this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
     column.append(this.threadRail.breadcrumb, this.stage)
@@ -844,7 +859,7 @@ export class Reader {
   }
   /** The source column is captured before the live Desk starts receding. */
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
-  /** One line per constitution, as the Desk's rows are: name, host, queue and worker; the outcome is the page's to show. */
+  /** One line per constitution: its lifecycle glyph, its name and its worker's dot; the host, outcome and question are the page's to show. */
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = buildCardPaper(card)
     // A note or role has no lifecycle, so it carries no lifecycle glyph.
@@ -856,10 +871,6 @@ export class Reader {
     face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
     const meta = element('div', 'kbn-card-meta')
     markVerdictHost(meta, card)
-    const host = element('small', 'ws-channel-owner')
-    host.textContent = `${this.sidebarHostMark(card)} ${card.originId}`
-    host.title = card.originId
-    meta.append(host)
     const pill = this.opts.workerPill?.(card)
     if (pill) {
       pill.dataset.part = 'act'; pill.dataset.act = 'worker'
@@ -1117,10 +1128,6 @@ export class Reader {
       if (at >= 0) return [...cards.slice(0, at + 1), current, ...cards.slice(at + 1)]
     }
     return [...cards, current]
-  }
-  private sidebarHostMark(card: KanbanCard): string {
-    const marks = this.sidebarSnapshot?.marks ?? overviewHostMarks(this.opts.cards().map(row => row.originId))
-    return marks.get(card.originId) ?? overviewHostMarks([...marks.keys(), card.originId]).get(card.originId) ?? '○'
   }
   private sidebarPosition(cards: KanbanCard[]): number {
     return cards.findIndex(card => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner)

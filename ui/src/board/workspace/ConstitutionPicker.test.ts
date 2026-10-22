@@ -53,13 +53,12 @@ it('cancels a deferred reveal when selection returns to the already-revealed row
 })
 
 it('closes every refresh it opens, including one whose row pass throws', () => {
-  const onBeforeRefresh = vi.fn(), onRefresh = vi.fn()
+  const onRefresh = vi.fn()
   let broken = true
-  const subject = picker = new ConstitutionPicker({ cards: () => [card({ id: 'a', uid: 'a', name: 'Alpha' })], onOpen: vi.fn(), onBeforeRefresh, onRefresh,
+  const subject = picker = new ConstitutionPicker({ cards: () => [card({ id: 'a', uid: 'a', name: 'Alpha' })], onOpen: vi.fn(), onRefresh,
     renderCard: () => { if (broken) throw new Error('face failed'); return document.createElement('div') },
   })
   expect(() => subject.refresh(false)).toThrow('face failed')
-  expect(onBeforeRefresh).toHaveBeenCalledOnce()
   expect(onRefresh).toHaveBeenCalledOnce()
   broken = false
   subject.refresh(false)

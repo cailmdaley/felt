@@ -6,12 +6,12 @@ import { workerPlateFacts } from './workerPlate.js'
 import { claudeOpening } from '../conversationOpening.js'
 import { coarsePointer } from '../mobile.js'
 
-/** Only the paper, worker target and turn, and host mark contribute to a row's face. */
-export function sidebarRevision(card: KanbanCard, hostMark?: string): string {
+/** Only the paper, worker target and turn contribute to a row's face. */
+export function sidebarRevision(card: KanbanCard): string {
   return JSON.stringify([
     card.id, card.uid, card.originId, card.name, card.outcome, isAgentCard(card), onDesk(card),
     card.status === 'active' && card.runtimePhase !== 'attention' ? card.ask?.text : undefined,
-    hostMark, deskColumn(card), card.workerState, card.runtimePhase, card.launchError,
+    deskColumn(card), card.workerState, card.runtimePhase, card.launchError,
     card.tmuxSession, card.sessionLink, card.sessionUuid, card.desktopLink, card.shuttleHost,
     card.shuttleProjectDir, card.workerSurface, card.shuttleSurface, card.workerAgent, card.shuttleAgent,
     card.lastActivityAt, card.ask?.at, card.originStale?.since, workerPlateFacts(card), claudeOpening(), coarsePointer(),

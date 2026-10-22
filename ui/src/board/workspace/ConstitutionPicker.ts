@@ -13,8 +13,6 @@ export interface ConstitutionPickerOptions {
   /** The retained root, after placement and revision patching, on every refresh. */
   onRow?(el: HTMLElement, card: KanbanCard): void
   onRemove?(el: HTMLElement): void
-  /** Capture shared inputs once for the whole row pass; `onRefresh` follows it whether or not the pass completes. */
-  onBeforeRefresh?(): void
   /** After every refresh, once rows and captions are placed, or once a row pass has thrown. */
   onRefresh?(): void
   onOpen(card: KanbanCard): void
@@ -80,7 +78,6 @@ export class ConstitutionPicker {
     this.previous = null
   }
   refresh(reveal = true): void {
-    this.opts.onBeforeRefresh?.()
     try { this.placeRows(reveal) } finally { this.opts.onRefresh?.() }
   }
   private placeRows(reveal: boolean): void {
@@ -151,7 +148,6 @@ export class ConstitutionPicker {
         const face = this.opts.renderCard(card)
         row.el.replaceChildren(...face.childNodes)
         row.name = row.el.querySelector<HTMLElement>('.ws-channel-name')!
-        row.owner = row.el.querySelector<HTMLElement>('.ws-channel-owner')!
       }
       row.revision = revision
       row.card = card

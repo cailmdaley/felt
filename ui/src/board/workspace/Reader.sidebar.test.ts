@@ -100,17 +100,7 @@ afterEach(() => {
 })
 
 describe('Reader channel sidebar', () => {
-  it('releases the refresh snapshot when a row face throws', () => {
-    storage.set('shuttle:workspace:sidebar', 'true')
-    let broken = false
-    const reader = makeReader(alpha, undefined, () => { if (broken) throw new Error('pill failed'); return null })
-    broken = true
-    listedCards = listedCards.map(card => ({ ...card, outcome: 'Revised' }))
-    expect(() => reader.refreshChannels()).toThrow('pill failed')
-    expect((reader as unknown as { sidebarSnapshot: unknown }).sidebarSnapshot).toBeNull()
-  })
-
-  it('draws each constitution as one compact line: name, host and worker, no outcome or question', () => {
+  it('draws each constitution as one compact line: glyph, name and worker, no host, outcome or question', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, status: 'active', outcome: 'A long result paragraph', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }
     listedCards = [asking, beta]
@@ -120,7 +110,16 @@ describe('Reader channel sidebar', () => {
     expect(face.classList.contains('ws-constitution-row')).toBe(true)
     expect(face.querySelector('.kbn-card-outcome, .kbn-card-question, .kbn-card-id')).toBeNull()
     expect(face.querySelector('.kbn-card-name')?.textContent).toBe(asking.name)
-    expect(face.querySelector('.ws-channel-owner')).not.toBeNull()
+    expect(face.querySelector('.ws-channel-owner')).toBeNull()
+  })
+
+  it('explains the row marks in a legend under the column strip', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const reader = makeReader(alpha)
+    const strip = reader.el.querySelector('.ws-sidebar-index')!
+    const legend = strip.nextElementSibling as HTMLElement
+    expect(legend.classList.contains('ws-sidebar-legend')).toBe(true)
+    expect(legend.textContent).toBe('◐agent✓youworkingquestionidle')
   })
 
   it('repaints a retained worker pill when its turn changes', () => {
