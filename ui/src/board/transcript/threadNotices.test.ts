@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeRecord } from './records.js'
 import { TranscriptModel, segments } from './model.js'
 import { threadNotices } from './threadNotices.js'
+import hookFixture from './fixtures/claude-hook-thread-notices.jsonl?raw'
 
 const delivery = (verb = 'closed', digit = 'a', text = 'Measured result') => `[Shuttle message thread-${digit.repeat(64)}-${'b'.repeat(16)}]\nthread work/child ${verb}: ${text}`
 const time = '2026-10-22T14:00:00Z'
@@ -50,5 +51,13 @@ describe('delivered thread notices', () => {
   it('never promotes quoted assistant output or tool results to a delivered notice', () => {
     expect(normalizeRecord({ type: 'assistant', message: { content: [{ type: 'text', text: delivery() }] } })[0].kind).toBe('text')
     expect(normalizeRecord({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: delivery() }] } })[0].kind).toBe('result')
+  })
+  it('reads deliveries Claude Code stores as hook_additional_context attachments, in arrival order', () => {
+    const [batch, peer] = hookFixture.trim().split('\n').map(line => normalizeRecord(JSON.parse(line)))
+    expect(batch).toEqual([
+      expect.objectContaining({ kind: 'thread-notice', fiber: 'cmbx/chair/euclid-spt-6x2pt', verb: 'closed', text: 'Covariance validated against 400 sims; report in reports/cov.html.', at: Date.parse('2026-10-22T11:05:17.443Z') }),
+      expect.objectContaining({ kind: 'thread-notice', fiber: 'cmbx/chair/mask-check', verb: 'rested', text: 'Paused until the new masks land.' }),
+    ])
+    expect(peer).toStrictEqual([])
   })
 })

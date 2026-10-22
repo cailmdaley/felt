@@ -24,3 +24,10 @@ Claude and Pi lines contain no effective window, so their denominator is omitted
 Only Codex's recorded window is displayed.
 Cache TTL is inferred only for native Claude records: hour writes establish an hour while active, otherwise five minutes; cache activity refreshes the active TTL.
 Pi's generic usage does not record a TTL and Codex's token counters do not either, so neither gets a cache-temperature fact.
+
+# Hook-delivered thread notices
+
+`claude-hook-thread-notices.jsonl` keeps the envelope of a real Claude Code `attachment` record (`hook_additional_context`, from a `UserPromptSubmit` hook, Claude Code 2.1.287, `~/.claude/projects` on 2026-10-22): its fields, the `content` array of strings, and the `rendered` system-reminder.
+Claude Code stores hook context this way, never as a `<system-reminder>` inside a `user` record.
+The content is what `shuttle hook` writes today (the peer-context preamble, then `messaging.Labeled` per message); no thread delivery through a hook had been recorded yet, so the thread ids, fibers and outcomes are written for the fixture.
+The second line is a peer message quoting a thread line, which must stay ordinary context.

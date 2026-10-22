@@ -180,9 +180,20 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
   return [...(classified ? [classified] : prompt ? [prompt] : []), ...results]
 }
 
-/** A message typed while the agent worked arrives as a queued command absorbed into the running turn. */
-function claudeQueued(record: ObjectValue): Entry[] {
+/**
+ * Claude Code's attachment records. A message typed while the agent worked
+ * arrives as a queued command absorbed into the running turn. Context a hook
+ * supplied (`shuttle hook`'s mailbox, which carries thread closes, asks,
+ * handoffs and rests) arrives as `hook_additional_context`, never as a
+ * system-reminder in a user record; only its thread deliveries are drawn.
+ */
+function claudeAttachment(record: ObjectValue): Entry[] {
   const attachment = object(record.attachment)
+  if (attachment?.type === 'hook_additional_context') {
+    const content = attachment.content
+    const text = Array.isArray(content) ? content.filter((part): part is string => typeof part === 'string').join('\n') : string(content) ?? ''
+    return threadNotices(text, timestamp(record.timestamp))
+  }
   if (attachment?.type !== 'queued_command' || (attachment.commandMode ?? 'prompt') !== 'prompt') return []
   const text = string(attachment.prompt)
   const classified = text ? classifiedClaudeText(text, false, timestamp(record.timestamp)) : null
@@ -191,7 +202,7 @@ function claudeQueued(record: ObjectValue): Entry[] {
 
 function claudeRecord(record: ObjectValue): Entry[] {
   if (record.isSidechain === true) return []
-  if (record.type === 'attachment') return claudeQueued(record)
+  if (record.type === 'attachment') return claudeAttachment(record)
   if (!['user', 'assistant', 'system'].includes(String(record.type))) return []
   const message = object(record.message)
   const time = timestamp(record.timestamp)
