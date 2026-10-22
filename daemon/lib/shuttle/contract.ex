@@ -22,9 +22,18 @@ defmodule Shuttle.Contract do
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
   # Office writes use `shuttle role <fiber> <slug>|--clear` and
   # `shuttle seat <fiber> [--clear]`; resolved Shuttle JSON carries a role
-  # string and a boolean seat. Shuttle.InterruptWatcher shells
-  # `shuttle hook interrupted --session --harness --cwd --id --at`.
-  @expected_level 14
+  # string and a boolean seat.
+  @expected_level 15
+
+  # The daemon-shelled surface each recent level introduced. A skew reason
+  # names every surface above the CLI's level, so an operator sees which verb
+  # the stale CLI is missing rather than only two integers.
+  @level_surfaces %{
+    14 => "hook interrupted (Shuttle.InterruptWatcher)",
+    15 =>
+      "context-mailbox get/receiver/revoke/put/deliver (thread receiver authority), " <>
+        "close --quiet (lifecycle API)"
+  }
 
   @doc "The daemon's expected `shuttle contract` level."
   @spec expected_level() :: pos_integer()
@@ -97,7 +106,9 @@ defmodule Shuttle.Contract do
           expected: @expected_level,
           observed: level,
           ok: false,
-          reason: "expected contract level #{@expected_level}, CLI reports #{level}"
+          reason:
+            "expected contract level #{@expected_level}, CLI reports #{level}" <>
+              missing_surfaces(level)
         }
 
       _ ->
@@ -110,6 +121,20 @@ defmodule Shuttle.Contract do
         }
     end
   end
+
+  defp missing_surfaces(level) when level < @expected_level do
+    surfaces =
+      (level + 1)..@expected_level//1
+      |> Enum.map(&@level_surfaces[&1])
+      |> Enum.reject(&is_nil/1)
+
+    case surfaces do
+      [] -> ""
+      surfaces -> "; the CLI lacks " <> Enum.join(surfaces, "; ")
+    end
+  end
+
+  defp missing_surfaces(_level), do: ""
 
   @doc """
   Run `check/1` and log at the appropriate level: `debug` on a match, `error`

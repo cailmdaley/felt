@@ -281,10 +281,10 @@ defmodule Shuttle.Poller do
       daemon_heartbeat_writer: nil,
       daemon_booted_at: nil,
       daemon_boots: [],
-      # True once boot adoption has scanned tmux and rebuilt `running` from what
-      # it found. The auto-release judges worker continuity against `running`,
-      # so it holds while this is false: a reorder that ran the verdict before
-      # adoption, or a boot whose tmux scan came back unknown, fails closed.
+      # True once adoption has a confirmed session scan and healthy document
+      # listings, rebuilt `running` and reconciled durable receiver authority.
+      # Unknown boot observations defer completion to a healthy poll. The
+      # auto-release judges continuity only after this boundary.
       adopted?: false,
       # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1`: the
       # daemon shells `shuttle contract` and compares it to
@@ -1286,10 +1286,23 @@ defmodule Shuttle.Poller do
     {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
   end
 
-  def handle_call({:context_receiver, fiber_id}, from, state) do
-    {:reply, worker, state} = handle_call({:live_worker, fiber_id}, from, state)
-    meta = running_worker(state, fiber_id)
-    reply = if meta, do: {:ok, worker, meta.context_epoch}, else: {:error, :no_worker}
+  # The address and epoch the receiver record committed. Delivery uses that
+  # address rather than re-resolving one from the registry, so a registry
+  # entry vanishing under a live worker cannot make its own epoch superseded.
+  def handle_call({:context_receiver, fiber_id}, _from, state) do
+    reply =
+      case running_worker(state, fiber_id) do
+        nil ->
+          {:error, :no_worker}
+
+        %{context_epoch: epoch, context_address: address}
+        when is_integer(epoch) and is_binary(address) ->
+          {:ok, address, epoch}
+
+        _ ->
+          {:error, :authority_unknown}
+      end
+
     {:reply, reply, state}
   end
 
@@ -1697,7 +1710,7 @@ defmodule Shuttle.Poller do
         discovery: discovery
     }
 
-    state = reconcile(state, sessions)
+    state = reconcile(state, sessions, listings_ok?)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
     Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, new_store_map))
@@ -2341,7 +2354,10 @@ defmodule Shuttle.Poller do
       anchor = worker_session_uuid(meta, fiber)
       current = Shuttle.SessionBinding.current(binding, anchor)
 
-      if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and current != anchor and
+      mirror = fiber && Shuttle.Continuation.resumable_session_id(fiber)
+
+      if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and
+           (current != anchor or mirror != current) and
            is_binary(Map.get(meta, :felt_store)) and Map.get(meta, :felt_store) != "" do
         case Shuttle.Continuation.backfill_session_uuid(
                state.runner,
@@ -2350,26 +2366,32 @@ defmodule Shuttle.Poller do
                current
              ) do
           :ok ->
-            Shuttle.SessionLedger.record(
-              fiber: fiber_id,
-              uid: metadata_uid(meta),
-              session: current,
-              tmux: meta.session,
-              harness:
-                Shuttle.SessionLedger.harness_for_cli(
-                  fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-                ),
-              kind: :resume,
-              agent: Map.get(meta, :agent_id),
-              role: Map.get(meta, :role)
-            )
+            if current != anchor do
+              Shuttle.SessionLedger.record(
+                fiber: fiber_id,
+                uid: metadata_uid(meta),
+                session: current,
+                tmux: meta.session,
+                harness:
+                  Shuttle.SessionLedger.harness_for_cli(
+                    fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+                  ),
+                kind: :resume,
+                agent: Map.get(meta, :agent_id),
+                role: Map.get(meta, :role)
+              )
+            end
 
-            state = put_running(state, key, Map.put(state.running[key], :session_uuid, current))
+            worker =
+              state.running[key] |> Map.put(:session_uuid, current) |> Map.delete(:identity_error)
+
+            state = put_running(state, key, worker)
 
             refresh_worker_document(state, fiber_id)
 
-          {:error, _} ->
-            state
+          {:error, reason} ->
+            worker = Map.put(state.running[key], :identity_error, inspect(reason))
+            %{state | running: Map.put(state.running, key, worker)}
         end
       else
         state
@@ -3667,16 +3689,34 @@ defmodule Shuttle.Poller do
   defp register_renamed_session(%State{} = state, fiber_id, fiber, session, agent_id, opts) do
     running_meta =
       new_running_meta(fiber_id, fiber, session, agent_id, owning_store(fiber_id, state))
+      # The claim's conversation is authoritative before registration, not
+      # the predecessor's runtime stamp that log_worker_claim replaces.
+      |> Map.put(:session_uuid, present_string(Keyword.get(opts, :session_uuid)))
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->
-        log_worker_claim(state, fiber_id, opts)
+        state =
+          case log_worker_claim(state, fiber_id, opts) do
+            :ok ->
+              state
+
+            {:error, reason} ->
+              # Receiver authority is already durable and owns live recovery.
+              # Expose a failed frontmatter mirror and retry it during polling.
+              Logger.warning(
+                "Claim #{fiber_id}: runtime mirror failed; durable receiver retained: #{inspect(reason)}"
+              )
+
+              key = running_key(state, fiber_id)
+              worker = Map.put(state.running[key], :identity_error, inspect(reason))
+              %{state | running: Map.put(state.running, key, worker)}
+          end
 
         # The structural half: the claim is the moment this host learns that
         # this externally-spawned session belongs to this fiber. `record/1`
         # drops a claim that carried no session UUID — there is no pairing to
-        # record then, only a run window, which `log_worker_claim` already
-        # stamped.
+        # record then, only the runtime mirror's run window. Receiver authority
+        # remains durable even when that mirror needs a retry.
         Shuttle.SessionLedger.record(
           fiber: fiber_id,
           uid: Map.get(fiber, "uid"),
@@ -3758,11 +3798,11 @@ defmodule Shuttle.Poller do
   # fresh reads, so a worker that closed its fiber mid-poll would still look
   # active in them, be re-adopted, and be killed during its own final act.
   # `sessions` is this cycle's `list_shuttle_sessions/1` scan.
-  defp reconcile(%State{} = state, sessions) do
+  defp reconcile(%State{} = state, sessions, listings_ok?) do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
-    SessionReconciliation.reconcile_orphaned_sessions(state, sessions)
+    SessionReconciliation.reconcile_orphaned_sessions(state, sessions, listings_ok?)
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do
@@ -4329,38 +4369,120 @@ defmodule Shuttle.Poller do
   end
 
   defp remove_running(%State{} = state, runtime_key) do
-    if meta = state.running[runtime_key], do: persist_context_receiver!(state, meta, nil)
+    if meta = state.running[runtime_key], do: persist_context_receiver(state, meta, nil)
     %{state | running: Map.delete(state.running, runtime_key)}
   end
 
   # Every worker registration, recovery, removal and conversation rotation
   # crosses this synchronous boundary before the Poller publishes its state.
-  # A failed authority write aborts the transition, never reporting success.
+  # A failed authority write fails closed for that worker alone: it stays
+  # tracked with `context_epoch: nil`, so nothing is delivered to it until a
+  # later transition commits an epoch.
   @doc false
   def put_running(state, key, meta) do
-    epoch = persist_context_receiver!(state, meta, meta)
-    %{state | running: Map.put(state.running, key, Map.put(meta, :context_epoch, epoch))}
+    worker =
+      case persist_context_receiver(state, meta, meta) do
+        {:ok, epoch, harness, address} ->
+          meta
+          |> Map.put(:context_epoch, epoch)
+          |> Map.put(:context_harness, harness)
+          |> Map.put(:context_address, address)
+
+        :error ->
+          meta |> Map.put(:context_epoch, nil) |> Map.put(:context_address, nil)
+      end
+
+    %{state | running: Map.put(state.running, key, worker)}
   end
 
+  # Fences every host-owned fiber the daemon is not tracking, in at most two
+  # CLI calls. An active fiber is revoked durably even without a mailbox, so a
+  # stale runtime mirror can never be recovered for it; any other fiber is
+  # revoked only if it already has a mailbox, so no state is created for it.
   @doc false
   def revoke_untracked_receivers(state) do
-    for fibers <- Map.values(state.last_known_listings),
-        fiber <- fibers,
-        host_owned?(fiber["shuttle"] || %{}, state.own_host_id),
-        is_nil(running_key(state, fiber["id"])) do
-      meta = %{
-        fiber_id: fiber["id"],
-        uid: fiber["uid"],
-        felt_store: owning_store(fiber["id"], state)
-      }
+    {active, inactive} =
+      for fibers <- Map.values(state.last_known_listings),
+          fiber <- fibers,
+          host_owned?(fiber["shuttle"] || %{}, state.own_host_id),
+          is_nil(running_key(state, fiber["id"])),
+          uniq: true do
+        meta = %{
+          fiber_id: fiber["id"],
+          uid: fiber["uid"],
+          felt_store: owning_store(fiber["id"], state)
+        }
 
-      persist_context_receiver!(state, meta, nil)
-    end
+        {fiber["status"] == "active", context_receiver_key(state, meta, fiber)}
+      end
+      |> Enum.split_with(&elem(&1, 0))
 
+    revoke_receivers(state, Enum.map(active, &elem(&1, 1)), [])
+    revoke_receivers(state, Enum.map(inactive, &elem(&1, 1)), ["--existing"])
     state
   end
 
-  defp persist_context_receiver!(state, meta, worker) do
+  defp revoke_receivers(_state, [], _flags), do: :ok
+
+  defp revoke_receivers(state, keys, flags) do
+    case Shuttle.CLI.run(["context-mailbox", "revoke" | flags] ++ keys,
+           env: [{"SHUTTLE_HOST", state.own_host_id}],
+           timeout_ms: 32_000
+         ) do
+      {:ok, _} ->
+        :ok
+
+      result ->
+        Logger.warning("receiver revocation incomplete: #{inspect(result)}")
+    end
+  end
+
+  # Restores a recovered worker's conversation from its durable receiver. Only
+  # a missing record defers to the frontmatter runtime mirror; a record for
+  # another identity, or one that cannot be read, leaves it unknown.
+  @doc false
+  def recover_context_receiver(state, meta, fiber) do
+    if Shuttle.AppWorkers.app?(meta.session) do
+      meta
+    else
+      key = context_receiver_key(state, meta, fiber)
+
+      case receiver_cli(state, meta, ["get", key], &Jason.decode/1) do
+        {:ok, nil} ->
+          meta
+
+        {:ok, receiver} when is_map(receiver) ->
+          uuid = present_string(receiver["ID"])
+          identity = meta.session <> ":" <> (uuid || "-")
+          # A registry entry describes a launch recipe, not the identity of
+          # this already-live execution. Its disappearance cannot undo the
+          # receiver's durable identity or its address during re-publication.
+          if receiver["Host"] == state.own_host_id and receiver["identity"] == identity do
+            meta
+            |> Map.put(:session_uuid, uuid)
+            |> Map.put(:context_harness, present_string(receiver["Harness"]))
+          else
+            # A record for another identity (a revoked predecessor, or a
+            # claim whose rename landed before its publish) grants this
+            # session nothing; the runtime mirror may still name that
+            # predecessor and must not be republished at a higher epoch.
+            Map.put(meta, :session_uuid, nil)
+          end
+
+        _ ->
+          Map.put(meta, :session_uuid, nil)
+      end
+    end
+  end
+
+  defp context_receiver_key(state, meta, fiber) do
+    fiber_id = fiber_address(meta)
+    store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
+    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
+    store <> ":" <> uid
+  end
+
+  defp persist_context_receiver(state, meta, worker) do
     fiber_id = fiber_address(meta)
 
     fiber =
@@ -4369,10 +4491,12 @@ defmodule Shuttle.Poller do
         _ -> cached_fiber(state, fiber_id)
       end
 
-    store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
-    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
+    key = context_receiver_key(state, meta, fiber)
     uuid = if worker, do: worker_session_uuid(worker, fiber)
-    cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+
+    cli =
+      present_string(Map.get(meta, :context_harness)) ||
+        present_string(fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"]))
 
     address =
       if uuid && cli,
@@ -4381,14 +4505,41 @@ defmodule Shuttle.Poller do
 
     identity = if worker, do: worker.session <> ":" <> (uuid || "-"), else: ""
 
-    {:ok, output} =
-      Shuttle.CLI.run(["context-mailbox", "receiver", store <> ":" <> uid, identity, address],
+    case receiver_cli(state, meta, ["receiver", key, identity, address], &parse_epoch/1) do
+      {:ok, epoch} -> {:ok, epoch, cli, address}
+      :error -> :error
+    end
+  end
+
+  # Shells one `context-mailbox` verb and parses the last line of its merged
+  # output, which is the verb's stdout. Any failure is logged with the fiber
+  # and the CLI's output and reported as `:error`; it never raises.
+  defp receiver_cli(state, meta, args, parse) do
+    result =
+      Shuttle.CLI.run(["context-mailbox" | args],
         env: [{"SHUTTLE_HOST", state.own_host_id}],
         timeout_ms: 32_000
       )
 
-    {epoch, ""} = Integer.parse(String.trim(output))
-    epoch
+    with {:ok, output} <- result,
+         {:ok, value} <- output |> String.split("\n", trim: true) |> List.last("") |> parse.() do
+      {:ok, value}
+    else
+      _ ->
+        Logger.warning(
+          "receiver authority unknown for #{fiber_address(meta)}: " <>
+            "context-mailbox #{hd(args)} failed: #{inspect(result)}"
+        )
+
+        :error
+    end
+  end
+
+  defp parse_epoch(line) do
+    case Integer.parse(String.trim(line)) do
+      {epoch, ""} when epoch > 0 -> {:ok, epoch}
+      _ -> :error
+    end
   end
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not

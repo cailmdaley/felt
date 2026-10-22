@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
@@ -16,6 +17,13 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	cmd.AddCommand(put)
+	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(receiver)
+	}})
 	cmd.AddCommand(&cobra.Command{Use: "receiver <fiber-key> <worker-identity> <address-or-dash>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		host, err := a.resolveOwnHost("")
 		if err != nil {
@@ -27,6 +35,33 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 		}
 		return err
 	}})
+	var existing bool
+	revoke := &cobra.Command{Use: "revoke <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		host, err := a.resolveOwnHost("")
+		if err != nil {
+			return err
+		}
+		// Each key is revoked independently: one corrupt record names itself
+		// on stderr without withholding revocation from the others.
+		failed := 0
+		for _, key := range args {
+			if existing {
+				_, err = messaging.RevokeExistingFiberReceiver(a.env, key, host)
+			} else {
+				_, err = messaging.TransitionFiberReceiver(a.env, key, host, "", "-")
+			}
+			if err != nil {
+				failed++
+				fmt.Fprintf(a.env.Stderr, "%s: %v\n", key, err)
+			}
+		}
+		if failed > 0 {
+			return fmt.Errorf("%d of %d receivers not revoked", failed, len(args))
+		}
+		return nil
+	}}
+	revoke.Flags().BoolVar(&existing, "existing", false, "Revoke only fibers that already have a mailbox; create nothing")
+	cmd.AddCommand(revoke)
 	cmd.AddCommand(&cobra.Command{Use: "deliver <fiber-key> <address-or-dash> <generation>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		host, err := a.resolveOwnHost("")
 		if err != nil {

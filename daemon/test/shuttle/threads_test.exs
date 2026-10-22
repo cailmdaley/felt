@@ -474,12 +474,25 @@ defmodule Shuttle.ThreadsTest do
     # Payload storage is bounded by pending work, not accumulated history.
     payload_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
     assert length(payload_paths) == 200
-    before = Map.new(payload_paths, &{&1, {File.stat!(&1), File.read!(&1)}})
+    # Reads may update atime; only write-related metadata tests rewriting.
+    before =
+      Map.new(
+        payload_paths,
+        &{&1, {Map.take(File.stat!(&1), [:inode, :mtime, :ctime, :size]), File.read!(&1)}}
+      )
+
     assert :ok = ThreadOutbox.acknowledge("result-1")
     assert length(ThreadOutbox.pending("test-host")) == 199
     after_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
     assert length(after_paths) == 199
-    for path <- after_paths, do: assert({File.stat!(path), File.read!(path)} == before[path])
+
+    for path <- after_paths,
+        do:
+          assert(
+            {Map.take(File.stat!(path), [:inode, :mtime, :ctime, :size]), File.read!(path)} ==
+              before[path]
+          )
+
     [acked_path] = Path.wildcard(Path.join(data, "thread-outbox/acked/*"))
     assert File.read!(acked_path) == "result-1"
     refute File.read!(acked_path) =~ "payload"

@@ -6,7 +6,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   running untouched (tmux owns the worker process; Shuttle only owns the
   watcher). This module re-adopts those live sessions so the daemon resumes
   supervising them — at boot (`adopt_orphans/1`) and on every poll
-  (`reconcile_orphaned_sessions/1`). Both walk the live `*-shuttle` tmux
+  (`reconcile_orphaned_sessions/3`). Both walk the live `*-shuttle` tmux
   sessions, map each back to its fiber by its `<leaf>-<uid>-shuttle` name
   through `candidate_session_lookup/1`, and either start a watcher over the
   live session, kill a session whose fiber has closed, or skip an unknown one.
@@ -40,10 +40,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
             adopt_known_orphan_session(state_acc, lookup, session)
           end)
 
-        # `state.running` is now this daemon's own observation of what is live,
-        # which the boot quarantine's auto-release requires before it judges.
-        state = Poller.revoke_untracked_receivers(state)
-        %{state | adopted?: true}
+        listings_ok? = Enum.all?(state.felt_stores, &Map.has_key?(state.last_full_listings, &1))
+        complete_adoption(state, listings_ok?)
 
       {:error, :unknown} ->
         Logger.warning("tmux session scan unavailable (unknown state); skipping boot adoption")
@@ -55,13 +53,25 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # them. Sessions already covered by a running entry are left alone. `scan` is
   # the cycle's `Poller.list_shuttle_sessions/1` result; on an :unknown scan
   # there is nothing safe to reconcile — retry next poll.
-  def reconcile_orphaned_sessions(%State{} = state, scan) do
+  def reconcile_orphaned_sessions(%State{} = state, scan, listings_ok?) do
     state = adopt_app_sessions(state)
 
     case scan do
-      {:ok, sessions} -> adopt_unwatched(state, sessions)
+      {:ok, sessions} -> state |> adopt_unwatched(sessions) |> complete_adoption(listings_ok?)
       {:error, :unknown} -> state
     end
+  end
+
+  # Complete the same authority boundary at boot or after deferred recovery.
+  # A successful scan alone cannot prove absence when document discovery is
+  # partial. Re-adoption publishes the live identities first; revocation then
+  # touches only untracked fibers, preserving unchanged workers' epochs.
+  defp complete_adoption(%State{adopted?: true} = state, _listings_ok?), do: state
+  defp complete_adoption(state, false), do: state
+
+  defp complete_adoption(state, true) do
+    state = Poller.revoke_untracked_receivers(state)
+    %{state | adopted?: true}
   end
 
   defp adopt_unwatched(%State{} = state, sessions) do
@@ -166,6 +176,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
       started_at: started_at,
       last_activity_at: started_at
     }
+
+    # The worker-owned durable receiver survives frontmatter mirror failures.
+    # Restore it before publishing recovery so stale runtime cannot grant a
+    # predecessor even a temporary higher-epoch designation.
+    running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
 
     case Poller.start_watcher(state, fiber_id, running_meta) do
       {:ok, running_meta} ->
