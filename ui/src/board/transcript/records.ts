@@ -6,6 +6,8 @@ export type UsageEntry = {
   model?: string
   context?: number
   window?: number
+  /** The context tokens this turn read from the prompt cache, where the harness records it. */
+  cached?: number
   /** Only Claude's native usage records establish a cache TTL. */
   cache?: { read: number; write: number; hourWrite: number }
 }
@@ -221,6 +223,7 @@ function claudeRecord(record: ObjectValue): Entry[] {
   const out: Entry[] = usage ? [at({
     kind: 'usage' as const, model,
     context: sumCounts(usage.input_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens),
+    cached: count(usage.cache_read_input_tokens),
     cache: {
       read: count(usage.cache_read_input_tokens) ?? 0,
       write: count(usage.cache_creation_input_tokens) ?? 0,
@@ -286,6 +289,7 @@ function piRecord(record: ObjectValue): Entry[] {
   const out: Entry[] = usage && !['error', 'aborted'].includes(String(message.stopReason)) ? [at({
     kind: 'usage' as const, model,
     context: sumCounts(usage.input, usage.cacheRead, usage.cacheWrite),
+    cached: count(usage.cacheRead),
   }, time)] : []
   for (const block of items) {
     const text = string(block.text)
@@ -337,6 +341,7 @@ function codexRecord(record: ObjectValue): Entry[] {
     return usage ? [at({ kind: 'usage' as const,
       // Codex's cached input is a subset, not another part of the prompt.
       context: resetOnly ? undefined : count(usage.input_tokens), window: count(info?.model_context_window),
+      cached: resetOnly ? undefined : count(usage.cached_input_tokens),
     }, time)] : []
   }
   if (record.type !== 'response_item' || !payload) return []

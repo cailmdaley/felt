@@ -99,3 +99,18 @@ describe('native transcript head facts', () => {
     expect(modelFor(record).stats().context).toBeUndefined()
   })
 })
+
+describe('the last turn\'s cache hit', () => {
+  it('is the share of the context read from cache, for each harness that records it', () => {
+    expect(modelFor(claude[0]).stats().cacheHit).toBeCloseTo(26331 / 53327)
+    const last = codex[0].payload.info.last_token_usage
+    expect(modelFor(codex[0]).stats().cacheHit).toBeCloseTo(last.cached_input_tokens / last.input_tokens)
+    expect(modelFor(pi[0]).stats().cacheHit).toBe(0)
+  })
+  it('clears when the context resets', () => {
+    const model = modelFor(claude[0])
+    model.append([{ kind: 'event', label: 'Compacted', contextReset: true }])
+    expect(model.stats().cacheHit).toBeUndefined()
+  })
+})
+

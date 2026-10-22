@@ -21,6 +21,12 @@ export interface TranscriptTarget {
 export interface TranscriptBandOptions {
   shuttleBase: string
   fetch?: typeof fetch
+  /**
+   * The whole session as the page's own column: every turn in place, no
+   * preview window, no head line and no pane to open. Its usage facts are
+   * `meter`, for the caller to seat.
+   */
+  inline?: boolean
 }
 
 type Prompt = Extract<Entry, { kind: 'prompt' }>
@@ -90,6 +96,8 @@ interface TurnView {
 
 const PAGE_SIZE = 150
 const INITIAL_TURNS = 3
+/** The inline column opens on more of the session than the pane does. */
+const INLINE_TURNS = 8
 const EARLIER_TURNS = 12
 const FOLD_KEY = 'shuttle.transcript.folded'
 const LIVE_POLL_MS = 3000
@@ -379,6 +387,12 @@ export class TranscriptBand {
   private readonly headRow: HTMLElement
   private readonly cacheFact: HTMLElement
   private readonly contextFact: HTMLElement
+  private readonly shareFact: HTMLElement
+  private readonly hitFact: HTMLElement
+  /** The session's usage facts: context tokens, the window's share, the cache's warmth and last hit. */
+  readonly meter: HTMLElement
+  private readonly inline: boolean
+  private readonly inlineWorking: HTMLElement
   private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
@@ -431,9 +445,10 @@ export class TranscriptBand {
   constructor(opts: TranscriptBandOptions) {
     this.shuttleBase = opts.shuttleBase
     this.fetcher = opts.fetch
-    this.folded = this.readFolded()
+    this.inline = opts.inline ?? false
+    this.folded = this.inline ? false : this.readFolded()
     this.el = document.createElement('section')
-    this.el.className = 'ws-transcript'
+    this.el.className = this.inline ? 'ws-transcript ws-transcript-inline' : 'ws-transcript'
     this.el.hidden = true
     this.el.addEventListener('click', (event) => event.stopPropagation())
 
@@ -460,7 +475,15 @@ export class TranscriptBand {
     this.contextFact.className = 'ws-transcript-fact ws-transcript-context'
     this.cacheFact = document.createElement('span')
     this.cacheFact.className = 'ws-transcript-fact ws-transcript-cache'
-    this.head.append(chevron, this.label, this.reading, this.liveDot, this.liveLabel, this.contextFact, this.cacheFact)
+    this.shareFact = document.createElement('span')
+    this.shareFact.className = 'ws-transcript-fact ws-transcript-share'
+    this.hitFact = document.createElement('span')
+    this.hitFact.className = 'ws-transcript-fact ws-transcript-hit'
+    this.meter = document.createElement('span')
+    this.meter.className = 'ws-transcript-meter'
+    this.meter.dataset.part = 'context-meter'
+    this.meter.append(this.contextFact, this.shareFact, this.cacheFact, this.hitFact)
+    this.head.append(chevron, this.label, this.reading, this.liveDot, this.liveLabel, ...(this.inline ? [] : [this.meter]))
     this.latestButton = createButton('ws-transcript-latest', '← latest')
     this.latestButton.hidden = true
     this.openButton = createButton('ws-transcript-open-full', '')
@@ -511,9 +534,20 @@ export class TranscriptBand {
     this.list = document.createElement('ol')
     this.list.className = 'ws-transcript-turns'
     this.scroller.append(this.earlierButton, this.list)
-    this.pane.append(panelHead, this.scroller)
-
-    this.el.append(headRow, this.note, this.body)
+    this.inlineWorking = document.createElement('p')
+    this.inlineWorking.className = 'ws-transcript-working ws-transcript-working-inline'
+    this.inlineWorking.textContent = 'working'
+    this.inlineWorking.hidden = true
+    if (this.inline) {
+      this.scroller.append(this.inlineWorking)
+      this.pane.append(this.scroller)
+      this.pane.hidden = false
+      this.fullOpen = true
+      this.el.append(this.note, this.latestButton, this.pane)
+    } else {
+      this.pane.append(panelHead, this.scroller)
+      this.el.append(headRow, this.note, this.body)
+    }
 
     this.head.addEventListener('click', () => this.toggleFold())
     this.openButton.addEventListener('click', () => this.openFull())
@@ -555,7 +589,7 @@ export class TranscriptBand {
         this.intersecting = visible
         if (visible) {
           if (becameVisible) this.readIfVisible()
-        } else if (!this.fullOpen) this.stopPollTimer()
+        } else if (!this.fullOpen || this.inline) this.stopPollTimer()
       })
       this.observer.observe(this.el)
     }
@@ -727,7 +761,16 @@ export class TranscriptBand {
     this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
     // With no session to read, the line keeps only the session list.
     this.head.hidden = this.openButton.hidden = !target
-    this.el.hidden = !target && !this.pinned && !this.sessions
+    this.el.hidden = this.inline ? !target : !target && !this.pinned && !this.sessions
+    this.paintWorking()
+  }
+
+  /** The inline column's last line while a live worker is mid-turn. */
+  private paintWorking(): void {
+    if (!this.inline) return
+    const turn = this.model.turns.at(-1)
+    const last = turn?.steps.at(-1)
+    this.inlineWorking.hidden = !(this.target?.live && this.hasInitialRender && (!last || last.kind !== 'text'))
   }
 
   /**
@@ -736,7 +779,7 @@ export class TranscriptBand {
    * under the line. A later list replaces this one where it stands.
    */
   mountSessions(sessions: HTMLElement): void {
-    if (this.disposed) return
+    if (this.disposed || this.inline) return
     sessions.classList.add('ws-transcript-sessions')
     if (this.sessions?.isConnected && this.sessions !== sessions) this.sessions.replaceWith(sessions)
     else if (!sessions.isConnected || sessions.parentElement !== this.headRow) this.headRow.insertBefore(sessions, this.openButton)
@@ -774,8 +817,14 @@ export class TranscriptBand {
         if (!this.disposed) this.paintFacts()
       }, Math.min(until! - now, CACHE_REPAINT_MS))
     }
+    const hit = stats.cacheHit
+    this.hitFact.hidden = hit === undefined
+    this.hitFact.textContent = hit === undefined ? '' : `${Math.round(hit * 100)}% cached`
+    this.hitFact.title = hit === undefined ? '' : `The last turn read ${Math.round(hit * 100)}% of its context from the prompt cache`
     const context = stats.context
     this.contextFact.hidden = context === undefined
+    this.shareFact.hidden = true
+    this.meter.hidden = context === undefined && until === undefined && hit === undefined
     if (context === undefined) {
       this.contextFact.textContent = ''
       this.contextFact.title = ''
@@ -789,6 +838,9 @@ export class TranscriptBand {
     if (window_) {
       const share = Math.round(Math.min(1, context / window_) * 100)
       this.contextFact.style.color = `color-mix(in oklch, var(--kbn-alarm) ${share}%, var(--kbn-tempered))`
+      this.shareFact.hidden = false
+      this.shareFact.textContent = `${share}%`
+      this.shareFact.title = this.contextFact.title
     } else {
       this.contextFact.style.removeProperty('color')
     }
@@ -805,7 +857,7 @@ export class TranscriptBand {
 
   private canReadNow(): boolean {
     return !this.disposed && !!this.target && document.visibilityState === 'visible'
-      && (this.fullOpen || (!this.folded && this.intersecting))
+      && (this.inline ? this.intersecting : this.fullOpen || (!this.folded && this.intersecting))
   }
 
   private readIfVisible(): void {
@@ -932,7 +984,7 @@ export class TranscriptBand {
       const after = this.model.turns.length
       this.paintPreview()
       if (this.fullRendered) {
-        if (before === 0 && after > 0) this.visibleStart = Math.max(0, after - INITIAL_TURNS)
+        if (before === 0 && after > 0) this.visibleStart = Math.max(0, after - (this.inline ? INLINE_TURNS : INITIAL_TURNS))
         for (const index of changes.turns) {
           if (index >= this.visibleStart) this.renderTurn(index)
         }
@@ -1005,6 +1057,7 @@ export class TranscriptBand {
 
   /** Paint the last turn's prompt and every agent message since, words only. */
   private paintPreview(): void {
+    if (this.inline) return
     const turns = this.model.turns
     const turn = turns[turns.length - 1]
     if (!turn) {
@@ -1090,7 +1143,9 @@ export class TranscriptBand {
    */
   reseated(): void {
     if (this.disposed) return
-    if (this.fullOpen) {
+    if (this.inline) {
+      if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
+    } else if (this.fullOpen) {
       const host = this.el.closest<HTMLElement>('.ws-content')
       if (host && this.pane.parentElement !== host) host.append(this.pane)
       if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
@@ -1101,7 +1156,7 @@ export class TranscriptBand {
 
   /** Close the full transcript; true when it was open, so Escape can peel it as a layer. */
   closeFull(): boolean {
-    if (!this.fullOpen) return false
+    if (!this.fullOpen || this.inline) return false
     this.fullOpen = false
     this.messageToReveal = null
     const hadFocus = this.pane.contains(document.activeElement)
@@ -1118,7 +1173,7 @@ export class TranscriptBand {
     this.clearFull()
     this.fullRendered = true
     const turns = this.model.turns
-    this.visibleStart = turns.length ? Math.max(0, turns.length - INITIAL_TURNS) : -1
+    this.visibleStart = turns.length ? Math.max(0, turns.length - (this.inline ? INLINE_TURNS : INITIAL_TURNS)) : -1
     for (let index = Math.max(0, this.visibleStart); index < turns.length; index++) this.renderTurn(index)
     this.updateEarlierButton()
   }
