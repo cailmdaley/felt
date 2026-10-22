@@ -1194,6 +1194,73 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert body["origins"]["candide"]["fiber_count"] == 1
   end
 
+  test "GET /api/v1/fibers/composite stamps a remote thread with its hub on this host",
+       %{store: store} do
+    write_fiber!(store, "tests/hub", """
+    ---
+    name: Hub
+    id: 01JZHVBA000000000000000000
+    status: active
+    shuttle:
+      kind: oneshot
+      host: test-host
+    ---
+    """)
+
+    # The thread is owned by candide; this host holds its synced copy.
+    write_fiber!(store, "tests/hub/thread", """
+    ---
+    name: Thread
+    id: 01JZTHREAD0000000000000000
+    status: active
+    shuttle:
+      kind: oneshot
+      host: candide
+    ---
+    """)
+
+    remote = %Remote{name: "candide", url: "http://localhost:4001"}
+
+    remote_body =
+      Jason.encode!(%{
+        "host" => "candide",
+        "fibers" => [
+          %{
+            # candide's path for the same store.
+            "felt_store" => "/home/someone/loom",
+            "path" => "tests/hub/thread/thread.md",
+            "fiber" => %{
+              "id" => "01JZTHREAD0000000000000000",
+              "uid" => "01JZTHREAD0000000000000000",
+              "slug" => "tests/hub/thread",
+              "name" => "Thread",
+              "status" => "active",
+              "shuttle" => %{"kind" => "oneshot", "host" => "candide"}
+            }
+          }
+        ]
+      })
+
+    start_supervised!(StubFiberClient)
+    StubFiberClient.set(Remote.fibers_url(remote), {:ok, remote_body})
+
+    Shuttle.Test.Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil, remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil},
+      RemoteFiberRegistry
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+
+    warm_poller!(store)
+    body = get(api_conn(), "/api/v1/fibers/composite").resp_body |> Jason.decode!()
+    by_origin = Map.new(body["fibers"], &{&1["origin"], &1})
+
+    assert %{"fiber" => %{"name" => "Hub", "id" => hub_id}} = by_origin["test-host"]
+    assert by_origin["test-host"]["orchestrator"] == nil
+    assert by_origin["candide"]["orchestrator"] == hub_id
+  end
+
   test "GET /api/v1/fibers/composite carries owned shuttle work plus human due cards, deduped",
        %{store: store} do
     write_fiber!(store, "tests/managed", """

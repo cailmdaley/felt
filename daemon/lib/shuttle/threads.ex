@@ -7,35 +7,76 @@ defmodule Shuttle.Threads do
   def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
 
   def orchestrator(entry, index) when is_map(index) do
-    nearest(Path.dirname(address(entry.fiber)), fn path ->
-      Map.get(index, {entry.felt_store, path})
-    end)
+    nearest(Path.dirname(address(entry.fiber)), &Map.get(index, {entry.felt_store, &1}))
   end
 
   defp index(entries), do: Map.new(entries, &{{&1.felt_store, address(&1.fiber)}, &1})
 
   @doc "Stamp each constitution with its nearest orchestrator's wire id, or null."
-  def put_orchestrators(entries) do
-    index = index(entries)
+  def put_orchestrators(entries), do: stamp(entries, & &1.felt_store)
 
-    Enum.map(entries, fn entry ->
-      if is_map(entry.fiber["shuttle"]) do
-        parent = orchestrator(entry, index)
-        Map.put(entry, :orchestrator, if(parent, do: parent.fiber["id"]))
+  @doc """
+  Stamp the cross-host board's constitutions with their nearest orchestrators.
+
+  `rows` mixes this host's atom-keyed entries with remote feeds' string-keyed
+  rows. Containment is a property of the felt store, whose tree is the same on
+  every host while its path is host-local, so rows are indexed by store
+  identity: each `{origin, felt_store}` location resolves to the local store
+  holding the most of its fibers' uids (`local_stores`, uid => felt_store). A
+  location sharing no uid with a local store is a store of its own. The stamp
+  replaces any `orchestrator` a remote daemon computed over its own feed.
+  """
+  def put_board_orchestrators(rows, local_stores) do
+    identities =
+      rows
+      |> Enum.group_by(&location/1, &get_in(field(&1, :fiber), ["uid"]))
+      |> Map.new(fn {location, uids} -> {location, identity(location, uids, local_stores)} end)
+
+    stamp(rows, &Map.fetch!(identities, location(&1)))
+  end
+
+  defp identity(location, uids, local_stores) do
+    uids
+    |> Enum.flat_map(&List.wrap(Map.get(local_stores, &1)))
+    |> Enum.frequencies()
+    |> Enum.max_by(fn {_store, count} -> count end, fn -> {location, 0} end)
+    |> elem(0)
+  end
+
+  defp location(row), do: {field(row, :origin), field(row, :felt_store)}
+
+  defp stamp(rows, store_of) do
+    index = Map.new(rows, &{{store_of.(&1), address(field(&1, :fiber))}, &1})
+
+    Enum.map(rows, fn row ->
+      fiber = field(row, :fiber)
+
+      if is_map(fiber["shuttle"]) do
+        store = store_of.(row)
+        parent = nearest(Path.dirname(address(fiber)), &Map.get(index, {store, &1}))
+        put_field(row, :orchestrator, if(parent, do: field(parent, :fiber)["id"]))
       else
-        entry
+        row
       end
     end)
   end
+
+  # Local entries are atom-keyed; rows decoded from a remote feed are string-keyed.
+  defp field(row, key), do: Map.get(row, key, Map.get(row, Atom.to_string(key)))
+
+  defp put_field(row, key, value) when is_map_key(row, key), do: Map.put(row, key, value)
+  defp put_field(%{fiber: _} = row, key, value), do: Map.put(row, key, value)
+  defp put_field(row, key, value), do: Map.put(row, Atom.to_string(key), value)
 
   defp nearest(".", _lookup), do: nil
   defp nearest("/", _lookup), do: nil
 
   defp nearest(path, lookup) do
-    case lookup.(path) do
-      %{fiber: %{"shuttle" => block}} = entry when is_map(block) -> entry
-      _ -> nearest(Path.dirname(path), lookup)
-    end
+    entry = lookup.(path)
+
+    if entry && is_map(field(entry, :fiber)["shuttle"]),
+      do: entry,
+      else: nearest(Path.dirname(path), lookup)
   end
 
   def address(fiber), do: fiber["slug"] || fiber["id"]
