@@ -61,6 +61,27 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
+  it('keeps thread deliveries visible between messages in preview and full transcript, outside folded tools', async () => {
+    const delivered = `[Shuttle message thread-${'a'.repeat(64)}]\nthread work/child closed: A measured result`
+    const items = [
+      ...records('Keep going', 'I am coordinating.'),
+      { type: 'user', message: { content: delivered } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'I will integrate it.' }] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    const preview = band.el.querySelector('.ws-transcript-exchange')!
+    expect([...preview.children].map(row => row.textContent)).toEqual([
+      expect.stringContaining('Keep going'), expect.stringContaining('I am coordinating.'),
+      expect.stringContaining('work/child closedA measured result'), expect.stringContaining('I will integrate it.'),
+    ])
+    expect(preview.querySelectorAll('.ws-transcript-thread-notice')).toHaveLength(1)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
+    expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
+    expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
+  })
   it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
     const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()
     const band = makeBand(fixtureFetch({ [latestId]: items }))

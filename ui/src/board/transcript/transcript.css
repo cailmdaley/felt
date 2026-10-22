@@ -477,3 +477,17 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }
+
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-thread-notice {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 1px solid var(--ws-hairline);
+  border-radius: 0;
+  background: none;
+  color: var(--ws-ink-muted);
+  font-size: 14px;
+}
+.ws-transcript-thread-notice time { font: 11px var(--ws-mono); }
+.ws-transcript-thread-notice p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-transcript-spawn { margin: 6px 0; font: 12px/1.5 var(--ws-mono); white-space: pre-wrap; overflow-wrap: anywhere; }

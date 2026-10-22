@@ -10,7 +10,7 @@ export interface ToolStep {
   version: number
 }
 
-export type Step = ToolStep | Extract<Entry, { kind: 'text' | 'thinking' | 'event' }>
+export type Step = ToolStep | Extract<Entry, { kind: 'text' | 'thinking' | 'event' | 'thread-notice' }>
 
 export interface Turn {
   index: number
@@ -50,6 +50,7 @@ function updateTimes(turn: Turn, time: number | undefined): void {
 export class TranscriptModel {
   private readonly turnList: Turn[] = []
   private readonly tools = new Map<string, ToolReference>()
+  private readonly notices = new Set<string>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
   private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil' | 'cacheTtl'> = {}
@@ -63,6 +64,10 @@ export class TranscriptModel {
 
   append(entries: readonly Entry[]): void {
     for (const entry of entries) {
+      if (entry.kind === 'thread-notice') {
+        if (this.notices.has(entry.id)) continue
+        this.notices.add(entry.id)
+      }
       if (entry.kind === 'usage') {
         if (entry.model) this.facts.model = entry.model
         this.facts.context = entry.context
@@ -139,6 +144,7 @@ export class TranscriptModel {
   reset(): void {
     this.turnList.length = 0
     this.tools.clear()
+    this.notices.clear()
     this.dirty.clear()
     this.resetRequested = true
     this.facts = {}
@@ -201,16 +207,17 @@ export class TranscriptModel {
 /** A turn's steps as the reader lays them out: each agent message on its own, the work between messages as one run. */
 export type Segment =
   | { kind: 'text'; index: number }
+  | { kind: 'thread-notice'; index: number }
   | { kind: 'steps'; start: number; end: number }
 
 export function segments(steps: readonly Step[]): Segment[] {
   const out: Segment[] = []
   let runStart = -1
   steps.forEach((step, index) => {
-    if (step.kind === 'text') {
+    if (step.kind === 'text' || step.kind === 'thread-notice') {
       if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: index })
       runStart = -1
-      out.push({ kind: 'text', index })
+      out.push({ kind: step.kind, index })
     } else if (runStart < 0) runStart = index
   })
   if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: steps.length })

@@ -24,6 +24,30 @@ export interface TranscriptBandOptions {
 type Prompt = Extract<Entry, { kind: 'prompt' }>
 type Text = Extract<Entry, { kind: 'text' }>
 type Speaker = 'you' | 'dispatch' | 'agent'
+type Notice = Extract<Entry, { kind: 'thread-notice' }>
+
+function noticeRow(entry: Notice, tag: 'div' | 'li' = 'div'): HTMLElement {
+  const row = document.createElement(tag)
+  row.className = 'ws-transcript-msg ws-transcript-thread-notice'
+  row.dataset.notice = entry.id
+  const link = document.createElement('a')
+  link.className = 'kbn-wikilink'
+  link.dataset.fiber = entry.fiber
+  link.textContent = entry.fiber
+  row.append(link, document.createTextNode(` ${entry.verb}`))
+  if (entry.at !== undefined) {
+    const stamp = document.createElement('time')
+    const when = clock(entry.at)
+    stamp.textContent = ` · ${when.text}`; stamp.title = when.title
+    row.append(stamp)
+  }
+  if (entry.text) {
+    const text = document.createElement('p')
+    text.textContent = entry.text
+    row.append(text)
+  }
+  return row
+}
 
 interface StepRow {
   version: number
@@ -995,6 +1019,7 @@ export class TranscriptBand {
     }
     const agent = this.agentName()
     turn.steps.forEach((step, index) => {
+      if (step.kind === 'thread-notice') { nodes.push(noticeRow(step, 'li')); return }
       if (step.kind !== 'text') {
         const spawn = spawnMention(step)
         if (spawn) { const item = document.createElement('li'); item.append(spawn); nodes.push(item) }
@@ -1117,6 +1142,10 @@ export class TranscriptBand {
     const parts = segments(turn.steps)
     const isLastTurn = view.index === this.model.turns.length - 1
     parts.forEach((part, position) => {
+      if (part.kind === 'thread-notice') {
+        children.push(noticeRow(turn.steps[part.index] as Notice))
+        return
+      }
       if (part.kind === 'text') {
         const step = turn.steps[part.index] as Text
         let message = view.texts.get(part.index)
