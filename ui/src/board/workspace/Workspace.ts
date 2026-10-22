@@ -1,4 +1,4 @@
-import { ThreadIndex } from '../threads.js'
+import { familyColumn, ThreadIndex } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -259,7 +259,7 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     // Threads list under their roots; an orphaned thread is a root of its own.
     const cards = this.opts.cards().filter(card => !card.orchestrator || card.threadOrphaned)
-    const inColumn = (column: string): KanbanCard[] => cards.filter(card => deskColumn(card) === column)
+    const inColumn = (column: string): KanbanCard[] => cards.filter(card => this.sidebarPlace(card) === column)
     const flight = inColumn('inFlight')
     return [
       ...inColumn('drafts'),
@@ -269,15 +269,28 @@ export class Workspace {
       ...inColumn('resting'),
     ]
   }
+  /** The card the Desk draws for `card`: the root of its family, or itself. */
+  private sidebarRoot(card: KanbanCard): KanbanCard {
+    const index = this.opts.threadIndex?.()
+    if (!index) return card
+    let root = index.card(card)
+    for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) root = parent
+    return root
+  }
+  /** Where the Desk draws a card: a thread with its root, a root promoted for its threads in the column they ask for. */
+  private sidebarPlace(card: KanbanCard): string {
+    const root = this.sidebarRoot(card)
+    return (root.threadPromoted && familyColumn(root.threadSummary)) || deskColumn(root)
+  }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
-    const column = deskColumn(card)
-    if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
+    const root = this.sidebarRoot(card)
+    if (this.sidebarPlace(root) === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(root))![1]
     return this.sidebarColumn(card)
   }
   /** A card's Desk column: In flight holds both its bands' groups. */
   private sidebarColumn(card: KanbanCard): string {
-    const column = deskColumn(card)
+    const column = this.sidebarPlace(card)
     if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'

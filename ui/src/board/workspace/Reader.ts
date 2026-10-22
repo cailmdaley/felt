@@ -1103,10 +1103,20 @@ export class Reader {
   private rememberStop(): void {
     if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
   }
-  /** The open constitution joins the list it is missing from, at its end. */
+  /**
+   * The open constitution joins the list it is missing from: a thread right
+   * after the nearest ancestor the list holds, which keeps it in its root's
+   * group; anything else at the end.
+   */
   private withCurrent(cards: KanbanCard[]): KanbanCard[] {
     const current = this.currentCard
-    return current && !cards.some(card => cardIdentity(card) === cardIdentity(current)) ? [...cards, current] : cards
+    if (!current || cards.some(card => cardIdentity(card) === cardIdentity(current))) return cards
+    const index = this.opts.threadIndex?.()
+    for (let parent = index?.parentOf(current); parent; parent = index!.parentOf(parent)) {
+      const at = cards.findIndex(card => cardIdentity(card) === cardIdentity(parent!))
+      if (at >= 0) return [...cards.slice(0, at + 1), current, ...cards.slice(at + 1)]
+    }
+    return [...cards, current]
   }
   private sidebarHostMark(card: KanbanCard): string {
     const marks = this.sidebarSnapshot?.marks ?? overviewHostMarks(this.opts.cards().map(row => row.originId))

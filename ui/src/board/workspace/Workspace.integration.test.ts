@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 import { card } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
+import { ThreadIndex } from '../threads.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
@@ -370,6 +371,35 @@ describe('workspace reader integration', () => {
     await press('J'); expect(current()).toBe('n1')
     await press('J'); expect(current()).toBe('alpha')
     await press('K'); expect(current()).toBe('n1')
+  })
+  it('files a promoted root where the Desk draws it, and an open thread under its root, leaving the strip in order', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
+    const raw = [
+      thread({ id: 'draft', status: 'open' }),
+      thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'hub/sub', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'settled', status: 'closed', tempered: true }),
+      thread({ id: 'settled/ask', orchestrator: 'settled', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }),
+      thread({ id: 'resting', status: 'open', effectiveHorizon: 'stashed' }),
+      thread({ id: 'resting/done', orchestrator: 'resting', status: 'closed' }),
+      thread({ id: 'review', status: 'closed' }),
+    ]
+    const index = new ThreadIndex(raw)
+    const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c), threadPromoted: c.id === 'settled' || c.id === 'resting' ? true : undefined }))
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const rows = (): (string | undefined)[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)
+    const strip = (): (string | null)[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label'))
+    workspace.open(feed[0], 'Desk'); await flush()
+    // The settled root waits on its thread's question; the resting root awaits review with its thread.
+    expect(rows()).toEqual(['draft', 'settled', 'hub', 'resting', 'review'])
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 2', 'Awaiting review, 2'])
+    workspace.open(feed[2], 'Desk'); await flush()
+    expect(rows()).toEqual(['draft', 'settled', 'hub', 'hub-sub', 'resting', 'review'])
+    expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 2'])
+    expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
   })
   it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()
