@@ -4,7 +4,7 @@ import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { deskColumn } from '../deskColumn.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
@@ -159,8 +159,8 @@ interface ChangeRow {
 }
 /** Sent attachments a change row draws before folding the rest behind its +N button. */
 export const CHANGE_ATTACHMENT_CAP = 3
-const needsYou = (card: KanbanCard): number => fiberPageColumn(card) === 'awaitingReview' ? 0
-  : fiberPageColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
+const needsYou = (card: KanbanCard): number => deskColumn(card) === 'awaitingReview' ? 0
+  : deskColumn(card) === 'inFlight' && inFlightBand(card) !== 'working' ? 1 : 2
 function changeSummary(change: Change): string {
   const parts = [change.review ? '→ awaiting review' : '', change.outcome ? 'outcome changed' : ''].filter(Boolean)
   const kinds = new Map<string, number>()
@@ -668,7 +668,7 @@ export class Overview {
     let changed = false
     for (const [uid, card] of known) {
       const outcome = card.outcome ?? ''
-      const review = fiberPageColumn(card) === 'awaitingReview'
+      const review = deskColumn(card) === 'awaitingReview'
       const old = this.stamps.get(uid)
       if (old && old.outcome === outcome && old.review === review) continue
       this.stamps.set(uid, {
@@ -772,7 +772,7 @@ export class Overview {
     const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
-    const reviewCount = this.opts.cards().filter(c => fiberPageColumn(c) === 'awaitingReview').length
+    const reviewCount = this.opts.cards().filter(c => deskColumn(c) === 'awaitingReview').length
     const prefix = this.previousVisit ? `Since you were here at ${new Date(this.previousVisit).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'The last 30 days'
     text(this.summary, `${prefix}: ${documentCount} ${documentCount === 1 ? 'document' : 'documents'} in ${constitutionCount} ${constitutionCount === 1 ? 'constitution' : 'constitutions'}; ${reviewCount} await your review.`)
     this.startVisit()

@@ -2,7 +2,8 @@ import { ThreadIndex } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
-import { fiberPageColumn, fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { deskColumn } from '../deskColumn.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import type { DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
@@ -258,7 +259,7 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     // Threads list under their roots; an orphaned thread is a root of its own.
     const cards = this.opts.cards().filter(card => !card.orchestrator || card.threadOrphaned)
-    const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
+    const inColumn = (column: string): KanbanCard[] => cards.filter(card => deskColumn(card) === column)
     const flight = inColumn('inFlight')
     return [
       ...inColumn('drafts'),
@@ -270,13 +271,13 @@ export class Workspace {
   }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
-    const column = fiberPageColumn(card)
+    const column = deskColumn(card)
     if (column === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(card))![1]
     return this.sidebarColumn(card)
   }
   /** A card's Desk column: In flight holds both its bands' groups. */
   private sidebarColumn(card: KanbanCard): string {
-    const column = fiberPageColumn(card)
+    const column = deskColumn(card)
     if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'
@@ -350,7 +351,7 @@ export class Workspace {
     if (!indexed && !state?.metadataKnown) return false
     const card = indexed ?? requested
     if (verdict === 'awaitingReview' && !reviewReachable(card)) return false
-    const review = fiberPageColumn(card) === 'awaitingReview'
+    const review = deskColumn(card) === 'awaitingReview'
     // Ask while the gesture is fresh; the undo window carries the answer to the write.
     if (!confirmWorkerStop(card, verdict)) return false
     const workerStopConfirmed = hasWorkerToStop(card)
@@ -367,7 +368,7 @@ export class Workspace {
         return
       }
       // A worker may start during the undo window; never stop it from a stale review.
-      if (review && fiberPageColumn(live) !== 'awaitingReview') {
+      if (review && deskColumn(live) !== 'awaitingReview') {
         showToast(`${live.name} no longer awaits review; verdict not written`, 'error')
         return
       }

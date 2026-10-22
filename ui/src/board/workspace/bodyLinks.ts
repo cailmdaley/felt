@@ -1,15 +1,11 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { threadState, THREAD_LABEL } from '../threads.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
-import { fiberPageColumn } from './fiberPageState.js'
 
 export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; outcome: string; origin: string }
 export function constitutionMentions(cards: readonly KanbanCard[]): ConstitutionMention[] {
   return cards.filter(card => !!card.shuttleKind && !card.isCycle).map(card => {
-    const state = threadState(card)
-    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId,
-      state: fiberPageColumn(card) === 'drafts' ? 'Draft' : state === 'resting' && card.status === 'active' ? 'Waiting' : THREAD_LABEL[state],
-      outcome: card.outcome ?? '' }
+    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: THREAD_LABEL[threadState(card)], outcome: card.outcome ?? '' }
   })
 }
 

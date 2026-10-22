@@ -116,7 +116,7 @@ describe('constitution mentions', () => {
     const states = [work(), work({ status: 'closed', workerState: undefined }),
       work({ status: 'open', effectiveHorizon: 'stashed', workerState: undefined }), work({ status: 'open', workerState: undefined }),
       work({ status: 'closed', tempered: true, workerState: undefined }), work({ ask: { text: 'Which?', at: '2026-01-01T00:00:00Z' } }), work({ workerState: undefined })]
-    expect(constitutionMentions(states).map(row => row.state)).toEqual(['Working', 'To review', 'Resting', 'Draft', 'Archived', 'Waiting', 'Waiting'])
+    expect(constitutionMentions(states).map(row => row.state)).toEqual(['Working', 'To review', 'Resting', 'Drafts', 'Archived', 'Waiting', 'Working'])
   })
   it('sends only requested report metadata, resolves rows beyond 500, and enforces registration and active navigation', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"fibers":[]}')))

@@ -1,27 +1,30 @@
-import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { deskColumn } from './deskColumn.js'
 import { turnOf } from './turn.js'
 
-export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'resting' | 'archived'
+export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
 export type ThreadSummary = NonNullable<KanbanCard['threadSummary']>
 export const THREAD_LABEL: Record<ThreadState, string> = {
-  waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', resting: 'Resting', archived: 'Archived',
+  waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
-const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'resting', 'archived']
+const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
- * A thread's state, read the way the Desk reads a card: a verdict archives,
- * a close awaits review, and a live worker puts the card In flight whatever
- * its status (as `classifyFiber` does), where `turnOf` decides Waiting from
- * Working. Only an open constitution with no live worker is a draft, or
- * resting when put down.
+ * A thread's state: the Desk column it would sit in (`deskColumn`), with
+ * In flight split by `turnOf` into Waiting (the human's move) and Working
+ * (the worker's, including an armed thread whose worker has not started).
+ * A verdict archives; a standing thread asleep on its cron rests; a seat at
+ * rest is among the Roles. Every thread surface (rail, peek, sub-entries,
+ * mention chips) reads this.
  */
 export function threadState(card: KanbanCard): ThreadState {
-  if (card.status === 'closed' && card.tempered !== undefined) return 'archived'
-  if (card.status === 'closed') return 'to-review'
-  const live = hasLiveWorker(card)
-  if (card.status === 'open' && !live) return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'
-  if (turnOf(card).yours) return 'waiting'
-  if (live && !card.originStale) return 'working'
-  return 'resting'
+  switch (deskColumn(card)) {
+    case 'tempered': case 'composted': return 'archived'
+    case 'awaitingReview': return 'to-review'
+    case 'inFlight': return turnOf(card).yours ? 'waiting' : 'working'
+    case 'drafts': return 'drafts'
+    case 'roles': return 'roles'
+    default: return 'resting'
+  }
 }
 /**
  * The Desk column a family's most urgent thread asks for; undefined when

@@ -1,6 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { renderMarkdown } from '../utils.js'
-import { fiberPageColumn } from './fiberPageState.js'
+import { deskColumn } from '../deskColumn.js'
 
 const ROLE_ID = /^roles\/([a-z0-9]+(?:-[a-z0-9]+)*)$/
 
@@ -9,7 +9,7 @@ export function roleSlug(card: KanbanCard): string | null {
   return ROLE_ID.exec(card.id)?.[1] ?? null
 }
 
-type HoldColumn = ReturnType<typeof fiberPageColumn>
+type HoldColumn = ReturnType<typeof deskColumn>
 /** The Desk's reading order: work awaiting review, in flight, drafts, then the rest. */
 const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
 const LIVE: ReadonlySet<HoldColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
@@ -22,7 +22,7 @@ const HOLDS_SHOWN = 5
 
 /** The feed's constitutions assigned to this office, in Desk order. */
 export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
-  const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(fiberPageColumn(card))
+  const rank = (card: KanbanCard) => HOLD_ORDER.indexOf(deskColumn(card))
   return cards
     .filter(card => card.shuttleRole === slug)
     .sort((a, b) => rank(a) - rank(b))
@@ -30,7 +30,7 @@ export function roleHolds(cards: KanbanCard[], slug: string): KanbanCard[] {
 
 /** What the page shows of each hold, so a feed poll that changes none of it leaves the page alone. */
 export function holdsRevision(holds: KanbanCard[]): unknown[] {
-  return holds.map(card => [card.originId, card.uid ?? card.id, card.name, card.outcome, fiberPageColumn(card)])
+  return holds.map(card => [card.originId, card.uid ?? card.id, card.name, card.outcome, deskColumn(card)])
 }
 
 function caption(text: string): HTMLElement {
@@ -50,7 +50,7 @@ function plainOutcome(outcome: string): string {
 }
 
 function holdRow(card: KanbanCard, onCard: (card: KanbanCard) => void): HTMLElement {
-  const column = fiberPageColumn(card)
+  const column = deskColumn(card)
   const item = document.createElement('li')
   const row = document.createElement('button')
   row.type = 'button'
@@ -85,7 +85,7 @@ function holdsSection(holds: KanbanCard[], onCard: (card: KanbanCard) => void): 
   section.dataset.part = 'role-holds'
   const list = document.createElement('ol')
   list.className = 'ws-role-hold-list'
-  const live = holds.filter(card => LIVE.has(fiberPageColumn(card))).length
+  const live = holds.filter(card => LIVE.has(deskColumn(card))).length
   const shown = Math.max(live, HOLDS_SHOWN)
   list.append(...holds.slice(0, shown).map(card => holdRow(card, onCard)))
   section.append(caption('Holds'), list)

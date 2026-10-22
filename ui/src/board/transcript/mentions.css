@@ -25,7 +25,7 @@
 .ws-constitution-chip[data-state='Working']::before { background: var(--shuttle-chip-agent, var(--kbn-agent, currentColor)); }
 .ws-constitution-chip[data-state='Waiting']::before { background: var(--shuttle-chip-owed, var(--kbn-owed, currentColor)); }
 .ws-constitution-chip[data-state='To review']::before { background: var(--shuttle-chip-tempered, var(--kbn-tempered, currentColor)); }
-.ws-constitution-chip[data-state='Draft']::before { background: transparent; border: 1px solid currentColor; }
+.ws-constitution-chip[data-state='Drafts']::before { background: transparent; border: 1px solid currentColor; }
 .ws-constitution-chip[data-state='Archived'] { opacity: .65; }
 .ws-constitution-chip-missing { opacity: .65; cursor: default; }
 .ws-constitution-chip-missing::before { content: none; }

@@ -16,7 +16,8 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { fiberPageColumn, restReachable, verdictReachable } from './fiberPageState.js'
+import { restReachable, verdictReachable } from './fiberPageState.js'
+import { deskColumn } from '../deskColumn.js'
 import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -971,7 +972,7 @@ export class Dock {
     // Review and live verdicts sit on the status line. Drafts and resting
     // constitutions keep their verdicts in a menu on the controls row.
     this.actPaint = () => {
-      const column = fiberPageColumn(card)
+      const column = deskColumn(card)
       this.el.dataset.column = column
       this.head.dataset.column = column
       const reachable = verdictReachable(card)
@@ -1064,7 +1065,7 @@ export class Dock {
     const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     this.composerPaint = () => {
-      const draft = fiberPageColumn(card) === 'drafts'
+      const draft = deskColumn(card) === 'drafts'
       const resumable = !draft && Boolean(card.sessionUuid)
       // A fresh session is always the default verb (↵); a resumable session
       // adds Resume beside it as the secondary verb (⌥↵).
@@ -1191,7 +1192,7 @@ export class Dock {
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
       if (this.meetingArmed()) { this.meetingStart?.(); return }
-      const resumeSession = event.altKey && Boolean(card.sessionUuid) && fiberPageColumn(card) !== 'drafts'
+      const resumeSession = event.altKey && Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
     })
     box.append(message, strip.el, foot)
