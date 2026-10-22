@@ -24,10 +24,12 @@ defmodule ShuttleWeb.Router do
     # Spawn-without-constitution: launch a capture session from a free-text
     # prompt; the session files the fiber and claims itself.
     post("/capture", CaptureController, :create)
-    # A recording starts for a new capture (/capture with `meeting`) or joins
-    # an existing constitution (/meeting/join). Both record on THIS daemon's
-    # audio; only the agent's half is owner-routed. Stop acts locally; GET
-    # observes this daemon or the host named by its optional origin.
+    # A recording starts for a new capture (/capture with `meeting`), joins
+    # an existing constitution (/meeting/join), or only records
+    # (/meeting/start). Each records on the selected recorder's audio; only
+    # the agent's half is owner-routed. Stop acts on the addressed recorder;
+    # GET observes this daemon or the host named by its optional selector.
+    post("/meeting/start", MeetingController, :start)
     post("/meeting/join", MeetingController, :join)
     post("/meeting/stop", MeetingController, :stop)
     get("/meeting", MeetingController, :show)

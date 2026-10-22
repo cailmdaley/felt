@@ -234,6 +234,7 @@ the file alone and records why, and `shuttle doctor` reports the reason.
 
 A meeting has two independent host addresses: the **recorder** runs hark, and the agent's **origin** owns the scribe or joined constitution.
 Capture and Join preserve that origin when forwarding to a recorder, so transcript mirrors and agent delivery point to the correct owner even when the owner is the requesting hub.
+A record-only start (`POST /meeting/start`) has an origin and no agent: the requesting daemon is the origin, receives the mirror, and answers its own path to the transcript.
 
 A phone board asks its serving daemon for `GET /api/v1/meeting?prefer=phone`.
 The daemon probes the configured fleet with short bounded local-capability reads and prefers a reachable recorder advertising hark availability and macOS device modes.

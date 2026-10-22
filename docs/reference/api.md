@@ -39,6 +39,7 @@ is not enough.
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
+| `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User |
@@ -354,6 +355,22 @@ through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
 `delivery` is `/deliver`'s body; if delivery fails after hark starts, it carries
 the delivery's status with `recording: true` and `error`, and the recording
 continues. Start errors are the same as meeting capture's.
+
+`POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode}, note?}`
+and records without any agent: no capture is routed and nothing goes to
+`/deliver`. It is for a caller that follows the transcript itself, such as a
+session the daemon did not launch (`shuttle meeting start`, then
+`shuttle follow`). It selects the recorder and starts hark exactly as Join
+does, mirrored toward `origin`, which defaults to the receiving daemon, and
+names the recording after the note's first line or `Meeting`. The answer is
+`{meeting, recorder, origin, transcript}`: `transcript` is the path a follower
+reads on `origin`. When the recorder is the origin it is the local transcript.
+Otherwise the recorder can only name the mirror as
+`~/.hark/meetings/<name>.txt`, and the origin's own daemon expands that `~` as
+the answer passes back through it, so a caller asking its local daemon always
+gets an absolute path. A path on an `origin` other than the answering daemon
+stays `~/`-relative. Start errors are the same as meeting capture's, including
+`recording_unknown` after an unconfirmed forwarded start.
 
 `POST /dispatch` accepts `{fiber_id, force?, ad_hoc?, resume_mode?,
 user_message?, project_dir?}` (plus `origin` to forward). A forced start

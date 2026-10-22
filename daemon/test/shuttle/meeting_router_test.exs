@@ -70,7 +70,7 @@ defmodule Shuttle.MeetingRouterTest do
   end
 
   test "malformed meeting values reach validation without selector crashes" do
-    for path <- ["/api/v1/capture", "/api/v1/meeting/join"],
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"],
         meeting <- ["phone", 42, ["phone"], nil] do
       conn = post(api_conn(), path, Jason.encode!(%{meeting: meeting, fiber_id: "p/f"}))
       assert conn.status == 422
@@ -133,7 +133,11 @@ defmodule Shuttle.MeetingRouterTest do
   end
 
   test "phone start selects recorder once and preserves agent owner and phone mode for both entry points" do
-    for {path, origin} <- [{"/api/v1/capture", "local"}, {"/api/v1/meeting/join", "agent-host"}] do
+    for {path, origin} <- [
+          {"/api/v1/capture", "local"},
+          {"/api/v1/meeting/join", "agent-host"},
+          {"/api/v1/meeting/start", nil}
+        ] do
       RecorderClient.set(
         Map.put(
           mac_responses(),
@@ -166,7 +170,9 @@ defmodule Shuttle.MeetingRouterTest do
       assert [{:post, _, body, _}] =
                Enum.filter(RecorderClient.calls(), fn {method, _, _, _} -> method == :post end)
 
-      assert body["origin"] == if(origin == "local", do: MeetingRouter.own_host(), else: origin)
+      assert body["origin"] ==
+               if(origin in [nil, "local"], do: MeetingRouter.own_host(), else: origin)
+
       assert body["recorder"] == "mac-recorder"
       assert body["recorder_forwarded"] == true
       assert body["meeting"]["mode"] == "phone"
@@ -174,30 +180,86 @@ defmodule Shuttle.MeetingRouterTest do
   end
 
   test "transport failure after POST reports uncertainty and never retries or falls back" do
-    RecorderClient.set(
-      Map.put(
-        mac_responses(),
-        {:post, "http://mac-recorder.example/api/v1/capture"},
-        {:error, :timeout}
-      )
-    )
+    for path <- ["/api/v1/capture", "/api/v1/meeting/start"] do
+      url = "http://mac-recorder.example" <> path
+      RecorderClient.set(Map.put(mac_responses(), {:post, url}, {:error, :timeout}))
+
+      conn =
+        post(
+          api_conn(),
+          path,
+          Jason.encode!(%{meeting: %{mode: "phone"}, origin: "agent-host"})
+        )
+
+      assert conn.status == 502
+
+      assert %{"recorder" => "mac-recorder", "recording_unknown" => true, "error" => error} =
+               Jason.decode!(conn.resp_body)
+
+      assert error =~ "Inspect that recorder before retrying"
+
+      assert [{:post, ^url, _, _}] =
+               Enum.filter(RecorderClient.calls(), fn {method, _, _, _} -> method == :post end)
+    end
+  end
+
+  # Mutation control: drop expand_own_transcript/2, or expand regardless of origin.
+  @tag :tmp_dir
+  test "a record-only start forwards to the named recorder and answers the path on this host", %{
+    tmp_dir: tmp_dir
+  } do
+    own = MeetingRouter.own_host()
+    Env.put_env("HOME", tmp_dir)
+    url = "http://mac-recorder.example/api/v1/meeting/start"
+
+    answer = fn origin ->
+      {:ok, 200,
+       Jason.encode!(%{
+         origin: origin,
+         transcript: "~/.hark/meetings/2026-09-25_1403_standup.txt",
+         meeting: %{launch: "L1", state: "live"}
+       })}
+    end
+
+    RecorderClient.set(%{{:post, url} => answer.(own)})
 
     conn =
       post(
         api_conn(),
-        "/api/v1/capture",
-        Jason.encode!(%{meeting: %{mode: "phone"}, origin: "agent-host"})
+        "/api/v1/meeting/start",
+        Jason.encode!(%{recorder: "mac-recorder", meeting: %{mode: "call"}, note: "Standup"})
       )
 
-    assert conn.status == 502
+    assert conn.status == 200
 
-    assert %{"recorder" => "mac-recorder", "recording_unknown" => true, "error" => error} =
+    assert %{
+             "recorder" => "mac-recorder",
+             "origin" => ^own,
+             "transcript" => transcript,
+             "meeting" => %{"recorder" => "mac-recorder", "launch" => "L1"}
+           } = Jason.decode!(conn.resp_body)
+
+    assert transcript == Path.join(tmp_dir, ".hark/meetings/2026-09-25_1403_standup.txt")
+
+    # One write, to the named recorder, carrying this host as the origin;
+    # nothing is probed, captured or delivered.
+    assert [{:post, ^url, body, _}] = RecorderClient.calls()
+    assert body["origin"] == own
+    assert body["recorder_forwarded"] == true
+    assert body["note"] == "Standup"
+
+    # A path on some other origin is not this host's to expand.
+    RecorderClient.set(%{{:post, url} => answer.("agent-host")})
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/start",
+        Jason.encode!(%{recorder: "mac-recorder", origin: "agent-host", meeting: %{mode: "call"}})
+      )
+
+    assert %{"origin" => "agent-host", "transcript" => "~/.hark/meetings/" <> _} =
              Jason.decode!(conn.resp_body)
-
-    assert error =~ "Inspect that recorder before retrying"
-
-    assert [{:post, "http://mac-recorder.example/api/v1/capture", _, _}] =
-             Enum.filter(RecorderClient.calls(), fn {method, _, _, _} -> method == :post end)
   end
 
   test "pinned show and stop do not reselect; addressed stop requires launch and forwards it intact" do
@@ -255,7 +317,7 @@ defmodule Shuttle.MeetingRouterTest do
   end
 
   test "forwarded wrong target is refused without probes or mutation; explicit local avoids recursion" do
-    for path <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"] do
       conn =
         post(
           api_conn(),

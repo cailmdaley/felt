@@ -3,6 +3,10 @@ defmodule ShuttleWeb.MeetingController do
   Starts, reports and stops a pinned recorder's hark meeting capture.
   Phone capture prefers a reachable device-capable remote recorder; agent
   delivery remains owner-routed independently of the recording host.
+
+  `start/2` records without any agent: it is Join's recorder routing and hark
+  start with neither a capture nor a `/deliver`, for a caller that follows the
+  transcript itself (`shuttle meeting start`).
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -54,6 +58,64 @@ defmodule ShuttleWeb.MeetingController do
         conn |> put_status(400) |> json(%{error: message})
     end
   end
+
+  @doc """
+  Body `{origin?, recorder?, meeting: {mode}, note?}`. Selects a recorder and
+  records there, mirrored toward `origin` (this daemon when omitted), and starts
+  no agent. The answer is `{meeting, recorder, origin, transcript}`, where
+  `transcript` is the path on `origin` that a follower reads. A remote
+  recorder can only name it `~/`-relative; the origin's own daemon expands it
+  as the answer passes back through it.
+  """
+  def start(conn, params) do
+    case MeetingRouter.select_start(params) do
+      {:ok, :local} ->
+        start_local(conn, params)
+
+      {:ok, {:remote, remote}} ->
+        {status, body} = MeetingRouter.forward_start(remote, "/api/v1/meeting/start", params)
+        conn |> put_status(status) |> json(expand_own_transcript(status, body))
+
+      {:error, message} ->
+        conn |> put_status(400) |> json(%{error: message})
+    end
+  end
+
+  defp start_local(conn, params) do
+    case Meeting.start(
+           Map.get(params, "meeting"),
+           :record,
+           Map.get(params, "note"),
+           params["origin"]
+         ) do
+      {:ok, %{meeting: row, transcript: transcript, mirror_host: mirror_host}} ->
+        body = %{
+          meeting: row,
+          origin: mirror_host || MeetingRouter.own_host(),
+          transcript: transcript
+        }
+
+        json(conn, MeetingRouter.stamp(body))
+
+      {:error, reason} ->
+        {status, body} = start_error(reason)
+        conn |> put_status(status) |> json(MeetingRouter.stamp(body))
+    end
+  end
+
+  # The recorder writes the mirror as `~/.hark/meetings/<name>.txt` on the
+  # origin; on the origin itself that `~` is this daemon's home.
+  defp expand_own_transcript(
+         status,
+         %{"origin" => origin, "transcript" => "~/" <> _ = path} = body
+       )
+       when status in 200..299 do
+    if origin == MeetingRouter.own_host(),
+      do: Map.put(body, "transcript", Shuttle.Env.expand(path)),
+      else: body
+  end
+
+  defp expand_own_transcript(_status, body), do: body
 
   defp join_local(conn, params) do
     fiber_id = Map.get(params, "fiber_id")

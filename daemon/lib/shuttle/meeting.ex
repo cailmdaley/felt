@@ -30,9 +30,10 @@ defmodule Shuttle.Meeting do
   the local capture and derives its state from hark's lifecycle and tmux.
 
   A meeting starts for a target: `{:capture, surface}` hands it to a new
-  capture agent, `{:fiber, id}` joins it to an existing constitution. The
-  recording is the same either way; the target shapes the name and the message
-  its agent receives.
+  capture agent, `{:fiber, id}` joins it to an existing constitution, and
+  `:record` only records, for a caller that follows the transcript itself. The
+  recording is the same every way; the target shapes the name and the message
+  its agent receives (`:record` has no agent, so no message).
 
   The live row names the meeting's `fiber`, the card it rides on. A joined
   meeting knows it from the start (`joined: true`). A capture meeting finds it:
@@ -71,7 +72,7 @@ defmodule Shuttle.Meeting do
               launch: String.t() | nil,
               fiber: String.t() | nil
             }
-  @type target :: {:capture, String.t() | nil} | {:fiber, String.t()}
+  @type target :: {:capture, String.t() | nil} | {:fiber, String.t()} | :record
   @type meeting :: map() | nil
 
   @doc false
@@ -110,12 +111,22 @@ defmodule Shuttle.Meeting do
 
   @doc """
   Start hark locally, mirrored toward `origin`, for `target`, and prepare the
-  message its agent receives: the meeting header followed by the user's note.
-  `launch` identifies this recording; a capture's scribe carries it into its
-  claim.
+  message its agent receives: the meeting header followed by the user's note
+  (`nil` for `:record`). `launch` identifies this recording; a capture's scribe
+  carries it into its claim. `transcript` is the transcript's path on the
+  origin, `~/`-relative when the origin is another host, and `mirror_host`
+  names that host (`nil` when the transcript is local).
   """
   @spec start(map(), target(), String.t() | nil, String.t() | nil, keyword()) ::
-          {:ok, %{meeting: map(), prompt: String.t(), launch: String.t()}} | {:error, term()}
+          {:ok,
+           %{
+             meeting: map(),
+             prompt: String.t() | nil,
+             launch: String.t(),
+             transcript: String.t(),
+             mirror_host: String.t() | nil
+           }}
+          | {:error, term()}
   def start(meeting, target, note, origin, opts \\ []) do
     with_meeting_lock(fn -> do_start(meeting, target, note, origin, opts) end)
   end
@@ -317,8 +328,14 @@ defmodule Shuttle.Meeting do
              "meeting start launch=#{launch_id} mode=#{mode} fiber=#{inspect(fiber)} transcript=#{inspect(paths.transcript)}"
            ),
          {:ok, row} <- await_launch(launch_id, paths, title, fiber, mode, opts) do
-      message = meeting_message(mode, paths.transcript, target)
-      {:ok, %{meeting: row, prompt: message <> "\n\n" <> note, launch: launch_id}}
+      {:ok,
+       %{
+         meeting: row,
+         prompt: agent_prompt(mode, paths.transcript, target, note),
+         launch: launch_id,
+         transcript: paths.transcript,
+         mirror_host: paths.mirror_host
+       }}
     else
       nil -> {:error, :unavailable}
       {:error, _reason} = error -> error
@@ -333,6 +350,11 @@ defmodule Shuttle.Meeting do
       "meeting delivery launch=#{launch} status=#{status} outcome=#{Jason.encode!(outcome)}"
     )
   end
+
+  defp agent_prompt(_mode, _transcript, :record, _note), do: nil
+
+  defp agent_prompt(mode, transcript, target, note),
+    do: meeting_message(mode, transcript, target) <> "\n\n" <> note
 
   # A joined meeting with no note is named after the constitution it joins.
   defp name_source(note, {:fiber, fiber_id}) do
@@ -369,6 +391,7 @@ defmodule Shuttle.Meeting do
     do: {:error, {:validation, "meeting mode requires a terminal capture surface"}}
 
   defp validate_target({:capture, _surface}), do: :ok
+  defp validate_target(:record), do: :ok
 
   defp validate_target({:fiber, fiber_id}) when is_binary(fiber_id) do
     if String.trim(fiber_id) == "" or String.contains?(fiber_id, ["|", <<0>>, "\n"]),

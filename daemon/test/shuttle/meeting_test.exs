@@ -113,7 +113,7 @@ defmodule Shuttle.MeetingTest do
   test "room and unknown modes are rejected before any recording", %{hark_dir: dir} do
     for os <- [:darwin, :linux],
         mode <- ["room", "unknown"],
-        route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+        route <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"] do
       Env.put_app_env(:host_capabilities_os_type, {:unix, os})
 
       conn =
@@ -135,7 +135,8 @@ defmodule Shuttle.MeetingTest do
   test "Linux rejects device capture before inspecting or launching hark", %{hark_dir: dir} do
     Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})
 
-    for mode <- ~w(call), route <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+    for mode <- ~w(call),
+        route <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"] do
       conn =
         api_conn()
         |> post(
@@ -584,6 +585,131 @@ defmodule Shuttle.MeetingTest do
     assert conn.status == 422
     assert Jason.decode!(conn.resp_body)["error"] =~ "fiber_id"
     assert Shuttle.Test.MeetingRunner.calls() == []
+  end
+
+  # Mutation control: route start_local/2 through DeliverController.route/4, or
+  # answer `transcript` from the row instead of the origin's path.
+  test "a record-only start records here, starts no agent, and answers the local transcript", %{
+    hark_dir: hark_dir
+  } do
+    start_supervised!(
+      {Shuttle.Test.MeetingCaptureForwardClient, {:ok, 200, Jason.encode!(%{"spawned" => true})}}
+    )
+
+    Env.put_app_env(:write_forward_client, Shuttle.Test.MeetingCaptureForwardClient)
+    set_starting_meeting_handler(hark_dir)
+
+    own = Shuttle.Poller.own_host_id()
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/start",
+        Jason.encode!(%{"meeting" => %{"mode" => "call"}, "note" => "Weekly standup\nagenda"})
+      )
+
+    assert conn.status == 200
+    body = Jason.decode!(conn.resp_body)
+
+    assert %{
+             "recorder" => ^own,
+             "origin" => ^own,
+             "transcript" => transcript,
+             "meeting" => %{"state" => "live", "recorder" => ^own, "fiber" => nil}
+           } = body
+
+    assert transcript == Path.join(hark_dir, "meetings/2026-09-25_1403_weekly-standup.txt")
+    refute Map.has_key?(body, "delivery")
+    assert Shuttle.Test.MeetingCaptureForwardClient.last() == nil
+
+    sessions =
+      Enum.filter(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    assert [{"tmux", ["new-session" | args], _}] = sessions
+    assert fiber_from_tmux_args(args) == nil
+    command = List.last(Enum.take_while(args, &(&1 != ";")))
+    assert command =~ "'--title=Weekly standup'"
+    assert command =~ "'-o' '#{transcript}'"
+    refute command =~ "--mirror"
+  end
+
+  test "a record-only start for a remote origin answers the mirror path on that origin", %{
+    hark_dir: hark_dir
+  } do
+    Env.put_app_env(:remotes, [
+      %{name: "project-host", ssh: "remote-alias", url: "http://127.0.0.1:4001"}
+    ])
+
+    set_starting_meeting_handler(hark_dir)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/meeting/start",
+        Jason.encode!(%{
+          "recorder" => Shuttle.Poller.own_host_id(),
+          "recorder_forwarded" => true,
+          "origin" => "project-host",
+          "meeting" => %{"mode" => "call"}
+        })
+      )
+
+    assert conn.status == 200
+
+    assert %{
+             "origin" => "project-host",
+             "transcript" => "~/.hark/meetings/2026-09-25_1403.txt",
+             "meeting" => %{"mirror_host" => "project-host"}
+           } = Jason.decode!(conn.resp_body)
+
+    {"tmux", ["new-session" | args], _} =
+      Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+        cmd == "tmux" and match?(["new-session" | _], args)
+      end)
+
+    command = List.last(Enum.take_while(args, &(&1 != ";")))
+    assert command =~ "'--title=Meeting'"
+    assert command =~ "'--mirror' 'remote-alias:~/.hark/meetings/2026-09-25_1403.txt'"
+  end
+
+  test "a record-only start refuses without hark and conflicts with a live meeting", %{
+    hark_dir: hark_dir,
+    hark_path: hark_path
+  } do
+    Env.put_app_env(:hark_path, false)
+    start = fn -> post(api_conn(), "/api/v1/meeting/start", ~s({"meeting":{"mode":"call"}})) end
+
+    conn = start.()
+    assert conn.status == 503
+    assert Jason.decode!(conn.resp_body)["error"] =~ "hark is not available"
+    assert Shuttle.Test.MeetingRunner.calls() == []
+
+    Env.put_app_env(:hark_path, hark_path)
+
+    write_meeting(hark_dir, %{
+      "launch" => "launch-current",
+      "pid" => 321,
+      "phase" => "live",
+      "title" => "current meeting",
+      "transcript" => "/tmp/current.txt"
+    })
+
+    set_current_meeting_handler("launch-current", 321)
+
+    conn = start.()
+    assert conn.status == 409
+
+    assert %{
+             "meeting" => %{"title" => "current meeting"},
+             "error" => "a meeting is already active"
+           } =
+             Jason.decode!(conn.resp_body)
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+             cmd == "tmux" and match?(["new-session" | _], args)
+           end)
   end
 
   test "an ended recording that carries an error is a failure, not a clean end" do
@@ -1131,9 +1257,9 @@ defmodule Shuttle.MeetingTest do
            end) == 1
   end
 
-  test "receiving recorder refuses a missing agent owner before any recording for capture and join",
+  test "receiving recorder refuses a missing agent owner before any recording for every start",
        %{hark_dir: hark_dir} do
-    for path <- ["/api/v1/capture", "/api/v1/meeting/join"] do
+    for path <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"] do
       conn =
         post(
           api_conn(),
