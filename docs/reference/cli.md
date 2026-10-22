@@ -86,6 +86,8 @@ These event and commit adapters are also installed by the felt plugin, but the
 | `shuttle hook event` | Append one harness event to the host-local activity stream (`~/.shuttle/events.jsonl`) and handle Shuttle mailbox registration/delivery |
 | `shuttle hook commit` | Record a commit from a Bash call in the host-local commit ledger (`~/.shuttle/commits.jsonl`) |
 
+The hidden `shuttle context-mailbox` subcommands (`put`, `get`, `receiver`, `revoke`, `deliver`) are daemon-internal: they manage the owner-local durable context queue that `close --quiet` and `message --context-only` write into, and are not a user surface.
+
 ## `shuttle` (dispatch layer)
 
 The `shuttle:` block is opaque frontmatter to felt: `felt show -j` and `felt
@@ -118,6 +120,7 @@ the daemon speaks directly, see the [HTTP API](api.md).
 |---|---|
 | `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
 | `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
+| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. `--host` requires `--project-dir`. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit |
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 
