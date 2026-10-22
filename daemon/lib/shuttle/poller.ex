@@ -4406,9 +4406,9 @@ defmodule Shuttle.Poller do
     state
   end
 
-  # Restores a recovered worker's conversation from its durable receiver. A
-  # record that cannot be read leaves the conversation unknown rather than
-  # falling back to the frontmatter runtime mirror.
+  # Restores a recovered worker's conversation from its durable receiver. Only
+  # a missing record defers to the frontmatter runtime mirror; a record for
+  # another identity, or one that cannot be read, leaves it unknown.
   @doc false
   def recover_context_receiver(state, meta, fiber) do
     if Shuttle.AppWorkers.app?(meta.session) do
@@ -4431,7 +4431,11 @@ defmodule Shuttle.Poller do
             |> Map.put(:session_uuid, uuid)
             |> Map.put(:context_harness, present_string(receiver["Harness"]))
           else
-            meta
+            # A record for another identity (a revoked predecessor, or a
+            # claim whose rename landed before its publish) grants this
+            # session nothing; the runtime mirror may still name that
+            # predecessor and must not be republished at a higher epoch.
+            Map.put(meta, :session_uuid, nil)
           end
 
         _ ->

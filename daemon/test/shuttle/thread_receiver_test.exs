@@ -422,6 +422,43 @@ defmodule Shuttle.ThreadReceiverTest do
     drain_results!(poller)
   end
 
+  test "a restart between the claim rename and its publish recovers the successor, never A",
+       context do
+    %{store: store, data: data, key: key, canonical: canonical} = context
+    # Predecessor A held authority in the canonical session, exited, and was
+    # revoked; its runtime mirror still names A.
+    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+    seed_receiver!(store, key, canonical <> ":A", "A")
+    assert {:ok, _} = CLI.run(["context-mailbox", "receiver", key, "", "-"])
+    revoked = authority!(data)
+    # Claim of B renamed its session to the canonical name, then the daemon
+    # died before put_running published B.
+    start_tmux!(canonical)
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert %{session: ^canonical, session_uuid: nil} = Poller.live_worker(poller, "hub")
+    recovered = authority!(data)
+    assert recovered["identity"] == canonical <> ":-"
+    assert recovered["ID"] in [nil, ""]
+    assert recovered["generation"] > revoked["generation"]
+
+    assert {:ok, _} =
+             CLI.run(["context-mailbox", "put", key, "window-result", "Successor only"])
+
+    cycle!(poller)
+    refute hook!(store, "A") =~ "Successor only"
+    assert [_] = pending(data)
+    # The retried claim completes the successor's lineage.
+    assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
+    assert authority!(data)["ID"] == "B"
+    hook!(store, "B")
+    assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
+    assert {:ok, _} = Delivery.flush_context(parent)
+    assert hook!(store, "B") =~ "Successor only"
+    refute hook!(store, "A") =~ "Successor only"
+    drain_results!(poller)
+  end
+
   defp mailbox_key(key), do: :crypto.hash(:sha256, key) |> Base.encode16(case: :lower)
 
   defp start_poller_for!(store) do
