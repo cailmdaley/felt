@@ -1288,8 +1288,14 @@ defmodule Shuttle.Poller do
 
   def handle_call({:context_receiver, fiber_id}, from, state) do
     {:reply, worker, state} = handle_call({:live_worker, fiber_id}, from, state)
-    meta = running_worker(state, fiber_id)
-    reply = if meta, do: {:ok, worker, meta.context_epoch}, else: {:error, :no_worker}
+
+    reply =
+      case running_worker(state, fiber_id) do
+        nil -> {:error, :no_worker}
+        %{context_epoch: epoch} when is_integer(epoch) -> {:ok, worker, epoch}
+        _ -> {:error, :authority_unknown}
+      end
+
     {:reply, reply, state}
   end
 
@@ -4359,17 +4365,26 @@ defmodule Shuttle.Poller do
   end
 
   defp remove_running(%State{} = state, runtime_key) do
-    if meta = state.running[runtime_key], do: persist_context_receiver!(state, meta, nil)
+    if meta = state.running[runtime_key], do: persist_context_receiver(state, meta, nil)
     %{state | running: Map.delete(state.running, runtime_key)}
   end
 
   # Every worker registration, recovery, removal and conversation rotation
   # crosses this synchronous boundary before the Poller publishes its state.
-  # A failed authority write aborts the transition, never reporting success.
+  # A failed authority write fails closed for that worker alone: it stays
+  # tracked with `context_epoch: nil`, so nothing is delivered to it until a
+  # later transition commits an epoch.
   @doc false
   def put_running(state, key, meta) do
-    {epoch, harness} = persist_context_receiver!(state, meta, meta)
-    worker = meta |> Map.put(:context_epoch, epoch) |> Map.put(:context_harness, harness)
+    worker =
+      case persist_context_receiver(state, meta, meta) do
+        {:ok, epoch, harness, _address} ->
+          meta |> Map.put(:context_epoch, epoch) |> Map.put(:context_harness, harness)
+
+        :error ->
+          Map.put(meta, :context_epoch, nil)
+      end
+
     %{state | running: Map.put(state.running, key, worker)}
   end
 
@@ -4385,27 +4400,27 @@ defmodule Shuttle.Poller do
         felt_store: owning_store(fiber["id"], state)
       }
 
-      persist_context_receiver!(state, meta, nil)
+      persist_context_receiver(state, meta, nil)
     end
 
     state
   end
 
+  # Restores a recovered worker's conversation from its durable receiver. A
+  # record that cannot be read leaves the conversation unknown rather than
+  # falling back to the frontmatter runtime mirror.
   @doc false
-  def recover_context_receiver!(state, meta, fiber) do
+  def recover_context_receiver(state, meta, fiber) do
     if Shuttle.AppWorkers.app?(meta.session) do
       meta
     else
-      {:ok, output} =
-        Shuttle.CLI.run(["context-mailbox", "get", context_receiver_key(state, meta, fiber)],
-          timeout_ms: 32_000
-        )
+      key = context_receiver_key(state, meta, fiber)
 
-      case Jason.decode!(output) do
-        nil ->
+      case receiver_cli(state, meta, ["get", key], &Jason.decode/1) do
+        {:ok, nil} ->
           meta
 
-        receiver ->
+        {:ok, receiver} when is_map(receiver) ->
           uuid = present_string(receiver["ID"])
           identity = meta.session <> ":" <> (uuid || "-")
           # A registry entry describes a launch recipe, not the identity of
@@ -4418,6 +4433,9 @@ defmodule Shuttle.Poller do
           else
             meta
           end
+
+        _ ->
+          Map.put(meta, :session_uuid, nil)
       end
     end
   end
@@ -4429,7 +4447,7 @@ defmodule Shuttle.Poller do
     store <> ":" <> uid
   end
 
-  defp persist_context_receiver!(state, meta, worker) do
+  defp persist_context_receiver(state, meta, worker) do
     fiber_id = fiber_address(meta)
 
     fiber =
@@ -4452,14 +4470,41 @@ defmodule Shuttle.Poller do
 
     identity = if worker, do: worker.session <> ":" <> (uuid || "-"), else: ""
 
-    {:ok, output} =
-      Shuttle.CLI.run(["context-mailbox", "receiver", key, identity, address],
+    case receiver_cli(state, meta, ["receiver", key, identity, address], &parse_epoch/1) do
+      {:ok, epoch} -> {:ok, epoch, cli, address}
+      :error -> :error
+    end
+  end
+
+  # Shells one `context-mailbox` verb and parses the last line of its merged
+  # output, which is the verb's stdout. Any failure is logged with the fiber
+  # and the CLI's output and reported as `:error`; it never raises.
+  defp receiver_cli(state, meta, args, parse) do
+    result =
+      Shuttle.CLI.run(["context-mailbox" | args],
         env: [{"SHUTTLE_HOST", state.own_host_id}],
         timeout_ms: 32_000
       )
 
-    {epoch, ""} = Integer.parse(String.trim(output))
-    {epoch, cli}
+    with {:ok, output} <- result,
+         {:ok, value} <- output |> String.split("\n", trim: true) |> List.last("") |> parse.() do
+      {:ok, value}
+    else
+      _ ->
+        Logger.warning(
+          "receiver authority unknown for #{fiber_address(meta)}: " <>
+            "context-mailbox #{hd(args)} failed: #{inspect(result)}"
+        )
+
+        :error
+    end
+  end
+
+  defp parse_epoch(line) do
+    case Integer.parse(String.trim(line)) do
+      {epoch, ""} when epoch > 0 -> {:ok, epoch}
+      _ -> :error
+    end
   end
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not

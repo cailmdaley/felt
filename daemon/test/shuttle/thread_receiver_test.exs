@@ -25,6 +25,11 @@ defmodule Shuttle.ThreadReceiverTest do
         Shuttle.Env.app(:receiver_documents_unavailable, false) and "ls" in args ->
           {"documents unavailable", :timeout}
 
+        # A merged stderr line ahead of the stdout the daemon parses.
+        Shuttle.Env.app(:receiver_stderr_noise, false) and "context-mailbox" in args ->
+          {output, status} = Shuttle.Runner.Default.cmd("shuttle", args, opts)
+          {"warning: injected stderr line\n" <> output, status}
+
         true ->
           Shuttle.Runner.Default.cmd("shuttle", args, opts)
       end
@@ -289,7 +294,7 @@ defmodule Shuttle.ThreadReceiverTest do
             %{"agent" => %{"cli" => nil}}
           ] do
         fiber = put_in(unresolved, ["shuttle", "resolved"], resolved)
-        recovered = Poller.recover_context_receiver!(state, worker, fiber)
+        recovered = Poller.recover_context_receiver(state, worker, fiber)
         assert recovered.session_uuid == uuid
         Poller.put_running(state, Poller.running_key(state, "hub"), recovered)
         assert authority!(data) == committed
@@ -361,6 +366,63 @@ defmodule Shuttle.ThreadReceiverTest do
       assert state.adopted?
     end
   end
+
+  test "a corrupt receiver record fails closed for its fiber without crashing the Poller",
+       context do
+    %{store: store, data: data, key: key, canonical: canonical} = context
+    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+    hook!(store, "A")
+    start_tmux!(canonical)
+    root = Path.join([data, "mailboxes", "fiber", mailbox_key(key)])
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "destination.json"), "{corrupt")
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        poller = start_poller_for!(store)
+        await_boot_cycle!(poller)
+        cycle!(poller)
+        send(self(), {:poller, poller})
+      end)
+
+    assert_received {:poller, poller}
+    assert Process.alive?(poller)
+    assert log =~ "receiver authority unknown for hub"
+    assert log =~ "invalid character"
+    state = :sys.get_state(poller)
+    worker = state.running[Poller.running_key(state, "hub")]
+    assert worker.session == canonical
+    assert worker.context_epoch == nil
+    # Unknown authority never falls back to the frontmatter predecessor.
+    assert %{session_uuid: nil} = Poller.live_worker(poller, "hub")
+    assert {:ok, _} = CLI.run(["context-mailbox", "put", key, "corrupt-result", "Hold for B"])
+    assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
+    assert {:error, :authority_unknown} = Delivery.flush_context(parent)
+    refute hook!(store, "A") =~ "Hold for B"
+    assert [_] = pending(data)
+    assert File.read!(Path.join(root, "destination.json")) == "{corrupt"
+    drain_results!(poller)
+  end
+
+  test "stderr lines merged into receiver CLI output do not break authority", context do
+    %{store: store, data: data} = context
+    start_tmux!("capture-B")
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    Env.put_app_env(:receiver_stderr_noise, true)
+    assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
+    state = :sys.get_state(poller)
+    worker = state.running[Poller.running_key(state, "hub")]
+    assert worker.context_epoch == authority!(data)["generation"]
+    assert authority!(data)["ID"] == "B"
+    GenServer.stop(poller)
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
+    drain_results!(poller)
+  end
+
+  defp mailbox_key(key), do: :crypto.hash(:sha256, key) |> Base.encode16(case: :lower)
 
   defp start_poller_for!(store) do
     {:ok, poller} =
