@@ -1660,8 +1660,6 @@ func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
 
 	legacy := `---
 title: Session hub
-depends-on:
-  - legacy-parent
 created-at: 2026-03-16T10:00:00Z
 ---
 
@@ -1684,9 +1682,6 @@ created-at: 2026-03-16T10:00:00Z
 	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
 	}
-	if got, want := result.RemovedDependsOnIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("RemovedDependsOnIDs = %#v, want %#v", got, want)
-	}
 	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)
 	}
@@ -1702,9 +1697,6 @@ created-at: 2026-03-16T10:00:00Z
 	if !strings.Contains(text, "name: Session hub") {
 		t.Fatalf("migrate should write name field:\n%s", text)
 	}
-	if strings.Contains(text, "depends-on:") {
-		t.Fatalf("migrate should strip legacy depends-on field:\n%s", text)
-	}
 	if strings.Contains(text, "(session-hub)=") {
 		t.Fatalf("migrate should strip legacy MyST anchor:\n%s", text)
 	}
@@ -1716,8 +1708,6 @@ func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
 
 	legacy := `---
 title: Session hub
-depends-on:
-  - legacy-parent
 created-at: 2026-03-16T10:00:00Z
 ---
 
@@ -1739,9 +1729,6 @@ created-at: 2026-03-16T10:00:00Z
 	}
 	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
-	}
-	if got, want := result.RemovedDependsOnIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("RemovedDependsOnIDs = %#v, want %#v", got, want)
 	}
 	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)

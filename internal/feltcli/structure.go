@@ -25,7 +25,6 @@ func (a *app) migrateCmd() *cobra.Command {
     the root, fold into <dir>/<slug>/<slug>.md (markdown without fiber
     frontmatter is a companion file and stays)
   - frontmatter title becomes name
-  - inert depends-on frontmatter is removed
   - leading MyST anchor lines such as (slug)= are stripped from bodies
 
 A stray that cannot fold safely (its target already exists, its <slug> is a
@@ -43,21 +42,21 @@ by hand.`,
 			if err != nil {
 				return err
 			}
-			if len(result.Entries) == 0 && len(result.Strays) == 0 && len(result.TitleToNameIDs) == 0 && len(result.RemovedDependsOnIDs) == 0 && len(result.StrippedMystAnchorIDs) == 0 {
+			if len(result.Entries) == 0 && len(result.Strays) == 0 && len(result.TitleToNameIDs) == 0 && len(result.StrippedMystAnchorIDs) == 0 {
 				fmt.Fprintln(a.env.Stdout, "No migrations needed")
 				return nil
 			}
 
 			// One verb-parameterized pass over the result slices; dry-run vs.
 			// applied differs only in the verbs and summary line.
-			var migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb string
+			var migrateVerb, foldVerb, renameVerb, stripVerb string
 			var summary string
 			if migrateDryRun {
-				migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb = "Would migrate", "Would fold", "Would rename", "Would remove", "Would strip"
-				summary = "Dry run: %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors would migrate\n"
+				migrateVerb, foldVerb, renameVerb, stripVerb = "Would migrate", "Would fold", "Would rename", "Would strip"
+				summary = "Dry run: %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy MyST anchors would migrate\n"
 			} else {
-				migrateVerb, foldVerb, renameVerb, removeVerb, stripVerb = "Migrated", "Folded", "Renamed", "Removed", "Stripped"
-				summary = "Migrated %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy depends-on keys, %d legacy MyST anchors\n"
+				migrateVerb, foldVerb, renameVerb, stripVerb = "Migrated", "Folded", "Renamed", "Stripped"
+				summary = "Migrated %d flat fibers, %d stray fiber files, %d legacy title fields, %d legacy MyST anchors\n"
 			}
 
 			for _, entry := range result.Entries {
@@ -76,15 +75,12 @@ by hand.`,
 			for _, id := range result.TitleToNameIDs {
 				fmt.Fprintf(a.env.Stdout, "%s title -> name in %s\n", renameVerb, id)
 			}
-			for _, id := range result.RemovedDependsOnIDs {
-				fmt.Fprintf(a.env.Stdout, "%s legacy depends-on from %s\n", removeVerb, id)
-			}
 			for _, id := range result.StrippedMystAnchorIDs {
 				fmt.Fprintf(a.env.Stdout, "%s legacy MyST anchor from %s\n", stripVerb, id)
 			}
 			fmt.Fprintf(a.env.Stdout,
 				summary,
-				len(result.Entries), folded, len(result.TitleToNameIDs), len(result.RemovedDependsOnIDs), len(result.StrippedMystAnchorIDs),
+				len(result.Entries), folded, len(result.TitleToNameIDs), len(result.StrippedMystAnchorIDs),
 			)
 
 			if blocked > 0 {

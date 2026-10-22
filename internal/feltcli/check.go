@@ -14,10 +14,10 @@ func (a *app) checkCmd() *cobra.Command {
 		Long: `Exits non-zero when it finds an error, under --json too. It reports:
   - fibers that fail to parse, which every other command skips
   - empty names
-  - wikilinks, inputs.from, and depends_on ids that resolve to no fiber
+  - wikilinks and inputs.from ids that resolve to no fiber
   - a link whose path names no fiber but whose last segment does (a warning:
     it resolves only by that guess, which rm, nest, and unnest refuse)
-  - legacy title, depends-on, and MyST anchor forms (felt migrate converts them)
+  - legacy title and MyST anchor forms (felt migrate converts them)
   - a slug in both bare and nested form, and more than one bare .md at the
     .felt root
   - stray fiber files: a bare <dir>/<slug>.md with fiber frontmatter below the

@@ -282,7 +282,7 @@ inputs:
 insights:
   stability:
     claim: Posterior is stable to jackknife choice
-depends_on:
+related_work:
   - upstream-fiber
 tempered: false
 shuttle:
@@ -309,7 +309,7 @@ shuttle:
 	if !strings.Contains(out, "stability:") || !strings.Contains(out, "claim: Posterior is stable to jackknife choice") {
 		t.Fatalf("opaque insights field: unexpected output:\n%s", out)
 	}
-	out = mustFelt(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle,depends_on,tempered,path,modified_at")
+	out = mustFelt(t, dir, "ls", "--json", "--has-field", "shuttle", "--json-field", "id,shuttle,related_work,tempered,path,modified_at")
 	var projected []map[string]any
 	if err := json.Unmarshal([]byte(out), &projected); err != nil {
 		t.Fatalf("ls --json projected fields: invalid json: %v\n%s", err, out)
@@ -333,9 +333,9 @@ shuttle:
 	if !ok || shuttle["agent"] != "codex" {
 		t.Fatalf("projected shuttle field = %#v, want agent codex", projected[0]["shuttle"])
 	}
-	deps, ok := projected[0]["depends_on"].([]any)
+	deps, ok := projected[0]["related_work"].([]any)
 	if !ok || len(deps) != 1 || deps[0] != "upstream-fiber" {
-		t.Fatalf("projected depends_on = %#v, want [upstream-fiber]", projected[0]["depends_on"])
+		t.Fatalf("projected related_work = %#v, want [upstream-fiber]", projected[0]["related_work"])
 	}
 	if projected[0]["tempered"] != false {
 		t.Fatalf("projected tempered = %#v, want false", projected[0]["tempered"])
@@ -525,8 +525,6 @@ Parent body.
 	}
 	legacyC := `---
 title: Session Hub
-depends-on:
-  - legacy-parent
 created-at: 2026-03-15T11:00:00Z
 ---
 
@@ -560,9 +558,6 @@ Session body.
 	if !strings.Contains(out, "Would rename title -> name in session-hub") {
 		t.Fatalf("migrate dry-run: expected title rename, got: %s", out)
 	}
-	if !strings.Contains(out, "Would remove legacy depends-on from session-hub") {
-		t.Fatalf("migrate dry-run: expected depends-on removal, got: %s", out)
-	}
 	if !strings.Contains(out, "Would strip legacy MyST anchor from session-hub") {
 		t.Fatalf("migrate dry-run: expected anchor strip, got: %s", out)
 	}
@@ -571,7 +566,7 @@ Session body.
 	}
 
 	out = mustFelt(t, dir, "migrate", "--dir", migrateDir)
-	if !strings.Contains(out, "Migrated 2 flat fibers, 1 stray fiber files, 1 legacy title fields, 1 legacy depends-on keys, 1 legacy MyST anchors") {
+	if !strings.Contains(out, "Migrated 2 flat fibers, 1 stray fiber files, 1 legacy title fields, 1 legacy MyST anchors") {
 		t.Fatalf("migrate: expected summary, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(migrateDir, ".felt", ".gitignore")); err != nil {
@@ -607,7 +602,7 @@ Session body.
 		t.Fatalf("read migrated session hub: %v", err)
 	}
 	sessionHubText := string(sessionHubData)
-	if strings.Contains(sessionHubText, "title: Session Hub") || strings.Contains(sessionHubText, "depends-on:") || strings.Contains(sessionHubText, "(session-hub)=") {
+	if strings.Contains(sessionHubText, "title: Session Hub") || strings.Contains(sessionHubText, "(session-hub)=") {
 		t.Fatalf("migrate should normalize session hub, got:\n%s", sessionHubText)
 	}
 	if !strings.Contains(sessionHubText, "name: Session Hub") {
