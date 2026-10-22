@@ -200,3 +200,26 @@ describe('sub-entries under the pointer', () => {
     expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(false)
   })
 })
+describe('quiet families', () => {
+  it('a family whose threads are all archived draws no badge', () => {
+    const root = card({ id: 'root' }), done = card({ id: 'root/done', orchestrator: 'root', status: 'closed', tempered: true })
+    const host = document.createElement('div')
+    installThreadPeek(host, host, root, new ThreadIndex([root, done]), vi.fn())
+    expect(host.querySelector('.kbn-thread-badge')).toBeNull()
+    expect(host.classList.contains('kbn-thread-family')).toBe(false)
+  })
+  it('repaints under a still hovering pointer hold one pending listener, not one per repaint', () => {
+    const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root', status: 'active' })
+    const index = new ThreadIndex([root, child]), families = new ThreadFamilies()
+    families.set(root, 'hover')
+    const added = vi.spyOn(document, 'addEventListener'), removed = vi.spyOn(document, 'removeEventListener')
+    for (let n = 0; n < 5; n++) {
+      document.body.replaceChildren()
+      const host = document.createElement('div'); document.body.append(host)
+      installThreadPeek(host, host, root, index, vi.fn(), families)
+    }
+    const live = (spy: typeof added) => spy.mock.calls.filter(([type]) => type === 'pointermove').length
+    expect(live(added) - live(removed)).toBe(1)
+    added.mockRestore(); removed.mockRestore()
+  })
+})

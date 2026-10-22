@@ -52,6 +52,16 @@ type Expansion = 'pinned' | 'hover'
  */
 export class ThreadFamilies {
   private readonly open = new Map<string, Expansion>()
+  private readonly folds = new Map<string, () => void>()
+  /** The one pending fold for a restored hover; a later repaint's replaces it. */
+  watch(card: KanbanCard, fold: ((event: PointerEvent) => void) | undefined): void {
+    const key = threadKey(card)
+    this.folds.get(key)?.()
+    this.folds.delete(key)
+    if (!fold) return
+    document.addEventListener('pointermove', fold, true)
+    this.folds.set(key, () => document.removeEventListener('pointermove', fold, true))
+  }
   get(card: KanbanCard): Expansion | undefined { return this.open.get(threadKey(card)) }
   set(card: KanbanCard, expansion: Expansion | undefined): void {
     if (expansion) this.open.set(threadKey(card), expansion)
@@ -60,7 +70,8 @@ export class ThreadFamilies {
 }
 
 export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, families = new ThreadFamilies()): void {
-  if (!index.size(card)) return
+  // Archived threads alone draw nothing here; the rail keeps them.
+  if (!index.summary(card).unfinished) return
   const family = threadKey(card)
   const focusId = (...parts: string[]): string => JSON.stringify([family, ...parts])
   const descendants = index.subtree(card).sort(index.compare)
@@ -128,15 +139,12 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   paint(restored)
   // A repaint under a still pointer gets no pointerenter or pointerleave, so a
   // restored hover expansion folds on the first move that lands elsewhere.
-  if (restored === 'hover') {
-    const moved = (event: PointerEvent): void => {
-      const inside = event.target instanceof Node && host.contains(event.target)
-      if (host.isConnected && families.get(card) === 'hover' && inside) return
-      document.removeEventListener('pointermove', moved, true)
-      if (host.isConnected && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
-    }
-    document.addEventListener('pointermove', moved, true)
-  }
+  families.watch(card, restored !== 'hover' ? undefined : event => {
+    const inside = event.target instanceof Node && host.contains(event.target)
+    if (host.isConnected && families.get(card) === 'hover' && inside) return
+    families.watch(card, undefined)
+    if (host.isConnected && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
+  })
 }
 
 /** The thread control holding focus inside `root`, by identity, to restore after a repaint. */

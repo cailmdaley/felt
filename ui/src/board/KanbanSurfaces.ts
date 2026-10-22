@@ -803,7 +803,7 @@ export class KanbanSurfaceRenderer {
     originStaleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
     const chip = this.renderRoleChip(card, originStaleness)
-    if (!(card.threadSummary?.unfinished || card.threadSummary?.archived)) return chip
+    if (!card.threadSummary?.unfinished) return chip
     chip.removeAttribute('role')
     const threads = document.createElement('div')
     threads.className = 'kbn-role-threads'
