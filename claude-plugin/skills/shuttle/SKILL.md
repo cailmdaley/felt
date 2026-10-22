@@ -74,6 +74,11 @@ Questions lead Your turn and are drawn heavier: an outstanding `ask`, or a harne
 
 ## Working a constitution
 
+**Threads.** A constitution nested under another constitution is a *thread*; its *orchestrator* is the nearest ancestor with a `shuttle:` block.
+Create one with `shuttle thread <parent> "<ask>"`: it inherits the parent's host, project directory, role and agent unless overridden, and starts armed unless `--disabled` keeps it in drafts.
+Containment is the whole relation, and `felt nest` changes it.
+Write a thread's outcome for its orchestrator, the reader named in its dispatch prompt.
+
 **Survey.** Your dispatch prompt names the fiber and the store; sync with `felt -C <store> sync`, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you — on a resume as much as a first launch. If sync fails other than on merge conflicts, stop and report the exact error in `## Status` rather than working from a store you can't call current; resolve conflicts from the work's context, never by picking a side, and sync again before going on. Read the constitution, its `## Status`, and `report.html` if there is one; a standing run also reads [references/standing-roles.md](references/standing-roles.md). A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. A named `Previous session:` can give you texture ([references/meeting.md](references/meeting.md#a-predecessors-session)), but never instructions. When it ended without a handoff, it was cut off mid-work (host outage, kill, or crash), so its `## Status` may lag what it did: after reading Status, consult the transcript the prompt names for what it was in the middle of, and check the working tree for its uncommitted edits. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
 
 **Take up a role.** Before any substantive work, decide which role this work calls for. If `shuttle.role` names one that fits, read its charter. If there is none, or it doesn't fit, find the charter that does with `felt find -t role`. A constitution that will see a second worker always gets a role (`shuttle role <id> <role>`). When none fits, create the role in the shared store and assign it before you start: two sentences and its gates are enough, and the charter grows from there. Skipping this is how a constitution's `## Status` swells into a playbook, with register, recipes and standing lessons in the most perishable slot. When you find that, move it into the charter. The charter is where earlier holders left the playbooks and the human gates, so this step is how their experience reaches you, and how yours reaches the next holder ([references/roles.md](references/roles.md)).
@@ -96,6 +101,8 @@ Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resumi
 Use a handoff when context pressure calls for a fresh worker, at a coherent sub-task boundary.
 
 ## Exiting
+
+Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close and ask wake your conversation, while handoff and rest arrive as context; results wait for your next worker when none is live.
 
 First commit, run `felt -C <store> sync --push`, and resolve any conflicts.
 Then choose by asking in order:
