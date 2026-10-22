@@ -101,16 +101,7 @@ defmodule Shuttle.RemoteControlTmuxTest do
     # set, otherwise there is no pane left to report the status and screen.
     File.write!(fifo, "exit\n")
 
-    await(fn ->
-      case Runner.cmd(
-             "tmux",
-             ["display-message", "-p", "-t", "=shuttle-remote-control:", "\#{pane_dead}"],
-             []
-           ) do
-        {"1\n", 0} -> true
-        _ -> false
-      end
-    end)
+    await(&pane_settled_dead?/0)
 
     assert %{state: :waiting, last_exit: %{status: 7, screen: screen}} =
              RemoteControl.reconcile(second)
@@ -126,17 +117,30 @@ defmodule Shuttle.RemoteControlTmuxTest do
     third = start_supervised!({RemoteControl, instant})
     assert %{state: :starting} = RemoteControl.status(third)
 
-    await(fn ->
-      Runner.cmd(
-        "tmux",
-        ["display-message", "-p", "-t", "=shuttle-remote-control:", "\#{pane_dead}"],
-        []
-      ) == {"1\n", 0}
-    end)
+    await(&pane_settled_dead?/0)
 
     stop_supervised!(RemoteControl)
     fourth = start_supervised!({RemoteControl, instant})
     assert %{state: :waiting, restarts: 0, last_exit: %{status: 7}} = RemoteControl.status(fourth)
+  end
+
+  # tmux marks a pane dead before it fills in pane_dead_time, so a check of
+  # pane_dead alone can let reconcile read the half-written metadata.
+  defp pane_settled_dead? do
+    case Runner.cmd(
+           "tmux",
+           [
+             "display-message",
+             "-p",
+             "-t",
+             "=shuttle-remote-control:",
+             "\#{pane_dead}|\#{pane_dead_time}"
+           ],
+           []
+         ) do
+      {"1|" <> time, 0} -> String.trim(time) != ""
+      _ -> false
+    end
   end
 
   defp await(fun), do: await(fun, System.monotonic_time(:millisecond) + 10_000)
