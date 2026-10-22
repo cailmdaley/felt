@@ -49,8 +49,14 @@ Snapshot migration keeps the original baseline and publications, extracting the 
 A snapshot without a parent UID remains pending for operator repair rather than routing by an ambiguous slug.
 Pending publications survive cleared lifecycle stamps and daemon restarts.
 An acknowledgment means the parent daemon has durably enqueued the result in its fiber mailbox, not that a worker has consumed it.
-Acknowledged IDs stay in the sender outbox to prevent republication.
+The sender's host-local `thread-outbox/` separates `pending/` payload files from `acked/` records containing only publication IDs.
+Capture checks only the IDs being captured; acknowledgment writes one ID and removes its pending payload, without decoding or rewriting accumulated history.
+Acknowledgment IDs never expire because unchanged lifecycle stamps can be observed indefinitely.
+An interrupted acknowledgment leaves a durable ID that suppresses replay; the next pending read removes any leftover payload.
+Snapshot migration installs pending payloads and compact acknowledgment IDs idempotently, preserves the baseline, then removes the full snapshot.
 Pending publications are retried independently of the baseline.
+A corrupt or missing baseline in an established store refuses startup without touching pending work.
+Recover by restoring the exact trusted cutoff from backup; never delete the outbox or reset the cutoff to the current time.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
 An unchanged worker keeps its epoch across flushes and daemon restarts.

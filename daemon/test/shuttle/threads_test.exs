@@ -248,6 +248,7 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  @tag first_boot: true
   test "snapshot migration preserves the cutoff, intended UID, pending text and acknowledgment dedup",
        %{store: store, data: data} do
     alias Shuttle.ThreadOutbox
@@ -270,13 +271,16 @@ defmodule Shuttle.ThreadsTest do
         baseline: baseline,
         records: %{
           "pending" => record,
-          "done" => Map.put(record, "acked", true)
+          "done" => record |> Map.put("acked", true) |> Map.put("text", "acked-only-secret")
         }
       })
     )
 
     assert :ok = ThreadOutbox.boot_baseline()
     assert ThreadOutbox.baseline() == baseline
+    refute File.exists?(Path.join(data, "thread-outbox.json"))
+    files = Path.wildcard(Path.join(data, "thread-outbox/**/*")) |> Enum.filter(&File.regular?/1)
+    refute Enum.any?(files, &String.contains?(File.read!(&1), "acked-only-secret"))
     uid = parent.fiber["uid"]
 
     assert [{"pending", %{"parent_uid" => ^uid, "text" => "original"} = migrated}] =
@@ -290,6 +294,7 @@ defmodule Shuttle.ThreadsTest do
     assert ThreadOutbox.baseline() == baseline
   end
 
+  @tag first_boot: true
   test "corrupt baseline fails closed and migration retains pending outbox records", %{data: data} do
     alias Shuttle.ThreadOutbox
     path = Path.join(data, "thread-outbox.json")
@@ -320,11 +325,112 @@ defmodule Shuttle.ThreadsTest do
         ThreadOutbox.boot_baseline()
         flunk("corrupt baseline was accepted")
       rescue
-        _ in [Jason.DecodeError, MatchError, RuntimeError] -> :ok
+        _ in [Jason.DecodeError, MatchError, RuntimeError, KeyError] -> :ok
       end
 
       assert File.read!(path) == corrupt
     end
+  end
+
+  test "baseline corruption or loss refuses recovery without touching pending payloads", %{
+    data: data
+  } do
+    alias Shuttle.ThreadOutbox
+
+    assert :ok =
+             ThreadOutbox.capture([
+               {"pending", %{"owner" => "test-host", "text" => "preserve me"}}
+             ])
+
+    cutoff = ThreadOutbox.baseline()
+    baseline_path = Path.join(data, "thread-outbox/baseline")
+    [payload] = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
+    bytes = File.read!(payload)
+    File.write!(baseline_path, "corrupt")
+    assert_raise MatchError, fn -> ThreadOutbox.boot_baseline() end
+    assert File.read!(payload) == bytes
+    assert File.read!(baseline_path) == "corrupt"
+    File.rm!(baseline_path)
+    assert_raise RuntimeError, fn -> ThreadOutbox.boot_baseline() end
+    assert File.read!(payload) == bytes
+    # Operator restores the exact trusted cutoff, never a new current time.
+    File.write!(baseline_path, cutoff)
+    assert :ok = ThreadOutbox.boot_baseline()
+    assert [{"pending", %{"text" => "preserve me"}}] = ThreadOutbox.pending("test-host")
+    assert ThreadOutbox.baseline() == cutoff
+  end
+
+  test "acknowledged publications retain dedup identity without their payload", %{data: data} do
+    alias Shuttle.ThreadOutbox
+
+    record = %{
+      "owner" => "test-host",
+      "text" => "unique-acknowledged-payload",
+      "parent_uid" => "parent"
+    }
+
+    assert :ok = ThreadOutbox.capture([{"done", record}])
+    assert :ok = ThreadOutbox.acknowledge("done")
+    files = Path.wildcard(Path.join(data, "**/*")) |> Enum.filter(&File.regular?/1)
+    refute Enum.any?(files, &String.contains?(File.read!(&1), "unique-acknowledged-payload"))
+
+    Task.async(fn ->
+      ThreadOutbox.boot_baseline()
+      ThreadOutbox.capture([{"done", record}])
+    end)
+    |> Task.await(30_000)
+
+    assert ThreadOutbox.pending("test-host") == []
+  end
+
+  test "outbox compacts acknowledgments to IDs and changes only the addressed backlog files", %{
+    data: data
+  } do
+    alias Shuttle.ThreadOutbox
+
+    records =
+      for n <- 1..200,
+          do:
+            {"result-#{n}",
+             %{
+               "owner" => "test-host",
+               "text" => String.duplicate("payload-#{n}", 100),
+               "parent_uid" => "parent",
+               "store" => "store",
+               "wake" => false
+             }}
+
+    assert :ok = ThreadOutbox.capture(records)
+    # Payload storage is bounded by pending work, not accumulated history.
+    payload_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
+    assert length(payload_paths) == 200
+    before = Map.new(payload_paths, &{&1, {File.stat!(&1), File.read!(&1)}})
+    assert :ok = ThreadOutbox.acknowledge("result-1")
+    assert length(ThreadOutbox.pending("test-host")) == 199
+    after_paths = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
+    assert length(after_paths) == 199
+    for path <- after_paths, do: assert({File.stat!(path), File.read!(path)} == before[path])
+    [acked_path] = Path.wildcard(Path.join(data, "thread-outbox/acked/*"))
+    assert File.read!(acked_path) == "result-1"
+    refute File.read!(acked_path) =~ "payload"
+    ack_stat = File.stat!(acked_path)
+    # Capture and ack do not decode old payloads or rewrite acknowledged history.
+    corrupt_path = hd(after_paths)
+    original = File.read!(corrupt_path)
+    File.write!(corrupt_path, "unreadable unrelated payload")
+    assert :ok = ThreadOutbox.capture([{"extra", %{"owner" => "test-host", "text" => "extra"}}])
+    assert :ok = ThreadOutbox.acknowledge("extra")
+    File.write!(corrupt_path, original)
+    assert File.stat!(acked_path) == ack_stat
+
+    Task.async(fn ->
+      ThreadOutbox.boot_baseline()
+      ThreadOutbox.capture(records)
+    end)
+    |> Task.await(30_000)
+
+    assert length(ThreadOutbox.pending("test-host")) == 199
+    assert File.stat!(acked_path) == ack_stat
   end
 
   @tag first_boot: true

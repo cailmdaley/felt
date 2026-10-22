@@ -1,106 +1,199 @@
 defmodule Shuttle.ThreadOutbox do
-  @moduledoc "Host-local immutable thread publications, retained until durable recipient enqueue."
+  @moduledoc "Host-local pending thread payloads and permanent, payload-free acknowledgment IDs."
 
-  @doc "Establish the first-deployment cutoff before the Poller's first poll; never advance it."
-  def boot_baseline do
-    transaction(fn state ->
-      {Map.put_new(state, "baseline", DateTime.to_iso8601(DateTime.utc_now())), :ok}
-    end)
-  end
+  @doc "Establish the first-deployment cutoff before polling; never reset or advance it."
+  def boot_baseline, do: transaction(true, fn _root, _baseline -> :ok end)
 
-  def baseline do
-    transaction(fn state -> {state, Map.fetch!(state, "baseline")} end)
-  end
+  def baseline, do: transaction(false, fn _root, baseline -> baseline end)
 
+  # Each capture checks just its own ID. Neither the acknowledged history nor
+  # unrelated pending payloads are read or rewritten on this synchronous path.
   def capture(records) do
-    transaction(fn state ->
-      _baseline = Map.fetch!(state, "baseline")
-
-      next =
-        Enum.reduce(records, state["records"], fn {id, record}, acc ->
-          Map.put_new(acc, id, record)
-        end)
-
-      {Map.put(state, "records", next), :ok}
+    transaction(false, fn root, _baseline ->
+      Enum.each(records, fn {id, record} -> capture_one(root, id, record) end)
+      :ok
     end)
   end
 
   def pending(owner) do
-    transaction(fn state ->
-      pending =
-        Enum.filter(state["records"], fn {_id, record} ->
-          record["owner"] == owner and record["acked"] != true
-        end)
+    transaction(false, fn root, _baseline ->
+      root
+      |> Path.join("pending/*.json")
+      |> Path.wildcard()
+      |> Enum.flat_map(fn path ->
+        key = Path.basename(path, ".json")
 
-      {state, pending}
+        if File.exists?(Path.join([root, "acked", key])) do
+          # Crash after durable ack but before payload removal.
+          File.rm!(path)
+          []
+        else
+          %{"id" => id, "record" => record} = path |> File.read!() |> Jason.decode!()
+          true = key == key(id)
+          if record["owner"] == owner, do: [{id, record}], else: []
+        end
+      end)
     end)
   end
 
   def acknowledge(id) do
-    transaction(fn state ->
-      {update_in(state, ["records", id], &Map.put(&1, "acked", true)), :ok}
+    transaction(false, fn root, _baseline ->
+      acknowledge_one(root, id)
+      :ok
     end)
   end
 
-  defp migrate(state) do
-    records =
-      Map.new(state["records"], fn {id, record} ->
-        case get_in(record, ["parent", "uid"]) do
-          uid when is_binary(uid) ->
-            {id, record |> Map.delete("parent") |> Map.put("parent_uid", uid)}
+  defp capture_one(root, id, record) do
+    path = pending_path(root, id)
 
-          _ ->
-            {id, record}
-        end
-      end)
-
-    state |> Map.put("version", 3) |> Map.put("records", records)
+    unless File.exists?(acked_path(root, id)) or File.exists?(path) do
+      write_atomic!(path, Jason.encode!(%{id: id, record: record}))
+    end
   end
 
-  # Capture and acknowledgment serialize across overlapping poll tasks. Disk is
-  # authoritative; no process memory is needed to retry after daemon restart.
-  defp transaction(fun) do
-    path = Path.join(Shuttle.data_dir(), "thread-outbox.json")
+  # Retention rule: payloads live only until durable acknowledgment. IDs have
+  # no expiry: an unchanged lifecycle stamp can be observed again indefinitely.
+  # Publish the tombstone before deleting the payload, so interruption cannot
+  # cause republication or lose an unacknowledged result.
+  defp acknowledge_one(root, id) do
+    path = acked_path(root, id)
+    unless File.exists?(path), do: write_atomic!(path, id)
 
-    :global.trans({{__MODULE__, path}, self()}, fn ->
-      state =
-        case File.read(path) do
-          {:ok, bytes} ->
-            case Jason.decode!(bytes) do
-              %{"version" => version, "records" => records, "baseline" => baseline} = state
-              when version in [2, 3] and is_map(records) and is_binary(baseline) ->
-                {:ok, _, _} = DateTime.from_iso8601(baseline)
-                state
+    case File.rm(pending_path(root, id)) do
+      :ok ->
+        :ok
 
-              %{"version" => 1, "records" => records} when is_map(records) ->
-                migrate(%{"version" => 3, "records" => records})
+      {:error, :enoent} ->
+        :ok
 
-              _ ->
-                raise "invalid thread outbox: #{path}"
-            end
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "remove pending payload", path: path
+    end
+  end
 
-          {:error, :enoent} ->
-            %{"version" => 3, "records" => %{}}
+  defp key(id), do: :crypto.hash(:sha256, id) |> Base.encode16(case: :lower)
+  defp pending_path(root, id), do: Path.join([root, "pending", key(id) <> ".json"])
+  defp acked_path(root, id), do: Path.join([root, "acked", key(id)])
 
-          {:error, reason} ->
-            raise File.Error, reason: reason, action: "read", path: path
-        end
+  # Serialize host-local capture, ack and snapshot migration. Each steady-state
+  # operation touches constant-size metadata and its addressed payloads only.
+  defp transaction(boot?, fun) do
+    root = Path.join(Shuttle.data_dir(), "thread-outbox")
 
-      {next, result} = fun.(migrate(state))
+    :global.trans({{__MODULE__, root}, self()}, fn ->
+      baseline = prepare!(root, boot?)
+      fun.(root, baseline)
+    end)
+  end
 
-      if next != state do
-        File.mkdir_p!(Path.dirname(path))
-        tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
+  defp prepare!(root, boot?) do
+    snapshot = root <> ".json"
+    legacy = read_snapshot!(snapshot)
+    path = Path.join(root, "baseline")
 
-        try do
-          File.write!(tmp, Jason.encode!(next), [:binary, :sync])
-          File.rename!(tmp, path)
-        after
-          File.rm(tmp)
-        end
+    baseline =
+      case File.read(path) do
+        {:ok, value} ->
+          valid_baseline!(value)
+
+        {:error, :enoent} ->
+          # A missing cutoff in an established store is corruption, not first
+          # deployment. Never recover by resetting it and dropping pending work.
+          if File.exists?(Path.join(root, "version")) or payloads?(root) or not boot?,
+            do: raise("missing thread outbox baseline: #{path}")
+
+          value =
+            valid_baseline!(
+              (legacy && legacy["baseline"]) || DateTime.to_iso8601(DateTime.utc_now())
+            )
+
+          write_atomic!(path, value)
+          value
+
+        {:error, reason} ->
+          raise File.Error, reason: reason, action: "read", path: path
       end
 
-      result
+    File.mkdir_p!(Path.join(root, "pending"))
+    File.mkdir_p!(Path.join(root, "acked"))
+
+    unless File.exists?(Path.join(root, "version")),
+      do: write_atomic!(Path.join(root, "version"), "4")
+
+    if legacy do
+      if legacy["baseline"] && legacy["baseline"] != baseline,
+        do: raise("thread outbox snapshot cutoff differs from durable baseline: #{snapshot}")
+
+      # Idempotent across interruption at any record; remove the full snapshot
+      # only after every pending payload and acknowledgment has been installed.
+      Enum.each(legacy["records"], fn {id, record} ->
+        if record["acked"] == true,
+          do: acknowledge_one(root, id),
+          else: capture_one(root, id, migrate_recipient(record))
+      end)
+
+      File.rm!(snapshot)
+    end
+
+    baseline
+  end
+
+  defp payloads?(root) do
+    Enum.any?(["pending", "acked"], fn dir ->
+      case File.ls(Path.join(root, dir)) do
+        {:ok, []} -> false
+        {:ok, _} -> true
+        {:error, :enoent} -> false
+        {:error, reason} -> raise File.Error, reason: reason, action: "list", path: root
+      end
     end)
+  end
+
+  defp valid_baseline!(value) do
+    {:ok, _, _} = DateTime.from_iso8601(value)
+    value
+  end
+
+  defp read_snapshot!(path) do
+    case File.read(path) do
+      {:ok, bytes} ->
+        state = Jason.decode!(bytes)
+
+        case state do
+          %{"version" => version, "records" => records}
+          when version in [1, 2, 3] and is_map(records) ->
+            if version != 1, do: valid_baseline!(Map.fetch!(state, "baseline"))
+            true = Enum.all?(records, fn {id, record} -> is_binary(id) and is_map(record) end)
+            state
+
+          _ ->
+            raise "invalid thread outbox snapshot: #{path}"
+        end
+
+      {:error, :enoent} ->
+        nil
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read", path: path
+    end
+  end
+
+  defp migrate_recipient(record) do
+    case get_in(record, ["parent", "uid"]) do
+      uid when is_binary(uid) -> record |> Map.delete("parent") |> Map.put("parent_uid", uid)
+      _ -> record
+    end
+  end
+
+  defp write_atomic!(path, bytes) do
+    File.mkdir_p!(Path.dirname(path))
+    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
+
+    try do
+      File.write!(tmp, bytes, [:binary, :sync])
+      File.rename!(tmp, path)
+    after
+      File.rm(tmp)
+    end
   end
 end
