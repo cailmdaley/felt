@@ -1054,8 +1054,8 @@ export class Reader {
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
-    // The sidebar's edge takes its own arrows, Home, End and Enter.
-    if (e.target === this.sidebarHandle && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
+    // Each column's edge takes its own arrows, Home, End and Enter.
+    if ((e.target === this.sidebarHandle || e.target === this.threadRail.handle) && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)
     if (e.altKey && !forward) return

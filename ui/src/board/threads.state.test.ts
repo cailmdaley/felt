@@ -55,8 +55,9 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
       const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
       const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
+      // The rail names a state by its mark's title; the peek and sub-entries by the row's word.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')!.textContent]))
+        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')?.textContent ?? row.querySelector('.ws-thread-mark')!.getAttribute('title')]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       expect(labels(rail.el, '.ws-thread-tree > ul')).toEqual(want)
       // The waiting thread is a sub-entry; the peek draws the rest beneath it.

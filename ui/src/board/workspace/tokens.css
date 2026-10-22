@@ -146,6 +146,8 @@
   --ws-meta-row: 19px;
   --ws-sidebar-glyph-size: 15px;
   --ws-sidebar-dot-size: 10px;
+  --ws-thread-outcome-size: 13px;
+  --ws-thread-quiet-glyph-size: 12px;
   --ws-sidebar-outcome-lines: 2;
   --ws-sidebar-outcome-size: 14px;
   --ws-row-size: 16px;
