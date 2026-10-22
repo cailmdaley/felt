@@ -98,7 +98,8 @@ export class DeskKeyboard {
 
   private readonly onClick = (event: MouseEvent): void => {
     const target = event.target as HTMLElement
-    const el = target.closest<HTMLElement>('[data-card-uid]')
+    // A thread's pin sits beside its row, not inside it; a click on it selects the thread.
+    const el = target.closest('.kbn-thread-pin')?.parentElement?.querySelector<HTMLElement>(':scope > [data-card-uid]') ?? target.closest<HTMLElement>('[data-card-uid]')
     if (el && this.root.contains(el)) this.select(identity(el), false)
   }
 

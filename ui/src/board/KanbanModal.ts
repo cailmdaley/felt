@@ -59,7 +59,7 @@ import type {
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { collapseThreadFamily, expandThreadFamily, restoreThreadFocus, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
+import { collapseThreadFamily, expandThreadFamily, PINNED_TAG, restoreThreadFocus, THREAD_PIN, type ThreadPinRequest, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -68,7 +68,7 @@ import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
 import { buildKanbanResponseFromComposite, byClosedAtDesc, byInFlightBand, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
-import { familyColumn } from './threads.js'
+import { familyColumn, threadKey } from './threads.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -312,6 +312,33 @@ export class KanbanModal {
   private readonly handleConversationOpening = (): void => {
     if (this.lastResponse) this.render(this.lastResponse)
     this.dock.refreshConversationOpening()
+  }
+
+  private readonly handleThreadPin = (event: Event): void => {
+    const { card, pinned } = (event as CustomEvent<ThreadPinRequest>).detail
+    void this.pinThread(card, pinned)
+  }
+
+  /** Pin or unpin a thread: its `pinned` tag, drawn at once and written through the owner's felt-edit. */
+  private async pinThread(card: KanbanCard, pinned: boolean): Promise<void> {
+    const key = threadKey(card)
+    const mark = (on: boolean): void => {
+      for (const c of boardCards(this.lastResponse)) {
+        if (threadKey(c) !== key) continue
+        const rest = (c.tags ?? []).filter(tag => tag !== PINNED_TAG)
+        c.tags = on ? [...rest, PINNED_TAG] : rest
+      }
+      if (this.lastResponse) this.render(this.lastResponse)
+    }
+    mark(pinned)
+    try {
+      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, [pinned ? 'add' : 'remove']: [PINNED_TAG] }, pinned ? 'Pin failed' : 'Unpin failed')
+      this.announce(pinned ? `Pinned ${card.name}` : `Unpinned ${card.name}`)
+    } catch (err: unknown) {
+      mark(!pinned)
+      this.showBanner(`Couldn't ${pinned ? 'pin' : 'unpin'} “${card.name}”: ${errText(err)}`, 'error')
+    }
+    await this.fetchAndRender()
   }
 
   constructor(options: KanbanModalOptions) {
@@ -576,6 +603,7 @@ export class KanbanModal {
     window.addEventListener('resize', this.handleResize)
     window.addEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
+    document.addEventListener(THREAD_PIN, this.handleThreadPin)
     this.startPolling()
     void this.fetchAndRender()
   }
@@ -608,6 +636,7 @@ export class KanbanModal {
     window.removeEventListener('resize', this.handleResize)
     window.removeEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
+    document.removeEventListener(THREAD_PIN, this.handleThreadPin)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null
     if (this.resizeRaf !== null) {
@@ -2330,6 +2359,12 @@ export class KanbanModal {
         else if (filter) filter.focus({ preventScroll: true })
         else this.workspace?.findConstitution()
         e.preventDefault(); e.stopPropagation()
+        return
+      }
+      if (intent === 'pin') {
+        const row = this.deskKeyboard?.selectedRow
+        const pin = row?.matches('.kbn-thread-row') ? row.parentElement?.querySelector<HTMLButtonElement>(':scope > .kbn-thread-pin') : null
+        if (pin) { pin.click(); e.preventDefault(); e.stopPropagation() }
         return
       }
       const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')

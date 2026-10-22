@@ -1,7 +1,7 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest'
+export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
@@ -47,6 +47,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     ...constitutionBindings('the selected card'),
+    bind(['p'], 'pin', 'Pin or unpin the selected thread under its card'),
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
@@ -102,7 +103,7 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation', 'rest'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation', 'rest', 'pin'].includes(binding.intent)) return null
   return binding.intent
 }
 

@@ -3,6 +3,7 @@ import { ThreadIndex } from '../threads.js'
 import { expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
+import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
 it('keeps pure containment beside flat waiting pointers, folds archives, navigates to an intermediate own subtree and back', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
@@ -78,4 +79,22 @@ it('draws no thread tree on the phone, keeping only the breadcrumb back to the o
     expect(rail.el.querySelector('.kbn-thread-row')).toBeNull()
     expect(rail.breadcrumb.hidden).toBe(false)
   } finally { vi.unstubAllGlobals() }
+})
+
+it('every rail row carries a pin that asks the board to toggle it, and a repaint follows the tag', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const root = card({ id: 'hub' }), branch = card({ id: 'hub/branch', name: 'Branch', orchestrator: root.id, status: 'active' })
+  const rail = new ThreadRail(vi.fn(), vi.fn()); document.body.append(rail.el)
+  const asked = vi.fn((event: Event) => (event as CustomEvent<ThreadPinRequest>).detail)
+  document.addEventListener(THREAD_PIN, asked)
+  rail.show(root, new ThreadIndex([root, branch]))
+  const pin = () => rail.el.querySelector<HTMLButtonElement>('.ws-thread-tree .kbn-thread-pin')!
+  expect(pin().getAttribute('aria-pressed')).toBe('false')
+  pin().click()
+  expect(asked.mock.results[0].value).toEqual({ card: branch, pinned: true })
+  rail.show(root, new ThreadIndex([root, { ...branch, tags: ['pinned'] }]))
+  expect(pin().getAttribute('aria-pressed')).toBe('true')
+  document.removeEventListener(THREAD_PIN, asked)
+  rail.el.remove()
+  vi.unstubAllGlobals()
 })

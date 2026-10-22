@@ -1,6 +1,6 @@
 import { MOBILE_MEDIA } from '../mobile.js'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { threadRow } from '../ThreadPeek.js'
+import { threadItem } from '../ThreadPeek.js'
 import type { ThreadIndex } from '../threads.js'
 import './thread-rail.css'
 
@@ -43,7 +43,7 @@ export class ThreadRail {
       this.paintBreadcrumb(ancestors)
       return
     }
-    const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon])])
+    const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags])])
     if (signature === this.signature) return
     this.signature = signature
     // A waiting thread opens the path down to it. Walks stop at an ancestor an
@@ -72,13 +72,10 @@ export class ThreadRail {
     const active = document.activeElement
     const focus = active instanceof HTMLElement && this.tree.contains(active) ? active.dataset.threadFocus : undefined
     const detailsState = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
-    const identify = (el: HTMLElement, kind: string, card: KanbanCard): void => {
-      el.dataset.threadFocus = JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    }
+    const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
+    const identify = (el: HTMLElement, kind: string, card: KanbanCard): void => { el.dataset.threadFocus = focusOf(kind, card) }
     const index = this.index!
-    const rowFor = (card: KanbanCard, scope: string): HTMLButtonElement => {
-      const row = threadRow(card, index, this.open); identify(row, scope, card); return row
-    }
+    const rowFor = (card: KanbanCard, scope: string): HTMLElement => threadItem(card, index, this.open, focusOf(scope, card))
     const subtree = index.subtree(this.card)
     const nodes = (parent: KanbanCard, archiveMode = false): HTMLElement => {
       const list = document.createElement('ul')
@@ -125,11 +122,11 @@ export class ThreadRail {
       identify(heading, `group:${state}`, this.card)
       heading.textContent = `${label} · ${members.length}`; group.append(heading)
       for (const card of members) {
-        const row = rowFor(card, `group:${state}`)
+        const item = rowFor(card, `group:${state}`)
         const prefix = document.createElement('span'); prefix.className = 'ws-thread-path'
         prefix.textContent = `${card.id.slice(this.card.id.length + 1).split('/').slice(0, -1).join('/')} / `
-        if (prefix.textContent !== ' / ') row.prepend(prefix)
-        group.append(row)
+        if (prefix.textContent !== ' / ') item.querySelector('.kbn-thread-row')!.prepend(prefix)
+        group.append(item)
       }
       this.tree.append(group)
     }

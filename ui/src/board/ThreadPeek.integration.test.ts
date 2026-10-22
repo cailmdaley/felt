@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { ThreadIndex } from './threads.js'
 import { response } from './testFixtures.js'
-import { installThreadPeek, PEEK_ROWS, ThreadFamilies } from './ThreadPeek.js'
+import { installThreadPeek, PEEK_ROWS, THREAD_PIN, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
 import { saveWaitingThreadEntries, waitingThreadEntries } from './threadPreferences.js'
 afterEach(() => { document.body.replaceChildren(); saveWaitingThreadEntries(false); vi.useRealTimers() })
@@ -84,9 +84,9 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
   expect(peek.hidden).toBe(true)
   meta.querySelector<HTMLButtonElement>('button')!.click()
   expect(peek.hidden).toBe(false)
-  expect([...peek.querySelectorAll('button')].map(row => row.textContent)).toEqual([expect.stringContaining(ask.id), expect.stringContaining(child.id)])
+  expect([...peek.querySelectorAll('.kbn-thread-row')].map(row => row.textContent)).toEqual([expect.stringContaining(ask.id), expect.stringContaining(child.id)])
   expect(peek.textContent).toContain('1 archived')
-  peek.querySelector<HTMLButtonElement>('button')!.click()
+  peek.querySelector<HTMLButtonElement>('.kbn-thread-row')!.click()
   expect(open).toHaveBeenCalledWith(ask)
   expect(host.querySelector('.kbn-thread-subentries')).toBeNull()
   saveWaitingThreadEntries(true)
@@ -207,5 +207,54 @@ describe('quiet families', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, done]), vi.fn())
     expect(host.querySelector('.kbn-thread-badge')).toBeNull()
     expect(host.classList.contains('kbn-thread-family')).toBe(false)
+  })
+})
+describe('pinned threads', () => {
+  const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
+  const names = (el: Element | null): string[] => [...el?.querySelectorAll('.kbn-thread-row .kbn-thread-name') ?? []].map(n => n.textContent!)
+  it('a pinned thread is a sub-entry with a pressed pin, whatever its state, and is not drawn again in the list', () => {
+    saveWaitingThreadEntries(false)
+    const root = card({ id: 'root' })
+    const work = card({ id: 'root/work', orchestrator: 'root', status: 'active', tags: ['pinned'] })
+    const other = card({ id: 'root/other', orchestrator: 'root', status: 'active' })
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, work, other]), vi.fn())
+    const entries = host.querySelector('.kbn-thread-subentries')
+    expect(names(entries)).toEqual(['root/work'])
+    expect(entries!.querySelector('.kbn-thread-row')!.classList.contains('kbn-thread-pinned')).toBe(true)
+    expect(entries!.querySelector('.kbn-thread-pin')!.getAttribute('aria-pressed')).toBe('true')
+    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
+    expect(names(host.querySelector('.kbn-thread-peek'))).toEqual(['root/other'])
+    expect(host.querySelector('.kbn-thread-peek .kbn-thread-pin')!.getAttribute('aria-pressed')).toBe('false')
+  })
+  it('pinned rows come ahead of the waiting ones and never fold into "+ N more"', () => {
+    saveWaitingThreadEntries(true)
+    const root = card({ id: 'root' })
+    const pins = [1, 2, 3].map(n => card({ id: `root/p${n}`, orchestrator: 'root', status: 'active', tags: ['pinned'] }))
+    const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask }))
+    const pinnedWait = card({ id: 'root/pw', orchestrator: 'root', status: 'active', ask, tags: ['pinned'] })
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, ...waits, ...pins, pinnedWait]), vi.fn())
+    const entries = host.querySelector('.kbn-thread-subentries')!
+    expect(names(entries)).toEqual(['root/pw', 'root/p1', 'root/p2', 'root/p3', 'root/w1', 'root/w2'])
+    expect(entries.querySelector('.kbn-thread-more')!.textContent).toBe('+ 1 more')
+  })
+  it('the pin control asks the board to pin an unpinned thread and to unpin a pinned one', () => {
+    saveWaitingThreadEntries(false)
+    const root = card({ id: 'root' })
+    const work = card({ id: 'root/work', orchestrator: 'root', status: 'active' })
+    const kept = card({ id: 'root/kept', orchestrator: 'root', status: 'active', tags: ['pinned'] })
+    const host = document.createElement('div'); document.body.append(host)
+    const asked = vi.fn()
+    document.addEventListener(THREAD_PIN, asked)
+    const openRoot = vi.fn(); host.addEventListener('click', openRoot)
+    installThreadPeek(host, host, root, new ThreadIndex([root, work, kept]), vi.fn())
+    const pinOf = (id: string) => host.querySelector<HTMLElement>(`.kbn-thread-row[data-card-uid="${id}"]`)!.parentElement!.querySelector<HTMLButtonElement>('.kbn-thread-pin')!
+    pinOf('root/work').click()
+    pinOf('root/kept').click()
+    document.removeEventListener(THREAD_PIN, asked)
+    expect(asked.mock.calls.map(([e]) => [(e as CustomEvent<ThreadPinRequest>).detail.card.id, (e as CustomEvent<ThreadPinRequest>).detail.pinned]))
+      .toEqual([['root/work', true], ['root/kept', false]])
+    expect(openRoot).not.toHaveBeenCalled()
   })
 })

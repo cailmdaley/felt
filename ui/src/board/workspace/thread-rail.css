@@ -21,3 +21,4 @@
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-thread-rail { display: none; }
 }
+.ws-thread-line > .kbn-thread-item { flex: 1 1 auto; }
