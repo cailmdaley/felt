@@ -14,6 +14,9 @@ import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
+import { bindConstitutionMentions } from './bodyLinks.js'
+import { frameBridge } from './DocumentBridge.js'
+import '../transcript/mentions.css'
 import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
 import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
@@ -90,6 +93,7 @@ export class Workspace {
   private readonly receipts = new Map<string, { files: ShelfFile[]; etag?: string }>()
   private readonly receiptsRead = new Map<string, Promise<void>>()
   private readonly loads = new Map<string, Promise<void>>()
+  private readonly mentions: ReturnType<typeof bindConstitutionMentions>
   private timer: number | null = null
   private disposed = false
   private routeEpoch = 0
@@ -101,6 +105,9 @@ export class Workspace {
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
     this.root = root
+    this.mentions = bindConstitutionMentions(root, opts.cards, (id, origin) => { void this.openFiber(id, origin) }, {
+      shuttleBase: opts.shuttleBase, frameActive: frame => frameBridge(frame)?.active ?? null,
+    })
     this.depth = new WorkspaceDepth(root)
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
@@ -310,6 +317,7 @@ export class Workspace {
 
   /** Keep worker metadata current without rebuilding live file instruments. */
   update(): void {
+    this.mentions.refresh()
     this.overview.cardsChanged()
     if (!this.current || !this.isActive) return
     const card = this.opts.cards().find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
@@ -754,6 +762,7 @@ export class Workspace {
   private stopTimer(): void { if (this.timer !== null) window.clearTimeout(this.timer); this.timer = null }
   private readonly visibility = (): void => { if (document.hidden) this.stopTimer(); else if (this.isActive) this.startTimer() }
   dispose(): void {
+    this.mentions.dispose()
     this.disposed = true
     this.routeEpoch++
     this.stopTimer()

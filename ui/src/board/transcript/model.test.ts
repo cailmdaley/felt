@@ -109,12 +109,13 @@ describe('segments', () => {
   it('covers every step exactly once, in order', () => {
     const steps = fc.array(fc.constantFrom<Step>(
       { kind: 'text', text: 't' }, { kind: 'thinking', text: 'th' }, { kind: 'tool', id: 'x', name: 'Read', input: {}, version: 0 },
+      { kind: 'thread-notice', id: 'n', fiber: 'work/child', verb: 'asked', text: 'Which?' },
     ))
     fc.assert(fc.property(steps, (list) => {
       const covered: number[] = []
       for (const part of segments(list)) {
-        if (part.kind === 'text') {
-          expect(list[part.index].kind).toBe('text')
+        if (part.kind !== 'steps') {
+          expect(list[part.index].kind).toBe(part.kind)
           covered.push(part.index)
         } else {
           for (let i = part.start; i < part.end; i++) {

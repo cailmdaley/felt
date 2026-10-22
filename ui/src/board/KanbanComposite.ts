@@ -39,6 +39,7 @@
 //   }
 
 import { validDesktopThreadLink } from './appConversation.js';
+import { parseWorkerTasks, type WorkerTask } from './transcript/tasks.js';
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
 /**
@@ -47,6 +48,7 @@ import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
  * observation; `state` says whether that worker is running or stuck.
  */
 interface CompositeRuntime {
+  tasks?: WorkerTask[];
   /** `running` for a live worker; `blocked` for an app worker whose launch or
    * conversation failed and now waits on a human (with `launchError`). */
   state: 'running' | 'blocked';
@@ -207,7 +209,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
-  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError };
+  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

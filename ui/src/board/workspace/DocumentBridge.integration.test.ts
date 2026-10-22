@@ -133,6 +133,21 @@ async function report(doc = documents[0]): Promise<HTMLIFrameElement> {
   return frame
 }
 
+it('renders read-model constitution chips in minified opaque reports and forwards their identity', async () => {
+  reportHtml = '<p>[[work/thread]] work/thread</p>'
+  const frame = await report()
+  const win = frame.contentWindow!
+  const row = { id: 'work/thread', name: 'Thread', state: 'Working', outcome: 'A measured result', origin: 'host-a' }
+  win.postMessage({ protocol: 'shuttle-constitution-mentions', type: 'scan' }, '*')
+  win.postMessage({ protocol: 'shuttle-constitution-mentions', type: 'resolved', rows: [row], targets: { '[[work/thread]]': 'work/thread' } }, '*')
+  expect(frame.contentDocument!.querySelectorAll('.ws-constitution-chip')).toHaveLength(2)
+  win.postMessage({ protocol: 'shuttle-constitution-mentions', type: 'resolved', rows: [{ ...row, state: 'To review' }], targets: { '[[work/thread]]': 'work/thread' } }, '*')
+  expect(frame.contentDocument!.querySelector('a')!.textContent).toBe('Thread · To review')
+  // Drain the native reference observer's resulting batch before closing its Window.
+  await vi.waitFor(() => expect(messages.mock.calls.some(([message]) => message.type === 'references')).toBe(true))
+  win.dispatchEvent(new Event('pagehide'))
+})
+
 function press(frame: HTMLIFrameElement, key: string, init: KeyboardEventInit = {}, selector = 'body', trusted = true): KeyboardEvent {
   const win = frame.contentWindow! as Window & typeof globalThis & { trustedTestKey: boolean }
   win.trustedTestKey = trusted

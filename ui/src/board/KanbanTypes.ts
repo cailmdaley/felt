@@ -68,6 +68,8 @@ export interface KanbanCard {
    * `tmuxSession`, which only CLI workers have.
    */
   workerState?: 'running' | 'blocked'
+  /** Owner-served live harness checklist, absent without a tracked worker. */
+  workerTasks?: import('./transcript/tasks.js').WorkerTask[]
   /**
    * The live CLI worker's tmux session name — the terminal handle that attach,
    * open-in-terminal and the join to session ledgers key on. Absent for an app

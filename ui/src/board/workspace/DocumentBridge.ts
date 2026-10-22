@@ -2,6 +2,9 @@ import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindi
 import { referenceRuntime, type ReferenceTarget, type ReferencePlayback } from './ChannelReferences.js'
 import referenceStyles from './references.css?inline'
 import { installPageSwipe, SWIPE } from './PhoneGestures.js'
+import { mentionRuntime } from './bodyLinks.js'
+import { reportMentionRuntime } from '../transcript/reportMentions.js'
+import mentionStyles from '../transcript/mentions.css?inline'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
@@ -59,7 +62,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -110,7 +113,13 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   }
   const style = document.createElement('style'); style.textContent = css
   ;(document.head ?? document.documentElement).append(style)
+  const disposeMentions = reportMentions(mentions, mentionCss, limits, () => active)
   let links: ReturnType<typeof references> | undefined
+  window.addEventListener('pagehide', () => {
+    clearTimeout(referencesTimer)
+    links?.dispose()
+    disposeMentions()
+  }, { once: true })
   const resolveScroller = (): HTMLElement | null => {
     if (scroller?.isConnected && scroller.scrollHeight > scroller.clientHeight + 1) return scroller
     const root = document.scrollingElement as HTMLElement | null
@@ -251,7 +260,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length
@@ -263,6 +272,7 @@ export function withWorkspaceKeyBridge(html: string): string {
 }
 
 export interface FrameBridge {
+  readonly active: boolean
   position: ScrollPosition
   command(type: string, payload?: Record<string, unknown>): void
   subscribeScroll(listener: (position: ScrollPosition) => void): () => void
@@ -277,7 +287,9 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
   let referenceTimes: number[] = []
   let deferredReferences: MessageEvent | undefined
   let deferredTimer: ReturnType<typeof setTimeout> | undefined
+  let active = false
   const bridge: FrameBridge = {
+    get active() { return active },
     position: { x: 0, y: 0 },
     command: (type, payload = {}) => {
       // Titles are presentation text, not identity; keep long titles within the wire budget.
@@ -286,6 +298,7 @@ export function connectDocumentFrame(frame: HTMLIFrameElement, receive: (message
       }
       const message = envelope(type, payload)
       if (!documentMessage(message)) return
+      if (type === 'active' && typeof payload.active === 'boolean') active = payload.active
       if (type === 'restore' && typeof payload.x === 'number' && typeof payload.y === 'number') bridge.position = { x: payload.x, y: payload.y }
       frame.contentWindow?.postMessage(message, '*')
     },

@@ -477,3 +477,37 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }
+
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-thread-notice {
+  margin: 12px 0;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 1px solid var(--ws-hairline);
+  border-radius: 0;
+  background: none;
+  color: var(--ws-ink-muted);
+  font-size: 14px;
+}
+.ws-transcript-thread-notice time { font: 11px var(--ws-mono); }
+.ws-transcript-thread-notice p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-transcript-spawn { margin: 6px 0; font: 12px/1.5 var(--ws-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ws-transcript-checklist {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--kbn-sheet);
+  border: 1px solid var(--ws-hairline);
+  border-radius: 3px;
+  color: var(--ws-ink-soft);
+  font-size: 14px;
+}
+.ws-transcript-checklist-heading { font: 11px/1.5 var(--ws-mono); color: var(--ws-ink-muted); }
+.ws-transcript-checklist ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.ws-transcript-checklist li { display: flex; gap: 8px; padding: 2px 0; }
+.ws-transcript-task-mark { flex: 0 0 1em; }
+.ws-transcript-checklist [data-status='completed'] { color: var(--kbn-tempered-ink); }
+.ws-transcript-checklist [data-status='in_progress'] .ws-transcript-task-mark { color: var(--kbn-agent); }
+.ws-transcript-checklist [data-status='pending'] { color: var(--ws-ink-muted); }

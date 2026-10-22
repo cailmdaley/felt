@@ -1,3 +1,5 @@
+import { threadNotices, type ThreadNotice } from './threadNotices.js'
+
 export type UsageEntry = {
   kind: 'usage'
   at?: number
@@ -9,6 +11,7 @@ export type UsageEntry = {
 }
 
 export type Entry =
+  | ThreadNotice
   | UsageEntry
   | { kind: 'prompt'; text: string; images: number; dispatch: boolean; at?: number }
   | { kind: 'text'; text: string; at?: number; model?: string }
@@ -366,10 +369,28 @@ function codexRecord(record: ObjectValue): Entry[] {
 export function normalizeRecord(raw: unknown): Entry[] {
   try {
     const record = object(raw)
-    if (!record) return []
-    if (['response_item', 'event_msg', 'compacted'].includes(String(record.type))) return codexRecord(record)
-    if (['message', 'custom_message', 'compaction', 'context_edit'].includes(String(record.type))) return piRecord(record)
-    return claudeRecord(record)
+    if (!record || record.isSidechain === true) return []
+    const native = ['response_item', 'event_msg', 'compacted'].includes(String(record.type)) ? codexRecord(record)
+      : ['message', 'custom_message', 'compaction', 'context_edit'].includes(String(record.type)) ? piRecord(record)
+      : claudeRecord(record)
+    const seen = new Set<string>()
+    const entries = native.flatMap<Entry>(entry => {
+      if (entry.kind !== 'prompt' && entry.kind !== 'event') return [entry]
+      const notices = threadNotices(entry.text ?? '', entry.at)
+      if (!notices.length) return [entry]
+      for (const notice of notices) seen.add(notice.id)
+      return notices
+    })
+    // Hook-supplied context is inside system-reminder blocks, which ordinary
+    // Claude prompt normalization omits. Read deliveries before losing them.
+    if (record.type === 'user') {
+      const message = object(record.message)
+      const source = contentText(message?.content)
+      const reminders = [...source.matchAll(/<system-reminder\b[^>]*>([\s\S]*?)<\/system-reminder\s*>/gi)]
+      const notices = reminders.flatMap(match => threadNotices(match[1], timestamp(record.timestamp))).filter(notice => !seen.has(notice.id))
+      return [...notices, ...entries]
+    }
+    return entries
   } catch {
     return []
   }

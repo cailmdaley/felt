@@ -61,6 +61,53 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
+  it('pins live tasks above both readers and updates without a transcript fetch or human turn', async () => {
+    const fetcher = fixtureFetch({ [latestId]: records('Fixture', 'Answer'), [earlierId]: records('Old', 'Earlier') })
+    const band = makeBand(fetcher)
+    const tasks = [{ id: '1', subject: 'Verify', status: 'in_progress' as const, activeForm: 'Verifying' }]
+    band.follow(target(latestId, { live: true, tasks }))
+    await settle()
+    const checklist = band.el.querySelector('.ws-transcript-checklist')!
+    expect(checklist.textContent).toContain('Verifying')
+    expect(band.el.querySelector('.ws-transcript-body')!.firstElementChild).toBe(checklist)
+    const reads = vi.mocked(fetcher).mock.calls.length
+    band.follow(target(latestId, { live: true, tasks: [{ ...tasks[0], status: 'completed' }] }))
+    expect(checklist.textContent).toContain('✓Verify')
+    expect(vi.mocked(fetcher).mock.calls).toHaveLength(reads)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    expect(band.el.querySelector('.ws-transcript-scroll')!.firstElementChild?.className).toBe('ws-transcript-checklist')
+    band.read(target(earlierId))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.follow(target(latestId, { live: true, tasks }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-latest')!.click()
+    expect(band.el.querySelector('.ws-transcript-checklist')?.textContent).toContain('Verifying')
+    band.follow(target(latestId, { live: true, tasks: [] }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.follow(target(latestId, { live: false, tasks }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+  })
+  it('keeps thread deliveries visible between messages in preview and full transcript, outside folded tools', async () => {
+    const delivered = `[Shuttle message thread-${'a'.repeat(64)}]\nthread work/child closed: A measured result`
+    const items = [
+      ...records('Keep going', 'I am coordinating.'),
+      { type: 'user', message: { content: delivered } },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'I will integrate it.' }] } },
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+    const preview = band.el.querySelector('.ws-transcript-exchange')!
+    expect([...preview.children].map(row => row.textContent)).toEqual([
+      expect.stringContaining('Keep going'), expect.stringContaining('I am coordinating.'),
+      expect.stringContaining('work/child closedA measured result'), expect.stringContaining('I will integrate it.'),
+    ])
+    expect(preview.querySelectorAll('.ws-transcript-thread-notice')).toHaveLength(1)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
+    expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
+    expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
+  })
   it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
     const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()
     const band = makeBand(fixtureFetch({ [latestId]: items }))
