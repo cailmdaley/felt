@@ -140,9 +140,7 @@
      paper it is the plate; dark stock sinks it below the desk instead. */
   --kbn-recess: var(--kbn-plate);
 
-  /* MACHINERY HUES. A queued card waits behind another (violet); a standing
-     role sleeps on its cron (slate); a launch is held by the daemon (steel). */
-  --kbn-queue: #6B4E71;
+  /* Standing constitutions wear the schedule hue. */
   --kbn-slate: #4A606E;
   --kbn-held: #5A698C;
 }
@@ -219,7 +217,6 @@
   --kbn-discarded-ink: #F2A99D;
   --kbn-diff-add: #9CCB8C;
   --kbn-diff-del: #E58A7C;
-  --kbn-queue: #C7A6CF;
   --kbn-slate: #9DB6C4;
   --kbn-held: #A9B6DC;
 }
@@ -250,7 +247,6 @@
   --kbn-discarded-ink: #F4B2A8;
   --kbn-diff-add: #A9D098;
   --kbn-diff-del: #E8978C;
-  --kbn-queue: #D0AFD2;
   --kbn-slate: #ACBCC6;
   --kbn-held: #B4BDE0;
 }

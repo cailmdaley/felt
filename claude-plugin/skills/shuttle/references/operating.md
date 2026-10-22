@@ -14,7 +14,8 @@ A fiber is eligible for a worker when these conditions hold:
 
 Inspect eligible work before releasing: the release applies to the whole host.
 
-`shuttle.agent` chooses what runs, from `shuttle agents`; without one the fiber gets the registry default. `depends_on` only orders the board, folding a queued card under its head.
+`shuttle.agent` chooses what runs, from `shuttle agents`; without one the fiber gets the registry default.
+For work that should wait, create a draft thread with `shuttle thread <parent> "<ask>" --disabled` and arm it with `shuttle resume <thread>` when ready.
 
 An `active` card can still refuse to dispatch; the daemon then shows it blocked with its reason instead of retrying every poll. On macOS the usual reason is `tmux_server_unavailable`: no tmux server is running, and the daemon won't start one itself (macOS would then charge every worker's file access to the daemon). The human restarts tmux from their terminal; re-dispatching won't help.
 
@@ -27,7 +28,7 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Drafts** — `status: open`, on the desk.
 - **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
-- **In flight** — a live worker or owned app conversation, or an armed oneshot, even one waiting on its dependencies.
+- **In flight** — a live worker or owned app conversation, or an armed oneshot.
 - **Awaiting review** — `status: closed` with no `tempered`, parked for the human.
 - **Tempered** — `closed`, `tempered: true`: the human accepted it.
 - **Discarded** — `closed`, `tempered: false`: the human set it aside. The block stays as the record.
@@ -44,7 +45,7 @@ shuttle rest    <fiber>                # into Resting without review; stops a li
 shuttle resume  <fiber>                # arm; a standing constitution awaiting review re-arms for its next tick
 shuttle accept  <fiber>                # accept a standing run: re-arms for its next tick
 shuttle close   <fiber> [--tempered=true|false]
-shuttle reopen  <fiber> [--as-draft]   # requeue a closed fiber
+shuttle reopen  <fiber> [--as-draft]   # reopen for active work, or as an unarmed draft
 shuttle uninstall <fiber>              # remove the block (see below)
 
 shuttle status [<fiber>] [--all]       # the block and whether it will dispatch; --all adds remotes

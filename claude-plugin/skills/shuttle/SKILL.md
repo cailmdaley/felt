@@ -80,6 +80,7 @@ Changing `--host` requires an explicit `--project-dir` for that host.
 An absent parent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent.
 Use `--surface cli|app` to override inheritance; app requires Codex, and invalid selections never create or arm a child.
 Containment is the whole relation, and `felt nest` changes it.
+For work that should wait, create the thread with `--disabled` and arm it with `shuttle resume <thread>` when ready; containment never gates dispatch.
 Write a thread's outcome for its orchestrator, the reader named in its dispatch prompt.
 Results reach **only that nearest orchestrator**, never automatically propagating further; each orchestrator decides what to pass on.
 

@@ -23,12 +23,8 @@ import {
   cycleMembership,
   cycleSpan,
   effectiveHorizon,
-  foldHeadId,
-  leftQueues,
   isCycleFiber,
   nextStandingLaunch,
-  unresolvedDependencies,
-  type FoldNode,
   type KanbanColumn,
 } from './KanbanRules.js';
 import type {
@@ -87,24 +83,6 @@ export function buildKanbanResponseFromComposite(
   const nowMs = opts.nowMs ?? Date.now();
   const staleness = buildStaleness(feed);
 
-  // Edge resolution reads across origins, so `byId` spans the WHOLE feed (a
-  // local fiber may depend on a remote-owned one and vice versa), while only
-  // the kanban-eligible subset is actually classified onto surfaces.
-  // Keyed by BOTH names a dependency can call a fiber by: its path id/slug and
-  // its intrinsic ULID `uid`. felt's own object-form `depends_on: [{id: <ulid>}]`
-  // writes a uid, so without the uid key a perfectly good chain would draw as a
-  // pile of loose cards each wearing a spurious "unresolved dep" warning.
-  const byId = new Map<string, Fiber>();
-  for (const e of feed.entries) {
-    byId.set(e.fiber.id, e.fiber);
-    // Both cases, because a uid is a ULID and a human retyping one does not
-    // hold the shift key. `felt check` case-folds for the same reason.
-    if (e.fiber.uid) {
-      byId.set(e.fiber.uid, e.fiber);
-      byId.set(e.fiber.uid.toLowerCase(), e.fiber);
-    }
-  }
-
   const eligible = dedupeMirroredRows(
     feed.entries.filter((e) => shouldIncludeInKanban(e.fiber)),
     feed,
@@ -115,7 +93,7 @@ export function buildKanbanResponseFromComposite(
     const o = feed.origins[origin];
     return o && o.kind !== 'local' && o.stale ? { since: o.lastPolledAt } : undefined;
   };
-  const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs, staleOrigin);
+  const surfaces = assembleSurfaces(eligible, projectDirIndex(eligible), nowMs, staleOrigin);
 
   const response: KanbanResponse = {
     feltHost: feed.host,
@@ -124,7 +102,6 @@ export function buildKanbanResponseFromComposite(
     timeline: surfaces.timeline,
     stash: surfaces.stash,
     roles: surfaces.roles,
-    folded: surfaces.folded,
     cycles: surfaces.cycles,
     totals: surfaceTotals(surfaces),
     staleness,
@@ -247,26 +224,8 @@ type AssembledSurfaces = {
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
   roles: KanbanCard[];
-  folded: KanbanCard[];
   cycles: KanbanCard[];
 };
-
-/**
- * The columns whose cards are DRAWN with their queue — the three desk columns
- * plus the scheduled/Resting surfaces. A head on one of these can
- * hold a fold; a head in the past lane (tempered, composted) or a cycle cannot,
- * so work queued behind finished work stands in its own column rather than
- * being tucked under something nobody is looking at.
- */
-export const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanColumn>([
-  'drafts',
-  'scheduled',
-  'inFlight',
-  'awaitingReview',
-  // A seat holds the work filed behind it: the chip wears the "+N queued"
-  // control, so dropping a card on a chair visibly puts it there.
-  'roles',
-]);
 
 /**
  * The classify-and-route pass: run `classifyFiber` (the SINGLE source of truth)
@@ -276,7 +235,6 @@ export const FOLDABLE_HEAD_COLUMNS: ReadonlySet<KanbanColumn> = new Set<KanbanCo
  */
 function assembleSurfaces(
   entries: CompositeEntry[],
-  byId: Map<string, Fiber>,
   dirs: ProjectDirIndex,
   nowMs: number,
   staleOrigin: (origin: string) => KanbanCard['originStale'] = () => undefined,
@@ -293,19 +251,8 @@ function assembleSurfaces(
   const buckets: Record<KanbanColumn, KanbanCard[]> = {
     drafts, scheduled, inFlight, awaitingReview, tempered, composted, cycles, roles,
   };
-  // THE FOLD. A card queued behind another is not a card of its own on this
-  // board: it is drawn under its head, wherever the head is drawn, reachable
-  // through that head's "+N queued" chip. So classification happens first, for
-  // everyone (a card's column is always its own status), and the fold then
-  // decides only which of them are DRAWN in their column.
-  //
-  // Two cards never fold, because both would be the board hiding something it
-  // must show: one with a LIVE WORKER or `status: active` (work is happening
-  // right now), and one whose head this board is not drawing at all — not in
-  // the feed, or settled into the past lane. Nothing is ever hidden behind a
-  // card that is not there.
   const classified = entries.map((entry) => {
-    const card = toCard(entry, byId, dirs, nowMs);
+    const card = toCard(entry, dirs, nowMs);
     const originStale = staleOrigin(entry.origin);
     if (originStale) card.originStale = originStale;
     return {
@@ -313,10 +260,6 @@ function assembleSurfaces(
       column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
     };
   });
-  // Keyed by BOTH names an edge can call a fiber by — the slug id and the
-  // intrinsic ULID — for the same reason `byId` is: felt's own object form
-  // writes a uid, and a chain the board could not resolve would draw as a pile
-  // of loose cards.
   // THREADS. A card whose orchestrator resolves is drawn through its root, never
   // on its own; one whose orchestrator is not on the board is its own card,
   // marked orphaned, so its work stays reachable.
@@ -328,38 +271,9 @@ function assembleSurfaces(
     card.threadSummary = threadIndex.summary(card);
   }
   const threads = allCards.filter(card => parented.has(card));
-  const nodes = new Map<string, FoldNode>();
   for (const { card, column } of classified) {
-    const node: FoldNode = {
-      id: card.id,
-      // A card with a verdict has left every queue (`leftQueues`): it never
-      // folds (below), and it is not a fold head, but the walk passes
-      // through it to what it waited on.
-      dependsOn: card.dependsOn,
-      foldable: !parented.has(card) && FOLDABLE_HEAD_COLUMNS.has(column),
-    };
-    nodes.set(card.id, node);
-    if (card.uid) {
-      nodes.set(card.uid, node);
-      nodes.set(card.uid.toLowerCase(), node);
-    }
+    if (!parented.has(card)) buckets[column].push(card);
   }
-  const folded: KanbanCard[] = [];
-  for (const { card, column } of classified) {
-    if (parented.has(card)) continue;
-    // A family with unfinished work in it is never tucked under another head.
-    const standsAlone = hasLiveWorker(card) || card.status === 'active' || leftQueues(card) || !!familyColumn(card.threadSummary);
-    const head = standsAlone
-      ? undefined
-      : foldHeadId(nodes.get(card.id) ?? { id: card.id, dependsOn: card.dependsOn, foldable: false },
-          (id) => nodes.get(id));
-    if (head !== undefined) {
-      folded.push({ ...card, foldedUnder: head });
-      continue;
-    }
-    buckets[column].push(card);
-  }
-  folded.sort(byCreatedAtDesc);
 
   scheduled.sort(byCreatedAtDesc);
   // Desk has no persisted human arrangement; drafts use creation order.
@@ -426,7 +340,6 @@ function assembleSurfaces(
     timeline: { past, futureDated },
     stash,
     roles,
-    folded,
     cycles,
   };
 }
@@ -564,39 +477,24 @@ function ghostColumn(card: KanbanCard): LensColumn {
  * The board builds cards in bulk from the whole feed; a fiber reached by
  * [[wikilink]] arrives alone, from the single-fiber feed, and still needs the
  * same card the board would have made — same fields, same shuttle block, so
- * the panel that opens it is the same panel. What a lone row cannot know is
- * how its edges resolve (there is no feed to look siblings up in), so it says
- * nothing about them rather than reporting every one as dangling.
+ * the panel that opens it is the same panel.
  */
 export function cardFromCompositeEntry(entry: CompositeEntry, nowMs = Date.now()): KanbanCard {
-  // `dependsOnUnresolved` is dropped: a lone row has no feed to resolve its
-  // edges against, so every dep would read as dangling — a warning that every
-  // single-fiber fetch would raise is noise, not information.
-  return {
-    ...toCard(entry, new Map(), new Map(), nowMs),
-    dependsOnUnresolved: undefined,
-  };
+  return toCard(entry, new Map(), nowMs);
 }
 
 /**
  * One composite row → one card. Liveness (`workerState`) and the terminal
  * handle (`tmuxSession`) are the feed row's owner-served `runtime` — uniform
  * for local and remote, ONE observer per fiber,
- * no local tmux index and no per-origin branch. Edge resolution reads `byId`
- * across the whole feed.
+ * no local tmux index and no per-origin branch.
  */
 function toCard(
   entry: CompositeEntry,
-  byId: Map<string, Fiber>,
   dirs: ProjectDirIndex,
   nowMs: number,
 ): KanbanCard {
   const f = entry.fiber;
-  const dependsOn = f.dependsOn ?? [];
-  // An id `byId` cannot answer for is REPORTED, never enforced: it lands on
-  // `dependsOnUnresolved` (a badge on the card) and holds nothing back. A typo
-  // must never be able to hide work.
-  const unresolved = unresolvedDependencies(dependsOn, (id) => byId.has(id));
   const runtime = entry.runtime;
   const tmuxSession = runtime?.tmuxSession;
   // A blocked worker's phase is its block; otherwise the activity category.
@@ -635,9 +533,6 @@ function toCard(
     closedAt: f.closedAt,
     modifiedAt: f.modifiedAt,
     tempered: f.tempered,
-    dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
-    dependsOnShape: f.dependsOnShape,
-    dependsOnUnresolved: unresolved.length > 0 ? unresolved : undefined,
     workerState: runtime?.state,
     tmuxSession,
     runtimePhase,

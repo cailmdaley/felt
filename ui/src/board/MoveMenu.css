@@ -21,11 +21,6 @@
   user-select: none;
   -webkit-touch-callout: none;
 }
-/* …except the one field made for typing into. */
-.kbn-move-menu .kbn-move-search {
-  -webkit-user-select: text;
-  user-select: text;
-}
 .kbn-move-menu {
   position: fixed;
   z-index: 10501;
@@ -83,17 +78,6 @@
   margin: 5px 14px;
   background: color-mix(in srgb, var(--kbn-ink) 12%, transparent);
 }
-.kbn-move-back {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  padding: 0 4px;
-  font-size: calc(15px * var(--kbn-type-scale, 1));
-  line-height: 1;
-  color: var(--kbn-graphite-muted);
-  cursor: pointer;
-}
-.kbn-move-back:hover { color: var(--kbn-ink); }
 .kbn-move-list {
   display: flex;
   flex-direction: column;
@@ -120,33 +104,6 @@
   background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent);
 }
 .kbn-move-item-label { font-weight: 600; }
-.kbn-move-item-hint {
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  color: var(--kbn-graphite-muted);
-  font-weight: 400;
-}
-.kbn-move-empty {
-  margin: 0;
-  padding: 4px 14px 8px;
-  font-size: calc(13.5px * var(--kbn-type-scale, 1));
-  color: var(--kbn-graphite-muted);
-}
-.kbn-move-search {
-  box-sizing: border-box;
-  margin: 0 14px 6px;
-  padding: 5px 8px;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 18%, transparent);
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--kbn-paper-bright) 75%, transparent);
-  font-family: var(--font-main, 'EB Garamond', serif);
-  /* 16px so iOS does not zoom the page when this takes focus. */
-  font-size: 16px;
-  color: var(--kbn-ink);
-}
-.kbn-move-search:focus {
-  outline: none;
-  border-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
-}
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The move menu rises from the bottom edge. Same list, different arrival. */
@@ -185,8 +142,6 @@
     border-top: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
     border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
   }
-  .kbn-move-sheet .kbn-move-back { font-size: 20px; padding: 0 8px; }
-  .kbn-move-sheet .kbn-move-search { margin: 0 18px 8px; padding: 10px; }
 }
 
 @keyframes kbn-move-rise {
@@ -196,4 +151,3 @@
 @media (prefers-reduced-motion: reduce) {
   .kbn-move-menu.kbn-move-sheet { animation: none; }
 }
-

@@ -30,9 +30,6 @@ function rendererOptions(
     stopDragAutoScroll: () => {},
     transition: vi.fn(),
     setSurface: () => {},
-    stack: () => {},
-    reorderQueue: () => {},
-    unqueueRow: () => {},
     openDetail: () => {},
     onRest: () => {},
     onRefresh: () => {},
@@ -99,15 +96,6 @@ describe('a Desk row is a line, not a card', () => {
     expect(meta.dataset.verdictKey).toBeTruthy()
     const actions = meta.querySelector(':scope > .kbn-card-hover-actions')!
     expect([...actions.querySelectorAll('button')].map(b => b.textContent)).toEqual(['Temper', 'Discard', 'rest'])
-  })
-
-  it('hangs a queue\'s peek list under the row, on a line of its own', () => {
-    const head = card({ id: 'head', shuttleKind: 'oneshot' })
-    const behind = card({ id: 'behind', shuttleKind: 'oneshot', dependsOn: ['head'], dependsOnShape: 'scalar', effectiveHorizon: 'stashed' })
-    const queued = response({ now: { drafts: [head], inFlight: [], awaitingReview: [] }, stash: [behind] })
-    const row = renderer(queued).renderNowSection(queued.now, queued.staleness).querySelector<HTMLElement>('[data-fiber-id="head"]')!
-    expect(row.querySelector('.kbn-card-meta > .kbn-card-queued')?.textContent).toMatch(/1/)
-    expect(row.querySelector(':scope > .kbn-card-queued-list')).not.toBeNull()
   })
 })
 

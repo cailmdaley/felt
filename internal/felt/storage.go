@@ -414,7 +414,6 @@ type MigrationResult struct {
 	// into the directory layout unless Blocked.
 	Strays                []StrayFiber
 	TitleToNameIDs        []string
-	RemovedDependsOnIDs   []string
 	StrippedMystAnchorIDs []string
 }
 
@@ -1183,18 +1182,15 @@ func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) erro
 			return fmt.Errorf("reading fiber %s: %w", file.path, err)
 		}
 
-		rewritten, renamedTitle, removedDependsOn, strippedAnchor, err := normalizeFiberFile(file.id, data)
+		rewritten, renamedTitle, strippedAnchor, err := normalizeFiberFile(file.id, data)
 		if err != nil {
 			return fmt.Errorf("normalize fiber %s: %w", file.path, err)
 		}
-		if !renamedTitle && !removedDependsOn && !strippedAnchor {
+		if !renamedTitle && !strippedAnchor {
 			continue
 		}
 		if renamedTitle {
 			result.TitleToNameIDs = append(result.TitleToNameIDs, file.id)
-		}
-		if removedDependsOn {
-			result.RemovedDependsOnIDs = append(result.RemovedDependsOnIDs, file.id)
 		}
 		if strippedAnchor {
 			result.StrippedMystAnchorIDs = append(result.StrippedMystAnchorIDs, file.id)
@@ -1208,7 +1204,6 @@ func (s *Storage) normalizeFiberFiles(dryRun bool, result *MigrationResult) erro
 	}
 
 	slices.Sort(result.TitleToNameIDs)
-	slices.Sort(result.RemovedDependsOnIDs)
 	slices.Sort(result.StrippedMystAnchorIDs)
 	return nil
 }
@@ -1251,19 +1246,19 @@ func (s *Storage) BackfillIntrinsicIDs(dryRun bool) (*IdentityBackfillResult, er
 	return result, nil
 }
 
-func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, error) {
+func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, error) {
 	frontmatter, body, err := SplitFrontmatter(content, true)
 	if err != nil {
-		return nil, false, false, false, err
+		return nil, false, false, err
 	}
 
-	rewrittenFrontmatter, renamedTitle, removedDependsOn, err := normalizeLegacyFrontmatter(frontmatter)
+	rewrittenFrontmatter, renamedTitle, err := normalizeLegacyFrontmatter(frontmatter)
 	if err != nil {
-		return nil, false, false, false, err
+		return nil, false, false, err
 	}
 	rewrittenBody, strippedAnchor := stripLegacyMystAnchor(id, body)
-	if !renamedTitle && !removedDependsOn && !strippedAnchor {
-		return content, false, false, false, nil
+	if !renamedTitle && !strippedAnchor {
+		return content, false, false, nil
 	}
 
 	var out bytes.Buffer
@@ -1277,7 +1272,7 @@ func normalizeFiberFile(id string, content []byte) ([]byte, bool, bool, bool, er
 			out.WriteString("\n")
 		}
 	}
-	return out.Bytes(), renamedTitle, removedDependsOn, strippedAnchor, nil
+	return out.Bytes(), renamedTitle, strippedAnchor, nil
 }
 
 func backfillIntrinsicID(content []byte) ([]byte, bool, error) {

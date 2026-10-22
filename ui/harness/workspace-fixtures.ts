@@ -248,8 +248,6 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         // Distinct from frontmatter stamps and receipt times: real file mtime.
         modified_at: iso(-47 * minute),
         closed_at: fiber.status === 'closed' ? iso(-fiber.age * day) : undefined,
-        ...(fiber.id === 'research/workspace/weekly-summary' ? { depends_on: WORKSPACE_UID } : {}),
-        ...(fiber.id === 'research/workspace/validation-follow-up' ? { depends_on: '01KVBR2G7CXDWMG85592QW78M9' } : {}),
         shuttle: {
           role: fiber.role,
           kind: fiber.id === 'pipeline/spin/remote-review' ? 'standing' : 'oneshot',
@@ -347,7 +345,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     file(WORKSPACE_HOST, wav, 'audio/wav', blobFor(wavData, 'audio/wav')),
     file(WORKSPACE_HOST, mp4, 'video/mp4', blobFor(mp4Data, 'video/mp4')),
     file(WORKSPACE_HOST, webm, 'video/webm', blobFor(webmData, 'video/webm')),
-    file(WORKSPACE_HOST, other, 'application/zip', new Blob([zipBytes], { type: 'application/zip' })), 
+    file(WORKSPACE_HOST, other, 'application/zip', new Blob([zipBytes], { type: 'application/zip' })),
     file(WORKSPACE_REMOTE, remotePdf, 'application/pdf', blobFor(pdfData, 'application/pdf')),
     file(WORKSPACE_HOST, `${project}/deliverables/weekly.txt`, 'text/plain', 'A receipt-backed second channel.\n'),
     file(WORKSPACE_REMOTE, '/scratch/fixture-store/covariance/transfer.txt', 'text/plain', 'Remote receipt fixture.\n'),

@@ -60,22 +60,6 @@ export interface KanbanCard {
    * — a launch/accept/edit rewrites the frontmatter. */
   modifiedAt?: string
   tempered?: boolean
-  dependsOn?: string[]
-  /** How `depends_on:` was written — `scalar` (one bare id) or `list`. The
-   *  drag gestures author and clear scalars only. */
-  dependsOnShape?: 'scalar' | 'list'
-  /** Dep ids nothing in the feed answers to. They hold nothing back; the card
-   *  wears a warning badge so a chain that silently is not one is visible. */
-  dependsOnUnresolved?: string[]
-  /**
-   * The card this one is FOLDED UNDER — the head of its chain, wherever that
-   * head is drawn (a desk column, Resting). Set only on the
-   * cards in `KanbanResponse.folded`, which no surface draws directly: they are
-   * reached through the head's "+N queued" chip. Derived fresh on every poll
-   * (`foldHeadId`), never stored — clear the edge and the card is simply drawn
-   * in its own column again.
-   */
-  foldedUnder?: string
   /**
    * The owning daemon's worker for this fiber: `running`, or `blocked` (an app
    * launch or conversation that failed and waits on a human, explained by
@@ -342,18 +326,6 @@ export interface KanbanResponse {
    *  running seat is in `now.inFlight`; a closed one awaits review like any
    *  other card. */
   roles: KanbanCard[]
-  /**
-   * Cards FOLDED under the head of their chain — queued behind a card that is
-   * drawn somewhere on this board, so they are drawn there and not in a column
-   * of their own. No surface iterates this list; it exists so a folded card is
-   * still RESOLVABLE (`findCardById`, the peek list's rows, every drag that
-   * starts from one) rather than vanishing from the response entirely.
-   *
-   * A card with a live worker or `status: active` is never here — work that is
-   * happening must be seen — and neither is one whose head the board is not
-   * drawing at all.
-   */
-  folded: KanbanCard[]
   /**
    * Cycles — `cycle`-tagged fibers, each a named span of time. Read ONLY by the
    * temporal views, which draw them as bands behind the work; the Desk never

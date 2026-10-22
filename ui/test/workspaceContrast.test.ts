@@ -84,7 +84,7 @@ describe('the board palette in every appearance', () => {
     if (name === 'light') continue
     it(`${name}: muted and faint ink, and every pigment set as text, meet AA on card paper`, () => {
       for (const ink of ['--kbn-ink-muted', '--kbn-ink-faint', '--kbn-graphite-muted', '--kbn-graphite-pale', '--kbn-you', '--kbn-agent',
-        '--kbn-owed', '--kbn-owed-bright', '--kbn-tempered', '--kbn-tempered-ink', '--kbn-discarded', '--kbn-queue', '--kbn-slate', '--kbn-held'])
+        '--kbn-owed', '--kbn-owed-bright', '--kbn-tempered', '--kbn-tempered-ink', '--kbn-discarded', '--kbn-slate', '--kbn-held'])
         for (const ground of grounds) expect(ratio(c(ink), c(ground)), `${ink} on ${ground}`).toBeGreaterThanOrEqual(4.5)
     })
     it(`${name}: text set on a solid pigment stays legible`, () => {

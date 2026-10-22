@@ -668,7 +668,7 @@ export class Overview {
     let changed = false
     for (const [uid, card] of known) {
       const outcome = card.outcome ?? ''
-      const review = fiberPageColumn(card) === 'awaitingReview' && !card.foldedUnder
+      const review = fiberPageColumn(card) === 'awaitingReview'
       const old = this.stamps.get(uid)
       if (old && old.outcome === outcome && old.review === review) continue
       this.stamps.set(uid, {
@@ -772,7 +772,7 @@ export class Overview {
     const newDocuments = [...this.folios.values()].flatMap(f => f.receipts.filter(r => r.timestamp > this.seen))
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
-    const reviewCount = this.opts.cards().filter(c => fiberPageColumn(c) === 'awaitingReview' && !c.foldedUnder).length
+    const reviewCount = this.opts.cards().filter(c => fiberPageColumn(c) === 'awaitingReview').length
     const prefix = this.previousVisit ? `Since you were here at ${new Date(this.previousVisit).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'The last 30 days'
     text(this.summary, `${prefix}: ${documentCount} ${documentCount === 1 ? 'document' : 'documents'} in ${constitutionCount} ${constitutionCount === 1 ? 'constitution' : 'constitutions'}; ${reviewCount} await your review.`)
     this.startVisit()

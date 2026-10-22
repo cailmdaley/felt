@@ -150,7 +150,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 				}
 			} else {
 				if statusBefore == felt.StatusClosed {
-					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to requeue it, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
+					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to arm it, or set status: active before installing; use --disabled to park in drafts", args[0], args[0])
 				}
 				if statusBefore != felt.StatusActive {
 					f.Status = felt.StatusActive
@@ -287,7 +287,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			statusBefore := f.Status
 			statusChanged := false
 			if statusBefore == felt.StatusClosed {
-				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it before installing", args[0], args[0])
+				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it before installing", args[0], args[0])
 			}
 			if statusBefore != felt.StatusActive {
 				f.Status = felt.StatusActive

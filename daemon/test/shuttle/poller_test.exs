@@ -4925,48 +4925,6 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  # `depends_on` has zero dispatch meaning: it's a board-only ordering
-  # annotation ("filed after that"), never a gate. An active oneshot whose
-  # `depends_on` names a fiber that is neither tempered nor pinned — the
-  # shape that used to block it under the old sequence gate — is eligible
-  # regardless, and this holds for every accepted `depends_on` shape (bare
-  # scalar, list of ids, list of {id: ...} maps).
-  test "poller dispatches a oneshot whose depends_on names an untempered fiber" do
-    dep = make_fiber("tests/dep", %{"tempered" => false, "tags" => []})
-
-    for {label, deps} <- [
-          {"scalar", "tests/dep"},
-          {"list of ids", ["tests/dep"]},
-          {"list of maps", [%{"id" => "tests/dep"}]}
-        ] do
-      fiber_id = "tests/dependent-#{String.replace(label, " ", "-")}"
-      fiber = make_fiber(fiber_id, %{"depends_on" => deps})
-
-      MockRunner.set_fiber(fiber_id, fiber)
-      MockRunner.set_fiber("tests/dep", dep)
-      MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
-
-      {:ok, poller} =
-        start_poller!(
-          name: :"test_poller_dep_ignored_#{String.replace(label, " ", "_")}",
-          runner: MockRunner,
-          poll_interval_ms: 60_000,
-          felt_stores: [MockRunner.felt_root()]
-        )
-
-      sync_poll_cycle!(poller)
-
-      assert_eventually(fn ->
-        commands = MockRunner.commands()
-
-        assert Enum.any?(commands, fn {cmd, args} ->
-                 cmd == "tmux" and hd(args) == "new-session" and
-                   Enum.member?(args, FiberUid.session(fiber_id))
-               end)
-      end)
-    end
-  end
-
   test "poller does not double-dispatch" do
     fiber = make_fiber("tests/haiku-dedup")
     MockRunner.set_fiber("tests/haiku-dedup", fiber)

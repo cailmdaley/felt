@@ -1330,7 +1330,7 @@ shuttle:
     session:
         id: 68b394d0-927b-4130-aba2-be4b87c33017
         agent: claude-sonnet
-depends_on:
+related_work:
     - some-other-fiber
 ---
 
@@ -1390,62 +1390,12 @@ Body.
 	}
 
 	// List-shaped tool-owned fields too.
-	deps, ok := decoded["depends_on"].([]interface{})
+	deps, ok := decoded["related_work"].([]interface{})
 	if !ok || len(deps) != 1 || deps[0] != "some-other-fiber" {
-		t.Errorf("depends_on = %v, want [\"some-other-fiber\"]", decoded["depends_on"])
+		t.Errorf("related_work = %v, want [\"some-other-fiber\"]", decoded["related_work"])
 	}
 }
 
-// TestMarshalJSONIncludesLegacyDependsOn guards against a regression: the
-// hyphenated `depends-on:` form was previously listed in
-// knownFrontmatterKeys without a corresponding struct field, so it was
-// silently absorbed at parse time and never appeared anywhere — including
-// in JSON output, which is what bit Portolan's tapestry view (it relies on
-// the dependency edges being visible via felt show/ls JSON). The fix is
-// to leave depends-on out of knownFrontmatterKeys so it lands in
-// ExtraFields like any other unknown key, then surfaces flat-top-level
-// in MarshalJSON output.
-func TestMarshalJSONIncludesLegacyDependsOn(t *testing.T) {
-	t.Parallel()
-	input := `---
-name: Legacy fiber
-status: open
-created-at: 2026-05-04T00:00:00Z
-depends-on:
-    - upstream-fiber
-    - other-upstream
----
-
-Body.
-`
-	f, err := Parse("tests/legacy", []byte(input))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-
-	out, err := json.Marshal(f)
-	if err != nil {
-		t.Fatalf("MarshalJSON: %v", err)
-	}
-
-	var decoded map[string]interface{}
-	if err := json.Unmarshal(out, &decoded); err != nil {
-		t.Fatalf("Unmarshal output: %v", err)
-	}
-
-	deps, ok := decoded["depends-on"].([]interface{})
-	if !ok {
-		t.Fatalf("depends-on missing or not a list; got %T: %v\nfull JSON:\n%s",
-			decoded["depends-on"], decoded["depends-on"], string(out))
-	}
-	if len(deps) != 2 || deps[0] != "upstream-fiber" || deps[1] != "other-upstream" {
-		t.Errorf("depends-on = %v, want [\"upstream-fiber\", \"other-upstream\"]", deps)
-	}
-}
-
-// TestMarshalJSONNoExtraFields exercises the fast path: a fiber with no
-// tool-owned frontmatter must round-trip through MarshalJSON without
-// regression.
 func TestMarshalJSONNoExtraFields(t *testing.T) {
 	t.Parallel()
 	input := `---

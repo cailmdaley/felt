@@ -313,7 +313,7 @@ func (a *app) dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.
 		}
 		return verdict
 	case felt.StatusClosed:
-		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `%s` to clear verdict fields and requeue it.", arm("reopen"))
+		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `%s` to clear verdict fields and arm it.", arm("reopen"))
 	case felt.StatusOpen:
 		return fmt.Sprintf("→ Draft (status: open). Use `%s` to arm it.", arm("resume"))
 	case "":

@@ -6,8 +6,7 @@
 // guard in KanbanModal / KanbanRules it is standing in for.
 
 import { describe, expect, it } from 'vitest'
-import { moveDestinations, queueTargets } from './MoveDestinations.js'
-import { buildDependents } from './KanbanRules.js'
+import { moveDestinations } from './MoveDestinations.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { card as baseCard } from './testFixtures.js'
 
@@ -25,7 +24,6 @@ describe('moveDestinations', () => {
       'inFlight',
       'awaitingReview',
       'stashed',
-      'queue',
     ])
   })
 
@@ -41,7 +39,7 @@ describe('moveDestinations', () => {
   it('puts the Now columns in one group and everything else in the other', () => {
     const d = moveDestinations(card({ status: 'open', shuttleKind: 'oneshot' }), 'drafts')
     expect(d.filter((x) => x.group === 'column').map((x) => x.id)).toEqual(['inFlight', 'awaitingReview'])
-    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed', 'queue'])
+    expect(d.filter((x) => x.group === 'other').map((x) => x.id)).toEqual(['stashed'])
   })
 
   // One row per guard the menu mirrors: the card's state, where the board has
@@ -51,40 +49,31 @@ describe('moveDestinations', () => {
     // `transition`'s one no-op guard, `fromKind === target`; the desk is
     // likewise withheld from a card already on it.
     ['a one-shot in In flight is not offered In flight or the desk', { shuttleKind: 'oneshot' }, 'inFlight',
-      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+      ['drafts', 'awaitingReview', 'stashed']],
     // Resting from In flight: the board's rest, the worker's `shuttle rest`
     // said by hand.
     ['a live one-shot is offered Resting — put down without review', { shuttleKind: 'oneshot', workerState: 'running', tmuxSession: 'w' }, 'inFlight',
-      ['drafts', 'awaitingReview', 'stashed', 'queue']],
+      ['drafts', 'awaitingReview', 'stashed']],
     ['a block-less draft is not offered Drafts', { status: 'open' }, 'drafts',
-      ['inFlight', 'awaitingReview', 'stashed', 'queue']],
+      ['inFlight', 'awaitingReview', 'stashed']],
     // Awaiting review is a plain lifecycle drop with no gate of its own, so it
     // is offered from every column but its own; a closed card is off the desk.
     ['an awaiting card is offered every other column and the desk', { status: 'closed' }, 'awaitingReview',
-      ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
+      ['drafts', 'inFlight', 'now', 'stashed']],
     ['a closed card that still carries the now horizon is offered the desk', { status: 'closed', effectiveHorizon: 'now', shuttleKind: 'oneshot' }, 'awaitingReview',
-      ['drafts', 'inFlight', 'now', 'stashed', 'queue']],
+      ['drafts', 'inFlight', 'now', 'stashed']],
     ['a tempered card is offered Awaiting review and both surfaces', { status: 'closed', tempered: true }, 'tempered',
-      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
+      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed']],
     ['a resting card is not offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'now', 'queue']],
+      ['drafts', 'inFlight', 'awaitingReview', 'now']],
     // setSurface compares the card's `cold` against the gesture's, and a menu
     // Rest carries none, so clearing the flag is the move.
     ['a resting cold card is offered Resting', { status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed', cold: true }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed', 'queue']],
+      ['drafts', 'inFlight', 'awaitingReview', 'now', 'stashed']],
     // setSurface's standing guard: "it runs on its schedule". Drag-to-In-flight
     // still runs it now.
     ['a standing constitution is withheld both surfaces', { shuttleKind: 'standing', effectiveHorizon: 'stashed' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'queue']],
-    // The queue exit is offered on the EDGE: a card that names a predecessor is
-    // in a queue whether or not the fold happens to be drawing it under one.
-    ['an active queued card is offered the queue exit', { shuttleKind: 'oneshot', status: 'active', dependsOn: ['work/b'], dependsOnShape: 'scalar' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
-    ['a card on a scalar edge is offered the queue exit', { dependsOn: ['work/b'], dependsOnShape: 'scalar', foldedUnder: 'work/b' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'stashed', 'queue', 'unstack']],
-    // stackDropVerdict: a hand-written list is a fan-in nobody may collapse.
-    ['a hand-written depends_on list is offered neither queue entry', { dependsOnShape: 'list', dependsOn: ['x', 'y'], foldedUnder: 'x' }, null,
-      ['drafts', 'inFlight', 'awaitingReview', 'stashed']],
+      ['drafts', 'inFlight', 'awaitingReview']],
     ['a cycle is offered nothing: a span of time is not work', { isCycle: true }, null, []],
   ]
 
@@ -93,31 +82,5 @@ describe('moveDestinations', () => {
       .map(([guard, state, column, menu]) => ({ guard, menu, got: ids(card(state), column) }))
       .filter(row => JSON.stringify(row.got) !== JSON.stringify(row.menu))
     expect(wrong).toEqual([])
-  })
-})
-
-describe('queueTargets', () => {
-  const a = card({ id: 'a', name: 'A', status: 'open' })
-  const b = card({ id: 'b', name: 'B', status: 'open' })
-  const c = card({ id: 'c', name: 'C', status: 'open', dependsOn: ['b'], dependsOnShape: 'scalar' })
-  const done = card({ id: 'd', name: 'D', status: 'closed', tempered: true })
-  const all = [a, b, c, done]
-  const deps = buildDependents(all)
-
-  it('offers every card the drop would accept, and resolves to the chain tail', () => {
-    const targets = queueTargets(a, all, deps)
-    expect(targets.map((t) => t.card.id).sort()).toEqual(['b', 'c'])
-    // Dropping onto B joins the END of B's queue, which is C.
-    expect(targets.find((t) => t.card.id === 'b')?.tail).toBe('c')
-  })
-
-  it('excludes the card itself, and a card with a verdict — it holds no queue', () => {
-    const targets = queueTargets(a, all, deps).map((t) => t.card.id)
-    expect(targets).not.toContain('a')
-    expect(targets).not.toContain('d')
-  })
-
-  it('excludes a target the card is already queued behind', () => {
-    expect(queueTargets(c, all, deps).map((t) => t.card.id)).not.toContain('b')
   })
 })

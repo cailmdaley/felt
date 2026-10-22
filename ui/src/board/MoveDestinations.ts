@@ -3,7 +3,7 @@
  *
  * Drag-and-drop has always been the board's only way to move a card, and it
  * has no touch backend: on a phone the whole vocabulary of the desk — the
- * columns, Resting, the queue — is simply unreachable. This
+ * columns and Resting — is simply unreachable. This
  * module is that vocabulary written down, so a menu can offer it.
  *
  * A DESTINATION IS A PLACE, not a verb about one. The label is the column or
@@ -15,9 +15,9 @@
  *
  * THE RULE THIS FILE FOLLOWS: it does not decide anything the drag does not
  * already decide. Every entry below mirrors a guard that already lives in
- * `KanbanModal.setSurface` / `transition`, or in
- * `stackDropVerdict` (KanbanRules). Where a guard would banner "that is not a
- * thing this card does", the destination is simply not offered — a menu can
+ * `KanbanModal.setSurface` or `KanbanModal.transition`.
+ * Where a guard would banner "that is not a thing this card does", the
+ * destination is simply not offered — a menu can
  * be honest about legality in a way a drop target cannot, because it is
  * allowed to be absent. Where the guard would banner "it is already there",
  * the destination is likewise absent.
@@ -33,7 +33,6 @@
 
 import type { KanbanCard, ColumnKind } from './KanbanTypes.js'
 import { hasLiveWorker } from './KanbanTypes.js'
-import { stackDropVerdict } from './KanbanRules.js'
 import { COLUMN_TITLES, SURFACE_TITLE } from './KanbanSurfaces.js'
 
 /** What a chosen destination asks the board to do. One-to-one with the
@@ -43,11 +42,6 @@ export type MoveAction =
   | { kind: 'transition'; target: ColumnKind }
   /** `KanbanModal.setSurface(card, horizon)` — the planning drop. */
   | { kind: 'surface'; horizon: 'now' | 'stashed' }
-  /** `KanbanModal.unstack(card)` — leave the queue. */
-  | { kind: 'unstack' }
-  /** Not a move by itself: opens the picker of cards this one may queue
-   *  behind. The chosen target becomes `stackBehind(card, tail)`. */
-  | { kind: 'queue' }
 
 export interface MoveDestination {
   /** Stable key, for tests and for DOM ids. */
@@ -55,7 +49,7 @@ export interface MoveDestination {
   /** What the human reads: the board's own name for the place. */
   label: string
   /** Which band of the menu this belongs to. The Now columns come first, a
-   *  rule under them, then the surfaces and the queue. */
+   *  rule under them, then the surfaces. */
   group: 'column' | 'other'
   action: MoveAction
 }
@@ -146,31 +140,6 @@ export function moveDestinations(card: KanbanCard, column: ColumnKind | null): M
     }
   }
 
-  // ── The queue ──────────────────────────────────────────────────────────
-  // A hand-written `depends_on:` LIST is a fan-in someone assembled on
-  // purpose; neither the drag nor this menu may collapse it.
-  if (card.dependsOnShape !== 'list') {
-    // Any kind may be queued: the edge is ordering for the eye, so a standing
-    // constitution filed after something is exactly that and nothing more.
-    out.push({
-      id: 'queue',
-      label: 'Queue behind…',
-      group: 'other',
-      action: { kind: 'queue' },
-    })
-    // Offered on the EDGE, not on a gate: a card that names a predecessor is in
-    // a queue whether or not the fold happens to be drawing it under one (a
-    // running card stands in its own column and is still queued).
-    if ((card.dependsOn?.length ?? 0) > 0) {
-      out.push({
-        id: 'unstack',
-        label: 'Out of the queue',
-        group: 'other',
-        action: { kind: 'unstack' },
-      })
-    }
-  }
-
   return out
 }
 
@@ -185,35 +154,11 @@ export function seatAtRest(card: KanbanCard): boolean {
   )
 }
 
-export interface QueueTarget {
-  card: KanbanCard
-  /** The END of the target's chain — what the edge is actually written to. */
-  tail: string
-}
-
-/**
- * Every card this one may be queued behind, ruled on by the SAME verdict the
- * card-onto-card drop uses. Nothing is re-derived here: `stackDropVerdict` is
- * asked once per candidate and only its `ok` branch survives.
- */
-export function queueTargets(
-  card: KanbanCard,
-  cards: readonly KanbanCard[],
-  dependents: ReadonlyMap<string, readonly string[]>,
-): QueueTarget[] {
-  const out: QueueTarget[] = []
-  for (const target of cards) {
-    const verdict = stackDropVerdict(card, target, dependents)
-    if (verdict.ok) out.push({ card: target, tail: verdict.tail })
-  }
-  return out
-}
-
 /**
  * What the move menu needs from the board in order to offer its places.
  *
  * The menu opens from a long-press on a card. It knows nothing about columns,
- * dependency graphs or wire protocols; the board knows nothing about menus.
+ * wire protocols; the board knows nothing about menus.
  * This is the seam. `KanbanModal` implements it over its existing gesture
  * methods, so every item the menu performs is byte-for-byte the drop it stands
  * in for.
@@ -221,10 +166,6 @@ export function queueTargets(
 export interface MoveBroker {
   /** Legal destinations for this card, given where the board has it. */
   destinations(card: KanbanCard): MoveDestination[]
-  /** Cards this one may be queued behind, chain tails resolved. */
-  queueTargets(card: KanbanCard): QueueTarget[]
-  /** Run one non-queue destination. */
+  /** Run one destination. */
   perform(card: KanbanCard, action: MoveAction): void
-  /** Run the queue destination, once a target has been chosen. */
-  queueBehind(card: KanbanCard, tailId: string): void
 }

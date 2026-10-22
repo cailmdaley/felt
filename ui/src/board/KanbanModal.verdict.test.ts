@@ -85,6 +85,6 @@ describe('verdict transition authorization', () => {
     board.transition(fiber, 'tempered')
     vi.advanceTimersByTime(6000)
     expect(board.workspace.queueVerdict).toHaveBeenCalledOnce()
-    expect(board.commitTransition).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered', false, false)
+    expect(board.commitTransition).toHaveBeenCalledExactlyOnceWith(fiber, 'tempered', false)
   })
 })

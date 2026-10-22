@@ -181,7 +181,6 @@ tracks how the thinking moved.
   exactly one fiber (a warning: typically a link left behind by an older move,
   or by a move made outside felt)
 - legacy `title` frontmatter keys
-- legacy `depends-on` frontmatter keys
 - legacy body anchors
 - slug collisions between bare and nested fiber forms
 - multiple bare `.md` files at the `.felt/` root
@@ -214,7 +213,6 @@ notes print without failing it.
 - flat `.felt/<slug>.md` files become `<slug>/<slug>.md`
 - stray fiber files below the root fold into `<path>/<slug>/<slug>.md`
 - `title` frontmatter becomes `name`
-- inert `depends-on` keys are dropped
 - leading anchor lines like `(slug)=` are stripped from bodies
 
 Look before you leap:

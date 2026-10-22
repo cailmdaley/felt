@@ -1,6 +1,7 @@
 package felt
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1660,8 +1661,6 @@ func TestStorageMigrateRenamesTitleAndStripsMystAnchor(t *testing.T) {
 
 	legacy := `---
 title: Session hub
-depends-on:
-  - legacy-parent
 created-at: 2026-03-16T10:00:00Z
 ---
 
@@ -1684,9 +1683,6 @@ created-at: 2026-03-16T10:00:00Z
 	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
 	}
-	if got, want := result.RemovedDependsOnIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("RemovedDependsOnIDs = %#v, want %#v", got, want)
-	}
 	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)
 	}
@@ -1702,11 +1698,97 @@ created-at: 2026-03-16T10:00:00Z
 	if !strings.Contains(text, "name: Session hub") {
 		t.Fatalf("migrate should write name field:\n%s", text)
 	}
-	if strings.Contains(text, "depends-on:") {
-		t.Fatalf("migrate should strip legacy depends-on field:\n%s", text)
-	}
 	if strings.Contains(text, "(session-hub)=") {
 		t.Fatalf("migrate should strip legacy MyST anchor:\n%s", text)
+	}
+}
+
+// Unknown frontmatter must survive both migration's YAML normalization and
+// ordinary fiber writes, without becoming references or validation rules.
+func TestStorageMigratePreservesOpaqueDependencyFields(t *testing.T) {
+	t.Parallel()
+	values := []struct {
+		name string
+		yaml string
+		json string
+	}{
+		{"dangling scalar", "missing/fiber", `"missing/fiber"`},
+		{"dangling list", "[missing/fiber, {id: another/missing}]", `["missing/fiber",{"id":"another/missing"}]`},
+		{"arbitrary mapping", "{arbitrary: [true, 42, null]}", `{"arbitrary":[true,42,null]}`},
+		{"number", "42", `42`},
+		{"boolean", "false", `false`},
+		{"null", "null", `null`},
+	}
+	for _, key := range []string{"depends_on", "depends-on"} {
+		for _, value := range values {
+			t.Run(key+"/"+value.name, func(t *testing.T) {
+				t.Parallel()
+				_, s := newStore(t)
+				const id = "opaque"
+				file := filepath.Join(s.root, id, id+".md")
+				if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+					t.Fatal(err)
+				}
+				content := fmt.Sprintf("---\ntitle: Opaque fields\n%s: %s\n---\n\n(opaque)=\n\nBody.\n", key, value.yaml)
+				if err := os.WriteFile(file, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+
+				result, err := s.Migrate(false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(result.TitleToNameIDs, []string{id}) || !reflect.DeepEqual(result.StrippedMystAnchorIDs, []string{id}) {
+					t.Fatalf("migration did not normalize title and anchor: %+v", result)
+				}
+				data, err := os.ReadFile(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !strings.Contains(string(data), "name: Opaque fields") || strings.Contains(string(data), "title:") || strings.Contains(string(data), "(opaque)=") {
+					t.Fatalf("migration did not normalize file:\n%s", data)
+				}
+				for _, phase := range []string{"after migration", "after write"} {
+					f, err := s.Read(id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					node, ok := f.ExtraFields[key]
+					if !ok {
+						t.Fatalf("%s: opaque field %s lost on disk", phase, key)
+					}
+					var decoded any
+					if err := node.Decode(&decoded); err != nil {
+						t.Fatal(err)
+					}
+					encoded, err := json.Marshal(decoded)
+					if err != nil || string(encoded) != value.json {
+						t.Fatalf("%s: disk field = %s (%v), want %s", phase, encoded, err, value.json)
+					}
+					encoded, err = json.Marshal(f)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var fields map[string]json.RawMessage
+					if err := json.Unmarshal(encoded, &fields); err != nil {
+						t.Fatal(err)
+					}
+					if string(fields[key]) != value.json {
+						t.Fatalf("%s: JSON field = %s, want %s", phase, fields[key], value.json)
+					}
+					if issues := Check([]*Felt{f}, nil); len(issues) != 0 {
+						t.Fatalf("%s: opaque field triggered validation: %+v", phase, issues)
+					}
+					if err := s.Write(f); err != nil {
+						t.Fatal(err)
+					}
+				}
+				issues, err := CheckLegacyFormat(s)
+				if err != nil || len(issues) != 0 {
+					t.Fatalf("opaque field triggered format validation: %+v (%v)", issues, err)
+				}
+			})
+		}
 	}
 }
 
@@ -1716,8 +1798,6 @@ func TestStorageMigrateDryRunReportsTitleAndAnchorWithoutWriting(t *testing.T) {
 
 	legacy := `---
 title: Session hub
-depends-on:
-  - legacy-parent
 created-at: 2026-03-16T10:00:00Z
 ---
 
@@ -1739,9 +1819,6 @@ created-at: 2026-03-16T10:00:00Z
 	}
 	if got, want := result.TitleToNameIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("TitleToNameIDs = %#v, want %#v", got, want)
-	}
-	if got, want := result.RemovedDependsOnIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("RemovedDependsOnIDs = %#v, want %#v", got, want)
 	}
 	if got, want := result.StrippedMystAnchorIDs, []string{"session-hub"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("StrippedMystAnchorIDs = %#v, want %#v", got, want)

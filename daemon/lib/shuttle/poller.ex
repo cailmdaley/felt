@@ -2704,9 +2704,7 @@ defmodule Shuttle.Poller do
         false
 
       # Standing constitutions have additional preconditions; a oneshot that reaches
-      # here has passed every gate. `depends_on` has no dispatch meaning — it
-      # is a board-only ordering annotation ("filed after that"), read solely
-      # by the UI fold and by `shuttle check`'s shape validation.
+      # here has passed every gate.
       block_kind(shuttle) == "standing" ->
         StandingRoles.standing_role_due?(fiber)
 
@@ -2724,8 +2722,7 @@ defmodule Shuttle.Poller do
   #      the one intent *can't* override: the shuttle block must be owned by
   #      this host (no block, or one homed elsewhere, cannot spawn here).
   #      Status, kind, schedule and the breaker cooldowns are all overridden:
-  #      closed, draft and not-yet-due fibers dispatch on force. `depends_on`
-  #      carries no dispatch meaning at all, forced or not.
+  #      closed, draft and not-yet-due fibers dispatch on force.
   #
   #   2. Default — the full `eligible?` check (host, status, liveness,
   #      breakers, standing schedule).

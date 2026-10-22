@@ -52,7 +52,7 @@ export class DeskKeyboard {
   }
   clear(): void { this.selected = null; this.refresh() }
 
-  /** Repaint after a poll, reopening the selected member's stack or cluster. */
+  /** Repaint after a poll, reopening the selected member's cluster. */
   refresh(scroll = false): void {
     for (const el of this.root.querySelectorAll('.kbn-key-selected')) {
       el.classList.remove('kbn-key-selected')
@@ -60,11 +60,6 @@ export class DeskKeyboard {
     }
     const el = this.selected ? [...this.root.querySelectorAll<HTMLElement>('[data-card-uid]')].find(node => matches(node, this.selected!)) : undefined
     if (!el) return
-    const queue = el.closest<HTMLElement>('.kbn-card-queued-list[hidden]')
-    if (queue) {
-      queue.hidden = false
-      queue.parentElement?.querySelector('.kbn-card-queued')?.setAttribute('aria-expanded', 'true')
-    }
     if (el.matches('.kbn-cluster-item[hidden]')) el.parentElement?.querySelector<HTMLButtonElement>('.kbn-cluster-more')?.click()
     revealThreadFamily(el)
     el.classList.add('kbn-key-selected')

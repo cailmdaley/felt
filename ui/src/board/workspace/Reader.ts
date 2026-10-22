@@ -3,9 +3,7 @@ import { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
-import { queuedControl } from '../QueuedControl.js'
 import { sidebarRevision } from './sidebarRevision.js'
-import { sidebarQueue } from './sidebarQueue.js'
 import { constitutionAction, onDesk } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
@@ -47,9 +45,7 @@ export interface ReaderOptions {
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
   cards(): KanbanCard[]
-  /** Full Desk graph, including folded children and heads outside the sidebar groups. */
-  queueCards?(): KanbanCard[]
-  /** The thread graph the rail reads; absent, one is built from `queueCards`. */
+  /** The thread graph the rail reads; absent, one is built from `cards`. */
   threadIndex?(): ThreadIndex
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
@@ -167,7 +163,7 @@ export class Reader {
   private readonly picker: ConstitutionPicker
   private readonly sidebarFlight: SidebarFlight
   private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
-  private sidebarSnapshot: { queues: ReturnType<typeof sidebarQueue>; marks: Map<string, string> } | null = null
+  private sidebarSnapshot: { marks: Map<string, string> } | null = null
   private readonly flightRoots = new Set<HTMLElement>()
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
@@ -258,9 +254,9 @@ export class Reader {
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
       onBeforeRefresh: () => {
         const cards = this.opts.cards()
-        this.sidebarSnapshot = { queues: sidebarQueue(this.opts.queueCards?.() ?? cards), marks: overviewHostMarks(cards.map(card => card.originId)) }
+        this.sidebarSnapshot = { marks: overviewHostMarks(cards.map(card => card.originId)) }
       },
-      revision: card => sidebarRevision(card, this.queues().members(card), this.sidebarHostMark(card)),
+      revision: card => sidebarRevision(card, this.sidebarHostMark(card)),
       onRow: (el, card) => {
         this.sidebarRows.set(el, card)
         if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
@@ -351,7 +347,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.queueCards?.() ?? this.opts.cards()))
+    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()))
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -864,19 +860,12 @@ export class Reader {
     host.textContent = `${this.sidebarHostMark(card)} ${card.originId}`
     host.title = card.originId
     meta.append(host)
-    const members = this.queues().members(card)
-    const queue = members.length ? queuedControl(card, members.map(member => member.id), members, member => {
-      const latest = (this.opts.queueCards?.() ?? this.opts.cards()).find(candidate => cardIdentity(candidate) === cardIdentity(member))
-      this.opts.onChannel(latest ?? member)
-    }) : null
-    if (queue) meta.append(queue.chip)
     const pill = this.opts.workerPill?.(card)
     if (pill) {
       pill.dataset.part = 'act'; pill.dataset.act = 'worker'
       meta.append(workerPlate(card, pill))
     }
     face.append(meta)
-    if (queue) face.append(queue.list)
     return face
   }
   /** Re-list the channel rows after the overview's order changes. */
@@ -1123,16 +1112,12 @@ export class Reader {
     const marks = this.sidebarSnapshot?.marks ?? overviewHostMarks(this.opts.cards().map(row => row.originId))
     return marks.get(card.originId) ?? overviewHostMarks([...marks.keys(), card.originId]).get(card.originId) ?? '○'
   }
-  private queues() { return this.sidebarSnapshot?.queues ?? sidebarQueue(this.opts.queueCards?.() ?? this.opts.cards()) }
-  /** A peek-opened child steps from its visible head without becoming a row. */
   private sidebarPosition(cards: KanbanCard[]): number {
-    const head = this.currentCard && this.queues().head(this.currentCard)
-    return cards.findIndex(card => head ? card.id === head : (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner)
+    return cards.findIndex(card => (card.uid ?? card.id) === this.channel?.uid && card.originId === this.channel?.owner)
   }
   /** The sidebar's visible rows, which j/k and J/K walk whether or not it is shown. */
   private sidebarCards(): KanbanCard[] {
-    const queues = this.queues()
-    return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards()).filter(card => !queues.folded(card))
+    return this.withCurrent(this.opts.switcherCards?.() ?? this.opts.cards())
   }
   /** The index strip names every column, unfiltered by Find, and marks the open constitution's. */
   private renderIndex(): void {

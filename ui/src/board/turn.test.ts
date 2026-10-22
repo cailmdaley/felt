@@ -108,8 +108,8 @@ function feed(rows: Row[]): KanbanResponse {
 function desk(data: KanbanResponse): HTMLElement {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
-    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, stack: () => {},
-    reorderQueue: () => {}, unqueueRow: () => {}, openDetail: vi.fn(), onRefresh: () => {},
+    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {},
+    openDetail: vi.fn(), onRefresh: () => {},
   }).renderNowSection(data.now, {}, null)
 }
 

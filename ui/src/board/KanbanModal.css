@@ -774,21 +774,6 @@
   flex: 1 1 auto;
   padding: 1px 0;
 }
-/* A seat with work filed behind it: the chip, then its "+N queued" control,
-   whose peek list drops beneath both. */
-.kbn-role-seat {
-  flex: 0 1 auto;
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  max-width: 360px;
-  min-width: 0;
-}
-.kbn-role-queue {
-  display: contents;
-}
 /* The chip wears `.kbn-card`'s plate — a seat is the same object as a card on
    the board, standing still — in one dense row: dot · name · hint. */
 .kbn-role-chip {
@@ -1107,13 +1092,6 @@
 .kbn-cluster-item {
   display: flex;
   align-items: baseline;
-  /* WRAPS, so the queued-peek list can take a line of its own. Without this the
-     `<ol>` was a nowrap flex child of a 232px row: it computed to 503px, laid
-     out ON TOP of the item's own title, and every one of its rows was painted
-     behind that span — unhittable. A press on a "row" therefore landed on the
-     cluster item, whose own draggable armed the CARD drag, and dragging a
-     queued line moved the head fiber instead. (The desk card's meta row already
-     wrapped, which is why the same list worked there and only there.) */
   flex-wrap: wrap;
   gap: 6px;
   padding: 3px 2px;
@@ -1814,7 +1792,7 @@
   margin-top: 2px;
   flex-wrap: wrap;
 }
-/* Divides whatever room the left-flowing chips (actor/due/queued) left
+/* Divides whatever room the left-flowing chips (actor/due) left
    behind. One spacer alone pushes the next chip flush right (the old
    margin-left:auto behavior); a spacer on BOTH sides of a chip centers it
    in that room instead — see the placement logic in KanbanSurfaces.ts. */
@@ -1822,11 +1800,10 @@
   flex: 1 1 0%;
 }
 /* One height for every small chip/button that can appear in the meta row —
-   due, +N queued, Temper/Discard, the phase badge, the held pill, the
+   due, Temper/Discard, the phase badge, the held pill, the
    worker pill — so swapping between them (a worker landing, a review
    finishing) never makes the row's own height twitch. */
 .kbn-card-due,
-.kbn-card-queued,
 .kbn-card-review-meta-actions .kbn-review-meta-btn,
 .kbn-card-phase,
 .kbn-card-held,
@@ -1930,105 +1907,6 @@
   padding: 3px 6px;
   border-radius: 2px;
   margin-top: 2px;
-}
-/* "+N queued" — this card heads a sequence. A quiet plum chip in the meta row,
-   matching the Resting "after …" chip so the two ends of one chain are
-   recognizably the same relation seen from either side. Click reveals the
-   names in chain order, in place. */
-.kbn-card-queued {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.03em;
-  color: color-mix(in srgb, var(--kbn-queue) 95%, transparent);
-  background: color-mix(in srgb, var(--kbn-queue) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--kbn-queue) 28%, transparent);
-  border-radius: 2px;
-  padding: 2px 5px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.kbn-card-queued:hover { background: color-mix(in srgb, var(--kbn-queue) 18%, transparent); }
-.kbn-card-queued-list {
-  /* Full row: the peek drops below the meta line instead of wedging into it.
-     `max-width` keeps it inside a narrow host (a Resting cluster item is much
-     narrower than a desk card) rather than overflowing across its siblings. */
-  flex-basis: 100%;
-  max-width: 100%;
-  min-width: 0;
-  list-style: decimal inside;
-  margin: 3px 0 0;
-  padding: 4px 6px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  color: color-mix(in srgb, var(--kbn-queue) 90%, transparent);
-  background: color-mix(in srgb, var(--kbn-queue) 6%, transparent);
-  border-radius: 2px;
-}
-.kbn-card-queued-list li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Each row is a way into the fiber it names — often the only one on the desk,
-   since a queued fiber is resting behind this card. Say so with the pointer. */
-.kbn-card-queued-row { cursor: pointer; }
-.kbn-card-queued-row:hover { text-decoration: underline; text-underline-offset: 2px; }
-/* A row that can be picked up says so, PER ROW — keyed off `draggable`, which
-   is the same bit the drag machinery reads, so the affordance cannot drift
-   from the permission. `grab` and a hairline gutter are the whole
-   affordance: a peek list is a thing you read first and rearrange second, and
-   a handle per row would make the reading worse to advertise the rarer
-   gesture. */
-.kbn-card-queued-row[draggable='true'] {
-  cursor: grab;
-  padding-left: 4px;
-  border-left: 1px solid transparent;
-}
-.kbn-card-queued-row[draggable='true']:hover {
-  border-left-color: color-mix(in srgb, var(--kbn-queue) 45%, transparent);
-  background: color-mix(in srgb, var(--kbn-queue) 8%, transparent);
-}
-/* A row held by a hand-written `depends_on:` list. Still a link into its fiber
-   — it just cannot be moved from here, and its `title` says why. Dotted, so
-   the difference is visible at rest rather than discovered by pulling on it. */
-.kbn-card-queued-row--fixed {
-  cursor: pointer;
-  padding-left: 4px;
-  border-left: 1px dotted color-mix(in srgb, var(--kbn-queue) 50%, transparent);
-}
-/* A member that is in the chain but no longer waiting its turn: closed and
-   awaiting review. It still counts — the drop gesture ends the chain there — so
-   it is shown, saying so. (A verdict takes a card out of the queue entirely.)
-
-   The chip above says only how many; the STATE is carried here, in pigment:
-   verdigris, the colour the Awaiting-review column's cap wears, so "there is a
-   verdict waiting in this queue" reads the same wherever it appears. */
-.kbn-card-queued-row--review {
-  color: var(--kbn-tempered-ink);
-  opacity: 0.9;
-}
-.kbn-card-queued-row--review .kbn-card-queued-note { color: var(--kbn-tempered); }
-.kbn-card-queued-note { font-style: italic; opacity: 0.85; }
-.kbn-card-queued-row.kbn-queue-row-dragging { opacity: 0.45; cursor: grabbing; }
-/* The insertion point, drawn in the gap the row will land in — a line, not a
-   filled target, because what is being chosen is a POSITION BETWEEN rows and
-   highlighting a row would name the wrong thing. */
-.kbn-queue-drop-before { box-shadow: inset 0 2px 0 -1px color-mix(in srgb, var(--kbn-queue) 85%, transparent); }
-.kbn-queue-drop-after { box-shadow: inset 0 -2px 0 -1px color-mix(in srgb, var(--kbn-queue) 85%, transparent); }
-/* Card-onto-card drag: the card's HOT ZONE is armed as a stack target. Plum
-   rather than the ochre of a column/section drop, because the gesture writes a
-   different kind of thing — a relation between two cards, not a move of one.
-   It appears only while the cursor is in the zone that will actually stack, so
-   the highlight and the behavior are the same rectangle; anywhere else on the
-   card the drop belongs to the column, unhighlighted and unchanged. */
-.kbn-card-stack-target {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--kbn-queue) 55%, transparent);
-  background: color-mix(in srgb, var(--kbn-queue) 8%, transparent);
-}
-/* THE CARD THE EDGE ACTUALLY POINTS AT. A drop queues behind the chain's tail,
-   which after a few stacks is not the card under the cursor — so the tail says
-   so itself, dashed rather than solid: this is where you are landing, not what
-   you are pointing at. (The aim readout names it in words at the same time.) */
-.kbn-card-stack-tail {
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--kbn-queue) 30%, transparent);
-  outline: 1px dashed color-mix(in srgb, var(--kbn-queue) 65%, transparent);
-  outline-offset: 2px;
 }
 /* THE WORKER PILL — one treatment wherever a worker is drawn: the Desk card,
    the reader's sidebar card and the reader's head. A dot carries the state's

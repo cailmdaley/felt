@@ -1,4 +1,4 @@
-import type { ThreadIndex } from '../threads.js'
+import { ThreadIndex } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -15,7 +15,6 @@ import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { Reader } from './Reader.js'
-import { sidebarQueue } from './sidebarQueue.js'
 import { WorkspaceDepth } from './Depth.js'
 import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
@@ -137,8 +136,7 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
-      queueCards: () => opts.cards(),
-      threadIndex: opts.threadIndex,
+      threadIndex: () => opts.threadIndex?.() ?? new ThreadIndex(opts.cards()),
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
@@ -248,14 +246,11 @@ export class Workspace {
    * The sidebar is one grouped list wherever the reader was opened from, in
    * the Desk's reading order: Drafts, In flight's Your turn and Working bands,
    * Awaiting review, Roles, then Resting, each in the Desk's own order. j/k
-   * walk it as one flow; J/K and the index strip step its columns. Queued
-   * children are reached through their head's peek, never as rows.
+   * walk it as one flow; J/K and the index strip step its columns.
    */
   private sidebarCards(): KanbanCard[] {
-    const all = this.opts.cards()
-    const queues = sidebarQueue(all)
     // Threads list under their roots; an orphaned thread is a root of its own.
-    const cards = all.filter(card => (!card.orchestrator || card.threadOrphaned) && !queues.folded(card))
+    const cards = this.opts.cards().filter(card => !card.orchestrator || card.threadOrphaned)
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
     const flight = inColumn('inFlight')
     return [

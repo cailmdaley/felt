@@ -109,20 +109,6 @@ describe('the read model files seats on the roles surface', () => {
   })
 })
 
-describe('a seat holds the work filed behind it', () => {
-  it('folds an awaiting-review follower under the seat instead of leaving it loose', () => {
-    const resp = board([
-      { id: 'science/cmbx', uid: 'uid-c', name: 'cmbx', status: 'open', horizon: 'stashed', created_at: at0,
-        shuttle: { kind: 'oneshot', host: 'desk', role: 'cmbx-chair', seat: true } },
-      { id: 'science/cmbx/gc', uid: 'uid-g', name: 'gc', status: 'closed', closed_at: at0, created_at: at0,
-        depends_on: 'science/cmbx', shuttle: { kind: 'oneshot', host: 'desk' } },
-    ])
-    expect(resp.roles.map((c) => c.id)).toEqual(['science/cmbx'])
-    expect(resp.now.awaitingReview).toEqual([])
-    expect(resp.folded.map((c) => [c.id, c.foldedUnder])).toEqual([['science/cmbx/gc', 'science/cmbx']])
-  })
-})
-
 describe('moveDestinations for a seat', () => {
   const seatCard = (over: Partial<KanbanCard> = {}): KanbanCard =>
     baseCard({ id: 'science/cmbx', name: 'cmbx chair', status: 'open', shuttleKind: 'oneshot', shuttleRole: 'cmbx-chair', shuttleSeat: true, createdAt: at0, ...over })
@@ -130,7 +116,7 @@ describe('moveDestinations for a seat', () => {
   it('offers a seat at rest only what changes it: start it, or review it', () => {
     const c = seatCard()
     expect(seatAtRest(c)).toBe(true)
-    expect(moveDestinations(c, null).map((d) => d.id)).toEqual(['inFlight', 'awaitingReview', 'queue'])
+    expect(moveDestinations(c, null).map((d) => d.id)).toEqual(['inFlight', 'awaitingReview'])
   })
 
   it('names the way back for a seat in flight "Roles"', () => {
@@ -157,9 +143,6 @@ describe('the Roles band', () => {
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},
-    stack: () => {},
-    reorderQueue: () => {},
-    unqueueRow: () => {},
     openDetail,
     onRefresh: () => {},
   })
@@ -183,51 +166,5 @@ describe('the Roles band', () => {
     chips[1].click()
     expect(openDetail).toHaveBeenCalledWith(expect.objectContaining({ id: 'life/vizier' }))
     expect(band.querySelector('.kbn-bandhead-title')?.textContent).toBe('Roles')
-  })
-
-  it('takes a card dropped anywhere on a seat chip as a queue behind it', () => {
-    vi.spyOn(window, 'getComputedStyle').mockReturnValue({ overflowX: 'visible', overflowY: 'visible' } as CSSStyleDeclaration)
-    const resp = board([
-      { id: 'life/vizier', uid: 'u1', name: 'Vizier', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk', role: 'vizier', seat: true } },
-      { id: 'work/draft', uid: 'u2', name: 'Draft', status: 'open', created_at: at0, shuttle: { kind: 'oneshot', host: 'desk' } },
-    ])
-    const stack = vi.fn()
-    const makeSeat = vi.fn()
-    const band = new KanbanSurfaceRenderer({
-      getDragSourceId: () => 'work/draft',
-      setDragSourceId: () => {},
-      getLastResponse: () => resp,
-      stopDragAutoScroll: () => {},
-      transition: () => {},
-      setSurface: () => {},
-      stack,
-      makeSeat,
-      reorderQueue: () => {},
-      unqueueRow: () => {},
-      openDetail: vi.fn(),
-      onRefresh: () => {},
-    }).renderRolesSection(resp.roles, resp.staleness)!
-    document.body.append(band)
-    const chip = band.querySelector<HTMLElement>('.kbn-role-chip')!
-    const rect = { x: 100, y: 100, left: 100, top: 100, right: 220, bottom: 122, width: 120, height: 22, toJSON: () => ({}) }
-    vi.spyOn(chip, 'getBoundingClientRect').mockReturnValue(rect)
-    for (let node = chip.parentElement; node; node = node.parentElement) {
-      vi.spyOn(node, 'getBoundingClientRect').mockReturnValue({ ...rect, left: 0, top: 0, right: 1000, bottom: 700, width: 1000, height: 700 })
-    }
-    const drag = (type: string): Event => {
-      // Near the chip's corner: outside a card's inner-60% zone.
-      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 103, clientY: 102 })
-      Object.defineProperty(event, 'dataTransfer', { value: { dropEffect: '' } })
-      return event
-    }
-    const over = drag('dragover')
-    chip.dispatchEvent(over)
-    expect(over.defaultPrevented).toBe(true)
-    expect(chip.classList.contains('kbn-card-stack-target')).toBe(true)
-    chip.dispatchEvent(drag('drop'))
-    expect(stack).toHaveBeenCalledWith(expect.objectContaining({ id: 'work/draft' }), 'life/vizier')
-    expect(makeSeat).not.toHaveBeenCalled()
-    document.body.replaceChildren()
-    vi.restoreAllMocks()
   })
 })

@@ -461,8 +461,7 @@ const legacyFrontmatterTitleKey = "title"
 // so it stays in lockstep with the parse/write field list.
 //
 // All other top-level keys — tool-owned namespaces like `shuttle:`, domain
-// schemas like `inputs:` / `decisions:` / `insights:` / `tempered:`, and a
-// stray `depends-on:` (which `felt migrate` strips on the raw YAML node) —
+// schemas like `inputs:` / `decisions:` / `insights:` / `tempered:` —
 // round-trip unchanged via ExtraFields.
 var knownFrontmatterKeys = buildKnownFrontmatterKeys()
 
@@ -556,31 +555,27 @@ func frontmatterMappingNode(frontmatter []byte) (*yaml.Node, error) {
 	return mapping, nil
 }
 
-func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, bool, error) {
+func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, error) {
 	mapping, err := frontmatterMappingNode(frontmatter)
 	if err != nil {
-		return nil, false, false, err
+		return nil, false, err
 	}
 	if mapping == nil {
-		return frontmatter, false, false, nil
+		return frontmatter, false, nil
 	}
 
 	nameIndex := -1
 	titleIndex := -1
-	dependsOnIndex := -1
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		switch mapping.Content[i].Value {
 		case "name":
 			nameIndex = i
 		case "title":
 			titleIndex = i
-		case "depends-on":
-			dependsOnIndex = i
 		}
 	}
 
 	renamedTitle := false
-	removedTitleEntry := false
 	if nameIndex == -1 {
 		if titleIndex != -1 {
 			mapping.Content[titleIndex].Value = "name"
@@ -589,25 +584,16 @@ func normalizeLegacyFrontmatter(frontmatter []byte) ([]byte, bool, bool, error) 
 	} else if titleIndex != -1 {
 		mapping.Content = append(mapping.Content[:titleIndex], mapping.Content[titleIndex+2:]...)
 		renamedTitle = true
-		removedTitleEntry = true
 	}
-	removedDependsOn := false
-	if dependsOnIndex != -1 {
-		if removedTitleEntry && titleIndex != -1 && titleIndex < dependsOnIndex {
-			dependsOnIndex -= 2
-		}
-		mapping.Content = append(mapping.Content[:dependsOnIndex], mapping.Content[dependsOnIndex+2:]...)
-		removedDependsOn = true
-	}
-	if !renamedTitle && !removedDependsOn {
-		return frontmatter, false, false, nil
+	if !renamedTitle {
+		return frontmatter, false, nil
 	}
 
 	rewritten, err := yaml.Marshal(mapping)
 	if err != nil {
-		return nil, false, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
+		return nil, false, fmt.Errorf("marshaling YAML frontmatter: %w", err)
 	}
-	return rewritten, renamedTitle, removedDependsOn, nil
+	return rewritten, renamedTitle, nil
 }
 
 func stripLegacyMystAnchor(id, body string) (string, bool) {

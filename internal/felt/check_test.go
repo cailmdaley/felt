@@ -113,14 +113,12 @@ func TestCheckBrokenDataFlowOutputReference(t *testing.T) {
 	}
 }
 
-func TestCheckLegacyFormatReportsTitleDependsOnAndMystAnchor(t *testing.T) {
+func TestCheckLegacyFormatReportsTitleAndMystAnchor(t *testing.T) {
 	t.Parallel()
 	dir, s := newStore(t)
 
 	content := `---
 title: Legacy Fiber
-depends-on:
-  - upstream
 created-at: 2026-04-10T10:00:00Z
 ---
 
@@ -140,12 +138,11 @@ Body.
 	if err != nil {
 		t.Fatalf("CheckLegacyFormat() error: %v", err)
 	}
-	if len(issues) != 3 {
-		t.Fatalf("CheckLegacyFormat() produced %d issues, want 3", len(issues))
+	if len(issues) != 2 {
+		t.Fatalf("CheckLegacyFormat() produced %d issues, want 2", len(issues))
 	}
 	bodyIssue := false
 	titleIssue := false
-	dependsOnIssue := false
 	for _, issue := range issues {
 		if issue.Path == "body" && strings.Contains(issue.Message, "legacy MyST anchor") {
 			bodyIssue = true
@@ -153,15 +150,12 @@ Body.
 		if issue.Path == "frontmatter" && strings.Contains(issue.Message, `"title"`) {
 			titleIssue = true
 		}
-		if issue.Path == "frontmatter" && strings.Contains(issue.Message, `"depends-on"`) {
-			dependsOnIssue = true
-		}
 	}
 	if !bodyIssue {
 		t.Fatalf("issues = %#v, want body issue", issues)
 	}
-	if !titleIssue || !dependsOnIssue {
-		t.Fatalf("issues = %#v, want title and depends-on frontmatter issues", issues)
+	if !titleIssue {
+		t.Fatalf("issues = %#v, want title frontmatter issue", issues)
 	}
 }
 
@@ -429,118 +423,6 @@ func TestCheckParseabilitySurvivesFeltWrittenColonOutcomes(t *testing.T) {
 	}
 	if len(issues) != 0 {
 		t.Fatalf("issues = %+v, want none — felt's own writes must round-trip", issues)
-	}
-}
-
-func TestCheckDependsOnScalarRefOK(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", "fiber-b")
-
-	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
-	if len(issues) != 0 {
-		t.Fatalf("Check() issues = %+v, want none", issues)
-	}
-}
-
-func TestCheckDependsOnListRefOK(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", []string{"fiber-b", "fiber-c"})
-
-	issues := Check([]*Felt{
-		dependent,
-		{ID: "fiber-b", Name: "Fiber B"},
-		{ID: "fiber-c", Name: "Fiber C"},
-	}, nil)
-	if len(issues) != 0 {
-		t.Fatalf("Check() issues = %+v, want none", issues)
-	}
-}
-
-func TestCheckDependsOnMapEntryOK(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", []map[string]any{{"id": "fiber-b"}})
-
-	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
-	if len(issues) != 0 {
-		t.Fatalf("Check() issues = %+v, want none", issues)
-	}
-}
-
-func TestCheckDependsOnDanglingRef(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", "missing-fiber")
-
-	issues := Check([]*Felt{dependent}, nil)
-	if len(issues) != 1 {
-		t.Fatalf("Check() issues = %+v, want 1", issues)
-	}
-	if issues[0].Path != "frontmatter.depends_on" {
-		t.Fatalf("issue path = %q, want frontmatter.depends_on", issues[0].Path)
-	}
-	if !strings.Contains(issues[0].Message, `dangling depends_on reference "missing-fiber"`) {
-		t.Fatalf("issue message = %q, want dangling depends_on reference", issues[0].Message)
-	}
-}
-
-func TestCheckDependsOnMalformedEntry(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", []map[string]any{{"not-id": "fiber-b"}})
-
-	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
-	if len(issues) != 1 {
-		t.Fatalf("Check() issues = %+v, want 1", issues)
-	}
-	if issues[0].Path != "frontmatter.depends_on" {
-		t.Fatalf("issue path = %q, want frontmatter.depends_on", issues[0].Path)
-	}
-	if !strings.Contains(issues[0].Message, "malformed depends_on entry") {
-		t.Fatalf("issue message = %q, want malformed depends_on entry", issues[0].Message)
-	}
-}
-
-// A TOP-LEVEL `depends_on: {id: …}` is malformed, however reasonable it looks.
-// No reader honors it: the board's parser ignores a bare mapping and the
-// poller iterates it as {key, value} tuples its dep_id/1 answers nil for, so
-// the fiber is gated forever with nothing on screen to say why. The checker is
-// the only place that can say so — it must not bless a shape the runtime
-// refuses.
-func TestCheckDependsOnTopLevelMapIsMalformed(t *testing.T) {
-	t.Parallel()
-	dependent := &Felt{ID: "fiber-a", Name: "Fiber A"}
-	mustExtra(t, dependent, "depends_on", map[string]any{"id": "fiber-b"})
-
-	issues := Check([]*Felt{dependent, {ID: "fiber-b", Name: "Fiber B"}}, nil)
-	if len(issues) != 1 {
-		t.Fatalf("Check() issues = %+v, want 1", issues)
-	}
-	if !strings.Contains(issues[0].Message, "malformed depends_on entry") {
-		t.Fatalf("issue message = %q, want malformed depends_on entry", issues[0].Message)
-	}
-}
-
-// `depends_on:` with nothing after it is ABSENCE. The poller normalizes nil to
-// "no dependencies" and the board ignores it, so a checker complaint here
-// would be a rule only the checker believes in — and one that fires on a line
-// someone left behind after clearing a dependency, which is exactly the moment
-// they were being tidy.
-func TestCheckDependsOnNullIsAbsent(t *testing.T) {
-	t.Parallel()
-	// Parsed from real frontmatter rather than built with SetExtraField: the
-	// bug is about the yaml NODE a bare `depends_on:` produces (a !!null
-	// scalar), and only the parse path produces one.
-	dependent, err := Parse("fiber-a", []byte("---\nname: Fiber A\nstatus: open\ndepends_on:\n---\n"))
-	if err != nil {
-		t.Fatalf("Parse() error: %v", err)
-	}
-
-	issues := Check([]*Felt{dependent}, nil)
-	if len(issues) != 0 {
-		t.Fatalf("Check() issues = %+v, want none — an empty depends_on is not a dependency", issues)
 	}
 }
 

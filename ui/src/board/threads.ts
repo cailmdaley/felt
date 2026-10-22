@@ -1,5 +1,4 @@
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
-import { leftQueues } from './KanbanRules.js'
 import { turnOf } from './turn.js'
 
 export type ThreadState = 'waiting-cail' | 'to-review' | 'working' | 'drafts' | 'resting' | 'archived'
@@ -16,7 +15,7 @@ const STATE_ORDER: readonly ThreadState[] = ['waiting-cail', 'to-review', 'worki
  * resting when put down.
  */
 export function threadState(card: KanbanCard): ThreadState {
-  if (leftQueues(card)) return 'archived'
+  if (card.status === 'closed' && card.tempered !== undefined) return 'archived'
   if (card.status === 'closed') return 'to-review'
   const live = hasLiveWorker(card)
   if (card.status === 'open' && !live) return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'

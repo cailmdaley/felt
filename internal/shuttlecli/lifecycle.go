@@ -307,7 +307,7 @@ straight to active. A remote-owned fiber routes through the local daemon to
 its owner, and the CLI never writes its Git mirror; a normal resume may stay
 pending while the owner is in boot quarantine. Every other closed fiber — a
 oneshot awaiting review, or any accepted or discarded close — is refused; use
-'shuttle reopen' to requeue it.
+'shuttle reopen' to arm it.
 
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A draft installed without one is refused; --project-dir sets it
@@ -344,7 +344,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			}
 			if owner != "" {
 				if f.Status == felt.StatusClosed && !standingAwaiting(f, block) {
-					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
+					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it", args[0], args[0])
 				}
 				if cmd.Flags().Changed("project-dir") {
 					if _, err := a.postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
@@ -378,7 +378,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 
 			statusBefore := f.Status
 			if statusBefore == felt.StatusClosed {
-				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and requeue it", args[0], args[0])
+				return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it", args[0], args[0])
 			}
 			f.Status = felt.StatusActive
 			// Resting is a property of an open fiber; an armed one is always
@@ -553,9 +553,6 @@ A thread's close wakes only its nearest orchestrator by default. --quiet deliver
 its outcome as context without waking that conversation. Ask always wakes.
 Results never propagate automatically beyond that orchestrator.
 
-A verdict (--tempered=true or false) also takes the fiber out of every
-depends_on queue: fibers that waited on it wait on what it waited on instead.
-
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing constitution
 awaiting review). When closing your own fiber from tmux, this command ends your
@@ -606,14 +603,6 @@ fiber leaves your session running.`,
 			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
 				return err
 			}
-			// A verdict takes the card off the desk, and out of every queue
-			// with it: what waited behind it now waits behind what it waited on.
-			var spliced []string
-			if tempered != nil {
-				if spliced, err = st.SpliceOutOfQueues(f); err != nil {
-					return fmt.Errorf("leaving queues: %w", err)
-				}
-			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
@@ -626,9 +615,6 @@ fiber leaves your session running.`,
 				fmt.Fprintln(a.env.Stdout, "  tempered: true")
 			default:
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
-			}
-			for _, id := range spliced {
-				fmt.Fprintf(a.env.Stdout, "  queue: %s no longer waits on it\n", id)
 			}
 			if a.isOwnFiber(f) {
 				a.endOwnTmuxSession()
@@ -652,7 +638,7 @@ func (a *app) reopenCmd() *cobra.Command {
 	var reopenMessageFile string
 	reopenCmd := &cobra.Command{
 		Use:   "reopen <fiber>",
-		Short: "Requeue a closed or reviewed fiber back into active work",
+		Short: "Reopen a closed or reviewed fiber for active work",
 		Long: `Sets status = active and clears tempered / closed-at so a closed card
 re-enters the in-flight loop. status is the fiber's only dispatch switch.
 
@@ -660,7 +646,7 @@ From a host whose fleet holds the owner (remotes.json or a discovered tailnet
 peer), a default reopen uses the owner's force-dispatch route and starts a
 fresh worker there. --message and --message-file
 supply the launch directive (the From User prompt block) on that route. On the
-owning host, reopen keeps its existing local requeue behavior.
+owning host, reopen arms the fiber for the daemon to dispatch.
 
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A block without one is refused; --project-dir sets it (an existing
@@ -685,7 +671,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 				return err
 			}
 			if owner == "" && messageSet {
-				return fmt.Errorf("--message is only supported when `reopen` routes a launch; local reopen only requeues the fiber. Use `shuttle dispatch %s --message <text>` to start it with a directive", args[0])
+				return fmt.Errorf("--message is only supported when `reopen` routes a launch; local reopen only arms the fiber. Use `shuttle dispatch %s --message <text>` to start it with a directive", args[0])
 			}
 			if owner != "" && reopenAsDraft && messageSet {
 				return fmt.Errorf("--message cannot be used with --as-draft because that route does not launch a worker")
@@ -1323,7 +1309,7 @@ func (a *app) printPreservedStatus(status string) {
 	}
 	note := "unchanged — a reshape changes shape, not lifecycle"
 	if status == felt.StatusClosed {
-		note = "unchanged — reshape does not requeue; `shuttle reopen` does"
+		note = "unchanged — reshape does not arm work; `shuttle reopen` does"
 	}
 	fmt.Fprintf(a.env.Stdout, "  status: %s (%s)\n", shown, note)
 }
