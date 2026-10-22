@@ -427,7 +427,11 @@ defmodule Shuttle.Threads do
           []
       end
 
-    ask ++ exit
+    # The publication the orchestrator's own session made (`shuttle rest`,
+    # `close` or `ask` on its thread) is not delivered back to it.
+    Enum.reject(ask ++ exit, fn {_verb, stamp, _text, _wake} ->
+      stamp == runtime["orchestrator_acted_at"]
+    end)
   end
 
   defp digest(term),

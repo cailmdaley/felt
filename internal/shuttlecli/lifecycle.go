@@ -172,7 +172,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 
 func (a *app) restCmd() *cobra.Command {
 	var restLocal bool
-	var until string
+	var until, restActor string
 	restCmd := &cobra.Command{
 		Use:   "rest <fiber>",
 		Short: "Put a constitution down in Resting, without review",
@@ -185,6 +185,8 @@ now) so the next start is a fresh session, and a live worker is stopped.
                            # and there is nothing left to review
 
 Rest is the third exit beside handoff (keep going) and close (review me).
+A thread's orchestrator hears of its rest as context, unless the orchestrator's
+own session rested it.
 It works on a constitution in any state, including one with a verdict. A future due: is kept, so the card wakes on that day; a due
 that is today or already past is cleared, because it would put the card
 straight back on the desk. --until YYYY-MM-DD sets a return date;
@@ -206,6 +208,10 @@ this host is killed.`,
 					}
 				}
 				fields["until"] = until
+			}
+			actor := a.actorSession(restActor)
+			if actor != "" {
+				fields["actor"] = actor
 			}
 			if !restLocal {
 				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
@@ -246,8 +252,12 @@ this host is killed.`,
 				clearedDue = f.Due.Format("2006-01-02")
 				f.Due = nil
 			}
-			if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			restedAt := time.Now().UTC().Format(time.RFC3339Nano)
+			if err := shuttle.SetRuntimeField(f, "handed_off_at", restedAt); err != nil {
 				return fmt.Errorf("stamping handed_off_at: %w", err)
+			}
+			if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
+				return err
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -279,6 +289,8 @@ this host is killed.`,
 	}
 	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
 	restCmd.Flags().StringVar(&until, "until", "", "Return date (YYYY-MM-DD); empty clears the date")
+	restCmd.Flags().StringVar(&restActor, "actor", "", actorFlagUsage)
+	_ = restCmd.Flags().MarkHidden("actor")
 	return restCmd
 }
 
@@ -536,7 +548,7 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 // ---- close -----------------------------------------------------------------
 
 func (a *app) closeCmd() *cobra.Command {
-	var closeTempered string
+	var closeTempered, closeActor string
 	var closeQuiet bool
 	closeCmd := &cobra.Command{
 		Use:   "close <fiber>",
@@ -551,7 +563,8 @@ field is missing. Use:
 
 A thread's close wakes only its nearest orchestrator by default. --quiet delivers
 its outcome as context without waking that conversation. Ask always wakes.
-Results never propagate automatically beyond that orchestrator.
+Results never propagate automatically beyond that orchestrator, and a close the
+orchestrator's own session makes is not delivered back to it.
 
 The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing constitution
@@ -582,6 +595,9 @@ fiber leaves your session running.`,
 				if closeQuiet {
 					fields["quiet"] = true
 				}
+				if actor := a.actorSession(closeActor); actor != "" {
+					fields["actor"] = actor
+				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
 					if routed && err == nil && a.isOwnFiber(f) {
 						a.endOwnTmuxSession()
@@ -601,6 +617,9 @@ fiber leaves your session running.`,
 				quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
 			}
 			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+				return err
+			}
+			if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
 				return err
 			}
 			if err := st.Write(f); err != nil {
@@ -625,6 +644,8 @@ fiber leaves your session running.`,
 	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
+	closeCmd.Flags().StringVar(&closeActor, "actor", "", actorFlagUsage)
+	_ = closeCmd.Flags().MarkHidden("actor")
 	return closeCmd
 }
 

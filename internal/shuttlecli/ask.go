@@ -15,7 +15,9 @@ func (a *app) askCmd() *cobra.Command {
 		Short: "Set or clear a worker's outstanding one-line question",
 		Long: `Writes shuttle.ask {text, at} locally without contacting the daemon.
 The fiber must carry a shuttle: block owned by this host. --clear removes the
-question. Status, outcome, configuration, and runtime remain unchanged.`,
+question. Status, outcome and configuration remain unchanged. A question
+asked by the thread's own orchestrator is marked so that it is not delivered
+back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if askClear {
 				return cobra.ExactArgs(1)(cmd, args)
@@ -42,6 +44,11 @@ question. Status, outcome, configuration, and runtime remain unchanged.`,
 			}
 			if err := shuttle.SetNodeField(f, "ask", value); err != nil {
 				return err
+			}
+			if block.Ask != nil {
+				if err := markOrchestratorAct(st, f, block.Ask.At, a.actorSession("")); err != nil {
+					return err
+				}
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)

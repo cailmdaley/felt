@@ -101,6 +101,34 @@ defmodule Shuttle.ThreadsTest do
     assert length(pending(data)) == 4
   end
 
+  test "the orchestrator's own rest and close reach no one; another session's are delivered",
+       %{store: store, data: data} do
+    assert {:ok, _} =
+             CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "chair-session"])
+
+    for {verb, actor, delivered?} <- [
+          {"rest", "chair-session", false},
+          {"rest", "thread-session", true},
+          {"close", "chair-session", false},
+          {"close", "thread-session", true}
+        ] do
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, [verb, "hub/child", "--local", "--actor", actor])
+
+      before = pending(data)
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.deliver_results(entries, "test-host")
+      added = pending(data) -- before
+      past = if verb == "rest", do: "rested", else: "closed"
+
+      assert Enum.any?(added, &(&1["request"]["text"] =~ "thread hub/child #{past}")) ==
+               delivered?,
+             "#{verb} by #{actor}: #{inspect(Enum.map(added, & &1["request"]["text"]))}"
+    end
+  end
+
   test "failed close and ask publications survive cleared stamps and publisher restart", %{
     store: store
   } do

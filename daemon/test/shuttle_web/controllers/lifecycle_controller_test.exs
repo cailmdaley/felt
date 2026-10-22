@@ -225,6 +225,24 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     end
   end
 
+  # The daemon writes outside any harness session, so a caller's session rides
+  # the request: the writer decides whether it is the thread's orchestrator.
+  test "rest and close pass their caller's session to the writer" do
+    store = fixture_store!("shuttle-lifecycle-actor", "tests/actor", "Actor")
+
+    for {action, extra, flags} <- [
+          {"rest", %{}, "--actor\nchair\n"},
+          {"rest", %{"until" => "2099-06-12"}, "--until\n2099-06-12\n--actor\nchair\n"},
+          {"close", %{"quiet" => true}, "--quiet\n--actor\nchair\n"}
+        ] do
+      args_file = install_fake_cli!()
+      body = Map.merge(%{"action" => action, "fiber" => "tests/actor", "actor" => "chair"}, extra)
+      conn = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(body))
+      assert conn.status == 200
+      assert File.read!(args_file) == "-C\n#{store}\n#{action}\ntests/actor\n#{flags}--local\n"
+    end
+  end
+
   test "close and reopen delegate through the existing lifecycle endpoint" do
     close_store =
       fixture_store!("shuttle-lifecycle-close-route", "tests/close-route", "Close route")

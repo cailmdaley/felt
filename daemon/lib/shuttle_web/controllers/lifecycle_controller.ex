@@ -71,13 +71,19 @@ defmodule ShuttleWeb.LifecycleController do
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
   # rest, too: written inside the Poller, so no tick that read the fiber
   # `active` launches a worker after it, and the Poller stops a live one.
-  defp execute("rest", %{"fiber" => fiber, "until" => until}) when is_binary(until),
-    do: LifecycleService.transition(:rest, fiber, ["--until", until]) |> clean_result()
-
-  defp execute("rest", %{"until" => _}),
+  defp execute("rest", %{"until" => until}) when not is_binary(until),
     do: {:error, "until must be a YYYY-MM-DD string or empty"}
 
-  defp execute("rest", %{"fiber" => fiber}), do: lifecycle(:rest, fiber)
+  defp execute("rest", %{"fiber" => fiber} = params) do
+    args =
+      case params do
+        %{"until" => until} -> ["--until", until]
+        _ -> []
+      end
+
+    LifecycleService.transition(:rest, fiber, add_string_flag(args, "--actor", params["actor"]))
+    |> clean_result()
+  end
 
   defp execute(action, %{"fiber" => fiber} = params) when action in ["role", "seat"] do
     with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
@@ -133,7 +139,10 @@ defmodule ShuttleWeb.LifecycleController do
         _ -> args
       end
 
-    {:ok, add_bool_flag(args, "--quiet", params["quiet"])}
+    {:ok,
+     args
+     |> add_bool_flag("--quiet", params["quiet"])
+     |> add_string_flag("--actor", params["actor"])}
   end
 
   defp args_for("reopen", %{"fiber" => fiber} = params) do
