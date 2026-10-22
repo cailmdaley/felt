@@ -40,7 +40,7 @@ describe('actionable threads never vanish from the Desk', () => {
     expect(ids(b.now.awaitingReview)).toEqual(['hub'])
     expect(b.now.awaitingReview[0].threadPromoted).toBe(true)
   })
-  it('brings a resting root back to Now while a thread works, and to Drafts for a draft', () => {
+  it('brings a resting root back to Now while a thread works, but not for a draft', () => {
     const working = board([
       { id: 'hub', status: 'open', horizon: 'stashed' },
       { id: 'hub/child', parent: 'hub', status: 'active', phase: 'working' },
@@ -51,8 +51,12 @@ describe('actionable threads never vanish from the Desk', () => {
       { id: 'hub', status: 'open', horizon: 'stashed' },
       { id: 'hub/a/draft', parent: 'hub', status: 'open' },
     ])
-    expect(ids(drafting.now.drafts)).toEqual(['hub'])
-    expect(drafting.now.drafts[0].threadPromoted).toBe(true)
+    // Drafts are ideas, not work: a draft-only family stays where its root is,
+    // though the badge still counts the draft.
+    expect(ids(drafting.stash)).toEqual(['hub'])
+    expect(drafting.stash[0].threadPromoted).toBeUndefined()
+    expect(drafting.stash[0].threadSummary?.unfinished).toBe(1)
+    expect(desk(drafting)).toEqual([])
   })
   it('the most urgent descendant decides, at any depth', () => {
     const b = board([

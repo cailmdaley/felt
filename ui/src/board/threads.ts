@@ -24,12 +24,15 @@ export function threadState(card: KanbanCard): ThreadState {
   if (live && !card.originStale) return 'working'
   return 'resting'
 }
-/** The Desk column a family's most urgent unfinished thread asks for; undefined when nothing in it needs the Desk. */
-export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' | 'awaitingReview' | 'drafts' | undefined {
+/**
+ * The Desk column a family's most urgent thread asks for; undefined when
+ * nothing in it is work. Drafts are ideas, not work: they count on the badge
+ * but never pull a root onto the Desk.
+ */
+export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' | 'awaitingReview' | undefined {
   if (!summary) return undefined
   if (summary.waitingOnCail || summary.working) return 'inFlight'
   if (summary.toReview) return 'awaitingReview'
-  if (summary.drafts) return 'drafts'
   return undefined
 }
 

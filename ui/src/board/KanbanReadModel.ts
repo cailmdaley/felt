@@ -383,7 +383,7 @@ function assembleSurfaces(
   // A root off the Desk (resting, scheduled, settled) whose threads still hold
   // work comes back to Now, in the column its most urgent thread asks for:
   // the Desk draws only roots, so a root that stays away hides its threads.
-  const deskColumns = { inFlight, awaitingReview, drafts: nowDrafts };
+  const deskColumns = { inFlight, awaitingReview };
   const promote = (list: KanbanCard[]): KanbanCard[] => list.filter((card) => {
     const target = familyColumn(card.threadSummary);
     if (!target) return true;
@@ -398,7 +398,6 @@ function assembleSurfaces(
   const settledComposted = promote(composted);
   inFlight.sort(byInFlightBand);
   awaitingReview.sort(byClosedAtDesc);
-  nowDrafts.sort(byCreatedAtDesc);
 
   // Awaiting-review cards are closed and pending a human verdict — actionable,
   // so they stay in the Now awaitingReview column. They must NOT be
