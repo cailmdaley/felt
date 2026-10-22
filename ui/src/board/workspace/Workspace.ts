@@ -254,7 +254,8 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     const all = this.opts.cards()
     const queues = sidebarQueue(all)
-    const cards = all.filter(card => !card.orchestrator && !queues.folded(card))
+    // Threads list under their roots; an orphaned thread is a root of its own.
+    const cards = all.filter(card => (!card.orchestrator || card.threadOrphaned) && !queues.folded(card))
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
     const flight = inColumn('inFlight')
     return [

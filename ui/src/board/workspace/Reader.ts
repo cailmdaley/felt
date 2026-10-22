@@ -169,7 +169,7 @@ export class Reader {
   private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
   private sidebarSnapshot: { queues: ReturnType<typeof sidebarQueue>; marks: Map<string, string> } | null = null
   private readonly flightRoots = new Set<HTMLElement>()
-  /** The persisted choice; absent, the constitution list stays hidden. */
+  /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
@@ -848,11 +848,13 @@ export class Reader {
   }
   /** The source column is captured before the live Desk starts receding. */
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
+  /** One line per constitution, as the Desk's rows are: name, host, queue and worker; the outcome is the page's to show. */
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = buildCardPaper(card)
     // A note or role has no lifecycle, so it carries no lifecycle glyph.
     if (!onDesk(card)) face.querySelector('.kbn-card-glyph')?.remove()
-    face.classList.add('ws-constitution-card')
+    for (const extra of face.querySelectorAll('.kbn-card-id, .kbn-card-outcome')) extra.remove()
+    face.classList.add('ws-constitution-card', 'ws-constitution-row')
     face.dataset.part = 'sidebar-card'
     face.dataset.wsThemeBoundary = ''
     face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
@@ -883,7 +885,7 @@ export class Reader {
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? false)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? this.wide.matches)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column

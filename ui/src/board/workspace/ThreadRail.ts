@@ -23,7 +23,7 @@ export class ThreadRail {
     this.el.setAttribute('aria-label', 'Thread tree')
     this.breadcrumb.className = 'ws-thread-breadcrumb'; this.breadcrumb.setAttribute('aria-label', 'Thread breadcrumb')
     this.toggle.type = 'button'; this.toggle.className = 'ws-thread-toggle'; this.toggle.textContent = 'Threads'
-    this.toggle.setAttribute('aria-expanded', String(!window.matchMedia(MOBILE_MEDIA).matches))
+    this.toggle.setAttribute('aria-expanded', 'true')
     this.el.classList.toggle('ws-thread-collapsed', this.toggle.getAttribute('aria-expanded') === 'false')
     this.toggle.addEventListener('click', () => {
       const collapsed = this.el.classList.toggle('ws-thread-collapsed')
@@ -37,6 +37,12 @@ export class ThreadRail {
     const descendants = index.subtree(card)
     const ancestors: KanbanCard[] = []
     for (let parent = index.parentOf(card); parent; parent = index.parentOf(parent)) ancestors.unshift(parent)
+    // The phone draws no tree under its chat; its threads get a page of their own.
+    if (window.matchMedia(MOBILE_MEDIA).matches) {
+      this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
+      this.paintBreadcrumb(ancestors)
+      return
+    }
     const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon])])
     if (signature === this.signature) return
     this.signature = signature
@@ -50,13 +56,16 @@ export class ThreadRail {
       }
     }
     this.el.hidden = !descendants.length
+    this.paintBreadcrumb(ancestors)
+    this.paint()
+  }
+  private paintBreadcrumb(ancestors: readonly KanbanCard[]): void {
     this.breadcrumb.hidden = !ancestors.length
     this.breadcrumb.replaceChildren()
     for (const ancestor of ancestors) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = `‹ ${ancestor.name}`
       button.addEventListener('click', () => this.open(ancestor)); this.breadcrumb.append(button)
     }
-    this.paint()
   }
   private paint(): void {
     if (!this.card) return

@@ -165,6 +165,19 @@ describe('Reader channel sidebar', () => {
     expect((reader as unknown as { sidebarSnapshot: unknown }).sidebarSnapshot).toBeNull()
   })
 
+  it('draws each constitution as one compact line: name, host and worker, no outcome or question', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const asking: KanbanCard = { ...alpha, status: 'active', outcome: 'A long result paragraph', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }
+    listedCards = [asking, beta]
+    const reader = makeReader(asking)
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    const face = row.matches('.ws-constitution-card') ? row : row.querySelector<HTMLElement>('.ws-constitution-card')!
+    expect(face.classList.contains('ws-constitution-row')).toBe(true)
+    expect(face.querySelector('.kbn-card-outcome, .kbn-card-question, .kbn-card-id')).toBeNull()
+    expect(face.querySelector('.kbn-card-name')?.textContent).toBe(asking.name)
+    expect(face.querySelector('.ws-channel-owner')).not.toBeNull()
+  })
+
   it('repaints a retained worker pill when its turn changes', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'running', runtimePhase: 'attention', lastActivityAt: Date.now() }
@@ -360,16 +373,16 @@ describe('Reader channel sidebar', () => {
     }
   })
 
-  it('defaults closed at every width, retaining the labelled Constitutions toggle', () => {
+  it('defaults open at wide widths and closed at narrow widths, with a labelled Constitutions lead control', () => {
     storage.clear()
     viewport.wide = true
     const wide = makeReader()
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(wideToggle.textContent).toBe('')
     expect(wideToggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
     expect(wideToggle.title).toBe('Constitutions · s')
-    expect(wideToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
     disposeReader(wide)
 
     viewport.wide = false

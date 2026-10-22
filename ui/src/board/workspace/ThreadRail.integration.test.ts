@@ -65,3 +65,17 @@ it('preserves focused folds and rows across toggles and live repaints without st
     expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-toggle'))
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
 })
+
+it('draws no thread tree on the phone, keeping only the breadcrumb back to the orchestrator', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true }))
+  try {
+    const root = card({ id: 'hub', status: 'active' })
+    const child = card({ id: 'hub/child', orchestrator: 'hub', status: 'active' })
+    const deep = card({ id: 'hub/child/deep', orchestrator: 'hub/child', status: 'active' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(child, new ThreadIndex([root, child, deep]))
+    expect(rail.el.hidden).toBe(true)
+    expect(rail.el.querySelector('.kbn-thread-row')).toBeNull()
+    expect(rail.breadcrumb.hidden).toBe(false)
+  } finally { vi.unstubAllGlobals() }
+})

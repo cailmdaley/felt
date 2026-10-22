@@ -17,9 +17,7 @@
 .ws-thread-tree summary { cursor: pointer; padding: 8px; }
 .ws-thread-breadcrumb { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 18px; font-size: var(--ws-small-size); color: var(--kbn-ink-muted); }
 .ws-thread-breadcrumb button:hover { color: var(--kbn-ink); text-decoration: underline; }
+/* The phone draws no tree under its chat, whatever width it rotates to. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-thread-rail { position: absolute; z-index: 5; right: 0; top: 0; bottom: 0; width: min(85vw, 340px); box-shadow: -4px 0 14px color-mix(in srgb, var(--kbn-shade) 15%, transparent); }
-  .ws-thread-rail.ws-thread-collapsed { top: 4px; bottom: auto; width: auto; box-shadow: none; border: 1px solid var(--kbn-rule); padding: 0; }
-  .ws-thread-collapsed .ws-thread-toggle { writing-mode: horizontal-tb; }
-  .ws-thread-breadcrumb { padding-right: 70px; }
+  .ws-thread-rail { display: none; }
 }
