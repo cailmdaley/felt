@@ -4,10 +4,28 @@ defmodule Shuttle.Threads do
   alias Shuttle.{Delivery, OriginRouter}
 
   @doc "Nearest strict ancestor carrying a shuttle block, in the same felt store."
-  def orchestrator(entry, entries) do
-    slug = address(entry.fiber)
-    index = Map.new(entries, &{{&1.felt_store, address(&1.fiber)}, &1})
-    nearest(Path.dirname(slug), fn path -> Map.get(index, {entry.felt_store, path}) end)
+  def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
+
+  def orchestrator(entry, index) when is_map(index) do
+    nearest(Path.dirname(address(entry.fiber)), fn path ->
+      Map.get(index, {entry.felt_store, path})
+    end)
+  end
+
+  defp index(entries), do: Map.new(entries, &{{&1.felt_store, address(&1.fiber)}, &1})
+
+  @doc "Stamp each constitution with its nearest orchestrator's wire id, or null."
+  def put_orchestrators(entries) do
+    index = index(entries)
+
+    Enum.map(entries, fn entry ->
+      if is_map(entry.fiber["shuttle"]) do
+        parent = orchestrator(entry, index)
+        Map.put(entry, :orchestrator, if(parent, do: parent.fiber["id"]))
+      else
+        entry
+      end
+    end)
   end
 
   defp nearest(".", _lookup), do: nil
@@ -51,9 +69,11 @@ defmodule Shuttle.Threads do
 
   @doc "Reconcile durable lifecycle signals. Only a child's owner publishes its results."
   def deliver_results(entries, own_host) do
+    index = index(entries)
+
     Enum.each(entries, fn entry ->
       if get_in(entry.fiber, ["shuttle", "host"]) == own_host do
-        if parent = orchestrator(entry, entries) do
+        if parent = orchestrator(entry, index) do
           Enum.each(signals(entry.fiber), fn {verb, stamp, text} ->
             id = "thread-" <> digest({entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
             message = "thread #{address(entry.fiber)} #{verb}: #{text}"

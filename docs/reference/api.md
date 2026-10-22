@@ -225,6 +225,10 @@ A strong `ETag` hashes the response bytes; matching `If-None-Match` returns 304 
 Full metadata and `body=true` listings without `fields=index` stay live.
 `shuttle=true` without bodies takes precedence and serves the poller's owner feed, independently of the all-fiber index cache.
 
+Each constitution entry in the owner's Desk feed has `orchestrator`: the wire id of its nearest strict ancestor carrying a `shuttle:` block, or null for a top-level constitution.
+The relation skips intervening ordinary fibers and retains ancestors owned by another host, even though those ancestors do not appear in this owner's rows.
+Containment uses canonical slugs within each felt store; existing fiber, path, report and runtime fields remain unchanged.
+
 The owner feed's live-worker `runtime` carries `tasks` beside its existing `phase` and session fields.
 Each task has `{id, subject, status, activeForm}`; `activeForm` is null when the harness supplies none.
 The asynchronous daemon poll reads Claude Code's session task directory in numeric id order and follows Codex's native transcript for the latest valid `update_plan`.

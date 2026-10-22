@@ -2131,6 +2131,7 @@ defmodule Shuttle.Poller do
       document_cache
       |> Map.values()
       |> Enum.map(& &1.entry)
+      |> Shuttle.Threads.put_orchestrators()
       |> Enum.filter(&owned_feed_entry?(&1, own_host_id))
       |> Enum.sort_by(&get_in(&1, [:fiber, "id"]))
 

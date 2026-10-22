@@ -61,6 +61,67 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
+  test "Desk orchestrators use nearest constitution across plain levels before owner filtering" do
+    root = MockRunner.felt_root()
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        own_host_id: "test-host",
+        felt_stores: [root],
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+
+    make_entry = fn id, slug, store, block ->
+      %{
+        felt_store: store,
+        path: store <> "/.felt/" <> slug <> ".md",
+        report_path: "report.html",
+        fiber: %{
+          "id" => id,
+          "uid" => id,
+          "slug" => slug,
+          "name" => slug,
+          "outcome" => "Preserved",
+          "status" => "open",
+          "shuttle" => block
+        }
+      }
+    end
+
+    own = %{"kind" => "oneshot", "host" => "test-host"}
+    remote = %{"kind" => "oneshot", "host" => "remote-host"}
+
+    entries = [
+      make_entry.("hub-uid", "hub", root, remote),
+      make_entry.("plain-uid", "hub/notes", root, nil),
+      make_entry.("thread-uid", "hub/notes/thread", root, own),
+      make_entry.("deep-uid", "hub/notes/thread/deep", root, own),
+      make_entry.("solo-uid", "solo", root, own),
+      make_entry.("prefix-uid", "hub-shadow", root, own),
+      make_entry.("other-uid", "hub/thread", "other-store", own)
+    ]
+
+    cache = Map.new(entries, &{&1.fiber["id"], %{entry: &1, modified_at: nil}})
+    :sys.replace_state(poller, &%{&1 | document_cache: cache, document_cache_ready: true})
+    assert {:ok, %{fibers: feed}} = Poller.cached_fiber_documents(poller)
+
+    assert Map.new(feed, &{&1.fiber["id"], &1.orchestrator}) == %{
+             "thread-uid" => "hub-uid",
+             "deep-uid" => "thread-uid",
+             "solo-uid" => nil,
+             "prefix-uid" => nil,
+             "other-uid" => nil
+           }
+
+    for row <- feed do
+      assert Map.delete(row, :orchestrator) ==
+               Enum.find(entries, &(&1.fiber["id"] == row.fiber["id"]))
+    end
+  end
+
   # ── Helpers ──
 
   # Companion to wait_until for when the check IS the assertion (e.g. a pattern
