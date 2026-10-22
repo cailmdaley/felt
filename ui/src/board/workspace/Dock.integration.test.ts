@@ -374,6 +374,20 @@ describe('state-shaped act zone', () => {
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Carry on' })
   })
+  it('inside a thread the line goes back to the orchestrator and the menu holds the origin', () => {
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))
+    const origin = vi.fn()
+    band.setNav({ orchestrator: { name: 'Chair', open: vi.fn() }, origin: { label: 'Board', open: origin } })
+    const lead = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-chat-lead button')].map(b => b.textContent)
+    expect(lead).toEqual(['‹ Chair'])
+    const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-origin-item')!
+    expect(item.textContent).toBe('‹ Board')
+    item.click()
+    expect(origin).toHaveBeenCalled()
+    band.setNav({ origin: { label: 'Board', open: origin } })
+    expect(band.el.querySelector('.ws-chat-menu-back')!.hasAttribute('hidden')).toBe(true)
+    expect(band.el.querySelector('.ws-chat-lead .ws-chat-origin')).not.toBeNull()
+  })
 })
 
 describe('Dock settings queue', () => {

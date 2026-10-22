@@ -456,6 +456,8 @@ export class Dock {
   private transcriptPane: HTMLElement | null = null
   private transcriptBand: TranscriptBand | null = null
   private verdictMenu: HTMLDetailsElement | null = null
+  /** The menu's slot for a way back that the header line has no room for. */
+  private menuBack: HTMLElement | null = null
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -546,15 +548,20 @@ export class Dock {
       button.addEventListener('click', () => open())
       back.push(button)
     }
-    // Inside a thread the orchestrator is the way back; the origin is reached through it.
-    if (nav.origin && !nav.orchestrator) {
+    // Inside a thread the orchestrator is the line's way back; the origin waits in the menu.
+    const menuBack: HTMLButtonElement[] = []
+    if (nav.origin) {
       const { label, open } = nav.origin
-      const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
+      const inMenu = Boolean(nav.orchestrator)
+      const button = inMenu ? document.createElement('button') : ctlButton('‹', 'ws-chat-back ws-chat-origin')
+      if (inMenu) { button.type = 'button'; button.className = 'kbn-ctl-menu-item ws-chat-origin-item'; button.textContent = `‹ ${label}` }
       button.title = `Return to ${label}`
       button.setAttribute('aria-label', `Return to ${label}`)
+      if (inMenu) button.setAttribute('role', 'menuitem')
       button.addEventListener('click', () => open())
-      back.unshift(button)
+      if (inMenu) menuBack.push(button); else back.unshift(button)
     }
+    if (this.menuBack) { this.menuBack.replaceChildren(...menuBack); this.menuBack.hidden = !menuBack.length }
     this.lead.replaceChildren(...back)
     this.lead.hidden = !back.length
     this.trail.replaceChildren(...(nav.trail ? [nav.trail] : []))
@@ -644,6 +651,7 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.verdictMenu = null
+    this.menuBack = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -1072,7 +1080,9 @@ export class Dock {
     // Who and where, said once, muted: the header line carries only the name.
     const facts = document.createElement('p')
     facts.className = 'ws-chat-menu-facts'
-    choices.append(facts, verdict, rule, settingsItem, sessionsItem, consoleItem)
+    const backSlot = this.menuBack = document.createElement('div'); backSlot.className = 'ws-chat-menu-back'; backSlot.hidden = true
+    backSlot.addEventListener('click', () => { menu.open = false })
+    choices.append(facts, verdict, rule, settingsItem, sessionsItem, consoleItem, backSlot)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.
