@@ -4368,8 +4368,9 @@ defmodule Shuttle.Poller do
   # A failed authority write aborts the transition, never reporting success.
   @doc false
   def put_running(state, key, meta) do
-    epoch = persist_context_receiver!(state, meta, meta)
-    %{state | running: Map.put(state.running, key, Map.put(meta, :context_epoch, epoch))}
+    {epoch, harness} = persist_context_receiver!(state, meta, meta)
+    worker = meta |> Map.put(:context_epoch, epoch) |> Map.put(:context_harness, harness)
+    %{state | running: Map.put(state.running, key, worker)}
   end
 
   @doc false
@@ -4407,15 +4408,16 @@ defmodule Shuttle.Poller do
         receiver ->
           uuid = present_string(receiver["ID"])
           identity = meta.session <> ":" <> (uuid || "-")
-          cli = get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-
-          same_harness? =
-            if uuid,
-              do: receiver["Harness"] == Shuttle.Harnesses.normalize(cli),
-              else: receiver["Harness"] == ""
-
-          if receiver["Host"] == state.own_host_id and receiver["identity"] == identity and
-               same_harness?, do: Map.put(meta, :session_uuid, uuid), else: meta
+          # A registry entry describes a launch recipe, not the identity of
+          # this already-live execution. Its disappearance cannot undo the
+          # receiver's durable identity or its address during re-publication.
+          if receiver["Host"] == state.own_host_id and receiver["identity"] == identity do
+            meta
+            |> Map.put(:session_uuid, uuid)
+            |> Map.put(:context_harness, present_string(receiver["Harness"]))
+          else
+            meta
+          end
       end
     end
   end
@@ -4438,7 +4440,10 @@ defmodule Shuttle.Poller do
 
     key = context_receiver_key(state, meta, fiber)
     uuid = if worker, do: worker_session_uuid(worker, fiber)
-    cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+
+    cli =
+      present_string(Map.get(meta, :context_harness)) ||
+        present_string(fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"]))
 
     address =
       if uuid && cli,
@@ -4454,7 +4459,7 @@ defmodule Shuttle.Poller do
       )
 
     {epoch, ""} = Integer.parse(String.trim(output))
-    epoch
+    {epoch, cli}
   end
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not

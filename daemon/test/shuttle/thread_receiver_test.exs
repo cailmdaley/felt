@@ -210,6 +210,109 @@ defmodule Shuttle.ThreadReceiverTest do
     drain_results!(poller)
   end
 
+  for uuid <- ["B", nil] do
+    @tag receiver_uuid: uuid
+    test "unresolved agent recovery preserves durable receiver #{inspect(uuid)} without runtime A fallback",
+         context do
+      %{store: store, data: data, key: key, canonical: canonical, receiver_uuid: uuid} = context
+      registry = Path.join(store, "agents.json")
+
+      manifest = %{
+        version: 1,
+        builtins: "restrict",
+        agents: [%{id: "receiver-custom", cli: "claude", model: "opus", wrapper: "bin/claude"}]
+      }
+
+      File.write!(registry, Jason.encode!(manifest))
+      Env.put_env("SHUTTLE_AGENTS_FILE", registry)
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, ["set-model", "hub", "receiver-custom", "--local"])
+
+      assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+      start_tmux!("capture-B")
+      poller = start_poller_for!(store)
+      await_boot_cycle!(poller)
+      assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: uuid)
+      committed = authority!(data)
+      # A stale mirror must not become a fallback when registry resolution vanishes.
+      assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+      File.write!(registry, Jason.encode!(%{manifest | agents: []}))
+      assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
+      unresolved = Jason.decode!(json)
+      assert get_in(unresolved, ["shuttle", "resolved", "agent"]) == nil
+      assert get_in(unresolved, ["shuttle", "agent"]) == "receiver-custom"
+      cycle!(poller)
+      assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
+      assert authority!(data) == committed
+      # Retain stale A across restart too, not just the healthy mirror repaired above.
+      assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+      drain_results!(poller)
+      GenServer.stop(poller)
+      poller = start_poller_for!(store)
+      await_boot_cycle!(poller)
+      assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
+      assert authority!(data) == committed
+      assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
+      assert get_in(entry.fiber, ["shuttle", "resolved", "agent"]) == nil
+      assert get_in(entry.fiber, ["shuttle", "agent"]) == "receiver-custom"
+
+      assert {:ok, _} =
+               CLI.run(["context-mailbox", "put", key, "unresolved-result", "Never authorize A"])
+
+      refute hook!(store, "A") =~ "Never authorize A"
+      assert [_] = pending(data)
+      # Polling, mirror repair, the snapshot and delivery must all tolerate the missing agent.
+      cycle!(poller)
+      assert is_map(Poller.snapshot(poller))
+
+      if uuid do
+        assert {:command_error, 1, detail} = Delivery.flush_context(entry)
+        assert detail =~ "superseded worker identity"
+      else
+        assert {:ok, _} = Delivery.flush_context(entry)
+      end
+
+      assert Process.alive?(poller)
+      assert authority!(data) == committed
+      refute hook!(store, "A") =~ "Never authorize A"
+      assert [_] = pending(data)
+      # The other absent shapes of the optional resolved view obey the same contract.
+      state = :sys.get_state(poller)
+      worker = state.running[Poller.running_key(state, "hub")]
+
+      for resolved <- [
+            nil,
+            %{},
+            %{"agent" => nil},
+            %{"agent" => %{}},
+            %{"agent" => %{"cli" => nil}}
+          ] do
+        fiber = put_in(unresolved, ["shuttle", "resolved"], resolved)
+        recovered = Poller.recover_context_receiver!(state, worker, fiber)
+        assert recovered.session_uuid == uuid
+        Poller.put_running(state, Poller.running_key(state, "hub"), recovered)
+        assert authority!(data) == committed
+      end
+
+      File.write!(registry, Jason.encode!(manifest))
+      cycle!(poller)
+      assert %{session_uuid: ^uuid, cli: "claude"} = Poller.live_worker(poller, "hub")
+      assert authority!(data) == committed
+
+      if uuid == nil do
+        assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
+      end
+
+      hook!(store, "B")
+      assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
+      assert {:ok, _} = Delivery.flush_context(parent)
+      assert hook!(store, "B") =~ "Never authorize A"
+      assert pending(data) == []
+      drain_results!(poller)
+    end
+  end
+
   for live? <- [false, true] do
     @tag live?: live?
     test "deferred authority recovery waits for healthy scan and documents with live worker #{live?}",
