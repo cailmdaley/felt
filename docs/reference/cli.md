@@ -121,6 +121,7 @@ the daemon speaks directly, see the [HTTP API](api.md).
 | `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
 | `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
 | `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. `--host` requires `--project-dir`. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit |
+| `shuttle threads <fiber>` | A constitution's direct threads from this host's daemon, grouped Waiting, Working, To review, Draft, Resting: id, state, name, the first sentence of the outcome, and the count of unfinished threads below. Archived threads (a tempered or discarded verdict) are a count; `--all` lists them and every deeper level, indented. `--json` adds each thread's board column |
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
 

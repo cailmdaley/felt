@@ -218,6 +218,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.shuttleContractCmd(),
 		a.installCmd(),
 		a.threadCmd(),
+		a.threadsCmd(),
 		a.contextMailboxCmd(),
 		a.repeatCmd(),
 		a.shuttleDaemonCmd(),

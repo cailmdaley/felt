@@ -87,6 +87,7 @@ Results reach **only that nearest orchestrator**, never automatically propagatin
 **Orchestrate.** Spawn a thread when work outlives your session or deserves a constitution — a Desired State worth writing and an outcome worth tracking; use a subagent for the rest.
 Give the ask a lede and a checkable Desired State before arming it ([references/authoring.md](references/authoring.md#threads)).
 Every thread has a role: inherit the parent's unless it doesn't fit.
+Your launch prompt's `## Threads` lists your threads as they stood then; `shuttle threads <your-id>` lists them now (`--all` for archived threads and deeper levels).
 When a result arrives, read its outcome and evidence against Desired State, decide what it changes, and act.
 You may temper or discard threads at any level; review and report before tempering one the human asked for, messaged, or expressed curiosity about, while threads you initiate may be tempered on your own judgment.
 Keep outcomes, reports and thread chips easy to inspect: give the human the high-level overview, with the detail one click down.

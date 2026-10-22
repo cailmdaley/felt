@@ -392,6 +392,15 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
+  The inputs of `Shuttle.Threads.tree/4`: `{:ok, {entries, live}}`, the cached
+  constitutions and the running workers' runtime keys, or `{:error, :cold}`
+  before the first poll has warmed the cache.
+  """
+  def thread_inputs(server \\ Shuttle.Env.server(__MODULE__)) do
+    GenServer.call(server, :thread_inputs, @orchestrator_state_call_timeout_ms)
+  end
+
+  @doc """
   The store each fiber in the document cache roots in, as `%{uid => felt_store}`.
 
   The cache holds every shuttle fiber in the configured stores, including those
@@ -1239,6 +1248,12 @@ defmodule Shuttle.Poller do
   def handle_call(:snapshot, _from, state) do
     {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
   end
+
+  def handle_call(:thread_inputs, _from, %State{document_cache_ready: false} = state),
+    do: {:reply, {:error, :cold}, state}
+
+  def handle_call(:thread_inputs, _from, state),
+    do: {:reply, {:ok, cached_thread_inputs(state)}, state}
 
   def handle_call(:fiber_stores, _from, state) do
     stores =
@@ -3450,9 +3465,7 @@ defmodule Shuttle.Poller do
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
            resume_mode: Keyword.get(opts, :resume_mode),
-           threads:
-             {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end),
-              MapSet.new(Map.keys(state.running))}
+           threads: cached_thread_inputs(state)
          ) do
       {:ok, session} ->
         running_meta =
@@ -3486,6 +3499,13 @@ defmodule Shuttle.Poller do
         state = record_dispatch_failure(state, fiber, reason)
         {state, {:error, reason}}
     end
+  end
+
+  # What an orchestrator's roster is computed from: the cached constitutions,
+  # local and synced, and the running workers' runtime keys.
+  defp cached_thread_inputs(state) do
+    {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end),
+     MapSet.new(Map.keys(state.running))}
   end
 
   defp do_claim_app_session(state, fiber_id, uid, id, opts) do

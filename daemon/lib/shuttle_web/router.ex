@@ -62,6 +62,8 @@ defmodule ShuttleWeb.Router do
     # feeds, concatenated with reconciled per-host liveness.
     get("/fibers/composite", FiberDocumentsController, :composite)
     get("/fibers/*id", FiberDocumentsController, :show)
+    # A constitution's threads, for `shuttle threads`.
+    get("/threads/*id", ThreadsController, :show)
     post("/lifecycle", LifecycleController, :create)
     post("/felt-edit", FeltEditController, :create)
     post("/felt-nest", FeltNestController, :create)
