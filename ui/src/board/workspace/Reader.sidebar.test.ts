@@ -360,16 +360,16 @@ describe('Reader channel sidebar', () => {
     }
   })
 
-  it('defaults open at wide widths and closed at narrow widths, with a labelled Constitutions lead control', () => {
+  it('defaults closed at every width, retaining the labelled Constitutions toggle', () => {
     storage.clear()
     viewport.wide = true
     const wide = makeReader()
     const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
+    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(false)
     expect(wideToggle.textContent).toBe('')
     expect(wideToggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
     expect(wideToggle.title).toBe('Constitutions · s')
-    expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(wideToggle.getAttribute('aria-expanded')).toBe('false')
     disposeReader(wide)
 
     viewport.wide = false

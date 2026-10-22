@@ -1,3 +1,4 @@
+import { ThreadRail } from './ThreadRail.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -97,6 +98,7 @@ export class Reader {
   private readonly veil = element('div', 'ws-veil')
   private departure: ReturnType<typeof setTimeout> | null = null
   private arrival = 0
+  private readonly threadRail: ThreadRail
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   private readonly parallax = element('div', 'ws-parallax')
@@ -164,7 +166,7 @@ export class Reader {
   private readonly sidebarRows = new Map<HTMLElement, KanbanCard>()
   private sidebarSnapshot: { queues: ReturnType<typeof sidebarQueue>; marks: Map<string, string> } | null = null
   private readonly flightRoots = new Set<HTMLElement>()
-  /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
+  /** The persisted choice; absent, the constitution list stays hidden. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
@@ -278,9 +280,10 @@ export class Reader {
     this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
-    column.append(this.stage)
+    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
+    column.append(this.threadRail.breadcrumb, this.stage)
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, column)
+    main.append(this.sidebar, column, this.threadRail.el)
     this.el.append(this.veil, this.navbar, this.sidebarToggle, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
@@ -345,6 +348,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
+    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.queueCards?.() ?? this.opts.cards())
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -876,7 +880,7 @@ export class Reader {
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
   private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? this.wide.matches)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? false)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column

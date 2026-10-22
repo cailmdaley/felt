@@ -250,7 +250,7 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     const all = this.opts.cards()
     const queues = sidebarQueue(all)
-    const cards = all.filter(card => !queues.folded(card))
+    const cards = all.filter(card => !card.orchestrator && !queues.folded(card))
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
     const flight = inColumn('inFlight')
     return [
@@ -658,6 +658,8 @@ export class Workspace {
           }
           // The feed owns office metadata between body reads.
           if (feed) {
+            metadata.orchestrator = feed.orchestrator
+            metadata.threadSummary = feed.threadSummary
             metadata.shuttleRole = feed.shuttleRole
             metadata.shuttleSeat = feed.shuttleSeat
           }

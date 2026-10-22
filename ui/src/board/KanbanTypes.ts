@@ -16,7 +16,7 @@ export interface InheritedProjectDir {
 export interface KanbanCard {
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
-  threadSummary?: { unfinished: number; waitingOnCail: number; archived: number }
+  threadSummary?: { unfinished: number; waitingOnCail: number; toReview: number; archived: number }
   id: string
   /** Intrinsic frontmatter ULID when present. */
   uid?: string

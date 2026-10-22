@@ -66,7 +66,7 @@ const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
 const workspaceFixture = example === 'workspace' || example === 'music' || example === 'threads' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
-if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now)
+if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()

@@ -6,8 +6,9 @@
 .kbn-thread-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
 .kbn-thread-row small { color: var(--kbn-ink-muted); font-size: 10px; }
-.kbn-thread-row[data-thread-state='waiting-cail'] > span:first-child { font-weight: 600; color: var(--kbn-owed-ink); }
+.kbn-thread-row[data-thread-state='waiting-cail'] > .kbn-thread-name { font-weight: 600; color: var(--kbn-owed-ink); }
 .kbn-thread-outcome { grid-column: 1 / -1; color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.kbn-thread-family:has(> .kbn-thread-peek:not([hidden])) > .kbn-thread-subentries { display: none; }
 .kbn-thread-peek > small { display: block; padding: 6px 8px; color: var(--kbn-ink-muted); }
 .kbn-role-seat.kbn-thread-family { flex-wrap: wrap; }
+.kbn-thread-more { margin-left: 8px; font: inherit; font-size: 11px; color: var(--kbn-ink-muted); padding: 4px 0; }
+.kbn-thread-more:hover { color: var(--kbn-ink); text-decoration: underline; }

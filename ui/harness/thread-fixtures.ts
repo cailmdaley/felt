@@ -1,7 +1,7 @@
 import { WORKSPACE_HOST, WORKSPACE_ID, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** A small family with every state, a plain-folder gap and three constitution levels. */
-export function addThreadFixtures(example: WorkspaceExample, now: number): void {
+export function addThreadFixtures(example: WorkspaceExample, now: number, many = false): void {
   const rows: Array<[string, string, string, string | null, string]> = [
     ['analysis', 'Response analysis', 'active', null, 'working'],
     ['analysis/checks/question', 'Choose the response cut', 'active', 'analysis', 'attention'],
@@ -10,6 +10,10 @@ export function addThreadFixtures(example: WorkspaceExample, now: number): void 
     ['archive', 'Accepted pilot', 'closed', null, ''],
     ['discard', 'Discarded pilot', 'closed', null, ''],
   ]
+  if (many) {
+    for (let n = 1; n <= 15; n++) rows.push([`review-${n}`, `Validation review ${n}`, 'closed', null, ''])
+    for (let n = 1; n <= 2; n++) rows.push([`question-${n}`, `Choose validation ${n}`, 'active', null, 'attention'])
+  }
   for (const [slug, name, status, parent, phase] of rows) {
     const id = `${WORKSPACE_ID}/${slug}`
     example.feed.fibers.push({
