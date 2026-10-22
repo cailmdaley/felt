@@ -4388,22 +4388,46 @@ defmodule Shuttle.Poller do
     %{state | running: Map.put(state.running, key, worker)}
   end
 
+  # Fences every host-owned fiber the daemon is not tracking, in at most two
+  # CLI calls. An active fiber is revoked durably even without a mailbox, so a
+  # stale runtime mirror can never be recovered for it; any other fiber is
+  # revoked only if it already has a mailbox, so no state is created for it.
   @doc false
   def revoke_untracked_receivers(state) do
-    for fibers <- Map.values(state.last_known_listings),
-        fiber <- fibers,
-        host_owned?(fiber["shuttle"] || %{}, state.own_host_id),
-        is_nil(running_key(state, fiber["id"])) do
-      meta = %{
-        fiber_id: fiber["id"],
-        uid: fiber["uid"],
-        felt_store: owning_store(fiber["id"], state)
-      }
+    {active, inactive} =
+      for fibers <- Map.values(state.last_known_listings),
+          fiber <- fibers,
+          host_owned?(fiber["shuttle"] || %{}, state.own_host_id),
+          is_nil(running_key(state, fiber["id"])),
+          uniq: true do
+        meta = %{
+          fiber_id: fiber["id"],
+          uid: fiber["uid"],
+          felt_store: owning_store(fiber["id"], state)
+        }
 
-      persist_context_receiver(state, meta, nil)
-    end
+        {fiber["status"] == "active", context_receiver_key(state, meta, fiber)}
+      end
+      |> Enum.split_with(&elem(&1, 0))
 
+    revoke_receivers(state, Enum.map(active, &elem(&1, 1)), [])
+    revoke_receivers(state, Enum.map(inactive, &elem(&1, 1)), ["--existing"])
     state
+  end
+
+  defp revoke_receivers(_state, [], _flags), do: :ok
+
+  defp revoke_receivers(state, keys, flags) do
+    case Shuttle.CLI.run(["context-mailbox", "revoke" | flags] ++ keys,
+           env: [{"SHUTTLE_HOST", state.own_host_id}],
+           timeout_ms: 32_000
+         ) do
+      {:ok, _} ->
+        :ok
+
+      result ->
+        Logger.warning("receiver revocation incomplete: #{inspect(result)}")
+    end
   end
 
   # Restores a recovered worker's conversation from its durable receiver. Only

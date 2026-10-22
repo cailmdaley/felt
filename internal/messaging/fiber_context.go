@@ -58,6 +58,18 @@ type FiberReceiver struct {
 // transition. Re-adoption of an unchanged worker preserves its durable epoch.
 // A removed or not-yet-addressable worker uses address "-".
 func TransitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address string) (uint64, error) {
+	return transitionFiberReceiver(env, fiber, host, identity, address, true)
+}
+
+// RevokeExistingFiberReceiver revokes the receiver of a fiber that already has
+// a mailbox, and reports whether it had one. A fiber without a mailbox has no
+// receiver to fence, so no state is created for it.
+func RevokeExistingFiberReceiver(env *sysenv.Env, fiber, host string) (bool, error) {
+	epoch, err := transitionFiberReceiver(env, fiber, host, "", "-", false)
+	return epoch != 0, err
+}
+
+func transitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address string, create bool) (uint64, error) {
 	a := Address{Host: host}
 	var err error
 	if address != "-" {
@@ -70,10 +82,15 @@ func TransitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 		return 0, errCode("wrong_host", "fiber receiver belongs to another host")
 	}
 	root := mailboxDir(env, "fiber", fiber)
-	if err := ensureDir(root, 0700); err != nil {
-		return 0, err
+	if create {
+		if err := ensureDir(root, 0700); err != nil {
+			return 0, err
+		}
 	}
 	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if !create && errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
 		return 0, err
 	}

@@ -14,7 +14,7 @@ defmodule Shuttle.ContractTest do
     result = Shuttle.Contract.check(LevelRunner)
     refute result.ok
     assert result.observed == 14
-    assert result.reason =~ "context-mailbox get/receiver/put/deliver"
+    assert result.reason =~ "context-mailbox get/receiver/revoke/put/deliver"
     assert result.reason =~ "close --quiet"
   end
 end

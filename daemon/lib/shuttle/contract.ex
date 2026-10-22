@@ -31,7 +31,7 @@ defmodule Shuttle.Contract do
   @level_surfaces %{
     14 => "hook interrupted (Shuttle.InterruptWatcher)",
     15 =>
-      "context-mailbox get/receiver/put/deliver (thread receiver authority), " <>
+      "context-mailbox get/receiver/revoke/put/deliver (thread receiver authority), " <>
         "close --quiet (lifecycle API)"
   }
 

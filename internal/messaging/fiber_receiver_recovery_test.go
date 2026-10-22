@@ -43,3 +43,30 @@ func TestReadFiberReceiverPreservesDurableRecoveryIdentity(t *testing.T) {
 		t.Fatal("corruption treated as missing identity")
 	}
 }
+
+// Revoking a fiber that never had a mailbox creates nothing; one that has a
+// mailbox loses its receiver at a higher epoch.
+func TestRevokeExistingFiberReceiverCreatesNoState(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	if revoked, err := RevokeExistingFiberReceiver(env, "absent", "host"); err != nil || revoked {
+		t.Fatalf("absent: %v %v", revoked, err)
+	}
+	if _, err := os.Stat(mailboxDir(env, "fiber", "absent")); !os.IsNotExist(err) {
+		t.Fatalf("revocation created a mailbox for a fiber without one: %v", err)
+	}
+	epoch := transition(t, env, "execution:B", "shuttle://host/claude/B")
+	if revoked, err := RevokeExistingFiberReceiver(env, "fiber", "host"); err != nil || !revoked {
+		t.Fatalf("existing: %v %v", revoked, err)
+	}
+	receiver, err := ReadFiberReceiver(env, "fiber")
+	if err != nil || receiver == nil || receiver.Identity != "" || receiver.ID != "" || receiver.Generation != epoch+1 {
+		t.Fatalf("revoked: %+v %v", receiver, err)
+	}
+	if _, err := RevokeExistingFiberReceiver(env, "fiber", "host"); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := ReadFiberReceiver(env, "fiber"); again.Generation != receiver.Generation {
+		t.Fatalf("repeated revocation rotated the epoch: %+v", again)
+	}
+}

@@ -18,6 +18,9 @@ defmodule Shuttle.ThreadReceiverTest do
     end
 
     def cmd("shuttle", args, opts) do
+      if spy = Shuttle.Env.app(:receiver_spy, nil),
+        do: if("context-mailbox" in args, do: send(spy, {:context_mailbox, args}))
+
       cond do
         Shuttle.Env.app(:receiver_runtime_write_fails, false) and "mark-runtime" in args ->
           {"injected runtime write failure", 1}
@@ -457,6 +460,67 @@ defmodule Shuttle.ThreadReceiverTest do
     assert hook!(store, "B") =~ "Successor only"
     refute hook!(store, "A") =~ "Successor only"
     drain_results!(poller)
+  end
+
+  test "boot revocation creates no state for an inactive fiber without a mailbox", context do
+    %{store: store, data: data} = context
+
+    keys =
+      for {slug, status} <- [done: "closed", gone: "closed", live: "active"], into: %{} do
+        slug = Atom.to_string(slug)
+        assert {:ok, _} = CLI.run_felt(["-C", store, "add", slug, slug])
+
+        assert {:ok, _} =
+                 CLI.run_in_store(store, [
+                   "install",
+                   slug,
+                   "--host",
+                   "test-host",
+                   "--project-dir",
+                   store | if(status == "active", do: [], else: ["--disabled"])
+                 ])
+
+        if status == "closed",
+          do: assert({:ok, _} = CLI.run_felt(["-C", store, "edit", slug, "-s", "closed"]))
+
+        assert {:ok, json} = CLI.run_in_store(store, ["show", slug, "--json"])
+        {slug, store <> ":" <> Jason.decode!(json)["uid"]}
+      end
+
+    seed_receiver!(store, keys["gone"], "old-worker:G", "G")
+    seeded = mailbox_record(data, keys["gone"])
+    Env.put_app_env(:receiver_spy, self())
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert :sys.get_state(poller).adopted?
+    # One batched revocation per kind, never one spawn per listed fiber.
+    revocations =
+      for {:context_mailbox, ["context-mailbox", verb | _]} <- flush_messages(), do: verb
+
+    assert Enum.count(revocations, &(&1 == "revoke")) <= 2
+    refute "receiver" in revocations
+    refute File.exists?(Path.join([data, "mailboxes", "fiber", mailbox_key(keys["done"])]))
+    refute File.exists?(Path.join([data, "mailboxes", "fiber", mailbox_key(context.key)]))
+    revoked = mailbox_record(data, keys["gone"])
+    assert revoked["identity"] == ""
+    assert revoked["generation"] > seeded["generation"]
+    # An active fiber is fenced durably even before its first worker.
+    assert mailbox_record(data, keys["live"])["identity"] == ""
+    drain_results!(poller)
+  end
+
+  defp flush_messages(acc \\ []) do
+    receive do
+      message -> flush_messages([message | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp mailbox_record(data, key) do
+    Path.join([data, "mailboxes", "fiber", mailbox_key(key), "destination.json"])
+    |> File.read!()
+    |> Jason.decode!()
   end
 
   defp mailbox_key(key), do: :crypto.hash(:sha256, key) |> Base.encode16(case: :lower)
