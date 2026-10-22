@@ -5,46 +5,51 @@ import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
-it('keeps pure containment beneath a flat waiting strip, folds archives, navigates to an intermediate own subtree and back', () => {
+it('draws state groups only, each a flat list in tree order with the parent path, and navigates back through the breadcrumb', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
   const deep = card({ id: 'hub/child/folder/deep', orchestrator: child.id, status: 'active', ask: { text: 'Choose a cut', at: '2026-07-02T12:00:00Z' }, name: 'Deep review' })
   const rest = card({ id: 'hub/rest', orchestrator: root.id, effectiveHorizon: 'stashed', name: 'A resting' })
-  const done = card({ id: 'hub/done', orchestrator: root.id, status: 'closed', tempered: true })
+  const done = card({ id: 'hub/done', orchestrator: root.id, status: 'closed', tempered: true, name: 'Done' })
   const all = [root, rest, child, deep, done], open = vi.fn(), rail = new ThreadRail(open, vi.fn())
   rail.show({ ...root }, new ThreadIndex(all))
-  expect(rail.el.textContent).toContain('1 archived')
-  expect([...rail.el.querySelectorAll('.ws-thread-tree > ul .kbn-thread-row')].slice(0, 3).map(row => row.querySelector('.kbn-thread-name')?.textContent)).toEqual(['A resting', 'Z working', 'Deep review'])
-  // The strip is the only group; its row carries the muted parent path, and no row repeats a state word.
-  expect(rail.el.querySelector('.ws-thread-waiting')?.textContent).toContain('Deep review')
-  expect(rail.el.querySelector('.ws-thread-waiting .ws-thread-path')?.textContent).toBe('child/folder')
-  expect(rail.el.querySelector('.ws-thread-tree > ul .ws-thread-path')).toBeNull()
-  expect(rail.el.querySelector('.ws-thread-tree')?.textContent).not.toMatch(/To review|Drafts|Resting/)
-  const marks = [...rail.el.querySelectorAll<HTMLElement>('.ws-thread-tree > ul .ws-thread-mark')].map(m => [m.dataset.state, m.title])
-  expect(marks.slice(0, 3)).toEqual([['resting', 'Resting'], ['working', 'Working'], ['waiting', 'Waiting']])
-  expect(rail.el.querySelector('.ws-thread-tree > ul .kbn-thread-row')?.getAttribute('aria-label')).toBe('A resting, resting')
-  expect([...rail.legend.querySelectorAll('.ws-thread-legend-entry')].map(e => e.textContent!.replace(/^[^a-z]*/, ''))).toEqual(['waiting', 'working', 'resting'])
-  rail.el.querySelectorAll<HTMLButtonElement>('.ws-thread-tree > ul .kbn-thread-row')[1].click()
+  const groups = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')]
+  expect(groups.map(g => g.querySelector('summary')!.textContent)).toEqual(['Waiting · 1', 'Working · 1', 'Resting · 1', 'Tempered · 1'])
+  expect(groups.map(g => g.open)).toEqual([true, true, true, false])
+  expect(rail.el.querySelector('.ws-thread-tree ul')).toBeNull()
+  const deepRow = groups[0].querySelector('.kbn-thread-row')!
+  expect(deepRow.querySelector('.ws-thread-path')?.textContent).toBe('child')
+  expect(deepRow.querySelector('.ws-thread-mark')?.getAttribute('title')).toBe('question')
+  expect(groups[1].querySelector('.ws-thread-path')).toBeNull()
+  expect(groups[1].querySelector('.ws-thread-mark')).toBeNull()
+  expect(rail.el.textContent).not.toMatch(/Archived/)
+  groups[1].querySelector<HTMLButtonElement>('.kbn-thread-row')!.click()
   expect(open).toHaveBeenLastCalledWith(child)
   rail.show({ ...child }, new ThreadIndex(all))
-  expect(rail.el.querySelector('ul')?.textContent).toContain('Deep review')
-  expect(rail.el.querySelector('ul')?.textContent).not.toContain('A resting')
+  expect(rail.el.textContent).toContain('Deep review')
+  expect(rail.el.textContent).not.toContain('A resting')
   rail.breadcrumb.querySelector<HTMLButtonElement>('button')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
-  rail.show(root, new ThreadIndex(all))
-  const fold = rail.el.querySelector<HTMLButtonElement>('[aria-label="Toggle threads of Z working"]')!
-  fold.click()
-  expect(rail.el.querySelector('ul')?.textContent).not.toContain('Deep review')
-  // A new ask wakes its ancestor path; the tree is still containment-ordered.
-  rail.show(root, new ThreadIndex(all.map(c => c === deep ? { ...deep, ask: { ...deep.ask!, text: 'New question' } } : c)))
-  expect(rail.el.querySelector('ul')?.textContent).toContain('Deep review')
-  rail.show(root, new ThreadIndex([root, rest, done]))
-  expect(rail.el.querySelector('.ws-thread-waiting')).toBeNull()
+  rail.show(root, new ThreadIndex([root, rest]))
+  expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.textContent)).toEqual(['Resting · 1'])
   vi.unstubAllGlobals()
 })
 
-it('preserves focused folds and rows across toggles and live repaints without stealing outside focus', () => {
+it('marks a discarded thread among the tempered and keeps roles with Resting', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const root = card({ id: 'hub' })
+    const dropped = card({ id: 'hub/dropped', orchestrator: root.id, status: 'closed', tempered: false, name: 'Dropped' })
+    const done = card({ id: 'hub/done', orchestrator: root.id, status: 'closed', tempered: true, name: 'Done' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(root, new ThreadIndex([root, dropped, done]))
+    const marks = [...rail.el.querySelectorAll('.ws-thread-group .ws-thread-mark')].map(m => m.getAttribute('title'))
+    expect(marks).toEqual(['Discarded'])
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('preserves focused rows and open groups across live repaints without stealing outside focus', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' }), branch = card({ id: 'hub/branch', name: 'Branch', orchestrator: root.id, status: 'active' })
   const draft = card({ id: 'hub/branch/draft', name: 'Draft', orchestrator: branch.id, status: 'open' })
@@ -53,24 +58,18 @@ it('preserves focused folds and rows across toggles and live repaints without st
   document.body.append(rail.el, outside)
   try {
     rail.show(root, new ThreadIndex([root, branch, draft, old]))
-    const fold = rail.el.querySelector<HTMLButtonElement>('[aria-label="Toggle threads of Branch"]')!
-    fold.focus(); fold.click()
-    expect(document.activeElement).toBe(rail.el.querySelector('[aria-label="Toggle threads of Branch"]'))
-    ;(document.activeElement as HTMLButtonElement).click()
-    const archive = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details]')!
-    archive.open = true
-    const row = archive.querySelector<HTMLButtonElement>('.kbn-thread-row')!
-    row.focus()
+    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
+    tempered.open = true
+    tempered.querySelector<HTMLButtonElement>('.kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, outcome: 'New evidence' }]))
-    const refreshed = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details]')!
+    const refreshed = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
     expect(refreshed.open).toBe(true)
     expect(document.activeElement).toBe(refreshed.querySelector('.kbn-thread-row'))
     expect(document.activeElement?.textContent).toContain('New evidence')
     outside.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, outcome: 'Another update' }]))
     expect(document.activeElement).toBe(outside)
-    const currentRow = rail.el.querySelector<HTMLButtonElement>('.ws-thread-tree > ul .kbn-thread-row')!
-    currentRow.focus()
+    rail.el.querySelector<HTMLButtonElement>('details[data-thread-details="working"] .kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, { ...draft, orchestrator: root.id }]))
     expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-toggle'))
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }

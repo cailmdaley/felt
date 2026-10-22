@@ -1,4 +1,4 @@
-/* The rail is one tree: a flat Waiting strip, then containment. Its type is a
+/* The rail is state groups: each a flat list in tree order. Its type is a
    step above the Desk's small text, set in the board's plain serif. */
 .ws-thread-rail {
   position: relative; display: flex; flex-direction: column; min-width: 0;
@@ -6,11 +6,11 @@
   background: var(--kbn-sheet); border-left: 1px solid var(--kbn-rule); color: var(--kbn-ink);
   font: var(--ws-label-size)/1.3 var(--ws-serif);
 }
-.ws-thread-rail[hidden], .ws-thread-breadcrumb[hidden], .ws-thread-legend[hidden] { display: none; }
+.ws-thread-rail[hidden], .ws-thread-breadcrumb[hidden] { display: none; }
 .ws-thread-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 8px 12px 12px; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
 .ws-thread-rail.ws-thread-collapsed { flex-basis: 44px; }
 .ws-thread-collapsed .ws-thread-scroll { padding: 12px 4px; }
-.ws-thread-collapsed :is(.ws-thread-tree, .ws-thread-legend, .ws-thread-handle) { display: none; }
+.ws-thread-collapsed :is(.ws-thread-tree, .ws-thread-handle) { display: none; }
 .ws-thread-collapsed .ws-thread-toggle { writing-mode: vertical-rl; }
 .ws-thread-toggle { padding: 4px 6px; font: inherit; font-variant: small-caps; }
 /* The left edge resizes the rail: a hairline that darkens under the pointer, the keyboard or a drag. */
@@ -24,47 +24,27 @@
 .ws-reader.ws-keyboard .ws-thread-handle:focus-visible::after { width: 2px; background: var(--ws-focus); }
 .ws-thread-resizing, .ws-thread-resizing * { cursor: col-resize !important; user-select: none; }
 
-/* What the marks mean: one muted line of the states below. */
-.ws-thread-legend { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 2px 6px 10px; color: var(--kbn-ink-muted); font-size: var(--ws-small-size); line-height: 1.5; }
-.ws-thread-legend-entry { display: inline-flex; align-items: center; gap: .4em; white-space: nowrap; }
-
-/* A state is a mark: the sidebar's dot for a worker's turn, its ✓ for the human's move. */
+/* A group is a flat list under its heading and count; a mark appears only for a sub-state. */
+.ws-thread-group { margin: 0 0 6px; }
+.ws-thread-group + .ws-thread-group { border-top: 1px solid var(--kbn-rule-strong); padding-top: 6px; }
+.ws-thread-group > summary { cursor: pointer; padding: 6px 6px; color: var(--kbn-ink-muted); font-size: var(--ws-small-size); }
+.ws-thread-group > .kbn-thread-item + .kbn-thread-item { border-top: 1px solid var(--kbn-rule); }
 .ws-thread-mark { flex: none; display: grid; place-items: center; width: 18px; height: 1.3em; font-size: var(--ws-sidebar-glyph-size); line-height: 1; color: var(--kbn-ink-muted); }
-.ws-thread-legend .ws-thread-mark { width: auto; height: auto; }
-.ws-thread-mark[data-state='to-review'] { color: var(--ws-you); }
-.ws-thread-mark[data-state='drafts'] { font-size: var(--ws-thread-quiet-glyph-size); }
-.ws-thread-mark[data-state='archived'] { color: var(--kbn-ink-muted); opacity: .6; }
-.ws-thread-mark[data-turn]::before { content: ''; width: var(--ws-sidebar-dot-size); height: var(--ws-sidebar-dot-size); border-radius: 50%; background: var(--ws-machine); }
-.ws-thread-mark[data-turn='idle']::before { background: var(--ws-fresh); }
-.ws-thread-mark[data-turn='question']::before { background: var(--ws-you); }
-.ws-thread-mark[data-turn='blocked']::before { background: var(--kbn-ink-muted); }
-
-.ws-thread-waiting { margin: 0 0 14px; padding-bottom: 6px; border-bottom: 1px solid var(--kbn-rule-strong); }
-.ws-thread-waiting h3 { margin: 0 6px 4px; font: inherit; font-size: var(--ws-small-size); font-weight: 500; color: var(--kbn-ink-muted); }
-.ws-thread-waiting > .kbn-thread-item + .kbn-thread-item { border-top: 1px solid var(--kbn-rule); }
+.ws-thread-mark[data-kind]:not([data-kind='discarded'])::before { content: ''; width: var(--ws-sidebar-dot-size); height: var(--ws-sidebar-dot-size); border-radius: 50%; background: var(--ws-fresh); }
+.ws-thread-mark[data-kind='question']::before { background: var(--ws-you); }
+.ws-thread-mark[data-kind='blocked']::before { background: var(--kbn-ink-muted); }
 
 /* A row: the state mark, then the name over its outcome. A parent path leads the name, muted, behind a thin rule. */
-.ws-thread-tree .kbn-thread-row { grid-template-columns: auto minmax(0, 1fr); gap: 1px 6px; align-items: baseline; padding: 7px 8px 7px 4px; font-size: inherit; }
+.ws-thread-tree .kbn-thread-row { grid-template-columns: minmax(0, 1fr); gap: 1px 6px; align-items: baseline; padding: 7px 8px; font-size: inherit; }
+.ws-thread-tree .kbn-thread-row.ws-thread-marked { grid-template-columns: auto minmax(0, 1fr); }
 .ws-thread-tree .kbn-thread-row .ws-thread-mark { grid-column: 1; grid-row: 1; }
-.ws-thread-head { grid-column: 2; grid-row: 1; display: flex; align-items: baseline; min-width: 0; }
+.ws-thread-head { grid-column: -2; grid-row: 1; display: flex; align-items: baseline; min-width: 0; }
 .ws-thread-head .kbn-thread-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ws-thread-path { flex: 0 1 auto; max-width: 45%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 7px; padding-right: 7px; border-right: 1px solid var(--kbn-rule-strong); color: var(--kbn-ink-muted); font-size: var(--ws-small-size); }
 .ws-thread-tree .kbn-thread-row[data-thread-state='waiting'] { background: color-mix(in srgb, var(--kbn-owed-bright) 9%, transparent); }
 .ws-thread-tree .kbn-thread-row[data-thread-state='waiting'] .kbn-thread-name { font-weight: 600; color: var(--kbn-owed-ink); }
 .ws-thread-tree .kbn-thread-row:hover, .ws-thread-tree .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
-.ws-thread-tree .kbn-thread-outcome { grid-column: 2; font-size: var(--ws-thread-outcome-size); line-height: 1.35; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.ws-thread-line > .kbn-thread-item { flex: 1 1 auto; }
-
-/* The tree: a hairline between siblings, a rule down each subtree, a stronger one between the top-level subtrees. */
-.ws-thread-tree ul { margin: 0 0 0 9px; padding: 0 0 0 9px; list-style: none; border-left: 1px solid var(--kbn-rule-strong); }
-.ws-thread-tree > ul { padding-left: 0; margin-left: 0; border: 0; }
-.ws-thread-tree li + li { border-top: 1px solid var(--kbn-rule); }
-.ws-thread-tree > ul > li + li { border-top-color: var(--kbn-rule-strong); }
-.ws-thread-line { display: flex; align-items: start; }
-.ws-thread-fold-gap { flex: none; width: 18px; }
-.ws-thread-line > button:not(.kbn-thread-row) { flex: none; width: 18px; padding: 8px 0; color: var(--kbn-ink-muted); }
-.ws-thread-tree details { margin: 6px 0; font-size: var(--ws-small-size); color: var(--kbn-ink-muted); }
-.ws-thread-tree summary { cursor: pointer; padding: 6px 8px; }
+.ws-thread-tree .kbn-thread-outcome { grid-column: -2; font-size: var(--ws-thread-outcome-size); line-height: 1.35; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
 .ws-thread-breadcrumb { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 18px; font-size: var(--ws-small-size); color: var(--kbn-ink-muted); }
 .ws-thread-breadcrumb button:hover { color: var(--kbn-ink); text-decoration: underline; }

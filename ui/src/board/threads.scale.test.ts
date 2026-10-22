@@ -86,7 +86,7 @@ describe('thread read model at fleet scale', () => {
         // Map touches see the walks inside the index's methods, not only the calls.
         const count = counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => rail.show(root, index))
         expect(threadIndexBuilds()).toBe(before)
-        expect(rail.el.querySelectorAll('.ws-thread-tree > ul .kbn-thread-row')).toHaveLength(size - 1)
+        expect(rail.el.querySelectorAll('.ws-thread-group .kbn-thread-row')).toHaveLength(size - 1)
         return count
       }
       expect(reads(N) / reads(N / 4)).toBeLessThan(LINEAR)

@@ -1,18 +1,22 @@
 import { MOBILE_MEDIA } from '../mobile.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
-import { THREAD_LABEL, type ThreadIndex, type ThreadState } from '../threads.js'
+import { deskColumn } from '../deskColumn.js'
+import { type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
 const MIN_WIDTH = 220, MAX_WIDTH = 640, STEP = 16
-/** Each state's mark: the sidebar's dot for a worker's turn, its ✓ for the human's move; the rest are quiet shapes. */
-const MARK: Record<ThreadState, { text: string; dot?: boolean }> = {
-  waiting: { text: '', dot: true }, working: { text: '', dot: true }, 'to-review': { text: '✓' },
-  drafts: { text: '◌' }, roles: { text: '◇' }, resting: { text: '○' }, archived: { text: '–' },
-}
-const LEGEND_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting']
+/** The groups, in the order they are drawn; roles rest with Resting and discarded threads sit with the Tempered. */
+const GROUPS: readonly { key: string; label: string; states: readonly ThreadState[] }[] = [
+  { key: 'waiting', label: 'Waiting', states: ['waiting'] },
+  { key: 'working', label: 'Working', states: ['working'] },
+  { key: 'to-review', label: 'To review', states: ['to-review'] },
+  { key: 'drafts', label: 'Drafts', states: ['drafts'] },
+  { key: 'resting', label: 'Resting', states: ['resting', 'roles'] },
+  { key: 'tempered', label: 'Tempered', states: ['archived'] },
+]
 
 /** A view of the selected constitution's own subtree; navigation never changes containment. */
 export class ThreadRail {
@@ -20,11 +24,8 @@ export class ThreadRail {
   readonly breadcrumb = document.createElement('nav')
   private readonly scroller = document.createElement('div')
   readonly handle = document.createElement('div')
-  readonly legend = document.createElement('div')
   private readonly tree = document.createElement('div')
   private readonly toggle = document.createElement('button')
-  private readonly folded = new Set<string>()
-  private readonly archivesOpen = new Set<string>()
   private signature = ''
   private width: number | null = null
   private card: KanbanCard | null = null
@@ -43,9 +44,8 @@ export class ThreadRail {
       const collapsed = this.el.classList.toggle('ws-thread-collapsed')
       this.toggle.setAttribute('aria-expanded', String(!collapsed)); layout()
     })
-    this.legend.className = 'ws-thread-legend'; this.legend.setAttribute('aria-label', 'Thread marks')
     this.tree.className = 'ws-thread-tree'
-    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.toggle, this.legend, this.tree)
+    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.toggle, this.tree)
     this.handle.className = 'ws-thread-handle'; this.handle.setAttribute('role', 'separator'); this.handle.setAttribute('aria-orientation', 'vertical')
     this.handle.setAttribute('aria-label', 'Resize thread tree'); this.handle.title = 'Drag to resize · double-click to reset'; this.handle.tabIndex = 0
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
@@ -129,30 +129,9 @@ export class ThreadRail {
     const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags])])
     if (signature === this.signature) return
     this.signature = signature
-    // A waiting thread opens the path down to it. Walks stop at an ancestor an
-    // earlier walk already opened, so a deep chain of asks stays linear.
-    const opened = new Set<KanbanCard>()
-    for (const waiting of descendants) {
-      if (index.state(waiting) !== 'waiting') continue
-      for (let ancestor = index.parentOf(waiting); ancestor && !opened.has(ancestor); ancestor = index.parentOf(ancestor)) {
-        opened.add(ancestor); this.folded.delete(JSON.stringify([ancestor.originId, ancestor.id]))
-      }
-    }
     this.el.hidden = !descendants.length
     this.paintBreadcrumb(ancestors)
     this.paint()
-  }
-  private paintLegend(present: readonly ThreadState[]): void {
-    const states = LEGEND_ORDER.filter(state => present.includes(state))
-    this.legend.hidden = !states.length
-    this.legend.replaceChildren(...states.map(state => {
-      const entry = document.createElement('span'); entry.className = 'ws-thread-legend-entry'
-      const mark = document.createElement('span'); mark.className = 'ws-thread-mark'; mark.dataset.state = state
-      mark.setAttribute('aria-hidden', 'true'); mark.textContent = MARK[state].text
-      if (MARK[state].dot) mark.dataset.turn = state === 'waiting' ? 'question' : 'working'
-      entry.append(mark, THREAD_LABEL[state].toLowerCase())
-      return entry
-    }))
   }
   private paintBreadcrumb(ancestors: readonly KanbanCard[]): void {
     this.breadcrumb.hidden = !ancestors.length
@@ -166,80 +145,59 @@ export class ThreadRail {
     if (!this.card) return
     const active = document.activeElement
     const focus = active instanceof HTMLElement && this.tree.contains(active) ? active.dataset.threadFocus : undefined
-    const detailsState = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
-    const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    const identify = (el: HTMLElement, kind: string, card: KanbanCard): void => { el.dataset.threadFocus = focusOf(kind, card) }
+    const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
     const index = this.index!
-    // The state is a mark, not a word: the word stays in the mark's title and the row's label.
-    const rowFor = (card: KanbanCard, scope: string, path = ''): HTMLElement => {
-      const item = threadItem(card, index, this.open, focusOf(scope, card))
+    const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
+    // Containment reads from the muted slugs of the two nearest ancestors below the open constitution, a cut chain led by an ellipsis.
+    const slug = (c: KanbanCard): string => c.id.split('/').pop()!
+    const pathOf = (card: KanbanCard): string => {
+      const root = this.card!, parent = index.parentOf(card)
+      if (!parent || parent.id === root.id) return ''
+      const grand = index.parentOf(parent)
+      if (!grand || grand.id === root.id) return slug(parent)
+      const above = index.parentOf(grand)
+      return `${above && above.id !== root.id ? '…/' : ''}${slug(grand)}/${slug(parent)}`
+    }
+    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, or a discarded one among the tempered.
+    const markOf = (card: KanbanCard, state: ThreadState): { kind: string; title: string } | null => {
+      if (state === 'waiting') { const turn = turnOf(card); return { kind: turn.turn, title: turn.word } }
+      if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
+      return null
+    }
+    const rowFor = (card: KanbanCard, group: string, label: string): HTMLElement => {
+      const item = threadItem(card, index, this.open, focusOf(group, card))
       const row = item.querySelector<HTMLElement>('.kbn-thread-row')!, state = index.state(card)
       row.querySelector('small')?.remove()
-      const mark = document.createElement('span'); mark.className = 'ws-thread-mark'; mark.dataset.state = state
-      mark.title = THREAD_LABEL[state]; mark.setAttribute('aria-hidden', 'true'); mark.textContent = MARK[state].text
-      if (MARK[state].dot) mark.dataset.turn = turnOf(card).turn
       const head = document.createElement('span'); head.className = 'ws-thread-head'
+      const path = pathOf(card)
       if (path) {
         const prefix = document.createElement('span'); prefix.className = 'ws-thread-path'; prefix.textContent = path; prefix.title = path
         head.append(prefix)
       }
       head.append(row.querySelector('.kbn-thread-name')!)
-      row.prepend(mark, head)
-      row.setAttribute('aria-label', `${card.name}, ${THREAD_LABEL[state].toLowerCase()}`)
+      row.prepend(head)
+      const mark = markOf(card, state)
+      let title = label
+      if (mark) {
+        const el = document.createElement('span'); el.className = 'ws-thread-mark'; el.dataset.kind = mark.kind
+        el.title = mark.title; el.setAttribute('aria-hidden', 'true'); el.textContent = mark.kind === 'discarded' ? '×' : ''
+        row.prepend(el); title = mark.title
+      }
+      row.classList.toggle('ws-thread-marked', mark !== null)
+      row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
       return item
     }
-    const subtree = index.subtree(this.card)
-    const nodes = (parent: KanbanCard, archiveMode = false): HTMLElement => {
-      const list = document.createElement('ul')
-      const archived: KanbanCard[] = []
-      for (const child of index.children(parent)) {
-        const below = index.summary(child)
-        if (!archiveMode && index.state(child) === 'archived' && below.unfinished === 0) { archived.push(child); continue }
-        const item = document.createElement('li')
-        const line = document.createElement('div'); line.className = 'ws-thread-line'
-        const expandable = index.size(child) > 0
-        const key = JSON.stringify([child.originId, child.id])
-        if (expandable) {
-          const fold = document.createElement('button'); fold.type = 'button'; fold.textContent = this.folded.has(key) ? '▸' : '▾'
-          identify(fold, 'fold', child)
-          fold.setAttribute('aria-label', `Toggle threads of ${child.name}`); fold.setAttribute('aria-expanded', String(!this.folded.has(key)))
-          fold.addEventListener('click', () => { if (this.folded.has(key)) this.folded.delete(key); else this.folded.add(key); this.paint() })
-          line.append(fold)
-        } else {
-          const spacer = document.createElement('span'); spacer.className = 'ws-thread-fold-gap'; spacer.setAttribute('aria-hidden', 'true'); line.append(spacer)
-        }
-        line.append(rowFor(child, 'tree')); item.append(line)
-        if (expandable && !this.folded.has(key)) item.append(nodes(child, archiveMode))
-        list.append(item)
-      }
-      if (archived.length) {
-        const item = document.createElement('li'), archive = document.createElement('details')
-        const key = JSON.stringify([parent.originId, parent.feltStore, parent.id])
-        archive.dataset.threadDetails = `archive:${key}`
-        archive.open = this.archivesOpen.has(key)
-        const summary = document.createElement('summary'); identify(summary, 'archive', parent)
-        summary.textContent = `${archived.reduce((n, c) => n + 1 + index.size(c), 0)} archived`
-        archive.append(summary)
-        for (const child of archived) archive.append(rowFor(child, 'tree'), nodes(child, true))
-        archive.addEventListener('toggle', () => { if (archive.isConnected) { if (archive.open) this.archivesOpen.add(key); else this.archivesOpen.delete(key) } })
-        item.append(archive); list.append(item)
-      }
-      return list
-    }
     this.tree.replaceChildren()
-    const waiting = subtree.filter(c => index.state(c) === 'waiting')
-    if (waiting.length) {
-      const strip = document.createElement('section'); strip.className = 'ws-thread-waiting'
-      const heading = document.createElement('h3'); identify(heading, 'waiting', this.card); heading.textContent = `Waiting · ${waiting.length}`
-      strip.append(heading)
-      for (const card of waiting) strip.append(rowFor(card, 'waiting', card.id.slice(this.card.id.length + 1).split('/').slice(0, -1).join('/')))
-      this.tree.append(strip)
-    }
-    this.paintLegend(subtree.map(c => index.state(c)))
-    this.tree.append(nodes(this.card))
-    for (const details of this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')) {
-      const open = detailsState.get(details.dataset.threadDetails!)
-      if (open !== undefined) details.open = open
+    const subtree = index.subtree(this.card)
+    for (const { key, label, states } of GROUPS) {
+      const members = subtree.filter(c => states.includes(index.state(c)))
+      if (!members.length) continue
+      const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
+      group.open = open.get(key) ?? key !== 'tempered'
+      const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, this.card)
+      summary.textContent = `${label} · ${members.length}`
+      group.append(summary, ...members.map(card => rowFor(card, key, label)))
+      this.tree.append(group)
     }
     this.layout()
     if (focus) {

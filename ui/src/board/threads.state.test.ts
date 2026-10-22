@@ -57,9 +57,10 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
       // The rail names a state by its mark's title; the peek and sub-entries by the row's word.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')?.textContent ?? row.querySelector('.ws-thread-mark')!.getAttribute('title')]))
+        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')?.textContent ?? row.closest('details')!.querySelector('summary')!.textContent!.split(' · ')[0]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
-      expect(labels(rail.el, '.ws-thread-tree > ul')).toEqual(want)
+      // The rail has no Roles group: a seat rests with Resting.
+      expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })
       // The waiting thread is a sub-entry; the peek draws the rest beneath it.
       expect(labels(host, '.kbn-thread-subentries')).toEqual({ [asking.name]: 'Waiting' })
       expect(labels(host, '.kbn-thread-family')).toEqual(want)
