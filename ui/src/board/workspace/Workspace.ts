@@ -1,3 +1,4 @@
+import type { ThreadIndex } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -23,6 +24,8 @@ import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from 
 import { ChannelThemes } from './ChannelThemes.js'
 
 export interface WorkspaceOptions {
+  /** The current response's thread graph, built once per response. */
+  threadIndex?(): ThreadIndex
   shuttleBase: string
   cards(): KanbanCard[]
   origin(): string
@@ -135,6 +138,7 @@ export class Workspace {
       themes: this.themes,
       cards: () => this.origin === 'Board' ? this.overview.orderedCards() : opts.cards(),
       queueCards: () => opts.cards(),
+      threadIndex: opts.threadIndex,
       switcherCards: () => this.sidebarCards(),
       pickerCards: () => this.overview.orderedCards(),
       sidebarBand: card => this.sidebarGroup(card),
@@ -250,7 +254,8 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     const all = this.opts.cards()
     const queues = sidebarQueue(all)
-    const cards = all.filter(card => !queues.folded(card))
+    // Threads list under their roots; an orphaned thread is a root of its own.
+    const cards = all.filter(card => (!card.orchestrator || card.threadOrphaned) && !queues.folded(card))
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => fiberPageColumn(card) === column)
     const flight = inColumn('inFlight')
     return [
@@ -658,6 +663,8 @@ export class Workspace {
           }
           // The feed owns office metadata between body reads.
           if (feed) {
+            metadata.orchestrator = feed.orchestrator
+            metadata.threadSummary = feed.threadSummary
             metadata.shuttleRole = feed.shuttleRole
             metadata.shuttleSeat = feed.shuttleSeat
           }

@@ -1,0 +1,15 @@
+.kbn-thread-badge { font: inherit; font-size: 11px; color: var(--kbn-ink-muted); background: transparent; border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 2px 5px; cursor: pointer; }
+.kbn-thread-badge-waiting { color: var(--kbn-owed-ink); font-weight: 700; border-color: var(--kbn-owed); background: color-mix(in srgb, var(--kbn-owed) 12%, transparent); }
+.kbn-thread-peek, .kbn-thread-subentries { grid-column: 1 / -1; flex-basis: 100%; min-width: 0; width: 100%; border-top: 1px solid var(--kbn-rule); padding: 6px 0; }
+.kbn-thread-peek[hidden] { display: none; }
+.kbn-thread-peek h4 { margin: 6px 8px 3px; font-size: 11px; font-weight: 400; color: var(--kbn-ink-muted); }
+.kbn-thread-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
+.kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
+.kbn-thread-row small { color: var(--kbn-ink-muted); font-size: 10px; }
+.kbn-thread-row[data-thread-state='waiting-cail'] > .kbn-thread-name { font-weight: 600; color: var(--kbn-owed-ink); }
+.kbn-thread-outcome { grid-column: 1 / -1; color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.kbn-thread-peek > small { display: block; padding: 6px 8px; color: var(--kbn-ink-muted); }
+.kbn-role-seat.kbn-thread-family { flex-wrap: wrap; }
+.kbn-thread-more { margin-left: 8px; font: inherit; font-size: 11px; color: var(--kbn-ink-muted); padding: 4px 0; }
+.kbn-thread-more:hover { color: var(--kbn-ink); text-decoration: underline; }
+.kbn-thread-mark { font-size: 10px; color: var(--kbn-ink-muted); border: 1px dashed var(--kbn-rule); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }

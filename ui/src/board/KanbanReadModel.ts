@@ -40,6 +40,7 @@ import type {
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
+import { adoptThreadIndex, familyColumn, ThreadIndex } from './threads.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -116,8 +117,9 @@ export function buildKanbanResponseFromComposite(
   };
   const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs, staleOrigin);
 
-  return {
+  const response: KanbanResponse = {
     feltHost: feed.host,
+    threads: surfaces.threads,
     now: surfaces.now,
     timeline: surfaces.timeline,
     stash: surfaces.stash,
@@ -128,6 +130,9 @@ export function buildKanbanResponseFromComposite(
     staleness,
     generatedAt: nowMs,
   };
+  // Every thread surface drawn from this response reads the graph built here.
+  adoptThreadIndex(response, surfaces.threadIndex);
+  return response;
 }
 
 /**
@@ -236,6 +241,8 @@ export function dedupeMirroredRows(
 }
 
 type AssembledSurfaces = {
+  threads: KanbanCard[];
+  threadIndex: ThreadIndex;
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
@@ -310,6 +317,17 @@ function assembleSurfaces(
   // intrinsic ULID — for the same reason `byId` is: felt's own object form
   // writes a uid, and a chain the board could not resolve would draw as a pile
   // of loose cards.
+  // THREADS. A card whose orchestrator resolves is drawn through its root, never
+  // on its own; one whose orchestrator is not on the board is its own card,
+  // marked orphaned, so its work stays reachable.
+  const allCards = classified.map(row => row.card);
+  const threadIndex = new ThreadIndex(allCards);
+  const parented = new Set(allCards.filter(card => threadIndex.parentOf(card)));
+  for (const card of allCards) {
+    if (threadIndex.isOrphan(card)) card.threadOrphaned = true;
+    card.threadSummary = threadIndex.summary(card);
+  }
+  const threads = allCards.filter(card => parented.has(card));
   const nodes = new Map<string, FoldNode>();
   for (const { card, column } of classified) {
     const node: FoldNode = {
@@ -318,7 +336,7 @@ function assembleSurfaces(
       // folds (below), and it is not a fold head, but the walk passes
       // through it to what it waited on.
       dependsOn: card.dependsOn,
-      foldable: FOLDABLE_HEAD_COLUMNS.has(column),
+      foldable: !parented.has(card) && FOLDABLE_HEAD_COLUMNS.has(column),
     };
     nodes.set(card.id, node);
     if (card.uid) {
@@ -328,7 +346,9 @@ function assembleSurfaces(
   }
   const folded: KanbanCard[] = [];
   for (const { card, column } of classified) {
-    const standsAlone = hasLiveWorker(card) || card.status === 'active' || leftQueues(card);
+    if (parented.has(card)) continue;
+    // A family with unfinished work in it is never tucked under another head.
+    const standsAlone = hasLiveWorker(card) || card.status === 'active' || leftQueues(card) || !!familyColumn(card.threadSummary);
     const head = standsAlone
       ? undefined
       : foldHeadId(nodes.get(card.id) ?? { id: card.id, dependsOn: card.dependsOn, foldable: false },
@@ -357,9 +377,27 @@ function assembleSurfaces(
   composted.sort(byClosedAtDesc);
 
   const stash: KanbanCard[] = [];
-  const futureDated: KanbanCard[] = [...scheduled];
   const nowDrafts: KanbanCard[] = [];
   for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
+
+  // A root off the Desk (resting, scheduled, settled) whose threads still hold
+  // work comes back to Now, in the column its most urgent thread asks for:
+  // the Desk draws only roots, so a root that stays away hides its threads.
+  const deskColumns = { inFlight, awaitingReview };
+  const promote = (list: KanbanCard[]): KanbanCard[] => list.filter((card) => {
+    const target = familyColumn(card.threadSummary);
+    if (!target) return true;
+    card.threadPromoted = true;
+    deskColumns[target].push(card);
+    return false;
+  });
+  const restingRoots = promote(stash);
+  stash.splice(0, stash.length, ...restingRoots);
+  const scheduledRoots = promote(scheduled);
+  const settledTempered = promote(tempered);
+  const settledComposted = promote(composted);
+  inFlight.sort(byInFlightBand);
+  awaitingReview.sort(byClosedAtDesc);
 
   // Awaiting-review cards are closed and pending a human verdict — actionable,
   // so they stay in the Now awaitingReview column. They must NOT be
@@ -370,8 +408,8 @@ function assembleSurfaces(
   // "disappeared from everywhere." See gotcha-awaiting-review-stale-horizon.
   const nowAwaitingReview = awaitingReview;
 
-  const past = mergeByClosedAtDesc(tempered, composted);
-  futureDated.sort(byDueAtAsc);
+  const past = mergeByClosedAtDesc(settledTempered, settledComposted);
+  const futureDated = scheduledRoots.sort(byDueAtAsc);
 
   // Cycles are the calendar's backdrop, so they read left to right: earliest
   // band first, with identity ties and absent dates last.
@@ -382,6 +420,8 @@ function assembleSurfaces(
   });
 
   return {
+    threads,
+    threadIndex,
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated },
     stash,
@@ -574,6 +614,7 @@ function toCard(
 
   return {
     id: f.id,
+    orchestrator: entry.orchestrator,
     uid: f.uid,
     name: f.name,
     path: entry.path,

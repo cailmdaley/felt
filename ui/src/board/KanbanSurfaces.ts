@@ -1,3 +1,5 @@
+import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
+import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
@@ -316,6 +318,8 @@ interface KanbanSurfaceRendererOptions {
 }
 
 export class KanbanSurfaceRenderer {
+  /** Open thread families, carried across the Desk's rebuilds. */
+  readonly threadFamilies = new ThreadFamilies()
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -867,12 +871,14 @@ export class KanbanSurfaceRenderer {
     const chip = this.renderRoleChip(card, originStaleness)
     const queue = document.createElement('div')
     queue.className = 'kbn-role-queue'
-    if (!this.renderQueuedChip(card, queue)) return chip
+    const queued = this.renderQueuedChip(card, queue)
+    if (!queued && !(card.threadSummary?.unfinished || card.threadSummary?.archived)) return chip
     chip.removeAttribute('role')
     const seat = document.createElement('div')
     seat.className = 'kbn-role-seat'
     seat.setAttribute('role', 'listitem')
     seat.append(chip, queue)
+    installThreadPeek(seat, queue, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
     return seat
   }
 
@@ -1382,6 +1388,9 @@ export class KanbanSurfaceRenderer {
     // not the compact one: a cluster row wraps, so the peek list can take a
     // line of its own here the way it does on a desk card.
     this.renderQueuedChip(card, el)
+    const mark = threadMark(card)
+    if (mark) el.append(mark)
+    installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
     // the way a Desk row's are: under the pointer at that end, or on focus. A
@@ -1912,8 +1921,11 @@ export class KanbanSurfaceRenderer {
 
     const turnChip = this.renderTurnChip(card, kind)
     if (turnChip) meta.append(turnChip)
+    const mark = threadMark(card)
+    if (mark) meta.append(mark)
 
     el.append(meta)
+    installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
     if (queuedList) el.append(queuedList)
 
     el.addEventListener('click', (e) => {
@@ -2032,6 +2044,8 @@ export class KanbanSurfaceRenderer {
   buildCardPreview(row: HTMLElement): PreviewContent | null {
     const card = this.previewCard(row)
     if (!card) return null
+    // A family expands in place; the floating preview would cover its thread rows.
+    if (card.threadSummary && card.threadSummary.unfinished + card.threadSummary.archived > 0) return null
     const sheet = document.createElement('div')
     sheet.className = 'kbn-preview-sheet'
     let paper = this.buildPreviewPaper(card, row, sheet)
@@ -3071,6 +3085,12 @@ function visibleRectOf(el: HTMLElement): ZoneRect | null {
  * card that can be found must also be able to appear in a chain, or "+N
  * queued" would count differently from what the peek can name.
  */
+const NO_THREADS = new ThreadIndex([])
+/** The response's thread graph: the one the read model built, or built once from its cards. */
+export function threadIndexFor(resp: KanbanResponse | null): ThreadIndex {
+  return resp ? responseThreadIndex(resp, () => boardCards(resp)) : NO_THREADS
+}
+
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []
   const seen = new Set<string>()
@@ -3082,6 +3102,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.stash,
     resp.roles,
     resp.folded,
+    resp.threads ?? [],
   ]) {
     for (const card of list) {
       if (seen.has(card.id)) continue
@@ -3131,6 +3152,7 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     // through this lookup. A folded card that did not resolve here would be a
     // row whose every gesture silently no-ops.
     resp.folded,
+    resp.threads ?? [],
   ]) {
     const hit = list.find((c) => c.id === id)
     if (hit) return hit

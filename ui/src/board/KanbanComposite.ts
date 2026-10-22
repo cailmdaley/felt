@@ -82,6 +82,8 @@ export interface CompositeEntry {
    * transition writes; this is the value to pass back as the `/transition`
    * `origin`. */
   origin: string;
+  /** Nearest ancestor constitution, owner-resolved; null is a root. */
+  orchestrator?: string | null;
   /** Owning felt store path on the owning host. */
   feltStore: string;
   /** Fiber path relative to the owning `.felt/` root. */
@@ -160,7 +162,8 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const dir = typeof item.dir === 'string' ? item.dir : undefined;
     const reportPath = typeof item.report_path === 'string' ? item.report_path : undefined;
 
-    entries.push({ origin, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
+    const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
+    entries.push({ origin, orchestrator, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

@@ -165,6 +165,19 @@ describe('Reader channel sidebar', () => {
     expect((reader as unknown as { sidebarSnapshot: unknown }).sidebarSnapshot).toBeNull()
   })
 
+  it('draws each constitution as one compact line: name, host and worker, no outcome or question', () => {
+    storage.set('shuttle:workspace:sidebar', 'true')
+    const asking: KanbanCard = { ...alpha, status: 'active', outcome: 'A long result paragraph', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }
+    listedCards = [asking, beta]
+    const reader = makeReader(asking)
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
+    const face = row.matches('.ws-constitution-card') ? row : row.querySelector<HTMLElement>('.ws-constitution-card')!
+    expect(face.classList.contains('ws-constitution-row')).toBe(true)
+    expect(face.querySelector('.kbn-card-outcome, .kbn-card-question, .kbn-card-id')).toBeNull()
+    expect(face.querySelector('.kbn-card-name')?.textContent).toBe(asking.name)
+    expect(face.querySelector('.ws-channel-owner')).not.toBeNull()
+  })
+
   it('repaints a retained worker pill when its turn changes', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'running', runtimePhase: 'attention', lastActivityAt: Date.now() }

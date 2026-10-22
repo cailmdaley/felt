@@ -14,6 +14,13 @@ export interface InheritedProjectDir {
 }
 
 export interface KanbanCard {
+  /** Nearest ancestor constitution; absent on older feeds and plain notes. */
+  orchestrator?: string | null
+  threadSummary?: { unfinished: number; waitingOnCail: number; working: number; toReview: number; drafts: number; archived: number }
+  /** A settled or resting root drawn on the Desk because its threads still hold work. */
+  threadPromoted?: boolean
+  /** A thread whose orchestrator is not on the board, drawn as its own card. */
+  threadOrphaned?: boolean
   id: string
   /** Intrinsic frontmatter ULID when present. */
   uid?: string
@@ -312,6 +319,8 @@ export interface KanbanOriginStaleness {
 }
 
 export interface KanbanResponse {
+  /** Descendant constitutions remain searchable and addressable, never standalone Desk cards. */
+  threads?: KanbanCard[]
   feltHost: string
   /** Now surface — the desk (3 columns). */
   now: {

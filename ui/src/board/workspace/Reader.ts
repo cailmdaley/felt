@@ -1,3 +1,5 @@
+import { ThreadRail } from './ThreadRail.js'
+import { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -47,6 +49,8 @@ export interface ReaderOptions {
   cards(): KanbanCard[]
   /** Full Desk graph, including folded children and heads outside the sidebar groups. */
   queueCards?(): KanbanCard[]
+  /** The thread graph the rail reads; absent, one is built from `queueCards`. */
+  threadIndex?(): ThreadIndex
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
@@ -97,6 +101,7 @@ export class Reader {
   private readonly veil = element('div', 'ws-veil')
   private departure: ReturnType<typeof setTimeout> | null = null
   private arrival = 0
+  private readonly threadRail: ThreadRail
   readonly track = element('div', 'ws-track')
   readonly stage = element('div', 'ws-stage')
   private readonly parallax = element('div', 'ws-parallax')
@@ -278,9 +283,10 @@ export class Reader {
     this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
-    column.append(this.stage)
+    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
+    column.append(this.threadRail.breadcrumb, this.stage)
     const main = element('div', 'ws-stage-row')
-    main.append(this.sidebar, column)
+    main.append(this.sidebar, column, this.threadRail.el)
     this.el.append(this.veil, this.navbar, this.sidebarToggle, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
@@ -345,6 +351,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
+    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.queueCards?.() ?? this.opts.cards()))
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -841,11 +848,13 @@ export class Reader {
   }
   /** The source column is captured before the live Desk starts receding. */
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
+  /** One line per constitution, as the Desk's rows are: name, host, queue and worker; the outcome is the page's to show. */
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = buildCardPaper(card)
     // A note or role has no lifecycle, so it carries no lifecycle glyph.
     if (!onDesk(card)) face.querySelector('.kbn-card-glyph')?.remove()
-    face.classList.add('ws-constitution-card')
+    for (const extra of face.querySelectorAll('.kbn-card-id, .kbn-card-outcome')) extra.remove()
+    face.classList.add('ws-constitution-card', 'ws-constitution-row')
     face.dataset.part = 'sidebar-card'
     face.dataset.wsThemeBoundary = ''
     face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
