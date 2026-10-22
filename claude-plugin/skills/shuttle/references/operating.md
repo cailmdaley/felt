@@ -28,9 +28,9 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
 - **In flight** — a live worker or owned app conversation, or an armed oneshot, even one waiting on its dependencies.
-- **Awaiting review** — `status: closed` with no `tempered`, parked for the human.
-- **Tempered** — `closed`, `tempered: true`: the human accepted it.
-- **Discarded** — `closed`, `tempered: false`: the human set it aside. The block stays as the record.
+- **Awaiting review** — `status: closed` with no `tempered`, parked for review.
+- **Tempered** — `closed`, `tempered: true`: accepted by the human or a thread's orchestrator.
+- **Discarded** — `closed`, `tempered: false`: set aside by the human or a thread's orchestrator. The block stays as the record.
 
 ## Threads on the board
 
@@ -41,10 +41,15 @@ Open a thread there to read its own conversation and report, then use the breadc
 **To review** means closed work awaiting a verdict, not accepted work; tempered and discarded threads are archived, folded away rather than counted as unfinished.
 
 “Keep going” tells the orchestrator to read incoming results, answer what it can, return work that misses Desired State, and launch queued threads whose prerequisites are met.
-It doesn't waive human gates: the orchestrator recommends a verdict, but the human tempers or discards and approves spend on a new host.
+The orchestrator may temper or discard threads at any level and choose their hosts without asking.
+Oversight follows the human's investment: review and report before tempering a thread they requested, messaged, or expressed curiosity about; temper self-initiated work on your own judgment.
+Keep the overview high-level, with outcomes, reports and thread chips making the detail one click away; reversible decisions call for inspection, not permission.
+The usual external-action gates still apply, including issues or PRs on repos where the human isn't a developer and messages in others' channels.
 Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.
 Answering inside a thread steers that worker directly; when the decision changes other threads or the parent's scope, tell the orchestrator too rather than assuming it sees every exchange.
-Thread close and ask messages wake the orchestrator; handoff and rest arrive as context for its next turn.
+Thread close and ask messages wake only that thread's own orchestrator; handoff and rest arrive as context for its next turn.
+That orchestrator decides whether to pass a result further up; results don't automatically wake a chain of ancestors.
+Use `shuttle close <thread> --quiet` for wrap-ups that need no wake.
 
 ## Verbs
 

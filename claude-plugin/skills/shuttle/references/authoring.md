@@ -45,6 +45,7 @@ An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lan
 ## Threads
 
 A thread is a constitution under its orchestrator, with its own worker and transcript.
+Choose it for work that outlives a session or deserves a Desired State worth writing and an outcome worth tracking; use a subagent for the rest.
 Use `shuttle thread <parent> "<ask>" --disabled` to file it safely: the ask becomes its name and lede, and Desired State starts empty.
 Rewrite the lede to say what the thread is for and how it serves the parent; fill `## Desired State` with the conditions the orchestrator will review, including scope and evidence.
 Then arm it with `shuttle resume <thread>`.
@@ -57,10 +58,11 @@ Override the agent for the work rather than assuming the orchestrator's model fi
 An absent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent, while explicit `--surface app` requires Codex.
 Changing `--host` requires `--project-dir` even for a draft: the parent's path belongs to another machine.
 Explicit paths are validated locally, so run the command on the destination host when its directory isn't available here; the owner's store must also receive the fiber before dispatch ([operating.md](operating.md#remote-hosts)).
-Get the human's approval before committing spend on a new host.
+Host choice is within the orchestrator's authority, not a separate approval gate.
 
-Keep the inherited role when the thread does the same kind of work.
-Give it its own role with `--role <role>` or `shuttle role <thread> <role>` when it needs a different office's playbooks, human gates or continuing responsibility; a separate transcript alone doesn't call for a new charter.
+Every thread has a role.
+Keep the parent's role unless it doesn't fit; assign a fitting office with `--role <role>` or `shuttle role <thread> <role>` when the thread needs different playbooks or continuing responsibility, and supply one before arming if the parent has none.
+A separate transcript alone doesn't call for a new charter.
 
 ## The human in the loop
 
