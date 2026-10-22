@@ -603,3 +603,39 @@ func TestShuttleStatus_SingleFiberWithoutBlock(t *testing.T) {
 		t.Fatal("status on a block-less fiber must error")
 	}
 }
+
+// The single-fiber JSON names the board's column and the verdict, so a reader
+// can tell a tempered fiber from one awaiting review.
+func TestShuttleStatusOneFiberJSONCarriesColumnAndVerdict(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	yes, no := true, false
+	seedShuttleRole(t, storage, "proj/kept", felt.StatusClosed, oneshot(), &yes)
+	seedShuttleRole(t, storage, "proj/dropped", felt.StatusClosed, oneshot(), &no)
+	seedShuttleRole(t, storage, "proj/review", felt.StatusClosed, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/armed", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/draft", felt.StatusOpen, oneshot(), nil)
+	a := withStubbedLiveSessions(t, env, map[string]bool{})
+
+	for id, want := range map[string][2]any{
+		"proj/kept":    {"tempered", "tempered"},
+		"proj/dropped": {"discarded", "discarded"},
+		"proj/review":  {"awaiting_review", nil},
+		"proj/armed":   {"in_flight", nil},
+		"proj/draft":   {"drafts", nil},
+	} {
+		out, _, err := executeApp(t, a, dir, "status", id, "--json")
+		if err != nil {
+			t.Fatalf("status %s: %v\n%s", id, err, out)
+		}
+		var got map[string]any
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%s: %v\n%s", id, err, out)
+		}
+		verdict, present := got["verdict"]
+		if got["column"] != want[0] || verdict != want[1] || !present || got["status"] == nil {
+			t.Errorf("%s: column %v verdict %v (present %v), want %v %v\n%s", id, got["column"], verdict, present, want[0], want[1], out)
+		}
+	}
+}

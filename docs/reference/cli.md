@@ -179,7 +179,7 @@ constitution open; activating it could launch another worker.
 | `shuttle ls [query]` | Felt-compatible fiber listing/search with Shuttle's resolved facet in JSON output |
 | `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
 | `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
-| `shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so |
+| `shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so. Its `--json` adds the board's `column` (`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting`, `roles`) and the review `verdict` (`tempered`, `discarded` or null) |
 | `shuttle ps` | Live tmux worker sessions only |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |

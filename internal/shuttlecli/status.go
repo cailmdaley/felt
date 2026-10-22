@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -253,6 +254,12 @@ func (a *app) runStatusOneFiber(query string) error {
 			"armed":    armed,
 			"running":  running,
 			"dispatch": a.dispatchAssessment(f.ID, f.UID, statusNow, block),
+			// The board's Desk column and the review verdict (null when none).
+			"column":  shuttle.Column(f, block, running, time.Now()),
+			"verdict": nil,
+		}
+		if verdict := shuttle.Verdict(f); verdict != "" {
+			out["verdict"] = verdict
 		}
 		if block.Agent != "" {
 			out["agent"] = block.Agent

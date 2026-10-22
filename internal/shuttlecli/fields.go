@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
-	"gopkg.in/yaml.v3"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // felt-native field helpers shared by the shuttle write verbs. A fiber's
@@ -18,21 +18,11 @@ import (
 
 // shuttleTemperedKey is the top-level frontmatter key holding the human review
 // verdict (true=tempered, false=discarded, absent=awaiting review).
-const shuttleTemperedKey = "tempered"
+const shuttleTemperedKey = shuttle.TemperedKey
 
 // readTempered returns the fiber's tempered verdict: a *bool that is nil when the
 // key is absent (awaiting review).
-func readTempered(f *felt.Felt) *bool {
-	node, ok := f.ExtraFields[shuttleTemperedKey]
-	if !ok || node == nil || node.Kind != yaml.ScalarNode {
-		return nil
-	}
-	var v bool
-	if err := node.Decode(&v); err != nil {
-		return nil
-	}
-	return &v
-}
+func readTempered(f *felt.Felt) *bool { return shuttle.Tempered(f) }
 
 // setTempered writes (true/false) or clears (nil) the tempered verdict. A nil
 // value removes the key entirely — the "awaiting review" state — via felt's
