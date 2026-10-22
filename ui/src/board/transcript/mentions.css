@@ -1,0 +1,32 @@
+.ws-constitution-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .4em;
+  max-width: 100%;
+  padding: .12em .45em;
+  border: 1px solid var(--shuttle-chip-hairline, var(--kbn-hairline, currentColor));
+  border-radius: 5px;
+  background: var(--shuttle-chip-sheet, var(--kbn-sheet, transparent));
+  color: var(--shuttle-chip-ink, var(--kbn-ink, inherit));
+  font: .85em/1.5 var(--font-mono, monospace);
+  text-decoration: none;
+  vertical-align: baseline;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.ws-constitution-chip::before {
+  content: '';
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--shuttle-chip-ink-muted, var(--kbn-ink-muted, currentColor));
+}
+.ws-constitution-chip[data-state='Working']::before { background: var(--shuttle-chip-agent, var(--kbn-agent, currentColor)); }
+.ws-constitution-chip[data-state='Waiting']::before { background: var(--shuttle-chip-owed, var(--kbn-owed, currentColor)); }
+.ws-constitution-chip[data-state='To review']::before { background: var(--shuttle-chip-tempered, var(--kbn-tempered, currentColor)); }
+.ws-constitution-chip[data-state='Draft']::before { background: transparent; border: 1px solid currentColor; }
+.ws-constitution-chip[data-state='Archived'] { opacity: .65; }
+.ws-constitution-chip-missing { opacity: .65; cursor: default; }
+.ws-constitution-chip-missing::before { content: none; }
+.ws-constitution-chip:focus-visible { outline: 2px solid var(--kbn-owed, currentColor); outline-offset: 2px; }

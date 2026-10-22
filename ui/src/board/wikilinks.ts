@@ -114,12 +114,13 @@ export async function installWikilinks(
   } catch {
     // No index, no resolution — leave every reference as literal text rather
     // than offering links that cannot be trusted to open anything.
-    for (const a of links) deaden(a)
+    for (const a of links) if (!a.dataset.constitution) deaden(a)
     return
   }
   if (opts.stillCurrent && !opts.stillCurrent()) return
 
   for (const a of links) {
+    if (a.dataset.constitution) continue
     const target = a.dataset.fiber ?? ''
     const id = opts.exact ? (index.some(row => row.id === target) ? target : null) : resolveWikilink(target, index)
     if (!id) {

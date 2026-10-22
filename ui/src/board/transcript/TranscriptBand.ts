@@ -194,6 +194,17 @@ function buildToolInput(step: ToolStep): HTMLElement {
   return detail
 }
 
+function spawnMention(step: Step): HTMLElement | null {
+  if (step.kind !== 'tool') return null
+  const input = inputObject(step.input)
+  const command = inputString(input?.command) ?? inputString(input?.cmd) ?? inputString(step.input) ?? ''
+  if (!/\bshuttle\s+thread\b/.test(command)) return null
+  const row = document.createElement('div')
+  row.className = 'ws-transcript-spawn'
+  row.textContent = [command, step.result?.text].filter(Boolean).join('\n')
+  return row
+}
+
 function setKicker(kicker: HTMLElement, author: string, speaker: Speaker, time?: number): void {
   const name = document.createElement('span')
   name.className = `ws-transcript-author ws-transcript-author-${speaker}`
@@ -984,7 +995,11 @@ export class TranscriptBand {
     }
     const agent = this.agentName()
     turn.steps.forEach((step, index) => {
-      if (step.kind !== 'text') return
+      if (step.kind !== 'text') {
+        const spawn = spawnMention(step)
+        if (spawn) { const item = document.createElement('li'); item.append(spawn); nodes.push(item) }
+        return
+      }
       let message = this.previewTexts.get(index)
       if (!message) {
         message = createMessage('agent', 'li')
@@ -1118,6 +1133,10 @@ export class TranscriptBand {
       this.paintGroupSummary(group, turn, part.start, part.end, trailing)
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
       children.push(group.button)
+      if (!group.expanded) for (const step of turn.steps.slice(part.start, part.end)) {
+        const spawn = spawnMention(step)
+        if (spawn) children.push(spawn)
+      }
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
     })
