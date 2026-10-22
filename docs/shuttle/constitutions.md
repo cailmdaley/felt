@@ -189,7 +189,7 @@ schedule (`shuttle reshape <fiber> --schedule "0 7 * * *"`). Reshape
 changes only `kind` and the schedule, and leaves the rest of the block —
 including the daemon-owned `runtime:` keys — untouched. It never
 touches felt's lifecycle fields (`status`, `tempered`, `outcome`), so a
-constitution sitting in Awaiting review can be reshaped in place without being requeued. A
+constitution sitting in Awaiting review can be reshaped in place without being re-armed. A
 `standing` target needs a schedule, from `--schedule` or echoed from the
 existing block; a `oneshot` target drops the schedule, and passing
 `--schedule`/`--tz` against one is an error.
@@ -247,8 +247,12 @@ list the daemon evaluates.
   pause. `closed` marks awaiting review or a terminus.
 
 One more condition lives outside the block: the fiber must sit in a felt store
-the daemon polls. `depends_on` is a board-only ordering annotation — a queued
-card folds under the card it follows — and never gates dispatch.
+the daemon polls.
+
+Work that should wait for an orchestrator is a draft thread:
+`shuttle thread <parent> "<ask>" --disabled`.
+It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
+Containment relates the work; it does not gate dispatch.
 
 ## Human in the loop
 

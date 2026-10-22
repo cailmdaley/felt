@@ -163,9 +163,6 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
    block without one still dispatches, with the felt store as the worker's
    directory; felt's arming verbs refuse to arm such a block.
 
-`depends_on` is not on this list. It is an ordering annotation for the board
-("this is filed after that") and carries no dispatch meaning.
-
 Configured stores come from `SHUTTLE_STORES` (comma-separated) or the persisted
 registry at `~/.config/shuttle/stores.json`. shuttle assumes no default store.
 

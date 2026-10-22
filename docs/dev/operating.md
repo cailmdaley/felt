@@ -133,7 +133,7 @@ parks the fiber like the ones below, so a force-dispatch launches it at once.
 
 The same preflight refuses a fiber whose `project_dir` is not a directory on
 this host — a checkout that lives on another machine. The autonomous path
-already skipped those; this catches the force-dispatch path (Requeue,
+already skipped those; this catches the force-dispatch path (New session,
 drag-to-launch), which bypasses eligibility. After either refusal the daemon
 parks that fiber for 5 minutes rather than re-probing a login shell every tick;
 a force-dispatch skips the wait.

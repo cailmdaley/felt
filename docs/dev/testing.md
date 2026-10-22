@@ -101,7 +101,7 @@ and add your test to its file.
 **Board** (`ui/`):
 
 - **Civil days and instants:** `src/board/civilDay.test.ts`, `civilDay.properties.test.ts`, `test/zoneReads.test.ts`.
-- **Desk classification and ordering:** `boardRules.test.ts`, `KanbanComposite.test.ts`, `deskBands.integration.test.ts`, `deskOrdering.test.ts`, `queueProperties.test.ts`, `queueEdge.test.ts`, `moveDestinations.test.ts`.
+- **Desk classification and ordering:** `boardRules.test.ts`, `KanbanComposite.test.ts`, `deskBands.integration.test.ts`, `deskOrdering.test.ts`, `moveDestinations.test.ts`.
 - **Desk input:** `keymap.test.ts`, `deskKeyboard.integration.test.ts`, `longPress`, `dismissGesture`, `mobile`.
 - **Dispatch actions:** `boardWire.test.ts`, `daemonApi`, `startPrompt`, `KanbanModal.verdict`, `composerImages.integration`.
 - **Chronicle:** `src/board/views/chronicle*.test.ts`, `temporalData.test.ts`, `vocabulary.test.ts`.
@@ -151,10 +151,10 @@ a finite set the product declares (key bindings, routes × content types),
 iterate *the declaration itself*, so that a new entry is covered without
 editing the test.
 
-- Libraries: **fast-check** in the board (see `queueProperties.test.ts` and `civilDay.properties.test.ts`), **StreamData** in the daemon, and Go's native fuzzing or `testing/quick`.
+- Libraries: **fast-check** in the board (see `civilDay.properties.test.ts`), **StreamData** in the daemon, and Go's native fuzzing or `testing/quick`.
 - Check the rule against an independent oracle (`Intl` formatting for a day, a brute-force model for an ordering), or as an invariant: idempotence, a round trip, invariance under permutation, monotonicity. A property that recomputes the implementation proves nothing.
 - Keep generators narrow enough to read as documentation, and bias them toward the edges: DST transitions, empty inputs, unicode, the boundary values.
-- Keep runs bounded and seeded: board properties pass an explicit `seed` and `numRuns` (200 is the common value; the queue properties run up to 1500), and daemon properties use `max_runs: 100`. A property should cost well under a second and fail the same way twice.
+- Keep runs bounded and seeded: board properties pass an explicit `seed` and `numRuns` (200 is the common value), and daemon properties use `max_runs: 100`. A property should cost well under a second and fail the same way twice.
 - Keep a named example beside the property for each regression worth naming, with its story in a comment.
 - Mutate the rule (off-by-one, a dropped case) and watch the property go red before you trust it.
 

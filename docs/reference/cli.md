@@ -48,7 +48,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 
 | Command | Purpose |
 |---|---|
-| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` and `depends_on` refs, stale link paths, legacy forms, slug collisions, stray fiber files; exits non-zero on errors |
+| `felt check` | Report unparseable fibers, empty names, broken wikilinks, `inputs.from` refs, stale link paths, legacy forms, slug collisions, stray fiber files; exits non-zero on errors |
 | `felt migrate` | Normalize legacy storage into the current model, folding stray fiber files into their directories; exits non-zero when a stray cannot fold safely (`--dir`, `--dry-run`) |
 | `felt backfill-ids` | Assign ULID ids to fibers missing one (`--dir`, `--dry-run`) |
 
@@ -128,7 +128,7 @@ settles status (`install`/`repeat` arm to `active`, `install --disabled`
 parks at `open`); an arming create refuses a closed fiber — arming
 something already reviewed needs an explicit `reopen`. `reshape` touches only the block's shape — `kind`, and a standing
 constitution's schedule — and leaves status and verdict fields exactly as found, so a
-role in Awaiting review can be reshaped in place without being requeued; `kind`
+role in Awaiting review can be reshaped in place without being re-armed; `kind`
 is optional, so `reshape <fiber> --schedule "0 7 * * *"` is a schedule-only
 edit. Lifecycle moves (`pause`/`resume`/`close`/`reopen`/`accept`) are
 untouched by any of this.
@@ -142,7 +142,7 @@ untouched by any of this.
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
 | `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until YYYY-MM-DD` sets a return day; `--until ''` rests undated. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
-| `shuttle reopen <fiber>` | Requeue a closed/reviewed fiber back to active (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
+| `shuttle reopen <fiber>` | Reopen a closed/reviewed fiber for active work (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`) |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running |
 | `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |

@@ -235,15 +235,9 @@ After installing and starting Shuttle, verify its version and release the boot h
 
 ### Fixed
 
-- `depends-on:` (the legacy hyphen form) was previously listed in
-  `knownFrontmatterKeys` without a corresponding struct field, so it was
-  silently absorbed at parse time and never surfaced anywhere — including
-  in JSON output. Lands in `ExtraFields` now like any other unknown key,
-  so `felt show --json` and `felt ls --json` round-trip the dependency
-  edges. The migrate command's destructive normalization
-  (`normalizeLegacyFrontmatter` strips `depends-on` from disk on `felt
-  migrate`) is unaffected — it operates on the raw YAML node, not the
-  parsed Felt.
+- Unknown frontmatter keys round-trip through `ExtraFields` in
+  `felt show --json` and `felt ls --json`, rather than being absorbed
+  without a corresponding struct field.
 
 ## [1.0.4] — 2026-05-04
 
@@ -251,7 +245,7 @@ After installing and starting Shuttle, verify its version and release the boot h
 
 - `felt show --json` now includes tool-owned frontmatter namespaces (any
   top-level YAML keys felt does not parse — `shuttle`, `tempered`,
-  `depends_on`, project-defined namespaces, etc.) as flat top-level JSON
+  project-defined namespaces, etc.) as flat top-level JSON
   keys. Previously these were silently omitted, forcing programmatic
   consumers to fall back on `--field <key>` per-key reads. The lossy JSON
   output had concretely bitten the shuttle daemon's dispatcher: every
@@ -404,7 +398,7 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 
 - `felt migrate` normalises legacy flat fibers into directory format,
   rewrites pre-existing `inputs` references, renames `title` →`name`,
-  strips legacy MyST anchors, and removes obsolete `depends-on` keys.
+  and strips legacy MyST anchors.
 - `--dry-run` previews all changes before writing.
 
 ### Changed
@@ -412,7 +406,7 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
 - The relationship model is now: directory containment for hierarchy,
   `[[wikilinks]]` in bodies for narrative cross-references, and ASTRA
   `inputs.from` for computational data flow. The older `tapestry:*` and
-  `tier:*` tag conventions and the `depends-on` link-graph are retired.
+  `tier:*` tag conventions are retired.
 - Fiber `name` replaces the legacy `title` field. Bodies are plain
   markdown (no MyST anchors required).
 - Status is opt-in: `felt add <slug> "name"` creates a statusless
@@ -428,8 +422,7 @@ the source of truth — `.felt/index.db` is a rebuildable cache.
   out of the felt core.
 - Public CLI: `tapestry`, `tag`, `untag`, `link`, `unlink`, `comment`,
   `upstream`, `downstream`, `graph`, `ready`, `prime`, `path`, and
-  `export` are removed (most absorbed into `edit` / `show` / `ls` or
-  retired with the depends-on graph).
+  `export` are removed (most absorbed into `edit` / `show` / `ls`).
 - Async Stop "conscience" hook retired in favour of the channel-nudge
   approach.
 
