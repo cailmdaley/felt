@@ -121,48 +121,34 @@ defmodule Shuttle.Threads do
 
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: its direct
-  threads in `entries` (the poller's cached constitutions, local and synced),
-  Waiting first, each with its own thread count. `live` holds the running
-  workers' runtime keys (uid, else id). Empty when it has none.
+  threads, Waiting first, each with the count of unfinished threads below it
+  (the board's thread badge), and the archived ones as a count. Empty when it
+  has none.
   """
   def roster(fiber_id, felt_store, entries, live) do
-    index = index(entries)
-
-    children =
-      Enum.group_by(
-        Enum.filter(entries, &is_map(&1.fiber["shuttle"])),
-        &case orchestrator(&1, index) do
-          nil -> nil
-          parent -> {parent.felt_store, address(parent.fiber)}
-        end
-      )
-
-    case Map.get(children, {felt_store, fiber_id}, []) do
+    case tree(fiber_id, felt_store, entries, live) do
       [] ->
         ""
 
       threads ->
-        {archived, rows} =
-          threads
-          |> Enum.map(&{thread_state(&1.fiber, live), &1})
-          |> Enum.split_with(&(elem(&1, 0) == "Archived"))
+        {archived, rows} = Enum.split_with(threads, &(&1["state"] == "Archived"))
 
         rows =
-          Enum.sort_by(rows, fn {state, e} ->
-            {Enum.find_index(@state_order, &(&1 == state)), address(e.fiber)}
-          end)
+          Enum.sort_by(
+            rows,
+            &{Enum.find_index(@state_order, fn s -> s == &1["state"] end), &1["id"]}
+          )
 
         lines =
           rows
           |> Enum.take(@roster_cap)
-          |> Enum.map(fn {state, e} ->
-            path = address(e.fiber)
-            n = length(Map.get(children, {e.felt_store, path}, []))
+          |> Enum.map(fn row ->
+            n = unfinished(row["threads"])
 
             count =
               if n > 0, do: "\n  (#{n} #{if n == 1, do: "thread", else: "threads"})", else: ""
 
-            "- #{path} — #{state} — #{first_sentence(e.fiber["outcome"])}#{count}"
+            "- #{row["id"]} — #{row["state"]} — #{first_sentence(row["outcome"])}#{count}"
           end)
 
         more =
@@ -185,21 +171,124 @@ defmodule Shuttle.Threads do
     end
   end
 
-  # The board's thread states (ui/src/board/threads.ts `threadState`), from the fiber alone.
-  defp thread_state(fiber, live) do
-    shuttle = fiber["shuttle"]
-    key = fiber["uid"] || fiber["id"]
+  # The thread badge's count: unfinished threads anywhere below.
+  defp unfinished(threads),
+    do:
+      Enum.sum(
+        for t <- threads,
+            do: if(t["state"] == "Archived", do: 0, else: 1) + unfinished(t["threads"])
+      )
+
+  @doc """
+  An orchestrator's threads to every depth, in containment order: one map per
+  thread with its `id`, `uid`, `name`, `host`, board `column`, roster `state`,
+  full `outcome` and its own `threads`. `entries` are the poller's cached
+  constitutions; `live` holds the running workers' runtime keys (uid, else id).
+  """
+  def tree(fiber_id, felt_store, entries, live) do
+    index = index(entries)
+
+    children =
+      entries
+      |> Enum.filter(&is_map(&1.fiber["shuttle"]))
+      |> Enum.group_by(fn entry ->
+        case orchestrator(entry, index) do
+          nil -> nil
+          parent -> {parent.felt_store, address(parent.fiber)}
+        end
+      end)
+
+    grow(children, {felt_store, fiber_id}, live)
+  end
+
+  defp grow(children, key, live) do
+    children
+    |> Map.get(key, [])
+    |> Enum.sort_by(&address(&1.fiber))
+    |> Enum.map(fn %{fiber: fiber} = entry ->
+      live? = live?(fiber, live)
+
+      %{
+        "id" => address(fiber),
+        "uid" => fiber["uid"],
+        "name" => fiber["name"],
+        "host" => get_in(fiber, ["shuttle", "host"]),
+        "column" => column(fiber, live?),
+        "state" => thread_state(fiber, live?),
+        "outcome" => fiber["outcome"],
+        "threads" => grow(children, {entry.felt_store, address(fiber)}, live)
+      }
+    end)
+  end
+
+  defp live?(fiber, live),
+    do: MapSet.member?(live, fiber["uid"] || fiber["id"]) or MapSet.member?(live, address(fiber))
+
+  @doc """
+  The Desk column a constitution sits in, as the board files it
+  (`ui/src/board/deskColumn.ts`): `drafts`, `in_flight`, `awaiting_review`,
+  `tempered`, `discarded`, `resting` (a draft put down, or a standing
+  constitution between firings) or `roles` (a seat at rest). `live?` is whether
+  its worker is running. `shuttle status --json` reports the same column
+  (`internal/shuttle/column.go`); `test/fixtures/columns.json` holds them equal.
+  """
+  def column(fiber, live?) do
+    shuttle = fiber["shuttle"] || %{}
+    status = fiber["status"]
 
     cond do
-      fiber["tempered"] || fiber["status"] == "composted" -> "Archived"
-      is_map(shuttle["ask"]) -> "Waiting"
-      MapSet.member?(live, key) or MapSet.member?(live, address(fiber)) -> "Working"
-      fiber["status"] == "closed" -> "To review"
-      fiber["horizon"] == "stashed" or shuttle["kind"] == "standing" -> "Resting"
-      shuttle["enabled"] == false or fiber["status"] == "open" -> "Draft"
-      true -> "Working"
+      status == "closed" and fiber["tempered"] == true -> "tempered"
+      status == "closed" and fiber["tempered"] == false -> "discarded"
+      status == "closed" -> "awaiting_review"
+      live? -> "in_flight"
+      seat_at_rest?(shuttle, status) -> "roles"
+      status == "active" and shuttle["kind"] == "standing" -> "resting"
+      status == "active" -> "in_flight"
+      stashed?(fiber) -> "resting"
+      true -> "drafts"
     end
   end
+
+  defp seat_at_rest?(shuttle, status) do
+    shuttle["seat"] == true and is_binary(shuttle["role"]) and shuttle["role"] != "" and
+      (status != "active" or shuttle["kind"] == "standing")
+  end
+
+  # Put down (`horizon: stashed`) unless a `due:` day that has come pulls it back.
+  defp stashed?(fiber) do
+    fiber["horizon"] == "stashed" and
+      case fiber["due"] do
+        due when is_binary(due) and byte_size(due) >= 10 ->
+          case Date.from_iso8601(binary_part(due, 0, 10)) do
+            {:ok, day} -> Date.compare(day, Date.utc_today()) == :gt
+            _ -> true
+          end
+
+        _ ->
+          true
+      end
+  end
+
+  @doc """
+  A thread's state on the board's rails (`ui/src/board/threads.ts`
+  `threadState`): its column, with In flight split into Waiting (an
+  outstanding ask) and Working, a verdict archived, and a rest or a seat
+  Resting. The board also reads a harness stopped on a prompt as Waiting; the
+  daemon's runtime record does not carry that turn.
+  """
+  def thread_state(fiber, live?) do
+    case column(fiber, live?) do
+      verdict when verdict in ["tempered", "discarded"] -> "Archived"
+      "awaiting_review" -> "To review"
+      "drafts" -> "Draft"
+      "in_flight" -> if asking?(fiber), do: "Waiting", else: "Working"
+      _ -> "Resting"
+    end
+  end
+
+  # An ask counts only on an active card, as the board's `turnOf` reads it.
+  defp asking?(fiber),
+    do: fiber["status"] == "active" and is_map(get_in(fiber, ["shuttle", "ask"]))
 
   defp first_sentence(text) when is_binary(text) and text != "" do
     sentence = text |> String.split(~r/(?<=[.!?])\s|\n/, parts: 2) |> hd() |> String.trim()

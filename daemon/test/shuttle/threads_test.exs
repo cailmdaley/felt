@@ -940,6 +940,49 @@ defmodule Shuttle.ThreadsTest do
         fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => %{}}, fiber)
       }
 
+    test "the classifier files every fixture case where the board does" do
+      for c <-
+            "../fixtures/columns/cases.json"
+            |> Path.expand(__DIR__)
+            |> File.read!()
+            |> Jason.decode!() do
+        assert {c["name"], Shuttle.Threads.column(c["fiber"], c["live"])} ==
+                 {c["name"], c["column"]}
+
+        assert {c["name"], Shuttle.Threads.thread_state(c["fiber"], c["live"])} ==
+                 {c["name"], c["state"]}
+      end
+    end
+
+    test "the tree nests threads to every depth, archived included" do
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/a", %{"status" => "closed", "outcome" => "Done."}),
+        thread("hub/a/b", %{"status" => "closed", "tempered" => false}),
+        thread("hub/a/b/c", %{"status" => "open"}),
+        thread("hub/notes", %{"status" => "active"}) |> put_in([:fiber, "shuttle"], nil),
+        thread("hub/notes/z", %{"status" => "active"})
+      ]
+
+      assert [
+               %{
+                 "id" => "hub/a",
+                 "column" => "awaiting_review",
+                 "state" => "To review",
+                 "outcome" => "Done.",
+                 "threads" => [
+                   %{
+                     "id" => "hub/a/b",
+                     "column" => "discarded",
+                     "state" => "Archived",
+                     "threads" => [%{"id" => "hub/a/b/c", "state" => "Draft", "threads" => []}]
+                   }
+                 ]
+               },
+               %{"id" => "hub/notes/z", "state" => "Working"}
+             ] = Shuttle.Threads.tree("hub", "/s", entries, MapSet.new())
+    end
+
     test "a hub's launch prompt lists its threads by state; a leaf gets no block" do
       entries = [
         thread("hub", %{"status" => "active"}),
@@ -952,7 +995,8 @@ defmodule Shuttle.ThreadsTest do
           "status" => "active",
           "shuttle" => %{"ask" => %{"text" => "?", "at" => "t"}}
         }),
-        thread("hub/done", %{"status" => "closed", "tempered" => "good"}),
+        thread("hub/done", %{"status" => "closed", "tempered" => true}),
+        thread("hub/dropped", %{"status" => "closed", "tempered" => false}),
         thread("hub/other", %{"status" => "active"}, "/elsewhere"),
         thread("hub/notes", %{"status" => "active"}) |> put_in([:fiber, "shuttle"], nil)
       ]
@@ -980,7 +1024,7 @@ defmodule Shuttle.ThreadsTest do
 
       assert prompt =~ "- hub/live — Working — (no outcome yet)\n  (1 thread)"
       assert prompt =~ "— To review — Found it.\n"
-      assert prompt =~ "(1 archived)"
+      assert prompt =~ "(2 archived)"
       assert prompt =~ ~s(`shuttle thread hub "<ask>"`)
 
       refute Shuttle.Dispatcher.render_prompt("hub/rest",
