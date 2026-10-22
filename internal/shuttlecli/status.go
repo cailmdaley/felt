@@ -244,6 +244,7 @@ func (a *app) runStatusOneFiber(query string) error {
 	statusNow := f.Status
 	armed := statusNow == felt.StatusActive
 	session, running := a.liveWorkerSession(f)
+	column := shuttle.Column(f, block, running, time.Now())
 
 	if a.json {
 		out := map[string]any{
@@ -253,9 +254,9 @@ func (a *app) runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": a.dispatchAssessment(f.ID, f.UID, statusNow, block),
+			"dispatch": a.dispatchAssessment(f, block, column),
 			// The board's Desk column and the review verdict (null when none).
-			"column":  shuttle.Column(f, block, running, time.Now()),
+			"column":  column,
 			"verdict": nil,
 		}
 		if verdict := shuttle.Verdict(f); verdict != "" {
@@ -277,57 +278,97 @@ func (a *app) runStatusOneFiber(query string) error {
 	}
 
 	fmt.Fprintf(a.env.Stdout, "shuttle: fiber %s\n\n", f.ID)
-	writeBlockSummary(a.env.Stdout, block, statusNow, armed)
+	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
 	if running {
 		fmt.Fprintf(a.env.Stdout, "  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Fprintln(a.env.Stdout, "")
-	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f.ID, f.UID, statusNow, block))
+	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f, block, column))
 	return nil
 }
 
 // dispatchAssessment renders the one line a single-fiber report is really for:
-// whether the fiber is eligible for dispatch, on which host, and the verb that
+// where the board files the fiber (its Desk column, as --json reports it),
+// whether it is eligible for dispatch and on which host, and the verb that
 // changes the answer when it is not. It promises eligibility, not a launch:
 // the owning daemon's boot quarantine can hold an eligible fiber. A block
 // without a project_dir still dispatches — its worker starts in the felt
 // store — but no verb arms it again until it has one, so every call named
 // here carries the --project-dir it would need.
-func (a *app) dispatchAssessment(fiberID, uid, statusNow string, block *shuttle.Block) string {
+func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column string) string {
 	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
 	arm := func(verb string) string {
 		if noProjectDir {
-			return fmt.Sprintf("shuttle %s %s --project-dir <dir>", verb, fiberID)
+			return fmt.Sprintf("shuttle %s %s --project-dir <dir>", verb, f.ID)
 		}
-		return fmt.Sprintf("shuttle %s %s", verb, fiberID)
+		return fmt.Sprintf("shuttle %s %s", verb, f.ID)
 	}
-	switch statusNow {
+	switch f.Status {
 	case felt.StatusActive:
-		own, _ := a.resolveOwnHost("")
-		var verdict string
-		switch {
-		case !isSessionULID(uid):
-			return "→ Armed, but the fiber has no intrinsic id, or its id is not an uppercase ULID — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter."
-		case block.Host == "":
-			return "→ Armed, but the block has no host — no daemon will dispatch it. Reinstall it with `shuttle uninstall` then install / repeat / pin, which stamp this host."
-		case block.Host != own:
-			verdict = fmt.Sprintf("→ Armed; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", block.Host, own)
-		default:
-			verdict = fmt.Sprintf("→ Armed; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`shuttle daemon release`).", own)
-		}
-		if noProjectDir {
-			verdict += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `%s` sets one.", arm("resume"))
-		}
-		return verdict
+		return a.armedAssessment(f, block, column, arm, noProjectDir)
 	case felt.StatusClosed:
-		return fmt.Sprintf("→ Fiber is closed — daemon will NOT dispatch. Use `%s` to clear verdict fields and arm it.", arm("reopen"))
+		switch column {
+		case "tempered", "discarded":
+			return fmt.Sprintf("→ %s — reviewed and archived; daemon will NOT dispatch. Use `%s` to clear the verdict and arm it.", columnTitle(column), arm("reopen"))
+		default:
+			return fmt.Sprintf("→ To review — closed, awaiting a verdict; daemon will NOT dispatch. `shuttle close %s --tempered=true|false` records one; `%s` arms it again.", f.ID, arm("reopen"))
+		}
 	case felt.StatusOpen:
-		return fmt.Sprintf("→ Draft (status: open). Use `%s` to arm it.", arm("resume"))
+		switch column {
+		case "resting":
+			return fmt.Sprintf("→ Resting — put down (status: open, horizon: stashed); daemon will NOT dispatch. Use `%s` to pick it back up and arm it.", arm("resume"))
+		case "roles":
+			return fmt.Sprintf("→ Seat at rest (role %s, status: open); daemon will NOT dispatch. Use `%s` to arm it.", block.Role, arm("resume"))
+		case "in_flight":
+			return fmt.Sprintf("→ In flight — a worker is running, though the fiber is not armed (status: open). Use `%s` to arm it.", arm("resume"))
+		default:
+			return fmt.Sprintf("→ Draft (status: open). Use `%s` to arm it.", arm("resume"))
+		}
 	case "":
 		return fmt.Sprintf("→ Status missing — daemon will NOT dispatch. Use `%s` or set status: active in the markdown.", arm("resume"))
 	default:
-		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `%s` to set status: active.", statusNow, arm("resume"))
+		return fmt.Sprintf("→ Status %q is not armed — daemon will NOT dispatch. Use `%s` to set status: active.", f.Status, arm("resume"))
 	}
+}
+
+// armedAssessment is dispatchAssessment for an armed fiber: its column (in
+// flight, a standing constitution resting between firings, or a standing seat
+// at rest), then which daemon may dispatch it.
+func (a *app) armedAssessment(f *felt.Felt, block *shuttle.Block, column string, arm func(string) string, noProjectDir bool) string {
+	lead := "Armed"
+	switch column {
+	case "resting":
+		lead = "Resting between firings, armed"
+	case "roles":
+		lead = "Seat at rest, armed"
+	}
+	own, _ := a.resolveOwnHost("")
+	var verdict string
+	switch {
+	case !isSessionULID(f.UID):
+		return fmt.Sprintf("→ %s, but the fiber has no intrinsic id, or its id is not an uppercase ULID — every daemon refuses to dispatch it (a worker's tmux session is <leaf>-<id>-shuttle). Run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter.", lead)
+	case block.Host == "":
+		return fmt.Sprintf("→ %s, but the block has no host — no daemon will dispatch it. Reinstall it with `shuttle uninstall` then install / repeat / pin, which stamp this host.", lead)
+	case block.Host != own:
+		verdict = fmt.Sprintf("→ %s; owned by host %s — eligible for dispatch on that host's daemon, not this one (%s).", lead, block.Host, own)
+	default:
+		verdict = fmt.Sprintf("→ %s; eligible for dispatch on this host (%s) at the daemon's next poll, unless its boot quarantine is holding launches (`shuttle daemon release`).", lead, own)
+	}
+	if noProjectDir {
+		verdict += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `%s` sets one.", arm("resume"))
+	}
+	return verdict
+}
+
+// columnTitle is a verdict column's name as the board titles it.
+func columnTitle(column string) string {
+	switch column {
+	case "tempered":
+		return "Tempered"
+	case "discarded":
+		return "Discarded"
+	}
+	return column
 }
 
 // liveWorkerSession reports the tmux session holding this fiber's worker, if
@@ -342,7 +383,7 @@ func (a *app) liveWorkerSession(f *felt.Felt) (string, bool) {
 
 // writeBlockSummary writes the human-readable "Current block:" report. Dispatch
 // eligibility is the felt-native status alone (status:active = armed).
-func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool) {
+func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool, column string) {
 	fmt.Fprintln(out, "Current block:")
 	fmt.Fprintf(out, "  kind:        %s\n", shuttleNonEmpty(b.Kind, "(unset)"))
 	fmt.Fprintf(out, "  host:        %s\n", shuttleNonEmpty(b.Host, "(unset — NOT eligible on any daemon)"))
@@ -361,6 +402,10 @@ func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed 
 		fmt.Fprintln(out, "  status:      (missing — NOT armed; resume or set status: active in the markdown)")
 	case statusNow == felt.StatusClosed:
 		fmt.Fprintln(out, "  status:      closed (NOT armed — daemon ignores closed fibers)")
+	case statusNow == felt.StatusOpen && column == "resting":
+		fmt.Fprintln(out, "  status:      open (resting — NOT armed; resume to dispatch)")
+	case statusNow == felt.StatusOpen && column == "roles":
+		fmt.Fprintln(out, "  status:      open (seat at rest — NOT armed; resume to dispatch)")
 	case statusNow == felt.StatusOpen:
 		fmt.Fprintln(out, "  status:      open (draft — NOT armed; resume to dispatch)")
 	case armed:

@@ -507,7 +507,7 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			want: []string{
 				"kind:        standing", "host:        testhost", "agent:       claude-opus",
 				pdir, `schedule:    "0 8 * * *" tz=UTC`, "status:      active (armed)",
-				"→ Armed; eligible for dispatch on this host (testhost)", "boot quarantine",
+				"→ Resting between firings, armed; eligible for dispatch on this host (testhost)", "boot quarantine",
 			},
 		},
 		{
@@ -515,28 +515,28 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			name:   "armed, owned elsewhere",
 			status: felt.StatusActive,
 			own:    "laptop",
-			want:   []string{"→ Armed; owned by host testhost", "not this one (laptop)"},
+			want:   []string{"→ Resting between firings, armed; owned by host testhost", "not this one (laptop)"},
 		},
 		{
 			name:         "armed, no project_dir",
 			status:       felt.StatusActive,
 			own:          "testhost",
 			noProjectDir: true,
-			want:         []string{"→ Armed; eligible for dispatch on this host", "no project_dir, so its worker starts in the felt store", "shuttle resume role --project-dir <dir>"},
+			want:         []string{"→ Resting between firings, armed; eligible for dispatch on this host", "no project_dir, so its worker starts in the felt store", "shuttle resume role --project-dir <dir>"},
 		},
 		{
 			name:         "closed, no project_dir",
 			status:       felt.StatusClosed,
 			own:          "testhost",
 			noProjectDir: true,
-			want:         []string{"→ Fiber is closed", "shuttle reopen role --project-dir <dir>"},
+			want:         []string{"→ To review — closed, awaiting a verdict", "shuttle reopen role --project-dir <dir>"},
 		},
 		{
 			name:   "closed",
 			status: felt.StatusClosed,
 			own:    "testhost",
 			want: []string{
-				"status:      closed (NOT armed", "→ Fiber is closed", "shuttle reopen role",
+				"status:      closed (NOT armed", "→ To review — closed, awaiting a verdict", "shuttle reopen role",
 			},
 		},
 	} {
@@ -636,6 +636,49 @@ func TestShuttleStatusOneFiberJSONCarriesColumnAndVerdict(t *testing.T) {
 		verdict, present := got["verdict"]
 		if got["column"] != want[0] || verdict != want[1] || !present || got["status"] == nil {
 			t.Errorf("%s: column %v verdict %v (present %v), want %v %v\n%s", id, got["column"], verdict, present, want[0], want[1], out)
+		}
+	}
+}
+
+// The single-fiber prose names the column --json reports and the verb that
+// moves the fiber out of it.
+func TestShuttleStatusProseFollowsTheColumn(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	yes, no := true, false
+	seedShuttleRole(t, storage, "proj/kept", felt.StatusClosed, oneshot(), &yes)
+	seedShuttleRole(t, storage, "proj/dropped", felt.StatusClosed, oneshot(), &no)
+	seedShuttleRole(t, storage, "proj/review", felt.StatusClosed, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/armed", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/draft", felt.StatusOpen, oneshot(), nil)
+	seedShuttleRole(t, storage, "proj/rest", felt.StatusOpen, oneshot(), nil)
+	rest := mustRead(t, storage, "proj/rest")
+	if err := rest.SetExtraField("horizon", "stashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(rest); err != nil {
+		t.Fatal(err)
+	}
+	a := withStubbedLiveSessions(t, env, map[string]bool{})
+
+	for id, want := range map[string]string{
+		"proj/kept":    "→ Tempered — reviewed and archived; daemon will NOT dispatch. Use `shuttle reopen proj/kept`",
+		"proj/dropped": "→ Discarded — reviewed and archived",
+		"proj/review":  "→ To review — closed, awaiting a verdict",
+		"proj/armed":   "→ Armed, but the block has no host",
+		"proj/draft":   "→ Draft (status: open). Use `shuttle resume proj/draft` to arm it.",
+		"proj/rest":    "→ Resting — put down (status: open, horizon: stashed); daemon will NOT dispatch. Use `shuttle resume proj/rest`",
+	} {
+		out, _, err := executeApp(t, a, dir, "status", id)
+		if err != nil {
+			t.Fatalf("status %s: %v\n%s", id, err, out)
+		}
+		if !strings.Contains(out, want) {
+			t.Errorf("%s: report lacks %q:\n%s", id, want, out)
+		}
+		if id == "proj/rest" && !strings.Contains(out, "open (resting") {
+			t.Errorf("%s: status line still calls it a draft:\n%s", id, out)
 		}
 	}
 }
