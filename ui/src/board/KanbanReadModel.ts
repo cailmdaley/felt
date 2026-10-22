@@ -607,6 +607,7 @@ function toCard(
     dependsOnShape: f.dependsOnShape,
     dependsOnUnresolved: unresolved.length > 0 ? unresolved : undefined,
     workerState: runtime?.state,
+    workerTasks: runtime?.tasks,
     tmuxSession,
     runtimePhase,
     launchError: entry.runtime?.launchError,

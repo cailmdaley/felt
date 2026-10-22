@@ -40,6 +40,20 @@ afterEach(() => {
 })
 
 describe('Dock worker transcript', () => {
+  it('carries same-session task polls into the transcript without rebuilding the composer', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({})))
+    const dock = makeDock()
+    const live = task({ sessionUuid: latestId, workerState: 'running', workerTasks: [{ id: '1', subject: 'Check', status: 'in_progress', activeForm: 'Checking' }] })
+    const band = dock.bandFor(live)
+    document.body.append(band.el)
+    const composer = band.el.querySelector('textarea')
+    expect(band.el.querySelector('.ws-transcript-checklist')?.textContent).toContain('Checking')
+    dock.syncRuntime({ ...live, workerTasks: [{ id: '1', subject: 'Check', status: 'completed' }] })
+    expect(band.el.querySelector('.ws-transcript-checklist')?.textContent).toContain('✓Check')
+    expect(band.el.querySelector('textarea')).toBe(composer)
+    dock.syncRuntime({ ...live, workerTasks: undefined })
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+  })
   it('follows the card session through the raw offset route', async () => {
     const requests: string[] = []
     const fetcher = vi.fn<typeof fetch>(async (input) => {

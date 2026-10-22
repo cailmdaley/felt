@@ -6,6 +6,7 @@ import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
 import { promptParts, type Entry } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
+import { TaskChecklist, type WorkerTask } from './tasks.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -13,6 +14,7 @@ export interface TranscriptTarget {
   host?: string
   agent?: string
   live: boolean
+  tasks?: WorkerTask[]
   at?: number
 }
 
@@ -366,6 +368,8 @@ export class TranscriptBand {
   private readonly shuttleBase: string
   private readonly fetcher?: typeof fetch
   private readonly model = new TranscriptModel()
+  private readonly previewTasks = new TaskChecklist()
+  private readonly fullTasks = new TaskChecklist()
   private readonly views = new Map<number, TurnView>()
   private readonly head: HTMLButtonElement
   private readonly label: HTMLElement
@@ -611,6 +615,7 @@ export class TranscriptBand {
     if (!target) {
       this.closeFull()
       this.target = null
+      this.paintTasks()
       this.hasReadCurrent = false
       this.stopPollTimer()
       this.clearLoadingTimer()
@@ -627,6 +632,7 @@ export class TranscriptBand {
     }
 
     this.target = { ...target }
+    this.paintTasks()
     this.el.hidden = false
     if (previous && this.sameTarget(previous, target)) {
       const becameParked = previous.live && !target.live
@@ -664,6 +670,14 @@ export class TranscriptBand {
     })
     this.paintHead()
     this.readIfVisible()
+  }
+
+  private paintTasks(): void {
+    const tasks = this.target?.live ? this.target.tasks ?? [] : []
+    if (this.previewTasks.paint(tasks)) this.body.prepend(this.previewTasks.el)
+    else this.previewTasks.el.remove()
+    if (this.fullTasks.paint(tasks)) this.scroller.prepend(this.fullTasks.el)
+    else this.fullTasks.el.remove()
   }
 
   private sameTarget(a: TranscriptTarget, b: TranscriptTarget): boolean {

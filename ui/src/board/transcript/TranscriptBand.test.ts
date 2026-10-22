@@ -61,6 +61,32 @@ afterEach(() => {
 })
 
 describe('TranscriptBand', () => {
+  it('pins live tasks above both readers and updates without a transcript fetch or human turn', async () => {
+    const fetcher = fixtureFetch({ [latestId]: records('Fixture', 'Answer'), [earlierId]: records('Old', 'Earlier') })
+    const band = makeBand(fetcher)
+    const tasks = [{ id: '1', subject: 'Verify', status: 'in_progress' as const, activeForm: 'Verifying' }]
+    band.follow(target(latestId, { live: true, tasks }))
+    await settle()
+    const checklist = band.el.querySelector('.ws-transcript-checklist')!
+    expect(checklist.textContent).toContain('Verifying')
+    expect(band.el.querySelector('.ws-transcript-body')!.firstElementChild).toBe(checklist)
+    const reads = vi.mocked(fetcher).mock.calls.length
+    band.follow(target(latestId, { live: true, tasks: [{ ...tasks[0], status: 'completed' }] }))
+    expect(checklist.textContent).toContain('✓Verify')
+    expect(vi.mocked(fetcher).mock.calls).toHaveLength(reads)
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    expect(band.el.querySelector('.ws-transcript-scroll')!.firstElementChild?.className).toBe('ws-transcript-checklist')
+    band.read(target(earlierId))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.follow(target(latestId, { live: true, tasks }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-latest')!.click()
+    expect(band.el.querySelector('.ws-transcript-checklist')?.textContent).toContain('Verifying')
+    band.follow(target(latestId, { live: true, tasks: [] }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+    band.follow(target(latestId, { live: false, tasks }))
+    expect(band.el.querySelector('.ws-transcript-checklist')).toBeNull()
+  })
   it('keeps thread deliveries visible between messages in preview and full transcript, outside folded tools', async () => {
     const delivered = `[Shuttle message thread-${'a'.repeat(64)}]\nthread work/child closed: A measured result`
     const items = [

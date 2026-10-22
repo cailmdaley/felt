@@ -41,6 +41,7 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
     host: card.shuttleHost,
     agent: card.workerAgent ?? card.shuttleAgent,
     live: hasLiveWorker(card),
+    tasks: card.workerTasks,
     at: instantMs(card.dispatchedAt),
   } : null
 }
@@ -789,7 +790,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
