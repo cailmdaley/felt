@@ -99,8 +99,10 @@ func (f *fakeCodex) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		var result any = map[string]any{}
 		switch frame.Method {
+		case "thread/loaded/list":
+			result = map[string]any{"data": []string{"thread-1"}}
 		case "thread/read":
-			result = map[string]any{"thread": map[string]any{"id": "thread-1", "status": map[string]any{"type": f.state, "activeFlags": f.activeFlags}, "canAcceptDirectInput": true}}
+			result = map[string]any{"thread": map[string]any{"id": "thread-1", "sessionId": "transcript-1", "status": map[string]any{"type": f.state, "activeFlags": f.activeFlags}, "canAcceptDirectInput": true}}
 		case "thread/turns/list":
 			turnID := "turn-1"
 			if f.emptyActiveTurnID {

@@ -340,20 +340,24 @@ func ledgerOriginProblem(origins map[string]any, host string) string {
 
 // fiberWorkerAddress builds the address of the ledger's worker. A live peer
 // registered for the fiber with that native id, or with that transcript id,
-// supplies it directly; otherwise the ledger row does, except that a Codex row
-// without a thread id carries only a transcript id, which is not addressable.
+// supplies it directly. A CLI hook peer also establishes that the ledger's
+// session id is addressable without a separate thread id. App workers still
+// require their native thread mapping.
 func fiberWorkerAddress(f *felt.Felt, worker *SessionProvenance, harness, runtimeID string, peers []messaging.Session) (string, error) {
 	nativeID := worker.ThreadID
 	if nativeID == "" && worker.Session == runtimeID {
 		nativeID = runtimeID
 	}
+	block, _, blockErr := shuttle.BlockOf(f)
+	cliCodex := harness == "codex" && blockErr == nil && block != nil && block.Surface != "app"
 	addresses := map[string]bool{}
 	for _, session := range peers {
 		address, err := messaging.ParseAddress(session.Address)
-		if err != nil || address.Host != worker.Host || !peerSessionMatchesFiber(session, f.ID, f.UID) {
+		if err != nil || address.Host != worker.Host || address.Harness != harness || !peerSessionMatchesFiber(session, f.ID, f.UID) {
 			continue
 		}
-		if !(nativeID != "" && address.ID == nativeID) && session.TranscriptID != worker.Session {
+		cliHook := cliCodex && session.State == "hook" && address.ID == worker.Session
+		if !(nativeID != "" && address.ID == nativeID) && session.TranscriptID != worker.Session && !cliHook {
 			continue
 		}
 		canonical, err := messaging.FormatAddress(address.Host, address.Harness, address.ID)

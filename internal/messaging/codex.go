@@ -25,11 +25,12 @@ type rpcPeerError struct{ method, message string }
 func (e *rpcPeerError) Error() string { return "codex " + e.method + ": " + e.message }
 
 type codexThread struct {
-	ID      string  `json:"id"`
-	Name    *string `json:"name"`
-	Preview string  `json:"preview"`
-	CWD     string  `json:"cwd"`
-	Status  struct {
+	ID        string  `json:"id"`
+	SessionID string  `json:"sessionId"`
+	Name      *string `json:"name"`
+	Preview   string  `json:"preview"`
+	CWD       string  `json:"cwd"`
+	Status    struct {
 		Type        string   `json:"type"`
 		ActiveFlags []string `json:"activeFlags"`
 	} `json:"status"`
@@ -159,7 +160,7 @@ func (codexAdapter) discover(ctx context.Context, env *sysenv.Env, host string) 
 		if (out.Thread.CanAcceptDirectInput == nil || *out.Thread.CanAcceptDirectInput) && out.Thread.Status.Type == "idle" {
 			caps = append(caps, "wake")
 		}
-		ss = append(ss, Session{Address: addr, Host: host, Harness: "codex", ID: id, Title: title, CWD: out.Thread.CWD, State: out.Thread.Status.Type, Capabilities: caps})
+		ss = append(ss, Session{Address: addr, Host: host, Harness: "codex", ID: id, TranscriptID: out.Thread.SessionID, Title: title, CWD: out.Thread.CWD, State: out.Thread.Status.Type, Capabilities: caps})
 	}
 	if failed > 0 {
 		return mergeSessions(ss, hookSessions), fmt.Errorf("%d loaded Codex thread(s) could not be inspected", failed)
@@ -223,7 +224,8 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 		if !req.Wake {
 			return queueMailbox(env, a, req)
 		}
-		return rejected(req, "codex-app-server", "Codex control socket unavailable"), errCode("preflight_failed", "Codex control socket unavailable: %v", err)
+		detail := "Codex control socket unavailable; " + codexWakeHint
+		return rejected(req, "codex-app-server", detail), errCode("preflight_failed", "%s: %v", detail, err)
 	}
 	defer r.c.Close()
 	var read struct {
@@ -234,7 +236,8 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 			if !req.Wake {
 				return queueMailbox(env, a, req)
 			}
-			return rejected(req, "codex-app-server", err.Error()), errCode("session_not_found", "Codex thread unavailable: %v", err)
+			detail := "Codex thread unavailable; " + codexWakeHint
+			return rejected(req, "codex-app-server", detail), errCode("session_not_found", "%s: %v", detail, err)
 		}
 		if !req.Wake {
 			return queueMailbox(env, a, req)
@@ -303,12 +306,17 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 		if !req.Wake {
 			return queueMailbox(env, a, req)
 		}
-		return rejected(req, "codex-app-server", "thread is not loaded by this Codex runtime"), errCode("session_unavailable", "thread is not loaded by this Codex runtime")
+		detail := "thread is not loaded by this Codex runtime; " + codexWakeHint
+		return rejected(req, "codex-app-server", detail), errCode("session_unavailable", "%s", detail)
 	default:
 		return rejected(req, "codex-app-server", "thread cannot accept input in state "+t.Status.Type), errCode("session_unavailable", "thread cannot accept input")
 	}
 	return codexMutationFailure(req, err)
 }
+
+// An explicit remote endpoint keeps a TUI on the same conversation owner as
+// native messaging. A hook registration alone cannot wake an embedded runtime.
+const codexWakeHint = "wake requires the exact thread on this App Server (terminal launch: codex --remote unix://PATH); restore that server if unavailable, or use --context-only for a hook-only session"
 
 func codexMutationFailure(req Request, err error) (Receipt, error) {
 	if _, ok := err.(*rpcPeerError); ok {
