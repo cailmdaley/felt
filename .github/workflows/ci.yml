@@ -6,15 +6,18 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   go:
     name: Go (felt + shuttle CLIs — build + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
@@ -36,7 +39,7 @@ jobs:
       # Deliberately in the Go job, not Elixir: that one installs both CLIs to
       # /usr/local/bin, which the hook resolvers find — the absent-binary
       # fallback assertions would silently test the wrong branch.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
 
@@ -65,10 +68,10 @@ jobs:
     name: Elixir (daemon — mix compile + mix test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Elixir
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           # Pinned to match the release build matrix (release.yml): a release
           # bundles whichever OTP built it, so CI must test what ships.
@@ -79,7 +82,7 @@ jobs:
       # orchestration; build both from THIS checkout rather than downloading a
       # possibly-older release.
       - name: Set up Go (to build both CLIs)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
@@ -90,14 +93,14 @@ jobs:
           shuttle --help >/dev/null
 
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: daemon/deps
           key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
           restore-keys: ${{ runner.os }}-mix-
 
       - name: Cache _build
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: daemon/_build
           key: ${{ runner.os }}-build-${{ hashFiles('**/mix.lock') }}
@@ -128,10 +131,10 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
 
@@ -186,7 +189,7 @@ jobs:
           dnf -y install git
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Load the pinned EL8 toolchain versions
         run: grep -E '^[A-Z0-9_]+=' .github/el8-toolchain.env >>"$GITHUB_ENV"
@@ -195,7 +198,7 @@ jobs:
       # throw away. On a hit the job is a no-op and finishes in seconds.
       - name: Is the cache already warm?
         id: probe
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /opt/otp
           key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}
@@ -211,7 +214,7 @@ jobs:
 
       - name: Save the OTP build for release.yml
         if: steps.probe.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /opt/otp
           key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}
