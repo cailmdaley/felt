@@ -114,23 +114,14 @@ defmodule Shuttle.Delivery do
     server = Shuttle.Env.server(Poller)
 
     if is_pid(GenServer.whereis(server)) do
-      # Delivery carries the worker-owned epoch; selecting or flushing a
-      # destination never changes authority.
-      with {:ok, worker, generation} <-
+      # Delivery carries the worker-owned epoch and the address it committed;
+      # selecting or flushing a destination never changes authority.
+      with {:ok, address, generation} <-
              GenServer.call(
                server,
                {:context_receiver, Shuttle.Threads.address(entry.fiber)},
                32_000
              ) do
-        address =
-          case worker do
-            %{session_uuid: native, cli: cli} when is_binary(native) and is_binary(cli) ->
-              Messaging.address(Poller.own_host_id(), Harnesses.normalize(cli), native)
-
-            _ ->
-              "-"
-          end
-
         Shuttle.CLI.run(
           ["context-mailbox", "deliver", context_key(entry), address, to_string(generation)],
           timeout_ms: 32_000

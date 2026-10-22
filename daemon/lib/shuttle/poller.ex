@@ -1286,14 +1286,21 @@ defmodule Shuttle.Poller do
     {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
   end
 
-  def handle_call({:context_receiver, fiber_id}, from, state) do
-    {:reply, worker, state} = handle_call({:live_worker, fiber_id}, from, state)
-
+  # The address and epoch the receiver record committed. Delivery uses that
+  # address rather than re-resolving one from the registry, so a registry
+  # entry vanishing under a live worker cannot make its own epoch superseded.
+  def handle_call({:context_receiver, fiber_id}, _from, state) do
     reply =
       case running_worker(state, fiber_id) do
-        nil -> {:error, :no_worker}
-        %{context_epoch: epoch} when is_integer(epoch) -> {:ok, worker, epoch}
-        _ -> {:error, :authority_unknown}
+        nil ->
+          {:error, :no_worker}
+
+        %{context_epoch: epoch, context_address: address}
+        when is_integer(epoch) and is_binary(address) ->
+          {:ok, address, epoch}
+
+        _ ->
+          {:error, :authority_unknown}
       end
 
     {:reply, reply, state}
@@ -4378,11 +4385,14 @@ defmodule Shuttle.Poller do
   def put_running(state, key, meta) do
     worker =
       case persist_context_receiver(state, meta, meta) do
-        {:ok, epoch, harness, _address} ->
-          meta |> Map.put(:context_epoch, epoch) |> Map.put(:context_harness, harness)
+        {:ok, epoch, harness, address} ->
+          meta
+          |> Map.put(:context_epoch, epoch)
+          |> Map.put(:context_harness, harness)
+          |> Map.put(:context_address, address)
 
         :error ->
-          Map.put(meta, :context_epoch, nil)
+          meta |> Map.put(:context_epoch, nil) |> Map.put(:context_address, nil)
       end
 
     %{state | running: Map.put(state.running, key, worker)}

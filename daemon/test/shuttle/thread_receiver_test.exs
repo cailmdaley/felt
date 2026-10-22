@@ -274,17 +274,21 @@ defmodule Shuttle.ThreadReceiverTest do
       cycle!(poller)
       assert is_map(Poller.snapshot(poller))
 
-      if uuid do
-        assert {:command_error, 1, detail} = Delivery.flush_context(entry)
-        assert detail =~ "superseded worker identity"
-      else
-        assert {:ok, _} = Delivery.flush_context(entry)
-      end
-
+      # Delivery follows the committed address, so a vanished registry entry
+      # does not stall results for the live receiver.
+      if uuid, do: hook!(store, uuid)
+      assert {:ok, _} = Delivery.flush_context(entry)
       assert Process.alive?(poller)
       assert authority!(data) == committed
       refute hook!(store, "A") =~ "Never authorize A"
-      assert [_] = pending(data)
+
+      if uuid do
+        assert hook!(store, uuid) =~ "Never authorize A"
+        assert pending(data) == []
+      else
+        assert [_] = pending(data)
+      end
+
       # The other absent shapes of the optional resolved view obey the same contract.
       state = :sys.get_state(poller)
       worker = state.running[Poller.running_key(state, "hub")]
@@ -312,10 +316,16 @@ defmodule Shuttle.ThreadReceiverTest do
         assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
       end
 
-      hook!(store, "B")
-      assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
-      assert {:ok, _} = Delivery.flush_context(parent)
-      assert hook!(store, "B") =~ "Never authorize A"
+      if uuid == nil do
+        hook!(store, "B")
+
+        assert {:ok, %{fibers: [parent]}} =
+                 FiberDocuments.get_shuttle("hub", felt_stores: [store])
+
+        assert {:ok, _} = Delivery.flush_context(parent)
+        assert hook!(store, "B") =~ "Never authorize A"
+      end
+
       assert pending(data) == []
       drain_results!(poller)
     end
