@@ -91,6 +91,12 @@ describe('buildChannel', () => {
     expect(channel.documents[0].kind).toBe('chat')
     expect(defaultSelection(channel)).toBe('chat:host-a:fiber-1')
     expect(proseDocument(channel)?.key).toBe('fiber:host-a:fiber-1')
+    // With no report, the newest sent file stands beside the chat.
+    const sent = buildChannel({ ...base, body: 'plain', conversation: true, sent: [
+      { path: '/out/old.png', time: 1000 }, { path: '/out/new.png', time: 3000 }, { path: '/out/mid.png', time: 2000 },
+    ] })
+    expect(sent.documents.map(document => document.name)).toEqual(['A channel', 'new.png', 'A channel', 'mid.png', 'old.png'])
+    expect(sent.documents.map(document => document.kind).slice(0, 3)).toEqual(['chat', 'image', 'fiber'])
     // Without a conversation the run is the fiber's own, and a report leads.
     expect(defaultSelection(buildChannel(base))).toBe('host-a:/store/project/task/report.html')
   })

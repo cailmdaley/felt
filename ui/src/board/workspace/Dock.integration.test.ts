@@ -615,3 +615,11 @@ describe('Dock poll reconciliation', () => {
     expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
   })
 })
+
+describe('the chat menu says who and where once', () => {
+  it('names agent, office and host, leaving out an office that repeats the name', async () => {
+    const { chatFacts } = await import('./Dock.js')
+    expect(chatFacts(card({ id: 'x', name: 'cmbx chair', shuttleRole: 'cmbx-chair', shuttleAgent: 'claude-opus', shuttleHost: 'cineca' }))).toBe('claude-opus · cineca')
+    expect(chatFacts(card({ id: 'x', name: 'Noise closure', shuttleRole: 'data-expert', shuttleAgent: 'codex-sol', shuttleHost: 'cineca' }))).toBe('codex-sol · data-expert · cineca')
+  })
+})

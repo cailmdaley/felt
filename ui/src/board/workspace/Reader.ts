@@ -106,6 +106,8 @@ function button(cls: string, text: string, action: () => void, label = text): HT
 export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
+/** The viewer's threads-rail choice; absent, the rail shows wherever it has threads. */
+const RAIL_STORAGE = 'shuttle:workspace:rail'
 /** One arrow press resizes the sidebar by this much; with Shift, four times as much. */
 const SIDEBAR_STEP = 16
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
@@ -192,6 +194,9 @@ export class Reader {
   /** The persisted choice; absent, desktop widths of at least 1280 px show the column. */
   private sidebarChoice: boolean | null = null
   private readonly sidebarToggle: HTMLButtonElement
+  /** The rail's toggle, the sidebar's mirror in the opposite corner. */
+  private readonly railToggle: HTMLButtonElement
+  private railChoice = true
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
@@ -222,6 +227,9 @@ export class Reader {
     this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
     this.sidebarToggle.title = 'Constitutions · s'
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
+    this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
+    this.railToggle.title = 'Threads · ⌘|'
+    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="10" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>'
     this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
@@ -308,7 +316,7 @@ export class Reader {
     column.append(this.threadRail.breadcrumb, this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
-    this.el.append(this.veil, this.navbar, this.sidebarToggle, main, thumb, this.announcement, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, thumb, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
@@ -343,6 +351,7 @@ export class Reader {
       this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
       const choice = localStorage.getItem(SIDEBAR_STORAGE)
       if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
+      this.railChoice = localStorage.getItem(RAIL_STORAGE) !== 'false'
       const width = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE))
       if (Number.isFinite(width) && width > 0) this.sidebarWidthChoice = width
     } catch { /* Storage is optional. */ }
@@ -373,6 +382,7 @@ export class Reader {
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
     if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()))
+    this.paintRail()
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -929,6 +939,20 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
+  /** The rail shows or hides on its own toggle, remembered for this viewer; a constitution without threads draws neither. */
+  private toggleRail(): void {
+    this.railChoice = !this.railChoice
+    try { localStorage.setItem(RAIL_STORAGE, String(this.railChoice)) } catch { /* Storage is optional. */ }
+    this.paintRail()
+    this.layout(false)
+  }
+  private paintRail(): void {
+    const has = !this.threadRail.el.hidden
+    this.el.classList.toggle('ws-rail-off', !this.railChoice)
+    this.railToggle.hidden = !has
+    this.railToggle.setAttribute('aria-expanded', String(this.railChoice))
+    this.railToggle.setAttribute('aria-label', this.railChoice ? 'Hide threads' : 'Show threads')
+  }
   private stagePlaces(): { page: number; tabs: number[]; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
     return { page, tabs: this.tabs.buttons.map(tab => tab.getBoundingClientRect().left), sidebar: this.sidebar.offsetWidth }
@@ -1109,6 +1133,7 @@ export class Reader {
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'sidebar') this.toggleSidebar()
+    else if (intent === 'rail') { if (!this.threadRail.el.hidden) this.toggleRail() }
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
       else if (this.sidebarShown) this.sidebarPicker.focus()

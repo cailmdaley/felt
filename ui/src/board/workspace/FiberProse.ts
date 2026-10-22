@@ -119,7 +119,9 @@ export function buildFiberProse(
     status.textContent = kicker
     header.append(status)
   }
-  const roles = roleChip(card.shuttleRole, opts)
+  // An office named like the fiber itself would only say the name twice.
+  const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const roles = card.shuttleRole && kebab(card.shuttleRole) !== kebab(channel.name) ? roleChip(card.shuttleRole, opts) : null
   if (roles) header.append(roles)
   if (opts.acts) header.append(opts.acts)
   const title = document.createElement('h1')

@@ -418,6 +418,13 @@ export interface ChatNav {
   trail?: HTMLElement
 }
 
+/** The menu's muted line: agent, office and host, the office only where it is not the name again. */
+export function chatFacts(card: KanbanCard): string {
+  const slug = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const role = card.shuttleRole && slug(card.shuttleRole) !== slug(card.name) ? card.shuttleRole : undefined
+  return [card.workerAgent ?? card.shuttleAgent, role, card.shuttleHost ?? card.originId].filter(Boolean).join(' · ')
+}
+
 export interface DockOptions {
   meeting?: MeetingJoinControl
   /** Opens the Rest popover on the button that asked for it. */
@@ -1061,7 +1068,10 @@ export class Dock {
       return true
     }
     const rule = document.createElement('hr'); rule.className = 'ws-chat-menu-rule'
-    choices.append(verdict, rule, settingsItem, sessionsItem, consoleItem)
+    // Who and where, said once, muted: the header line carries only the name.
+    const facts = document.createElement('p')
+    facts.className = 'ws-chat-menu-facts'
+    choices.append(facts, verdict, rule, settingsItem, sessionsItem, consoleItem)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.
@@ -1111,6 +1121,8 @@ export class Dock {
       this.head.dataset.column = column
       title.textContent = card.name
       title.title = card.name
+      facts.textContent = chatFacts(card)
+      facts.hidden = !facts.textContent
       const reachable = verdictReachable(card)
       const restable = !!this.onRest && restReachable(card)
       const reviewable = reviewReachable(card)

@@ -362,3 +362,9 @@
 @media (prefers-reduced-transparency: reduce) {
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
+
+/* The threads rail's toggle mirrors the sidebar's in the opposite corner; hidden, the rail leaves the stage whole. */
+.ws-rail-toggle { left: auto; right: var(--ws-corner-inset); }
+.ws-rail-toggle[hidden] { display: none; }
+.ws-rail-off .ws-thread-rail { display: none; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) { .ws-rail-toggle { display: none !important; } }

@@ -281,11 +281,14 @@ export function buildChannel(input: ChannelInput): Channel {
 
   documents.delete(prose.key)
   const run = arrangeDocuments(prose, documents.values(), declared)
-  // A conversation leads the run: the chat is the page a constitution opens on.
+  // A conversation leads the run: the chat is the page a constitution opens
+  // on, and its latest word beside it, one step away: the report, else the
+  // newest sent file.
+  const latest = run.find(isReport) ?? run.filter(d => lastSent(d) !== undefined).sort((x, y) => lastSent(y)! - lastSent(x)!)[0]
   const ordered = input.conversation ? [{
     key: chatKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: input.name,
     kind: 'chat' as const, provenance: [{ kind: 'fiber' as const }],
-  }, ...run] : run
+  }, ...(latest ? [latest] : []), ...run.filter(d => d !== latest)] : run
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
