@@ -133,7 +133,7 @@ defmodule ShuttleWeb.LifecycleController do
         _ -> args
       end
 
-    {:ok, args}
+    {:ok, add_bool_flag(args, "--quiet", params["quiet"])}
   end
 
   defp args_for("reopen", %{"fiber" => fiber} = params) do

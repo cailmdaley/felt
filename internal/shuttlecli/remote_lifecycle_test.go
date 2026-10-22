@@ -295,6 +295,11 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("close payload = %#v", body)
 			}
 		}},
+		{"quiet", felt.StatusActive, remoteShuttleBlock(project), []string{"close", "quiet", "--quiet"}, "close", func(t *testing.T, body map[string]any) {
+			if body["quiet"] != true {
+				t.Fatalf("quiet close payload = %#v", body)
+			}
+		}},
 		{"accept", felt.StatusClosed, map[string]any{"kind": "standing", "host": "worker", "agent": "claude-opus", "project_dir": project, "schedule": map[string]any{"expr": "0 9 * * *", "tz": "UTC"}}, []string{"accept", "accept"}, "accept", nil},
 		{"rest", felt.StatusActive, remoteShuttleBlock(project), []string{"rest", "rest"}, "rest", nil},
 		{"outcome", felt.StatusActive, remoteShuttleBlock(project), []string{"set-outcome", "outcome", "--outcome", "new outcome"}, "set-outcome", func(t *testing.T, body map[string]any) {

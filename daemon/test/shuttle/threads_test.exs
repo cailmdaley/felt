@@ -248,6 +248,76 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  test "normal close wakes, quiet close supplies context, and ask always wakes across retry and restart",
+       %{store: store} do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
+    path = Path.join(store, ".felt/hub/hub.md")
+    File.write!(path, String.replace(File.read!(path), "host: test-host", "host: parent-host"))
+
+    for {verb, args, expected_wake} <- [
+          {"close", ["--quiet", "--local"], false},
+          {"ask", ["Needs a decision"], true},
+          {"close", ["--local"], true}
+        ] do
+      StubPostClient.set_response({:error, :unavailable})
+      assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.deliver_results(entries, "test-host")
+      assert [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert record["wake"] == expected_wake
+      original = StubPostClient.last().body |> Jason.decode!()
+      assert original["wake"] == expected_wake
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--as-draft", "--local"])
+      assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "--clear"])
+      StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+
+      Task.async(fn ->
+        Shuttle.ThreadOutbox.boot_baseline()
+        Threads.retry_results("test-host")
+      end)
+      |> Task.await(30_000)
+
+      assert StubPostClient.last().body |> Jason.decode!() == original
+      assert original["message_id"] == id
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+  end
+
+  test "results reach only the nearest orchestrator and never propagate automatically", %{
+    store: store,
+    data: data
+  } do
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "thread",
+               "hub/child",
+               "Deep work",
+               "--slug",
+               "deep",
+               "--disabled"
+             ])
+
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child/deep", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/child"))
+    Threads.capture_results(entries, "test-host")
+    assert [{_, %{"parent_uid" => uid}}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert uid == parent.fiber["uid"]
+    Threads.deliver_results(entries, "test-host")
+    assert [%{"request" => %{"text" => "thread hub/child/deep closed: "}}] = pending(data)
+    # Repeated delivery/polling does not manufacture a result for the hub.
+    Threads.deliver_results(entries, "test-host")
+    assert length(pending(data)) == 1
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+    assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+    child = Enum.find(latest, &(Threads.address(&1.fiber) == "hub/child"))
+    assert child.fiber["status"] == "open"
+    refute Map.has_key?(child.fiber, "closed_at")
+  end
+
   @tag first_boot: true
   test "snapshot migration preserves the cutoff, intended UID, pending text and acknowledgment dedup",
        %{store: store, data: data} do

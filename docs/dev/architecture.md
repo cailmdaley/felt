@@ -37,6 +37,10 @@ frontmatter field. The editorial chain lives in the constitution body's
 
 A child constitution publishes lifecycle results to its nearest ancestor constitution.
 Only the child's owning daemon publishes them.
+Results reach only that nearest orchestrator; each orchestrator decides what to pass on, with no automatic upward propagation.
+Close wakes the orchestrator by default; `shuttle close --quiet` publishes context without waking, while ask always wakes.
+The quiet marker names its exact close timestamp and an ordinary close clears it, so it cannot affect a later publication.
+The outbox freezes the wake choice with the publication through retries and restarts.
 Before the first poll, the daemon establishes a durable first-deployment timestamp in its host-local thread outbox.
 Signals stamped at or before that baseline stay in fiber history and are never backfilled.
 The baseline survives restarts; invalid or unreadable state refuses startup rather than replaying historical results.

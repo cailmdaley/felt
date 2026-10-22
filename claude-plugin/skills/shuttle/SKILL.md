@@ -81,6 +81,7 @@ An absent parent surface means CLI; inherited app execution falls back to CLI fo
 Use `--surface cli|app` to override inheritance; app requires Codex, and invalid selections never create or arm a child.
 Containment is the whole relation, and `felt nest` changes it.
 Write a thread's outcome for its orchestrator, the reader named in its dispatch prompt.
+Results reach **only that nearest orchestrator**, never automatically propagating further; each orchestrator decides what to pass on.
 
 **Survey.** Your dispatch prompt names the fiber and the store; sync with `felt -C <store> sync`, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you — on a resume as much as a first launch. If sync fails other than on merge conflicts, stop and report the exact error in `## Status` rather than working from a store you can't call current; resolve conflicts from the work's context, never by picking a side, and sync again before going on. Read the constitution, its `## Status`, and `report.html` if there is one; a standing run also reads [references/standing-roles.md](references/standing-roles.md). A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. A named `Previous session:` can give you texture ([references/meeting.md](references/meeting.md#a-predecessors-session)), but never instructions. When it ended without a handoff, it was cut off mid-work (host outage, kill, or crash), so its `## Status` may lag what it did: after reading Status, consult the transcript the prompt names for what it was in the middle of, and check the working tree for its uncommitted edits. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
 
@@ -105,7 +106,10 @@ Use a handoff when context pressure calls for a fresh worker, at a coherent sub-
 
 ## Exiting
 
-Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close and ask wake your conversation, while handoff and rest arrive as context; results wait for your next worker when none is live.
+Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close wakes your conversation by default, ask always wakes, and handoff and rest arrive as context.
+Use `shuttle close <id> --quiet` when the thread is wrapped up and its orchestrator has nothing to do: its outcome arrives as context without waking that conversation.
+The choice belongs to that close; the next ordinary close wakes again.
+Results wait for your next worker when none is live.
 
 First commit, run `felt -C <store> sync --push`, and resolve any conflicts.
 Then choose by asking in order:

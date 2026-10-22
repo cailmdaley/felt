@@ -202,6 +202,29 @@ defmodule ShuttleWeb.LifecycleControllerTest do
              "-C\n#{loom}\nreshape\nai-futures/lightcone/lightcone/desk\noneshot\n--local\n"
   end
 
+  test "close forwards its quiet choice through the owning Poller" do
+    store = fixture_store!("shuttle-quiet-close-route", "tests/quiet-close", "Quiet close")
+
+    for quiet <- [true, false] do
+      args_file = install_fake_cli!()
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{
+            "action" => "close",
+            "fiber" => "tests/quiet-close",
+            "quiet" => quiet
+          })
+        )
+
+      assert conn.status == 200
+      flag = if quiet, do: "--quiet\n", else: ""
+      assert File.read!(args_file) == "-C\n#{store}\nclose\ntests/quiet-close\n#{flag}--local\n"
+    end
+  end
+
   test "close and reopen delegate through the existing lifecycle endpoint" do
     close_store =
       fixture_store!("shuttle-lifecycle-close-route", "tests/close-route", "Close route")

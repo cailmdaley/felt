@@ -537,6 +537,7 @@ func setRemoteProjectDirFlag(cmd *cobra.Command, raw string, f *felt.Felt, block
 
 func (a *app) closeCmd() *cobra.Command {
 	var closeTempered string
+	var closeQuiet bool
 	closeCmd := &cobra.Command{
 		Use:   "close <fiber>",
 		Short: "Close a shuttle-managed fiber and optionally set the human verdict",
@@ -546,6 +547,11 @@ field is missing. Use:
   shuttle close <fiber>                   # awaiting review (tempered cleared)
   shuttle close <fiber> --tempered=true   # human-accepted
   shuttle close <fiber> --tempered=false  # discarded
+  shuttle close <fiber> --quiet           # context-only result for its orchestrator
+
+A thread's close wakes only its nearest orchestrator by default. --quiet delivers
+its outcome as context without waking that conversation. Ask always wakes.
+Results never propagate automatically beyond that orchestrator.
 
 A verdict (--tempered=true or false) also takes the fiber out of every
 depends_on queue: fibers that waited on it wait on what it waited on instead.
@@ -576,6 +582,9 @@ fiber leaves your session running.`,
 				if tempered != nil {
 					fields["tempered"] = *tempered
 				}
+				if closeQuiet {
+					fields["quiet"] = true
+				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
 					if routed && err == nil && a.isOwnFiber(f) {
 						a.endOwnTmuxSession()
@@ -589,6 +598,14 @@ fiber leaves your session running.`,
 				return err
 			}
 			setClosedAtIfMissing(f)
+			// Bind quiet to this publication stamp; an ordinary close clears it.
+			quietStamp := ""
+			if closeQuiet {
+				quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
+			}
+			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+				return err
+			}
 			// A verdict takes the card off the desk, and out of every queue
 			// with it: what waited behind it now waits behind what it waited on.
 			var spliced []string
@@ -619,6 +636,7 @@ fiber leaves your session running.`,
 			return nil
 		},
 	}
+	closeCmd.Flags().BoolVar(&closeQuiet, "quiet", false, "Deliver the outcome as context without waking the nearest orchestrator")
 	closeCmd.Flags().StringVar(&closeTempered, "tempered", "", "Set tempered verdict (true/false); omit to clear it for awaiting review")
 	closeCmd.Flags().Bool("local", false, localFlagUsage)
 	return closeCmd

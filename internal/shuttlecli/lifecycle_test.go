@@ -43,6 +43,32 @@ func runIn(t *testing.T, env *sysenv.Env, dir string, args ...string) (string, e
 
 // ---- close -----------------------------------------------------------------
 
+func TestShuttleCloseQuietIsBoundToOneClose(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	if out, err := runIn(t, env, dir, "close", "f", "--quiet"); err != nil {
+		t.Fatalf("quiet close: %v\n%s", err, out)
+	}
+	f := mustRead(t, storage, "f")
+	runtime := felt.MappingValueNode(f.ExtraFields["shuttle"], "runtime")
+	quiet := felt.MappingValueNode(runtime, "quiet_closed_at")
+	if quiet == nil || quiet.Value != f.ClosedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("quiet stamp does not identify this close: %+v", quiet)
+	}
+	if out, err := runIn(t, env, dir, "reopen", "f", "--as-draft", "--local"); err != nil {
+		t.Fatalf("reopen: %v\n%s", err, out)
+	}
+	if out, err := runIn(t, env, dir, "close", "f"); err != nil {
+		t.Fatalf("ordinary close: %v\n%s", err, out)
+	}
+	runtime = felt.MappingValueNode(mustRead(t, storage, "f").ExtraFields["shuttle"], "runtime")
+	if felt.MappingValueNode(runtime, "quiet_closed_at") != nil {
+		t.Fatal("ordinary close retained quiet state")
+	}
+}
+
 func TestShuttleClose_OwnSession(t *testing.T) {
 	t.Parallel()
 	for _, verdict := range []string{"", "true", "false"} {

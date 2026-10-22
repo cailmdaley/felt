@@ -90,7 +90,7 @@ defmodule Shuttle.Threads do
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
           parent = orchestrator(entry, index),
           parent != nil,
-          {verb, stamp, text} <- signals(entry.fiber),
+          {verb, stamp, text, wake} <- signals(entry.fiber),
           after_baseline?(stamp, baseline) do
         id =
           "thread-" <>
@@ -102,7 +102,7 @@ defmodule Shuttle.Threads do
            "store" => parent.felt_store,
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
            "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
-           "wake" => verb in ["closed", "asked"]
+           "wake" => wake
          }}
       end
 
@@ -168,7 +168,7 @@ defmodule Shuttle.Threads do
     ask =
       case get_in(fiber, ["shuttle", "ask"]) do
         %{"text" => text, "at" => at} when is_binary(text) and is_binary(at) ->
-          [{"asked", at, text}]
+          [{"asked", at, text, true}]
 
         _ ->
           []
@@ -181,14 +181,17 @@ defmodule Shuttle.Threads do
     exit =
       cond do
         fiber["status"] == "closed" && fiber["closed_at"] ->
-          [{"closed", fiber["closed_at"], fiber["outcome"] || ""}]
+          [
+            {"closed", fiber["closed_at"], fiber["outcome"] || "",
+             runtime["quiet_closed_at"] != fiber["closed_at"]}
+          ]
 
         fiber["status"] == "open" && fiber["horizon"] == "stashed" && handed ->
-          [{"rested", handed, fiber["outcome"] || ""}]
+          [{"rested", handed, fiber["outcome"] || "", false}]
 
         fiber["status"] == "active" && is_binary(handed) &&
             (is_nil(dispatched) || handed >= dispatched) ->
-          [{"handed off", handed, fiber["outcome"] || ""}]
+          [{"handed off", handed, fiber["outcome"] || "", false}]
 
         true ->
           []
