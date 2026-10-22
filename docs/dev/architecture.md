@@ -63,6 +63,9 @@ A corrupt or missing baseline in an established store refuses startup without to
 Recover by restoring the exact trusted cutoff from backup; never delete the outbox or reset the cutoff to the current time.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
+A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.
+Boot recovery completes only after both the session scan and document listings are healthy; an uncertain boot defers authority reconciliation to a healthy poll.
+Recovery adopts live workers before revoking untracked receivers.
 An unchanged worker keeps its epoch across flushes and daemon restarts.
 Publishing a worker transition revokes the predecessor before the Poller reports completion, even before a successor's delivery task runs.
 Hooks check the current receiver under the mailbox emission lock; asynchronous delivery carries its epoch and cannot change authority.

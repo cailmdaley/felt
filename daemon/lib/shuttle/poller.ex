@@ -281,10 +281,10 @@ defmodule Shuttle.Poller do
       daemon_heartbeat_writer: nil,
       daemon_booted_at: nil,
       daemon_boots: [],
-      # True once boot adoption has scanned tmux and rebuilt `running` from what
-      # it found. The auto-release judges worker continuity against `running`,
-      # so it holds while this is false: a reorder that ran the verdict before
-      # adoption, or a boot whose tmux scan came back unknown, fails closed.
+      # True once adoption has a confirmed session scan and healthy document
+      # listings, rebuilt `running` and reconciled durable receiver authority.
+      # Unknown boot observations defer completion to a healthy poll. The
+      # auto-release judges continuity only after this boundary.
       adopted?: false,
       # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1`: the
       # daemon shells `shuttle contract` and compares it to
@@ -1697,7 +1697,7 @@ defmodule Shuttle.Poller do
         discovery: discovery
     }
 
-    state = reconcile(state, sessions)
+    state = reconcile(state, sessions, listings_ok?)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
     Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, new_store_map))
@@ -3670,6 +3670,9 @@ defmodule Shuttle.Poller do
   defp register_renamed_session(%State{} = state, fiber_id, fiber, session, agent_id, opts) do
     running_meta =
       new_running_meta(fiber_id, fiber, session, agent_id, owning_store(fiber_id, state))
+      # The claim's conversation is authoritative before registration, not
+      # the predecessor's runtime stamp that log_worker_claim replaces.
+      |> Map.put(:session_uuid, present_string(Keyword.get(opts, :session_uuid)))
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->
@@ -3761,11 +3764,11 @@ defmodule Shuttle.Poller do
   # fresh reads, so a worker that closed its fiber mid-poll would still look
   # active in them, be re-adopted, and be killed during its own final act.
   # `sessions` is this cycle's `list_shuttle_sessions/1` scan.
-  defp reconcile(%State{} = state, sessions) do
+  defp reconcile(%State{} = state, sessions, listings_ok?) do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
-    SessionReconciliation.reconcile_orphaned_sessions(state, sessions)
+    SessionReconciliation.reconcile_orphaned_sessions(state, sessions, listings_ok?)
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do
