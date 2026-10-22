@@ -35,6 +35,15 @@ export function threadMark(card: KanbanCard): HTMLElement | null {
   return mark
 }
 
+/** Rows a peek group draws before the rest fold into "+ N more", which opens the root and its rail. */
+export const PEEK_ROWS = 5
+function moreButton(count: number, focus: string, open: () => void): HTMLButtonElement {
+  const more = document.createElement('button'); more.type = 'button'; more.className = 'kbn-thread-more'
+  more.textContent = `+ ${count} more`; more.dataset.threadFocus = focus
+  more.addEventListener('click', event => { event.stopPropagation(); open() })
+  return more
+}
+
 type Expansion = 'pinned' | 'hover'
 /**
  * Which families are open, kept by the renderer across Desk repaints, which
@@ -96,7 +105,8 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   ] as const) {
     if (!members.length) continue
     const heading = document.createElement('h4'); heading.textContent = label
-    peek.append(heading, ...members.map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('peek', threadKey(c)); return row }))
+    peek.append(heading, ...members.slice(0, PEEK_ROWS).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('peek', threadKey(c)); return row }))
+    if (members.length > PEEK_ROWS) peek.append(moreButton(members.length - PEEK_ROWS, focusId('peek-more', label), () => open(card)))
   }
   const archived = descendants.length - live.length
   if (archived) { const note = document.createElement('small'); note.textContent = `${archived} archived`; peek.append(note) }
@@ -104,11 +114,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   if (waitingThreadEntries() && waiting.length) {
     entries = document.createElement('div'); entries.className = 'kbn-thread-subentries'
     entries.append(...waiting.slice(0, 2).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('entry', threadKey(c)); return row }))
-    if (waiting.length > 2) {
-      const more = document.createElement('button'); more.type = 'button'; more.className = 'kbn-thread-more'
-      more.textContent = `+ ${waiting.length - 2} more`; more.dataset.threadFocus = focusId('more')
-      more.addEventListener('click', event => { event.stopPropagation(); open(card) }); entries.append(more)
-    }
+    if (waiting.length > 2) entries.append(moreButton(waiting.length - 2, focusId('more'), () => open(card)))
     host.insertBefore(entries, peek)
   }
   const restored = families.get(card)

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { ThreadIndex } from './threads.js'
 import { response } from './testFixtures.js'
-import { installThreadPeek } from './ThreadPeek.js'
+import { installThreadPeek, PEEK_ROWS } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
 import { saveWaitingThreadEntries, waitingThreadEntries } from './threadPreferences.js'
 afterEach(() => { document.body.replaceChildren(); saveWaitingThreadEntries(false); vi.useRealTimers() })
@@ -126,5 +126,22 @@ describe('role seats', () => {
     const bare = document.querySelector<HTMLElement>('[data-card-uid="lone"]')!
     expect(bare.closest('.kbn-role-seat')).toBeNull()
     expect(bare.getAttribute('role')).toBe('listitem')
+  })
+})
+describe('a large family stays a peek, not a column', () => {
+  it('caps each group at a few rows, folding the rest into "+ N more" that opens the root', () => {
+    saveWaitingThreadEntries(false)
+    const root = card({ id: 'hub', status: 'active' }), open = vi.fn()
+    const threads = Array.from({ length: 48 }, (_, n) => card({ id: `hub/t${n}`, orchestrator: 'hub', status: n % 2 ? 'closed' : 'active',
+      ask: n % 4 === 0 ? { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } : undefined }))
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), open)
+    const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
+    expect([...peek.querySelectorAll('h4')].map(h => h.textContent)).toEqual(['Waiting', 'To review', 'Working'])
+    expect(peek.querySelectorAll('.kbn-thread-row')).toHaveLength(3 * PEEK_ROWS)
+    const more = [...peek.querySelectorAll<HTMLButtonElement>('.kbn-thread-more')]
+    expect(more.map(b => b.textContent)).toEqual([`+ ${12 - PEEK_ROWS} more`, `+ ${24 - PEEK_ROWS} more`, `+ ${12 - PEEK_ROWS} more`])
+    more[1].click()
+    expect(open).toHaveBeenCalledWith(root)
   })
 })
