@@ -85,7 +85,9 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   }
   const keepsFocus = (): boolean => peek.contains(document.activeElement)
   badge.dataset.threadFocus = focusId('badge')
-  badge.addEventListener('click', event => { event.stopPropagation(); paint(peek.hidden ? 'pinned' : undefined) })
+  // A click pins: a family the pointer opened on its way to the badge stays
+  // open, and only a pinned one folds.
+  badge.addEventListener('click', event => { event.stopPropagation(); paint(families.get(card) === 'pinned' ? undefined : 'pinned') })
   host.addEventListener(THREAD_REVEAL, () => paint('pinned'))
   host.addEventListener(THREAD_COLLAPSE, () => { paint(undefined); badge.focus({ preventScroll: true }) })
   host.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch' && peek.hidden) paint('hover') })

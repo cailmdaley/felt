@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { ThreadIndex } from './threads.js'
 import { response } from './testFixtures.js'
-import { installThreadPeek, PEEK_ROWS } from './ThreadPeek.js'
+import { installThreadPeek, PEEK_ROWS, ThreadFamilies } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
 import { saveWaitingThreadEntries, waitingThreadEntries } from './threadPreferences.js'
 afterEach(() => { document.body.replaceChildren(); saveWaitingThreadEntries(false); vi.useRealTimers() })
@@ -143,5 +143,27 @@ describe('a large family stays a peek, not a column', () => {
     expect(more.map(b => b.textContent)).toEqual([`+ ${12 - PEEK_ROWS} more`, `+ ${24 - PEEK_ROWS} more`, `+ ${12 - PEEK_ROWS} more`])
     more[1].click()
     expect(open).toHaveBeenCalledWith(root)
+  })
+})
+describe('a mouse on the badge', () => {
+  const pointer = (el: HTMLElement, type: string): void => {
+    const event = new Event(type); Object.assign(event, { pointerType: 'mouse' }); el.dispatchEvent(event)
+  }
+  it('a click on a family the hover already opened pins it, and the next click folds it', () => {
+    saveWaitingThreadEntries(false)
+    const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root', status: 'active' })
+    const families = new ThreadFamilies()
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, child]), vi.fn(), families)
+    const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!, badge = host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!
+    pointer(host, 'pointerenter')
+    expect(families.get(root)).toBe('hover')
+    badge.click()
+    expect(peek.hidden).toBe(false)
+    expect(families.get(root)).toBe('pinned')
+    pointer(host, 'pointerleave')
+    expect(peek.hidden).toBe(false)
+    badge.click()
+    expect(peek.hidden).toBe(true)
   })
 })
