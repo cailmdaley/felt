@@ -12,17 +12,17 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           # Keep the release tool reproducible. v2.17.1 is the version that
@@ -35,7 +35,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       - name: Preserve the formula generated for these exact archives
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: homebrew-formula
           path: dist/homebrew/Formula/felt.rb
@@ -118,7 +118,7 @@ jobs:
           # "dubious ownership".
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Both workflows read the same file, so the cache key they compute and the
       # OTP they build are the same by construction.
@@ -149,7 +149,7 @@ jobs:
       - name: Restore the source-built OTP
         if: matrix.container != ''
         id: otp-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /opt/otp
           key: el8-almalinux8-${{ runner.arch }}-otp-${{ env.EL8_OTP_VERSION }}
@@ -190,14 +190,14 @@ jobs:
 
       - name: Set up Elixir (macOS)
         if: matrix.container == ''
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           # Keep in lockstep with ci.yml: the release ships this OTP.
           otp-version: "28"
           elixir-version: "1.19"
 
       - name: Set up Node (UI bundle)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
 
@@ -205,7 +205,7 @@ jobs:
       # orchestration; the boot test below runs a real poller tick, so install
       # both CLIs from this checkout.
       - name: Set up Go (both CLIs for boot test)
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: go.mod
 
@@ -312,7 +312,7 @@ jobs:
       # the formula artifact behind, the release stays private and the failure
       # is repairable from the workflow run.
       - name: Retrieve the formula from the GoReleaser run
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: homebrew-formula
           path: dist/homebrew/Formula
