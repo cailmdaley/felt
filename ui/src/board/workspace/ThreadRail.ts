@@ -50,7 +50,7 @@ export class ThreadRail {
     // earlier walk already opened, so a deep chain of asks stays linear.
     const opened = new Set<KanbanCard>()
     for (const waiting of descendants) {
-      if (index.state(waiting) !== 'waiting-cail') continue
+      if (index.state(waiting) !== 'waiting') continue
       for (let ancestor = index.parentOf(waiting); ancestor && !opened.has(ancestor); ancestor = index.parentOf(ancestor)) {
         opened.add(ancestor); this.folded.delete(JSON.stringify([ancestor.originId, ancestor.id]))
       }
@@ -116,12 +116,12 @@ export class ThreadRail {
       return list
     }
     this.tree.replaceChildren()
-    for (const [label, state] of [['Waiting', 'waiting-cail'], ['To review', 'to-review'], ['Drafts', 'drafts']] as const) {
+    for (const [label, state] of [['Waiting', 'waiting'], ['To review', 'to-review'], ['Drafts', 'drafts']] as const) {
       const members = subtree.filter(c => index.state(c) === state)
       if (!members.length) continue
-      const group = document.createElement(state !== 'waiting-cail' ? 'details' : 'section'); group.className = 'ws-thread-pointers'
+      const group = document.createElement(state !== 'waiting' ? 'details' : 'section'); group.className = 'ws-thread-pointers'
       if (group instanceof HTMLDetailsElement) group.dataset.threadDetails = `group:${state}`
-      const heading = document.createElement(state !== 'waiting-cail' ? 'summary' : 'h3')
+      const heading = document.createElement(state !== 'waiting' ? 'summary' : 'h3')
       identify(heading, `group:${state}`, this.card)
       heading.textContent = `${label} · ${members.length}`; group.append(heading)
       for (const card of members) {

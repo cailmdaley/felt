@@ -7,7 +7,7 @@ defmodule Shuttle.Actions do
   between the two.
   """
 
-  @transition_targets ~w(drafts inFlight queued active awaitingReview tempered composted)
+  @transition_targets ~w(drafts inFlight active awaitingReview tempered composted)
 
   @spec actions_for(map(), boolean()) :: [map()]
   def actions_for(fiber, running? \\ false) when is_map(fiber) do
@@ -190,7 +190,6 @@ defmodule Shuttle.Actions do
   defp invocation(:close_tempered), do: %{verb: "close", tempered: true}
   defp invocation(:close_composted), do: %{verb: "close", tempered: false}
 
-  defp normalize_target("queued"), do: "inFlight"
   defp normalize_target("active"), do: "inFlight"
   defp normalize_target(target), do: target
 

@@ -1,12 +1,12 @@
 import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 
-export type ThreadState = 'waiting-cail' | 'to-review' | 'working' | 'drafts' | 'resting' | 'archived'
+export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'resting' | 'archived'
 export type ThreadSummary = NonNullable<KanbanCard['threadSummary']>
 export const THREAD_LABEL: Record<ThreadState, string> = {
-  'waiting-cail': 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', resting: 'Resting', archived: 'Archived',
+  waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', resting: 'Resting', archived: 'Archived',
 }
-const STATE_ORDER: readonly ThreadState[] = ['waiting-cail', 'to-review', 'working', 'drafts', 'resting', 'archived']
+const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'resting', 'archived']
 /**
  * A thread's state, read the way the Desk reads a card: a verdict archives,
  * a close awaits review, and a live worker puts the card In flight whatever
@@ -19,7 +19,7 @@ export function threadState(card: KanbanCard): ThreadState {
   if (card.status === 'closed') return 'to-review'
   const live = hasLiveWorker(card)
   if (card.status === 'open' && !live) return card.effectiveHorizon === 'stashed' ? 'resting' : 'drafts'
-  if (turnOf(card).yours) return 'waiting-cail'
+  if (turnOf(card).yours) return 'waiting'
   if (live && !card.originStale) return 'working'
   return 'resting'
 }
@@ -30,7 +30,7 @@ export function threadState(card: KanbanCard): ThreadState {
  */
 export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' | 'awaitingReview' | undefined {
   if (!summary) return undefined
-  if (summary.waitingOnCail || summary.working) return 'inFlight'
+  if (summary.waiting || summary.working) return 'inFlight'
   if (summary.toReview) return 'awaitingReview'
   return undefined
 }
@@ -38,7 +38,7 @@ export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' |
 /** A thread's identity: a wire edge names a path, and the same path can live on several hosts. */
 export const threadKey = (card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'>): string =>
   `${card.originId}\u0000${card.feltStore ?? ''}\u0000${card.id}`
-const EMPTY: ThreadSummary = Object.freeze({ unfinished: 0, waitingOnCail: 0, working: 0, toReview: 0, drafts: 0, archived: 0 })
+const EMPTY: ThreadSummary = Object.freeze({ unfinished: 0, waiting: 0, working: 0, toReview: 0, drafts: 0, archived: 0 })
 let builds = 0
 /** How many indexes have been built in this page — the scale tests' witness that nothing rebuilds per card. */
 export function threadIndexBuilds(): number { return builds }
@@ -117,13 +117,13 @@ export class ThreadIndex {
       const sum = { ...EMPTY }
       for (const child of children) {
         const childKey = threadKey(child), below = this.sums.get(childKey) ?? EMPTY
-        sum.unfinished += below.unfinished; sum.waitingOnCail += below.waitingOnCail; sum.working += below.working
+        sum.unfinished += below.unfinished; sum.waiting += below.waiting; sum.working += below.working
         sum.toReview += below.toReview; sum.drafts += below.drafts; sum.archived += below.archived
         const state = this.states.get(childKey)!
         if (state === 'archived') sum.archived++
         else {
           sum.unfinished++
-          if (state === 'waiting-cail') sum.waitingOnCail++
+          if (state === 'waiting') sum.waiting++
           else if (state === 'working') sum.working++
           else if (state === 'to-review') sum.toReview++
           else if (state === 'drafts') sum.drafts++

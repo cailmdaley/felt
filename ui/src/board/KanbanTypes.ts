@@ -16,7 +16,7 @@ export interface InheritedProjectDir {
 export interface KanbanCard {
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
-  threadSummary?: { unfinished: number; waitingOnCail: number; working: number; toReview: number; drafts: number; archived: number }
+  threadSummary?: { unfinished: number; waiting: number; working: number; toReview: number; drafts: number; archived: number }
   /** A settled or resting root drawn on the Desk because its threads still hold work. */
   threadPromoted?: boolean
   /** A thread whose orchestrator is not on the board, drawn as its own card. */

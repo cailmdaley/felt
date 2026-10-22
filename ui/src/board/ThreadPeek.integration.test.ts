@@ -109,3 +109,22 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   expect(open).toHaveBeenCalledWith(root)
   expect(host.querySelector('.kbn-thread-peek')?.textContent).toContain('To review')
 })
+describe('role seats', () => {
+  it('a seat with threads carries its badge beside the chip; a seat without stays a bare chip', () => {
+    const seat = card({ id: 'seat', shuttleRole: 'chair', shuttleSeat: true }), seatChild = card({ id: 'seat/child', orchestrator: 'seat' })
+    const lone = card({ id: 'lone', shuttleRole: 'scribe', shuttleSeat: true })
+    const index = new ThreadIndex([seat, seatChild, lone])
+    for (const c of [seat, lone]) c.threadSummary = index.summary(c)
+    const data = response({ roles: [seat, lone], threads: [seatChild] })
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+      stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {} })
+    document.body.append(renderer.renderRolesSection(data.roles, {})!)
+    const seated = document.querySelector<HTMLElement>('.kbn-role-seat')!
+    expect(seated.getAttribute('role')).toBe('listitem')
+    expect(seated.querySelector('[data-card-uid="seat"]')).not.toBeNull()
+    expect(seated.querySelector('.kbn-role-threads .kbn-thread-badge')).not.toBeNull()
+    const bare = document.querySelector<HTMLElement>('[data-card-uid="lone"]')!
+    expect(bare.closest('.kbn-role-seat')).toBeNull()
+    expect(bare.getAttribute('role')).toBe('listitem')
+  })
+})

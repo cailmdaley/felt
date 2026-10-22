@@ -58,7 +58,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   host.classList.add('kbn-thread-family')
   const badge = document.createElement('button'); badge.type = 'button'; badge.className = 'kbn-thread-badge'
   const live = descendants.filter(c => index.state(c) !== 'archived')
-  const waiting = live.filter(c => index.state(c) === 'waiting-cail')
+  const waiting = live.filter(c => index.state(c) === 'waiting')
   const review = live.filter(c => index.state(c) === 'to-review')
   badge.textContent = `⑂ ${live.length}${review.length ? ` · ${review.length} to review` : ''}`
   badge.classList.toggle('kbn-thread-badge-waiting', waiting.length > 0)
