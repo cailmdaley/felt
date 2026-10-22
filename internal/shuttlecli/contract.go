@@ -30,8 +30,9 @@ import (
 // integer it prints on stdout, and compares it to its own baked expectation —
 // surfacing a version-skew warning/refusal at startup instead of failing one
 // shelled write at a time. Bumped in lockstep with
-// daemon/lib/shuttle/contract.ex's @expected_level.
-const ShuttleContractLevel = 14
+// daemon/lib/shuttle/contract.ex's @expected_level, whose @level_surfaces
+// names what each level adds so a skew reports the missing verb.
+const ShuttleContractLevel = 15
 
 func (a *app) shuttleContractCmd() *cobra.Command {
 	shuttleContractCmd := &cobra.Command{
