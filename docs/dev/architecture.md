@@ -48,7 +48,8 @@ Acknowledged IDs stay in the sender outbox to prevent republication.
 Pending publications are retried independently of the baseline.
 
 The parent Poller reserves a durable, monotonically increasing receiver generation while serializing worker selection, including selections with no available conversation.
-Asynchronous delivery carries that generation, so a delayed predecessor selection cannot replace its successor's consumption authority.
+Publishing a reservation immediately revokes every older destination, even before the successor's delivery task runs.
+Both destination designation and mailbox consumption require the latest reserved generation; asynchronous delivery carries that generation.
 
 ## Stores and views
 

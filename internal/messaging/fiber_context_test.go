@@ -292,6 +292,91 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 	}
 }
 
+func TestFiberContextReservationImmediatelyFencesPredecessor(t *testing.T) {
+	t.Parallel()
+	for _, successor := range []string{"B", "unavailable", "-"} {
+		for _, phase := range []string{"already-designated-hook", "delayed-designation"} {
+			t.Run(successor+"/"+phase, func(t *testing.T) {
+				env := testEnv(t)
+				for _, id := range []string{"A", "B"} {
+					if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
+						t.Fatal(err)
+					}
+				}
+				reserve := func() uint64 {
+					t.Helper()
+					n, err := ReserveFiberGeneration(env, "fiber")
+					if err != nil {
+						t.Fatal(err)
+					}
+					return n
+				}
+				a, b := "shuttle://host/claude/A", "shuttle://host/claude/"+successor
+				if successor == "-" {
+					b = "-"
+				}
+				first := reserve()
+				if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err != nil {
+					t.Fatal(err)
+				}
+				second := reserve() // Selection of B revokes A before B's delivery task runs.
+				if second <= first {
+					t.Fatalf("non-monotonic reservation: %d <= %d", second, first)
+				}
+				if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "ready"}); err != nil {
+					t.Fatal(err)
+				}
+				if phase == "delayed-designation" {
+					if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
+						t.Error("stale A designation succeeded after B reservation")
+					}
+				}
+				var stale []Request
+				if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
+					t.Fatal(err)
+				}
+				if len(stale) != 0 {
+					t.Fatalf("A consumed during reserved successor gap: %+v", stale)
+				}
+				// Arrival of the delayed B selection must retain context when B is unavailable or revoked.
+				err := DeliverFiberContext(context.Background(), env, "fiber", "host", b, second)
+				if successor == "unavailable" {
+					if err == nil {
+						t.Fatal("unavailable B succeeded")
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { t.Errorf("A consumed after successor arrival: %+v", batch); return nil }); err != nil {
+					t.Fatal(err)
+				}
+				pending, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending"))
+				if err != nil || len(pending) != 1 {
+					t.Fatalf("result not retained: %v %v", pending, err)
+				}
+				if successor != "B" {
+					if err := RegisterMailbox(env, "claude", "B", "host", t.TempDir(), os.Getpid(), true); err != nil {
+						t.Fatal(err)
+					}
+					second = reserve()
+					if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B", second); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var received []Request
+				for i := 0; i < 2; i++ {
+					if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { received = append(received, batch...); return nil }); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if len(received) != 1 || received[0].MessageID != "result" {
+					t.Fatalf("successor received: %+v", received)
+				}
+			})
+		}
+	}
+}
+
 func TestFiberContextDelayedSelectionCannotRestorePredecessor(t *testing.T) {
 	t.Parallel()
 	for _, successor := range []string{"B", "unavailable", "-"} {
@@ -305,16 +390,23 @@ func TestFiberContextDelayedSelectionCannotRestorePredecessor(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			// Selection epochs are assigned by the serialized owner, not by delayed delivery tasks.
-			deliver := func(id string, epoch uint64) {
-				address := "shuttle://host/claude/" + id
-				if id == "-" {
-					address = "-"
-				}
-				_ = DeliverFiberContext(context.Background(), env, "fiber", "host", address, epoch)
+			// Exercise designated-successor arrival as well as the reservation gap.
+			first, err := ReserveFiberGeneration(env, "fiber")
+			if err != nil {
+				t.Fatal(err)
 			}
-			deliver(successor, 2)
-			deliver("A", 1)
+			second, err := ReserveFiberGeneration(env, "fiber")
+			if err != nil || second <= first {
+				t.Fatalf("reserve successor: %d %v", second, err)
+			}
+			address := "shuttle://host/claude/" + successor
+			if successor == "-" {
+				address = "-"
+			}
+			_ = DeliverFiberContext(context.Background(), env, "fiber", "host", address, second)
+			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A", first); err == nil {
+				t.Error("delayed predecessor designation succeeded")
+			}
 			var stale []Request
 			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
 				t.Fatal(err)
