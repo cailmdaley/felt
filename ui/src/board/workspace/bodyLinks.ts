@@ -79,7 +79,8 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     const texts: Text[] = []
     while (walker.nextNode()) {
       const node = walker.currentNode as Text
-      if (!node.parentElement?.closest('a,button,script,style,textarea,input,select,[contenteditable="true"],[data-mention-ignore]')) texts.push(node)
+      // Code stays code: a copied command must yield the path, not a chip's label.
+      if (!node.parentElement?.closest('a,button,code,pre,script,style,textarea,input,select,[contenteditable="true"],[data-mention-ignore]')) texts.push(node)
     }
     for (const node of texts) {
       const text = node.data
@@ -92,6 +93,9 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
         if (!match[1] && urls.some(([start, end]) => match.index! >= start && match.index! < end)) continue
         const raw = match[1] ? `[[${match[1]}]]` : match[2].replace(/[.,;:]+$/, '')
         if (!raw) continue
+        // A bare token chips only as a nested path or a ULID: a one-word id
+        // (a constitution slugged "review") is prose until written [[review]].
+        if (!match[1] && !raw.includes('/') && !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(raw)) continue
         candidates.add(raw)
         const row = resolve(raw)
         if (!row) continue

@@ -18,7 +18,9 @@ describe('constitution mentions', () => {
     root.innerHTML = '<p>[[child]] <code>shuttle thread work/child "ask"</code> work/child, https://example/work/child /work/childish [[missing]] <a href="https://example.org">ordinary</a></p>'
     const open = vi.fn(), runtime = mentionRuntime(root, open)
     update(runtime, [work({ outcome: 'Verified result' })])
-    expect(root.querySelectorAll('.ws-constitution-chip')).toHaveLength(3)
+    // The path inside <code> stays code: copying the command yields the path.
+    expect(root.querySelectorAll('.ws-constitution-chip')).toHaveLength(2)
+    expect(root.querySelector('code')!.textContent).toBe('shuttle thread work/child "ask"')
     expect(root.textContent).toContain('https://example/work/child /work/childish [[missing]]')
     expect(root.querySelector('a[href="https://example.org"]')).not.toBeNull()
     const chip = root.querySelector<HTMLAnchorElement>('.ws-constitution-chip')!
@@ -94,22 +96,33 @@ describe('constitution mentions', () => {
     expect(constitutionOpen).not.toHaveBeenCalled()
     runtime.dispose()
   })
-  it('excludes filename, domain and URL spans while recognizing standalone ids and explicit wikilinks', () => {
+  it('chips a one-word id only as an explicit wikilink, never as a word, a filename, a domain or a URL', () => {
     const source = 'debug debug, [[debug]] debug.log debug.example.org https://example.test/?job=debug www.example.test/?job=debug mailto:debug'
     const root = document.createElement('div'); root.textContent = source
     const runtime = mentionRuntime(root, vi.fn())
     const rows = constitutionMentions([work({ id: 'debug', uid: 'debug-uid' })])
     runtime.update(rows, { '[[debug]]': 'debug-uid' })
-    expect(root.querySelectorAll('.ws-constitution-chip')).toHaveLength(3)
+    expect([...root.querySelectorAll<HTMLElement>('.ws-constitution-chip')].map(chip => chip.dataset.mentionSource)).toEqual(['[[debug]]'])
+    expect(root.textContent).toContain('debug debug, ')
     expect(root.textContent).toContain('debug.log debug.example.org https://example.test/?job=debug www.example.test/?job=debug mailto:debug')
     runtime.dispose()
   })
-  it('recognizes raw top-level ids and ULIDs, without fuzzy prose matching', () => {
+  it('recognizes raw nested paths and ULIDs, without matching a one-word id in prose', () => {
     const root = document.createElement('div'); root.textContent = 'debug debugger debugged 01M5ETDH3XJH80QPYMZZNPNB9F work/child'
     const runtime = mentionRuntime(root, vi.fn())
-    update(runtime, [work({ id: 'debug' }), work({ uid: '01M5ETDH3XJH80QPYMZZNPNB9F' })])
-    expect(root.querySelectorAll('.ws-constitution-chip')).toHaveLength(3)
-    expect(root.textContent).toContain('debugger debugged')
+    update(runtime, [work({ id: 'debug', uid: 'debug-uid' }), work({ uid: '01M5ETDH3XJH80QPYMZZNPNB9F' })])
+    expect([...root.querySelectorAll<HTMLElement>('.ws-constitution-chip')].map(chip => chip.dataset.mentionSource)).toEqual(['01M5ETDH3XJH80QPYMZZNPNB9F', 'work/child'])
+    expect(root.textContent).toContain('debug debugger debugged')
+    runtime.dispose()
+  })
+  it('leaves code and preformatted blocks alone, and a constitution slugged "review" never chips the word', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<p>Please review this. <code>work/child</code></p><pre>shuttle thread work/child "ask"\n<span>work/child</span></pre><p>work/child</p>'
+    const runtime = mentionRuntime(root, vi.fn())
+    update(runtime, [work(), work({ id: 'review', uid: 'review-uid', name: 'Review' })])
+    expect([...root.querySelectorAll('.ws-constitution-chip')].map(chip => chip.closest('p, pre')!.tagName)).toEqual(['P'])
+    expect(root.querySelector('p')!.textContent).toBe('Please review this. work/child')
+    expect(root.querySelector('pre')!.textContent).toBe('shuttle thread work/child "ask"\nwork/child')
     runtime.dispose()
   })
   it('names every lifecycle state from the board rules, including armed workers without runtime', () => {
