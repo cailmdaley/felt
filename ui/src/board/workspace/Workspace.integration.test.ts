@@ -180,7 +180,9 @@ describe('workspace reader integration', () => {
     document.querySelector<HTMLButtonElement>('.ws-role-hold')!.click()
     await flush(); await flush()
     expect(document.querySelector('.ws-selected [data-part="fiber-title"]')?.textContent).toBe('Alpha')
-    expect(document.querySelector('.ws-fiber-prose .ws-dock')).not.toBeNull()
+    // A constitution opens on its chat, which holds the controls; its fiber page holds none.
+    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock')).not.toBeNull()
+    expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
   })
 
   it('draws a key verdict in place of the pair, takes a click verdict after undo, and commits only the live identity after a move', async () => {
@@ -194,7 +196,7 @@ describe('workspace reader integration', () => {
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
-    const pair = document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
+    const pair = document.querySelector<HTMLElement>('.ws-fiber-acts')!
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true, cancelable: true }))
     expect(pair.dataset.verdictPending).toBe('discarded')
     expect(pair.querySelector(':scope > .ws-verdict-undo')?.textContent).toBe('Discarded·undo z')
@@ -240,7 +242,7 @@ describe('workspace reader integration', () => {
       workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
         onVisibility: visibility, dock: new Dock('', changed, commit) })
       workspace.open(fiber); await flush()
-      return document.querySelector<HTMLElement>('.ws-fiber-acts .kbn-ctl-verdict')!
+      return document.querySelector<HTMLElement>('.ws-fiber-acts')!
     }
     const flying = card({ id: 'work/fly', uid: 'fly-uid', name: 'Fly', originId: 'host-a', status: 'active',
       workerState: 'running', shuttleKind: 'oneshot', path: 'work/fly/fly.md', fiberDir: '/notes/fly' })
@@ -400,6 +402,35 @@ describe('workspace reader integration', () => {
     expect(rows()).toEqual(['draft', 'settled', 'hub', 'hub-sub', 'resting', 'review'])
     expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 2'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
+  })
+  it("leads a thread's chat back to its orchestrator, by its header line and by b", async () => {
+    workspace.dispose()
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
+    const feed = [
+      thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'hub/sub', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+    ]
+    bodyCards = feed
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const title = (): string | null | undefined => document.querySelector('.ws-page.ws-selected .ws-chat-title')?.textContent
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(title()).toBe('hub')
+    // A root has no orchestrator: no way back on its line, and b does nothing.
+    expect(document.querySelector('.ws-page.ws-selected .ws-chat-orchestrator')).toBeNull()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
+    await flush()
+    expect(title()).toBe('hub')
+    workspace.open(feed[1], 'Desk'); await flush()
+    expect(title()).toBe('hub/sub')
+    const back = document.querySelector<HTMLButtonElement>('.ws-page.ws-selected .ws-chat-orchestrator')!
+    expect(back.textContent).toBe('‹ hub')
+    back.click(); await flush()
+    expect(title()).toBe('hub')
+    workspace.open(feed[1], 'Desk'); await flush()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
+    await flush()
+    expect(title()).toBe('hub')
   })
   it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()
@@ -668,19 +699,18 @@ describe('workspace reader integration', () => {
     expect(frame.doc.provenance.filter(p => p.kind === 'sent')).toHaveLength(1)
   })
 
-  it('keeps body links and embeds while placing the outcome above inline controls', async () => {
-    // Inline controls belong to a fiber on the Desk's lifecycle.
+  it('opens a constitution on its chat and keeps body links and embeds on its fiber page, which holds no controls', async () => {
     const original = cards[0]
     cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
+    // The chat leads the run and is the page it opens on; the body is one tab away.
+    expect(document.querySelector('.ws-page.ws-selected')?.classList.contains('ws-chat-frame')).toBe(true)
+    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock textarea')).not.toBeNull()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
-    const header = article.querySelector('header')!
-    const band = article.querySelector<HTMLElement>('.ws-dock')!
-    const outcome = article.querySelector<HTMLElement>('.kbn-detail-lede')!
-    expect(header.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(outcome.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(article.querySelector('.ws-dock')).toBeNull()
+    expect(article.querySelector('.kbn-detail-lede')).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
 
     const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Constitution')!
@@ -769,7 +799,7 @@ describe('workspace reader integration', () => {
     })
     workspace.open(liveCards[0])
     await flush()
-    const band = document.querySelector<HTMLElement>('.ws-fiber-prose .ws-dock')!
+    const band = document.querySelector<HTMLElement>('.ws-chat-page .ws-dock')!
     const draft = band.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'Keep this draft'
     liveCards = [{ ...liveCards[0], id: 'b/task', path: 'b/task/task.md', fiberDir: '/notes/b/task',
@@ -879,7 +909,11 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    expect(document.querySelector('.ws-dock .kbn-card-worker')).toBeNull()
+    // The chat's header line carries the one worker control, the same pill the head draws.
+    expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(1)
+    document.querySelector<HTMLButtonElement>('.ws-chat-acts button.kbn-card-worker')!.click()
+    expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
+    openWorker.mockClear()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!
     head.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
@@ -889,7 +923,9 @@ describe('workspace reader integration', () => {
     expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
     expect(workspace.isActive).toBe(true)
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    expect(document.querySelector('.ws-fiber-prose .ws-dock')).not.toBeNull()
+    // A constitution opens on its chat, which holds the controls; its fiber page holds none.
+    expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock')).not.toBeNull()
+    expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
   })
 
   it('keeps reordered tab DOM, labels, and selection aligned with the active fiber', async () => {
@@ -1102,7 +1138,7 @@ describe('workspace reader integration', () => {
     await flush()
     workspace.open(managed)
     await flush()
-    const band = document.querySelector<HTMLElement>('.ws-fiber-prose .ws-dock')!
+    const band = document.querySelector<HTMLElement>('.ws-chat-page .ws-dock')!
     const textarea = band.querySelector<HTMLTextAreaElement>('textarea')!
     expect(textarea).not.toBeNull()
     expect(band.querySelector('.kbn-detail-controls-toggle')?.textContent).toContain('codex-sol')

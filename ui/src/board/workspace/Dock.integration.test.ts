@@ -265,34 +265,48 @@ describe('state-shaped act zone', () => {
     band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
   })
-  it("keeps review and live verdicts on the status line, the transcript below the controls, and draft verdicts in its menu", () => {
+  it("lays the chat out as header, drawer, conversation and composer, with every verdict in the header's menu", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
+    const verbs = (): string[] => [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')]
+      .filter(button => !button.hidden).map(button => button.textContent ?? '')
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
-    const children = [...band.el.querySelector('.ws-dock-body')!.children]
-    expect(children[0].classList.contains('kbn-ctl-compose')).toBe(true)
-    expect(children.at(-1)?.classList.contains('ws-transcript')).toBe(true)
-    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
+    const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
+    expect(children).toEqual(['ws-chat-head', 'ws-chat-drawer', 'ws-chat-log', 'ws-chat-compose'])
+    expect(band.el.querySelector('.ws-chat-head')!.contains(band.head)).toBe(true)
+    expect(band.el.querySelector('.ws-chat-log .ws-transcript')).not.toBeNull()
+    expect(band.el.querySelector('.ws-chat-compose .kbn-ctl-compose')).not.toBeNull()
+    // The verdicts wait in the menu; the undo window is drawn on the header's acts.
+    expect(band.head.querySelector('.ws-chat-menu .kbn-ctl-verdict')).not.toBeNull()
+    expect(band.head.dataset.verdictKey).toBeTruthy()
     expect(band.head.dataset.column).toBe('awaitingReview')
-    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    expect(verbs()).toEqual(['Temper', 'Discard'])
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
     expect(message.placeholder).toBe('')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
-    // In flight the pair sits beside the worker; drafts keep it in the menu.
     expect(band.head.dataset.column).toBe('inFlight')
-    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(false)
-    expect(band.el.querySelector('.kbn-ctl-temper,.kbn-ctl-discard')).toBeNull()
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.el.querySelector('.kbn-ctl-verdict')).toBeNull()
-    expect(band.el.querySelectorAll('.kbn-ctl-verdict-menu .kbn-ctl-temper,.kbn-ctl-verdict-menu .kbn-ctl-discard')).toHaveLength(2)
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
-    expect(band.el.querySelector('.kbn-ctl-verdict-menu')).toBeNull()
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+  })
+  it('opens settings and sessions from the menu into the drawer, and Escape folds the drawer', () => {
+    band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's' }))
+    document.body.append(band.el)
+    const drawer = band.el.querySelector<HTMLElement>('.ws-chat-drawer')!
+    expect(drawer.hidden).toBe(true)
+    band.el.querySelector<HTMLButtonElement>('.ws-chat-settings')!.click()
+    expect(drawer.hidden).toBe(false)
+    expect(drawer.querySelector<HTMLElement>('.kbn-ctl-ledger')!.hidden).toBe(false)
+    expect(band.handleEscape()).toBe(true)
+    expect(drawer.hidden).toBe(true)
+    expect(band.handleEscape()).toBe(false)
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
@@ -529,8 +543,8 @@ describe('Dock session history', () => {
     })
     const toggle = (): HTMLButtonElement => band.el.querySelector('.kbn-ctl-history-toggle')!
     const historyReads = (): number => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/sessions/composite')).length
-    // The session list rides the transcript's head line, not a line of its own.
-    expect(toggle().closest('.ws-transcript-headrow')).not.toBeNull()
+    // The session list waits in the chat's drawer, opened from the menu.
+    expect(toggle().closest('.ws-chat-drawer')).not.toBeNull()
     toggle().focus(); toggle().click()
     await flush()
     expect(historyReads()).toBe(1)

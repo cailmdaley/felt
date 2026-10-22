@@ -82,6 +82,19 @@ describe('buildChannel', () => {
     expect(channel.documents[1].path).toBe('/store/project/task/task.md')
   })
 
+  it('leads a run with the chat when the fiber has a conversation, and opens on it', () => {
+    const channel = buildChannel({ ...base, isConstitution: true, conversation: true })
+    expect(channel.documents.map(document => document.key)).toEqual([
+      'chat:host-a:fiber-1', 'host-a:/store/project/task/report.html', 'fiber:host-a:fiber-1',
+    ])
+    expect(channel.labels).toEqual(['Chat', 'Results', 'Constitution'])
+    expect(channel.documents[0].kind).toBe('chat')
+    expect(defaultSelection(channel)).toBe('chat:host-a:fiber-1')
+    expect(proseDocument(channel)?.key).toBe('fiber:host-a:fiber-1')
+    // Without a conversation the run is the fiber's own, and a report leads.
+    expect(defaultSelection(buildChannel(base))).toBe('host-a:/store/project/task/report.html')
+  })
+
   it('labels the fiber page as a Note or Constitution according to Shuttle presence', () => {
     expect(buildChannel({ ...base, body: 'plain text' }).labels[0]).toBe('Note')
     expect(buildChannel({ ...base, body: 'plain text', isConstitution: true }).labels[0]).toBe('Constitution')

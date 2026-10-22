@@ -27,6 +27,7 @@ import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
+import { phoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
@@ -44,6 +45,8 @@ export interface ReaderOptions {
   onRest?(card: KanbanCard, anchor: HTMLElement): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
+  /** Open the open thread's orchestrator; false outside a thread. */
+  onOrchestrator?(): boolean
   cards(): KanbanCard[]
   /** The thread graph the rail reads; absent, one is built from `cards`. */
   threadIndex?(): ThreadIndex
@@ -159,6 +162,8 @@ export class Reader {
   private pressDismisses = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
+  /** The phone chat's top-right control: the constitution's threads and pages, as a page of their own. */
+  readonly pagesButton: HTMLButtonElement
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly prev: HTMLButtonElement
   private readonly pageChoice: HTMLButtonElement
@@ -250,6 +255,11 @@ export class Reader {
     const pageChoice = this.pageChoice = button('ws-page-choice', '', () => { if (!this.runSettled) return; this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
     pageChoice.setAttribute('aria-haspopup', 'dialog')
     pageChoice.setAttribute('aria-expanded', 'false')
+    const pages = this.pagesButton = button('ws-chat-pages', '', () => this.openPhonePage(), 'Threads and pages')
+    pages.title = 'Threads and pages'
+    pages.setAttribute('aria-haspopup', 'dialog')
+    pages.setAttribute('aria-expanded', 'false')
+    pages.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>'
     const pageMeta = element('span', 'ws-thumb-meta')
     pageMeta.append(this.position, this.arrivalSummary)
     pageChoice.append(this.pageTitle, pageMeta)
@@ -461,6 +471,14 @@ export class Reader {
     }
     if (!settled) this.pageSheet.hide()
   }
+  /** The phone's page of threads (the family from its root) and the run's pages. */
+  private openPhonePage(): void {
+    const card = this.currentCard
+    if (!this.runSettled || !card) return
+    this.closeMenu()
+    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
+    this.pageSheet.show(this.pagesButton, phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
+  }
   private selectIndex(index: number): void {
     if (!this.runSettled) return
     const doc = this.channel?.documents[index]
@@ -553,9 +571,11 @@ export class Reader {
     this.barPosition.style.minWidth = `calc(${digits}ch + ${digits} * var(--ws-mono-tracking))`
     this.paintTicks(index, ch.documents.length)
     const doc = ch.documents[index]
+    if (doc) this.el.dataset.page = doc.kind
+    else delete this.el.dataset.page
     if (doc) {
       const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
-      this.pageTitle.textContent = doc.kind === 'fiber' ? ch.labels[index] : metadata.title
+      this.pageTitle.textContent = doc.kind === 'fiber' || doc.kind === 'chat' ? ch.labels[index] : metadata.title
       this.arrivalSummary.textContent = metadata.summary && ` · ${metadata.summary.charAt(0).toLowerCase()}${metadata.summary.slice(1)}`
       this.topbar.select(doc.key)
     }
@@ -569,6 +589,7 @@ export class Reader {
   private prepareFrame(frame: DocumentFrame): void {
     frame.el.classList.toggle('ws-text-page', ['fiber', 'text', 'markdown', 'code'].includes(frame.doc.kind))
     frame.el.classList.toggle('ws-native-page', ['audio', 'video', 'pdf'].includes(frame.doc.kind))
+    frame.el.classList.toggle('ws-chat-frame', frame.doc.kind === 'chat')
     if (frame.doc.kind === 'audio' || frame.doc.kind === 'video') frame.el.classList.add('ws-media-page')
     frame.el.setAttribute('role', 'tabpanel')
     frame.el.setAttribute('aria-label', frame.doc.name)
@@ -591,7 +612,7 @@ export class Reader {
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
     const metadata = documentLabelMetadata(doc, label, this.channel?.owner ?? doc.owner)
-    const glyph = { fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□' }[doc.kind]
+    const glyph = { chat: '', fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
     parts.glyph.hidden = doc.kind === 'fiber'
@@ -615,6 +636,8 @@ export class Reader {
     if (this.phone.matches) return max
     const saved = this.sizes[doc.key]
     if (Number.isFinite(saved) && saved > 0) return Math.min(max, saved)
+    // The chat is the widest page of the run: it takes the room the stage gives it, up to its measure.
+    if (doc.kind === 'chat') return Math.min(max, this.measure('chat-width', 960))
     let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
     const content = this.host.get(doc.key)?.content
     const img = content?.querySelector('img')
@@ -1078,6 +1101,7 @@ export class Reader {
       return true
     }
     if (this.tabs.handleIntent(intent)) return true
+    if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (constitutionAction(intent, this.currentCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
       compose: () => this.opts.onCompose?.(),
@@ -1173,8 +1197,8 @@ export class Reader {
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
     const viewer = doc && this.host.get(doc.key)?.viewer
-    if (!doc || !viewer || !['fiber', 'html', 'markdown', 'text', 'code'].includes(doc.kind)) return
-    let scroller = viewer.querySelector<HTMLElement>('.ws-prose-scroll,.kbn-fileview-text')
+    if (!doc || !viewer || !['chat', 'fiber', 'html', 'markdown', 'text', 'code'].includes(doc.kind)) return
+    let scroller = viewer.querySelector<HTMLElement>(doc.kind === 'chat' ? '.ws-transcript-scroll' : '.ws-prose-scroll,.kbn-fileview-text')
     if (doc.kind === 'fiber') scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
     if (doc.kind === 'html') {
       scrollHtmlViewer(viewer, intent, this.motion.matches || repeat)

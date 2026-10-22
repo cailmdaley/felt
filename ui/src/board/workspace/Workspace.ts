@@ -5,7 +5,7 @@ import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { deskColumn } from '../deskColumn.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
-import type { DispatchFailureBody } from '../KanbanModalShared.js'
+import { isAgentCard, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
@@ -13,7 +13,7 @@ import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { buildChannel, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
+import { buildChannel, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
@@ -163,7 +163,8 @@ export class Workspace {
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
-      buildProse: doc => this.prose(doc.key),
+      onOrchestrator: () => this.openOrchestrator(),
+      buildProse: doc => doc.kind === 'chat' ? this.chat(doc.key) : this.prose(doc.key),
       onRefreshProse: async doc => {
         const state = [...this.channels.values()].find(s => proseDocument(s.channel)?.key === doc.key)
         if (!state) return
@@ -218,7 +219,7 @@ export class Workspace {
   /** A refused Desk launch enters the document channel and exposes its recovery form. */
   openStartPrompt(card: KanbanCard, failure: DispatchFailureBody): void {
     this.startPrompt = { card, failure }
-    this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
+    this.open(card, this.opts.origin(), this.landing(this.ensure(card).channel))
   }
 
   /** A Question card leads with its report, even after a previous visit to prose. */
@@ -229,10 +230,25 @@ export class Workspace {
     this.open(card)
   }
 
-  /** Open the constitution on its fiber page with the composer focused. */
+  /** Open the constitution on its chat with the composer focused. */
   compose(card: KanbanCard): void {
     this.composing = cardIdentity(card)
-    this.open(card, this.opts.origin(), proseDocument(this.ensure(card).channel)?.key)
+    this.open(card, this.opts.origin(), this.landing(this.ensure(card).channel))
+  }
+  /** The page that holds the composer: the chat, else the fiber's own page. */
+  private landing(channel: Channel): DocKey | undefined {
+    return (chatDocument(channel) ?? proseDocument(channel))?.key
+  }
+  /** The open thread's orchestrator, as the rail would open it; false outside a thread. */
+  private orchestrator(card: KanbanCard): KanbanCard | undefined {
+    const index = this.opts.threadIndex?.()
+    return index?.parentOf(index.card(card))
+  }
+  openOrchestrator(): boolean {
+    const parent = this.current && this.isActive ? this.orchestrator(this.current.card) : undefined
+    if (!parent) return false
+    this.open(parent, this.origin, undefined, this.overview.hasMetadata(parent))
+    return true
   }
 
   open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
@@ -349,8 +365,8 @@ export class Workspace {
     const state = this.current
     if (!state?.metadataKnown || !verdictReachable(state.card)) return
     // A key verdict given from another page waits where the verdict lives,
-    // on the constitution's status line, so the page comes forward to show it.
-    const prose = proseDocument(state.channel)?.key
+    // on the chat's header line, so the page comes forward to show it.
+    const prose = this.landing(state.channel)
     if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.select(prose)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
@@ -400,7 +416,7 @@ export class Workspace {
   private focusComposer(): boolean {
     const state = this.current
     if (!state) return false
-    const key = proseDocument(state.channel)?.key
+    const key = this.landing(state.channel)
     if (key) this.select(key)
     return this.controls(state)?.focusComposer() ?? false
   }
@@ -417,6 +433,31 @@ export class Workspace {
   private controls(state: ChannelState | null): Dock | undefined {
     return state?.metadataKnown && !state.channel.uid.startsWith('other:') && onDesk(state.card) ? this.dock.bandFor(state.card) : undefined
   }
+  /** A Shuttle-managed fiber has a worker conversation, and so a chat page. */
+  private conversation(state: Pick<ChannelState, 'card' | 'metadataKnown'>, uid: string): boolean {
+    return state.metadataKnown && !uid.startsWith('other:') && isAgentCard(state.card)
+  }
+  /** The header line's way back: to the orchestrator inside a thread; to the origin view on the phone. */
+  private seatNav(state: ChannelState, dock: Dock): void {
+    const parent = this.orchestrator(state.card)
+    dock.setNav({
+      orchestrator: parent ? { name: parent.name, open: () => { this.openOrchestrator() } } : undefined,
+      origin: { label: this.origin, open: () => this.returnToOrigin() },
+      trail: this.reader.pagesButton,
+    })
+  }
+  /** The chat page: the constitution's band, seated whole. */
+  private chat(key: DocKey): HTMLElement {
+    const page = document.createElement('div')
+    page.className = 'ws-chat-page'
+    const state = [...this.channels.values()].find(s => chatDocument(s.channel)?.key === key)
+    const dock = state && this.controls(state)
+    if (!state || !dock) return page
+    this.seatNav(state, dock)
+    page.append(dock.el)
+    queueMicrotask(() => dock.reseated())
+    return page
+  }
   private holds(state: ChannelState): KanbanCard[] {
     const slug = roleSlug(state.card)
     return slug ? roleHolds(this.opts.cards(), slug) : []
@@ -429,10 +470,15 @@ export class Workspace {
     if (!state) return document.createElement('div')
     this.proseRevisions.set(key, this.proseRevision(state))
     const dock = this.controls(state)
+    // With a chat page the fiber's page is its prose alone; the controls live in the chat.
+    const chat = chatDocument(state.channel)
     const page = buildFiberProse(state.card, state.channel, {
-      controls: dock?.el,
-      onContinueReading: dock && state.card.sessionUuid ? text => dock.openOutcome(text) : undefined,
-      acts: dock?.head,
+      controls: chat ? undefined : dock?.el,
+      onContinueReading: dock && state.card.sessionUuid ? text => {
+        if (chat) this.select(chat.key)
+        dock.openOutcome(text)
+      } : undefined,
+      acts: chat ? undefined : dock?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
       onFile: (path, title) => this.openFile(path, title),
@@ -453,7 +499,7 @@ export class Workspace {
     }
     // The caller seats the new page synchronously; the Dock then puts back
     // what moving its element reset (scroll positions, the open transcript).
-    if (dock) queueMicrotask(() => dock.reseated())
+    if (dock && !chat) queueMicrotask(() => dock.reseated())
     return page
   }
   private refreshProse(state: ChannelState): void {
@@ -469,7 +515,7 @@ export class Workspace {
     if (!state) {
       state = {
         card,
-        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, modifiedAt: card.modifiedAt }),
+        channel: buildChannel({ uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: '', outcome: card.outcome, isConstitution: card.shuttleKind !== undefined, conversation: this.conversation({ card, metadataKnown }, uid), modifiedAt: card.modifiedAt }),
         links: [], fileModifiedAt: new Map(), loaded: false, runFinal: false, metadataKnown,
       }
       this.channels.set(key, state)
@@ -518,7 +564,8 @@ export class Workspace {
     this.overview.refresh()
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
-    const wanted = route.doc ?? state.selected ?? this.knownReport(state)
+    // A constitution with a conversation opens on its chat; another lands on its report.
+    const wanted = route.doc ?? state.selected ?? (chatDocument(state.channel) ? undefined : this.knownReport(state))
     const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
@@ -561,10 +608,10 @@ export class Workspace {
     const report = this.overview.unfiledReceipts(state.channel.uid).find(file => (file.host ?? card.originId) === card.originId && file.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
     return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
   }
-  /** The page on screen: the selection when the channel lists it, else the fiber's own page. */
+  /** The page on screen: the selection when the channel lists it, else the chat, else the fiber's own page. */
   private shown(state: ChannelState): DocKey {
     const documents = state.channel.documents
-    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : (proseDocument(state.channel) ?? documents[0]).key
+    return state.selected && documents.some(d => d.key === state.selected) ? state.selected : this.landing(state.channel) ?? documents[0].key
   }
   private show(state: ChannelState, animate = true): void {
     const ch = state.channel
@@ -573,6 +620,8 @@ export class Workspace {
     this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
+    const dock = chatDocument(ch) && this.controls(state)
+    if (dock) this.seatNav(state, dock)
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -753,6 +802,7 @@ export class Workspace {
     const sent = receipts.map(f => ({ path: f.fullPath, owner: f.host ?? card.originId, session: f.sessionId, time: f.timestamp }))
     state.channel = buildChannel({
       uid: before.uid, owner: card.originId, name: card.name, path: this.fiberPath(card), fiberDir: card.fiberDir ?? '', body: before.body, outcome: before.outcome, isConstitution: card.shuttleKind !== undefined,
+      conversation: this.conversation(state, before.uid),
       sent, links: state.links, routed: provisional ? [provisional] : undefined, previous: before, modifiedAt: card.modifiedAt, fileModifiedAt: state.fileModifiedAt,
     })
     if (state.selected && !state.channel.documents.some(d => d.key === state.selected)) {

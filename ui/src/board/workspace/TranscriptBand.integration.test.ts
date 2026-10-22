@@ -74,23 +74,22 @@ describe('Dock worker transcript', () => {
     const band = dock.bandFor(task({ sessionUuid: latestId, workerState: 'running' }))
     document.body.append(band.el)
 
-    await vi.waitFor(() => expect(band.el.querySelector('.ws-transcript-preview .ws-transcript-msg-agent')?.textContent).toContain('Latest word.'))
+    await vi.waitFor(() => expect(band.el.querySelector('.ws-transcript-inline .ws-transcript-msg-agent')?.textContent).toContain('Latest word.'))
     expect(band.el.querySelector<HTMLElement>('.ws-transcript')?.hidden).toBe(false)
     expect(requests).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
   })
 
-  it('places the transcript below the composer and its controls, with review verdicts on the status line', async () => {
+  it('reads the conversation inline between the header and the composer, its meter on the header line', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) => String(url).endsWith('/agents')
       ? json([{ id: 'claude-opus', cli: 'claude' }])
       : json({})))
     const dock = makeDock()
     const band = dock.bandFor(task({ status: 'closed', sessionUuid: latestId }))
-    const body = band.el.querySelector<HTMLElement>('.ws-dock-body')!
-    const children = [...body.children]
-
-    expect(children[0].classList.contains('kbn-ctl-compose')).toBe(true)
-    expect(children.at(-1)?.classList.contains('ws-transcript')).toBe(true)
-    expect(band.head.querySelector('.kbn-ctl-verdict')?.textContent).toBe('TemperDiscard')
+    const transcript = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-transcript')!
+    expect(transcript.classList.contains('ws-transcript-inline')).toBe(true)
+    expect(transcript.querySelector('.ws-transcript-headrow')).toBeNull()
+    expect(band.head.querySelector('.ws-transcript-meter')).not.toBeNull()
+    expect(band.el.querySelector('.ws-chat-log')!.nextElementSibling?.classList.contains('ws-chat-compose')).toBe(true)
   })
 
   it('pins a History session with read and returns to the latest session', async () => {

@@ -17,6 +17,9 @@ import { noteAudioSketch } from './audioSketch.js'
 import { createMediaPoster, type MediaPoster } from './MediaPoster.js'
 import { referenceRuntime, referenceTargets, resolveChannelReference, type ReferenceSurface } from './ChannelReferences.js'
 
+/** Pages the controller builds as DOM (`buildProse`) rather than loading a file. */
+const built = (doc: WorkspaceDocument): boolean => doc.kind === 'fiber' || doc.kind === 'chat'
+
 export interface DocumentFrame {
   el: HTMLElement
   sheet: HTMLElement
@@ -176,10 +179,10 @@ export class DocumentHost {
     }
   }
 
-  /** Replace only fiber prose when its body or channel metadata changes. */
+  /** Replace only a built page (fiber prose, the chat) when its body or channel metadata changes. */
   updateProse(key: DocKey, element: HTMLElement): void {
     const state = this.frames.get(key)
-    if (this.disposed || !state || state.frame.doc.kind !== 'fiber' || !state.frame.viewer) return
+    if (this.disposed || !state || !built(state.frame.doc) || !state.frame.viewer) return
     this.saveScroll(state)
     state.stopScroll?.()
     state.references?.dispose()
@@ -199,6 +202,10 @@ export class DocumentHost {
     if (this.disposed || !state) return
     if (!state.frame.viewer) {
       this.mount(state)
+      return
+    }
+    if (state.frame.doc.kind === 'chat') {
+      this.updateProse(key, this.options.buildProse(state.frame.doc))
       return
     }
     if (state.frame.doc.kind === 'fiber') {
@@ -291,7 +298,7 @@ export class DocumentHost {
       }
       return
     }
-    if (state.frame.doc.kind === 'fiber') {
+    if (built(state.frame.doc)) {
       const prose = this.options.buildProse(state.frame.doc)
       state.frame.content.replaceChildren(prose)
       state.frame.viewer = prose
@@ -331,7 +338,7 @@ export class DocumentHost {
       {
         quietLoading: true,
         active: state.active,
-        kind: doc.kind === 'fiber' ? undefined : doc.kind,
+        kind: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : doc.kind,
         decorateAudio: audio => {
           const page = new AudioPage(audio, doc, this.options.shuttleBase, this.options.onSelect,
             (peaks, duration) => {

@@ -16,7 +16,8 @@ export interface WorkspaceDocument {
   owner: string
   path: string
   name: string
-  kind: 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other'
+  /** `chat` is the worker's conversation; `fiber` the fiber's own prose. */
+  kind: 'chat' | 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other'
   provenance: Provenance[]
   /** Owner-daemon file modification time; absent when unknown. */
   modifiedAt?: string
@@ -43,6 +44,8 @@ export interface ChannelInput {
   outcome?: string
   /** True when the fiber carries a `shuttle:` block. */
   isConstitution?: boolean
+  /** True when the fiber has a worker conversation: the run then leads with its chat page. */
+  conversation?: boolean
   /** The fiber's genuine owner-daemon modification time, never its creation time. */
   modifiedAt?: string
   embeds?: { path: string; title?: string }[]
@@ -94,8 +97,12 @@ export function fiberKey(owner: string, uid: string): DocKey {
   return `fiber:${owner}:${uid}`
 }
 
-/** Reuse the extension vocabulary that drives FileViewerPanel. */
-export function documentKind(path: string): WorkspaceDocument['kind'] {
+export function chatKey(owner: string, uid: string): DocKey {
+  return `chat:${owner}:${uid}`
+}
+
+/** Reuse the extension vocabulary that drives FileViewerPanel. A path is never a conversation. */
+export function documentKind(path: string): Exclude<WorkspaceDocument['kind'], 'chat'> {
   const kind = fileKind(path)
   if (kind === 'markdown' || kind === 'text') return 'text'
   return kind
@@ -191,6 +198,11 @@ export function proseDocument(channel: Channel): WorkspaceDocument | undefined {
   return channel.documents.find(d => d.kind === 'fiber')
 }
 
+/** The worker conversation's page, when the fiber has one. */
+export function chatDocument(channel: Channel): WorkspaceDocument | undefined {
+  return channel.documents.find(d => d.kind === 'chat')
+}
+
 /** Build one owner-aware row, retaining receipt history without mutating inputs. */
 export function buildChannel(input: ChannelInput): Channel {
   const extracted = extractEmbeds(input.body)
@@ -268,7 +280,12 @@ export function buildChannel(input: ChannelInput): Channel {
   }
 
   documents.delete(prose.key)
-  const ordered = arrangeDocuments(prose, documents.values(), declared)
+  const run = arrangeDocuments(prose, documents.values(), declared)
+  // A conversation leads the run: the chat is the page a constitution opens on.
+  const ordered = input.conversation ? [{
+    key: chatKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: input.name,
+    kind: 'chat' as const, provenance: [{ kind: 'fiber' as const }],
+  }, ...run] : run
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
@@ -284,6 +301,7 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
     const minutes = Math.max(0, Math.round((now - time) / 60000))
     return `${minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`} ago`
   }
+  if (doc.kind === 'chat') return { title: '', summary: 'Conversation' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN
     return { title: '', summary: Number.isFinite(time) ? `Last changed ${age(time)}` : 'Last changed unknown' }
@@ -299,6 +317,8 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
 }
 
 export function defaultSelection(channel: Channel): DocKey {
+  const chat = chatDocument(channel)
+  if (chat) return chat.key
   const reports = channel.documents.filter((document) => document.name.toLowerCase() === 'report.html')
   const report = reports.find((document) => document.provenance.some((item) => item.kind === 'embed'))
     ?? reports.find((document) => !isDeclared(document)) ?? reports[0]
@@ -330,6 +350,7 @@ export function documentLabels(documents: WorkspaceDocument[], isConstitution = 
   const candidates = documents.map((document) => {
     const labels: string[] = []
     const add = (label: string): void => { if (label && !labels.includes(label)) labels.push(label) }
+    if (document.kind === 'chat') return ['Chat']
     if (document.kind === 'fiber') {
       add(isConstitution ? 'Constitution' : 'Note')
       return labels

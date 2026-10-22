@@ -1,5 +1,6 @@
 import { extractEmbeds } from '../attachments.js'
 import { Thumbnail } from './Thumbnail.js'
+import { CHAT_GLYPH } from './TabStrip.js'
 import { documentLabelMetadata, type Channel, type DocKey } from './documents.js'
 import './page-sheet.css'
 
@@ -7,10 +8,17 @@ const HISTORY_KEY = 'shuttlePageSheet'
 interface SheetModel { channel: Channel; selected: DocKey; fresh: ReadonlySet<DocKey> }
 type Row = { button: HTMLButtonElement; title: HTMLElement; summary: HTMLElement; thumb: Thumbnail }
 
-/** A phone page picker with native modal focus containment and its own browser-Back entry. */
+/**
+ * A phone page picker with native modal focus containment and its own
+ * browser-Back entry. Opened with a thread list it is a page of its own: the
+ * constitution's threads, then its pages.
+ */
 export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly panel = document.createElement('section')
+  private readonly body = document.createElement('div')
+  private readonly threads = document.createElement('div')
+  private readonly heading = document.createElement('h2')
   private readonly list = document.createElement('div')
   private readonly rows = new Map<DocKey, Row>()
   private readonly token = `pages:${Math.random().toString(36).slice(2)}`
@@ -32,15 +40,18 @@ export class PageSheet {
     grabber.type = 'button'; grabber.className = 'ws-page-sheet-grabber'
     grabber.setAttribute('aria-label', 'Close pages')
     grabber.addEventListener('click', () => this.close())
-    const heading = document.createElement('h2'); heading.textContent = 'Pages'
+    this.heading.textContent = 'Pages'
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'
-    head.append(heading)
+    head.append(this.heading)
     this.list.className = 'ws-page-sheet-list'
-    this.panel.append(grabber, head, this.list)
+    this.threads.className = 'ws-page-sheet-threads'
+    this.body.className = 'ws-page-sheet-body'
+    this.body.append(this.threads, this.list)
+    this.panel.append(grabber, head, this.body)
     this.el.append(this.panel)
     this.el.addEventListener('click', event => { if (event.target === this.el) this.close() })
     this.el.addEventListener('cancel', event => { event.preventDefault(); this.close() })
-    this.list.addEventListener('scroll', () => { for (const row of this.rows.values()) row.thumb.schedule() }, { passive: true })
+    this.body.addEventListener('scroll', () => { for (const row of this.rows.values()) row.thumb.schedule() }, { passive: true })
     let drag: { id: number; y: number } | null = null
     let suppressClick = false
     grabber.addEventListener('pointerdown', event => {
@@ -75,9 +86,14 @@ export class PageSheet {
     if (this.isOpen) this.render()
   }
 
-  show(opener: HTMLElement): void {
+  /** `threads`, when given, makes the sheet a full page that leads with them. */
+  show(opener: HTMLElement, threads: HTMLElement | null = null): void {
     if (this.isOpen || this.pendingBack || !this.model) return
     this.opener = opener
+    this.threads.replaceChildren(...(threads ? [threads] : []))
+    this.threads.hidden = !threads
+    this.el.classList.toggle('ws-page-sheet-full', !!threads)
+    this.heading.textContent = threads ? 'Threads and pages' : 'Pages'
     window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
   }
@@ -87,7 +103,9 @@ export class PageSheet {
     this.el.showModal()
     const selected = this.model && this.rows.get(this.model.selected)?.button
     selected?.focus({ preventScroll: true })
-    selected?.scrollIntoView({ block: 'nearest' })
+    // A page of threads opens at its top; the pages picker opens on the selected page.
+    if (this.el.classList.contains('ws-page-sheet-full')) this.body.scrollTop = 0
+    else selected?.scrollIntoView({ block: 'nearest' })
     for (const row of this.rows.values()) row.thumb.schedule()
     this.opener?.setAttribute('aria-expanded', 'true')
   }
@@ -136,13 +154,15 @@ export class PageSheet {
         button.type = 'button'; button.className = 'ws-page-sheet-row'; button.dataset.key = doc.key
         button.dataset.part = 'page-sheet-row'
         const thumb = new Thumbnail({ key: `sheet:${doc.key}`, shuttleBase: this.base,
-          file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
+          file: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
           fallback: channel.outcome ?? channel.name, captioned: true, className: 'ws-page-sheet-thumb',
+          ...(doc.kind === 'chat' ? { glyph: CHAT_GLYPH } : {}),
           // At 56 px, PDFs use their designed face instead of mounting a native viewer.
           priority: () => doc.kind !== 'pdf' && this.isOpen && this.onScreen(button) ? 4 : 0,
           distance: () => Math.abs(index - channel.documents.findIndex(d => d.key === this.model?.selected)),
         })
         if (doc.kind === 'fiber') thumb.setProse(extractEmbeds(channel.body).body || channel.outcome || '', channel.labels[index])
+        if (doc.kind === 'chat') thumb.setProse(channel.outcome || '', channel.labels[index])
         const text = document.createElement('span'); text.className = 'ws-page-sheet-text'
         const title = document.createElement('span'); title.className = 'ws-page-sheet-title'
         const summary = document.createElement('span'); summary.className = 'ws-page-sheet-summary'
@@ -151,7 +171,7 @@ export class PageSheet {
         row = { button, title, summary, thumb }; this.rows.set(doc.key, row)
       }
       const metadata = documentLabelMetadata(doc, channel.labels[index], channel.owner)
-      row.title.textContent = doc.kind === 'fiber' ? channel.labels[index] : metadata.title
+      row.title.textContent = doc.kind === 'fiber' || doc.kind === 'chat' ? channel.labels[index] : metadata.title
       row.summary.textContent = metadata.summary
       row.button.title = doc.path
       if (doc.key === selected) row.button.setAttribute('aria-current', 'page')
@@ -165,7 +185,7 @@ export class PageSheet {
   }
 
   private onScreen(button: HTMLElement): boolean {
-    const item = button.getBoundingClientRect(), list = this.list.getBoundingClientRect()
+    const item = button.getBoundingClientRect(), list = this.body.getBoundingClientRect()
     return item.bottom > list.top && item.top < list.bottom
   }
 

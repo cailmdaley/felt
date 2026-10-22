@@ -14,6 +14,8 @@ export interface ThumbnailOptions {
   className?: string
   /** A caption beside the thumbnail already names the document, so the face and glyph card leave the name out. */
   captioned?: boolean
+  /** The face's mark in place of the kind's, for a page that is no file (the chat). */
+  glyph?: string
   /** The face's title, when the caller names the document better than its declared title or file name. */
   title?(): string
   /** Visible candidates outrank the loading ring; zero suspends loading. */
@@ -122,7 +124,7 @@ export class Thumbnail {
     this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face ws-overview-thumb-face'
     this.face.dataset.part = 'thumbnail-face'
     const glyph = document.createElement('span'); glyph.className = 'ws-thumbnail-kind'
-    glyph.textContent = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
+    glyph.textContent = opts.glyph ?? { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
     this.title = document.createElement('strong'); this.title.className = 'ws-thumbnail-title'
     this.preview = document.createElement('span'); this.preview.className = 'ws-thumbnail-preview'
     this.face.append(this.title, this.preview, glyph)

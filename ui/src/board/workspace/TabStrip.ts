@@ -67,6 +67,9 @@ export function indexCaptions(labels: string[], channel?: Pick<Channel, 'documen
   return captions.map((caption, index) => caption !== '§' && (counts.get(caption) ?? 0) > 1 ? labels[index] : caption)
 }
 
+/** The chat's tile mark: a quotation, the conversation. */
+export const CHAT_GLYPH = '❝'
+
 type TabRecord = { key: string; label: string; docIndex: number; button: HTMLButtonElement; thumb?: Thumbnail; caption: string; doc?: WorkspaceDocument }
 interface StripOptions { shuttleBase: string }
 
@@ -399,7 +402,7 @@ export class TabStrip {
     if (!text) { text = document.createElement('span'); text.className = 'ws-tab-label'; button.prepend(text) }
     text.textContent = caption
     text.classList.toggle('ws-tab-title', !!doc && (!!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === label)))
-    button.classList.toggle('ws-tab-anchor', doc?.kind === 'fiber')
+    button.classList.toggle('ws-tab-anchor', doc?.kind === 'fiber' || doc?.kind === 'chat')
     if (doc) button.dataset.kind = doc.kind
     else delete button.dataset.kind
     if (doc && doc.kind !== 'fiber') button.dataset.caption = caption
@@ -420,9 +423,9 @@ export class TabStrip {
     const live = doc.kind === 'html' || doc.kind === 'image' || doc.kind === 'pdf'
     const thumb = new Thumbnail({
       key: `tile:${key}`, shuttleBase: this.shuttleBase!,
-      file: doc.kind === 'fiber' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
-      fallback: '', className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true,
-      title: () => doc.kind === 'fiber' ? '' : record.caption,
+      file: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
+      fallback: '', className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true, ...(doc.kind === 'chat' ? { glyph: CHAT_GLYPH } : {}),
+      title: () => doc.kind === 'fiber' || doc.kind === 'chat' ? '' : record.caption,
       priority: () => live && this.visible && !this.disposed && this.el.isConnected && this.el.clientWidth > 0
         ? (this.onScreen(record.button) ? 2 : 0) : 0,
       distance: () => Math.abs(this.records.indexOf(record) - this.selectedIndex),

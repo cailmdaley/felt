@@ -1,0 +1,146 @@
+/* The chat: one header line, the conversation as a centred column, the
+   composer pinned beneath it. The page is the widest of the run; its words
+   keep a reading measure inside it. */
+.ws-chat-page { display: flex; flex-direction: column; min-height: 0; }
+.ws-chat {
+  --ws-chat-measure: 46rem;
+  /* The column's side room: the measure centred, never less than the inset. */
+  --ws-chat-gutter: max(28px, calc((100% - var(--ws-chat-measure)) / 2));
+}
+.ws-chat-page > .ws-chat {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 0; margin: 0; border: 0;
+}
+.ws-chat > .ws-dock-body { display: contents; }
+
+.ws-chat-head {
+  flex: none; display: flex; align-items: center; gap: 12px; min-width: 0;
+  min-height: 44px; padding: 6px calc(var(--ws-chat-gutter) - 10px) 6px var(--ws-chat-gutter);
+  border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
+}
+.ws-chat-lead { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+.ws-chat .ws-chat-back {
+  flex: none; min-height: 28px; padding: 2px 6px; margin-left: -6px;
+  border: 0 !important; background: transparent; color: var(--ws-ink-muted);
+  font: var(--ws-label-size)/1.3 var(--ws-serif) !important;
+  max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
+/* The origin's way back is the phone's; the desktop leaves by Escape and the board bar. */
+.ws-chat .ws-chat-origin { display: none; }
+.ws-chat-title {
+  flex: 1 1 auto; min-width: 0; margin: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
+}
+.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 14px; }
+.ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
+.ws-chat-acts .ws-fiber-worker:empty { display: none; }
+.ws-chat-trail { display: none; }
+
+/* The meter: context tokens tinted as they fill the window, the window's
+   share, the cache's warmth and the last turn's hit, in one mono run. */
+.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 7px; }
+.ws-chat .ws-transcript-meter[hidden] { display: none; }
+.ws-chat .ws-transcript-share::before { content: '·'; margin-right: 7px; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+.ws-transcript-head .ws-transcript-meter { display: contents; }
+
+.ws-chat .ws-chat-menu summary { min-width: 32px; min-height: 32px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); }
+.ws-chat .ws-chat-menu summary:hover, .ws-chat .ws-chat-menu[open] summary { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-chat .ws-chat-menu .kbn-ctl-menu { min-width: 180px; }
+.ws-chat .ws-chat-menu .kbn-ctl-verdict { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+.ws-chat .ws-chat-menu .kbn-ctl-verdict { gap: 0; }
+.ws-chat .ws-chat-menu .kbn-ctl-verdict .kbn-ctl-btn {
+  width: 100%; min-height: 0; padding: 8px 12px; text-align: left;
+  border-color: transparent !important; background: transparent;
+}
+.ws-chat .ws-chat-menu .kbn-ctl-verdict .kbn-ctl-btn:hover:not(:disabled) { background: var(--ws-hover); }
+.ws-chat-menu-rule { width: 100%; margin: 4px 0; border: 0; border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-chat .ws-chat-menu .kbn-ctl-menu-item[aria-expanded='true'] { background: var(--ws-fill); }
+
+/* What the menu opens, under the header: settings, sessions. */
+.ws-chat-drawer {
+  flex: none; max-height: 50%; overflow: auto; overscroll-behavior: contain;
+  padding: 4px var(--ws-chat-gutter) 8px;
+  border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
+}
+.ws-chat-section + .ws-chat-section:not([hidden]) { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
+
+/* The conversation. */
+.ws-chat-log { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.ws-chat-log > .kbn-detail-app-guide { flex: none; margin: 8px var(--ws-chat-gutter) 0; }
+.ws-chat-empty {
+  display: none; margin: auto var(--ws-chat-gutter); text-align: center;
+  color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.5 var(--ws-serif);
+}
+.ws-chat-log:not(:has(> .ws-transcript:not([hidden]))) > .ws-chat-empty { display: block; }
+.ws-chat .ws-transcript-inline { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; }
+.ws-chat .ws-transcript-inline > .ws-transcript-note { flex: none; margin: 10px var(--ws-chat-gutter) 0; }
+.ws-chat .ws-transcript-inline > .ws-transcript-latest { flex: none; margin: 6px var(--ws-chat-gutter) 0; }
+.ws-chat .ws-transcript-inline > .ws-transcript-pane {
+  position: static; flex: 1; min-height: 0; animation: none; background: transparent; z-index: auto;
+}
+.ws-chat .ws-transcript-inline .ws-transcript-scroll { padding: 8px var(--ws-chat-gutter) 24px; scrollbar-width: thin; }
+.ws-chat .ws-transcript-inline .ws-transcript-checklist { margin-top: 8px; }
+.ws-chat .ws-transcript-inline .ws-transcript-turn { gap: 10px; padding-block: 18px 6px; }
+.ws-chat .ws-transcript-inline .ws-transcript-turn + .ws-transcript-turn { border-top: 0; }
+/* Your turns are lightly set off, at the column's right; the worker's are prose. */
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you {
+  align-self: flex-end; max-width: 85%; padding: 8px 14px 10px;
+  border: 0; border-radius: 14px; background: var(--ws-fill);
+}
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text { color: var(--ws-ink); font: var(--ws-prose-size)/1.5 var(--ws-serif); max-height: 9em; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker { justify-content: flex-end; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
+.ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }
+.ws-chat .ws-transcript-inline .ws-transcript-steps { padding-left: 0; opacity: .85; }
+.ws-chat .ws-transcript-inline .ws-transcript-steplist { margin-left: 2px; }
+.ws-chat .ws-transcript-inline .ws-transcript-thread-notice { margin: 4px 0; }
+.ws-chat .ws-transcript-working-inline { margin: 10px 0 0; padding-left: 0; }
+.ws-chat .ws-transcript-working-inline[hidden] { display: none; }
+
+/* The composer, pinned beneath the column. */
+.ws-chat-compose {
+  flex: none; display: flex; flex-direction: column; gap: 6px;
+  padding: 8px var(--ws-chat-gutter) 14px;
+}
+.ws-chat-compose > .kbn-detail-transcript { padding: 6px 0; border-block: 0; }
+.ws-chat .ws-chat-status:not(:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty))) { display: none; }
+.ws-chat .ws-chat-compose .kbn-ctl-composer { padding: 5px; border-radius: 12px; box-shadow: var(--ws-shadow-low); }
+.ws-chat .ws-chat-compose .kbn-detail-directive { max-height: 30vh; }
+/* The field takes the whole width; Meeting and the verbs ride a row beneath it. */
+.ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-detail-directive { grid-column: 1 / -1; min-height: calc(var(--ctl-h) + 8px); }
+.ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; }
+
+/* A fiber with no conversation keeps its page; the header holds its acts only. */
+.ws-chat:not(.ws-chat-conversation) { padding: 0; margin: 0 0 var(--ws-inset); border-bottom: var(--ws-line-width) solid var(--ws-hairline); }
+.ws-chat:not(.ws-chat-conversation) .ws-chat-title { visibility: hidden; }
+.ws-chat:not(.ws-chat-conversation) .ws-chat-head { padding-inline: 0; border-bottom: 0; }
+.ws-chat:not(.ws-chat-conversation) :is(.ws-chat-drawer, .ws-chat-compose) { padding-inline: 0; }
+
+/* The chat's frame carries no label bar: the header line names the page and leads back. */
+.ws-chat-frame .ws-labelbar { display: none; }
+.ws-reader[data-page='chat'] .ws-stage-column > .ws-thread-breadcrumb { display: none; }
+
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
+  .ws-reader[data-page='chat'] :is(.ws-navbar, .ws-thumbbar) { display: none; }
+  .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
+  .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }
+  .ws-chat .ws-chat-back { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
+  .ws-chat .ws-chat-orchestrator { max-width: 8em; padding-inline: 4px; }
+  .ws-chat-title { font-size: var(--ws-label-size); }
+  .ws-chat-acts { gap: 6px; }
+  .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
+  .ws-chat-acts .ws-fiber-worker .kbn-card-worker { min-width: 28px; min-height: var(--ws-phone-target); justify-content: center; padding: 0; border: 0; background: transparent; }
+  .ws-chat .ws-transcript-meter :is(.ws-transcript-share, .ws-transcript-hit) { display: none; }
+  .ws-chat .ws-chat-menu summary { min-width: var(--ws-phone-target); min-height: var(--ws-phone-target); }
+  .ws-chat-trail { display: inline-flex; flex: none; }
+  .ws-reader .ws-chat-pages { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; color: var(--ws-ink); }
+  .ws-chat-pages svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+  .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding-inline: 16px; }
+  .ws-chat-compose { padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .ws-chat .ws-transcript-inline .ws-transcript-msg-you { max-width: 92%; }
+}

@@ -16,13 +16,14 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { restReachable, verdictReachable } from './fiberPageState.js'
+import { restReachable, reviewReachable, verdictReachable } from './fiberPageState.js'
 import { deskColumn } from '../deskColumn.js'
 import { workerPlate } from './workerPlate.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
 import './tokens.css'
 import './dock.css'
+import './chat.css'
 
 type Directive = string | (() => Promise<string>)
 interface AgentAxes { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }
@@ -406,6 +407,17 @@ interface AgentRecord {
   alias_of?: string | null
 }
 
+/**
+ * Where the chat's header line leads: back to the thread's orchestrator, and
+ * on the phone back to the view the reader was opened from; `trail` is a
+ * control the reader seats at the line's right end.
+ */
+export interface ChatNav {
+  orchestrator?: { name: string; open(): void }
+  origin?: { label: string; open(): void }
+  trail?: HTMLElement
+}
+
 export interface DockOptions {
   meeting?: MeetingJoinControl
   /** Opens the Rest popover on the button that asked for it. */
@@ -413,13 +425,20 @@ export interface DockOptions {
 }
 
 /**
- * The fiber page's act zone: state-shaped verdicts, composer, meeting,
- * folded settings and session history. The navbar owns the worker control.
+ * A constitution's chat: one header line (the way back, the name, the worker's
+ * state, its context meter and one menu holding the verdicts, settings,
+ * sessions and the console), the conversation as a column, and the composer
+ * pinned beneath it. A fiber with no conversation shows the header and the
+ * drawer only, inside its fiber page.
  */
 export class Dock {
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
   private headRoot: HTMLElement | null = null
+  private header: HTMLElement | null = null
+  private lead: HTMLElement | null = null
+  private trail: HTMLElement | null = null
+  private drawerClose: (() => boolean) | null = null
   private headWorkerKey: string | null = null
   private card: KanbanCard | null = null
   private searchDebounce: number | null = null
@@ -475,11 +494,11 @@ export class Dock {
     this.onRest = opts.onRest
   }
 
-  /** The dock's element, built on first use so controls can be exercised without a page. */
+  /** The chat's element, built on first use so controls can be exercised without a page. */
   get el(): HTMLElement {
     if (!this.root) {
       this.root = document.createElement('div')
-      this.root.className = 'ws-dock'
+      this.root.className = 'ws-dock ws-chat'
       this.root.dataset.part = 'act'
       this.root.dataset.act = 'composer'
       this.root.tabIndex = -1
@@ -489,19 +508,49 @@ export class Dock {
   }
 
   /**
-   * The acts the fiber page's status line carries: the worker pill, then
-   * Temper and Discard. Built once per band, so a prose repaint re-seats the
-   * same controls under the pointer and the focus.
+   * The header line's acts: the worker's state, the context meter and the
+   * menu. Built once per band, so a repaint re-seats the same controls under
+   * the pointer and the focus.
    */
   get head(): HTMLElement {
     if (!this.headRoot) {
       this.headRoot = document.createElement('div')
-      this.headRoot.className = 'ws-fiber-acts'
+      this.headRoot.className = 'ws-fiber-acts ws-chat-acts'
       this.headRoot.dataset.part = 'act'
       this.headRoot.dataset.act = 'verdict'
       this.headRoot.addEventListener('click', event => event.stopPropagation())
     }
     return this.headRoot
+  }
+
+  /**
+   * Seat the header line's way back and its trailing control. The acts come
+   * home too: a fiber page drawn before the chat existed may have borrowed them.
+   */
+  setNav(nav: ChatNav): void {
+    if (!this.lead || !this.trail || !this.header) return
+    if (this.head.parentElement !== this.header) this.header.insertBefore(this.head, this.trail)
+    const back: HTMLButtonElement[] = []
+    if (nav.orchestrator) {
+      const { name, open } = nav.orchestrator
+      const button = ctlButton(`‹ ${name}`, 'ws-chat-back ws-chat-orchestrator')
+      button.title = `Back to the orchestrator, ${name} (b)`
+      button.setAttribute('aria-label', `Back to the orchestrator, ${name}`)
+      button.addEventListener('click', () => open())
+      back.push(button)
+    }
+    if (nav.origin) {
+      const { label, open } = nav.origin
+      const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
+      button.title = `Return to ${label}`
+      button.setAttribute('aria-label', `Return to ${label}`)
+      button.addEventListener('click', () => open())
+      back.unshift(button)
+    }
+    this.lead.replaceChildren(...back)
+    this.lead.hidden = !back.length
+    this.trail.replaceChildren(...(nav.trail ? [nav.trail] : []))
+    this.trail.hidden = !nav.trail
   }
 
   private later(fn: () => void, ms: number): number {
@@ -603,6 +652,8 @@ export class Dock {
     this.root?.replaceChildren()
     this.headRoot?.replaceChildren()
     this.headWorkerKey = null
+    this.header = this.lead = this.trail = null
+    this.drawerClose = null
   }
 
   /**
@@ -638,7 +689,8 @@ export class Dock {
     if (dismissSelectPicker()) return true
     if (this.verdictMenu?.open) { this.verdictMenu.open = false; return true }
     if (this.transcriptBand?.closeFull()) return true
-    return Boolean(this.dismissConversation?.() || this.dismissParent?.())
+    if (this.dismissConversation?.() || this.dismissParent?.()) return true
+    return this.drawerClose?.() ?? false
   }
 
 
@@ -839,11 +891,9 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
-    if (shuttleManaged) {
-      this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase })
-      body.append(this.buildComposer(card))
-    }
-    body.append(this.buildTranscriptPane(card))
+    const composer = shuttleManaged ? this.buildComposer(card) : null
+    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true })
+    const meetingPane = this.buildTranscriptPane(card)
 
     const settings = document.createElement('div')
     settings.className = 'kbn-detail-controls'
@@ -919,8 +969,7 @@ export class Dock {
         } : undefined,
         onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
       })
-      if (this.transcriptBand) this.transcriptBand.mountSessions(next)
-      else history?.replaceWith(next)
+      if (history?.isConnected) history.replaceWith(next)
       history = next
       const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
       if (open) unfold.click()
@@ -940,56 +989,139 @@ export class Dock {
       refreshHistory(history?.classList.contains('kbn-ctl-history-open') ?? false)
     }
     const foot = document.createElement('div')
-    foot.className = 'kbn-ctl-foot'
+    foot.className = 'kbn-ctl-foot ws-chat-status'
+    foot.append(errorEl, statusEl)
     const verdict = this.verdictControlsFor(card)
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
-    const worker = document.createElement('span')
-    worker.className = 'ws-fiber-worker'
-    this.head.replaceChildren(worker, verdict)
+    // The undo window is drawn on the header's acts, where it can be seen, not in the closed menu.
+    delete verdict.dataset.verdictKey
+    markVerdictHost(this.head, card)
     const rest = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-rest')
     const temper = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-temper')!
     const discard = verdict.querySelector<HTMLButtonElement>('.kbn-ctl-discard')!
+    const review = ctlButton('Close for review', 'kbn-ctl-review')
+    review.title = 'Move to Awaiting review (a)'
+    review.addEventListener('click', () => this.verdict(card, 'awaitingReview'))
+    verdict.prepend(review)
+    const worker = document.createElement('span')
+    worker.className = 'ws-fiber-worker'
+
+    // The drawer under the header holds what the menu opens: settings, sessions.
+    const drawer = document.createElement('div')
+    drawer.className = 'ws-chat-drawer'
+    drawer.hidden = true
+    const settingsSection = document.createElement('section')
+    settingsSection.className = 'ws-chat-section'
+    settingsSection.setAttribute('aria-label', 'Settings')
+    settingsSection.hidden = true
+    settingsSection.append(settings)
+    const sessionsSection = document.createElement('section')
+    sessionsSection.className = 'ws-chat-section'
+    sessionsSection.setAttribute('aria-label', 'Sessions')
+    sessionsSection.hidden = true
+    if (history) sessionsSection.append(history)
+    drawer.append(settingsSection, sessionsSection)
+
     const menu = document.createElement('details')
-    menu.className = 'kbn-ctl-verdict-menu'
+    menu.className = 'kbn-ctl-verdict-menu ws-chat-menu'
     const more = document.createElement('summary')
-    more.textContent = '⋯'; more.setAttribute('aria-label', 'Fiber actions')
+    more.textContent = '⋯'; more.setAttribute('aria-label', 'Constitution menu'); more.title = 'Verdicts, settings, sessions, console'
     const choices = document.createElement('div'); choices.className = 'kbn-ctl-menu'
+    choices.setAttribute('role', 'menu')
+    const item = (label: string, cls: string, act: () => void): HTMLButtonElement => {
+      const button = document.createElement('button')
+      button.type = 'button'; button.className = `kbn-ctl-menu-item ${cls}`; button.textContent = label
+      button.addEventListener('click', () => { menu.open = false; act() })
+      return button
+    }
+    const reveal = (section: HTMLElement, show: boolean): void => {
+      section.hidden = !show
+      drawer.hidden = settingsSection.hidden && sessionsSection.hidden
+      settingsItem.setAttribute('aria-expanded', String(!settingsSection.hidden))
+      sessionsItem.setAttribute('aria-expanded', String(!sessionsSection.hidden))
+    }
+    const settingsItem = item('Settings', 'ws-chat-settings', () => {
+      reveal(settingsSection, settingsSection.hidden)
+      if (!settingsSection.hidden && ledger.hidden) toggle.click()
+      if (!settingsSection.hidden) toggle.focus({ preventScroll: true })
+    })
+    const sessionsItem = item('Sessions', 'ws-chat-sessions', () => {
+      reveal(sessionsSection, sessionsSection.hidden)
+      const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
+      if (!sessionsSection.hidden && unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
+      if (!sessionsSection.hidden) sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')?.focus({ preventScroll: true })
+    })
+    const consoleItem = item('Console', 'ws-chat-console', () => { this.openConversation(card) })
+    consoleItem.title = 'Open the worker’s own conversation'
+    this.drawerClose = () => {
+      if (drawer.hidden) return false
+      reveal(settingsSection, false); reveal(sessionsSection, false)
+      more.focus({ preventScroll: true })
+      return true
+    }
+    const rule = document.createElement('hr'); rule.className = 'ws-chat-menu-rule'
+    choices.append(verdict, rule, settingsItem, sessionsItem, consoleItem)
     menu.append(more, choices)
     let release: Release | null = null
+    // A press anywhere else closes the menu, as it does every popover on the page.
+    const outside = (event: PointerEvent): void => { if (!menu.contains(event.target as Node)) menu.open = false }
     menu.addEventListener('toggle', () => {
       release?.(); release = null
-      if (menu.open && menu.isConnected) release = anchorPopover(choices, more, { placement: 'below-end' })
+      document.removeEventListener('pointerdown', outside, true)
+      if (menu.open && menu.isConnected) {
+        release = anchorPopover(choices, more, { placement: 'below-end' })
+        document.addEventListener('pointerdown', outside, true)
+      }
     })
-    this.composerDisposers.push(() => { release?.(); release = null })
+    this.composerDisposers.push(() => { release?.(); release = null; document.removeEventListener('pointerdown', outside, true); menu.open = false })
     this.verdictMenu = menu
-    foot.append(errorEl, statusEl)
-    // The transcript reads below every control, so the composer and its
-    // verbs stay at the top of the dock however long the worker has talked.
-    // The session list rides the transcript's head line when there is one.
-    const looseHistory = history && !this.transcriptBand ? [history as HTMLElement] : []
-    body.append(settings, ...looseHistory, foot, ...(this.transcriptBand ? [this.transcriptBand.el] : []))
-    // Review and live verdicts sit on the status line. Drafts and resting
-    // constitutions keep their verdicts in a menu on the controls row.
+    const meter = this.transcriptBand?.meter ?? null
+    this.head.replaceChildren(worker, ...(meter ? [meter] : []), menu)
+
+    const header = this.header = document.createElement('header')
+    header.className = 'ws-chat-head'
+    header.dataset.part = 'chat-header'
+    const lead = this.lead = document.createElement('span')
+    lead.className = 'ws-chat-lead'
+    lead.hidden = true
+    const title = document.createElement('h1')
+    title.className = 'ws-chat-title'
+    title.dataset.part = 'fiber-title'
+    const trail = this.trail = document.createElement('span')
+    trail.className = 'ws-chat-trail'
+    trail.hidden = true
+    header.append(lead, title, this.head, trail)
+
+    const log = document.createElement('div')
+    log.className = 'ws-chat-log'
+    const empty = document.createElement('p')
+    empty.className = 'ws-chat-empty'
+    empty.textContent = 'No conversation yet. Write below to start a worker.'
+    if (this.guidance) log.append(this.guidance)
+    if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
+    const compose = document.createElement('div')
+    compose.className = 'ws-chat-compose'
+    compose.append(meetingPane, ...(composer ? [composer] : []), foot)
+    this.el.classList.toggle('ws-chat-conversation', shuttleManaged)
+    body.append(header, drawer, ...(shuttleManaged ? [log] : []), compose)
     this.actPaint = () => {
       const column = deskColumn(card)
       this.el.dataset.column = column
       this.head.dataset.column = column
+      title.textContent = card.name
+      title.title = card.name
       const reachable = verdictReachable(card)
       const restable = !!this.onRest && restReachable(card)
-      verdict.hidden = !reachable && !restable
+      const reviewable = reviewReachable(card)
+      verdict.hidden = !reachable && !restable && !reviewable
+      rule.hidden = verdict.hidden
       if (rest) rest.hidden = !restable
       temper.hidden = discard.hidden = !reachable
+      review.hidden = !reviewable
+      consoleItem.hidden = !this.workerPillFor(card)
+      sessionsItem.hidden = !card.uid
       this.paintHeadWorker(card, worker)
-      if (reachable && column !== 'inFlight' && column !== 'awaitingReview') {
-        verdict.remove()
-        if (temper.parentElement !== choices) choices.append(...(rest ? [rest] : []), temper, discard)
-        if (menu.parentElement !== foot) foot.append(menu)
-      } else {
-        if (verdict.parentElement !== this.head) this.head.append(verdict)
-        if (temper.parentElement !== verdict) verdict.append(...(rest ? [rest] : []), temper, discard)
-        menu.remove()
-      }
     }
     this.actPaint()
   }
