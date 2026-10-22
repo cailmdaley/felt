@@ -722,9 +722,13 @@ export function isQuestion(card: KanbanCard): boolean {
   return turnOf(card).turn === 'question';
 }
 
-/** Whose move it is, read from the card's one turn derivation (`turnOf`). */
+/**
+ * Whose move it is, read from the card's one turn derivation (`turnOf`). A
+ * root whose threads wait on the human is the human's move too: the Desk draws
+ * only roots, so the band says what the family needs, not the root alone.
+ */
 export function inFlightBand(card: KanbanCard): InFlightBand {
-  return turnOf(card).yours ? 'yourTurn' : 'working';
+  return turnOf(card).yours || (card.threadSummary?.waiting ?? 0) > 0 ? 'yourTurn' : 'working';
 }
 
 /** Your turn before Working; within Your turn, questions first; then newest first. */

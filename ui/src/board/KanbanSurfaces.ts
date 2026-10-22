@@ -1,5 +1,6 @@
 import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
+import { ownColumn } from './deskColumn.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
@@ -137,6 +138,13 @@ type VerdictTarget = 'tempered' | 'composted'
  * Drafts take none, and only Shuttle-managed fibers have a verdict to take.
  */
 export function verdictTargets(card: KanbanCard, place: NowColumnKind | 'resting'): VerdictTarget[] {
+  // A root drawn on the Desk for its threads is judged where it is on its own
+  // account: a settled one has had its verdict, a resting one takes Resting's.
+  if (card.threadPromoted) {
+    const own = ownColumn(card)
+    if (own === 'tempered' || own === 'composted') return []
+    place = own ?? 'resting'
+  }
   if (place === 'awaitingReview' || place === 'inFlight') return ['tempered', 'composted']
   if (place !== 'resting' || !isAgentCard(card) || card.shuttleSeat === true) return []
   return card.shuttleKind === 'standing' ? ['composted'] : ['tempered', 'composted']
@@ -2439,7 +2447,9 @@ function dayDropHorizon(resp: KanbanResponse | null, id: string): HorizonKind {
 export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnKind | null {
   if (!resp) return null
   for (const kind of NOW_COLUMN_ORDER) {
-    if (resp.now[kind].some((c) => c.id === id)) return kind
+    const card = resp.now[kind].find((c) => c.id === id)
+    // A root drawn here for its threads holds its own column underneath.
+    if (card) return card.threadPromoted ? ownColumn(card) : kind
   }
   for (const c of resp.timeline.past) {
     if (c.id === id) return c.tempered === false ? 'composted' : 'tempered'

@@ -67,7 +67,8 @@ import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, byClosedAtDesc, byInFlightBand, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
+import { familyColumn } from './threads.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -2660,7 +2661,7 @@ export function resolveOpenTarget(
  * past lane keys off `status`/`tempered` and a `closedAt` day-column, and
  * closing the fiber drops the running-worker pill.
  */
-function applyOptimisticTransition(
+export function applyOptimisticTransition(
   resp: KanbanResponse | null,
   cardId: string,
   target: ColumnKind,
@@ -2670,7 +2671,7 @@ function applyOptimisticTransition(
   const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
-  const moved: KanbanCard = { ...card }
+  const moved: KanbanCard = { ...card, threadPromoted: undefined }
   // Any UNTEMPERED non-draft state counts, not just awaiting (status:closed):
   // Temper can land while the run is still status:active (worker alive or just
   // killed, exit writer not yet run) and the daemon resolves it to accept
@@ -2701,7 +2702,7 @@ function applyOptimisticTransition(
     )
     // A standing seat re-armed between runs rests among the Roles.
     if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-    timeline.futureDated = [...timeline.futureDated, moved]
+    if (!keptByThreads(moved, now)) timeline.futureDated = [...timeline.futureDated, moved]
     return withSurfaces(resp, { now, timeline, stash, roles })
   }
   if (target === 'tempered' || target === 'composted') {
@@ -2710,7 +2711,7 @@ function applyOptimisticTransition(
     moved.workerState = undefined           // closing the fiber stops its worker
     moved.tmuxSession = undefined
     moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
-    timeline.past = [moved, ...timeline.past] // past renders recency-desc — freshest first
+    if (!keptByThreads(moved, now)) timeline.past = [moved, ...timeline.past] // past renders recency-desc — freshest first
   } else {
     // Patch the fields the destination's own rendering + the next classify
     // read, mirroring the committed verbs: drafts = reopen-as-draft/pause +
@@ -2749,6 +2750,21 @@ function applyOptimisticTransition(
   return withSurfaces(resp, { now, timeline, stash, roles })
 }
 
+/**
+ * The read model's promotion, applied to a card an optimistic gesture is
+ * putting off the Desk (Resting, the timeline, the past): a root whose threads
+ * still hold work stays in the column they ask for, marked, with its new
+ * lifecycle fields, which is where the next refresh draws it. True when it
+ * stayed, placed in `now`.
+ */
+function keptByThreads(moved: KanbanCard, now: KanbanResponse['now']): boolean {
+  const column = familyColumn(moved.threadSummary)
+  if (!column) return false
+  moved.threadPromoted = true
+  now[column] = [...now[column], moved].sort(column === 'inFlight' ? byInFlightBand : byClosedAtDesc)
+  return true
+}
+
 /** Optimistically mark the seat without changing a running or closed lifecycle. */
 export function applyOptimisticSeat(resp: KanbanResponse | null, seat: KanbanCard): KanbanResponse | null {
   if (!resp) return null
@@ -2777,7 +2793,7 @@ function withSeat(roles: KanbanCard[], seat: KanbanCard): KanbanCard[] {
  * lifecycle column, so placing there would mean reclassifying. Returns null
  * when the card is absent.
  */
-function applyOptimisticSurface(
+export function applyOptimisticSurface(
   resp: KanbanResponse | null,
   cardId: string,
   opts: { cold?: boolean; due?: string | null } = {},
@@ -2822,8 +2838,9 @@ function placeOptimistically(
   if (!resp) return null
   const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
-  const moved: KanbanCard = { ...card, ...patch(card) }
+  const moved: KanbanCard = { ...card, ...patch(card), threadPromoted: undefined }
   // Resting a seat keeps it a seat: it comes to rest among the Roles.
   if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+  if (keptByThreads(moved, now)) return withSurfaces(resp, { now, timeline, stash, roles })
   return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles })
 }
