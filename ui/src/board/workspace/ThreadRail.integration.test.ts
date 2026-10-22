@@ -5,7 +5,7 @@ import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
-it('draws state groups only, each a flat list in tree order with the parent path, and navigates back through the breadcrumb', () => {
+it('draws state groups only, each a flat list in tree order with the parent path, the state said once per group, and navigates back through the breadcrumb', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
@@ -24,11 +24,17 @@ it('draws state groups only, each a flat list in tree order with the parent path
   expect(groups[1].querySelector('.ws-thread-path')).toBeNull()
   expect(groups[1].querySelector('.ws-thread-mark')).toBeNull()
   expect(rail.el.textContent).not.toMatch(/Archived/)
+  // A group's state is its heading; no row says it again.
+  expect(rail.el.querySelectorAll('.kbn-thread-row small')).toHaveLength(0)
+  expect(rail.el.querySelector('button.ws-thread-toggle')).toBeNull()
   groups[1].querySelector<HTMLButtonElement>('.kbn-thread-row')!.click()
   expect(open).toHaveBeenLastCalledWith(child)
+  // Inside a thread the rail stays on its orchestrator's family, the open thread marked.
   rail.show({ ...child }, new ThreadIndex(all))
   expect(rail.el.textContent).toContain('Deep review')
-  expect(rail.el.textContent).not.toContain('A resting')
+  expect(rail.el.textContent).toContain('A resting')
+  expect(rail.el.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('Z working')
+  expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
   rail.breadcrumb.querySelector<HTMLButtonElement>('button')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
   rail.show(root, new ThreadIndex([root, rest]))
@@ -71,7 +77,7 @@ it('preserves focused rows and open groups across live repaints without stealing
     expect(document.activeElement).toBe(outside)
     rail.el.querySelector<HTMLButtonElement>('details[data-thread-details="working"] .kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, { ...draft, orchestrator: root.id }]))
-    expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-toggle'))
+    expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-heading'))
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
 })
 

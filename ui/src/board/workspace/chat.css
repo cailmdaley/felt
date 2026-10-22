@@ -18,7 +18,9 @@
   min-height: 44px; padding: 6px calc(var(--ws-chat-gutter) - 10px) 6px var(--ws-chat-gutter);
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
-.ws-chat-lead { display: inline-flex; flex: none; align-items: center; gap: 2px; }
+.ws-chat-lead { display: inline-flex; flex: 0 1 auto; min-width: 0; max-width: 34%; align-items: center; gap: 2px; }
+.ws-chat .ws-chat-lead .ws-chat-back { max-width: 100%; }
+.ws-chat-title { flex-shrink: 1; min-width: 6em; }
 .ws-chat .ws-chat-back {
   flex: none; min-height: 28px; padding: 2px 6px; margin-left: -6px;
   border: 0 !important; background: transparent; color: var(--ws-ink-muted);
@@ -26,6 +28,12 @@
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
+/* Inside a thread the way back to its orchestrator is the line's first, plain-spoken control. */
+.ws-chat .ws-chat-orchestrator {
+  margin-left: 0; padding: 3px 12px; border-radius: 999px;
+  color: var(--ws-ink); background: var(--ws-fill);
+}
+.ws-chat .ws-chat-orchestrator:hover { background: var(--ws-hover); }
 /* The origin's way back is the phone's; the desktop leaves by Escape and the board bar. */
 .ws-chat .ws-chat-origin { display: none; }
 .ws-chat-title {
@@ -94,6 +102,8 @@
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text { color: var(--ws-ink); font: var(--ws-prose-size)/1.5 var(--ws-serif); max-height: 9em; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker { justify-content: flex-end; }
+/* The bubble already says who spoke; its kicker keeps the time. */
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }
@@ -132,7 +142,7 @@
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
   .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }
   .ws-chat .ws-chat-back { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
-  .ws-chat .ws-chat-orchestrator { max-width: 8em; padding-inline: 4px; }
+  .ws-chat .ws-chat-orchestrator { min-height: 32px; padding-inline: 10px; margin-left: 8px; }
   .ws-chat-title { font-size: var(--ws-label-size); }
   .ws-chat-acts { gap: 6px; }
   .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }

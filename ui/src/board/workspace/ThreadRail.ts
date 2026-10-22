@@ -18,17 +18,23 @@ const GROUPS: readonly { key: string; label: string; states: readonly ThreadStat
   { key: 'tempered', label: 'Tempered', states: ['archived'] },
 ]
 
-/** A view of the selected constitution's own subtree; navigation never changes containment. */
+/**
+ * A view of the open constitution's family: its own subtree, or inside a
+ * thread its orchestrator's, with the open thread marked, so siblings stay
+ * one click away. Navigation never changes containment.
+ */
 export class ThreadRail {
   readonly el = document.createElement('aside')
   readonly breadcrumb = document.createElement('nav')
   private readonly scroller = document.createElement('div')
   readonly handle = document.createElement('div')
   private readonly tree = document.createElement('div')
-  private readonly toggle = document.createElement('button')
+  private readonly heading = document.createElement('h2')
   private signature = ''
   private width: number | null = null
   private card: KanbanCard | null = null
+  /** The constitution whose subtree the rail draws: the open one, or its orchestrator. */
+  private scope: KanbanCard | null = null
   private index: ThreadIndex | null = null
   private readonly open: (card: KanbanCard) => void
   private readonly layout: () => void
@@ -37,15 +43,10 @@ export class ThreadRail {
     this.el.className = 'ws-thread-rail'
     this.el.setAttribute('aria-label', 'Thread tree')
     this.breadcrumb.className = 'ws-thread-breadcrumb'; this.breadcrumb.setAttribute('aria-label', 'Thread breadcrumb')
-    this.toggle.type = 'button'; this.toggle.className = 'ws-thread-toggle'; this.toggle.textContent = 'Threads'
-    this.toggle.setAttribute('aria-expanded', 'true')
-    this.el.classList.toggle('ws-thread-collapsed', this.toggle.getAttribute('aria-expanded') === 'false')
-    this.toggle.addEventListener('click', () => {
-      const collapsed = this.el.classList.toggle('ws-thread-collapsed')
-      this.toggle.setAttribute('aria-expanded', String(!collapsed)); layout()
-    })
+    // The rail shows and hides from the reader's corner toggle; its heading only names it.
+    this.heading.className = 'ws-thread-heading'; this.heading.textContent = 'Threads'; this.heading.tabIndex = -1
     this.tree.className = 'ws-thread-tree'
-    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.toggle, this.tree)
+    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.heading, this.tree)
     this.handle.className = 'ws-thread-handle'; this.handle.setAttribute('role', 'separator'); this.handle.setAttribute('aria-orientation', 'vertical')
     this.handle.setAttribute('aria-label', 'Resize thread tree'); this.handle.title = 'Drag to resize · double-click to reset'; this.handle.tabIndex = 0
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
@@ -116,8 +117,9 @@ export class ThreadRail {
   }
   show(card: KanbanCard, index: ThreadIndex): void {
     card = index.card(card)
-    this.card = card; this.index = index
-    const descendants = index.subtree(card)
+    const scope = index.parentOf(card) ?? card
+    this.card = card; this.scope = scope; this.index = index
+    const descendants = index.subtree(scope)
     const ancestors: KanbanCard[] = []
     for (let parent = index.parentOf(card); parent; parent = index.parentOf(parent)) ancestors.unshift(parent)
     // The phone draws no tree under its chat, only the breadcrumb.
@@ -126,7 +128,7 @@ export class ThreadRail {
       this.paintBreadcrumb(ancestors)
       return
     }
-    const signature = JSON.stringify([card.id, card.originId, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags])])
+    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags])])
     if (signature === this.signature) return
     this.signature = signature
     this.el.hidden = !descendants.length
@@ -142,7 +144,8 @@ export class ThreadRail {
     }
   }
   private paint(): void {
-    if (!this.card) return
+    if (!this.card || !this.scope) return
+    const current = this.card, scope = this.scope
     const active = document.activeElement
     const focus = active instanceof HTMLElement && this.tree.contains(active) ? active.dataset.threadFocus : undefined
     const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
@@ -151,7 +154,7 @@ export class ThreadRail {
     // Containment reads from the muted slugs of the two nearest ancestors below the open constitution, a cut chain led by an ellipsis.
     const slug = (c: KanbanCard): string => c.id.split('/').pop()!
     const pathOf = (card: KanbanCard): string => {
-      const root = this.card!, parent = index.parentOf(card)
+      const root = scope, parent = index.parentOf(card)
       if (!parent || parent.id === root.id) return ''
       const grand = index.parentOf(parent)
       if (!grand || grand.id === root.id) return slug(parent)
@@ -184,17 +187,20 @@ export class ThreadRail {
         row.prepend(el); title = mark.title
       }
       row.classList.toggle('ws-thread-marked', mark !== null)
+      const here = card.id === current.id && card.originId === current.originId
+      row.classList.toggle('ws-thread-current', here)
+      if (here) row.setAttribute('aria-current', 'page')
       row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
       return item
     }
     this.tree.replaceChildren()
-    const subtree = index.subtree(this.card)
+    const subtree = index.subtree(scope)
     for (const { key, label, states } of GROUPS) {
       const members = subtree.filter(c => states.includes(index.state(c)))
       if (!members.length) continue
       const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
       group.open = open.get(key) ?? key !== 'tempered'
-      const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, this.card)
+      const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, scope)
       summary.textContent = `${label} · ${members.length}`
       group.append(summary, ...members.map(card => rowFor(card, key, label)))
       this.tree.append(group)
@@ -202,7 +208,7 @@ export class ThreadRail {
     this.layout()
     if (focus) {
       const target = [...this.tree.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
-      ;(target ?? this.toggle).focus({ preventScroll: true })
+      ;(target ?? this.heading).focus({ preventScroll: true })
     }
   }
 }

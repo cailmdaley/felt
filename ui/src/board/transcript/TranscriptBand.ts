@@ -250,7 +250,10 @@ function setKicker(kicker: HTMLElement, author: string, speaker: Speaker, time?:
     stamp.className = 'ws-transcript-clock'
     stamp.textContent = when.text
     stamp.title = when.title
-    kicker.append(document.createTextNode(' · '), stamp)
+    const separator = document.createElement('span')
+    separator.className = 'ws-transcript-sep'
+    separator.textContent = ' · '
+    kicker.append(separator, stamp)
   }
 }
 

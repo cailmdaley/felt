@@ -546,7 +546,8 @@ export class Dock {
       button.addEventListener('click', () => open())
       back.push(button)
     }
-    if (nav.origin) {
+    // Inside a thread the orchestrator is the way back; the origin is reached through it.
+    if (nav.origin && !nav.orchestrator) {
       const { label, open } = nav.origin
       const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
       button.title = `Return to ${label}`
