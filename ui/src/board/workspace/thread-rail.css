@@ -27,7 +27,7 @@
 /* A group is a flat list under its heading and count; a mark appears only for a sub-state. */
 .ws-thread-group { margin: 0 0 6px; }
 .ws-thread-group + .ws-thread-group { border-top: 1px solid var(--kbn-rule-strong); padding-top: 6px; }
-.ws-thread-group > summary { cursor: pointer; padding: 6px 6px; color: var(--kbn-ink-muted); font-size: var(--ws-small-size); }
+.ws-thread-group > summary { cursor: pointer; padding: 6px 6px; color: var(--kbn-ink-muted); font-size: var(--ws-thread-outcome-size); }
 .ws-thread-group > .kbn-thread-item + .kbn-thread-item { border-top: 1px solid var(--kbn-rule); }
 .ws-thread-mark { flex: none; display: grid; place-items: center; width: 18px; height: 1.3em; font-size: var(--ws-sidebar-glyph-size); line-height: 1; color: var(--kbn-ink-muted); }
 .ws-thread-mark[data-kind]:not([data-kind='discarded'])::before { content: ''; width: var(--ws-sidebar-dot-size); height: var(--ws-sidebar-dot-size); border-radius: 50%; background: var(--ws-fresh); }
