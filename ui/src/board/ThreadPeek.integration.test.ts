@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { ThreadIndex } from './threads.js'
 import { response } from './testFixtures.js'
@@ -14,22 +14,61 @@ it('enables waiting subentries by default and respects an explicit opt-out', () 
   expect(waitingThreadEntries()).toBe(false)
   vi.unstubAllGlobals()
 })
-it('a phone hold expands without its synthetic action being swallowed by click suppression', () => {
-  vi.useFakeTimers()
+describe('phone gestures on a family', () => {
   const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root' })
-  root.threadSummary = new ThreadIndex([root, child]).summary(root)
-  const data = response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] })
-  const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
-    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {} })
-  const section = renderer.renderNowSection(data.now, {})
-  document.body.append(section)
-  const host = section.querySelector<HTMLElement>('.kbn-card')!
-  const down = new Event('pointerdown', { bubbles: true })
-  Object.assign(down, { pointerType: 'touch', pointerId: 1, button: 0, clientX: 10, clientY: 10 })
-  host.dispatchEvent(down)
-  vi.advanceTimersByTime(500)
-  expect(host.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
-  vi.runOnlyPendingTimers()
+  const seat = card({ id: 'seat', shuttleRole: 'chair', shuttleSeat: true }), seatChild = card({ id: 'seat/child', orchestrator: 'seat' })
+  const rest = card({ id: 'rest', effectiveHorizon: 'stashed' }), restChild = card({ id: 'rest/child', orchestrator: 'rest', effectiveHorizon: 'stashed' })
+  const index = new ThreadIndex([root, child, seat, seatChild, rest, restChild])
+  for (const c of [root, seat, rest]) c.threadSummary = index.summary(c)
+  const data = response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, roles: [seat], stash: [rest], threads: [child, seatChild, restChild] })
+  const touch = (el: HTMLElement, type: string): void => {
+    const event = new Event(type, { bubbles: true })
+    Object.assign(event, { pointerType: 'touch', pointerId: 1, button: 0, isPrimary: true, clientX: 10, clientY: 10 })
+    el.dispatchEvent(event)
+  }
+  const draw = () => {
+    const longPress = vi.fn()
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+      stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {}, onCardLongPress: longPress })
+    document.body.append(renderer.renderNowSection(data.now, {}), renderer.renderRolesSection(data.roles, {})!, renderer.renderStashSection([rest], {}))
+    return longPress
+  }
+  it('a hold on a family card or seat opens the Move menu and leaves the family folded', () => {
+    vi.useFakeTimers()
+    const longPress = draw()
+    for (const id of ['root', 'seat']) {
+      const el = document.querySelector<HTMLElement>(`[data-card-uid="${id}"]`)!
+      touch(el, 'pointerdown')
+      vi.advanceTimersByTime(500)
+      touch(el, 'pointerup')
+      el.click() // the lift's own click, which the fired hold swallows
+      expect(longPress).toHaveBeenLastCalledWith(expect.objectContaining({ id }), el)
+      expect(el.closest('.kbn-thread-family')!.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(true)
+    }
+    expect(longPress).toHaveBeenCalledTimes(2)
+    vi.runOnlyPendingTimers()
+  })
+  it('a resting row keeps no hold gesture of its own', () => {
+    vi.useFakeTimers()
+    const longPress = draw()
+    const row = document.querySelector<HTMLElement>('.kbn-cluster-item[data-card-uid="rest"]')!
+    touch(row, 'pointerdown')
+    vi.advanceTimersByTime(500)
+    touch(row, 'pointerup')
+    expect(longPress).not.toHaveBeenCalled()
+    vi.runOnlyPendingTimers()
+  })
+  it('a tap on the badge expands and folds the family', () => {
+    draw()
+    const family = document.querySelector<HTMLElement>('[data-card-uid="root"]')!
+    const badge = family.querySelector<HTMLButtonElement>('.kbn-thread-badge')!
+    touch(family, 'pointerenter')
+    expect(family.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(true)
+    badge.click()
+    expect(family.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
+    badge.click()
+    expect(family.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(true)
+  })
 })
 it('expands deep asks before work, hides archived rows, and opens the selected thread rather than the root', () => {
   const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root', status: 'active' })

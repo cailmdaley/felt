@@ -1389,7 +1389,6 @@ export class KanbanSurfaceRenderer {
     const mark = threadMark(card)
     if (mark) el.append(mark)
     installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
-    this.installLongPressMove(el, card)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
     // the way a Desk row's are: under the pointer at that end, or on focus. A
@@ -2603,12 +2602,8 @@ export class KanbanSurfaceRenderer {
    *  own verdict to give, not a gesture's to silently withhold. */
   private installLongPressMove(el: HTMLElement, card: KanbanCard): void {
     const longPress = this.o.onCardLongPress
-    if (!longPress && !card.threadSummary?.unfinished && !card.threadSummary?.archived) return
-    attachLongPress(el, { onFire: () => {
-      const badge = (el.closest('.kbn-role-seat') ?? el).querySelector<HTMLButtonElement>('.kbn-thread-badge')
-      if (badge) badge.dispatchEvent(new Event('thread-expand'))
-      else longPress?.(card, el)
-    } })
+    if (!longPress) return
+    attachLongPress(el, { onFire: () => longPress(card, el) })
   }
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {

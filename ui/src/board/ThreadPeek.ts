@@ -56,7 +56,6 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     if (entries) entries.hidden = expanded
   }
   badge.addEventListener('click', event => { event.stopPropagation(); paint(peek.hidden) })
-  badge.addEventListener('thread-expand', () => paint(peek.hidden))
   host.addEventListener(THREAD_REVEAL, () => paint(true))
   host.addEventListener(THREAD_COLLAPSE, () => { paint(false); badge.focus({ preventScroll: true }) })
   host.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') paint(true) })
