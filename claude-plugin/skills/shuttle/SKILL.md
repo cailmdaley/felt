@@ -75,7 +75,9 @@ Questions lead Your turn and are drawn heavier: an outstanding `ask`, or a harne
 ## Working a constitution
 
 **Threads.** A constitution nested under another constitution is a *thread*; its *orchestrator* is the nearest ancestor with a `shuttle:` block.
-Create one with `shuttle thread <parent> "<ask>"`: it inherits the parent's host, project directory, role and agent unless overridden, and starts armed unless `--disabled` keeps it in drafts.
+Create one with `shuttle thread <parent> "<ask>"`: it inherits the parent's host, project directory, role, agent and compatible execution surface unless overridden, and starts armed unless `--disabled` keeps it in drafts.
+An absent parent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent.
+Use `--surface cli|app` to override inheritance; app requires Codex, and invalid selections never create or arm a child.
 Containment is the whole relation, and `felt nest` changes it.
 Write a thread's outcome for its orchestrator, the reader named in its dispatch prompt.
 
