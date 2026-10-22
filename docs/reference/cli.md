@@ -456,3 +456,31 @@ starting `# ended` flushes and ends the follow with exit 0. Lines starting `#`
 ride along without counting words or addressing the agent. A partial trailing
 line waits for its newline, a file that shrinks is read again from the start,
 and the file is polled once per second.
+
+### `shuttle meeting start [--recorder <host>] [--mode call|phone] [--note <text>]`
+
+Start a hark recording without launching or telling any agent, for a session
+the daemon did not launch (a Claude Code Remote Control session, say) that
+follows the transcript itself. The local daemon's `POST /meeting/start` records
+on `--recorder` (default: this host; `--mode phone` without a recorder lets the
+daemon select one) and mirrors the transcript to this host. `--mode` defaults
+to `call`. The recording is named after the note's first line, else `Meeting`.
+
+Stdout is the transcript's path on this host, so the verbs compose:
+
+```bash
+shuttle follow "$(shuttle meeting start --recorder mac --note 'Weekly standup')"
+```
+
+The recorder and launch id go to stderr; `--json` prints the daemon's whole
+answer. An existing meeting on the recorder (409), a recorder without hark
+(503) or a mode it cannot record (422) fails with the daemon's error. A start
+the recorder did not confirm fails with `recording_unknown`: inspect that
+recorder before starting another.
+
+### `shuttle meeting stop [--recorder <host> --launch <id>]`
+
+Stop the recording on `--recorder` (default: this host), or dismiss its failed
+tmux pane, through the local daemon's `POST /meeting/stop`. An addressed stop
+needs the launch id `meeting start` printed, so a stale stop never ends a newer
+recording.

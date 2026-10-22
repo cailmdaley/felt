@@ -29,6 +29,18 @@ When the message says the meeting joins this constitution, you stay that constit
 3. **Follow, act and keep the report live** as in steps 2–4, in the child fiber.
 4. **Carry it home.** At `# ended`, consolidate, then close the ordinary child fiber with `felt edit <child-fiber> --status closed`. Bring what bears on the constitution back into its work: decisions into its body and plan, your own action items into your next steps, the rest as proposals. The constitution stays open.
 
+### Recording without a board start
+
+A session shuttle did not launch, such as a Claude Code Remote Control session, can start the recording itself. Ask the local daemon to record on the machine with the microphone and follow what it mirrors here:
+
+```bash
+T=$(shuttle meeting start --recorder mac --note "Weekly standup")   # path on this host
+shuttle follow "$T"                                                  # under Monitor
+shuttle meeting stop --recorder mac --launch <id>                    # the id start printed on stderr
+```
+
+No agent is launched and no fiber is told, so you are the scribe from the moment the path prints; nothing claims a fiber for you. Use `--mode phone` when the audio comes from a phone. A `recording_unknown` failure means the recorder may already be recording: check before starting again.
+
 ## From transcript to notes
 
 A live meeting's running notes are your first draft. With a handed-over transcript you start from nothing and weren't there, so show the user the draft and the extraction plan, and get approval at each step.
