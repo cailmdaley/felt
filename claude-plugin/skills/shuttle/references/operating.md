@@ -32,6 +32,20 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Tempered** — `closed`, `tempered: true`: the human accepted it.
 - **Discarded** — `closed`, `tempered: false`: the human set it aside. The block stays as the record.
 
+## Threads on the board
+
+The Desk gives the top-level orchestrator a card; its **thread badge** counts unfinished threads and draws attention when a descendant needs the human.
+The card's expansion lists threads by name, state and outcome, with waiting threads first; **sub-entries** are the compact thread rows shown under the card when that display option is enabled.
+Opening the card puts the conversation in the centre and the **thread rail**, a collapsible tree of its descendants, on the right.
+Open a thread there to read its own conversation and report, then use the breadcrumb to return to its orchestrator.
+**To review** means closed work awaiting a verdict, not accepted work; tempered and discarded threads are archived, folded away rather than counted as unfinished.
+
+“Keep going” tells the orchestrator to read incoming results, answer what it can, return work that misses Desired State, and launch queued threads whose prerequisites are met.
+It doesn't waive human gates: the orchestrator recommends a verdict, but the human tempers or discards and approves spend on a new host.
+Answering in the orchestrator's conversation lets it carry the decision to the relevant thread with `shuttle message <thread> "<decision>"` and keep the whole effort coherent.
+Answering inside a thread steers that worker directly; when the decision changes other threads or the parent's scope, tell the orchestrator too rather than assuming it sees every exchange.
+Thread close and ask messages wake the orchestrator; handoff and rest arrive as context for its next turn.
+
 ## Verbs
 
 ```bash
