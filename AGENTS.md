@@ -48,6 +48,8 @@ lives in the docs site (`docs/`, published to
 | Fiber model, frontmatter, cross-project stores | [`docs/concepts/`](docs/concepts/) |
 | CLI verbs, daemon HTTP API | [`docs/reference/cli.md`](docs/reference/cli.md), [`docs/reference/api.md`](docs/reference/api.md) |
 
+For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt show practices/elixir`).
+
 ## Critical invariants
 
 - **Execution backends own conversations; shuttle owns task assignment and
