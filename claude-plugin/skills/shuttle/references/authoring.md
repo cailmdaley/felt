@@ -42,6 +42,28 @@ An `active` fiber dispatches on the next poll; `--disabled` (`status: open`) lan
 
 `install` only creates. On a fiber that already has a block it refuses and points you to `shuttle status` (inspect), `reshape` (kind or schedule), `set-agent` (agent and its settings), or `uninstall` (start over).
 
+## Threads
+
+A thread is a constitution under its orchestrator, with its own worker and transcript.
+Choose it for work that outlives a session or deserves a Desired State worth writing and an outcome worth tracking; use a subagent for the rest.
+Use `shuttle thread <parent> "<ask>" --disabled` to file it safely: the ask becomes its name and lede, and Desired State starts empty.
+Rewrite the lede to say what the thread is for and how it serves the parent; fill `## Desired State` with the conditions the orchestrator will review, including scope and evidence.
+Then arm it with `shuttle resume <thread>`.
+Without `--disabled`, creation arms it immediately; don't leave a worker racing an unwritten contract.
+Draft threads are queued work: leave them disabled until their inputs or decisions are ready, then have the orchestrator arm the next useful one.
+Closing a sibling does not itself arm a draft.
+
+Host, project directory, role, agent and compatible execution surface inherit from the parent; runtime, schedule and seat do not.
+Override the agent for the work rather than assuming the orchestrator's model fits every thread.
+An absent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent, while explicit `--surface app` requires Codex.
+Changing `--host` requires `--project-dir` even for a draft: the parent's path belongs to another machine.
+Explicit paths are validated locally, so run the command on the destination host when its directory isn't available here; the owner's store must also receive the fiber before dispatch ([operating.md](operating.md#remote-hosts)).
+Host choice is within the orchestrator's authority, not a separate approval gate.
+
+Every thread has a role.
+Keep the parent's role unless it doesn't fit; assign a fitting office with `--role <role>` or `shuttle role <thread> <role>` when the thread needs different playbooks or continuing responsibility, and supply one before arming if the parent has none.
+A separate transcript alone doesn't call for a new charter.
+
 ## The human in the loop
 
 Every dispatch runs autonomously; there is no interactive mode. When a particular run needs the human, say so in its launch directive ("stay interactive", "talk to me first"); the next dispatch starts clean. Otherwise a worker closes at the end of its arc and puts open taste calls in the outcome; the human answers by resuming it.

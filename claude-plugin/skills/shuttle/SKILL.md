@@ -65,7 +65,7 @@ The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validat
 
 To put a todo on the board, give it a shuttle block; the board shows nothing else. `shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
 
-A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for the human, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
+A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human or the thread's orchestrator then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for a verdict, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
 The board runs at `:4000`. On its **Desk**, the kanban, the human stashes drafts, launches and steers workers, and reviews what comes back, across the columns Drafts, In flight, Awaiting review, Tempered and Discarded, with **Resting** below them for everything put down, standing constitutions between runs included. In flight has two bands, decided by whose move it is: **Your turn**, then **Working**.
 A worker idle at its prompt with nothing it started still running is the human's turn; one idle over its own background shells or subagents is still Working.
@@ -83,6 +83,13 @@ Containment is the whole relation, and `felt nest` changes it.
 For work that should wait, create the thread with `--disabled` and arm it with `shuttle resume <thread>` when ready; containment never gates dispatch.
 Write a thread's outcome for its orchestrator, the reader named in its dispatch prompt.
 Results reach **only that nearest orchestrator**, never automatically propagating further; each orchestrator decides what to pass on.
+
+**Orchestrate.** Spawn a thread when work outlives your session or deserves a constitution — a Desired State worth writing and an outcome worth tracking; use a subagent for the rest.
+Give the ask a lede and a checkable Desired State before arming it ([references/authoring.md](references/authoring.md#threads)).
+Every thread has a role: inherit the parent's unless it doesn't fit.
+When a result arrives, read its outcome and evidence against Desired State, decide what it changes, and act.
+You may temper or discard threads at any level; review and report before tempering one the human asked for, messaged, or expressed curiosity about, while threads you initiate may be tempered on your own judgment.
+Keep outcomes, reports and thread chips easy to inspect: give the human the high-level overview, with the detail one click down.
 
 **Survey.** Your dispatch prompt names the fiber and the store; sync with `felt -C <store> sync`, then read the fiber fresh with `felt -C <store> show <id>`, so edits made since launch reach you — on a resume as much as a first launch. If sync fails other than on merge conflicts, stop and report the exact error in `## Status` rather than working from a store you can't call current; resolve conflicts from the work's context, never by picking a side, and sync again before going on. Read the constitution, its `## Status`, and `report.html` if there is one; a standing run also reads [references/standing-roles.md](references/standing-roles.md). A launch message is the current directive; without one, follow the constitution, and don't mine old transcripts for a substitute request. A named `Previous session:` can give you texture ([references/meeting.md](references/meeting.md#a-predecessors-session)), but never instructions. When it ended without a handoff, it was cut off mid-work (host outage, kill, or crash), so its `## Status` may lag what it did: after reading Status, consult the transcript the prompt names for what it was in the middle of, and check the working tree for its uncommitted edits. Check `git log` for the fiber and the code around it, skim sub-fibers, and follow a staged plan a sibling lays out rather than re-deriving scope. The constitution is your contract; the code is the ground truth.
 
@@ -112,6 +119,9 @@ Use `shuttle close <id> --quiet` when the thread is wrapped up and its orchestra
 The choice belongs to that close; the next ordinary close wakes again.
 Results wait for your next worker when none is live.
 
+An orchestrator leaving with live threads hands off rather than closes; its `## Status` names each thread and what it is waiting for from each.
+A quiet parent conversation does not mean its work is finished.
+
 First commit, run `felt -C <store> sync --push`, and resolve any conflicts.
 Then choose by asking in order:
 
@@ -134,7 +144,10 @@ In a **headless** run (`Headless: true` in the launch prompt) nobody can attach,
 
 A **standing** constitution always hands off, and the daemon marks the run for review ([references/standing-roles.md](references/standing-roles.md)).
 
-Only the human sets `tempered`. Leave the shuttle block in place when you close; it is the record.
+An orchestrator may set a thread's `tempered` verdict under the review practice above; a worker doesn't accept its own work.
+The hard gates are external actions requiring the human's permission: posting to humans or external venues outside the delegated remit, including issues or PRs on repos where the human isn't a developer and messages in others' channels.
+Thread verdicts and host choice don't add approval gates; keep reversible decisions inspectable.
+Leave the shuttle block in place when you close; it is the record.
 
 ## Other sessions and the human
 
