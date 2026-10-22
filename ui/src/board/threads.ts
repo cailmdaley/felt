@@ -58,6 +58,8 @@ export class ThreadIndex {
   private readonly kids = new Map<string, KanbanCard[]>()
   private readonly states = new Map<string, ThreadState>()
   private readonly sums = new Map<string, ThreadSummary>()
+  /** A fiber id is a ULID, one fiber on every host: each id's first copy stands for its others. */
+  private readonly firstOf = new Map<string, string>()
 
   constructor(cards: readonly KanbanCard[]) {
     builds++
@@ -66,20 +68,26 @@ export class ThreadIndex {
       const key = threadKey(card)
       if (this.cards.has(key)) continue
       this.cards.set(key, card)
-      this.states.set(key, threadState(card))
+      if (!this.firstOf.has(card.id)) this.firstOf.set(card.id, key)
       if (!card.isCycle) byId.set(card.id, [...(byId.get(card.id) ?? []), card])
     }
-    // Same-store matches win; an ambiguous foreign path is never guessed.
-    for (const [key, card] of this.cards) {
+    // The graph has one node per fiber, its first copy; every copy reads it.
+    for (const key of new Set(this.firstOf.values())) this.states.set(key, threadState(this.cards.get(key)!))
+    // Every candidate sharing an id is the same fiber, so a stamped thread always
+    // resolves: the copy in its own store, else the copy served by its owning
+    // host, else the first.
+    for (const key of this.states.keys()) {
+      const card = this.cards.get(key)!
       if (!card.orchestrator) continue
       const candidates = byId.get(card.orchestrator) ?? []
       const owner = candidates.find(c => c.originId === card.originId && c.feltStore === card.feltStore)
-        ?? (candidates.length === 1 ? candidates[0] : undefined)
-      if (owner && owner !== card) this.parents.set(key, owner)
+        ?? candidates.find(c => !!c.shuttleHost && c.originId === c.shuttleHost)
+        ?? candidates[0]
+      if (owner && owner.id !== card.id) this.parents.set(key, owner)
     }
     this.breakCycles()
     for (const [key, owner] of this.parents) {
-      const ownerKey = threadKey(owner)
+      const ownerKey = this.key(owner)
       const list = this.kids.get(ownerKey)
       if (list) list.push(this.cards.get(key)!)
       else this.kids.set(ownerKey, [this.cards.get(key)!])
@@ -90,13 +98,13 @@ export class ThreadIndex {
   /** A malformed feed can name a loop; the edge that closes it is dropped, so every walk ends. */
   private breakCycles(): void {
     const done = new Set<string>()
-    for (const start of this.cards.keys()) {
+    for (const start of this.states.keys()) {
       const path = new Set<string>()
       let key: string | undefined = start
       while (key !== undefined && !done.has(key) && !path.has(key)) {
         path.add(key)
         const owner = this.parents.get(key)
-        const next = owner ? threadKey(owner) : undefined
+        const next = owner ? this.key(owner) : undefined
         if (next !== undefined && path.has(next)) { this.parents.delete(key); break }
         key = next
       }
@@ -107,11 +115,11 @@ export class ThreadIndex {
   /** Pre-order from the roots, then reversed: every child is summed before its parent. */
   private summarize(): void {
     const order: string[] = []
-    const pending = [...this.cards.keys()].filter(key => !this.parents.has(key))
+    const pending = [...this.states.keys()].filter(key => !this.parents.has(key))
     while (pending.length) {
       const key = pending.pop()!
       order.push(key)
-      for (const child of this.kids.get(key) ?? []) pending.push(threadKey(child))
+      for (const child of this.kids.get(key) ?? []) pending.push(this.key(child))
     }
     for (let n = order.length - 1; n >= 0; n--) {
       const key = order[n]
@@ -119,7 +127,7 @@ export class ThreadIndex {
       if (!children) continue
       const sum = { ...EMPTY }
       for (const child of children) {
-        const childKey = threadKey(child), below = this.sums.get(childKey) ?? EMPTY
+        const childKey = this.key(child), below = this.sums.get(childKey) ?? EMPTY
         sum.unfinished += below.unfinished; sum.waiting += below.waiting; sum.working += below.working
         sum.toReview += below.toReview; sum.drafts += below.drafts; sum.archived += below.archived
         const state = this.states.get(childKey)!
@@ -137,12 +145,14 @@ export class ThreadIndex {
   }
 
   /** The index's own copy of a card, which may be fresher than a caller's. */
-  card(card: KanbanCard): KanbanCard { return this.cards.get(threadKey(card)) ?? card }
-  parentOf(card: KanbanCard): KanbanCard | undefined { return this.parents.get(threadKey(card)) }
+  card(card: KanbanCard): KanbanCard { return this.cards.get(threadKey(card)) ?? this.cards.get(this.key(card)) ?? card }
+  parentOf(card: KanbanCard): KanbanCard | undefined { return this.parents.get(this.key(card)) }
+  /** The fiber's node, whichever host's copy asks. */
+  private key(card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'>): string { return this.firstOf.get(card.id) ?? threadKey(card) }
   /** A thread whose orchestrator is named but not on the board. */
-  isOrphan(card: KanbanCard): boolean { return !!card.orchestrator && !this.parents.has(threadKey(card)) }
+  isOrphan(card: KanbanCard): boolean { return !!card.orchestrator && !this.parents.has(this.key(card)) }
   /** Direct threads, in feed order. */
-  children(card: KanbanCard): readonly KanbanCard[] { return this.kids.get(threadKey(card)) ?? [] }
+  children(card: KanbanCard): readonly KanbanCard[] { return this.kids.get(this.key(card)) ?? [] }
   /** Every descendant, in tree order. */
   subtree(card: KanbanCard): KanbanCard[] {
     const result: KanbanCard[] = []
@@ -150,15 +160,15 @@ export class ThreadIndex {
     while (pending.length) {
       const next = pending.pop()!
       result.push(next)
-      const below = this.kids.get(threadKey(next))
+      const below = this.kids.get(this.key(next))
       if (below) for (let n = below.length - 1; n >= 0; n--) pending.push(below[n])
     }
     return result
   }
-  summary(card: KanbanCard): ThreadSummary { return this.sums.get(threadKey(card)) ?? EMPTY }
+  summary(card: KanbanCard): ThreadSummary { return this.sums.get(this.key(card)) ?? EMPTY }
   /** Descendants, archived included. */
   size(card: KanbanCard): number { const s = this.summary(card); return s.unfinished + s.archived }
-  state(card: KanbanCard): ThreadState { return this.states.get(threadKey(card)) ?? threadState(card) }
+  state(card: KanbanCard): ThreadState { return this.states.get(this.key(card)) ?? threadState(card) }
   /** Waiting first, then review, work, drafts, rest, archive; then name. */
   readonly compare = (a: KanbanCard, b: KanbanCard): number =>
     STATE_ORDER.indexOf(this.state(a)) - STATE_ORDER.indexOf(this.state(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
