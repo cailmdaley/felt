@@ -1209,15 +1209,23 @@ export class Dock {
     let busy = false
     const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    const sends = document.createElement('span')
+    sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
       const draft = deskColumn(card) === 'drafts'
       const resumable = !draft && Boolean(card.sessionUuid)
-      // A fresh session is always the default verb (↵); a resumable session
-      // adds Resume beside it as the secondary verb (⌥↵).
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : resumable ? 'New session ↵' : 'Start ↵'
-      resume.classList.toggle('kbn-ctl-secondary', resumable)
-      resume.title = resumable ? 'Resume the previous session (⌥↵)' : ''
+      // A live worker takes the message by default (Send ↵) and a new
+      // session is the secondary verb (⌥↵). Otherwise a fresh session is the
+      // default and a resumable one adds Resume beside it (⌥↵).
+      const live = resumable && hasLiveWorker(card)
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : live ? 'New session' : resumable ? 'New session ↵' : 'Start ↵'
+      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : 'Resume'
+      fresh.classList.toggle('kbn-ctl-secondary', live)
+      fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : ''
+      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
+      resume.title = live ? 'Send the message to the live worker (↵)' : resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
+      if (live ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(live ? [resume, fresh] : [fresh, resume]))
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
@@ -1296,15 +1304,12 @@ export class Dock {
     // meeting (its note), a fresh worker, or the same worker resumed.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const sends = document.createElement('span')
-    sends.className = 'kbn-ctl-sends'
     // With Meeting on, its own verb stands in for New session and Resume.
     const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
       sends.hidden = armed
       this.composerPaint?.()
       fit()
     }) : null
-    sends.append(fresh, resume)
     foot.append(...(meeting ? [meeting] : []), sends)
 
     this.composerSend = send
@@ -1337,7 +1342,9 @@ export class Dock {
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
       if (this.meetingArmed()) { this.meetingStart?.(); return }
-      const resumeSession = event.altKey && Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
+      // ↵ is the default verb the buttons show, ⌥↵ the secondary.
+      const resumable = Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
+      const resumeSession = resumable && (hasLiveWorker(card) ? !event.altKey : event.altKey)
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
     })
     box.append(message, strip.el, foot)

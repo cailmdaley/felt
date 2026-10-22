@@ -215,7 +215,6 @@ describe('Dock dispatch recovery', () => {
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
     band.el.querySelector<HTMLTextAreaElement>('textarea')!.value = 'a message'
     const verb = button(name)
-    const label = verb.textContent
     verb.click()
     await flush()
     expect(verb.textContent).toBe('Already running')
@@ -224,8 +223,8 @@ describe('Dock dispatch recovery', () => {
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
-    // The verb names the state it now stands in: a live session makes a fresh start "New session ↵".
-    expect(verb.textContent).toBe(name === 'Resume' ? label : 'New session ↵')
+    // The verb names the state it now stands in: a live worker takes the message (Send ↵) and a fresh start is secondary.
+    expect(verb.textContent).toBe(name === 'Resume' ? 'Send ↵' : 'New session')
     expect(band.el.querySelector('.kbn-ctl-composer')?.parentElement?.querySelector('.kbn-detail-error')?.textContent).toBe('')
   })
 
@@ -311,7 +310,7 @@ describe('state-shaped act zone', () => {
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
     ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
-    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['New session ↵', 'Resume']],
+    ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['Send ↵', 'New session']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
     ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
     ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
@@ -366,6 +365,14 @@ describe('state-shaped act zone', () => {
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
+  })
+  it('Enter sends to a live worker and Alt-Enter starts a new session', async () => {
+    band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }))
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'Carry on'
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Carry on' })
   })
 })
 
