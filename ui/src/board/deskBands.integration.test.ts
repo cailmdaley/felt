@@ -14,9 +14,6 @@ function renderer(data: KanbanResponse, openDetail = vi.fn()): KanbanSurfaceRend
     stopDragAutoScroll: () => {},
     transition: () => {},
     setSurface: () => {},
-    stack: () => {},
-    reorderQueue: () => {},
-    unqueueRow: () => {},
     openDetail,
     onRefresh: () => {},
   })
@@ -188,18 +185,6 @@ describe('In flight bands', () => {
     const column = root.querySelector('[data-column="inFlight"]')!
     expect(column.querySelector('.kbn-empty')?.textContent).toBe('Drag a draft here to start its agent.')
     expect(column.querySelectorAll('.kbn-flight-band')).toHaveLength(0)
-  })
-
-  it('keeps a queue peek in dependency order even when creation order is reversed', () => {
-    const head = card({ id: 'head', status: 'active', runtimePhase: 'waiting' })
-    const next = card({ id: 'next', createdAt: '2026-01-01T09:00:00Z', dependsOn: ['head'], foldedUnder: 'head' })
-    const last = card({ id: 'last', createdAt: '2026-10-01T09:00:00Z', dependsOn: ['next'], foldedUnder: 'head' })
-    const data = response({ now: { drafts: [], inFlight: [head], awaitingReview: [] }, folded: [last, next] })
-    const root = renderer(data).renderNowSection(data.now, {})
-    document.body.append(root)
-    root.querySelector<HTMLElement>('.kbn-card-queued')!.click()
-    expect([...root.querySelectorAll<HTMLElement>('.kbn-card-queued-row')].map((el) => el.textContent))
-      .toEqual(['next', 'last'])
   })
 })
 

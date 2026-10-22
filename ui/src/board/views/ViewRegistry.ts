@@ -284,6 +284,5 @@ export function collectCards(response: KanbanResponse): KanbanCard[] {
   // cards — and it has nothing to say about a day: a card due Tuesday is due
   // Tuesday whoever it is filed behind, and dropping it here would take work off
   // the calendar for an ordering gesture.
-  take(response.folded)
   return out
 }

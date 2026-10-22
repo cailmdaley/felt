@@ -46,7 +46,7 @@ export function response(over: Partial<KanbanResponse> = {}): KanbanResponse {
     timeline: { past: [], futureDated: [] },
     stash: [],
     roles: [],
-    folded: [],
+
     cycles: [],
     staleness: {},
     generatedAt: 0,

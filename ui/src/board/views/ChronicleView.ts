@@ -1028,11 +1028,6 @@ export function buildRows(
     ...restingCards(response),
     // Seats at rest have their own Desk band, but keep their calendar rows.
     ...response.roles,
-    // FOLDED cards. The Desk draws them under their head rather than in a
-    // column of their own, and that is a Desk reading, not a claim that the
-    // work is gone: a never-run draft filed behind something else still belongs
-    // on the Chronicle at its own day. Omit them and a queued card has no row.
-    ...response.folded,
   ]) {
     include.add(card.id)
   }
@@ -1663,7 +1658,6 @@ class ChronicleView implements TemporalView {
       response.timeline.futureDated,
       // Folding and unfolding move a card between `folded` and a column, so a
       // poll whose only change is one of those has to repaint.
-      response.folded,
     ]) {
       parts.push(list.map((c) => c.id).join(','))
     }
@@ -1768,11 +1762,6 @@ class ChronicleView implements TemporalView {
       }
       grid.append(...parts)
     }
-    // Appended LAST so it paints over the bands and the lifelines: today is one
-    // unbroken line down the page, not a line that stops at whatever happens to
-    // overlap it. Same stacking level as the tracks, so DOM order decides — and
-    // it stays under the sticky gutter (z 3), which must keep covering the days
-    // that scroll behind it.
     if (todayIdx >= 0) grid.append(this.buildTodaySeam(todayIdx))
 
     scroller.append(grid)

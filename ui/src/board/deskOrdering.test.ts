@@ -12,7 +12,6 @@ import {
   inFlightBand,
   isQuestion,
 } from './KanbanReadModel.js'
-import { buildDependents, queuedBehind } from './KanbanRules.js'
 import { clusterStashCards, sortDatedByReturn, splitStashByReturn } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { dueCivilDay, instantMs, zone } from './civilDay.js'
@@ -61,7 +60,7 @@ function surfaceOrder(r: KanbanResponse): unknown {
   return {
     drafts: identities(r.now.drafts), inFlight: identities(r.now.inFlight), review: identities(r.now.awaitingReview),
     past: identities(r.timeline.past), future: identities(r.timeline.futureDated),
-    stash: identities(r.stash), folded: identities(r.folded),
+    stash: identities(r.stash),
   }
 }
 
@@ -191,14 +190,11 @@ describe('the composite Desk is independent of entry and origin order', () => {
     entry('shared/local-id', { uid: 'distinct-b' }, 'beta'),
     entry('old/local-id', { uid: undefined }, 'alpha'),
     entry('old/local-id', { uid: undefined }, 'beta'),
-    entry('queue/head', { createdAt: OLD }),
-    entry('queue/next', { createdAt: '', dependsOn: ['queue/head'], dependsOnShape: 'scalar' }),
-    entry('queue/last', { createdAt: NEW, dependsOn: ['queue/next'], dependsOnShape: 'scalar' }),
     entry('future/early', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 9 * * *', tz: 'UTC' } }),
     entry('future/late', { status: 'active', shuttleKind: 'standing', shuttleSchedule: { expr: '0 19 * * *', tz: 'UTC' } }),
   )
 
-  it('keeps every lane stable, duplicates visible, and dependency order independent of recency', () => {
+  it('keeps every lane stable, duplicates visible, independent of recency', () => {
     const baseline = buildKanbanResponseFromComposite(feed(entries), { nowMs: NOW })
     expect(baseline.now.drafts.filter((c) => c.id === 'shared/local-id')).toHaveLength(2)
     expect(baseline.now.drafts.filter((c) => c.id === 'old/local-id')).toHaveLength(2)
@@ -206,8 +202,6 @@ describe('the composite Desk is independent of entry and origin order', () => {
     for (let seed = 1; seed <= 40; seed++) {
       const result = buildKanbanResponseFromComposite(feed(entries, seed), { nowMs: NOW })
       expect(surfaceOrder(result)).toEqual(surfaceOrder(baseline))
-      expect(queuedBehind('queue/head', buildDependents([...result.now.drafts, ...result.folded])))
-        .toEqual(['queue/next', 'queue/last'])
     }
   })
 

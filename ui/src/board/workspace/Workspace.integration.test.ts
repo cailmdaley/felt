@@ -348,41 +348,6 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
     expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
   })
-  it.each(['draft', 'aloft', 'holding', 'review'])('shows a %s head’s queue without putting its children in any lifecycle group or navigation count', async band => {
-    workspace.dispose()
-    localStorage.setItem('shuttle:workspace:sidebar', 'true')
-    const head = { ...cards[0], status: band === 'draft' ? 'open' : band === 'review' ? 'closed' : 'active', runtimePhase: band === 'holding' ? 'waiting' : 'working' }
-    const queued = { ...cards[1], dependsOn: [head.uid!.toUpperCase()], dependsOnShape: 'scalar' as const, foldedUnder: head.id }
-    const review = { ...queued, id: 'work/review', uid: 'review', name: 'Review', status: 'closed', dependsOn: [queued.id], foldedUnder: undefined }
-    const foldedAloft = { ...queued, id: 'work/folded-aloft', uid: 'folded-aloft', status: 'active', runtimePhase: 'working', workerState: 'running' as const, tmuxSession: 'aloft-worker', foldedUnder: undefined }
-    const foldedHolding = { ...queued, id: 'work/folded-holding', uid: 'folded-holding', status: 'active', runtimePhase: 'waiting', foldedUnder: undefined }
-    const other = { ...cards[1], id: 'work/other', uid: 'other', name: 'Other', status: 'closed' }
-    const feed = [review, head, queued, foldedAloft, foldedHolding, other]
-    bodyCards = feed
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
-    workspace.open(head, 'Desk'); await flush()
-    const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')]
-    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
-    const chip = rows()[0].querySelector<HTMLButtonElement>('.kbn-card-queued')!
-    expect(chip.textContent).toBe('+4 queued')
-    chip.click()
-    expect(chip.getAttribute('aria-expanded')).toBe('true')
-    expect(rows()[0].querySelector<HTMLOListElement>('.kbn-card-queued-list')!.hidden).toBe(false)
-    rows()[0].querySelector<HTMLElement>('.kbn-card-queued-row[data-card-uid="beta"]')!.click(); await flush()
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
-    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
-    expect([...document.querySelectorAll('.ws-sidebar-index-count')].reduce((sum, el) => sum + Number(el.textContent), 0)).toBe(2)
-    // A child opened from the peek steps from its head, never becoming a stop.
-    const press = async (key: string): Promise<void> => {
-      document.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey: key === key.toUpperCase(), bubbles: true, cancelable: true })); await flush()
-    }
-    const current = (): string | undefined => rows().find(row => row.getAttribute('aria-current') === 'true')?.dataset.channelUid
-    await press('j'); expect(current()).toBe('other')
-    await press('k'); expect(current()).toBe('alpha')
-    await press('J'); expect(current()).toBe(band === 'review' ? 'alpha' : 'other')
-    await press('K'); expect(current()).toBe('alpha')
-    expect(rows().map(row => row.dataset.channelUid)).toEqual(['alpha', 'other'])
-  })
   it('captions In flight as its Your turn and Working bands even from an interleaved feed; j/k walk one flow and J/K stop at each column', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')

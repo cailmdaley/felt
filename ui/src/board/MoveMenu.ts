@@ -10,9 +10,7 @@
  * words the board prints over those regions, with a rule between the Now
  * columns and the rest. Prose under a row was there to explain verbs, and the
  * places need no explaining; which card is being moved is carried by the
- * sheet's accessible name and the subline under the heading. The one surviving
- * subline is in the queue pane, where a row is a card name and joining the end
- * of its chain is not visible from that name.
+ * sheet's accessible name and the subline under the heading.
  *
  * It is raised by a LONG PRESS on the card itself — the gesture sits where
  * the object is. The menu mounts
@@ -46,9 +44,6 @@ function placeMoveMenu(menu: HTMLElement, anchor: HTMLElement): void {
  * Returns the teardown — the caller holds it and is the only thing that closes
  * the menu deliberately; everything else (scrim, Escape, reflow) closes it from
  * the inside and then calls the caller's `onClosed`.
- *
- * The first pane is destinations. Choosing "Queue behind…" swaps the pane
- * rather than opening a second menu — one surface, two depths.
  */
 export function openMoveMenu(
   card: KanbanCard,
@@ -69,7 +64,7 @@ export function openMoveMenu(
 
   const renderRoot = (): void => {
     menu.replaceChildren()
-    menu.append(buildMoveHeading('Move to', null, card.name))
+    menu.append(buildMoveHeading('Move to', card.name))
     const list = document.createElement('div')
     list.className = 'kbn-move-list'
     let lastGroup: string | null = null
@@ -81,11 +76,7 @@ export function openMoveMenu(
         list.append(rule)
       }
       lastGroup = dest.group
-      list.append(buildMoveItem(dest.label, undefined, () => {
-        if (dest.action.kind === 'queue') {
-          renderQueue()
-          return
-        }
+      list.append(buildMoveItem(dest.label, () => {
         dismiss()
         broker.perform(card, dest.action)
       }))
@@ -96,60 +87,6 @@ export function openMoveMenu(
     // thumb, which is the last impression a destructive-adjacent menu should
     // give when nobody has chosen anything yet.
     if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-item')?.focus()
-  }
-
-  const renderQueue = (): void => {
-    const targets = broker.queueTargets(card)
-    menu.replaceChildren()
-    menu.append(buildMoveHeading('Queue behind', renderRoot, null))
-    if (targets.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'kbn-move-empty'
-      // An empty list is a fact about the board, not a failure — say which.
-      empty.textContent = 'Nothing on the board can take this one behind it.'
-      menu.append(empty)
-      return
-    }
-    // A search box only once the list is long enough that scanning it costs
-    // more than typing. Below that it is chrome standing between the reader
-    // and four names.
-    const list = document.createElement('div')
-    list.className = 'kbn-move-list'
-    const draw = (filter: string): void => {
-      const q = filter.trim().toLowerCase()
-      list.replaceChildren()
-      const shown = q
-        ? targets.filter((t) => t.card.name.toLowerCase().includes(q) || t.card.id.toLowerCase().includes(q))
-        : targets
-      for (const t of shown) {
-        // The hint names the TAIL when it differs from the card you picked:
-        // joining a queue means joining its end, and the menu should not let
-        // that happen behind your back.
-        const hint = t.tail === t.card.id ? undefined : `joins the end of its queue`
-        list.append(buildMoveItem(t.card.name, hint, () => {
-          dismiss()
-          broker.queueBehind(card, t.tail)
-        }))
-      }
-      if (shown.length === 0) {
-        const none = document.createElement('p')
-        none.className = 'kbn-move-empty'
-        none.textContent = 'No match.'
-        list.append(none)
-      }
-    }
-    if (targets.length > 7) {
-      const search = document.createElement('input')
-      search.type = 'search'
-      search.className = 'kbn-move-search'
-      search.placeholder = 'Find a card…'
-      search.setAttribute('aria-label', 'Filter queue targets')
-      search.addEventListener('input', () => draw(search.value))
-      menu.append(search)
-    }
-    draw('')
-    menu.append(list)
-    if (!sheet) menu.querySelector<HTMLElement>('.kbn-move-search, .kbn-move-item')?.focus()
   }
 
   document.body.append(scrim, menu)
@@ -210,23 +147,10 @@ export function openMoveMenu(
 
 function buildMoveHeading(
   text: string,
-  onBack: (() => void) | null,
   subline: string | null,
 ): HTMLElement {
   const row = document.createElement('div')
   row.className = 'kbn-move-heading'
-  if (onBack) {
-    const back = document.createElement('button')
-    back.type = 'button'
-    back.className = 'kbn-move-back'
-    back.setAttribute('aria-label', 'Back to destinations')
-    back.textContent = '‹'
-    back.addEventListener('click', (e) => {
-      e.stopPropagation()
-      onBack()
-    })
-    row.append(back)
-  }
   const label = document.createElement('span')
   label.className = 'kbn-move-heading-text'
   label.textContent = text
@@ -240,7 +164,7 @@ function buildMoveHeading(
   return row
 }
 
-function buildMoveItem(label: string, hint: string | undefined, onPick: () => void): HTMLElement {
+function buildMoveItem(label: string, onPick: () => void): HTMLElement {
   const item = document.createElement('button')
   item.type = 'button'
   item.className = 'kbn-move-item'
@@ -249,12 +173,6 @@ function buildMoveItem(label: string, hint: string | undefined, onPick: () => vo
   main.className = 'kbn-move-item-label'
   main.textContent = label
   item.append(main)
-  if (hint) {
-    const sub = document.createElement('span')
-    sub.className = 'kbn-move-item-hint'
-    sub.textContent = hint
-    item.append(sub)
-  }
   item.addEventListener('click', (e) => {
     e.stopPropagation()
     onPick()

@@ -619,9 +619,9 @@ describe('Overview news, visits and graduated density', () => {
     expect(overview.el.querySelector('.ws-overview-change[data-uid="alpha"]')).toBeNull()
     expect(folio('alpha').classList.contains('ws-overview-seen')).toBe(true)
   })
-  it('counts the Desk review surface, excluding resting, cycles and folded cards', async () => {
+  it('counts the Desk review surface, excluding resting cards and cycles', async () => {
     cards = [card({ id: 'a', status: 'closed' }), card({ id: 'b', status: 'closed', tempered: true }),
-      card({ id: 'c', status: 'closed', effectiveHorizon: 'stashed' }), card({ id: 'd', status: 'closed', foldedUnder: 'a' }),
+      card({ id: 'c', status: 'closed', effectiveHorizon: 'stashed' }),
       card({ id: 'e', status: 'closed', tags: ['cycle'], isCycle: true })]
     await refresh()
     expect(overview.el.querySelector('.ws-overview-summary')?.textContent).toMatch(/; 1 await your review\.$/)

@@ -12,9 +12,6 @@ function renderer(): KanbanSurfaceRenderer {
     stopDragAutoScroll: () => {},
     transition: vi.fn(),
     setSurface: () => {},
-    stack: () => {},
-    reorderQueue: () => {},
-    unqueueRow: () => {},
     openDetail: () => {},
     onRefresh: () => {},
   })

@@ -68,7 +68,6 @@
 /* An undo window needs room for its sentence even on a line whose end held
    only a pill. */
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
-.kbn-col-list .kbn-card > .kbn-card-queued-list { margin: 2px 0 2px 19px; }
 .kbn-col-list .kbn-card--meeting .kbn-meeting { flex-basis: 100%; }
 
 /* Verdicts and Rest stand in over the title's end, on a fade of the line's

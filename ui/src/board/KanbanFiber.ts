@@ -38,18 +38,6 @@ export interface Fiber {
   cold?: boolean;     // project-owned frontmatter `cold:` — when true, stash
                       // cluster renders dimmer and below warm clusters.
   tags?: string[];
-  dependsOn?: string[]; // fiber IDs this depends on
-  /**
-   * How `depends_on:` was WRITTEN, not what it means — `scalar` for the bare
-   * `depends_on: some-fiber` the drag-to-stack gesture writes, `list` for any
-   * sequence form (`[a, b]`, `- {id: a}`, …).
-   *
-   * The gesture is a one-dep affordance: it can author and it can clear a
-   * scalar it (or a human) wrote, but it must never rewrite a LIST. A fan-in
-   * someone assembled by hand carries intent no drag can reconstruct, so the
-   * gesture declines it out loud instead of quietly collapsing it to one edge.
-   */
-  dependsOnShape?: 'scalar' | 'list';
   tempered?: boolean;   // human-acceptance signal — agent never sets this itself
   /** True when the fiber has a `shuttle:` frontmatter block. A fiber is
    * shuttle-managed iff it carries this block; `status` alone decides whether
@@ -108,7 +96,7 @@ export interface Fiber {
 
 /**
  * Map one entry from felt's JSON output onto the kanban Fiber interface.
- * Tool-owned namespaces (`shuttle:`, `tempered:`, `depends_on:`) arrive as
+ * Tool-owned namespaces (`shuttle:`, `tempered:`) arrive as
  * native JSON values (felt v1.0.4+) so we read them directly rather than
  * re-parsing YAML.
  *
@@ -148,16 +136,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   const modifiedAt = pickIsoString(f, 'modified_at');
 
   const tags = stringList(f.tags);
-  // depends_on ships as `[{id: "..."}]` (common), bare-string arrays (legacy),
-  // or a BARE STRING — the one-dep form `felt edit --set depends_on=<id>`
-  // writes, which is what the board's drag-to-stack gesture produces. Accept
-  // all three, and remember which one it was: `dependsOnShape` is what keeps
-  // the gesture from rewriting a hand-built list.
-  const dependsOnRaw = f.depends_on ?? f['depends-on'];
-  const dependsOn = fiberRefList(dependsOnRaw);
-  const dependsOnShape: 'scalar' | 'list' | undefined =
-    dependsOn === undefined ? undefined : typeof dependsOnRaw === 'string' ? 'scalar' : 'list';
-
   const tempered = typeof f.tempered === 'boolean' ? f.tempered : undefined;
 
   // shuttle: arrives as a native JSON map post felt v1.0.4. Anything else
@@ -262,8 +240,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     horizon,
     cold,
     tags,
-    dependsOn,
-    dependsOnShape,
     tempered,
     hasShuttleBlock: hasShuttleBlock || undefined,
     shuttleKind,
@@ -304,35 +280,6 @@ function stringList(v: unknown): string[] | undefined {
     if (typeof item === 'string') {
       const trimmed = item.trim();
       if (trimmed) out.push(trimmed);
-    }
-  }
-  return out.length > 0 ? out : undefined;
-}
-
-/**
- * Like `stringList`, but also accepts items shaped as `{id: "..."}` so felt's
- * object-form depends_on round-trips correctly. Tolerates mixed arrays.
- */
-function fiberRefList(v: unknown): string[] | undefined {
-  // The scalar form: `depends_on: some-fiber`. felt stores what it is handed,
-  // and `--set depends_on=<id>` hands it a string, so this is the shape the
-  // board's own stack gesture round-trips through.
-  if (typeof v === 'string') {
-    const trimmed = v.trim();
-    return trimmed ? [trimmed] : undefined;
-  }
-  if (!Array.isArray(v)) return undefined;
-  const out: string[] = [];
-  for (const item of v) {
-    if (typeof item === 'string') {
-      const trimmed = item.trim();
-      if (trimmed) out.push(trimmed);
-    } else if (item && typeof item === 'object' && !Array.isArray(item)) {
-      const id = (item as Record<string, unknown>).id;
-      if (typeof id === 'string') {
-        const trimmed = id.trim();
-        if (trimmed) out.push(trimmed);
-      }
     }
   }
   return out.length > 0 ? out : undefined;

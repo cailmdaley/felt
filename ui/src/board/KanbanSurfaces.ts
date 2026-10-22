@@ -6,7 +6,6 @@ import { withEmbeds, type FiberSend } from './fiberSends.js'
 import { buildSendGallery } from './previewGallery.js'
 import { buildPreviewConstitution } from './previewConstitution.js'
 import type { PreviewContent } from './CardPreview.js'
-import { queuedControl } from './QueuedControl.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
@@ -34,31 +33,11 @@ import { hasLiveWorker } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
-  buildDependents,
-  throughVerdicts,
-  cardDragArms,
   humanizeCron,
-  inStackHotZone,
-  intersectRects,
-  STACK_DWELL_MS,
-  stackZoneOffered,
   lensCycles,
-  queueDropIndex,
-  queueIsLinear,
-  queueRowDetachPlan,
-  queueRowDropWrites,
-  queueRowGesture,
-  queuedBehind,
-  reorderQueueWrites,
-  stackClaimsDrop,
-  stackDropVerdict,
 } from './KanbanRules.js'
 import type {
   CycleLensChip,
-  QueueRewrite,
-  QueueRowGesture,
-  StackVerdict,
-  ZoneRect,
 } from './KanbanRules.js'
 import { byCreatedAtDesc, deriveCycleLens, IN_FLIGHT_BANDS, inFlightBand, isSleepingOnSchedule } from './KanbanReadModel.js'
 import { coarsePointer, isMobileViewport } from './mobile.js'
@@ -173,10 +152,7 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 // weeks is still inside "a day you can picture"; past that you write a `due:`.
 const DRAG_HORIZON_DAYS = 21
 
-/** The dataTransfer type a peek-list row drag carries. Its own MIME type on
- *  purpose: no other drop target on the board reads it, so a row in flight
- *  cannot be mistaken for a card being moved. */
-const QUEUE_ROW_MIME = 'application/x-queue-row'
+
 
 /**
  * Daemon runtime phases that earn a badge on an In-flight card with no live
@@ -228,9 +204,7 @@ interface AxisScrollSpec {
   state: AxisScroll
   edgePx: number
   maxStepPx: number
-  /** Capture phase, for the columns: a card claiming a stack and a peek row
-   *  mid-reorder both `stopPropagation`, which in the bubble phase would
-   *  starve the scroll exactly when the human most needs to reach further. */
+  /** Capture phase, for the columns: observe the gesture before a drop target handles it. */
   capture: boolean
   /** Columns only: a column that does not overflow has nothing to scroll. */
   requireOverflow: boolean
@@ -251,24 +225,6 @@ interface KanbanSurfaceRendererOptions {
   ) => void | Promise<void>
   /** Make this constitution a seat, choosing an office when it has none. */
   makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>
-  /** Author a sequence edge — `card.depends_on = tailId`, the card-onto-card
-   *  drop. The renderer has already ruled the drop legal (`stackDropVerdict`)
-   *  and resolved the chain tail. */
-  stack?: (card: KanbanCard, tailId: string) => void | Promise<void>
-  /** Move a queued row behind a stack target and repair its old queue. */
-  stackQueueRow?: (fiberId: string, plan: ReturnType<typeof queueRowDropWrites>) => void | Promise<void>
-  /** Commit a reordered queue — one `depends_on:` write per card whose
-   *  predecessor actually changed (`reorderQueueWrites`). Omit to render the
-   *  peek list read-only. */
-  reorderQueue?: (writes: QueueRewrite[]) => void | Promise<void>
-  /** Take a row out of the queue entirely — the drag that leaves the peek list
-   *  and lands on the board. The graph plan repairs scalar children and names
-   *  list children that remain attached; `drop` adds the target's meaning. */
-  unqueueRow?: (
-    fiberId: string,
-    plan: ReturnType<typeof queueRowDetachPlan>,
-    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
-  ) => void | Promise<void>
   openDetail: (card: KanbanCard) => void
   /** The newest report a card sent — the row's mark. */
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
@@ -307,12 +263,7 @@ interface KanbanSurfaceRendererOptions {
   /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
    *  (refresh is never read-only). */
   onRefresh: () => void
-  /** Called whenever a drag this renderer owns starts or ends. The card channel
-   *  is the modal's own (`dragSourceId` is its field), but a PEEK ROW's drag
-   *  lives entirely in here — and the drag horizon has to open for it too, now
-   *  that a row can be dropped on a day. One notification, and the modal
-   *  re-reads `isDragging()`. */
-  onDragActivity?: () => void
+
 }
 
 export class KanbanSurfaceRenderer {
@@ -337,24 +288,6 @@ export class KanbanSurfaceRenderer {
   /** The offscreen node handed to `setDragImage`, kept only until the drag
    *  ends (the browser needs it alive for the snapshot, not after). */
   private dragGhostEl: HTMLElement | null = null
-  /** The peek row currently being dragged, and which list it belongs to — the
-   *  queue reorder's entire drag state. Deliberately NOT `dragSourceId`: see
-   *  `installQueueRowDrag`. */
-  private queueDrag: {
-    list: HTMLElement
-    from: number
-    /** The fiber the dragged row stands for, and the chain it sits in — what a
-     *  drop OUTSIDE the list needs in order to unqueue it and close the gap. */
-    fiberId: string
-    headId: string
-    queue: readonly string[]
-  } | null = null
-  /** Reverse dependency edges for the response currently on screen, built once
-   *  per response rather than once per card. Keyed by the response object
-   *  itself, so a new poll rebuilds and a re-render does not. */
-  private chainDependentsFor: KanbanResponse | null = null
-  private chainDependentsMap: Map<string, string[]> = new Map()
-
   private readonly o: KanbanSurfaceRendererOptions
   private currentMeetingList: HTMLElement | null = null
   /** The card the live meeting was last drawn on; `null` while it draws its own. */
@@ -409,7 +342,6 @@ export class KanbanSurfaceRenderer {
     if (isMobileViewport()) adoptColumnActions(board, folio)
     this.installFolioPager(board, folio)
     this.installSectionDragHandlers(section, {
-      rowDrop: 'now',
       skipColHead: true,
       commit: (card) => void this.o.setSurface(card, 'now'),
     })
@@ -591,11 +523,7 @@ export class KanbanSurfaceRenderer {
    * because a chip here, a chip on the horizon, and a band on the Chronicle are
    * all the same object.
    *
-   * AND EACH CHIP IS A DROP TARGET while a drag is in flight — a card or a peek
-   * list row, the same as a day cell on the strip. That is why the strip has no
-   * chapter chips of its own any more: there was one row of chapters on screen
-   * already, and drawing a second one under the tabs the moment you picked
-   * something up was the board saying the same thing twice. `dropDay` (from
+   * Each chip accepts a card drop, like a day cell on the strip. `dropDay` (from
    * `lensCycles`) is what a drop here writes — a chip is a day
    * cell you happen to know by name. A cycle with no `start:` is a deadline
    * rather than a span, so it has no day to offer and simply refuses, silently
@@ -804,7 +732,6 @@ export class KanbanSurfaceRenderer {
 
     section.append(grid)
     this.installSectionDragHandlers(section, {
-      rowDrop: 'stashed',
       skipColHead: true,
       commit: (card) => void this.o.setSurface(card, 'stashed'),
     })
@@ -821,8 +748,7 @@ export class KanbanSurfaceRenderer {
    *
    * Drop a constitution on the band to make it a seat and let it rest,
    * choosing an office first when it has none. The empty band stays reachable
-   * for the first seat. Chips keep their own stack meaning: drop a card on a
-   * seat to queue it behind that office's work.
+   * for the first seat.
    */
   renderRolesSection(
     roles: KanbanCard[],
@@ -831,7 +757,7 @@ export class KanbanSurfaceRenderer {
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-roles'
     section.setAttribute('role', 'region')
-    section.setAttribute('aria-label', `Roles (${roles.length}) — drop a constitution here to make a seat; drop on a seat to queue work`)
+    section.setAttribute('aria-label', `Roles (${roles.length}) — drop a constitution here to make a seat`)
 
     const head = renderBandHead('Roles', roles.length)
     section.append(head)
@@ -840,7 +766,7 @@ export class KanbanSurfaceRenderer {
     const row = document.createElement('div')
     row.className = 'kbn-roles-row'
     row.setAttribute('role', 'list')
-    for (const card of roles) row.append(this.renderRoleSeat(card, staleness[card.originId]))
+    for (const card of roles) row.append(this.renderRoleChip(card, staleness[card.originId]))
     if (roles.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'kbn-cluster-empty'
@@ -850,30 +776,11 @@ export class KanbanSurfaceRenderer {
     section.append(row)
     this.installSectionDragHandlers(section, {
       skipColHead: false,
-      skipTarget: '.kbn-role-chip, .kbn-role-queue',
+      skipTarget: '.kbn-role-chip',
       refusal: seatDropRefusal,
       commit: card => void this.o.makeSeat?.(card, section),
     })
     return section
-  }
-
-  /** One seat in the Roles band: its chip, and — when work is filed behind it
-   *  — the "+N queued" control beside it. The control sits OUTSIDE the chip,
-   *  which is a button and cannot hold the peek list's own buttons and drags. */
-  private renderRoleSeat(
-    card: KanbanCard,
-    originStaleness: KanbanOriginStaleness | undefined,
-  ): HTMLElement {
-    const chip = this.renderRoleChip(card, originStaleness)
-    const queue = document.createElement('div')
-    queue.className = 'kbn-role-queue'
-    if (!this.renderQueuedChip(card, queue)) return chip
-    chip.removeAttribute('role')
-    const seat = document.createElement('div')
-    seat.className = 'kbn-role-seat'
-    seat.setAttribute('role', 'listitem')
-    seat.append(chip, queue)
-    return seat
   }
 
   private renderRoleChip(
@@ -891,9 +798,6 @@ export class KanbanSurfaceRenderer {
     el.draggable = !isStale && !coarsePointer()
     if (!isStale) this.installDraggable(el, card, true)
     this.installLongPressMove(el, card)
-    // The whole chip queues work; its edges never yield to the band's
-    // make-seat gesture.
-    this.installStackTarget(el, card, { wholeChip: true })
 
     const dot = document.createElement('span')
     dot.className = `kbn-role-chip-dot kbn-role-chip-dot-${isStale ? 'stale' : card.held ? 'held' : 'rest'}`
@@ -1022,37 +926,10 @@ export class KanbanSurfaceRenderer {
     st.frame = null
   }
 
-  /** The one write path for `queueDrag`, so the drag horizon opens and closes
-   *  with a row exactly as it does with a card. */
-  private setQueueDrag(drag: KanbanSurfaceRenderer['queueDrag']): void {
-    const was = this.queueDrag !== null
-    this.queueDrag = drag
-    if (was !== (drag !== null)) this.o.onDragActivity?.()
-  }
+  /** True while a card drag is in flight. */
+  isDragging(): boolean { return this.o.getDragSourceId() !== null }
 
-  /** True while ANY drag this renderer owns is in flight — a card or a peek-list
-   *  row. The edge-scrolls and the modal's body scroll both key off this, so a
-   *  queue row can reach an off-screen part of the board exactly as a card can.
-   *  (A row drag deliberately never sets `dragSourceId`; see
-   *  `installQueueRowDrag`.) */
-  isDragging(): boolean {
-    return this.o.getDragSourceId() !== null || this.queueDrag !== null
-  }
 
-  /**
-   * Vertical drag edge-scroll for a scrollable region — hold a card near a
-   * column's top or bottom edge and the column scrolls under it.
-   *
-   * The columns scroll independently of the board body, so the body's own
-   * auto-scroll cannot reach a card at the bottom of a full column: you could
-   * see the card, but never get to it while holding something. (The hot zone
-   * is measured on the visible box for the same reason; see `visibleRectOf`.)
-   *
-   * Registered in the CAPTURE phase on purpose. A card that claims a stack and
-   * a peek row mid-reorder both call `stopPropagation`, and in the bubble
-   * phase that would silently starve the scroll exactly when the human is
-   * hovering something — the moment they most need to reach further.
-   */
   private installVerticalEdgeScroll(el: HTMLElement): void {
     this.installAxisEdgeScroll(el, {
       axis: 'y',
@@ -1066,13 +943,7 @@ export class KanbanSurfaceRenderer {
     })
   }
 
-  /** Edge-scroll the drag horizon when a drag approaches its left or right
-   *  edge — the horizontal twin of the body's vertical drag-scroll, and the
-   *  only way to reach day fourteen on a narrow board while holding a card.
-   *  Velocity rises with how far into the 80px margin the cursor has pushed.
-   *
-   *  A PEEK ROW deliberately does not edge-scroll the horizon: the liveness
-   *  predicate is `getDragSourceId` alone, not `isDragging()`. */
+
   private installEdgeScroll(wrap: HTMLElement): void {
     this.installAxisEdgeScroll(wrap, {
       axis: 'x',
@@ -1087,12 +958,10 @@ export class KanbanSurfaceRenderer {
   }
 
   /** Install drop handlers on a section (Now, Resting, Roles). A drop outside
-   *  a column header calls `commit`; `rowDrop` also accepts a peek-list row,
-   *  which leaves the queue and takes that horizon. */
+   *  a column header calls `commit`. */
   private installSectionDragHandlers(
     section: HTMLElement,
     spec: {
-      rowDrop?: HorizonKind
       skipColHead: boolean
       skipTarget?: string
       refusal?: (card: KanbanCard) => string | null
@@ -1108,9 +977,8 @@ export class KanbanSurfaceRenderer {
       section.removeAttribute('title')
       this.setAim(section, null)
     }
-    const rowInFlight = (): boolean => spec.rowDrop !== undefined && this.queueDrag !== null
     section.addEventListener('dragover', (e) => {
-      if (!this.o.getDragSourceId() && !rowInFlight()) return
+      if (!this.o.getDragSourceId()) return
       if (!watchingEnd) {
         watchingEnd = true
         document.addEventListener('dragend', () => { watchingEnd = false; clear() }, { once: true })
@@ -1137,13 +1005,6 @@ export class KanbanSurfaceRenderer {
     section.addEventListener('drop', (e) => {
       if (overHead(e)) return
       clear()
-      // A peek-list row landing here leaves the queue; Now surfaces the card,
-      // while Resting keeps it at rest.
-      if (rowInFlight() && spec.rowDrop) {
-        e.preventDefault()
-        this.handleQueueRowDropOut({ horizon: spec.rowDrop })
-        return
-      }
       const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
       this.o.setDragSourceId(null)
       this.o.stopDragAutoScroll()
@@ -1159,13 +1020,7 @@ export class KanbanSurfaceRenderer {
    * Make an element mean the civil day `iso` for a drop — a day cell on the
    * drag horizon, or a cycle chip standing in for its opening day.
    *
-   * It answers TWO drags with one meaning. A card lands here and gets the date.
-   * A PEEK-LIST ROW lands here and gets the same date, with the unqueue
-   * composed in front of it (`handleQueueRowDropOut`): the row leaves its
-   * chain, the chain closes over the gap, and then the day says what it always
-   * says. Dragging a row out is "not behind that one — then", and "then" is
-   * exactly what this surface is for, so the row had no business being unable
-   * to reach it.
+   * A card lands here and gets the date.
    *
    * NOTHING IS CLAIMED THAT IS NOT TAKEN: with no drag in flight, or a past
    * day, or an id this board cannot resolve, the handlers return before
@@ -1181,11 +1036,8 @@ export class KanbanSurfaceRenderer {
       if (iso < today) return false
       return !!findCardById(this.o.getLastResponse(), id)
     }
-    /** The id this drop would act on — the card being dragged, or the fiber the
-     *  peek row stands for. Null when nothing eligible is in flight. */
+    /** The id this drop would act on — the card being dragged. Null when nothing eligible is in flight. */
     const heldId = (): string | null => {
-      const row = this.queueDrag
-      if (row) return isDropEligible(row.fiberId) ? row.fiberId : null
       const dragSourceId = this.o.getDragSourceId()
       if (!dragSourceId) return null
       return isDropEligible(dragSourceId) ? dragSourceId : null
@@ -1210,18 +1062,6 @@ export class KanbanSurfaceRenderer {
       setActive(false)
     })
     dropCol.addEventListener('drop', (e) => {
-      // A row in flight is answered first: it never arms `dragSourceId`, so the
-      // card path below would find nothing to move and the release would fall
-      // through to the surface underneath.
-      const row = this.queueDrag
-      if (row) {
-        if (!isDropEligible(row.fiberId)) return
-        e.preventDefault()
-        e.stopPropagation()
-        setActive(false)
-        this.handleQueueRowDropOut(dayMeaning(row.fiberId))
-        return
-      }
       e.preventDefault()
       e.stopPropagation()
       const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
@@ -1332,7 +1172,6 @@ export class KanbanSurfaceRenderer {
     el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''}`)
 
     if (!isStale) this.installDraggable(el, card, false)
-    this.installStackTarget(el, card)
 
     const glyph = document.createElement('span')
     glyph.className = 'kbn-cluster-item-glyph'
@@ -1377,11 +1216,6 @@ export class KanbanSurfaceRenderer {
       el.title = `${card.name} — resting until ${formatDue(card.due)}`
     }
 
-    // A head at rest still says what is queued behind it — the fold puts those
-    // cards HERE, on this row, and nowhere else on the board. The full chip,
-    // not the compact one: a cluster row wraps, so the peek list can take a
-    // line of its own here the way it does on a desk card.
-    this.renderQueuedChip(card, el)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
     // the way a Desk row's are: under the pointer at that end, or on focus. A
@@ -1450,12 +1284,6 @@ export class KanbanSurfaceRenderer {
       e.preventDefault()
       e.stopPropagation()
       col.classList.remove('kbn-col-drop')
-      // A row dragged out of a peek list onto a lifecycle column: unqueue it,
-      // then let the column do what the column does.
-      if (this.queueDrag) {
-        this.handleQueueRowDropOut({ column: kind })
-        return
-      }
       const fiberId = e.dataTransfer?.getData('text/x-fiber-id') || this.o.getDragSourceId()
       this.o.setDragSourceId(null)
       this.o.stopDragAutoScroll()
@@ -1465,7 +1293,7 @@ export class KanbanSurfaceRenderer {
       void this.o.transition(card, kind)
     }
     const dragOverColumn = (e: DragEvent): void => {
-      if (!this.o.getDragSourceId() && !this.queueDrag) return
+      if (!this.o.getDragSourceId()) return
       e.preventDefault()
       e.stopPropagation()
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
@@ -1803,7 +1631,7 @@ export class KanbanSurfaceRenderer {
    * Render one Desk row — a line in a thread list, not a slip of paper.
    *
    * At a glance a row carries only what decides where to look next: whose
-   * hand it is in (the glyph), the title, the queue behind it, a mark for its
+   * hand it is in (the glyph), the title, a mark for its
    * newest report, and the turn chip. Everything read rather than glanced —
    * outcome, question, path, agent, due, warnings and the report itself — is
    * the preview's (`buildCardPreview`), built when the row is hovered or
@@ -1847,12 +1675,6 @@ export class KanbanSurfaceRenderer {
     // raises is the board's business (`onCardLongPress`); the renderer only
     // reports that it happened, and on which element to hang the menu.
     this.installLongPressMove(el, card)
-    // A card is also a DROP TARGET: dropping another card on it stacks that
-    // one behind this one. Installed even on a stale card — the sequence write
-    // is against the DROPPED card's owner, not this one's. ONCE: a second call
-    // attaches a second listener set, and the pair disagree about the card's
-    // held title, leaving a refused drag's tooltip stuck on the card.
-    this.installStackTarget(el, card)
 
     const glyph = document.createElement('span')
     glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
@@ -1869,10 +1691,6 @@ export class KanbanSurfaceRenderer {
     meta.className = 'kbn-card-meta'
     markVerdictHost(meta, card)
 
-    // "+N queued" — this card heads a sequence. Its peek list hangs under the
-    // row, on a line of its own, where the keyboard can walk it.
-    this.renderQueuedChip(card, meta)
-    const queuedList = meta.querySelector<HTMLElement>(':scope > .kbn-card-queued-list')
 
     // Temper / Discard (awaiting review and in flight) and Rest (every
     // Shuttle-managed card) lie over the title's end, shown under the pointer,
@@ -1914,7 +1732,6 @@ export class KanbanSurfaceRenderer {
     if (turnChip) meta.append(turnChip)
 
     el.append(meta)
-    if (queuedList) el.append(queuedList)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
@@ -2157,15 +1974,7 @@ export class KanbanSurfaceRenderer {
       paper.querySelector(':scope > .kbn-card-header')?.append(actions)
     }
 
-    // A dep id that resolves to nothing. It holds nothing back, so the only way
-    // it can be seen is to say so on the card — otherwise a typo reads as a
-    // queue that silently isn't one.
-    if (card.dependsOnUnresolved?.length) {
-      const warn = document.createElement('div')
-      warn.className = 'kbn-card-depwarn'
-      warn.textContent = `unresolved dep: ${card.dependsOnUnresolved.join(', ')} — fix the reference or remove it`
-      paper.append(warn)
-    }
+
     const staleness = resp?.staleness[card.originId]
     if (staleness?.status === 'stale') {
       const waiting = document.createElement('div')
@@ -2174,415 +1983,6 @@ export class KanbanSurfaceRenderer {
       paper.append(waiting)
     }
     return paper
-  }
-
-  /**
-   * Reverse edges over every card on the board — the graph the stack gesture,
-   * the fold and the "+N queued" chip all reason over. Memoized per response.
-   */
-  private chainDependents(): Map<string, string[]> {
-    const resp = this.o.getLastResponse()
-    if (resp === this.chainDependentsFor) return this.chainDependentsMap
-    this.chainDependentsFor = resp
-    this.chainDependentsMap = boardDependents(resp)
-    return this.chainDependentsMap
-  }
-
-  /**
-   * The "+N queued" affordance: the head of a chain says how much is waiting
-   * behind it, and clicking it reveals the names in chain order, in place.
-   *
-   * N is the WHOLE chain, not the immediate dependents — "3 queued" on a card
-   * that has one card behind it which has two behind that is the honest count
-   * of work filed after this one. The reveal is a list of names, not a modal:
-   * you are checking what is behind the card you are looking at, and leaving
-   * the board to do it would lose the thing you were comparing it to.
-   *
-   * This chip is the ONLY place a folded card appears, so every surface that
-   * draws a head has to call it: the full card and the Resting row. A head
-   * drawn without it is a queue that is simply gone.
-   */
-  private renderQueuedChip(card: KanbanCard, host: HTMLElement): boolean {
-    // THE SAME GRAPH THE GESTURE READS. A follower in awaiting review is still
-    // in the chain — it is what a drop resolves the tail to, and what makes a
-    // second drop refuse — so a chip that counted only the live ones described
-    // a queue nobody else believed in. See `queueMemberNote`.
-    const queued = queuedBehind(card.id, this.chainDependents())
-    if (queued.length === 0) return false
-
-    const resp = this.o.getLastResponse()
-    const members = queued.map((id) => findCardById(resp, id))
-    // Each row asks for itself. `chainAllScalar` is the only chain-wide fact in
-    // play, and it gates REORDER alone — taking a row out is a fact about that
-    // row's own fiber, so it stays offered even in a queue of one and even when
-    // some other member of the chain was assembled by hand. See
-    // `queueRowGesture` for why nothing about the head card is an input.
-    const chainAllScalar = members.every((m) => m?.dependsOnShape === 'scalar')
-    const gestureFor = (m: KanbanCard | null | undefined): QueueRowGesture =>
-      queueRowGesture({
-        shape: m?.dependsOnShape,
-        queueLength: queued.length,
-        chainAllScalar,
-      })
-    const gestures = members.map(gestureFor)
-    const reorderable = gestures.some((g) => g.reorderable)
-      && queueIsLinear(card.id, queued, members.filter((m): m is KanbanCard => !!m))
-    const { chip, list } = queuedControl(card, queued, members, member => this.o.openDetail(member))
-    // THE LIST IS ITS OWN DRAG BOUNDARY.
-    //
-    // `dragstart` fires on the nearest DRAGGABLE ANCESTOR of the pressed
-    // element, not on the element pressed — so a press on this list's padding
-    // would resolve straight past it to the card (or Resting cluster item)
-    // hosting it, and arm a drag of the HEAD fiber. Marking the list draggable
-    // makes it that ancestor: a press on a row still resolves to the row (it is
-    // nearer), and a press on anything else in here resolves to the list, whose
-    // dragstart cancels outright. A near-miss on a queued line does nothing,
-    // which is the only acceptable outcome — the alternative was moving the
-    // fiber the human was reading.
-    list.draggable = !coarsePointer()
-    list.addEventListener('dragstart', (e) => {
-      if (e.target === list) {
-        e.preventDefault()
-        e.stopPropagation()
-      }
-    })
-    // ...AND ITS OWN DROP BOUNDARY, for the same reason. A row released inside
-    // its own list is aiming at a gap between rows; when the chain is not
-    // reorderable there is no gap to aim at, and without this the release would
-    // bubble to the column under the list and be read as "take it out of the
-    // queue" — an unqueue nobody asked for, from a gesture that never left home.
-    // Rows that DO reorder stop these events themselves, so only near-misses
-    // reach here, and a near-miss inside the list does nothing.
-    list.addEventListener('dragover', (e) => {
-      if (this.queueDrag?.list !== list) return
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = reorderable ? 'move' : 'none'
-    })
-    list.addEventListener('drop', (e) => {
-      if (this.queueDrag?.list !== list) return
-      e.preventDefault()
-      e.stopPropagation()
-    })
-    if (reorderable) {
-      list.classList.add('kbn-card-queued-list--reorderable')
-      chip.title = `${chip.title}. Drag a row to reorder the queue.`
-    }
-    Array.from(list.children).forEach((child, i) => {
-      const li = child as HTMLLIElement
-      const gesture = gestures[i]
-      const canReorder = reorderable && gesture.reorderable
-      // The row SAYS what its drag can do — or, when it has none, why. A row
-      // that silently refuses to move reads as a broken board.
-      const hint = gesture.reorderable && !reorderable
-        ? 'Drag out to move. This queue branches, so rows cannot be reordered.'
-        : gesture.hint
-      li.title += ` ${hint}`
-      if (!gesture.draggable) li.classList.add('kbn-card-queued-row--fixed')
-      if (gesture.draggable) {
-        this.installQueueRowDrag(li, list, card.id, queued, i, canReorder)
-      }
-    })
-    host.append(chip)
-    host.append(list)
-    return true
-  }
-
-  /** Drag a folded row within its own linear queue, to another card stack, or
-   *  out to a surface. It has a separate state channel so column drops can
-   *  unqueue it, while card stack targets can move it directly between queues.
-   *  Stop dragstart bubbling because the row lives inside a draggable card. */
-  private installQueueRowDrag(
-    row: HTMLElement,
-    list: HTMLElement,
-    headId: string,
-    queue: readonly string[],
-    index: number,
-    /** May this row also be dropped back into its own list to reorder it? A
-     *  row that can only leave still drags — it just has nowhere to land in
-     *  here, and the list swallows the release (see its own drop handler). */
-    reorderable: boolean,
-  ): void {
-    row.draggable = true
-    row.dataset.queueIndex = String(index)
-    const clearMarks = (): void => {
-      for (const el of list.querySelectorAll('.kbn-queue-drop-before, .kbn-queue-drop-after')) {
-        el.classList.remove('kbn-queue-drop-before', 'kbn-queue-drop-after')
-      }
-    }
-    row.addEventListener('dragstart', (e) => {
-      e.stopPropagation()
-      this.setQueueDrag({ list, from: index, fiberId: queue[index], headId, queue })
-      row.classList.add('kbn-queue-row-dragging')
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'move'
-        // Queue rows carry their own type; ordinary card drags use the
-        // distinct fiber-id MIME type.
-        e.dataTransfer.setData(QUEUE_ROW_MIME, String(index))
-      }
-    })
-    row.addEventListener('dragend', (e) => {
-      e.stopPropagation()
-      row.classList.remove('kbn-queue-row-dragging')
-      this.setQueueDrag(null)
-      clearMarks()
-    })
-    // Where the row would land: above or below this one, by which half of it
-    // the cursor is in. The gap is what the human is aiming at, so the gap is
-    // what gets the indicator.
-    const insertionFor = (e: DragEvent): number => {
-      const r = row.getBoundingClientRect()
-      return e.clientY < r.top + r.height / 2 ? index : index + 1
-    }
-    if (!reorderable) return
-    row.addEventListener('dragover', (e) => {
-      const drag = this.queueDrag
-      if (!drag || drag.list !== list) return
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-      clearMarks()
-      const insertAt = insertionFor(e)
-      row.classList.add(insertAt === index ? 'kbn-queue-drop-before' : 'kbn-queue-drop-after')
-    })
-    row.addEventListener('drop', (e) => {
-      const drag = this.queueDrag
-      if (!drag || drag.list !== list) return
-      e.preventDefault()
-      e.stopPropagation()
-      const to = queueDropIndex(drag.from, insertionFor(e))
-      this.setQueueDrag(null)
-      clearMarks()
-      const writes = reorderQueueWrites(headId, queue, drag.from, to)
-      if (writes.length === 0) return
-      void this.o.reorderQueue?.(writes)
-    })
-  }
-
-  /**
-   * A peek-list row released on the BOARD rather than in its list.
-   *
-   * Dragging a row out says "not that one, this one now" — so it means what it
-   * says: unqueue the fiber, and let the place it landed keep its own meaning.
-   * Scalar children close over the gap using the source row's actual parent;
-   * list children retain their authored edges. A card drawn in its own column
-   * is a card, not a position in a list somebody else is behind.
-   *
-   * Returns true when it handled the drop, so a caller can skip its ordinary
-   * path. A drop with no row in flight returns false and changes nothing.
-   */
-  private handleQueueRowDropOut(
-    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
-  ): boolean {
-    const drag = this.queueDrag
-    if (!drag || !this.o.unqueueRow) return false
-    this.setQueueDrag(null)
-    this.o.stopDragAutoScroll()
-    const source = findCardById(this.o.getLastResponse(), drag.fiberId)
-    const previousId = source?.dependsOn?.[0]
-    if (!source || !previousId) return true
-    void this.o.unqueueRow(
-      drag.fiberId,
-      queueRowDetachPlan(drag.fiberId, previousId, boardCards(this.o.getLastResponse())),
-      drop,
-    )
-    return true
-  }
-
-  /**
-   * Make a card a STACK TARGET: dropping another card on it means "this one
-   * goes after that one".
-   *
-   * The card claims the event only for a DELIBERATE, legal stack — an ok
-   * verdict released in its hot zone (`stackClaimsDrop`). Anything else is
-   * left entirely alone: no `preventDefault`, no `stopPropagation`, no
-   * highlight, so the column's own handler runs on the bubble and every
-   * lifecycle drag that worked before sequences existed still works when
-   * released over a card.
-   *
-   * `wholeChip` makes every visible pixel the hot zone, for a target on a
-   * surface that takes no drop of its own (a Roles chip): the inner-60% zone
-   * exists only to leave the edges to a column's drop.
-   */
-  private installStackTarget(el: HTMLElement, target: KanbanCard, opts: { wholeChip?: boolean } = {}): void {
-    if (!this.o.stack && !this.o.stackQueueRow) return
-    const draggedCard = (): KanbanCard | null => {
-      if (this.queueDrag) {
-        return this.o.stackQueueRow
-          ? findCardById(this.o.getLastResponse(), this.queueDrag.fiberId)
-          : null
-      }
-      if (!this.o.stack) return null
-      const sourceId = this.o.getDragSourceId()
-      return sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
-    }
-    const verdictFor = (): StackVerdict | null => {
-      const source = draggedCard()
-      if (!source) return null
-      return stackDropVerdict(source, target, this.chainDependents())
-    }
-    // DWELL: the pointer resting on this card arms it, whatever the geometry
-    // is doing. The timer starts on the first dragover and is torn down the
-    // moment the pointer leaves or the drag ends, so nothing survives a drag.
-    let dwellTimer: number | null = null
-    let dwelled = false
-    const startDwell = (): void => {
-      if (dwellTimer !== null || dwelled) return
-      dwellTimer = window.setTimeout(() => {
-        dwellTimer = null
-        // Re-check: a verdict can only have gone stale in the human's favour
-        // (they are still holding the same card over the same one), but a
-        // drag that ended during the wait must not leave a card armed.
-        const verdict = verdictFor()
-        if (verdict === null || !verdict.ok) return
-        dwelled = true
-        arm(verdict.tail)
-        // A drag CANCELLED over this card (Escape, or a drop the browser
-        // refuses) fires no dragleave, and a card left glowing at rest is a
-        // promise about a gesture that is over.
-        document.addEventListener('dragend', clear, { once: true })
-      }, STACK_DWELL_MS)
-    }
-    // ARMING SAYS WHERE THE CARD ACTUALLY GOES.
-    //
-    // A drop queues behind the chain's TAIL, and after a few stacks the tail
-    // can be several hops from the card under the cursor — a card in another
-    // project entirely, which the human has never seen and did not aim at.
-    // ("Cards queued I never touched.") The mechanics are right; what was
-    // missing was saying so. So an armed card names its landing place in the
-    // aim readout — the same fixed line the day cells use — and outlines the
-    // tail card itself when it is on screen, so the answer is visible in two
-    // places at once: the words, and the card they name.
-    let tailEl: HTMLElement | null = null
-    const arm = (tail: string): void => {
-      el.classList.add('kbn-card-stack-target')
-      const tailCard = tail === target.id ? target : findCardById(this.o.getLastResponse(), tail)
-      const tailName = tailCard?.name ?? tail
-      this.setAim(el, tail === target.id
-        ? `queues after “${tailName}”`
-        : `queues after “${tailName}” — the end of this stack`)
-      if (tail !== target.id) {
-        tailEl = document.querySelector<HTMLElement>(
-          `[data-fiber-id="${typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(tail) : tail}"]`,
-        )
-        tailEl?.classList.add('kbn-card-stack-tail')
-      }
-    }
-    // A REFUSAL THAT SAYS SO — and says it without claiming anything.
-    //
-    // The one refusal a human reads as a broken board is the silent one over a
-    // card the dragged fiber is ALREADY queued behind: nothing highlights,
-    // nothing moves, and nothing explains. So the target borrows its own
-    // `title` for the duration of the drag. That is the whole intervention:
-    // no preventDefault, no dropEffect, no class — the column's handler still
-    // owns the event exactly as before.
-    let heldTitle: string | null = null
-    const sayRefusal = (text: string | null): void => {
-      if (text === null) {
-        if (heldTitle !== null) {
-          el.title = heldTitle === '' ? '' : heldTitle
-          if (heldTitle === '') el.removeAttribute('title')
-          heldTitle = null
-        }
-        return
-      }
-      if (heldTitle === null) {
-        heldTitle = el.getAttribute('title') ?? ''
-        document.addEventListener('dragend', clearRefusal, { once: true })
-      }
-      el.title = text
-    }
-    const clearRefusal = (): void => sayRefusal(null)
-    const clear = (): void => {
-      sayRefusal(null)
-      if (dwellTimer !== null) {
-        window.clearTimeout(dwellTimer)
-        dwellTimer = null
-      }
-      dwelled = false
-      el.classList.remove('kbn-card-stack-target')
-      tailEl?.classList.remove('kbn-card-stack-tail')
-      tailEl = null
-      this.setAim(el, null)
-    }
-    /** Is this card a target at all right now, and is the pointer in its zone?
-     *  Both answers come from the VISIBLE rectangle — a card clipped by its
-     *  scrolling column is judged on the part you can actually see. */
-    const aimAt = (e: DragEvent): { offered: boolean; inZone: boolean } => {
-      const rect = visibleRectOf(el)
-      if (rect === null) return { offered: false, inZone: false }
-      const offered = stackZoneOffered(el.getBoundingClientRect().height, rect.height)
-      return {
-        offered,
-        inZone: offered && (opts.wholeChip === true || inStackHotZone(rect, { x: e.clientX, y: e.clientY })),
-      }
-    }
-    el.addEventListener('dragover', (e) => {
-      // A legal stack under the pointer starts the dwell clock even while the
-      // claim is still false — that IS the clock. An illegal one never starts
-      // it, so a card that cannot be stacked behind never arms by waiting.
-      const verdict = verdictFor()
-      const aim = aimAt(e)
-      // A card that is not substantially on screen is not a target by ANY
-      // route — not the zone, and not by waiting on its sliver either. The
-      // fold of a scrolling column is where people aim when they mean "the
-      // bottom of this column", and that drop belongs to the column.
-      if (verdict?.ok && aim.offered) startDwell()
-      sayRefusal(
-        verdict && !verdict.ok && verdict.code === 'alreadyQueued' && aim.offered
-          ? 'already queued behind this'
-          : null,
-      )
-      // Not claiming means not touching: no preventDefault, no
-      // stopPropagation, no highlight. The column's own dragover then runs on
-      // the bubble and the drop lands where it always did.
-      if (!stackClaimsDrop(verdict, aim.inZone, dwelled)) {
-        if (el.classList.contains('kbn-card-stack-target')) clear()
-        return
-      }
-      e.preventDefault()
-      e.stopPropagation()
-      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-      // The column saw the first dragover before the stack's dwell completed.
-      // Once this card owns the gesture, remove that broad cue so it does not
-      // keep claiming the whole column while the pointer stays here.
-      el.closest('.kbn-col')?.classList.remove('kbn-col-drop')
-      el.closest('.kbn-section')?.classList.remove('kbn-section-drop')
-      if (verdict?.ok) arm(verdict.tail)
-    })
-    el.addEventListener('dragleave', (e) => {
-      if (e.relatedTarget && el.contains(e.relatedTarget as Node)) return
-      clear()
-    })
-    el.addEventListener('drop', (e) => {
-      const verdict = verdictFor()
-      if (!stackClaimsDrop(verdict, aimAt(e).inZone, dwelled)) {
-        clear()
-        return
-      }
-      e.preventDefault()
-      e.stopPropagation()
-      const queueDrag = this.queueDrag
-      const sourceId = this.o.getDragSourceId()
-      clear()
-      this.o.stopDragAutoScroll()
-      const source = queueDrag
-        ? findCardById(this.o.getLastResponse(), queueDrag.fiberId)
-        : sourceId ? findCardById(this.o.getLastResponse(), sourceId) : null
-      if (!source || !verdict?.ok) return
-      if (queueDrag) {
-        this.setQueueDrag(null)
-        const priorId = source.dependsOn?.[0]
-        if (!priorId) return
-        void this.o.stackQueueRow?.(
-          queueDrag.fiberId,
-          queueRowDropWrites(queueDrag.fiberId, priorId, boardCards(this.o.getLastResponse()), verdict.tail),
-        )
-      } else {
-        this.o.setDragSourceId(null)
-        void this.o.stack?.(source, verdict.tail)
-      }
-    })
   }
 
   /** Wire the long press, when the board offered somewhere for it to go.
@@ -2596,27 +1996,6 @@ export class KanbanSurfaceRenderer {
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {
     el.addEventListener('dragstart', (e) => {
-      // A DRAG THAT BEGAN INSIDE THE QUEUED-PEEK LIST IS NEVER THIS CARD'S.
-      //
-      // The rows stop propagation, so in the ordinary case this listener never
-      // sees their dragstart at all. This guard is for the case that actually
-      // bit: a press that lands on the list's padding, its chip, or — as
-      // happened when the list overflowed a Resting cluster item — on the host
-      // itself while the human was aiming at a row. Arming the card there means
-      // "drag one purple line, move the fiber it hangs off", which is the
-      // opposite of what the gesture says. Refuse the drag outright rather than
-      // starting the wrong one: `preventDefault` in dragstart cancels it, and a
-      // gesture that does nothing is recoverable in a way that a gesture that
-      // moved the wrong fiber is not.
-      const from = e.target as HTMLElement | null
-      const arms = cardDragArms({
-        rowDragInFlight: this.queueDrag !== null,
-        startedInsidePeekList: !!from?.closest?.('.kbn-card-queued-list'),
-      })
-      if (!arms) {
-        e.preventDefault()
-        return
-      }
       this.o.setDragSourceId(card.id)
       el.classList.add('kbn-card-dragging')
       if (e.dataTransfer) {
@@ -3049,28 +2428,7 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
  * Returns null when the element is scrolled entirely out of view — there is no
  * point on it to hit, and callers should treat that as "not over it".
  */
-function visibleRectOf(el: HTMLElement): ZoneRect | null {
-  let rect: ZoneRect | null = el.getBoundingClientRect()
-  for (let node = el.parentElement; node && rect; node = node.parentElement) {
-    const overflow = window.getComputedStyle(node)
-    if (overflow.overflowX === 'visible' && overflow.overflowY === 'visible') continue
-    rect = intersectRects(rect, node.getBoundingClientRect())
-  }
-  if (!rect) return null
-  return intersectRects(rect, {
-    left: 0,
-    top: 0,
-    width: window.innerWidth,
-    height: window.innerHeight,
-  })
-}
-
-/**
- * Every card the response holds, once each — the collection the dependency
- * graph is built over. Deliberately the same lists `findCardById` searches: a
- * card that can be found must also be able to appear in a chain, or "+N
- * queued" would count differently from what the peek can name.
- */
+/** Every card the response holds, once each. */
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []
   const seen = new Set<string>()
@@ -3081,7 +2439,6 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.timeline.futureDated,
     resp.stash,
     resp.roles,
-    resp.folded,
   ]) {
     for (const card of list) {
       if (seen.has(card.id)) continue
@@ -3090,23 +2447,6 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     }
   }
   return out
-}
-
-/**
- * THE reverse dependency graph — the one graph the board reasons over, over
- * every card the response carries, folded ones included.
- *
- * There were two of these once: a narrower one over live cards for the "+N
- * queued" chip, and a wider one for the stack gesture. The split was wrong. A
- * follower in awaiting review is still in the chain — it is what a drop
- * resolves the tail to — so a chip built on the narrower graph showed NOTHING
- * over a card whose queue the gesture could plainly see. And no card leaves
- * this graph for being finished: a queue is ordering, so "after that one" holds
- * whatever verdict that one carries, and the members are shown as what they are
- * (`queueMemberNote`).
- */
-export function boardDependents(resp: KanbanResponse | null): Map<string, string[]> {
-  return buildDependents(throughVerdicts(boardCards(resp)))
 }
 
 export function findCardById(resp: KanbanResponse | null, id: string): KanbanCard | null {
@@ -3126,11 +2466,6 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     resp.timeline.futureDated,
     resp.stash,
     resp.roles,
-    // FOLDED CARDS ARE NOT DRAWN, but they are on screen: every one of them is
-    // a row in some head's peek list, and every row opens, drags and reorders
-    // through this lookup. A folded card that did not resolve here would be a
-    // row whose every gesture silently no-ops.
-    resp.folded,
   ]) {
     const hit = list.find((c) => c.id === id)
     if (hit) return hit

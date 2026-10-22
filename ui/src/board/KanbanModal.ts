@@ -57,10 +57,10 @@ import type {
   KanbanCard,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
+import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
-import { moveDestinations, queueTargets, seatAtRest } from './MoveDestinations.js'
+import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
+import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
@@ -72,7 +72,6 @@ import {
   nextStandingLaunch,
   restingUntil,
 } from './KanbanRules.js'
-import type { QueueRewrite, QueueRowMovePlan } from './KanbanRules.js'
 import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
@@ -270,10 +269,6 @@ export class KanbanModal {
   private set dragSourceId(value: string | null) {
     this._dragSourceId = value
     if (this.body) this.body.classList.toggle('kbn-dragging', value !== null)
-    // `isDragging()`, not `value !== null`: a peek row's drag opens the same
-    // strip and must not be closed by a card drag ending.
-    // `surfaces` is optional-chained only for order: this setter is reachable
-    // from the renderer's own callback, which cannot run before it exists.
     this.syncDragHorizon(value !== null || (this.surfaces?.isDragging() ?? false))
   }
   private dragAutoScrollFrame: number | null = null
@@ -296,12 +291,8 @@ export class KanbanModal {
   /**
    * How many multi-write gestures are still landing.
    *
-   * A COUNTER, not a flag: a gesture routinely nests (a queue row dropped on a
-   * column brackets its own writes and then hands off to `commitTransition`,
-   * which brackets its own), and the outer bracket releases the moment it hands
-   * off — so a flag would clear while the dispatch it delegated is still in
-   * flight, which is exactly the window the guard exists for. Only the poll
-   * reads it; the gesture's own refetch is a direct call and always runs.
+   * A counter keeps nested writes from releasing the poll guard early.
+   * The gesture's own refetch always runs.
    */
   private gestureDepth = 0
   private workspace: Workspace | null = null
@@ -313,7 +304,7 @@ export class KanbanModal {
   private fiberSends: FiberSends | null = null
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
-  private workspaceReturnCard: { id: string; origin: string; head?: string } | null = null
+  private workspaceReturnCard: { id: string; origin: string } | null = null
   private readonly surfaces: KanbanSurfaceRenderer
 
   private readonly handleConversationOpening = (): void => {
@@ -409,20 +400,12 @@ export class KanbanModal {
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       makeSeat: (card, anchor) => this.makeSeat(card, anchor),
-      stack: (card, tailId) => this.stackBehind(card, tailId),
-      stackQueueRow: (fiberId, plan) => this.stackQueueRow(fiberId, plan),
-      reorderQueue: (writes) => this.reorderQueue(writes),
-      unqueueRow: (fiberId, plan, drop) => this.unqueueRow(fiberId, plan, drop),
       openDetail: (card) => this.openDocumentChannel(card),
       onRest: card => this.openRestPopover(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
       openWorker: this.openWorkerAfterGesture,
       releaseQuarantine: (host) => this.releaseQuarantine(host),
-      // A peek row's drag never touches `dragSourceId`, so this is how the
-      // horizon hears about it — the strip has to be there for a row too, now
-      // that a row can be put down on a day.
-      onDragActivity: () => this.syncDragHorizon(this.surfaces.isDragging()),
       onStashClick: this.onStashClick,
       onNewIdeaClick: this.onNewIdeaClick,
       getMeeting: () => this.meetingStatus.meeting,
@@ -572,7 +555,7 @@ export class KanbanModal {
       onVisibility: (active) => this.showWorkspace(active),
       deskColumn: card => this.workspaceColumn(card),
       onReturnCard: card => {
-        this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+        this.workspaceReturnCard = { id: card.id, origin: card.originId }
         this.workspaceReturnFocus = null
         this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
       },
@@ -664,10 +647,6 @@ export class KanbanModal {
     this.body.className = 'kbn-body'
     this.body.addEventListener('wheel', (e) => this.handleBodyWheel(e), { passive: false })
     this.body.addEventListener('scroll', () => this.updateBodyScrollAffordance(), { passive: true })
-    // CAPTURE phase: a card claiming a stack, and a peek row mid-reorder, both
-    // stop propagation, and in the bubble phase that would starve the board's
-    // auto-scroll at exactly the moment the human is reaching for something
-    // off-screen.
     this.body.addEventListener('dragover', (e) => this.handleBodyDragOver(e), true)
     this.body.addEventListener('dragleave', (e) => this.handleBodyDragLeave(e))
     this.body.addEventListener('drop', () => this.stopDragAutoScroll())
@@ -730,7 +709,7 @@ export class KanbanModal {
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
       : null
-    this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+    this.workspaceReturnCard = { id: card.id, origin: card.originId }
     if (compose) this.workspace?.compose(card)
     else if (doc) this.workspace?.open(card, undefined, doc)
     else if (card.status === 'active' && isQuestion(card)) this.workspace?.openQuestion(card)
@@ -793,7 +772,7 @@ export class KanbanModal {
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
     const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
-      : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id || el.dataset.fiberId === address.head)
+      : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id)
       : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
     target?.focus({ preventScroll: true })
   }
@@ -810,7 +789,7 @@ export class KanbanModal {
     })
   }
 
-  /** Drawn Desk order, followed by undrawn folded and chronological cards. */
+  /** Drawn Desk order, followed by chronological cards. */
   private workspaceCards(): KanbanCard[] {
     if (!this.lastResponse) return []
     const cards = boardCards(this.lastResponse)
@@ -1303,22 +1282,7 @@ export class KanbanModal {
       if (optimistic) this.applyResponse(optimistic)
     }
 
-    // LEAVING THE FOLD MEANS LEAVING THE QUEUE. A folded card dragged to a
-    // working column is a person saying "not that one — this one now", and the
-    // fold is derived from `depends_on:`, so a lifecycle verb alone cannot lift
-    // it: the card would land in Drafts and be folded away again by the very
-    // next poll. ("It goes there for a second and pops back.") So the gesture
-    // carries the unstack with it, as one more write alongside the transition.
-    //
-    // Not on a VERDICT (Temper / Compost): erasing the edge would delete the
-    // record of what this work was filed after at the moment it finished.
-    const unstacks =
-      card.foldedUnder !== undefined &&
-      card.dependsOnShape !== 'list' &&
-      target !== 'tempered' &&
-      target !== 'composted'
-
-    void this.commitTransition(card, target, needSurfaceShift, unstacks)
+    void this.commitTransition(card, target, needSurfaceShift)
   }
 
   /**
@@ -1336,7 +1300,6 @@ export class KanbanModal {
     card: KanbanCard,
     target: ColumnKind,
     needSurfaceShift: boolean,
-    unstacks = false,
   ): Promise<void> {
     // Held across the writes AND the trailing reconcile: the launch half can
     // take seconds, and until the daemon has actually dispatched, the honest
@@ -1344,17 +1307,6 @@ export class KanbanModal {
     // for. The poll stays out until the refetch below settles it.
     this.gestureDepth += 1
     try {
-      // The unstack rides FIRST, before the lifecycle verb: the edge is what
-      // would fold the card away again, so clearing it is what makes the rest
-      // of the gesture stick. See the `unstacks` note in `transition`.
-      if (unstacks) {
-        await this.postFeltEdit(
-          { fiber_id: card.id, origin: card.originId, unset: ['depends_on'] },
-          'Unstack failed',
-        )
-        this.announce(`“${card.name}” is out of the queue.`)
-      }
-
       if (needSurfaceShift) {
         // Same write policy as commitSurface's `now`: clear horizon/cold and
         // (for a Drafts drop) the `due:` — "park on the desk" means no
@@ -1420,298 +1372,11 @@ export class KanbanModal {
     const body = (await res.json().catch(() => ({}))) as DispatchFailureBody
     if (needsProjectDir(body)) {
       this.workspaceReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      this.workspaceReturnCard = { id: card.id, origin: card.originId, head: card.foldedUnder }
+      this.workspaceReturnCard = { id: card.id, origin: card.originId }
       this.workspace?.openStartPrompt(card, body)
       return false
     }
-    throw new Error(dispatchFailureMessage(body, `requeue ${res.status}`, res.status))
-  }
-
-  /**
-   * "This one goes after that one" — the card-onto-card drop, persisted as a
-   * scalar `depends_on:` on the DROPPED card.
-   *
-   * One write, one field, and nothing else: the fold is a pure derivation, so
-   * writing the edge is the whole gesture. The board does not move the card
-   * itself — the next render folds it under its head from the new frontmatter,
-   * which is the same path a hand-edited `depends_on:` takes. No optimistic
-   * placement for that reason: an optimism that guessed the routing would be
-   * re-deriving the read model in the writer.
-   *
-   * `tailId` is the END of the target's chain (`stackDropVerdict`), so
-   * dropping onto a card that already has work queued behind it appends to the
-   * queue rather than forking it.
-   */
-  private async stackBehind(card: KanbanCard, tailId: string): Promise<void> {
-    const tail = findCardById(this.lastResponse, tailId)
-    const tailName = tail?.name ?? tailId
-    try {
-      await this.postFeltEdit({
-        fiber_id: card.id,
-        origin: card.originId,
-        set: { depends_on: tailId },
-      })
-      this.announce(`“${card.name}” is queued after “${tailName}”.`)
-    } catch (err: unknown) {
-      const msg = errText(err)
-      this.showBanner(`Couldn't queue “${card.name}” behind “${tailName}”: ${msg}`, 'error')
-      this.announce(`Sequence edit failed: ${msg}`)
-    }
-    await this.fetchAndRender()
-  }
-
-  /** Move a folded queue row onto another stack target. Scalar children stay
-   * behind the row's old predecessor; hand-authored list children keep their
-   * explicit edges and are reported. The moved row is written last; if a
-   * repair fails, the refetch shows the completed repairs with source unmoved. */
-  private async stackQueueRow(
-    fiberId: string,
-    plan: { writes: QueueRewrite[]; protectedIds: string[] },
-  ): Promise<void> {
-    const card = findCardById(this.lastResponse, fiberId)
-    if (!card) return
-    if (this.refusesHandwrittenList(card)) return
-    if (card.dependsOnShape !== 'scalar' || !card.dependsOn?.[0]) {
-      this.showBanner(`Couldn't move “${card.name}” to the new queue: its source edge changed during the drag.`, 'error')
-      await this.fetchAndRender()
-      return
-    }
-    for (const write of plan.writes) {
-      const candidate = findCardById(this.lastResponse, write.fiberId)
-      if (!candidate) {
-        this.showBanner(`Couldn't move “${card.name}” to the new queue: “${write.fiberId}” is no longer on the board.`, 'error')
-        await this.fetchAndRender()
-        return
-      }
-      if (write.fiberId === fiberId) continue
-      if (candidate.dependsOnShape === 'list' && candidate.dependsOn?.includes(fiberId)) {
-        plan.protectedIds.push(write.fiberId)
-        plan.writes = plan.writes.filter((item) => item.fiberId !== write.fiberId)
-        continue
-      }
-      if (candidate.dependsOnShape !== 'scalar' || !candidate.dependsOn?.includes(fiberId)) {
-        this.showBanner(`Couldn't move “${card.name}” to the new queue: “${candidate.name}” changed during the drag.`, 'error')
-        await this.fetchAndRender()
-        return
-      }
-    }
-    const tail = findCardById(this.lastResponse, plan.writes.at(-1)?.newDep ?? '')
-    const tailName = tail?.name ?? plan.writes.at(-1)?.newDep ?? 'the target'
-    this.gestureDepth += 1
-    try {
-      try {
-        for (const write of plan.writes) {
-          const rewritten = findCardById(this.lastResponse, write.fiberId)
-          if (!rewritten) throw new Error(`“${write.fiberId}” is no longer on the board`)
-          if (write.fiberId === fiberId && rewritten.dependsOnShape !== 'scalar') {
-            throw new Error('its depends_on is no longer a scalar during the drag')
-          }
-          if (write.fiberId !== fiberId && rewritten.dependsOnShape !== 'scalar') {
-            plan.protectedIds.push(write.fiberId)
-            continue
-          }
-          await this.postFeltEdit({
-            fiber_id: rewritten.id,
-            origin: rewritten.originId,
-            set: { depends_on: write.newDep },
-          })
-        }
-        if (plan.protectedIds.length > 0) {
-          const names = plan.protectedIds.map((id) => findCardById(this.lastResponse, id)?.name ?? id)
-          this.showBanner(
-            `“${card.name}” moved to the new queue. ${names.map((name) => `“${name}”`).join(', ')} still has a hand-written depends_on list naming it, so that list was left unchanged.`,
-            'info',
-          )
-        }
-        this.announce(`“${card.name}” is queued after “${tailName}”.`)
-      } catch (err: unknown) {
-        const msg = errText(err)
-        this.showBanner(`Couldn't move “${card.name}” to the new queue: ${msg}`, 'error')
-        this.announce(`Queue move failed: ${msg}`)
-      }
-    } finally {
-      this.gestureDepth -= 1
-      await this.fetchAndRender()
-    }
-  }
-
-  /**
-   * Commit a reordered queue — the peek list's drag-a-row gesture.
-   *
-   * The order is not stored anywhere, so there is nothing to write called
-   * "position": a reorder is a handful of `depends_on:` edges changing, and
-   * `reorderQueueWrites` has already reduced the gesture to the MINIMAL set of
-   * them. Cards whose predecessor did not change are not written, so a reorder
-   * does not bump `modified_at` on work nobody moved.
-   *
-   * The writes go out one at a time and the board refetches once at the end.
-   * There is no optimistic render for the same reason the stack drop has none:
-   * the queue's shape is derived from the documents, and guessing it here
-   * would be re-deriving the read model inside the writer. A failure mid-way
-   * leaves the chain partly rewired, which the refetch then shows honestly —
-   * the alternative (a rollback the daemon cannot transact) would be a
-   * fiction.
-   */
-  private async reorderQueue(writes: QueueRewrite[]): Promise<void> {
-    let moved = 0
-    for (const write of writes) {
-      const card = findCardById(this.lastResponse, write.fiberId)
-      try {
-        await this.postFeltEdit({
-          fiber_id: write.fiberId,
-          origin: card?.originId,
-          set: { depends_on: write.newDep },
-        })
-        moved += 1
-      } catch (err: unknown) {
-        const msg = errText(err)
-        this.showBanner(
-          `Couldn't reorder the queue — “${card?.name ?? write.fiberId}” did not move: ${msg}`,
-          'error',
-        )
-        this.announce(`Queue reorder failed: ${msg}`)
-        break
-      }
-    }
-    if (moved === writes.length) this.announce('Queue reordered.')
-    await this.fetchAndRender()
-  }
-
-  /**
-   * Take a fiber out of a queue by dragging its row off the peek list.
-   *
-   * The same sentence as dragging a folded card out of a peek list, so it gets the
-   * same answer — the edge that holds it goes — plus the one thing a card drag
-   * never has to consider: the row was a POSITION, and somebody may have been
-   * standing behind it. Scalar children inherit the departing row's actual
-   * predecessor; hand-written list children are reported and left intact.
-   *
-   * The drop's own meaning is then applied on top, through the ordinary paths:
-   * a column transitions, `now` surfaces, `stashed` keeps it at rest. The card
-   * handed to those paths is a copy with the edge already cleared, so
-   * `transition`'s own unstack does not fire a second, redundant write.
-   *
-   * THE DESTINATION IS PAINTED FIRST, BEFORE ANY WRITE. This gesture is three
-   * or four round trips deep — clear the row's edge, repair the successor's,
-   * transition, dispatch — and every stopping point between them is a state
-   * that is true of the store and false of what the human asked for. Left to
-   * render, they render: the card reached In flight, popped back to Drafts,
-   * and then launched, which is the board narrating its own plumbing. So the
-   * first frame after the drop is the ANSWER (edge cleared, card in the column
-   * it was dropped on), the writes run underneath it, and `gestureDepth` keeps
-   * the poll from painting anything in between. The reconcile at the end still
-   * owns the truth: a write that fails snaps the card back with a banner
-   * saying so, which is the one intermediate state worth seeing.
-   */
-  private async unqueueRow(
-    fiberId: string,
-    plan: QueueRowMovePlan,
-    drop: { column?: ColumnKind; horizon?: HorizonKind; due?: string | null },
-  ): Promise<void> {
-    const card = findCardById(this.lastResponse, fiberId)
-    if (!card) return
-    if (this.refusesHandwrittenList(card)) return
-    // The board as it stands BEFORE the optimistic paint. `transition` needs it
-    // to know where the card came from; see its `basis` parameter.
-    const before = this.lastResponse
-    this.gestureDepth += 1
-    try {
-      const unfolded = clearQueueEdge(before, fiberId)
-      // Verdict placement waits for the shared undo window; unqueuing is independent.
-      const painted = drop.column && drop.column !== 'tempered' && drop.column !== 'composted'
-        ? (applyOptimisticTransition(unfolded, fiberId, drop.column) ?? unfolded)
-        : unfolded
-      if (painted) this.applyResponse(painted)
-
-      try {
-        // Repair scalar children first. If one repair fails, the row remains
-        // attached to its old queue and no destination action runs.
-        for (const w of plan.writes) {
-          const successor = findCardById(before, w.fiberId)
-          if (!successor) throw new Error(`“${w.fiberId}” is no longer on the board`)
-          // A hand-written LIST is somebody's fan-in; closing its edge would
-          // delete a decision to tidy up a graph. Leave it standing and report
-          // that the child still names the departing row.
-          if (successor?.dependsOnShape === 'list') {
-            plan.protectedIds.push(w.fiberId)
-            continue
-          }
-          await this.postFeltEdit({
-            fiber_id: w.fiberId,
-            origin: successor?.originId,
-            set: { depends_on: w.newDep },
-          })
-        }
-        await this.postFeltEdit({ fiber_id: fiberId, origin: card.originId, unset: ['depends_on'] })
-        if (plan.protectedIds.length > 0) {
-          const names = plan.protectedIds.map((id) => findCardById(before, id)?.name ?? id)
-          this.showBanner(
-            `“${card.name}” is out of the queue. ${names.map((name) => `“${name}”`).join(', ')} still has a hand-written depends_on list naming it, so that list was left unchanged.`,
-            'info',
-          )
-        }
-        this.announce(`“${card.name}” is out of the queue.`)
-      } catch (err: unknown) {
-        const msg = errText(err)
-        // Names the daemon's own message, which for an owner this desk cannot
-        // reach is the forward failing by name. That is the honest moment to
-        // report it — the gesture was offered, attempted, and refused by the
-        // machine that owns the file, not withheld on a guess about who owns
-        // what.
-        this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
-        await this.fetchAndRender()
-        return
-      }
-      const released: KanbanCard = {
-        ...card,
-        foldedUnder: undefined,
-        dependsOn: undefined,
-        dependsOnShape: undefined,
-      }
-      if (drop.column) {
-        // Non-verdict drops are painted; verdicts remain on their source surface.
-        this.transition(released, drop.column, { basis: before, skipOptimistic: drop.column !== 'tempered' && drop.column !== 'composted' })
-        return
-      }
-      if (drop.horizon !== undefined) {
-        // Dropped on a surface: out of the queue, but still put down. The
-        // horizon write is what keeps it there — without it, an unqueued card
-        // would walk straight back onto the desk and the drop would read as
-        // ignored. `due` is the day-cell / cycle-chip half of the same
-        // sentence: undefined from a plain section drop (leave the date alone),
-        // a date from a day, null from today (onto the desk, now).
-        //
-        // Unless the card is ALREADY there. A folded card keeps its own
-        // horizon while it hides under its head, so a row pulled out of a
-        // queue onto the surface it was resting on all along has nothing left
-        // to write — and `setSurface`'s "already in Resting" banner would
-        // bury the thing that actually happened.
-        if (this.alreadyOnSurface(released, drop.horizon, { due: drop.due })) {
-          this.showBanner(`“${card.name}” is out of the queue.`, 'info')
-          await this.fetchAndRender()
-          return
-        }
-        this.setSurface(released, drop.horizon, { due: drop.due })
-        return
-      }
-      await this.fetchAndRender()
-    } finally {
-      this.gestureDepth -= 1
-    }
-  }
-
-  /**
-   * A LIST-shaped `depends_on:` is somebody's fan-in, not a chain this board
-   * may rewrite — both queue exits refuse it rather than collapsing it.
-   * Returns whether it refused (and bannered).
-   */
-  private refusesHandwrittenList(card: KanbanCard): boolean {
-    if (card.dependsOnShape !== 'list') return false
-    this.showBanner(
-      `“${card.name}” waits on a hand-written depends_on list — open it and edit the list to release it.`,
-      'info',
-    )
-    return true
+    throw new Error(dispatchFailureMessage(body, `reopen ${res.status}`, res.status))
   }
 
   /** POST one frontmatter edit, owner-routed by `origin`, throwing the
@@ -1719,41 +1384,9 @@ export class KanbanModal {
    *  write. */
   private async postFeltEdit(
     payload: Record<string, unknown>,
-    label = 'Sequence edit failed',
+    label = 'Frontmatter edit failed',
   ): Promise<void> {
     await this.postJson('/api/v1/felt-edit', payload, label)
-  }
-
-  /**
-   * The un-stack: drag a folded card out of its head's peek list and onto Now.
-   *
-   * Clearing the field IS the gesture — there is nothing else to store, so the
-   * only way to take a card out of a queue is to say it is not in one.
-   * When the card was ALSO explicitly stashed, the same write clears that too:
-   * the human dragged it to the desk, and leaving half the reasons it was
-   * resting in place would bounce it straight back on the next poll.
-   *
-   * Refuses a LIST-shaped `depends_on:` rather than collapsing it — the same
-   * rule the stack drop follows, from the other direction.
-   */
-  private async unstack(card: KanbanCard): Promise<void> {
-    if (this.refusesHandwrittenList(card)) {
-      this.announce(`${card.name} has a hand-written depends_on list; edit it there.`)
-      return
-    }
-    // One write: the sequence edge, plus the stash it may also be carrying.
-    const unset = card.storedHorizon === 'stashed'
-      ? ['depends_on', 'horizon', 'cold']
-      : ['depends_on']
-    try {
-      await this.postFeltEdit({ fiber_id: card.id, origin: card.originId, unset })
-      this.announce(`“${card.name}” is out of the queue and back on the desk.`)
-    } catch (err: unknown) {
-      const msg = errText(err)
-      this.showBanner(`Couldn't take “${card.name}” out of the queue: ${msg}`, 'error')
-      this.announce(`Sequence edit failed: ${msg}`)
-    }
-    await this.fetchAndRender()
   }
 
   /**
@@ -1837,16 +1470,7 @@ export class KanbanModal {
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null } = {},
   ): void {
-    // A FOLDED card dragged up to Now is asking to LEAVE THE QUEUE, not to have
-    // its horizon cleared: the fold is derived from `depends_on:` and no horizon
-    // write can lift it, so the plain surface edit would commit and the card
-    // would fold back under its head one poll later — the drag reading as
-    // ignored, which is the dissonance the board must never produce. `unstack`
-    // writes the field that actually holds it.
-    if (horizon === 'now' && card.foldedUnder !== undefined) {
-      void this.unstack(card)
-      return
-    }
+
     // A standing constitution is placed on the timeline by its schedule
     // (`nextStandingLaunch`), not by hand — a horizon/due write here is
     // silently ignored by the read model and just leaves dead frontmatter.
@@ -2516,25 +2140,7 @@ export class KanbanModal {
     this.stopPolling()
     this.scheduleMeetingPoll()
     this.pollTimer = window.setInterval(() => {
-      // Never rebuild the board out from under a held card. The drop targets
-      // would move mid-gesture, and — worse — the source node gets replaced, so
-      // its `dragend` listener dies with it and the drag state never clears,
-      // stranding the drag horizon open across the top of the page. The drag is
-      // seconds long and every drop refetches on landing, so nothing goes stale
-      // for waiting.
-      //
-      // `isDragging()` rather than `dragSourceId`: a peek-list row drag
-      // deliberately never sets that field (it is the isolation mechanism that
-      // keeps a row from being read as a card), and a row drag is the one drag
-      // whose source node is guaranteed to be rebuilt, because the head card
-      // re-renders its own peek list.
       if (this.surfaces.isDragging()) return
-      // AND NOT WHILE A GESTURE IS STILL LANDING. A drop that takes several
-      // writes — unqueue, then transition, then dispatch — passes through
-      // intermediate states that are true of the store and false of what the
-      // human asked for. A poll landing in that window paints one of them: the
-      // card reached In flight, popped back to Drafts, then launched. The
-      // gesture owns the board until its own refetch reconciles.
       if (this.gestureDepth > 0) return
       // Hidden tabs stop polling; visible but unfocused tiled windows slow
       // down to the shared page-attention cadence.
@@ -2777,9 +2383,6 @@ export class KanbanModal {
   }
 
   private handleBodyDragOver(e: DragEvent): void {
-    // `isDragging()` rather than `dragSourceId`: a peek-list row deliberately
-    // never arms the card drag channel, and it still has to be able to reach
-    // an off-screen part of the board.
     if (!this.body || !this.surfaces.isDragging() || this.body.classList.contains('kbn-body-zoomed')) return
     if (this.body.scrollHeight <= this.body.clientHeight) return
 
@@ -2852,7 +2455,7 @@ export class KanbanModal {
   /**
    * The Move menu's seam. Why the menu exists is written once, in
    * `MoveDestinations.ts`; these four calls are the ONLY thing the menu is
-   * given, so it never learns a column, a dependency graph or a wire protocol,
+   * given, so it never learns a column or a wire protocol,
    * and every item it performs lands in the same private gesture method the
    * equivalent drop lands in. Each call rules on {@link liveCard}.
    */
@@ -2863,13 +2466,7 @@ export class KanbanModal {
       const live = this.liveCard(card)
       return moveDestinations(live, findCardColumn(this.lastResponse, live.id))
     },
-    // Cards this one may be queued behind, from the same graph and the same
-    // verdict the card-onto-card drop consults.
-    queueTargets: (card) =>
-      queueTargets(this.liveCard(card), boardCards(this.lastResponse), boardDependents(this.lastResponse)),
     perform: (card, action) => this.performMove(this.liveCard(card), action),
-    // `tailId` is the chain's END, already resolved by `queueTargets`.
-    queueBehind: (card, tailId) => void this.stackBehind(this.liveCard(card), tailId),
   }
 
   /** Teardown for the open move menu. Non-null iff one is up — a second long
@@ -2912,7 +2509,7 @@ export class KanbanModal {
     return findCardById(this.lastResponse, card.id) ?? card
   }
 
-  /** Perform one non-queue destination. Each branch is the drop's own entry
+  /** Perform one destination. Each branch is the drop's own entry
    *  point, so banners, optimism and reconciliation are inherited whole. */
   private performMove(card: KanbanCard, action: MoveAction): void {
     switch (action.kind) {
@@ -2921,13 +2518,6 @@ export class KanbanModal {
         return
       case 'surface':
         this.setSurface(card, action.horizon)
-        return
-      case 'unstack':
-        void this.unstack(card)
-        return
-      case 'queue':
-        // The picker owns this one — it needs a target before anything is
-        // written. The broker's `queueBehind` is where it lands.
         return
     }
   }
@@ -2949,7 +2539,6 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
   timeline: KanbanResponse['timeline']
   stash: KanbanCard[]
   roles: KanbanCard[]
-  folded: KanbanCard[]
 } {
   let card: KanbanCard | null = null
   const drop = (list: KanbanCard[]): KanbanCard[] => {
@@ -2971,80 +2560,8 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
     },
     stash: drop(resp.stash),
     roles: drop(resp.roles),
-    // FOLDED IS A SURFACE for lifting purposes: a card drawn only as a row in
-    // its head's peek list is still a card every gesture can start from, and a
-    // relocator that could not find it would paint nothing at all.
-    folded: drop(resp.folded),
     card,
   }
-}
-
-/**
- * Optimistically release one card from its queue: the edge goes, on whichever
- * surface holds it. Returns a fresh response (the input is never
- * mutated), or null when the card is absent.
- *
- * This is the half of "take it out of the queue" the OTHER optimistic
- * relocators cannot express. They move a card between surfaces; the edge is a
- * property of the card itself, and it is what the head's "+N queued" list is
- * built from — so until it clears, the row the human just dragged is still
- * sitting in the peek list they dragged it out of. Clearing it first is what
- * makes the very first frame after the drop agree with the gesture.
- *
- * Deliberately does NOT touch anyone else's `depends_on:`. The successor's
- * repair edge is a real write with a real failure mode, and guessing it here
- * would put a chain shape on screen that no document says yet.
- */
-export function clearQueueEdge(
-  resp: KanbanResponse | null,
-  cardId: string,
-): KanbanResponse | null {
-  if (!resp) return null
-  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
-  if (!card) return null
-  const released: KanbanCard = {
-    ...card,
-    foldedUnder: undefined,
-    dependsOn: undefined,
-    dependsOnShape: undefined,
-  }
-  const restore = (list: KanbanCard[], original: KanbanCard[]): KanbanCard[] =>
-    list === original ? list : [...list, released]
-  // A card lifted out of FOLDED has no surface to be put back on — it was never
-  // drawn in a column. Unfolding it IS its arrival, so it lands in the column
-  // its own status names, which is where the very next poll will draw it too.
-  const arrives = folded !== resp.folded
-  const arrivesIn = (kind: 'drafts' | 'inFlight' | 'awaitingReview'): boolean =>
-    arrives && unfoldedColumn(released) === kind
-  const place = (
-    list: KanbanCard[],
-    original: KanbanCard[],
-    kind: 'drafts' | 'inFlight' | 'awaitingReview',
-  ): KanbanCard[] => (arrivesIn(kind) ? [released, ...list] : restore(list, original))
-  return withSurfaces(resp, {
-    now: {
-      drafts: place(now.drafts, resp.now.drafts, 'drafts'),
-      inFlight: place(now.inFlight, resp.now.inFlight, 'inFlight'),
-      awaitingReview: place(now.awaitingReview, resp.now.awaitingReview, 'awaitingReview'),
-    },
-    timeline: {
-      ...timeline,
-      past: restore(timeline.past, resp.timeline.past),
-      futureDated: restore(timeline.futureDated, resp.timeline.futureDated),
-    },
-    stash: restore(stash, resp.stash),
-    roles: restore(roles, resp.roles),
-    folded,
-  })
-}
-
-/** The desk column an unfolded card belongs in, from its own status — the
- *  card-level twin of `classifyFiber`'s open/closed branches, for the one
- *  frame between a drop and the refetch that reclassifies properly. */
-function unfoldedColumn(card: KanbanCard): 'drafts' | 'inFlight' | 'awaitingReview' {
-  if (card.status === 'closed' && card.tempered === undefined) return 'awaitingReview'
-  if (hasLiveWorker(card) || card.status === 'active') return 'inFlight'
-  return 'drafts'
 }
 
 /**
@@ -3058,7 +2575,6 @@ function withSurfaces(
     timeline: KanbanResponse['timeline']
     stash: KanbanCard[]
     roles?: KanbanCard[]
-    folded?: KanbanCard[]
   },
 ): KanbanResponse {
   const roles = s.roles ?? resp.roles
@@ -3068,7 +2584,6 @@ function withSurfaces(
     timeline: s.timeline,
     stash: s.stash,
     roles,
-    folded: s.folded ?? resp.folded,
     totals: surfaceTotals({ ...s, roles }),
   }
 }
@@ -3121,12 +2636,10 @@ function applyOptimisticTransition(
 ): KanbanResponse | null {
   if (!resp) return null
   const nowIso = new Date().toISOString()
-  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
-  // Unfolding is implicit in every lifecycle drop: the card is being drawn in a
-  // column now, so the fold marker must not survive into the optimistic frame.
-  const moved: KanbanCard = { ...card, foldedUnder: undefined }
+  const moved: KanbanCard = { ...card }
   // Any UNTEMPERED non-draft state counts, not just awaiting (status:closed):
   // Temper can land while the run is still status:active (worker alive or just
   // killed, exit writer not yet run) and the daemon resolves it to accept
@@ -3156,9 +2669,9 @@ function applyOptimisticTransition(
       nowMs,
     )
     // A standing seat re-armed between runs rests among the Roles.
-    if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+    if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
     timeline.futureDated = [...timeline.futureDated, moved]
-    return withSurfaces(resp, { now, timeline, stash, roles, folded })
+    return withSurfaces(resp, { now, timeline, stash, roles })
   }
   if (target === 'tempered' || target === 'composted') {
     moved.status = 'closed'
@@ -3197,12 +2710,12 @@ function applyOptimisticTransition(
     }
     // A seat parked as a draft is a seat at rest: it goes back to its role.
     if (target === 'drafts' && moved.shuttleSeat === true && moved.shuttleRole) {
-      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
+      return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
     }
     now[target] = [...now[target], moved]
   }
 
-  return withSurfaces(resp, { now, timeline, stash, roles, folded })
+  return withSurfaces(resp, { now, timeline, stash, roles })
 }
 
 /** Optimistically mark the seat without changing a running or closed lifecycle. */
@@ -3213,9 +2726,9 @@ export function applyOptimisticSeat(resp: KanbanResponse | null, seat: KanbanCar
   const updated = withSurfaces(resp, {
     now: { drafts: patch(resp.now.drafts), inFlight: patch(resp.now.inFlight), awaitingReview: patch(resp.now.awaitingReview) },
     timeline: { ...resp.timeline, past: patch(resp.timeline.past), futureDated: patch(resp.timeline.futureDated) },
-    stash: patch(resp.stash), roles: patch(resp.roles), folded: patch(resp.folded),
+    stash: patch(resp.stash), roles: patch(resp.roles),
   })
-  return seatAtRest(seat) && seat.foldedUnder === undefined
+  return seatAtRest(seat)
     ? placeOptimistically(updated, seat.id, () => ({}))
     : updated
 }
@@ -3276,10 +2789,10 @@ function placeOptimistically(
   patch: (card: KanbanCard) => Partial<KanbanCard>,
 ): KanbanResponse | null {
   if (!resp) return null
-  const { card, now, timeline, stash, roles, folded } = liftCardFromSurfaces(resp, cardId)
+  const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
-  const moved: KanbanCard = { ...card, foldedUnder: undefined, ...patch(card) }
+  const moved: KanbanCard = { ...card, ...patch(card) }
   // Resting a seat keeps it a seat: it comes to rest among the Roles.
-  if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved), folded })
-  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles, folded })
+  if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
+  return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles })
 }
