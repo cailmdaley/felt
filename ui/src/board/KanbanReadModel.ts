@@ -40,6 +40,7 @@ import type {
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
+import { threadSummary } from './threads.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -118,6 +119,7 @@ export function buildKanbanResponseFromComposite(
 
   return {
     feltHost: feed.host,
+    threads: surfaces.threads,
     now: surfaces.now,
     timeline: surfaces.timeline,
     stash: surfaces.stash,
@@ -236,6 +238,7 @@ export function dedupeMirroredRows(
 }
 
 type AssembledSurfaces = {
+  threads: KanbanCard[];
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
@@ -318,7 +321,7 @@ function assembleSurfaces(
       // folds (below), and it is not a fold head, but the walk passes
       // through it to what it waited on.
       dependsOn: card.dependsOn,
-      foldable: FOLDABLE_HEAD_COLUMNS.has(column),
+      foldable: !card.orchestrator && FOLDABLE_HEAD_COLUMNS.has(column),
     };
     nodes.set(card.id, node);
     if (card.uid) {
@@ -326,8 +329,12 @@ function assembleSurfaces(
       nodes.set(card.uid.toLowerCase(), node);
     }
   }
+  const allCards = classified.map(row => row.card);
+  const threads = allCards.filter(card => !!card.orchestrator);
+  for (const card of allCards) card.threadSummary = threadSummary(card, allCards);
   const folded: KanbanCard[] = [];
   for (const { card, column } of classified) {
+    if (card.orchestrator) continue;
     const standsAlone = hasLiveWorker(card) || card.status === 'active' || leftQueues(card);
     const head = standsAlone
       ? undefined
@@ -382,6 +389,7 @@ function assembleSurfaces(
   });
 
   return {
+    threads,
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated },
     stash,
@@ -574,6 +582,7 @@ function toCard(
 
   return {
     id: f.id,
+    orchestrator: entry.orchestrator,
     uid: f.uid,
     name: f.name,
     path: entry.path,

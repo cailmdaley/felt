@@ -3082,6 +3082,7 @@ export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
     resp.stash,
     resp.roles,
     resp.folded,
+    resp.threads ?? [],
   ]) {
     for (const card of list) {
       if (seen.has(card.id)) continue
@@ -3131,6 +3132,7 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     // through this lookup. A folded card that did not resolve here would be a
     // row whose every gesture silently no-ops.
     resp.folded,
+    resp.threads ?? [],
   ]) {
     const hit = list.find((c) => c.id === id)
     if (hit) return hit

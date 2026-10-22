@@ -3,6 +3,30 @@ import { hasWorkerToStop } from './KanbanTypes.js'
 import { buildKanbanResponseFromComposite, cardFromCompositeEntry } from './KanbanReadModel.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 
+describe('constitution roll-up', () => {
+  it('keeps deep threads searchable but only roots on Desk, excluding verdicts from the aggregate', () => {
+    const fibers = [
+      ['hub', null, 'active', undefined],
+      ['hub/folder/child', 'hub', 'open', undefined],
+      ['hub/folder/child/deep', 'hub/folder/child', 'closed', undefined],
+      ['hub/accepted', 'hub', 'closed', true],
+      ['hub/discarded', 'hub', 'closed', false],
+      ['hub-lookalike', null, 'open', undefined],
+    ].map(([id, orchestrator, status, tempered]) => ({
+      origin: 'local', felt_store: '/felt', path: `${id}.md`, orchestrator,
+      fiber: { id, name: id, status, tempered, shuttle: { kind: 'oneshot' } },
+    }))
+    const board = buildKanbanResponseFromComposite(parseCompositeFeed({ host: 'local', fibers }))
+    expect(board.now.inFlight.map(c => c.id)).toStrictEqual(['hub'])
+    expect(board.now.drafts.map(c => c.id)).toStrictEqual(['hub-lookalike'])
+    expect(board.now.awaitingReview).toHaveLength(0)
+    expect(board.threads).toHaveLength(4)
+    expect(board.now.inFlight[0].threadSummary).toEqual({ unfinished: 2, waitingOnCail: 1, archived: 2 })
+    expect(board.threads?.find(c => c.id.endsWith('/child'))?.threadSummary?.waitingOnCail).toBe(1)
+    expect(board.totals.inFlight).toBe(1)
+  })
+})
+
 describe('composite app runtime', () => {
   it('carries the owner-served launch instant into the board without a second runtime read', () => {
     const feed = parseCompositeFeed({ fibers: [{
