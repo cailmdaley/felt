@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
@@ -16,6 +17,13 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	cmd.AddCommand(put)
+	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(receiver)
+	}})
 	cmd.AddCommand(&cobra.Command{Use: "receiver <fiber-key> <worker-identity> <address-or-dash>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		host, err := a.resolveOwnHost("")
 		if err != nil {

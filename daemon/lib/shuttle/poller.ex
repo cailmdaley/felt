@@ -2341,7 +2341,10 @@ defmodule Shuttle.Poller do
       anchor = worker_session_uuid(meta, fiber)
       current = Shuttle.SessionBinding.current(binding, anchor)
 
-      if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and current != anchor and
+      mirror = fiber && Shuttle.Continuation.resumable_session_id(fiber)
+
+      if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and
+           (current != anchor or mirror != current) and
            is_binary(Map.get(meta, :felt_store)) and Map.get(meta, :felt_store) != "" do
         case Shuttle.Continuation.backfill_session_uuid(
                state.runner,
@@ -2350,26 +2353,32 @@ defmodule Shuttle.Poller do
                current
              ) do
           :ok ->
-            Shuttle.SessionLedger.record(
-              fiber: fiber_id,
-              uid: metadata_uid(meta),
-              session: current,
-              tmux: meta.session,
-              harness:
-                Shuttle.SessionLedger.harness_for_cli(
-                  fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-                ),
-              kind: :resume,
-              agent: Map.get(meta, :agent_id),
-              role: Map.get(meta, :role)
-            )
+            if current != anchor do
+              Shuttle.SessionLedger.record(
+                fiber: fiber_id,
+                uid: metadata_uid(meta),
+                session: current,
+                tmux: meta.session,
+                harness:
+                  Shuttle.SessionLedger.harness_for_cli(
+                    fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+                  ),
+                kind: :resume,
+                agent: Map.get(meta, :agent_id),
+                role: Map.get(meta, :role)
+              )
+            end
 
-            state = put_running(state, key, Map.put(state.running[key], :session_uuid, current))
+            worker =
+              state.running[key] |> Map.put(:session_uuid, current) |> Map.delete(:identity_error)
+
+            state = put_running(state, key, worker)
 
             refresh_worker_document(state, fiber_id)
 
-          {:error, _} ->
-            state
+          {:error, reason} ->
+            worker = Map.put(state.running[key], :identity_error, inspect(reason))
+            %{state | running: Map.put(state.running, key, worker)}
         end
       else
         state
@@ -3676,13 +3685,28 @@ defmodule Shuttle.Poller do
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->
-        log_worker_claim(state, fiber_id, opts)
+        state =
+          case log_worker_claim(state, fiber_id, opts) do
+            :ok ->
+              state
+
+            {:error, reason} ->
+              # Receiver authority is already durable and owns live recovery.
+              # Expose a failed frontmatter mirror and retry it during polling.
+              Logger.warning(
+                "Claim #{fiber_id}: runtime mirror failed; durable receiver retained: #{inspect(reason)}"
+              )
+
+              key = running_key(state, fiber_id)
+              worker = Map.put(state.running[key], :identity_error, inspect(reason))
+              %{state | running: Map.put(state.running, key, worker)}
+          end
 
         # The structural half: the claim is the moment this host learns that
         # this externally-spawned session belongs to this fiber. `record/1`
         # drops a claim that carried no session UUID — there is no pairing to
-        # record then, only a run window, which `log_worker_claim` already
-        # stamped.
+        # record then, only the runtime mirror's run window. Receiver authority
+        # remains durable even when that mirror needs a retry.
         Shuttle.SessionLedger.record(
           fiber: fiber_id,
           uid: Map.get(fiber, "uid"),
@@ -4366,6 +4390,43 @@ defmodule Shuttle.Poller do
     state
   end
 
+  @doc false
+  def recover_context_receiver!(state, meta, fiber) do
+    if Shuttle.AppWorkers.app?(meta.session) do
+      meta
+    else
+      {:ok, output} =
+        Shuttle.CLI.run(["context-mailbox", "get", context_receiver_key(state, meta, fiber)],
+          timeout_ms: 32_000
+        )
+
+      case Jason.decode!(output) do
+        nil ->
+          meta
+
+        receiver ->
+          uuid = present_string(receiver["ID"])
+          identity = meta.session <> ":" <> (uuid || "-")
+          cli = get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+
+          same_harness? =
+            if uuid,
+              do: receiver["Harness"] == Shuttle.Harnesses.normalize(cli),
+              else: receiver["Harness"] == ""
+
+          if receiver["Host"] == state.own_host_id and receiver["identity"] == identity and
+               same_harness?, do: Map.put(meta, :session_uuid, uuid), else: meta
+      end
+    end
+  end
+
+  defp context_receiver_key(state, meta, fiber) do
+    fiber_id = fiber_address(meta)
+    store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
+    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
+    store <> ":" <> uid
+  end
+
   defp persist_context_receiver!(state, meta, worker) do
     fiber_id = fiber_address(meta)
 
@@ -4375,8 +4436,7 @@ defmodule Shuttle.Poller do
         _ -> cached_fiber(state, fiber_id)
       end
 
-    store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
-    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
+    key = context_receiver_key(state, meta, fiber)
     uuid = if worker, do: worker_session_uuid(worker, fiber)
     cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
 
@@ -4388,7 +4448,7 @@ defmodule Shuttle.Poller do
     identity = if worker, do: worker.session <> ":" <> (uuid || "-"), else: ""
 
     {:ok, output} =
-      Shuttle.CLI.run(["context-mailbox", "receiver", store <> ":" <> uid, identity, address],
+      Shuttle.CLI.run(["context-mailbox", "receiver", key, identity, address],
         env: [{"SHUTTLE_HOST", state.own_host_id}],
         timeout_ms: 32_000
       )

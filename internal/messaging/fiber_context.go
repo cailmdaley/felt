@@ -48,7 +48,7 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 
 // Worker transitions alone publish authority. Delivery and hook subscriptions
 // cannot change it. Identity includes the execution and conversation identity.
-type fiberReceiver struct {
+type FiberReceiver struct {
 	Address
 	Identity   string `json:"identity"`
 	Generation uint64 `json:"generation"`
@@ -84,7 +84,7 @@ func TransitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	path := filepath.Join(root, "destination.json")
 	bytes, err := readBounded(path, 16384)
-	var old fiberReceiver
+	var old FiberReceiver
 	if err == nil {
 		if err := json.Unmarshal(bytes, &old); err != nil {
 			return 0, err
@@ -98,7 +98,7 @@ func TransitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 	if old.Generation == ^uint64(0) {
 		return 0, errors.New("fiber epoch exhausted")
 	}
-	next := fiberReceiver{Address: a, Identity: identity, Generation: old.Generation + 1}
+	next := FiberReceiver{Address: a, Identity: identity, Generation: old.Generation + 1}
 	bytes, err = json.Marshal(next)
 	if err != nil {
 		return 0, err
@@ -106,10 +106,40 @@ func TransitionFiberReceiver(env *sysenv.Env, fiber, host, identity, address str
 	return next.Generation, mailboxWrite(path, bytes, false)
 }
 
+// ReadFiberReceiver reads the durable worker-owned authority for restart
+// recovery. A missing record is distinct from an explicit unknown receiver;
+// corrupt or unreadable records are errors, never permission to reset identity.
+func ReadFiberReceiver(env *sysenv.Env, fiber string) (*FiberReceiver, error) {
+	root := mailboxDir(env, "fiber", fiber)
+	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return nil, err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	receiver, err := readFiberReceiver(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if receiver.Generation == 0 {
+		return nil, errors.New("invalid fiber receiver epoch")
+	}
+	return &receiver, nil
+}
+
 // Called only under the mailbox lock, including during output emission.
-func readFiberReceiver(root string) (fiberReceiver, error) {
+func readFiberReceiver(root string) (FiberReceiver, error) {
 	bytes, err := readBounded(filepath.Join(root, "destination.json"), 16384)
-	var receiver fiberReceiver
+	var receiver FiberReceiver
 	if err == nil {
 		err = json.Unmarshal(bytes, &receiver)
 	}
@@ -149,7 +179,7 @@ func subscribeFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool,
 // Missing or malformed authority fails closed; registration cannot restore it.
 func fiberReceiverMatches(root string, a Address) bool {
 	bytes, err := readBounded(filepath.Join(root, "destination.json"), 16384)
-	var receiver fiberReceiver
+	var receiver FiberReceiver
 	return err == nil && json.Unmarshal(bytes, &receiver) == nil && receiver.Address == a && receiver.Generation != 0 && receiver.Identity != ""
 }
 

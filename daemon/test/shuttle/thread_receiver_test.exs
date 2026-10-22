@@ -18,9 +18,16 @@ defmodule Shuttle.ThreadReceiverTest do
     end
 
     def cmd("shuttle", args, opts) do
-      if Shuttle.Env.app(:receiver_documents_unavailable, false) and "ls" in args,
-        do: {"documents unavailable", :timeout},
-        else: Shuttle.Runner.Default.cmd("shuttle", args, opts)
+      cond do
+        Shuttle.Env.app(:receiver_runtime_write_fails, false) and "mark-runtime" in args ->
+          {"injected runtime write failure", 1}
+
+        Shuttle.Env.app(:receiver_documents_unavailable, false) and "ls" in args ->
+          {"documents unavailable", :timeout}
+
+        true ->
+          Shuttle.Runner.Default.cmd("shuttle", args, opts)
+      end
     end
 
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
@@ -121,6 +128,86 @@ defmodule Shuttle.ThreadReceiverTest do
       assert authority!(data) == authority
       drain_results!(poller)
     end
+  end
+
+  test "successful claim recovers durable B after runtime persistence fails, then repairs its mirror",
+       context do
+    %{store: store, data: data, key: key} = context
+    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+    start_tmux!("capture-B")
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    seed_receiver!(store, key, "old-worker:A", "A")
+    Env.put_app_env(:receiver_runtime_write_fails, true)
+    assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
+    assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
+    committed = authority!(data)
+    assert committed["ID"] == "B"
+    state = :sys.get_state(poller)
+    worker = state.running[Poller.running_key(state, "hub")]
+    assert worker.identity_error =~ "injected runtime write failure"
+    assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
+    assert get_in(Jason.decode!(json), ["shuttle", "runtime", "session_uuid"]) == "A"
+
+    assert {:ok, _} =
+             CLI.run(["context-mailbox", "put", key, "persist-result", "Durable B context"])
+
+    drain_results!(poller)
+    GenServer.stop(poller)
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
+    assert authority!(data) == committed
+    refute hook!(store, "A") =~ "Durable B context"
+    assert [_] = pending(data)
+    # Recovery remains B through repeated failed mirror writes.
+    cycle!(poller)
+    assert authority!(data) == committed
+    Env.put_app_env(:receiver_runtime_write_fails, false)
+    cycle!(poller)
+    assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
+    assert get_in(Jason.decode!(json), ["shuttle", "runtime", "session_uuid"]) == "B"
+    assert authority!(data) == committed
+    state = :sys.get_state(poller)
+    refute Map.has_key?(state.running[Poller.running_key(state, "hub")], :identity_error)
+    hook!(store, "B")
+    assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
+    assert {:ok, _} = Delivery.flush_context(parent)
+    assert hook!(store, "B") =~ "Durable B context"
+    assert pending(data) == []
+    drain_results!(poller)
+  end
+
+  test "durable unknown receiver cannot recover predecessor A when runtime clearing fails",
+       context do
+    %{store: store, data: data, key: key, canonical: canonical} = context
+    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+    start_tmux!(canonical)
+    seed_receiver!(store, key, canonical <> ":A", "A")
+    assert {:ok, _} = CLI.run(["context-mailbox", "receiver", key, canonical <> ":-", "-"])
+    Env.put_app_env(:receiver_runtime_write_fails, true)
+
+    assert {:error, _} =
+             Shuttle.Continuation.backfill_session_uuid(IsolatedRunner, store, "hub", "")
+
+    committed = authority!(data)
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    assert %{session_uuid: nil} = Poller.live_worker(poller, "hub")
+    assert authority!(data) == committed
+
+    assert {:ok, _} =
+             CLI.run([
+               "context-mailbox",
+               "put",
+               key,
+               "unknown-result",
+               "Wait for identity capture"
+             ])
+
+    refute hook!(store, "A") =~ "Wait for identity capture"
+    assert [_] = pending(data)
+    drain_results!(poller)
   end
 
   for live? <- [false, true] do

@@ -64,6 +64,9 @@ Recover by restoring the exact trusted cutoff from backup; never delete the outb
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
 A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.
+Recovery restores the durable receiver for the same live execution before consulting frontmatter: a known conversation and an explicitly unknown identity both survive failed runtime-mirror writes.
+A claim whose frontmatter write fails retains its committed receiver, exposes the mirror error, and retries the identity mirror during polling.
+Mirror repair does not rotate the receiver epoch or append a duplicate session-resume event.
 Boot recovery completes only after both the session scan and document listings are healthy; an uncertain boot defers authority reconciliation to a healthy poll.
 Recovery adopts live workers before revoking untracked receivers.
 An unchanged worker keeps its epoch across flushes and daemon restarts.

@@ -177,6 +177,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
       last_activity_at: started_at
     }
 
+    # The worker-owned durable receiver survives frontmatter mirror failures.
+    # Restore it before publishing recovery so stale runtime cannot grant a
+    # predecessor even a temporary higher-epoch designation.
+    running_meta = Poller.recover_context_receiver!(state, running_meta, fiber)
+
     case Poller.start_watcher(state, fiber_id, running_meta) do
       {:ok, running_meta} ->
         Logger.info("Adopted orphan session: #{session}")
