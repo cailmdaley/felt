@@ -42,6 +42,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
         # `state.running` is now this daemon's own observation of what is live,
         # which the boot quarantine's auto-release requires before it judges.
+        state = Poller.revoke_untracked_receivers(state)
         %{state | adopted?: true}
 
       {:error, :unknown} ->
@@ -168,11 +169,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
     case Poller.start_watcher(state, fiber_id, running_meta) do
       {:ok, running_meta} ->
-        running = Map.put(state.running, runtime_key, running_meta)
-
         Logger.info("Adopted orphan session: #{session}")
 
-        %{state | running: running}
+        Poller.put_running(state, runtime_key, running_meta)
         |> Poller.note_running(runtime_key)
         |> Poller.acquire_worker_identity(fiber_id, fiber)
 

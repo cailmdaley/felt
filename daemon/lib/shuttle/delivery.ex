@@ -114,12 +114,12 @@ defmodule Shuttle.Delivery do
     server = Shuttle.Env.server(Poller)
 
     if is_pid(GenServer.whereis(server)) do
-      # The Poller reserves the durable epoch while serializing worker selection.
-      # Delivery tasks may arrive in any order, including after a daemon restart.
+      # Delivery carries the worker-owned epoch; selecting or flushing a
+      # destination never changes authority.
       with {:ok, worker, generation} <-
              GenServer.call(
                server,
-               {:context_receiver, Shuttle.Threads.address(entry.fiber), context_key(entry)},
+               {:context_receiver, Shuttle.Threads.address(entry.fiber)},
                32_000
              ) do
         address =

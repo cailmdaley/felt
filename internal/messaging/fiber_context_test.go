@@ -5,269 +5,115 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
-	"time"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
-func TestFiberContextDormantRetryAndDedup(t *testing.T) {
-	t.Parallel()
-	env := testEnv(t)
-	req := Request{MessageID: "result", Text: "thread child rested: ready"}
-	if err := QueueFiberContext(env, "fiber", req); err != nil {
+func transition(t *testing.T, env *sysenv.Env, identity, address string) uint64 {
+	t.Helper()
+	n, err := TransitionFiberReceiver(env, "fiber", "host", identity, address)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/session"); err == nil {
-		t.Fatal("delivered to missing receiver")
-	}
-	if err := RegisterMailbox(env, "claude", "session", "host", t.TempDir(), os.Getpid(), true); err != nil {
-		t.Fatal(err)
-	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/session"); err != nil {
-		t.Fatal(err)
-	}
-	if err := QueueFiberContext(env, "fiber", req); err != nil {
-		t.Fatal(err)
-	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/session"); err != nil {
-		t.Fatal(err)
-	}
-	var offered []Request
-	if err := OfferMailbox(env, "claude", "session", "host", func(batch []Request) error { offered = append(offered, batch...); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if len(offered) != 1 || offered[0].Wake || offered[0].Text != req.Text {
-		t.Fatalf("offered: %+v", offered)
-	}
-	entries, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending"))
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("pending: %v %v", entries, err)
-	}
+	return n
 }
 
-// A session-local queued receipt is not a hook acknowledgment. The durable
-// task queue must survive replacement in that interval.
-func TestFiberContextSurvivesReplacementBeforeHookAcknowledgment(t *testing.T) {
+// Registration/removal/rotation must fence the old hook before any delivery.
+func TestFiberContextWorkerTransitions(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	req := Request{MessageID: "result", Text: "thread child rested: ready"}
-	if err := QueueFiberContext(env, "fiber", req); err != nil {
-		t.Fatal(err)
-	}
-	for _, id := range []string{"A", "B"} {
-		if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
-			t.Fatal(err)
-		}
-		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/"+id); err != nil {
-			t.Fatal(err)
-		}
-		pending, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending"))
-		if err != nil || len(pending) != 1 {
-			t.Fatalf("fiber result acknowledged before %s's hook: %v %v", id, pending, err)
-		}
-		if id == "A" {
-			if err := RegisterMailbox(env, "claude", id, "host", "", os.Getpid(), false); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	// Re-registering A must not reclaim B's pending result, even if A's
-	// hook runs first. Registration and subscription are not authority.
-	if err := RegisterMailbox(env, "claude", "A", "host", t.TempDir(), os.Getpid(), true); err != nil {
-		t.Fatal(err)
-	}
-	staleEmit := func(batch []Request) error { t.Errorf("stale A received: %+v", batch); return nil }
-	if err := OfferMailbox(env, "claude", "A", "host", staleEmit); err != nil {
-		t.Fatal(err)
-	}
-	failedOutput := errors.New("hook output failed")
-	if err := OfferMailbox(env, "claude", "B", "host", func([]Request) error { return failedOutput }); !errors.Is(err, failedOutput) {
-		t.Fatalf("failed hook output: %v", err)
-	}
-	var received []Request
-	emit := func(batch []Request) error { received = append(received, batch...); return nil }
-	for i := 0; i < 2; i++ {
-		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B"); err != nil {
-			t.Fatal(err)
-		}
-		if err := OfferMailbox(env, "claude", "B", "host", emit); err != nil {
-			t.Fatal(err)
-		}
-		if err := QueueFiberContext(env, "fiber", req); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// Authority persists across queue drain: A cannot take future results
-	// either, even before another delivery call to B refreshes its subscription.
-	next := Request{MessageID: "next", Text: "thread child rested: next result"}
-	if err := QueueFiberContext(env, "fiber", next); err != nil {
-		t.Fatal(err)
-	}
-	if err := OfferMailbox(env, "claude", "A", "host", staleEmit); err != nil {
-		t.Fatal(err)
-	}
-	var future []Request
-	for i := 0; i < 2; i++ {
-		if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { future = append(future, batch...); return nil }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(future) != 1 || future[0].MessageID != next.MessageID {
-		t.Fatalf("future results: %+v", future)
-	}
-	if err := OfferMailbox(env, "claude", "A", "host", staleEmit); err != nil {
-		t.Fatal(err)
-	}
-	if len(received) != 1 || received[0].MessageID != req.MessageID || received[0].Text != req.Text {
-		t.Fatalf("received: %+v", received)
-	}
-	pending, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending"))
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("acknowledged result still pending: %v %v", pending, err)
-	}
-}
-
-func TestFiberContextReceiverAuthorityFailsClosed(t *testing.T) {
-	t.Parallel()
-	for _, scenario := range []string{"unavailable", "no-hook", "missing", "malformed", "other-harness", "wrong-host"} {
-		t.Run(scenario, func(t *testing.T) {
+	for _, successor := range []string{"B", "unavailable", "removed", "rotation"} {
+		t.Run(successor, func(t *testing.T) {
 			env := testEnv(t)
-			req := Request{MessageID: "result", Text: "ready"}
-			if err := QueueFiberContext(env, "fiber", req); err != nil {
+			for _, id := range []string{"A", "B"} {
+				if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			a := "shuttle://host/claude/A"
+			first := transition(t, env, "execution-A:A", a)
+			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err != nil {
 				t.Fatal(err)
 			}
-			if err := RegisterMailbox(env, "claude", "A", "host", t.TempDir(), os.Getpid(), true); err != nil {
+			if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "original"}); err != nil {
 				t.Fatal(err)
 			}
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A"); err != nil {
-				t.Fatal(err)
-			}
-			harness, id := "claude", "B"
-			destination := filepath.Join(mailboxDir(env, "fiber", "fiber"), "destination.json")
-			switch scenario {
+			b, identity := "shuttle://host/claude/B", "execution-B:B"
+			switch successor {
+			case "removed":
+				b, identity = "-", ""
 			case "unavailable":
-				if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B"); err == nil {
-					t.Fatal("accepted unavailable successor")
-				}
-			case "no-hook":
-				harness = "pi"
-				// A destination without hooks still revokes all predecessor hooks.
-				_ = DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/pi/B")
-			case "missing":
-				if err := os.Remove(destination); err != nil {
-					t.Fatal(err)
-				}
-			case "malformed":
-				if err := os.WriteFile(destination, []byte("{"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			case "other-harness":
-				harness, id = "pi", "A"
-				if err := RegisterMailbox(env, harness, id, "host", t.TempDir(), os.Getpid(), true); err != nil {
-					t.Fatal(err)
-				}
-				if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/pi/A"); err != nil {
-					t.Fatal(err)
-				}
-			case "wrong-host":
-				if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://other/claude/B"); err == nil {
-					t.Fatal("accepted foreign-host selection")
-				}
+				b = "shuttle://host/claude/missing"
+			case "rotation":
+				identity = "execution-A:B"
 			}
-			var stale []Request
-			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
+			second := transition(t, env, identity, b)
+			if second <= first {
+				t.Fatal("epoch did not advance")
+			}
+			// Delayed delivery selection cannot designate A, and stale hooks cannot emit.
+			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
+				t.Fatal("stale selection succeeded")
+			}
+			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { t.Errorf("stale A emitted: %+v", batch); return nil }); err != nil {
 				t.Fatal(err)
 			}
-			if scenario == "wrong-host" {
-				if len(stale) != 1 {
-					t.Fatalf("invalid selection changed valid authority: %+v", stale)
-				}
-				return
+			// A fresh Env/process can re-adopt the same worker without changing the epoch.
+			if n := transition(t, env, identity, b); n != second {
+				t.Fatal("re-adoption changed epoch")
 			}
-			if len(stale) != 0 {
-				t.Fatalf("unauthorized hook consumed: %+v", stale)
+			for i := 0; i < 3; i++ {
+				_ = DeliverFiberContext(context.Background(), env, "fiber", "host", b, second)
 			}
-			if err := RegisterMailbox(env, harness, id, "host", t.TempDir(), os.Getpid(), true); err != nil {
+			if n := transition(t, env, identity, b); n != second {
+				t.Fatal("flush changed epoch")
+			}
+			if successor == "removed" || successor == "unavailable" {
+				second = transition(t, env, "execution-B:B", "shuttle://host/claude/B")
+			}
+			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B", second); err != nil {
 				t.Fatal(err)
 			}
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/"+harness+"/"+id); err != nil {
-				t.Fatal(err)
+			failed := errors.New("output failed")
+			if err := OfferMailbox(env, "claude", "B", "host", func([]Request) error { return failed }); !errors.Is(err, failed) {
+				t.Fatalf("failed emission: %v", err)
 			}
-			var received []Request
+			var got []Request
 			for i := 0; i < 2; i++ {
-				if err := OfferMailbox(env, harness, id, "host", func(batch []Request) error { received = append(received, batch...); return nil }); err != nil {
+				if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { got = append(got, batch...); return nil }); err != nil {
+					t.Fatal(err)
+				}
+				if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "original"}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if len(received) != 1 || received[0].MessageID != req.MessageID {
-				t.Fatalf("successor received: %+v", received)
+			if len(got) != 1 || got[0].Text != "original" {
+				t.Fatalf("received: %+v", got)
 			}
 		})
 	}
 }
 
-func TestFiberContextReplacementSerializesWithHookOutput(t *testing.T) {
+func TestFiberContextAuthorityFailures(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	if err := QueueFiberContext(env, "fiber", Request{MessageID: "first", Text: "first"}); err != nil {
+	a := "shuttle://host/claude/A"
+	first := transition(t, env, "A", a)
+	if _, err := TransitionFiberReceiver(env, "fiber", "host", "B", "shuttle://other/claude/B"); err == nil {
+		t.Fatal("foreign owner accepted")
+	}
+	if n := transition(t, env, "A", a); n != first {
+		t.Fatal("invalid transition changed authority")
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "destination.json")
+	if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"A", "B"} {
-		if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := TransitionFiberReceiver(env, "fiber", "host", "B", "-"); err == nil {
+		t.Fatal("corruption reset authority")
 	}
-	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A"); err != nil {
-		t.Fatal(err)
-	}
-	entered, release := make(chan struct{}), make(chan struct{})
-	releaseOutput := sync.OnceFunc(func() { close(release) })
-	defer releaseOutput()
-	aDone := make(chan error, 1)
-	go func() {
-		aDone <- OfferMailbox(env, "claude", "A", "host", func([]Request) error { close(entered); <-release; return nil })
-	}()
-	select {
-	case <-entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("A did not enter hook output")
-	}
-	bStarted, bDone := make(chan struct{}), make(chan error, 1)
-	go func() {
-		close(bStarted)
-		bDone <- DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B")
-	}()
-	<-bStarted
-	select {
-	case err := <-bDone:
-		t.Fatalf("replacement bypassed in-flight hook's lock: %v", err)
-	case <-time.After(50 * time.Millisecond):
-	}
-	releaseOutput()
-	for _, done := range []chan error{aDone, bDone} {
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("mailbox lock did not release")
-		}
-	}
-	if err := QueueFiberContext(env, "fiber", Request{MessageID: "next", Text: "next"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { t.Errorf("A consumed after replacement: %+v", batch); return nil }); err != nil {
-		t.Fatal(err)
-	}
-	var received []Request
-	for i := 0; i < 2; i++ {
-		if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { received = append(received, batch...); return nil }); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(received) != 1 || received[0].MessageID != "next" {
-		t.Fatalf("B received: %+v", received)
+	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
+		t.Fatal("corrupt authority accepted")
 	}
 }
 
@@ -275,145 +121,18 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	_, sent := nativeClaudeFixture(t, env, func(frame map[string]any, transcript *os.File) { nativeRows(frame, transcript, false) })
+	a := "shuttle://host/claude/session"
+	epoch := transition(t, env, "execution:session", a)
 	req := Request{MessageID: "closed-result", Text: "thread child closed: measured", Wake: true}
-	if err := QueueFiberContext(env, "fiber", req); err != nil {
-		t.Fatal(err)
-	}
 	for i := 0; i < 2; i++ {
-		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/session"); err != nil {
+		if err := QueueFiberContext(env, "fiber", req); err != nil {
 			t.Fatal(err)
 		}
-		if err := QueueFiberContext(env, "fiber", req); err != nil {
+		if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, epoch); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if sent.Load() != 1 {
 		t.Fatalf("native turns = %d", sent.Load())
-	}
-}
-
-func TestFiberContextReservationImmediatelyFencesPredecessor(t *testing.T) {
-	t.Parallel()
-	for _, successor := range []string{"B", "unavailable", "-"} {
-		for _, phase := range []string{"already-designated-hook", "delayed-designation"} {
-			t.Run(successor+"/"+phase, func(t *testing.T) {
-				env := testEnv(t)
-				for _, id := range []string{"A", "B"} {
-					if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
-						t.Fatal(err)
-					}
-				}
-				reserve := func() uint64 {
-					t.Helper()
-					n, err := ReserveFiberGeneration(env, "fiber")
-					if err != nil {
-						t.Fatal(err)
-					}
-					return n
-				}
-				a, b := "shuttle://host/claude/A", "shuttle://host/claude/"+successor
-				if successor == "-" {
-					b = "-"
-				}
-				first := reserve()
-				if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err != nil {
-					t.Fatal(err)
-				}
-				second := reserve() // Selection of B revokes A before B's delivery task runs.
-				if second <= first {
-					t.Fatalf("non-monotonic reservation: %d <= %d", second, first)
-				}
-				if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "ready"}); err != nil {
-					t.Fatal(err)
-				}
-				if phase == "delayed-designation" {
-					if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, first); err == nil {
-						t.Error("stale A designation succeeded after B reservation")
-					}
-				}
-				var stale []Request
-				if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
-					t.Fatal(err)
-				}
-				if len(stale) != 0 {
-					t.Fatalf("A consumed during reserved successor gap: %+v", stale)
-				}
-				// Arrival of the delayed B selection must retain context when B is unavailable or revoked.
-				err := DeliverFiberContext(context.Background(), env, "fiber", "host", b, second)
-				if successor == "unavailable" {
-					if err == nil {
-						t.Fatal("unavailable B succeeded")
-					}
-				} else if err != nil {
-					t.Fatal(err)
-				}
-				if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { t.Errorf("A consumed after successor arrival: %+v", batch); return nil }); err != nil {
-					t.Fatal(err)
-				}
-				pending, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending"))
-				if err != nil || len(pending) != 1 {
-					t.Fatalf("result not retained: %v %v", pending, err)
-				}
-				if successor != "B" {
-					if err := RegisterMailbox(env, "claude", "B", "host", t.TempDir(), os.Getpid(), true); err != nil {
-						t.Fatal(err)
-					}
-					second = reserve()
-					if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/B", second); err != nil {
-						t.Fatal(err)
-					}
-				}
-				var received []Request
-				for i := 0; i < 2; i++ {
-					if err := OfferMailbox(env, "claude", "B", "host", func(batch []Request) error { received = append(received, batch...); return nil }); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if len(received) != 1 || received[0].MessageID != "result" {
-					t.Fatalf("successor received: %+v", received)
-				}
-			})
-		}
-	}
-}
-
-func TestFiberContextDelayedSelectionCannotRestorePredecessor(t *testing.T) {
-	t.Parallel()
-	for _, successor := range []string{"B", "unavailable", "-"} {
-		t.Run(successor, func(t *testing.T) {
-			env := testEnv(t)
-			if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "ready"}); err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range []string{"A", "B"} {
-				if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
-					t.Fatal(err)
-				}
-			}
-			// Exercise designated-successor arrival as well as the reservation gap.
-			first, err := ReserveFiberGeneration(env, "fiber")
-			if err != nil {
-				t.Fatal(err)
-			}
-			second, err := ReserveFiberGeneration(env, "fiber")
-			if err != nil || second <= first {
-				t.Fatalf("reserve successor: %d %v", second, err)
-			}
-			address := "shuttle://host/claude/" + successor
-			if successor == "-" {
-				address = "-"
-			}
-			_ = DeliverFiberContext(context.Background(), env, "fiber", "host", address, second)
-			if err := DeliverFiberContext(context.Background(), env, "fiber", "host", "shuttle://host/claude/A", first); err == nil {
-				t.Error("delayed predecessor designation succeeded")
-			}
-			var stale []Request
-			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
-				t.Fatal(err)
-			}
-			if len(stale) != 0 {
-				t.Fatalf("delayed predecessor restored authority: %+v", stale)
-			}
-		})
 	}
 }

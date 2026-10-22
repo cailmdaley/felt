@@ -895,8 +895,7 @@ defmodule Shuttle.Poller do
       %{identity_token: ^token} when not is_nil(token) ->
         key = running_key(state, fiber_id)
 
-        {:noreply,
-         %{state | running: Map.update!(state.running, key, &Map.put(&1, :session_uuid, uuid))}}
+        {:noreply, put_running(state, key, Map.put(state.running[key], :session_uuid, uuid))}
 
       _ ->
         {:noreply, state}
@@ -980,18 +979,13 @@ defmodule Shuttle.Poller do
 
           key = running_key(state, fiber_id)
 
-          state = %{
-            state
-            | running:
-                Map.update!(
-                  state.running,
-                  key,
-                  &(&1
-                    |> Map.put(:identity_captured, true)
-                    |> Map.put(:session_uuid, current)
-                    |> Map.delete(:identity_error))
-                )
-          }
+          worker =
+            state.running[key]
+            |> Map.put(:identity_captured, true)
+            |> Map.put(:session_uuid, current)
+            |> Map.delete(:identity_error)
+
+          state = put_running(state, key, worker)
 
           {:noreply, refresh_worker_document(state, fiber_id)}
 
@@ -1292,17 +1286,10 @@ defmodule Shuttle.Poller do
     {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
   end
 
-  def handle_call({:context_receiver, fiber_id, key}, from, state) do
+  def handle_call({:context_receiver, fiber_id}, from, state) do
     {:reply, worker, state} = handle_call({:live_worker, fiber_id}, from, state)
-
-    reply =
-      with {:ok, output} <- Shuttle.CLI.run(["context-mailbox", "generation", key]),
-           {generation, ""} <- Integer.parse(String.trim(output)) do
-        {:ok, worker, generation}
-      else
-        error -> {:error, error}
-      end
-
+    meta = running_worker(state, fiber_id)
+    reply = if meta, do: {:ok, worker, meta.context_epoch}, else: {:error, :no_worker}
     {:reply, reply, state}
   end
 
@@ -2259,7 +2246,7 @@ defmodule Shuttle.Poller do
     worker =
       state.running[key] |> Map.put(:session_uuid, nil) |> Map.put(:identity_captured, false)
 
-    state = %{state | running: Map.put(state.running, key, worker)}
+    state = put_running(state, key, worker)
 
     # A failed durable write cannot make the live fresh process its predecessor again.
     case Shuttle.Continuation.backfill_session_uuid(state.runner, store, fiber_id, "") do
@@ -2284,7 +2271,7 @@ defmodule Shuttle.Poller do
       token = make_ref()
       key = running_key(state, fiber_id)
       worker = worker |> Map.put(:session_uuid, uuid) |> Map.put(:identity_token, token)
-      state = %{state | running: Map.put(state.running, key, worker)}
+      state = put_running(state, key, worker)
       store = owning_store(fiber_id, state)
       work_dir = declared_project_dir(Map.get(fiber, "shuttle")) || store
 
@@ -2377,10 +2364,7 @@ defmodule Shuttle.Poller do
               role: Map.get(meta, :role)
             )
 
-            state = %{
-              state
-              | running: Map.update!(state.running, key, &Map.put(&1, :session_uuid, current))
-            }
+            state = put_running(state, key, Map.put(state.running[key], :session_uuid, current))
 
             refresh_worker_document(state, fiber_id)
 
@@ -3628,7 +3612,7 @@ defmodule Shuttle.Poller do
             role: Map.get(worker, :role)
           )
 
-          state = %{state | running: Map.put(state.running, key, worker)}
+          state = put_running(state, key, worker)
           {refresh_worker_document(state, fiber_id), result}
 
         {:error, reason} ->
@@ -4061,8 +4045,8 @@ defmodule Shuttle.Poller do
         state
 
       runtime_key ->
-        {meta, running} = Map.pop(state.running, runtime_key)
-        state = %{state | running: running}
+        meta = Map.fetch!(state.running, runtime_key)
+        state = remove_running(state, runtime_key)
         fiber_id = fiber_address(meta)
 
         case fetch_fiber_full(fiber_id, state) do
@@ -4348,7 +4332,66 @@ defmodule Shuttle.Poller do
   end
 
   defp remove_running(%State{} = state, runtime_key) do
+    if meta = state.running[runtime_key], do: persist_context_receiver!(state, meta, nil)
     %{state | running: Map.delete(state.running, runtime_key)}
+  end
+
+  # Every worker registration, recovery, removal and conversation rotation
+  # crosses this synchronous boundary before the Poller publishes its state.
+  # A failed authority write aborts the transition, never reporting success.
+  @doc false
+  def put_running(state, key, meta) do
+    epoch = persist_context_receiver!(state, meta, meta)
+    %{state | running: Map.put(state.running, key, Map.put(meta, :context_epoch, epoch))}
+  end
+
+  @doc false
+  def revoke_untracked_receivers(state) do
+    for fibers <- Map.values(state.last_known_listings),
+        fiber <- fibers,
+        host_owned?(fiber["shuttle"] || %{}, state.own_host_id),
+        is_nil(running_key(state, fiber["id"])) do
+      meta = %{
+        fiber_id: fiber["id"],
+        uid: fiber["uid"],
+        felt_store: owning_store(fiber["id"], state)
+      }
+
+      persist_context_receiver!(state, meta, nil)
+    end
+
+    state
+  end
+
+  defp persist_context_receiver!(state, meta, worker) do
+    fiber_id = fiber_address(meta)
+
+    fiber =
+      case fetch_fiber_full(fiber_id, state) do
+        {:ok, fiber} -> fiber
+        _ -> cached_fiber(state, fiber_id)
+      end
+
+    store = Map.get(meta, :felt_store) || owning_store(fiber_id, state)
+    uid = metadata_uid(meta) || (fiber && (fiber["uid"] || fiber["id"])) || fiber_id
+    uuid = if worker, do: worker_session_uuid(worker, fiber)
+    cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+
+    address =
+      if uuid && cli,
+        do: Shuttle.Messaging.address(state.own_host_id, Shuttle.Harnesses.normalize(cli), uuid),
+        else: "-"
+
+    identity = if worker, do: worker.session <> ":" <> (uuid || "-"), else: ""
+
+    {:ok, output} =
+      Shuttle.CLI.run(["context-mailbox", "receiver", store <> ":" <> uid, identity, address],
+        env: [{"SHUTTLE_HOST", state.own_host_id}],
+        timeout_ms: 32_000
+      )
+
+    {epoch, ""} = Integer.parse(String.trim(output))
+    epoch
   end
 
   # "New session" on a fiber that still holds an OPEN tmux session is a CUT, not
@@ -4444,9 +4487,9 @@ defmodule Shuttle.Poller do
         state =
           %{
             state
-            | running: Map.put(state.running, runtime_key, meta),
-              dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
+            | dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)
           }
+          |> put_running(runtime_key, meta)
           |> note_running(runtime_key)
 
         {:ok, state}

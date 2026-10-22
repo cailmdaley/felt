@@ -1001,7 +1001,10 @@ defmodule Shuttle.AppWorkersTest do
 
   test "app workers can launch without a tmux executable" do
     fiber("tests/app")
-    Env.put_env("PATH", "/does-not-exist")
+    Env.put_env("REAL_SHUTTLE", FakeCli.real!("shuttle"))
+    bin = FakeCli.install!(%{"shuttle" => "#!/bin/sh\nexec \"$REAL_SHUTTLE\" \"$@\"\n"})
+    Env.put_env("PATH", bin)
+    assert Shuttle.Env.find_executable("tmux") == nil
     assert {:ok, "codex-app:app-session-1"} = dispatch("tests/app", runner: MissingTmuxRunner)
 
     {:ok, poller} =

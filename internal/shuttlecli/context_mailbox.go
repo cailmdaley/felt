@@ -16,8 +16,12 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	cmd.AddCommand(put)
-	cmd.AddCommand(&cobra.Command{Use: "generation <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		n, err := messaging.ReserveFiberGeneration(a.env, args[0])
+	cmd.AddCommand(&cobra.Command{Use: "receiver <fiber-key> <worker-identity> <address-or-dash>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
+		host, err := a.resolveOwnHost("")
+		if err != nil {
+			return err
+		}
+		n, err := messaging.TransitionFiberReceiver(a.env, args[0], host, args[1], args[2])
 		if err == nil {
 			fmt.Fprintln(a.env.Stdout, n)
 		}

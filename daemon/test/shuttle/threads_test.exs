@@ -437,9 +437,35 @@ defmodule Shuttle.ThreadsTest do
     assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
     assert [_] = pending(data)
     first_native = File.read!(Path.join(store, "ready")) |> String.trim()
+
+    authority_path =
+      Path.wildcard(Path.join(data, "mailboxes/fiber/*/destination.json"))
+      |> Enum.find(&(Jason.decode!(File.read!(&1))["identity"] != ""))
+
+    authority = File.read!(authority_path)
+    assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
+    assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
+    assert File.read!(authority_path) == authority
+
+    stale_hook = fn ->
+      script = """
+      for event in SessionStart UserPromptSubmit; do
+        printf '{"session_id":"#{first_native}","hook_event_name":"%s","harness":"claude","cwd":"#{store}"}\\n' "$event" | '#{cli}' hook event
+      done
+      """
+
+      assert {output, 0} = Shuttle.Env.cmd("bash", ["--noprofile", "--norc", "-c", script])
+      refute output =~ "thread hub/child closed:"
+    end
+
     # Replace A while its result is still waiting for a hook. The successor
     # offers the same fiber mailbox; no copy is stranded in A's session queue.
     assert {:ok, _} = Poller.lifecycle_transition(poller, :rest, "hub", [])
+    stale_hook.()
+    assert [_] = pending(data)
+    removed = Jason.decode!(File.read!(authority_path))
+    assert removed["identity"] == ""
+    assert removed["generation"] > Jason.decode!(authority)["generation"]
     File.rm!(Path.join(store, "ready"))
     assert {:ok, _} = Poller.dispatch_fiber(poller, "hub", force: true)
     await(fn -> File.exists?(Path.join(store, "ready")) end)
@@ -451,28 +477,34 @@ defmodule Shuttle.ThreadsTest do
       end
     end)
 
-    Threads.deliver_results(entries, "test-host")
-    assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
+    # No post-replacement flush: registration itself must revoke A.
     assert [_] = pending(data)
     # A fresh process re-registers the stale session and runs its hook first.
     # Its old subscription is discovery only, not authority to drain B's mail.
-    stale_hook = """
-    for event in SessionStart UserPromptSubmit; do
-      printf '{"session_id":"#{first_native}","hook_event_name":"%s","harness":"claude","cwd":"#{store}"}\\n' "$event" | '#{cli}' hook event
-    done
-    """
-
-    assert {stale_output, 0} =
-             Shuttle.Env.cmd("bash", ["--noprofile", "--norc", "-c", stale_hook])
-
-    refute stale_output =~ "thread hub/child closed:"
+    stale_hook.()
     assert [_] = pending(data)
+    assert {:ok, _} = Shuttle.Delivery.flush_context(parent)
     File.write!(gate, "offer\n")
     await(fn -> File.exists?(Path.join(store, "rounds")) end)
     assert pending(data) == []
     received_result = File.read!(Path.join(store, "received"))
     assert length(String.split(received_result, "thread hub/child closed:")) == 2
     native = File.read!(Path.join(store, "ready")) |> String.trim()
+    authority = File.read!(authority_path)
+    GenServer.stop(poller)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: SocketRunner,
+        own_host_id: "test-host",
+        felt_stores: [store],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+    assert %{session_uuid: ^native} = Poller.live_worker(poller, "hub")
+    assert File.read!(authority_path) == authority
     tasks_dir = Path.join([store, "tasks", native])
     File.mkdir_p!(tasks_dir)
     Env.put_env("SHUTTLE_CLAUDE_TASKS_DIR", Path.join(store, "tasks"))

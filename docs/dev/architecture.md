@@ -47,9 +47,11 @@ An acknowledgment means the parent daemon has durably enqueued the result in its
 Acknowledged IDs stay in the sender outbox to prevent republication.
 Pending publications are retried independently of the baseline.
 
-The parent Poller reserves a durable, monotonically increasing receiver generation while serializing worker selection, including selections with no available conversation.
-Publishing a reservation immediately revokes every older destination, even before the successor's delivery task runs.
-Both destination designation and mailbox consumption require the latest reserved generation; asynchronous delivery carries that generation.
+The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
+An unchanged worker keeps its epoch across flushes and daemon restarts.
+Publishing a worker transition revokes the predecessor before the Poller reports completion, even before a successor's delivery task runs.
+Hooks check the current receiver under the mailbox emission lock; asynchronous delivery carries its epoch and cannot change authority.
+A failed authority write aborts the transition instead of reporting success.
 
 ## Stores and views
 
