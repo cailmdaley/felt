@@ -5,10 +5,6 @@
    tiles run past. It never wraps. */
 .ws-head-index { position: relative; min-width: 0; display: flex; }
 .ws-head-index > .ws-tabs { flex: 1; }
-.ws-head-position {
-  flex: none; text-align: right; color: var(--ws-ink-muted); font: var(--ws-small-size)/1 var(--ws-mono);
-  letter-spacing: var(--ws-mono-tracking); font-variant-numeric: tabular-nums; white-space: nowrap;
-}
 .ws-tabs {
   display: flex; align-items: center; gap: var(--ws-tile-gap); min-width: 0; position: relative;
   height: calc(var(--ws-tile-height) + 2 * var(--ws-tile-air)); padding: 0 var(--ws-strip-end, 50%) 0 var(--ws-strip-start, 50%);

@@ -143,8 +143,6 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly position = element('span', 'ws-position')
-  /** The page count the board bar carries before its settings, on the desktop. */
-  readonly barPosition = element('span', 'ws-position ws-head-position')
   /** The map the board bar carries at its centre on the desktop: the tiles, the selected one over the page's centre. */
   readonly barIndex = element('div', 'ws-head-index')
   /** The phone's sense of place: one tick per page along the bottom bar's top edge. */
@@ -234,11 +232,10 @@ export class Reader {
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
-    this.barPosition.setAttribute('aria-hidden', 'true')
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
-    trail.append(this.headWorker, this.barPosition)
+    trail.append(this.headWorker)
     this.barIndex.dataset.part = 'page-band'
     this.barIndex.append(this.tabs.el, this.tabs.tip)
     // The phone's top bar: back, the fiber's name, the worker's dot. The desktop
@@ -474,7 +471,7 @@ export class Reader {
     const landing = settled && !this.runSettled
     this.runSettled = settled
     this.pageChoice.setAttribute('aria-disabled', String(!settled))
-    for (const el of [this.tabs.el, this.barPosition, this.ticks, this.position, this.prev, this.next]) {
+    for (const el of [this.tabs.el, this.ticks, this.position, this.prev, this.next]) {
       el.classList.toggle('ws-run-pending', !settled)
       if (!settled || landing) el.classList.remove('ws-run-landing')
       if (landing) el.classList.add('ws-run-landing')
@@ -575,10 +572,7 @@ export class Reader {
     this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     this.tabs.mark(index, animate)
-    this.position.textContent = this.barPosition.textContent = `${index + 1} / ${ch.documents.length}`
-    // Held at the widest count, so stepping from 9 to 10 never moves the index.
-    const digits = 2 * String(ch.documents.length).length + 3
-    this.barPosition.style.minWidth = `calc(${digits}ch + ${digits} * var(--ws-mono-tracking))`
+    this.position.textContent = `${index + 1} / ${ch.documents.length}`
     this.paintTicks(index, ch.documents.length)
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind

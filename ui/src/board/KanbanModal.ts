@@ -215,7 +215,6 @@ export class KanbanModal {
   /** The bar's centre while the reader is open: its map of pages. */
   private readerSlotEl: HTMLDivElement | null = null
   /** The bar's right end while the reader is open: its page count, before Settings. */
-  private positionSlotEl: HTMLDivElement | null = null
   /**
    * Wrapper around the Desk surfaces (Now + Resting).
    * `display: contents` in CSS, so it adds a toggle handle WITHOUT adding a
@@ -597,7 +596,6 @@ export class KanbanModal {
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
     this.readerSlotEl?.append(this.workspace.reader.barIndex)
-    this.positionSlotEl?.append(this.workspace.reader.barPosition)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
@@ -917,9 +915,7 @@ export class KanbanModal {
     this.readerSlotEl = document.createElement('div')
     this.readerSlotEl.className = 'kbn-viewtabs-reader'
     centre.append(this.readerSlotEl, this.lensSlotEl)
-    this.positionSlotEl = document.createElement('div')
-    this.positionSlotEl.className = 'kbn-viewtabs-position'
-    strip.append(centre, this.positionSlotEl)
+    strip.append(centre)
 
     // Settings rides the same row as the pages without being one of them. It
     // is deliberately NOT a tab: the tabs are windows onto the work, and
@@ -1198,7 +1194,6 @@ export class KanbanModal {
     this.lensSlotEl = null
     this.findEl = null
     this.readerSlotEl = null
-    this.positionSlotEl = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null

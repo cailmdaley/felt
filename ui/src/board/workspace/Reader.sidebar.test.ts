@@ -182,8 +182,9 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
-    // The trail ends with the page count; the head's centre holds the map.
-    expect(head.nextElementSibling?.classList.contains('ws-head-position')).toBe(true)
+    // The trail ends with the worker; the head's centre holds the map, with no page count beside it.
+    expect(head.nextElementSibling).toBeNull()
+    expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar .ws-nav-lead + [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.turn).toBe('working')

@@ -317,7 +317,7 @@
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
   /* The phone keeps its place in the bottom bar's ticks and count and its page sheet. */
-  .ws-head-index, .ws-head-position, .ws-tab-tip { display: none !important; }
+  .ws-head-index, .ws-tab-tip { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }

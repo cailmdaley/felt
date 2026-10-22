@@ -506,10 +506,10 @@ describe('workspace reader integration', () => {
       })
       const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
       workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
-      const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.barPosition, workspace.reader.el.querySelector('.ws-page-ticks')!]
+      const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.el.querySelector('.ws-page-ticks')!]
       const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
       const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
-      // Before the body, the selected page shows; the strip, ticks and count wait unseen, and stepping does nothing.
+      // Before the body, the selected page shows; the strip and ticks wait unseen, and stepping does nothing.
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
       for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(true)
       for (const press of ['G', 'l', 'h']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))

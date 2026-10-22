@@ -599,9 +599,8 @@
 /* The reader's map hangs from the bar's top edge, its tiles level with the
    tabs, and overhangs into the reader's top margin below. */
 .kbn-viewtabs-reader { display: none; position: absolute; left: 0; right: 0; top: calc(-1 * var(--ws-tile-air, 4px)); }
-.kbn-viewtabs-position { display: none; flex: none; margin-left: 12px; }
 .kbn-reader-open .kbn-viewtabs { z-index: calc(var(--ws-reader-layer, 9000) + 2); }
-.kbn-reader-open .kbn-viewtabs-reader, .kbn-reader-open .kbn-viewtabs-position { display: block; }
+.kbn-reader-open .kbn-viewtabs-reader { display: block; }
 .kbn-reader-open .kbn-viewtabs-lens { display: none !important; }
 /* Expand takes the whole window; the bar steps aside until it is restored. */
 .kbn-reader-expanded .kbn-viewtabs { visibility: hidden; }
@@ -2295,7 +2294,7 @@
   .kbn-viewtab-hotkey { display: none; }
   .kbn-viewtabs-views { gap: 4px; }
   /* The phone's bar is its bottom nav; the reader covers it and keeps its own bars. */
-  .kbn-viewtabs-find, .kbn-viewtabs-reader, .kbn-viewtabs-position { display: none !important; }
+  .kbn-viewtabs-find, .kbn-viewtabs-reader { display: none !important; }
   .kbn-reader-open .kbn-viewtabs { z-index: 20; }
   .kbn-modal .kbn-body-veiled > .kbn-view-host { top: 0; bottom: calc(57px + env(safe-area-inset-bottom, 0px)); }
   .kbn-viewtabs-lens {
