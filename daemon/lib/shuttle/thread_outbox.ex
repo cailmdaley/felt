@@ -14,7 +14,7 @@ defmodule Shuttle.ThreadOutbox do
 
   def capture(records) do
     transaction(fn state ->
-      Map.fetch!(state, "baseline")
+      _baseline = Map.fetch!(state, "baseline")
 
       next =
         Enum.reduce(records, state["records"], fn {id, record}, acc ->
