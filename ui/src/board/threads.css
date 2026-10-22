@@ -12,3 +12,4 @@
 .kbn-role-seat.kbn-thread-family { flex-wrap: wrap; }
 .kbn-thread-more { margin-left: 8px; font: inherit; font-size: 11px; color: var(--kbn-ink-muted); padding: 4px 0; }
 .kbn-thread-more:hover { color: var(--kbn-ink); text-decoration: underline; }
+.kbn-thread-mark { font-size: 10px; color: var(--kbn-ink-muted); border: 1px dashed var(--kbn-rule); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }

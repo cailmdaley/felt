@@ -52,6 +52,15 @@ export function threadSubtree(parent: KanbanCard, cards: readonly KanbanCard[]):
 }
 export function threadSummary(parent: KanbanCard, cards: readonly KanbanCard[]): NonNullable<KanbanCard['threadSummary']> {
   const descendants = threadSubtree(parent, cards)
-  const archived = descendants.filter(c => threadState(c) === 'archived').length
-  return { unfinished: descendants.length - archived, waitingOnCail: descendants.filter(c => threadState(c) === 'waiting-cail').length, toReview: descendants.filter(c => threadState(c) === 'to-review').length, archived }
+  const count = (state: ThreadState) => descendants.filter(c => threadState(c) === state).length
+  const archived = count('archived')
+  return { unfinished: descendants.length - archived, waitingOnCail: count('waiting-cail'), working: count('working'), toReview: count('to-review'), drafts: count('drafts'), archived }
+}
+/** The Desk column a family's most urgent unfinished thread asks for; undefined when nothing in it needs the Desk. */
+export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' | 'awaitingReview' | 'drafts' | undefined {
+  if (!summary) return undefined
+  if (summary.waitingOnCail || summary.working) return 'inFlight'
+  if (summary.toReview) return 'awaitingReview'
+  if (summary.drafts) return 'drafts'
+  return undefined
 }

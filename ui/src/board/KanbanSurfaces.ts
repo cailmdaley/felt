@@ -1,4 +1,4 @@
-import { installThreadPeek } from './ThreadPeek.js'
+import { installThreadPeek, threadMark } from './ThreadPeek.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
@@ -1385,6 +1385,8 @@ export class KanbanSurfaceRenderer {
     // not the compact one: a cluster row wraps, so the peek list can take a
     // line of its own here the way it does on a desk card.
     this.renderQueuedChip(card, el)
+    const mark = threadMark(card)
+    if (mark) el.append(mark)
     installThreadPeek(el, el, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
     this.installLongPressMove(el, card)
 
@@ -1917,6 +1919,8 @@ export class KanbanSurfaceRenderer {
 
     const turnChip = this.renderTurnChip(card, kind)
     if (turnChip) meta.append(turnChip)
+    const mark = threadMark(card)
+    if (mark) meta.append(mark)
 
     el.append(meta)
     installThreadPeek(el, meta, card, boardCards(this.o.getLastResponse()), this.o.openDetail)

@@ -17,6 +17,21 @@ export function threadRow(card: KanbanCard, open: (card: KanbanCard) => void): H
   return row
 }
 
+/** Why a card the Desk would not otherwise draw is here: a settled root kept for its threads, or a thread whose orchestrator is gone. */
+export function threadMark(card: KanbanCard): HTMLElement | null {
+  if (!card.threadPromoted && !card.threadOrphaned) return null
+  const mark = document.createElement('span')
+  mark.className = 'kbn-thread-mark'
+  if (card.threadOrphaned) {
+    mark.textContent = 'orphaned thread'
+    mark.title = `Its orchestrator, ${card.orchestrator}, is not on the board.`
+  } else {
+    mark.textContent = 'threads open'
+    mark.title = 'This constitution is settled or resting; it is here because its threads still hold work.'
+  }
+  return mark
+}
+
 export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, cards: KanbanCard[], open: (card: KanbanCard) => void): void {
   const descendants = threadSubtree(card, cards)
   if (!descendants.length) return
