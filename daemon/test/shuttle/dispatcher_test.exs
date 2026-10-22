@@ -1032,6 +1032,36 @@ defmodule Shuttle.DispatcherTest do
     assert hd(args) == "new-session"
   end
 
+  # The poller hands `Dispatcher.dispatch/2` the cached constitutions; the
+  # roster has to survive the dispatcher's own option rebuild into the script
+  # the worker actually starts with.
+  test "an orchestrator's dispatched launch script carries its thread roster" do
+    thread = fn id, fiber ->
+      %{
+        felt_store: "/tmp",
+        fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => %{}}, fiber)
+      }
+    end
+
+    entries = [
+      thread.("tests/haiku", %{"status" => "active"}),
+      thread.("tests/haiku/blinding", %{"status" => "closed", "outcome" => "Rebuilt. More."}),
+      thread.("tests/haiku/live", %{"status" => "active"})
+    ]
+
+    assert {:ok, session} =
+             Dispatcher.dispatch("tests/haiku",
+               runner: MockRunner,
+               felt_store: "/tmp",
+               threads: {entries, MapSet.new(["u-tests/haiku/live"])}
+             )
+
+    script = read_run_script_for(session)
+    assert script =~ "## Threads"
+    assert script =~ "- tests/haiku/live — Working —"
+    assert script =~ "- tests/haiku/blinding — To review — Rebuilt."
+  end
+
   test "dispatch uses Shuttle's resolved agent (claude-opus) when present" do
     assert {:ok, _session} = Dispatcher.dispatch("tests/shuttle-agent-block", runner: MockRunner)
     script = read_run_script_for(FiberUid.session("tests/shuttle-agent-block"))

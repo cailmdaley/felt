@@ -88,6 +88,9 @@ defmodule Shuttle.Dispatcher do
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
+    * `:threads` — `{entries, live}`: the poller's cached constitutions and its
+      running workers' runtime keys, from which an orchestrator's launch prompt
+      renders its `## Threads` roster (`Shuttle.Threads.roster/4`).
   """
   @spec dispatch(String.t(), keyword()) :: dispatch_result()
   def dispatch(fiber_id, opts \\ []) do
@@ -146,6 +149,7 @@ defmodule Shuttle.Dispatcher do
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
             previous_session: previous_session,
+            threads: Keyword.get(opts, :threads),
             role: get_in(fiber, ["shuttle", "role"]),
             agent: agent.id,
             model: agent.model
