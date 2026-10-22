@@ -98,15 +98,115 @@ defmodule Shuttle.Threads do
         end
       end)
 
-    case parent do
-      %{fiber: fiber} ->
-        "You are a thread of #{address(fiber)} (#{fiber["name"]}). " <>
-          "Your outcome is delivered to that orchestrator when you close or ask; write it for that reader."
+    lineage =
+      case parent do
+        %{fiber: fiber} ->
+          "You are a thread of #{address(fiber)} (#{fiber["name"]}). " <>
+            "Your outcome is delivered to that orchestrator when you close or ask; write it for that reader."
 
-      nil ->
+        nil ->
+          ""
+      end
+
+    case opts[:threads] do
+      {entries, live} -> [lineage, roster(fiber_id, opts[:felt_store], entries, live)]
+      _ -> [lineage]
+    end
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  @roster_cap 40
+  @state_order ["Waiting", "Working", "To review", "Draft", "Resting"]
+
+  @doc """
+  The `## Threads` block for an orchestrator's launch prompt: its direct
+  threads in `entries` (the poller's cached constitutions, local and synced),
+  Waiting first, each with its own thread count. `live` holds the running
+  workers' runtime keys (uid, else id). Empty when it has none.
+  """
+  def roster(fiber_id, felt_store, entries, live) do
+    index = index(entries)
+
+    children =
+      Enum.group_by(
+        Enum.filter(entries, &is_map(&1.fiber["shuttle"])),
+        &case orchestrator(&1, index) do
+          nil -> nil
+          parent -> {parent.felt_store, address(parent.fiber)}
+        end
+      )
+
+    case Map.get(children, {felt_store, fiber_id}, []) do
+      [] ->
         ""
+
+      threads ->
+        {archived, rows} =
+          threads
+          |> Enum.map(&{thread_state(&1.fiber, live), &1})
+          |> Enum.split_with(&(elem(&1, 0) == "Archived"))
+
+        rows =
+          Enum.sort_by(rows, fn {state, e} ->
+            {Enum.find_index(@state_order, &(&1 == state)), address(e.fiber)}
+          end)
+
+        lines =
+          rows
+          |> Enum.take(@roster_cap)
+          |> Enum.map(fn {state, e} ->
+            path = address(e.fiber)
+            n = length(Map.get(children, {e.felt_store, path}, []))
+
+            count =
+              if n > 0, do: "\n  (#{n} #{if n == 1, do: "thread", else: "threads"})", else: ""
+
+            "- #{path} — #{state} — #{first_sentence(e.fiber["outcome"])}#{count}"
+          end)
+
+        more =
+          if length(rows) > @roster_cap,
+            do: ["… and #{length(rows) - @roster_cap} more"],
+            else: []
+
+        tail = if archived != [], do: ["(#{length(archived)} archived)"], else: []
+
+        Enum.join(
+          ["## Threads" | lines] ++
+            more ++
+            tail ++
+            [
+              "Results from these arrive as messages (close/ask wake you; handoff/rest arrive as context). " <>
+                "`shuttle thread #{fiber_id} \"<ask>\"` files a new one."
+            ],
+          "\n"
+        )
     end
   end
+
+  # The board's thread states (ui/src/board/threads.ts `threadState`), from the fiber alone.
+  defp thread_state(fiber, live) do
+    shuttle = fiber["shuttle"]
+    key = fiber["uid"] || fiber["id"]
+
+    cond do
+      fiber["tempered"] || fiber["status"] == "composted" -> "Archived"
+      is_map(shuttle["ask"]) -> "Waiting"
+      MapSet.member?(live, key) or MapSet.member?(live, address(fiber)) -> "Working"
+      fiber["status"] == "closed" -> "To review"
+      fiber["horizon"] == "stashed" or shuttle["kind"] == "standing" -> "Resting"
+      shuttle["enabled"] == false or fiber["status"] == "open" -> "Draft"
+      true -> "Working"
+    end
+  end
+
+  defp first_sentence(text) when is_binary(text) and text != "" do
+    sentence = text |> String.split(~r/(?<=[.!?])\s|\n/, parts: 2) |> hd() |> String.trim()
+    if String.length(sentence) > 120, do: String.slice(sentence, 0, 119) <> "…", else: sentence
+  end
+
+  defp first_sentence(_), do: "(no outcome yet)"
 
   @doc "Reconcile durable lifecycle signals. Only a child's owner publishes its results."
   def deliver_results(entries, own_host) do

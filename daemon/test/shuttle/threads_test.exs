@@ -932,4 +932,62 @@ defmodule Shuttle.ThreadsTest do
     |> Enum.map(&(&1 |> File.read!() |> Jason.decode!()))
     |> Enum.sort_by(& &1["request"]["message_id"])
   end
+
+  describe "orchestrator roster" do
+    defp thread(id, fiber, store \\ "/s"),
+      do: %{
+        felt_store: store,
+        fiber: Map.merge(%{"id" => id, "uid" => "u-" <> id, "shuttle" => %{}}, fiber)
+      }
+
+    test "a hub's launch prompt lists its threads by state; a leaf gets no block" do
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/rest", %{"status" => "open", "horizon" => "stashed"}),
+        thread("hub/draft", %{"status" => "open", "shuttle" => %{"enabled" => false}}),
+        thread("hub/review", %{"status" => "closed", "outcome" => "Found it. Then more."}),
+        thread("hub/live", %{"status" => "active"}),
+        thread("hub/live/deep", %{"status" => "active"}),
+        thread("hub/asking", %{
+          "status" => "active",
+          "shuttle" => %{"ask" => %{"text" => "?", "at" => "t"}}
+        }),
+        thread("hub/done", %{"status" => "closed", "tempered" => "good"}),
+        thread("hub/other", %{"status" => "active"}, "/elsewhere"),
+        thread("hub/notes", %{"status" => "active"}) |> put_in([:fiber, "shuttle"], nil)
+      ]
+
+      prompt =
+        Shuttle.Dispatcher.render_prompt("hub",
+          felt_store: "/s",
+          threads: {entries, MapSet.new(["u-hub/live"])}
+        )
+
+      assert prompt =~ "## Threads"
+
+      rows =
+        for [path, state] <-
+              Regex.scan(~r/^- (\S+) — ([^—]+) —/m, prompt, capture: :all_but_first),
+            do: {path, String.trim(state)}
+
+      assert rows == [
+               {"hub/asking", "Waiting"},
+               {"hub/live", "Working"},
+               {"hub/review", "To review"},
+               {"hub/draft", "Draft"},
+               {"hub/rest", "Resting"}
+             ]
+
+      assert prompt =~ "- hub/live — Working — (no outcome yet)\n  (1 thread)"
+      assert prompt =~ "— To review — Found it.\n"
+      assert prompt =~ "(1 archived)"
+      assert prompt =~ ~s(`shuttle thread hub "<ask>"`)
+
+      refute Shuttle.Dispatcher.render_prompt("hub/rest",
+               felt_store: "/nonexistent",
+               runner: FailingMailboxRunner,
+               threads: {entries, MapSet.new()}
+             ) =~ "## Threads"
+    end
+  end
 end
