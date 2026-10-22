@@ -59,7 +59,7 @@ import type {
 } from './KanbanTypes.js'
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { collapseThreadFamily, threadFamilyCard, threadFamilyTab } from './ThreadPeek.js'
+import { collapseThreadFamily, restoreThreadFocus, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -2321,6 +2321,7 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
+    const threadFocus = threadFocusIn(this.deskEl)
     const { now, staleness } = data
 
     this.deskEl.innerHTML = ''
@@ -2357,6 +2358,8 @@ export class KanbanModal {
     // A redraw repaints the selection in place: the Desk scrolls only when the
     // selection moves, never under a pointer on its way to another card.
     this.deskKeyboard?.refresh()
+    // Focus on a thread control lands on the same control, rebuilt.
+    restoreThreadFocus(this.deskEl, threadFocus)
     // An open preview follows its card onto the rebuilt row.
     this.cardPreview?.rerendered()
     void this.fiberSends?.refresh()

@@ -1,4 +1,4 @@
-import { installThreadPeek, threadMark } from './ThreadPeek.js'
+import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
@@ -318,6 +318,8 @@ interface KanbanSurfaceRendererOptions {
 }
 
 export class KanbanSurfaceRenderer {
+  /** Open thread families, carried across the Desk's rebuilds. */
+  readonly threadFamilies = new ThreadFamilies()
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -876,7 +878,7 @@ export class KanbanSurfaceRenderer {
     seat.className = 'kbn-role-seat'
     seat.setAttribute('role', 'listitem')
     seat.append(chip, queue)
-    installThreadPeek(seat, queue, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(seat, queue, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
     return seat
   }
 
@@ -1388,7 +1390,7 @@ export class KanbanSurfaceRenderer {
     this.renderQueuedChip(card, el)
     const mark = threadMark(card)
     if (mark) el.append(mark)
-    installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
     // the way a Desk row's are: under the pointer at that end, or on focus. A
@@ -1923,7 +1925,7 @@ export class KanbanSurfaceRenderer {
     if (mark) meta.append(mark)
 
     el.append(meta)
-    installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
     if (queuedList) el.append(queuedList)
 
     el.addEventListener('click', (e) => {

@@ -118,3 +118,44 @@ describe('thread rows on the Desk keyboard', () => {
     expect(selected()).toBeUndefined()
   })
 })
+
+describe('thread families across Desk repaints', () => {
+  const pointer = (type: string, target: EventTarget, pointerType = 'mouse'): void => {
+    const event = new Event(type, { bubbles: type !== 'pointerenter' && type !== 'pointerleave' })
+    Object.assign(event, { pointerType })
+    target.dispatchEvent(event)
+  }
+  it('an expanded family stays expanded through a poll', () => {
+    badge().click()
+    draw(data())
+    expect(peek().hidden).toBe(false)
+    expect(badge().getAttribute('aria-expanded')).toBe('true')
+    badge().click()
+    draw(data())
+    expect(peek().hidden).toBe(true)
+  })
+  it('focus on a thread row or the badge returns to the same control', () => {
+    badge().click()
+    peek().querySelector<HTMLElement>('[data-card-uid="draft-uid"]')!.focus()
+    draw(data())
+    const active = document.activeElement as HTMLElement
+    expect(active.isConnected).toBe(true)
+    expect(active.dataset.cardUid).toBe('draft-uid')
+    expect(peek().contains(active)).toBe(true)
+    badge().focus()
+    draw(data())
+    expect(document.activeElement).toBe(badge())
+  })
+  it('a hover expansion survives a still pointer and folds on the first move elsewhere', () => {
+    pointer('pointerenter', family())
+    expect(peek().hidden).toBe(false)
+    draw(data())
+    expect(peek().hidden).toBe(false)
+    pointer('pointermove', peek())
+    expect(peek().hidden).toBe(false)
+    pointer('pointermove', document.querySelector('.kbn-card[data-card-uid="after-uid"]')!)
+    expect(peek().hidden).toBe(true)
+    draw(data())
+    expect(peek().hidden).toBe(true)
+  })
+})

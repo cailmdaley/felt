@@ -1,5 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { THREAD_LABEL, type ThreadIndex } from './threads.js'
+import { THREAD_LABEL, threadKey, type ThreadIndex } from './threads.js'
 import { waitingThreadEntries } from './threadPreferences.js'
 import './threads.css'
 
@@ -35,8 +35,25 @@ export function threadMark(card: KanbanCard): HTMLElement | null {
   return mark
 }
 
-export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): void {
+type Expansion = 'pinned' | 'hover'
+/**
+ * Which families are open, kept by the renderer across Desk repaints, which
+ * rebuild every card. A badge tap or a keyboard reveal pins a family open; a
+ * hover opens it only while the pointer stays.
+ */
+export class ThreadFamilies {
+  private readonly open = new Map<string, Expansion>()
+  get(card: KanbanCard): Expansion | undefined { return this.open.get(threadKey(card)) }
+  set(card: KanbanCard, expansion: Expansion | undefined): void {
+    if (expansion) this.open.set(threadKey(card), expansion)
+    else this.open.delete(threadKey(card))
+  }
+}
+
+export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, families = new ThreadFamilies()): void {
   if (!index.size(card)) return
+  const family = threadKey(card)
+  const focusId = (...parts: string[]): string => JSON.stringify([family, ...parts])
   const descendants = index.subtree(card).sort(index.compare)
   host.classList.add('kbn-thread-family')
   const badge = document.createElement('button'); badge.type = 'button'; badge.className = 'kbn-thread-badge'
@@ -51,15 +68,21 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   let entries: HTMLElement | undefined
   // Expanded, the peek holds every waiting row, so the sub-entries step aside
   // rather than give the keyboard two stops for one thread.
-  const paint = (expanded: boolean): void => {
+  const paint = (expansion: Expansion | undefined): void => {
+    const expanded = expansion !== undefined
     peek.hidden = !expanded; badge.setAttribute('aria-expanded', String(expanded))
     if (entries) entries.hidden = expanded
+    families.set(card, expansion)
   }
-  badge.addEventListener('click', event => { event.stopPropagation(); paint(peek.hidden) })
-  host.addEventListener(THREAD_REVEAL, () => paint(true))
-  host.addEventListener(THREAD_COLLAPSE, () => { paint(false); badge.focus({ preventScroll: true }) })
-  host.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') paint(true) })
-  host.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch' && !peek.contains(document.activeElement)) paint(false) })
+  const keepsFocus = (): boolean => peek.contains(document.activeElement)
+  badge.dataset.threadFocus = focusId('badge')
+  badge.addEventListener('click', event => { event.stopPropagation(); paint(peek.hidden ? 'pinned' : undefined) })
+  host.addEventListener(THREAD_REVEAL, () => paint('pinned'))
+  host.addEventListener(THREAD_COLLAPSE, () => { paint(undefined); badge.focus({ preventScroll: true }) })
+  host.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch' && peek.hidden) paint('hover') })
+  host.addEventListener('pointerleave', event => {
+    if (event.pointerType !== 'touch' && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
+  })
   peek.addEventListener('pointerdown', event => event.stopPropagation())
   peek.draggable = true
   peek.addEventListener('dragstart', event => { event.preventDefault(); event.stopPropagation() })
@@ -72,22 +95,45 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   ] as const) {
     if (!members.length) continue
     const heading = document.createElement('h4'); heading.textContent = label
-    peek.append(heading, ...members.map(c => threadRow(c, index, open)))
+    peek.append(heading, ...members.map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('peek', threadKey(c)); return row }))
   }
   const archived = descendants.length - live.length
   if (archived) { const note = document.createElement('small'); note.textContent = `${archived} archived`; peek.append(note) }
   badgeHost.append(badge); host.append(peek)
   if (waitingThreadEntries() && waiting.length) {
     entries = document.createElement('div'); entries.className = 'kbn-thread-subentries'
-    entries.append(...waiting.slice(0, 2).map(c => threadRow(c, index, open)))
+    entries.append(...waiting.slice(0, 2).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('entry', threadKey(c)); return row }))
     if (waiting.length > 2) {
       const more = document.createElement('button'); more.type = 'button'; more.className = 'kbn-thread-more'
-      more.textContent = `+ ${waiting.length - 2} more`
+      more.textContent = `+ ${waiting.length - 2} more`; more.dataset.threadFocus = focusId('more')
       more.addEventListener('click', event => { event.stopPropagation(); open(card) }); entries.append(more)
     }
     host.insertBefore(entries, peek)
   }
-  paint(false)
+  const restored = families.get(card)
+  paint(restored)
+  // A repaint under a still pointer gets no pointerenter or pointerleave, so a
+  // restored hover expansion folds on the first move that lands elsewhere.
+  if (restored === 'hover') {
+    const moved = (event: PointerEvent): void => {
+      const inside = event.target instanceof Node && host.contains(event.target)
+      if (host.isConnected && families.get(card) === 'hover' && inside) return
+      document.removeEventListener('pointermove', moved, true)
+      if (host.isConnected && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
+    }
+    document.addEventListener('pointermove', moved, true)
+  }
+}
+
+/** The thread control holding focus inside `root`, by identity, to restore after a repaint. */
+export function threadFocusIn(root: HTMLElement): string | undefined {
+  const active = document.activeElement
+  return active instanceof HTMLElement && root.contains(active) && active.matches('.kbn-thread-family [data-thread-focus]') ? active.dataset.threadFocus : undefined
+}
+export function restoreThreadFocus(root: HTMLElement, id: string | undefined): void {
+  if (!id) return
+  const target = [...root.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === id && !el.closest('[hidden]'))
+  target?.focus({ preventScroll: true })
 }
 
 const THREAD_REVEAL = 'thread-reveal'
