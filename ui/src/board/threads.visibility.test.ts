@@ -94,6 +94,15 @@ describe('actionable threads never vanish from the Desk', () => {
     expect(ids(b.threads ?? [])).toEqual(['gone/child/deep'])
     expect(ids(boardCards(b)).sort()).toEqual(['gone/child', 'gone/child/deep'])
   })
+  it('a malformed cyclic feed still draws one card for the loop, marked orphaned', () => {
+    const b = board([
+      { id: 'a', parent: 'b', status: 'active', ask: true },
+      { id: 'b', parent: 'a', status: 'active', phase: 'working' },
+    ])
+    expect(desk(b)).toHaveLength(1)
+    expect(desk(b)[0].threadOrphaned).toBe(true)
+    expect(boardCards(b)).toHaveLength(2)
+  })
   it('draws the promoted-family and orphaned-thread marks on the Desk card', () => {
     const b = board([
       { id: 'hub', status: 'closed', tempered: true },

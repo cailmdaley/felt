@@ -1,4 +1,5 @@
 import { installThreadPeek, threadMark } from './ThreadPeek.js'
+import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
@@ -875,7 +876,7 @@ export class KanbanSurfaceRenderer {
     seat.className = 'kbn-role-seat'
     seat.setAttribute('role', 'listitem')
     seat.append(chip, queue)
-    installThreadPeek(seat, queue, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(seat, queue, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
     return seat
   }
 
@@ -1387,7 +1388,7 @@ export class KanbanSurfaceRenderer {
     this.renderQueuedChip(card, el)
     const mark = threadMark(card)
     if (mark) el.append(mark)
-    installThreadPeek(el, el, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
     this.installLongPressMove(el, card)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
@@ -1923,7 +1924,7 @@ export class KanbanSurfaceRenderer {
     if (mark) meta.append(mark)
 
     el.append(meta)
-    installThreadPeek(el, meta, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
+    installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
     if (queuedList) el.append(queuedList)
 
     el.addEventListener('click', (e) => {
@@ -3087,6 +3088,12 @@ function visibleRectOf(el: HTMLElement): ZoneRect | null {
  * card that can be found must also be able to appear in a chain, or "+N
  * queued" would count differently from what the peek can name.
  */
+const NO_THREADS = new ThreadIndex([])
+/** The response's thread graph: the one the read model built, or built once from its cards. */
+export function threadIndexFor(resp: KanbanResponse | null): ThreadIndex {
+  return resp ? responseThreadIndex(resp, () => boardCards(resp)) : NO_THREADS
+}
+
 export function boardCards(resp: KanbanResponse | null): KanbanCard[] {
   if (!resp) return []
   const seen = new Set<string>()

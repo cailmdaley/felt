@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import { threadSummary } from './threads.js'
+import { ThreadIndex } from './threads.js'
 import { response } from './testFixtures.js'
 import { installThreadPeek } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
@@ -17,7 +17,7 @@ it('enables waiting subentries by default and respects an explicit opt-out', () 
 it('a phone hold expands without its synthetic action being swallowed by click suppression', () => {
   vi.useFakeTimers()
   const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root' })
-  root.threadSummary = threadSummary(root, [root, child])
+  root.threadSummary = new ThreadIndex([root, child]).summary(root)
   const data = response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] })
   const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {} })
@@ -38,7 +38,7 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
   const archived = card({ id: 'root/done', orchestrator: root.id, status: 'closed', tempered: false })
   const host = document.createElement('div'), meta = document.createElement('div'); host.append(meta); document.body.append(host)
   const open = vi.fn()
-  installThreadPeek(host, meta, root, [root, child, ask, archived], open)
+  installThreadPeek(host, meta, root, new ThreadIndex([root, child, ask, archived]), open)
   expect(meta.textContent).toBe('⑂ 2')
   expect(meta.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
   const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
@@ -52,7 +52,7 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
   expect(host.querySelector('.kbn-thread-subentries')).toBeNull()
   saveWaitingThreadEntries(true)
   const second = document.createElement('div')
-  installThreadPeek(second, second, root, [root, child, ask], open)
+  installThreadPeek(second, second, root, new ThreadIndex([root, child, ask]), open)
   expect(second.querySelector('.kbn-thread-subentries')?.textContent).toContain(ask.id)
 })
 it('caps enabled Desk subentries at two actual waits, never reviews, and opens the root for more', () => {
@@ -61,7 +61,7 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: root.id, status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
   const reviews = Array.from({ length: 16 }, (_, n) => card({ id: `root/review${n}`, orchestrator: root.id, status: 'closed' }))
   const host = document.createElement('div'), meta = document.createElement('div'); host.append(meta)
-  installThreadPeek(host, meta, root, [root, ...waits, ...reviews], open)
+  installThreadPeek(host, meta, root, new ThreadIndex([root, ...waits, ...reviews]), open)
   expect(meta.textContent).toContain('16 to review')
   expect(host.querySelector('.kbn-thread-subentries')?.nextElementSibling).toBe(host.querySelector('.kbn-thread-peek'))
   expect(host.querySelectorAll('.kbn-thread-subentries .kbn-thread-row')).toHaveLength(2)

@@ -5,7 +5,7 @@ import { type KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 import type { Workspace } from './workspace/Workspace.js'
 import { MOBILE_MEDIA } from './mobile.js'
-import { threadSummary } from './threads.js'
+import { ThreadIndex } from './threads.js'
 import { saveWaitingThreadEntries } from './threadPreferences.js'
 
 interface BoardInternals {
@@ -32,7 +32,7 @@ const head = card({ id: 'hub', uid: 'hub-uid', status: 'active', workerState: 'r
 const ask = card({ id: 'hub/ask', uid: 'ask-uid', orchestrator: 'hub', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } })
 const draft = card({ id: 'hub/draft', uid: 'draft-uid', orchestrator: 'hub' })
 const after = card({ id: 'after', uid: 'after-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
-head.threadSummary = threadSummary(head, [head, ask, draft])
+head.threadSummary = new ThreadIndex([head, ask, draft]).summary(head)
 const data = () => response({ now: { drafts: [], inFlight: [head, after], awaitingReview: [] }, threads: [ask, draft] })
 function draw(value: KanbanResponse): void { inside.lastResponse = value; inside.render(value) }
 function press(key: string, init: KeyboardEventInit = {}, target: EventTarget = document): KeyboardEvent {

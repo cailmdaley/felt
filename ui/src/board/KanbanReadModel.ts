@@ -40,7 +40,7 @@ import type {
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
-import { familyColumn, orchestratorOf, threadSummary } from './threads.js';
+import { adoptThreadIndex, familyColumn, ThreadIndex } from './threads.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -117,7 +117,7 @@ export function buildKanbanResponseFromComposite(
   };
   const surfaces = assembleSurfaces(eligible, byId, projectDirIndex(eligible), nowMs, staleOrigin);
 
-  return {
+  const response: KanbanResponse = {
     feltHost: feed.host,
     threads: surfaces.threads,
     now: surfaces.now,
@@ -130,6 +130,9 @@ export function buildKanbanResponseFromComposite(
     staleness,
     generatedAt: nowMs,
   };
+  // Every thread surface drawn from this response reads the graph built here.
+  adoptThreadIndex(response, surfaces.threadIndex);
+  return response;
 }
 
 /**
@@ -239,6 +242,7 @@ export function dedupeMirroredRows(
 
 type AssembledSurfaces = {
   threads: KanbanCard[];
+  threadIndex: ThreadIndex;
   now: KanbanResponse['now'];
   timeline: KanbanResponse['timeline'];
   stash: KanbanCard[];
@@ -317,10 +321,11 @@ function assembleSurfaces(
   // on its own; one whose orchestrator is not on the board is its own card,
   // marked orphaned, so its work stays reachable.
   const allCards = classified.map(row => row.card);
-  const parented = new Set(allCards.filter(card => orchestratorOf(card, allCards)));
+  const threadIndex = new ThreadIndex(allCards);
+  const parented = new Set(allCards.filter(card => threadIndex.parentOf(card)));
   for (const card of allCards) {
-    if (card.orchestrator && !parented.has(card)) card.threadOrphaned = true;
-    card.threadSummary = threadSummary(card, allCards);
+    if (threadIndex.isOrphan(card)) card.threadOrphaned = true;
+    card.threadSummary = threadIndex.summary(card);
   }
   const threads = allCards.filter(card => parented.has(card));
   const nodes = new Map<string, FoldNode>();
@@ -417,6 +422,7 @@ function assembleSurfaces(
 
   return {
     threads,
+    threadIndex,
     now: { drafts: nowDrafts, inFlight, awaitingReview: nowAwaitingReview },
     timeline: { past, futureDated },
     stash,

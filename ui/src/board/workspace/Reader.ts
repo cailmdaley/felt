@@ -1,4 +1,5 @@
 import { ThreadRail } from './ThreadRail.js'
+import { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -48,6 +49,8 @@ export interface ReaderOptions {
   cards(): KanbanCard[]
   /** Full Desk graph, including folded children and heads outside the sidebar groups. */
   queueCards?(): KanbanCard[]
+  /** The thread graph the rail reads; absent, one is built from `queueCards`. */
+  threadIndex?(): ThreadIndex
   /** The sidebar's order, shared by every constitution-stepping binding. */
   switcherCards?(): KanbanCard[]
   pickerCards?(): KanbanCard[]
@@ -348,7 +351,7 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.queueCards?.() ?? this.opts.cards())
+    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.queueCards?.() ?? this.opts.cards()))
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true

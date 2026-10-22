@@ -1,19 +1,20 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { THREAD_LABEL, threadState, threadSubtree } from './threads.js'
+import { THREAD_LABEL, type ThreadIndex } from './threads.js'
 import { waitingThreadEntries } from './threadPreferences.js'
 import './threads.css'
 
-export function threadRow(card: KanbanCard, open: (card: KanbanCard) => void): HTMLButtonElement {
+export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLButtonElement {
+  const state = index.state(card)
   const row = document.createElement('button')
-  row.type = 'button'; row.className = 'kbn-thread-row'; row.dataset.threadState = threadState(card)
+  row.type = 'button'; row.className = 'kbn-thread-row'; row.dataset.threadState = state
   // The Desk keyboard's identity: an expanded row is a stop in its column.
   row.dataset.cardUid = card.uid ?? card.id; row.dataset.cardOrigin = card.originId
   row.title = card.ask?.text ?? card.outcome ?? card.id
   const name = document.createElement('span'); name.className = 'kbn-thread-name'; name.textContent = card.name
-  const state = document.createElement('small'); state.textContent = THREAD_LABEL[threadState(card)]
+  const label = document.createElement('small'); label.textContent = THREAD_LABEL[state]
   const outcome = document.createElement('span'); outcome.className = 'kbn-thread-outcome'
   outcome.textContent = card.ask?.text ?? card.outcome ?? ''
-  row.append(name, state, outcome)
+  row.append(name, label, outcome)
   row.addEventListener('click', event => { event.stopPropagation(); open(card) })
   row.addEventListener('pointerdown', event => event.stopPropagation())
   return row
@@ -34,14 +35,14 @@ export function threadMark(card: KanbanCard): HTMLElement | null {
   return mark
 }
 
-export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, cards: KanbanCard[], open: (card: KanbanCard) => void): void {
-  const descendants = threadSubtree(card, cards)
-  if (!descendants.length) return
+export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): void {
+  if (!index.size(card)) return
+  const descendants = index.subtree(card).sort(index.compare)
   host.classList.add('kbn-thread-family')
   const badge = document.createElement('button'); badge.type = 'button'; badge.className = 'kbn-thread-badge'
-  const live = descendants.filter(c => threadState(c) !== 'archived')
-  const waiting = live.filter(c => threadState(c) === 'waiting-cail')
-  const review = live.filter(c => threadState(c) === 'to-review')
+  const live = descendants.filter(c => index.state(c) !== 'archived')
+  const waiting = live.filter(c => index.state(c) === 'waiting-cail')
+  const review = live.filter(c => index.state(c) === 'to-review')
   badge.textContent = `⑂ ${live.length}${review.length ? ` · ${review.length} to review` : ''}`
   badge.classList.toggle('kbn-thread-badge-waiting', waiting.length > 0)
   badge.title = `${live.length} unfinished threads · ${waiting.length} waiting · ${review.length} to review`
@@ -66,20 +67,20 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   for (const [label, members] of [
     ['Waiting', waiting],
     ['To review', review],
-    ['Working', live.filter(c => threadState(c) === 'working')],
-    ['Drafts', live.filter(c => threadState(c) === 'drafts')],
-    ['Resting', live.filter(c => threadState(c) === 'resting')],
+    ['Working', live.filter(c => index.state(c) === 'working')],
+    ['Drafts', live.filter(c => index.state(c) === 'drafts')],
+    ['Resting', live.filter(c => index.state(c) === 'resting')],
   ] as const) {
     if (!members.length) continue
     const heading = document.createElement('h4'); heading.textContent = label
-    peek.append(heading, ...members.map(c => threadRow(c, open)))
+    peek.append(heading, ...members.map(c => threadRow(c, index, open)))
   }
   const archived = descendants.length - live.length
   if (archived) { const note = document.createElement('small'); note.textContent = `${archived} archived`; peek.append(note) }
   badgeHost.append(badge); host.append(peek)
   if (waitingThreadEntries() && waiting.length) {
     entries = document.createElement('div'); entries.className = 'kbn-thread-subentries'
-    entries.append(...waiting.slice(0, 2).map(c => threadRow(c, open)))
+    entries.append(...waiting.slice(0, 2).map(c => threadRow(c, index, open)))
     if (waiting.length > 2) {
       const more = document.createElement('button'); more.type = 'button'; more.className = 'kbn-thread-more'
       more.textContent = `+ ${waiting.length - 2} more`
