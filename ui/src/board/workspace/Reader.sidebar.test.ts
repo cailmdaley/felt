@@ -113,13 +113,13 @@ describe('Reader channel sidebar', () => {
     expect(face.querySelector('.ws-channel-owner')).toBeNull()
   })
 
-  it('explains the row marks in a legend under the column strip', () => {
+  it('explains the row marks in the column strip\'s tooltip, not in standing chrome', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const reader = makeReader(alpha)
-    const strip = reader.el.querySelector('.ws-sidebar-index')!
-    const legend = strip.nextElementSibling as HTMLElement
-    expect(legend.classList.contains('ws-sidebar-legend')).toBe(true)
-    expect(legend.textContent).toBe('◐agent✓youworkingquestionidle')
+    const strip = reader.el.querySelector<HTMLElement>('.ws-sidebar-index')!
+    expect(reader.el.querySelector('.ws-sidebar-legend')).toBeNull()
+    expect(strip.title).toBe('Row marks: ◐ agent · ✓ you · dot blue working, red question, yellow idle')
+    for (const entry of strip.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')) expect(entry.title.endsWith(strip.title)).toBe(true)
   })
 
   it('repaints a retained worker pill when its turn changes', () => {

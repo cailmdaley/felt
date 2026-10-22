@@ -22,7 +22,7 @@ import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.
 import { groupJump, groupStops, stopLanding } from './groupJump.js'
 import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from './measures.js'
 import { workerPlate } from './workerPlate.js'
-import { TURN_WORD, type Turn } from '../turn.js'
+import { TURN_WORD } from '../turn.js'
 import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
@@ -72,26 +72,9 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   return el
 }
 /** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
-/** What a row's marks mean: the lifecycle glyph, then the worker's dot by turn, drawn as the rows draw them. */
-function sidebarLegend(): HTMLElement {
-  const legend = element('div', 'ws-sidebar-legend')
-  legend.setAttribute('aria-label', 'Row marks')
-  const entry = (mark: HTMLElement, word: string): void => {
-    const item = element('span', 'ws-sidebar-legend-entry')
-    item.append(mark, word)
-    legend.append(item)
-  }
-  const glyph = (kind: 'agent' | 'human', text: string): HTMLElement => element('span', `kbn-card-glyph kbn-card-glyph-${kind}`, text)
-  const dot = (turn: Turn): HTMLElement => {
-    const mark = element('span', 'ws-sidebar-legend-dot')
-    mark.dataset.turn = turn
-    return mark
-  }
-  entry(glyph('agent', '◐'), 'agent')
-  entry(glyph('human', '✓'), 'you')
-  for (const turn of ['working', 'question', 'idle'] as const) entry(dot(turn), TURN_WORD[turn])
-  return legend
-}
+/** What a row's marks mean, said by the index strip's tooltip: the lifecycle glyph, then the worker's dot by turn. */
+const TURN_DOT: Record<'working' | 'question' | 'idle', string> = { working: 'blue', question: 'red', idle: 'yellow' }
+const ROW_MARKS = `Row marks: ◐ agent · ✓ you · dot ${(['working', 'question', 'idle'] as const).map(turn => `${TURN_DOT[turn]} ${TURN_WORD[turn]}`).join(', ')}`
 const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
@@ -307,7 +290,8 @@ export class Reader {
     this.sidebarHandle.addEventListener('keydown', e => this.sidebarResizeKey(e))
     this.sidebarHandle.addEventListener('dblclick', () => this.setSidebarWidth(null, true))
     this.sidebarIndex.setAttribute('aria-label', 'Constitution columns')
-    this.sidebar.append(this.sidebarIndex, sidebarLegend(), this.sidebarPicker.el, this.sidebarHandle)
+    this.sidebarIndex.title = ROW_MARKS
+    this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
     column.append(this.threadRail.breadcrumb, this.stage)
@@ -1197,7 +1181,7 @@ export class Reader {
       const tally = entry.lastElementChild as HTMLElement
       if (tally.textContent !== count) tally.textContent = count
       entry.setAttribute('aria-label', `${stop.key}, ${count}`)
-      entry.title = stop.key
+      entry.title = `${stop.key}\n${ROW_MARKS}`
       if (stop.cards.some(card => cardIdentity(card) === current)) entry.setAttribute('aria-current', 'location')
       else entry.removeAttribute('aria-current')
       if (this.sidebarIndex.children[i] !== entry) this.sidebarIndex.insertBefore(entry, this.sidebarIndex.children[i] ?? null)
