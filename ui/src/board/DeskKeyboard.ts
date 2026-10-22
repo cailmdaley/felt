@@ -1,6 +1,7 @@
 import { DESK_REGION_SELECTORS, type KeyIntent } from './keymap.js'
 import { isMobileViewport } from './mobile.js'
 import { folioScrollTarget } from './deskMobile.js'
+import { revealThreadFamily } from './ThreadPeek.js'
 
 export interface DeskAddress { uid: string; origin: string }
 const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin! })
@@ -65,6 +66,7 @@ export class DeskKeyboard {
       queue.parentElement?.querySelector('.kbn-card-queued')?.setAttribute('aria-expanded', 'true')
     }
     if (el.matches('.kbn-cluster-item[hidden]')) el.parentElement?.querySelector<HTMLButtonElement>('.kbn-cluster-more')?.click()
+    revealThreadFamily(el)
     el.classList.add('kbn-key-selected')
     el.setAttribute('aria-current', 'true')
     if (scroll) this.reveal(el)

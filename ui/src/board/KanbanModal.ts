@@ -59,6 +59,7 @@ import type {
 } from './KanbanTypes.js'
 import { hasLiveWorker, hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
+import { collapseThreadFamily, threadFamilyCard, threadFamilyTab } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, findCardById, findCardColumn, formatDue, boardDependents } from './KanbanSurfaces.js'
 import { moveDestinations, queueTargets, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -2659,6 +2660,21 @@ export class KanbanModal {
     if (!this.body) return
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
+    // Escape folds an expanded thread family first — the nearest thing open —
+    // and the selection, if it was on one of its rows, returns to the family's card.
+    if (e.key === 'Escape' && this.activeViewId === 'desk' && !(e.target instanceof HTMLElement && isTypingTarget(e.target))) {
+      const selectedRow = this.deskKeyboard?.selectedRow ?? null
+      const family = collapseThreadFamily(document.activeElement) ?? collapseThreadFamily(selectedRow)
+      if (family) {
+        e.preventDefault()
+        e.stopPropagation()
+        const own = threadFamilyCard(family)
+        if (own && selectedRow && selectedRow !== own && family.contains(selectedRow)) {
+          this.deskKeyboard?.select({ uid: own.dataset.cardUid!, origin: own.dataset.cardOrigin! }, false)
+        }
+        return
+      }
+    }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     // A field takes its own Escape (the bar's Find puts itself away) before the lens is released.
@@ -2723,6 +2739,15 @@ export class KanbanModal {
           return
         }
       }
+    }
+    // Inside a thread family, Tab steps through its card, badge and drawn rows
+    // before the column order takes over.
+    const familyStop = active ? threadFamilyTab(active, e.shiftKey) : null
+    if (familyStop) {
+      e.preventDefault()
+      e.stopPropagation()
+      familyStop.focus({ preventScroll: true })
+      return
     }
     const heads = Array.from(this.body.querySelectorAll<HTMLElement>('.kbn-col-head'))
       .filter(head => head.offsetParent !== null)
