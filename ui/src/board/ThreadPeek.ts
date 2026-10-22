@@ -44,27 +44,16 @@ function moreButton(count: number, focus: string, open: () => void): HTMLButtonE
   return more
 }
 
-type Expansion = 'pinned' | 'hover'
 /**
  * Which families are open, kept by the renderer across Desk repaints, which
- * rebuild every card. A badge tap or a keyboard reveal pins a family open; a
- * hover opens it only while the pointer stays.
+ * rebuild every card. A family opens on its badge or from the keyboard and
+ * stays open until folded.
  */
 export class ThreadFamilies {
-  private readonly open = new Map<string, Expansion>()
-  private readonly folds = new Map<string, () => void>()
-  /** The one pending fold for a restored hover; a later repaint's replaces it. */
-  watch(card: KanbanCard, fold: ((event: PointerEvent) => void) | undefined): void {
-    const key = threadKey(card)
-    this.folds.get(key)?.()
-    this.folds.delete(key)
-    if (!fold) return
-    document.addEventListener('pointermove', fold, true)
-    this.folds.set(key, () => document.removeEventListener('pointermove', fold, true))
-  }
-  get(card: KanbanCard): Expansion | undefined { return this.open.get(threadKey(card)) }
-  set(card: KanbanCard, expansion: Expansion | undefined): void {
-    if (expansion) this.open.set(threadKey(card), expansion)
+  private readonly open = new Set<string>()
+  isOpen(card: KanbanCard): boolean { return this.open.has(threadKey(card)) }
+  set(card: KanbanCard, open: boolean): void {
+    if (open) this.open.add(threadKey(card))
     else this.open.delete(threadKey(card))
   }
 }
@@ -86,27 +75,19 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   badge.setAttribute('aria-label', badge.title)
   const peek = document.createElement('div'); peek.className = 'kbn-thread-peek'; peek.hidden = true
   // Sub-entries are the first waiting rows, drawn under the card at rest.
-  // Expanded, they stay put (the pointer that opened the peek was aiming at
-  // one) and the peek continues below them, so no thread is drawn twice.
+  // Expanded, they stay put and the list continues below them, so no thread
+  // is drawn twice.
   const entryRows = waitingThreadEntries() ? waiting.slice(0, 2) : []
   let entriesMore: HTMLElement | undefined
-  const paint = (expansion: Expansion | undefined): void => {
-    const expanded = expansion !== undefined
+  const paint = (expanded: boolean): void => {
     peek.hidden = !expanded; badge.setAttribute('aria-expanded', String(expanded))
     if (entriesMore) entriesMore.hidden = expanded
-    families.set(card, expansion)
+    families.set(card, expanded)
   }
-  const keepsFocus = (): boolean => peek.contains(document.activeElement)
   badge.dataset.threadFocus = focusId('badge')
-  // A click pins: a family the pointer opened on its way to the badge stays
-  // open, and only a pinned one folds.
-  badge.addEventListener('click', event => { event.stopPropagation(); paint(families.get(card) === 'pinned' ? undefined : 'pinned') })
-  host.addEventListener(THREAD_REVEAL, () => paint('pinned'))
-  host.addEventListener(THREAD_COLLAPSE, () => { paint(undefined); badge.focus({ preventScroll: true }) })
-  host.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch' && peek.hidden) paint('hover') })
-  host.addEventListener('pointerleave', event => {
-    if (event.pointerType !== 'touch' && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
-  })
+  badge.addEventListener('click', event => { event.stopPropagation(); paint(peek.hidden) })
+  host.addEventListener(THREAD_REVEAL, () => paint(true))
+  host.addEventListener(THREAD_COLLAPSE, () => { paint(false); badge.focus({ preventScroll: true }) })
   peek.addEventListener('pointerdown', event => event.stopPropagation())
   // The peek's own padding is not the card: a click that misses a row opens nothing.
   peek.addEventListener('click', event => event.stopPropagation())
@@ -135,16 +116,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     if (waiting.length > entryRows.length) { entriesMore = moreButton(waiting.length - entryRows.length, focusId('more'), () => open(card)); entries.append(entriesMore) }
     host.insertBefore(entries, peek)
   }
-  const restored = families.get(card)
-  paint(restored)
-  // A repaint under a still pointer gets no pointerenter or pointerleave, so a
-  // restored hover expansion folds on the first move that lands elsewhere.
-  families.watch(card, restored !== 'hover' ? undefined : event => {
-    const inside = event.target instanceof Node && host.contains(event.target)
-    if (host.isConnected && families.get(card) === 'hover' && inside) return
-    families.watch(card, undefined)
-    if (host.isConnected && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
-  })
+  paint(families.isOpen(card))
 }
 
 /** The thread control holding focus inside `root`, by identity, to restore after a repaint. */
@@ -165,6 +137,15 @@ const familyOf = (el: Element | null): HTMLElement | null => el?.closest<HTMLEle
 /** Expand the family holding `row`, so a selection inside it can be drawn. */
 export function revealThreadFamily(row: Element): void {
   if (row.closest('.kbn-thread-peek[hidden]')) familyOf(row)?.dispatchEvent(new Event(THREAD_REVEAL))
+}
+
+/** Expand the folded family whose own card is `row`; false when `row` heads no folded family. */
+export function expandThreadFamily(row: Element | null): boolean {
+  const family = familyOf(row)
+  const peek = family?.querySelector<HTMLElement>(':scope > .kbn-thread-peek')
+  if (!family || !peek?.hidden || threadFamilyCard(family) !== row) return false
+  family.dispatchEvent(new Event(THREAD_REVEAL))
+  return true
 }
 
 /** Collapse the expanded family around `from`, focusing its badge; the family host, or null when none was open. */

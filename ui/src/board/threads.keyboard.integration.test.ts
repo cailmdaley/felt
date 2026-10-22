@@ -119,12 +119,41 @@ describe('thread rows on the Desk keyboard', () => {
   })
 })
 
-describe('thread families across Desk repaints', () => {
-  const pointer = (type: string, target: EventTarget, pointerType = 'mouse'): void => {
-    const event = new Event(type, { bubbles: type !== 'pointerenter' && type !== 'pointerleave' })
-    Object.assign(event, { pointerType })
-    target.dispatchEvent(event)
+describe('opening a family from the keyboard', () => {
+  for (const [open, fold] of [['Enter', 'Escape'], ['ArrowRight', 'ArrowLeft']] as const) {
+    it(`${open} on the selected card opens its family, which stays open; ${fold} folds it back to the card`, () => {
+      press('j')
+      expect(selected()).toBe('hub-uid')
+      press(open, {}, family())
+      expect(peek().hidden).toBe(false)
+      expect(selected()).toBe('hub-uid')
+      draw(data())
+      expect(peek().hidden).toBe(false)
+      press('j')
+      expect(selected()).toBe('ask-uid')
+      press(fold, {}, document.activeElement!)
+      expect(peek().hidden).toBe(true)
+      expect(selected()).toBe('hub-uid')
+    })
   }
+  it('with the family open, Enter opens the constitution and → moves to the next column', () => {
+    const open = vi.spyOn(inside as unknown as { openDocumentChannel(card: unknown): void }, 'openDocumentChannel').mockImplementation(() => {})
+    press('j')
+    press('Enter', {}, family())
+    expect(open).not.toHaveBeenCalled()
+    press('Enter', {}, family())
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub' }))
+  })
+  it('o opens the constitution while its family stays folded', () => {
+    const open = vi.spyOn(inside as unknown as { openDocumentChannel(card: unknown): void }, 'openDocumentChannel').mockImplementation(() => {})
+    press('j')
+    press('o', {}, family())
+    expect(peek().hidden).toBe(true)
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub' }))
+  })
+})
+
+describe('thread families across Desk repaints', () => {
   it('an expanded family stays expanded through a poll', () => {
     badge().click()
     draw(data())
@@ -146,32 +175,19 @@ describe('thread families across Desk repaints', () => {
     draw(data())
     expect(document.activeElement).toBe(badge())
   })
-  it('a hover expansion survives a still pointer and folds on the first move elsewhere', () => {
-    pointer('pointerenter', family())
-    expect(peek().hidden).toBe(false)
-    draw(data())
-    expect(peek().hidden).toBe(false)
-    pointer('pointermove', peek())
-    expect(peek().hidden).toBe(false)
-    pointer('pointermove', document.querySelector('.kbn-card[data-card-uid="after-uid"]')!)
-    expect(peek().hidden).toBe(true)
-    draw(data())
-    expect(peek().hidden).toBe(true)
-  })
 })
 
 describe('the keyboard selection on a sub-entry', () => {
-  it('stays drawn on a visible row when the pointer expands its family and a poll repaints it', () => {
+  it('stays drawn on a visible row in an open family through a poll', () => {
     saveWaitingThreadEntries(true)
     draw(data())
-    press('j')
+    badge().click()
+    expect(peek().hidden).toBe(false)
     expect(selected()).toBe('hub-uid')
     press('j')
     expect(selected()).toBe('ask-uid')
     const sel = () => document.querySelector<HTMLElement>('.kbn-key-selected')!
     expect(sel().closest('.kbn-thread-subentries')).not.toBeNull()
-    const enter = new Event('pointerenter'); Object.assign(enter, { pointerType: 'mouse' }); family().dispatchEvent(enter)
-    expect(peek().hidden).toBe(false)
     draw(data())
     expect(document.querySelectorAll('.kbn-key-selected')).toHaveLength(1)
     expect(sel().dataset.cardUid).toBe('ask-uid')

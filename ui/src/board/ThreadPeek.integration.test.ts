@@ -145,11 +145,11 @@ describe('a large family stays a peek, not a column', () => {
     expect(open).toHaveBeenCalledWith(root)
   })
 })
-describe('a mouse on the badge', () => {
+describe('a mouse on a family', () => {
   const pointer = (el: HTMLElement, type: string): void => {
     const event = new Event(type); Object.assign(event, { pointerType: 'mouse' }); el.dispatchEvent(event)
   }
-  it('a click on a family the hover already opened pins it, and the next click folds it', () => {
+  it('passing over opens nothing; a badge click opens the family until the next click folds it', () => {
     saveWaitingThreadEntries(false)
     const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root', status: 'active' })
     const families = new ThreadFamilies()
@@ -157,21 +157,21 @@ describe('a mouse on the badge', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, child]), vi.fn(), families)
     const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!, badge = host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!
     pointer(host, 'pointerenter')
-    expect(families.get(root)).toBe('hover')
+    pointer(host, 'pointermove')
+    expect(peek.hidden).toBe(true)
+    expect(families.isOpen(root)).toBe(false)
     badge.click()
     expect(peek.hidden).toBe(false)
-    expect(families.get(root)).toBe('pinned')
+    expect(families.isOpen(root)).toBe(true)
     pointer(host, 'pointerleave')
     expect(peek.hidden).toBe(false)
     badge.click()
     expect(peek.hidden).toBe(true)
+    expect(families.isOpen(root)).toBe(false)
   })
 })
-describe('sub-entries under the pointer', () => {
-  const pointer = (el: HTMLElement, type: string): void => {
-    const event = new Event(type); Object.assign(event, { pointerType: 'mouse' }); el.dispatchEvent(event)
-  }
-  it('stay where they are when the hover opens the peek, which continues below them', () => {
+describe('sub-entries in an open family', () => {
+  it('stay where they are when the badge opens the family, whose list continues below them', () => {
     saveWaitingThreadEntries(true)
     const root = card({ id: 'root' })
     const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
@@ -182,7 +182,7 @@ describe('sub-entries under the pointer', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, ...waits, work]), open)
     const entries = host.querySelector<HTMLElement>('.kbn-thread-subentries')!
     const before = [...entries.querySelectorAll('.kbn-thread-row')]
-    pointer(host, 'pointerenter')
+    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
     expect(host.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
     expect(entries.hidden).toBe(false)
     expect([...entries.querySelectorAll('.kbn-thread-row')]).toEqual(before)
@@ -196,7 +196,7 @@ describe('sub-entries under the pointer', () => {
     expect(open).toHaveBeenLastCalledWith(waits[0])
     host.querySelector<HTMLElement>('.kbn-thread-peek')!.click()
     expect(openRoot).not.toHaveBeenCalled()
-    pointer(host, 'pointerleave')
+    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
     expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(false)
   })
 })
@@ -207,19 +207,5 @@ describe('quiet families', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, done]), vi.fn())
     expect(host.querySelector('.kbn-thread-badge')).toBeNull()
     expect(host.classList.contains('kbn-thread-family')).toBe(false)
-  })
-  it('repaints under a still hovering pointer hold one pending listener, not one per repaint', () => {
-    const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root', status: 'active' })
-    const index = new ThreadIndex([root, child]), families = new ThreadFamilies()
-    families.set(root, 'hover')
-    const added = vi.spyOn(document, 'addEventListener'), removed = vi.spyOn(document, 'removeEventListener')
-    for (let n = 0; n < 5; n++) {
-      document.body.replaceChildren()
-      const host = document.createElement('div'); document.body.append(host)
-      installThreadPeek(host, host, root, index, vi.fn(), families)
-    }
-    const live = (spy: typeof added) => spy.mock.calls.filter(([type]) => type === 'pointermove').length
-    expect(live(added) - live(removed)).toBe(1)
-    added.mockRestore(); removed.mockRestore()
   })
 })

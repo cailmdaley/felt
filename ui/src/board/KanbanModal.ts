@@ -59,7 +59,7 @@ import type {
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { collapseThreadFamily, restoreThreadFocus, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
+import { collapseThreadFamily, expandThreadFamily, restoreThreadFocus, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -2271,9 +2271,17 @@ export class KanbanModal {
     if (!this.body) return
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
-    // Escape folds an expanded thread family first — the nearest thing open —
+    const deskKey = this.activeViewId === 'desk' && !e.isComposing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !(e.target instanceof HTMLElement && isTypingTarget(e.target))
+    // Enter or → on a card whose thread family is folded opens the family;
+    // open, Enter opens the constitution and → moves on, as on any card.
+    if (deskKey && (e.key === 'Enter' || e.key === 'ArrowRight') && !e.repeat && expandThreadFamily(this.deskKeyboard?.selectedRow ?? null)) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    // Escape or ← folds an expanded thread family first — the nearest thing open —
     // and the selection, if it was on one of its rows, returns to the family's card.
-    if (e.key === 'Escape' && this.activeViewId === 'desk' && !(e.target instanceof HTMLElement && isTypingTarget(e.target))) {
+    if (deskKey && (e.key === 'Escape' || e.key === 'ArrowLeft')) {
       const selectedRow = this.deskKeyboard?.selectedRow ?? null
       const family = collapseThreadFamily(document.activeElement) ?? collapseThreadFamily(selectedRow)
       if (family) {
