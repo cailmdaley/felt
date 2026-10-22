@@ -588,6 +588,7 @@ export class KanbanModal {
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
+    window.addEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.startPolling()
     void this.fetchAndRender()
@@ -619,6 +620,7 @@ export class KanbanModal {
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
+    window.removeEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     this.stopMobileWatch?.()
     this.stopMobileWatch = null

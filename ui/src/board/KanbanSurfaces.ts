@@ -1,3 +1,4 @@
+import { installThreadPeek } from './ThreadPeek.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
 import { documentKind, type DocKey } from './workspace/documents.js'
@@ -867,12 +868,14 @@ export class KanbanSurfaceRenderer {
     const chip = this.renderRoleChip(card, originStaleness)
     const queue = document.createElement('div')
     queue.className = 'kbn-role-queue'
-    if (!this.renderQueuedChip(card, queue)) return chip
+    const queued = this.renderQueuedChip(card, queue)
+    if (!queued && !(card.threadSummary?.unfinished || card.threadSummary?.archived)) return chip
     chip.removeAttribute('role')
     const seat = document.createElement('div')
     seat.className = 'kbn-role-seat'
     seat.setAttribute('role', 'listitem')
     seat.append(chip, queue)
+    installThreadPeek(seat, queue, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
     return seat
   }
 
@@ -1382,6 +1385,8 @@ export class KanbanSurfaceRenderer {
     // not the compact one: a cluster row wraps, so the peek list can take a
     // line of its own here the way it does on a desk card.
     this.renderQueuedChip(card, el)
+    installThreadPeek(el, el, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
+    this.installLongPressMove(el, card)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
     // the way a Desk row's are: under the pointer at that end, or on focus. A
@@ -1914,6 +1919,7 @@ export class KanbanSurfaceRenderer {
     if (turnChip) meta.append(turnChip)
 
     el.append(meta)
+    installThreadPeek(el, meta, card, boardCards(this.o.getLastResponse()), this.o.openDetail)
     if (queuedList) el.append(queuedList)
 
     el.addEventListener('click', (e) => {
@@ -2032,6 +2038,8 @@ export class KanbanSurfaceRenderer {
   buildCardPreview(row: HTMLElement): PreviewContent | null {
     const card = this.previewCard(row)
     if (!card) return null
+    // A family expands in place; the floating preview would cover its thread rows.
+    if (card.threadSummary && card.threadSummary.unfinished + card.threadSummary.archived > 0) return null
     const sheet = document.createElement('div')
     sheet.className = 'kbn-preview-sheet'
     let paper = this.buildPreviewPaper(card, row, sheet)
@@ -2590,8 +2598,12 @@ export class KanbanSurfaceRenderer {
    *  own verdict to give, not a gesture's to silently withhold. */
   private installLongPressMove(el: HTMLElement, card: KanbanCard): void {
     const longPress = this.o.onCardLongPress
-    if (!longPress) return
-    attachLongPress(el, { onFire: () => longPress(card, el) })
+    if (!longPress && !card.threadSummary?.unfinished && !card.threadSummary?.archived) return
+    attachLongPress(el, { onFire: () => {
+      const badge = (el.closest('.kbn-role-seat') ?? el).querySelector<HTMLButtonElement>('.kbn-thread-badge')
+      if (badge) badge.dispatchEvent(new Event('thread-expand'))
+      else longPress?.(card, el)
+    } })
   }
 
   private installDraggable(el: HTMLElement, card: KanbanCard, includePlainText: boolean): void {
