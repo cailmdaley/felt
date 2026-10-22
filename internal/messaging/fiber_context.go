@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -49,7 +50,46 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 // designateFiberReceiver serializes replacement with hook output and native
 // delivery. Subscription links only locate queues; this receiver record alone
 // grants consumption authority, including when the queue is empty.
-func designateFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool) error {
+type fiberReceiver struct {
+	Address
+	Generation uint64 `json:"generation"`
+}
+
+// ReserveFiberGeneration runs in the owner's serialized selection call, before
+// any asynchronous delivery. The counter survives daemon restarts and empty queues.
+func ReserveFiberGeneration(env *sysenv.Env, fiber string) (uint64, error) {
+	root := mailboxDir(env, "fiber", fiber)
+	if err := ensureDir(root, 0700); err != nil {
+		return 0, err
+	}
+	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return 0, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return 0, err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	path := filepath.Join(root, "generation")
+	bytes, err := readBounded(path, 64)
+	var n uint64
+	if err == nil {
+		n, err = strconv.ParseUint(string(bytes), 10, 64)
+	} else if errors.Is(err, os.ErrNotExist) {
+		err = nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if n == ^uint64(0) {
+		return 0, errors.New("fiber generation exhausted")
+	}
+	n++
+	return n, mailboxWrite(path, []byte(strconv.FormatUint(n, 10)), false)
+}
+
+func designateFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool, generation uint64, strict bool) error {
 	root := mailboxDir(env, "fiber", fiber)
 	lock, err := os.OpenFile(filepath.Join(root, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -60,7 +100,19 @@ func designateFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool)
 		return err
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	bytes, err := json.Marshal(a)
+	previous, readErr := readBounded(filepath.Join(root, "destination.json"), 16384)
+	var old fiberReceiver
+	if readErr == nil {
+		if json.Unmarshal(previous, &old) != nil && strict {
+			return errors.New("invalid fiber receiver authority")
+		}
+		if old.Generation > generation || (old.Generation == generation && old.Address != a) {
+			return errCode("stale_receiver", "superseded fiber receiver selection")
+		}
+	} else if !errors.Is(readErr, os.ErrNotExist) {
+		return readErr
+	}
+	bytes, err := json.Marshal(fiberReceiver{Address: a, Generation: generation})
 	if err != nil {
 		return err
 	}
@@ -87,8 +139,8 @@ func designateFiberReceiver(env *sysenv.Env, fiber string, a Address, hook bool)
 // Missing or malformed authority fails closed; registration cannot restore it.
 func fiberReceiverMatches(root string, a Address) bool {
 	bytes, err := readBounded(filepath.Join(root, "destination.json"), 16384)
-	var receiver Address
-	return err == nil && json.Unmarshal(bytes, &receiver) == nil && receiver == a
+	var receiver fiberReceiver
+	return err == nil && json.Unmarshal(bytes, &receiver) == nil && receiver.Address == a
 }
 
 // offerLinkedFiberContext uses the fiber mailbox's own lock and acknowledgment
@@ -126,8 +178,21 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 // DeliverFiberContext offers pending context to the current conversation. The
 // mailbox acknowledges only confirmed context receipts; retries retain each
 // message id so a crash after delivery cannot inject it twice.
-func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string) error {
-	a, err := ParseAddress(address)
+func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, address string, generations ...uint64) error {
+	var generation uint64
+	var err error
+	if len(generations) > 0 {
+		generation = generations[0]
+	} else {
+		generation, err = ReserveFiberGeneration(env, fiber)
+	}
+	if err != nil {
+		return err
+	}
+	a := Address{Host: host}
+	if address != "-" {
+		a, err = ParseAddress(address)
+	}
 	if err != nil {
 		return err
 	}
@@ -135,14 +200,17 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 		return errCode("wrong_host", "fiber context belongs to another host")
 	}
 	root := mailboxDir(env, "fiber", fiber)
-	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
 	// Hooks offer the fiber queue itself, so replacing a conversation before
 	// its next hook cannot strand a result in a session-scoped pending queue.
 	hook := MailboxAvailable(env, a.Harness, a.ID, host)
-	if err := designateFiberReceiver(env, fiber, a, hook); err != nil {
+	if err := ensureDir(root, 0700); err != nil {
 		return err
+	}
+	if err := designateFiberReceiver(env, fiber, a, hook, generation, len(generations) > 0); err != nil {
+		return err
+	}
+	if address == "-" {
+		return nil
 	}
 	// Selection revokes A even if B is not hook-ready yet. Never fall back to
 	// an old subscriber merely because the designated successor is unavailable.

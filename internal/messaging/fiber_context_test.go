@@ -291,3 +291,37 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 		t.Fatalf("native turns = %d", sent.Load())
 	}
 }
+
+func TestFiberContextDelayedSelectionCannotRestorePredecessor(t *testing.T) {
+	t.Parallel()
+	for _, successor := range []string{"B", "unavailable", "-"} {
+		t.Run(successor, func(t *testing.T) {
+			env := testEnv(t)
+			if err := QueueFiberContext(env, "fiber", Request{MessageID: "result", Text: "ready"}); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{"A", "B"} {
+				if err := RegisterMailbox(env, "claude", id, "host", t.TempDir(), os.Getpid(), true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Selection epochs are assigned by the serialized owner, not by delayed delivery tasks.
+			deliver := func(id string, epoch uint64) {
+				address := "shuttle://host/claude/" + id
+				if id == "-" {
+					address = "-"
+				}
+				_ = DeliverFiberContext(context.Background(), env, "fiber", "host", address, epoch)
+			}
+			deliver(successor, 2)
+			deliver("A", 1)
+			var stale []Request
+			if err := OfferMailbox(env, "claude", "A", "host", func(batch []Request) error { stale = append(stale, batch...); return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if len(stale) != 0 {
+				t.Fatalf("delayed predecessor restored authority: %+v", stale)
+			}
+		})
+	}
+}

@@ -1289,6 +1289,20 @@ defmodule Shuttle.Poller do
     {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
   end
 
+  def handle_call({:context_receiver, fiber_id, key}, from, state) do
+    {:reply, worker, state} = handle_call({:live_worker, fiber_id}, from, state)
+
+    reply =
+      with {:ok, output} <- Shuttle.CLI.run(["context-mailbox", "generation", key]),
+           {generation, ""} <- Integer.parse(String.trim(output)) do
+        {:ok, worker, generation}
+      else
+        error -> {:error, error}
+      end
+
+    {:reply, reply, state}
+  end
+
   def handle_call({:live_worker, fiber_id}, _from, state) do
     reply =
       case running_worker(state, fiber_id) do

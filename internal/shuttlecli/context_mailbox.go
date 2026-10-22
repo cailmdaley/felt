@@ -2,8 +2,10 @@ package shuttlecli
 
 import (
 	"context"
+	"fmt"
 	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
+	"strconv"
 )
 
 func (a *app) contextMailboxCmd() *cobra.Command {
@@ -14,12 +16,23 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	cmd.AddCommand(put)
-	cmd.AddCommand(&cobra.Command{Use: "deliver <fiber-key> <address>", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd.AddCommand(&cobra.Command{Use: "generation <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		n, err := messaging.ReserveFiberGeneration(a.env, args[0])
+		if err == nil {
+			fmt.Fprintln(a.env.Stdout, n)
+		}
+		return err
+	}})
+	cmd.AddCommand(&cobra.Command{Use: "deliver <fiber-key> <address-or-dash> <generation>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
 		host, err := a.resolveOwnHost("")
 		if err != nil {
 			return err
 		}
-		return messaging.DeliverFiberContext(context.Background(), a.env, args[0], host, args[1])
+		generation, err := strconv.ParseUint(args[2], 10, 64)
+		if err != nil || generation == 0 {
+			return fmt.Errorf("positive receiver generation required")
+		}
+		return messaging.DeliverFiberContext(context.Background(), a.env, args[0], host, args[1], generation)
 	}})
 	return cmd
 }

@@ -111,16 +111,33 @@ defmodule Shuttle.Delivery do
 
   @doc "Offer a fiber's pending context to its current live conversation."
   def flush_context(entry) do
-    case live_context_worker(entry) do
-      %{session_uuid: native, cli: cli} when is_binary(native) and is_binary(cli) ->
-        address = Messaging.address(Poller.own_host_id(), Harnesses.normalize(cli), native)
+    server = Shuttle.Env.server(Poller)
 
-        Shuttle.CLI.run(["context-mailbox", "deliver", context_key(entry), address],
+    if is_pid(GenServer.whereis(server)) do
+      # The Poller reserves the durable epoch while serializing worker selection.
+      # Delivery tasks may arrive in any order, including after a daemon restart.
+      with {:ok, worker, generation} <-
+             GenServer.call(
+               server,
+               {:context_receiver, Shuttle.Threads.address(entry.fiber), context_key(entry)},
+               32_000
+             ) do
+        address =
+          case worker do
+            %{session_uuid: native, cli: cli} when is_binary(native) and is_binary(cli) ->
+              Messaging.address(Poller.own_host_id(), Harnesses.normalize(cli), native)
+
+            _ ->
+              "-"
+          end
+
+        Shuttle.CLI.run(
+          ["context-mailbox", "deliver", context_key(entry), address, to_string(generation)],
           timeout_ms: 32_000
         )
-
-      _ ->
-        :ok
+      end
+    else
+      :ok
     end
   end
 
