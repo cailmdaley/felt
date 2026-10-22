@@ -17,3 +17,8 @@
 .kbn-thread-more { display: block; margin-left: 8px; font: inherit; font-size: 11px; color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 4px 0; cursor: pointer; }
 .kbn-thread-more:hover { color: var(--kbn-ink); text-decoration: underline; }
 .kbn-thread-mark { font-size: 10px; color: var(--kbn-ink-muted); border: 1px dashed var(--kbn-rule); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }
+/* A phone draws each seat as a full-width line: the chip takes what the badge leaves, and the peek drops beneath both. */
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-role-seat { max-width: none; width: 100%; flex-wrap: wrap; }
+  .kbn-role-seat > .kbn-role-chip { flex: 1 1 0; width: auto; min-width: 0; }
+}

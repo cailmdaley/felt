@@ -37,7 +37,7 @@ export class ThreadRail {
     const descendants = index.subtree(card)
     const ancestors: KanbanCard[] = []
     for (let parent = index.parentOf(card); parent; parent = index.parentOf(parent)) ancestors.unshift(parent)
-    // The phone draws no tree under its chat; its threads get a page of their own.
+    // The phone draws no tree under its chat, only the breadcrumb.
     if (window.matchMedia(MOBILE_MEDIA).matches) {
       this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
       this.paintBreadcrumb(ancestors)

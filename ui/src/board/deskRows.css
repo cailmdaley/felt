@@ -3,7 +3,7 @@
    ══════════════════════════════════════════════════════════════════════════
    A Desk column is an index of lines, one per card, so a column shows twenty
    things instead of three. A line is a glyph, a title and the facts that
-   decide where to look next (queue, report, turn). The card it stands for —
+   decide where to look next (report, turn, threads). The card it stands for —
    outcome, question, path, machine, agent, due, what it sent — opens over the
    neighbouring column under the pointer or the keyboard selection
    (`.kbn-preview`).
@@ -57,7 +57,7 @@
   text-overflow: ellipsis;
 }
 
-/* The line's right end: queue, report, turn chip. */
+/* The line's right end: report, turn chip, thread badge. */
 .kbn-col-list .kbn-card > .kbn-card-meta {
   position: relative;
   flex: 0 0 auto;

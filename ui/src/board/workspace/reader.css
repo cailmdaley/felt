@@ -200,7 +200,6 @@
 .ws-sidebar .ws-constitution-row > .kbn-card-header { flex: 1 1 0; min-width: 0; }
 .ws-sidebar .ws-constitution-row .kbn-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-row > .kbn-card-meta { flex: 0 1 auto; min-width: 0; }
-.ws-sidebar .ws-constitution-row > .kbn-card-queued-list { flex-basis: 100%; }
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
 .ws-sidebar .ws-channel-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
