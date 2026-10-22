@@ -634,6 +634,14 @@ export class Reader {
     if (doc.kind === 'video' && video?.videoWidth && video.videoHeight) width = Math.max(320, (height - 180) * video.videoWidth / video.videoHeight)
     return Math.min(max, width)
   }
+  /** The map is the centre column's tab bar: wherever it is seated, it spans only the stage, clear of either side column. */
+  private confineIndex(): void {
+    const slot = this.barIndex.parentElement
+    if (!slot || this.phone.matches) { this.barIndex.style.removeProperty('margin-left'); this.barIndex.style.removeProperty('margin-right'); return }
+    const room = slot.getBoundingClientRect(), stage = this.stage.getBoundingClientRect()
+    this.barIndex.style.marginLeft = `${Math.max(0, Math.round(stage.left - room.left))}px`
+    this.barIndex.style.marginRight = `${Math.max(0, Math.round(room.right - stage.right))}px`
+  }
   private layoutNavbar(): void {
     if (this.phone.matches) this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
   }
@@ -653,6 +661,7 @@ export class Reader {
     const inset = this.measure('stage-inset', 28), top = this.measure('stage-top', 10), gap = this.measure('gap', 24)
     const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
     const column = this.stage.parentElement?.getBoundingClientRect().left ?? 0
+    this.confineIndex()
     const stripLeft = this.tabs.el.getBoundingClientRect().left, stripWidth = this.tabs.el.clientWidth
     // Beside the sidebar the page keeps one page gap from the column and shrinks
     // before that gutter grows; the right neighbour has the room left over.
