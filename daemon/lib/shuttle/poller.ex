@@ -3449,7 +3449,10 @@ defmodule Shuttle.Poller do
            # call (no persisted review-comment). The dispatcher inlines the
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
-           resume_mode: Keyword.get(opts, :resume_mode)
+           resume_mode: Keyword.get(opts, :resume_mode),
+           threads:
+             {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end),
+              MapSet.new(Map.keys(state.running))}
          ) do
       {:ok, session} ->
         running_meta =
