@@ -444,6 +444,13 @@
   min-height: 24px;
   font: italic var(--ws-label-size)/1.4 var(--ws-serif);
 }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-pictures { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-picture {
+  display: block; width: fit-content; max-width: 100%; padding: 0; border: var(--ws-line-width, 1px) solid var(--ws-hairline-soft); border-radius: var(--ws-control-radius);
+  background: var(--ws-hover); cursor: zoom-in; overflow: hidden;
+}
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-picture:hover { border-color: var(--ws-ink-muted); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-picture img { display: block; max-width: min(100%, 320px); max-height: 240px; object-fit: contain; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steps .ws-transcript-pending { margin-left: 3px; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist {
   margin: 4px 0 10px;

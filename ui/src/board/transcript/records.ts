@@ -12,6 +12,12 @@ export type UsageEntry = {
   cache?: { read: number; write: number; hourWrite: number }
 }
 
+/**
+ * An image a tool returned, kept as the record's own text: a base64 payload
+ * with its media type, or a URL. Nothing is decoded until it is drawn.
+ */
+export type ResultImage = { mediaType: string; data: string } | { url: string }
+
 export type Entry =
   | ThreadNotice
   | UsageEntry
@@ -19,7 +25,7 @@ export type Entry =
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
-  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; at?: number }
+  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
 type ObjectValue = Record<string, unknown>
@@ -66,18 +72,33 @@ function contentText(value: unknown, acceptedTypes: readonly string[] = ['text']
     .join('\n')
 }
 
-function resultContent(value: unknown): { text: string; images: number } {
+/** Claude's `{source: {type: 'base64', media_type, data}}`, Pi's `{data, mimeType}`, Codex's `{type: 'input_image', image_url}`. */
+function resultImage(block: ObjectValue): ResultImage | null {
+  const source = object(block.source)
+  const data = string(source?.data) ?? string(block.data)
+  const mediaType = string(source?.media_type) ?? string(block.mimeType) ?? string(block.media_type)
+  if (data && mediaType?.startsWith('image/')) return { mediaType, data }
+  const url = string(block.image_url) ?? string(source?.url)
+  return url && /^(data:image\/|https?:)/.test(url) ? { url } : null
+}
+
+function resultContent(value: unknown): { text: string; images: number; pictures?: ResultImage[] } {
   if (typeof value === 'string') return { text: value, images: 0 }
   let images = 0
   const text: string[] = []
+  const pictures: ResultImage[] = []
   for (const block of blocks(value)) {
-    if (block.type === 'image') images++
+    if (block.type === 'image' || block.type === 'input_image') {
+      images++
+      const picture = resultImage(block)
+      if (picture) pictures.push(picture)
+    }
     else if (block.type === 'text' || block.type === 'input_text' || block.type === 'output_text') {
       const value = string(block.text)
       if (value) text.push(value)
     }
   }
-  return { text: text.join('\n'), images }
+  return { text: text.join('\n'), images, ...(pictures.length ? { pictures } : {}) }
 }
 
 function firstLine(text: string, limit = 80): string {
@@ -169,6 +190,7 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
         text: result.text,
         isError: block.is_error === true,
         images: result.images,
+        ...(result.pictures ? { pictures: result.pictures } : {}),
       }, time))
     }
   }

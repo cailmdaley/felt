@@ -454,6 +454,7 @@ export class Workspace {
     const dock = state && this.controls(state)
     if (!state || !dock) return page
     this.seatNav(state, dock)
+    dock.openFile = (path, title) => this.openFile(path, title)
     page.append(dock.el)
     queueMicrotask(() => dock.reseated())
     return page

@@ -4,7 +4,7 @@ import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
 import { TranscriptModel, segments, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { toolLabel } from './tools.js'
-import { promptParts, type Entry } from './records.js'
+import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
 import { TaskChecklist, type WorkerTask } from './tasks.js'
 import './transcript.css'
@@ -27,6 +27,8 @@ export interface TranscriptBandOptions {
    * `meter`, for the caller to seat.
    */
   inline?: boolean
+  /** Open a file the worker touched in the reader's file viewer. */
+  onFile?: (path: string, title?: string) => void
 }
 
 type Prompt = Extract<Entry, { kind: 'prompt' }>
@@ -138,8 +140,32 @@ function clock(ms: number): { text: string; title: string } {
 }
 
 function outputWithImages(result: NonNullable<ToolStep['result']>): string {
-  const images = Array.from({ length: result.images }, () => '[image]').join('\n')
+  // Images drawn beside the output need no placeholder.
+  const images = Array.from({ length: result.images - (result.pictures?.length ?? 0) }, () => '[image]').join('\n')
   return [result.text, images].filter(Boolean).join('\n')
+}
+
+/** The file a tool step read or wrote, where its input names one. */
+export function stepPath(step: Pick<ToolStep, 'input'>): string | undefined {
+  const input = step.input !== null && typeof step.input === 'object' ? step.input as Record<string, unknown> : null
+  const path = input && [input.file_path, input.path, input.filePath].find(value => typeof value === 'string' && value)
+  return typeof path === 'string' ? path : undefined
+}
+
+function imageSource(picture: ResultImage): string {
+  return 'url' in picture ? picture.url : `data:${picture.mediaType};base64,${picture.data}`
+}
+
+/** Full size in a tab of its own, decoded only now: a blob, since browsers refuse to navigate to data URLs. */
+function openPicture(picture: ResultImage): void {
+  if ('url' in picture && !picture.url.startsWith('data:')) { window.open(picture.url, '_blank', 'noopener'); return }
+  const source = imageSource(picture)
+  const comma = source.indexOf(',')
+  const mediaType = source.slice(5, source.indexOf(';'))
+  const bytes = Uint8Array.from(atob(source.slice(comma + 1)), c => c.charCodeAt(0))
+  const url = URL.createObjectURL(new Blob([bytes], { type: mediaType }))
+  window.open(url, '_blank', 'noopener')
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 function shortenedOutput(text: string): { shown: string; truncated: boolean; lines: number } {
@@ -395,6 +421,7 @@ export class TranscriptBand {
   /** The session's usage facts: context tokens, the window's share, the cache's warmth and last hit. */
   readonly meter: HTMLElement
   private readonly inline: boolean
+  private readonly onFile?: (path: string, title?: string) => void
   private readonly inlineWorking: HTMLElement
   private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
@@ -449,6 +476,7 @@ export class TranscriptBand {
     this.shuttleBase = opts.shuttleBase
     this.fetcher = opts.fetch
     this.inline = opts.inline ?? false
+    this.onFile = opts.onFile
     this.folded = this.inline ? false : this.readFolded()
     this.el = document.createElement('section')
     this.el.className = this.inline ? 'ws-transcript ws-transcript-inline' : 'ws-transcript'
@@ -1425,7 +1453,7 @@ export class TranscriptBand {
   }
 
   private buildToolResult(row: StepRow, step: ToolStep): void {
-    row.detail?.querySelector('.ws-transcript-output-wrap, .ws-transcript-no-result')?.remove()
+    row.detail?.querySelectorAll('.ws-transcript-output-wrap, .ws-transcript-no-result, .ws-transcript-pictures').forEach(el => el.remove())
     row.detailKey = `${step.version}:${this.target?.live ? 'live' : 'parked'}`
     if (!step.result) {
       if (this.target?.live) return
@@ -1451,7 +1479,33 @@ export class TranscriptBand {
       })
       wrap.append(showAll)
     }
-    row.detail?.append(wrap)
+    if (full || !step.result.pictures?.length) row.detail?.append(wrap)
+    if (step.result.pictures?.length) row.detail?.append(this.pictures(step, step.result.pictures))
+  }
+
+  /** The images a step's result carries, drawn only now that the step is open; a press opens one full size. */
+  private pictures(step: ToolStep, pictures: readonly ResultImage[]): HTMLElement {
+    const strip = document.createElement('div')
+    strip.className = 'ws-transcript-pictures'
+    const path = pictures.length === 1 ? stepPath(step) : undefined
+    const name = path?.split('/').pop()
+    for (const picture of pictures) {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.className = 'ws-transcript-picture'
+      button.title = path && this.onFile ? `Open ${name} in the viewer` : 'Open full size'
+      const img = document.createElement('img')
+      img.loading = 'lazy'; img.decoding = 'async'; img.alt = name ?? 'Image from the tool result'
+      img.src = imageSource(picture)
+      button.append(img)
+      button.addEventListener('click', event => {
+        event.stopPropagation()
+        if (path && this.onFile) this.onFile(path, name)
+        else openPicture(picture)
+      })
+      strip.append(button)
+    }
+    return strip
   }
 
   private updateLiveMarks(): void {

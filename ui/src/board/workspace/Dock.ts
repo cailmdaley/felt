@@ -456,6 +456,8 @@ export class Dock {
   private transcriptPane: HTMLElement | null = null
   private transcriptBand: TranscriptBand | null = null
   private verdictMenu: HTMLDetailsElement | null = null
+  /** Opens a file the worker touched in the reader's file viewer; the workspace seats it. */
+  openFile?: (path: string, title?: string) => void
   /** The menu's slot for a way back that the header line has no room for. */
   private menuBack: HTMLElement | null = null
   private meetingPaint: (() => void) | null = null
@@ -908,7 +910,7 @@ export class Dock {
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
     const composer = shuttleManaged ? this.buildComposer(card) : null
-    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true })
+    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title) => this.openFile?.(path, title) })
     const meetingPane = this.buildTranscriptPane(card)
 
     const settings = document.createElement('div')

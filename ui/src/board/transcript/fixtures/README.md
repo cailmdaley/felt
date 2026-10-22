@@ -31,3 +31,8 @@ Pi's generic usage does not record a TTL and Codex's token counters do not eithe
 Claude Code stores hook context this way, never as a `<system-reminder>` inside a `user` record.
 The content is what `shuttle hook` writes today (the peer-context preamble, then `messaging.Labeled` per message); no thread delivery through a hook had been recorded yet, so the thread ids, fibers and outcomes are written for the fixture.
 The second line is a peer message quoting a thread line, which must stay ordinary context.
+
+# Captured image tool results
+
+`tool-result-images.jsonl` holds one tool call and its image result per harness, in the shapes read from real local transcripts on 2026-10-23: Claude's `Read` result (`tool_result` content `{type: 'image', source: {type: 'base64', media_type, data}}`, mirrored in `toolUseResult.file`), Pi's `read` `toolResult` (`{type: 'image', data, mimeType}` beside a text block) and Codex's `view_image` `function_call_output` (`[{type: 'input_image', image_url: 'data:…'}]`).
+Paths, identifiers and the images themselves are replaced: every payload is the same 1×1 PNG, and the Pi and Codex calls stand in for the records that preceded the captured results.

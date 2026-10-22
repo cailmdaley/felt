@@ -1,4 +1,4 @@
-import type { Entry } from './records.js'
+import type { Entry, ResultImage } from './records.js'
 
 export interface ToolStep {
   kind: 'tool'
@@ -6,7 +6,7 @@ export interface ToolStep {
   name: string
   input: unknown
   at?: number
-  result?: { text: string; isError: boolean; images: number; at?: number }
+  result?: { text: string; isError: boolean; images: number; pictures?: ResultImage[]; at?: number }
   version: number
 }
 
@@ -97,6 +97,7 @@ export class TranscriptModel {
           text: entry.text,
           isError: entry.isError,
           images: entry.images,
+          ...(entry.pictures ? { pictures: entry.pictures } : {}),
           ...(entry.at === undefined ? {} : { at: entry.at }),
         }
         reference.step.version++
