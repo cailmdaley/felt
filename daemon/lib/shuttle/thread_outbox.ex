@@ -42,6 +42,21 @@ defmodule Shuttle.ThreadOutbox do
     end)
   end
 
+  defp migrate(state) do
+    records =
+      Map.new(state["records"], fn {id, record} ->
+        case get_in(record, ["parent", "uid"]) do
+          uid when is_binary(uid) ->
+            {id, record |> Map.delete("parent") |> Map.put("parent_uid", uid)}
+
+          _ ->
+            {id, record}
+        end
+      end)
+
+    state |> Map.put("version", 3) |> Map.put("records", records)
+  end
+
   # Capture and acknowledgment serialize across overlapping poll tasks. Disk is
   # authoritative; no process memory is needed to retry after daemon restart.
   defp transaction(fun) do
@@ -52,26 +67,26 @@ defmodule Shuttle.ThreadOutbox do
         case File.read(path) do
           {:ok, bytes} ->
             case Jason.decode!(bytes) do
-              %{"version" => 2, "records" => records, "baseline" => baseline} = state
-              when is_map(records) and is_binary(baseline) ->
+              %{"version" => version, "records" => records, "baseline" => baseline} = state
+              when version in [2, 3] and is_map(records) and is_binary(baseline) ->
                 {:ok, _, _} = DateTime.from_iso8601(baseline)
                 state
 
               %{"version" => 1, "records" => records} when is_map(records) ->
-                %{"version" => 2, "records" => records}
+                migrate(%{"version" => 3, "records" => records})
 
               _ ->
                 raise "invalid thread outbox: #{path}"
             end
 
           {:error, :enoent} ->
-            %{"version" => 2, "records" => %{}}
+            %{"version" => 3, "records" => %{}}
 
           {:error, reason} ->
             raise File.Error, reason: reason, action: "read", path: path
         end
 
-      {next, result} = fun.(state)
+      {next, result} = fun.(migrate(state))
 
       if next != state do
         File.mkdir_p!(Path.dirname(path))

@@ -11,6 +11,11 @@ defmodule Shuttle.ThreadsTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
+  defmodule FailingMailboxRunner do
+    def cmd("shuttle", ["context-mailbox", "put" | _], _opts), do: {"mailbox unavailable", 1}
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
   setup %{tmp_dir: dir} = context do
     home = Path.join(dir, "home")
     data = Path.join(dir, "data")
@@ -160,6 +165,129 @@ defmodule Shuttle.ThreadsTest do
       Threads.deliver_results(entries, "test-host")
       assert StubPostClient.last() == nil
     end
+  end
+
+  for initial_host <- ["test-host", "parent-host"] do
+    @tag initial_host: initial_host
+    test "pending result follows intended parent UID through rename, nest and host move from #{initial_host}",
+         %{store: store, initial_host: initial_host} do
+      alias Shuttle.Test.StubPostClient
+      StubPostClient.start!()
+      Env.put_app_env(:write_forward_client, StubPostClient)
+      remotes = Path.join(store, "remotes.json")
+
+      File.write!(
+        remotes,
+        Jason.encode!(%{
+          defaults: %{discover: false},
+          remotes: [
+            %{name: "parent-host", url: "http://127.0.0.1:43210"},
+            %{name: "new-host", url: "http://127.0.0.1:43211"}
+          ]
+        })
+      )
+
+      Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+
+      Env.put_app_env(:remotes, [
+        %{name: "parent-host", port: 43210},
+        %{name: "new-host", port: 43211}
+      ])
+
+      parent_path = Path.join(store, ".felt/hub/hub.md")
+
+      File.write!(
+        parent_path,
+        String.replace(File.read!(parent_path), "host: test-host", "host: #{initial_host}")
+      )
+
+      assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Keep the original text"])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+      uid = parent.fiber["uid"]
+      assert is_binary(uid) and uid != Threads.address(parent.fiber)
+      StubPostClient.set_response({:error, :unavailable})
+      Env.put_app_env(:felt_runner, FailingMailboxRunner)
+      Threads.deliver_results(entries, "test-host")
+      Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+      assert [{message_id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "--clear"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "add", "elsewhere", "Elsewhere"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "nest", "hub/child", "elsewhere"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "add", "group", "Group"])
+      File.rename!(Path.join(store, ".felt/hub/hub.md"), Path.join(store, ".felt/hub/renamed.md"))
+      File.rename!(Path.join(store, ".felt/hub"), Path.join(store, ".felt/renamed"))
+      assert {:ok, _} = CLI.run_felt(["-C", store, "nest", "renamed", "group"])
+      path = Path.join(store, ".felt/group/renamed/renamed.md")
+
+      File.write!(
+        path,
+        String.replace(File.read!(path), "host: #{initial_host}", "host: new-host")
+      )
+
+      bytes = File.read!(path)
+      File.rm!(path)
+      Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
+      assert :ok = Threads.retry_results("test-host")
+      assert StubPostClient.last() == nil
+      assert [{^message_id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
+      File.write!(path, bytes)
+      StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+      # New publisher process: no in-memory placement or publication state.
+      Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
+      assert %{url: url, body: body} = StubPostClient.last()
+      assert url =~ "43211"
+
+      assert %{
+               "fiber_id" => ^uid,
+               "message_id" => ^message_id,
+               "text" => "thread hub/child asked: Keep the original text"
+             } = Jason.decode!(body)
+
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+  end
+
+  test "snapshot migration preserves the cutoff, intended UID, pending text and acknowledgment dedup",
+       %{store: store, data: data} do
+    alias Shuttle.ThreadOutbox
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    baseline = "2025-01-01T00:00:00Z"
+
+    record = %{
+      "owner" => "test-host",
+      "store" => store,
+      "parent" => parent.fiber,
+      "text" => "original",
+      "wake" => false
+    }
+
+    File.write!(
+      Path.join(data, "thread-outbox.json"),
+      Jason.encode!(%{
+        version: 2,
+        baseline: baseline,
+        records: %{
+          "pending" => record,
+          "done" => Map.put(record, "acked", true)
+        }
+      })
+    )
+
+    assert :ok = ThreadOutbox.boot_baseline()
+    assert ThreadOutbox.baseline() == baseline
+    uid = parent.fiber["uid"]
+
+    assert [{"pending", %{"parent_uid" => ^uid, "text" => "original"} = migrated}] =
+             ThreadOutbox.pending("test-host")
+
+    refute Map.has_key?(migrated, "parent")
+    assert :ok = ThreadOutbox.capture([{"done", record}])
+    assert [{"pending", ^migrated}] = ThreadOutbox.pending("test-host")
+    Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
+    assert ThreadOutbox.pending("test-host") == []
+    assert ThreadOutbox.baseline() == baseline
   end
 
   test "corrupt baseline fails closed and migration retains pending outbox records", %{data: data} do

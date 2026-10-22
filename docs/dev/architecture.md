@@ -41,7 +41,12 @@ Before the first poll, the daemon establishes a durable first-deployment timesta
 Signals stamped at or before that baseline stay in fiber history and are never backfilled.
 The baseline survives restarts; invalid or unreadable state refuses startup rather than replaying historical results.
 
-The sender captures each new publication's immutable recipient, text and message ID before attempting delivery.
+The sender captures each new publication's immutable intended parent UID (felt's intrinsic frontmatter identity), text and message ID before attempting delivery.
+Every retry resolves that UID from a fresh document read and uses its current host, including for formerly local parents.
+Cross-host delivery carries the UID, never a slug.
+Moving the child does not change a pending publication's recipient; a missing parent leaves it pending.
+Snapshot migration keeps the original baseline and publications, extracting the parent's UID from saved snapshots.
+A snapshot without a parent UID remains pending for operator repair rather than routing by an ambiguous slug.
 Pending publications survive cleared lifecycle stamps and daemon restarts.
 An acknowledgment means the parent daemon has durably enqueued the result in its fiber mailbox, not that a worker has consumed it.
 Acknowledged IDs stay in the sender outbox to prevent republication.

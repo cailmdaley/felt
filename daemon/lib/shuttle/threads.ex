@@ -100,7 +100,7 @@ defmodule Shuttle.Threads do
          %{
            "owner" => own_host,
            "store" => parent.felt_store,
-           "parent" => parent.fiber,
+           "parent_uid" => Map.fetch!(parent.fiber, "uid"),
            "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
            "wake" => verb in ["closed", "asked"]
          }}
@@ -112,9 +112,14 @@ defmodule Shuttle.Threads do
   @doc "Retry persisted publications; acknowledgment means recipient mailbox enqueue, not worker consumption."
   def retry_results(own_host) do
     for {id, record} <- ThreadOutbox.pending(own_host) do
-      parent = %{felt_store: record["store"], fiber: record["parent"]}
-
-      if acknowledged?(deliver(parent, record["text"], id, record["wake"])) do
+      # Placement is mutable; the intended orchestrator is not. Never infer a
+      # new recipient from the child's current ancestry or an old slug.
+      with uid when is_binary(uid) <- record["parent_uid"],
+           stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()]),
+           {:ok, %{fibers: [parent]}} <-
+             Shuttle.FiberDocuments.get_shuttle(uid, felt_stores: stores),
+           ^uid <- parent.fiber["uid"],
+           true <- acknowledged?(deliver(parent, record["text"], id, record["wake"])) do
         ThreadOutbox.acknowledge(id)
       end
     end
@@ -140,7 +145,7 @@ defmodule Shuttle.Threads do
 
       {:remote, remote} ->
         OriginRouter.forward(remote, "/api/v1/deliver", %{
-          "fiber_id" => address(parent.fiber),
+          "fiber_id" => Map.fetch!(parent.fiber, "uid"),
           "text" => text,
           "context_only" => true,
           "wake" => wake,
