@@ -1,4 +1,5 @@
 import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
+import { LastReplies } from './threadReply.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { ownColumn } from './deskColumn.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
@@ -277,8 +278,8 @@ interface KanbanSurfaceRendererOptions {
 }
 
 export class KanbanSurfaceRenderer {
-  /** Open thread families, carried across the Desk's rebuilds. */
-  readonly threadFamilies = new ThreadFamilies()
+  /** Open thread families, carried across the Desk's rebuilds, and the whisper their lines share. */
+  readonly threadFamilies: ThreadFamilies
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -307,6 +308,7 @@ export class KanbanSurfaceRenderer {
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
+    this.threadFamilies = new ThreadFamilies(new LastReplies(options.shuttleBase ?? ''))
   }
 
   private agentName(card: KanbanCard): string | null {

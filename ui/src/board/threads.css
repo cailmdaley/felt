@@ -1,16 +1,69 @@
 .kbn-thread-badge { font: inherit; font-size: 11px; color: var(--kbn-ink-muted); background: transparent; border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 2px 5px; cursor: pointer; }
 .kbn-thread-badge-waiting { color: var(--kbn-owed-ink); font-weight: 700; border-color: var(--kbn-owed); background: color-mix(in srgb, var(--kbn-owed) 12%, transparent); }
-.kbn-thread-peek, .kbn-thread-subentries { grid-column: 1 / -1; flex-basis: 100%; min-width: 0; width: 100%; border-top: 1px solid var(--kbn-rule); padding: 6px 0; }
-.kbn-thread-peek { max-height: min(360px, 50vh); overflow-y: auto; overscroll-behavior: contain; }
-.kbn-thread-peek[hidden], .kbn-thread-more[hidden] { display: none; }
-.kbn-thread-subentries + .kbn-thread-peek { border-top: 0; padding-top: 0; }
-.kbn-thread-peek h4 { margin: 6px 8px 3px; font-size: 11px; font-weight: 400; color: var(--kbn-ink-muted); }
 .kbn-thread-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
 .kbn-thread-row small { color: var(--kbn-ink-muted); font-size: 10px; }
 .kbn-thread-row[data-thread-state='waiting'] > .kbn-thread-name { font-weight: 600; color: var(--kbn-owed-ink); }
 .kbn-thread-outcome { grid-column: 1 / -1; color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.kbn-thread-peek > small { display: block; padding: 6px 8px; color: var(--kbn-ink-muted); }
+/* The family as a tree under its card, drawn like `tree`: one line a thread,
+   its branches hairlines grown from the tree's shape, its state a mark, its
+   name the only word. The stem leaves from under the card's glyph. */
+.kbn-thread-tree {
+  --tree-cell: 14px; --tree-stem: 6px; --tree-line: 20px;
+  --tree-branch: color-mix(in srgb, var(--kbn-ink-muted) 38%, transparent);
+  grid-column: 1 / -1; flex-basis: 100%; min-width: 0; width: 100%;
+  padding: 1px 0 3px; font-family: var(--font-serif, 'EB Garamond', serif);
+}
+.kbn-thread-peek { max-height: min(400px, 55vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--kbn-rule-strong) transparent; }
+.kbn-thread-tree[hidden], .kbn-thread-more[hidden] { display: none; }
+.kbn-thread-tree .kbn-tree-line { position: relative; display: flex; align-items: stretch; min-width: 0; height: var(--tree-line); }
+.kbn-tree-guides { flex: none; display: flex; align-self: stretch; }
+.kbn-tree-guides > i { position: relative; flex: none; width: var(--tree-cell); }
+.kbn-tree-guides > i::before, .kbn-tree-guides > i::after { content: ''; position: absolute; left: var(--tree-stem); border: 0 solid var(--tree-branch); }
+.kbn-tree-guides > i[data-g='pipe']::before, .kbn-tree-guides > i[data-g='tee']::before { top: 0; bottom: 0; border-left-width: 1px; }
+.kbn-tree-guides > i[data-g='tee']::after { top: 50%; width: calc(var(--tree-cell) - var(--tree-stem) - 2px); border-top-width: 1px; }
+/* The last joint turns its corner softly. */
+.kbn-tree-guides > i[data-g='elbow']::before { top: 0; height: 50%; width: calc(var(--tree-cell) - var(--tree-stem) - 2px); border-left-width: 1px; border-bottom-width: 1px; border-bottom-left-radius: 5px; }
+.kbn-thread-tree .kbn-tree-line > .kbn-thread-row {
+  display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; height: 100%; width: auto;
+  padding: 0 22px 0 3px; margin: 0; border: 0; border-radius: 3px; background: transparent;
+  font: inherit; font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 1; color: var(--kbn-ink-soft); text-align: left; cursor: pointer;
+}
+.kbn-thread-tree .kbn-thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kbn-thread-tree .kbn-thread-row:hover, .kbn-thread-tree .kbn-thread-row:focus-visible, .kbn-thread-tree .kbn-thread-row.kbn-key-selected { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); outline: none; }
+.kbn-thread-tree .kbn-thread-row.kbn-key-selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
+.kbn-thread-tree .kbn-thread-row[data-thread-state='waiting'] { color: var(--kbn-ink); font-weight: 600; }
+.kbn-thread-tree .kbn-thread-row:is([data-thread-state='drafts'], [data-thread-state='roles'], [data-thread-state='resting']) { color: var(--kbn-ink-muted); }
+/* The mark: whose turn by colour (the sidebar's dots), a ring for done or not begun. */
+.kbn-tree-mark { flex: none; box-sizing: border-box; width: 6px; height: 6px; border-radius: 50%; background: var(--kbn-ink-faint); }
+.kbn-tree-mark[data-mark='question'] { background: var(--kbn-you); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--kbn-you) 20%, transparent); }
+.kbn-tree-mark[data-mark='idle'] { background: var(--kbn-owed-bright); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--kbn-owed-bright) 20%, transparent); }
+.kbn-tree-mark[data-mark='working'] { background: var(--kbn-agent); }
+.kbn-tree-mark[data-mark='to-review'] { background: transparent; border: 1.25px solid var(--kbn-tempered); }
+.kbn-tree-mark[data-mark='drafts'] { background: transparent; border: 1px solid var(--kbn-ink-faint); }
+.kbn-tree-mark:is([data-mark='roles'], [data-mark='resting']) { width: 4px; height: 4px; margin: 0 1px; opacity: .7; }
+/* A cap's fold and the archived count: the tree's quietest lines. */
+.kbn-thread-tree .kbn-thread-more { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0 3px; font: inherit; font-size: calc(11.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
+.kbn-thread-tree .kbn-thread-more .kbn-tree-mark { opacity: .55; }
+.kbn-thread-tree .kbn-thread-more:hover, .kbn-thread-tree .kbn-thread-more:focus-visible { color: var(--kbn-ink); text-decoration: none; }
+.kbn-tree-archived { display: block; padding: 3px 0 0 calc(var(--tree-cell) + 3px); font-size: calc(11px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
+/* The pin waits at the line's end, out of sight until the line is pointed at or focused. */
+.kbn-thread-tree .kbn-tree-line > .kbn-thread-pin { position: static; align-self: center; margin-left: -20px; width: 16px; height: 16px; }
+
+/* What a thread last said, under the pointer or the keyboard: state and age, then the agent's words. */
+.kbn-thread-whisper {
+  position: fixed; z-index: 60; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); padding: 7px 10px 8px;
+  background: var(--kbn-paper-bright); color: var(--kbn-ink-soft); border: 1px solid var(--kbn-rule-strong); border-radius: 3px;
+  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
+  font-family: var(--font-serif, 'EB Garamond', serif); pointer-events: none;
+}
+.kbn-thread-whisper[hidden] { display: none; }
+.kbn-thread-whisper-head { font-size: calc(10.5px * var(--kbn-type-scale, 1)); letter-spacing: .06em; font-variant: small-caps; text-transform: lowercase; color: var(--kbn-ink-muted); }
+.kbn-thread-whisper[data-thread-state='waiting'] .kbn-thread-whisper-head { color: var(--kbn-owed-ink); }
+.kbn-thread-whisper-body { margin: 3px 0 0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.kbn-thread-whisper-body[hidden] { display: none; }
+:root[data-ws-appearance='dark'] .kbn-thread-whisper { background: var(--kbn-sheet); }
+
 /* A seat with threads: the chip, then its thread badge, whose peek drops beneath both. */
 .kbn-role-seat { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 4px; max-width: 360px; min-width: 0; }
 .kbn-role-threads { display: contents; }
@@ -33,3 +86,8 @@
 .kbn-thread-pin[aria-pressed='true'] svg { fill: currentColor; }
 /* With no hover to reveal it, the pin stays in reach, quietly. */
 @media (hover: none) { .kbn-thread-pin { opacity: 0.45; } }
+/* A phone draws the same tree, a touch taller a line. */
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-thread-tree { --tree-line: 26px; }
+  .kbn-thread-tree .kbn-thread-row { font-size: calc(13.5px * var(--kbn-type-scale, 1)); }
+}

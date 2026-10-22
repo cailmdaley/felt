@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
-import { ThreadIndex, threadState } from './threads.js'
+import { THREAD_LABEL, ThreadIndex, threadState, type ThreadState } from './threads.js'
 import { installThreadPeek } from './ThreadPeek.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { ThreadRail } from './workspace/ThreadRail.js'
@@ -55,16 +55,15 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
       const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
       const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
-      // The rail names a state by its mark's title; the peek and sub-entries by the row's word.
+      // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark and whisper draw.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')?.textContent ?? row.closest('details')!.querySelector('summary')!.textContent!.split(' · ')[0]]))
+        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('summary')!.textContent!.split(' · ')[0] ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       // The rail has no Roles group: a seat rests with Resting.
       expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })
-      // The waiting thread is a sub-entry; the peek draws the rest beneath it.
+      // The waiting thread is a sub-entry; the opened tree draws every thread.
       expect(labels(host, '.kbn-thread-subentries')).toEqual({ [asking.name]: 'Waiting' })
-      expect(labels(host, '.kbn-thread-family')).toEqual(want)
-      expect([...host.querySelectorAll('.kbn-thread-peek h4')].map(h => h.textContent)).toEqual(['Working', 'Roles', 'Resting'])
+      expect(labels(host, '.kbn-thread-peek')).toEqual(want)
       expect(host.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
     } finally { vi.unstubAllGlobals() }
   })

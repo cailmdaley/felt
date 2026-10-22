@@ -187,7 +187,8 @@ describe('the keyboard selection on a sub-entry', () => {
     press('j')
     expect(selected()).toBe('ask-uid')
     const sel = () => document.querySelector<HTMLElement>('.kbn-key-selected')!
-    expect(sel().closest('.kbn-thread-subentries')).not.toBeNull()
+    // Opened, the tree draws the thread where it hangs; the sub-entries fold away.
+    expect(sel().closest('.kbn-thread-peek')).not.toBeNull()
     draw(data())
     expect(document.querySelectorAll('.kbn-key-selected')).toHaveLength(1)
     expect(sel().dataset.cardUid).toBe('ask-uid')

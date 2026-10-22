@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import { ThreadIndex } from './threads.js'
+import { THREAD_LABEL, ThreadIndex } from './threads.js'
+import { LastReplies } from './threadReply.js'
 import { response } from './testFixtures.js'
 import { installThreadPeek, PEEK_ROWS, THREAD_PIN, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
@@ -84,9 +85,12 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
   expect(peek.hidden).toBe(true)
   meta.querySelector<HTMLButtonElement>('button')!.click()
   expect(peek.hidden).toBe(false)
-  expect([...peek.querySelectorAll('.kbn-thread-row')].map(row => row.textContent)).toEqual([expect.stringContaining(ask.id), expect.stringContaining(child.id)])
+  // The tree: the working child, its asking thread a level below it, drawn as the last joint.
+  const lines = [...peek.querySelectorAll('.kbn-tree-line')]
+  expect(lines.map(line => [line.querySelector('.kbn-thread-name')!.textContent, [...line.querySelectorAll('.kbn-tree-guides > i')].map(i => (i as HTMLElement).dataset.g)]))
+    .toEqual([[child.id, ['elbow']], [ask.id, ['gap', 'elbow']]])
   expect(peek.textContent).toContain('1 archived')
-  peek.querySelector<HTMLButtonElement>('.kbn-thread-row')!.click()
+  peek.querySelector<HTMLButtonElement>(`.kbn-thread-row[data-card-uid="${ask.id}"]`)!.click()
   expect(open).toHaveBeenCalledWith(ask)
   expect(host.querySelector('.kbn-thread-subentries')).toBeNull()
   saveWaitingThreadEntries(true)
@@ -97,7 +101,7 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
 it('caps enabled Desk subentries at two actual waits, never reviews, and opens the root for more', () => {
   saveWaitingThreadEntries(true)
   const root = card({ id: 'root' }), open = vi.fn()
-  const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: root.id, status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
+  const waits = [1, 2, 3, 4].map(n => card({ id: `root/w${n}`, orchestrator: root.id, status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
   const reviews = Array.from({ length: 16 }, (_, n) => card({ id: `root/review${n}`, orchestrator: root.id, status: 'closed' }))
   const host = document.createElement('div'), meta = document.createElement('div'); host.append(meta)
   installThreadPeek(host, meta, root, new ThreadIndex([root, ...waits, ...reviews]), open)
@@ -107,7 +111,18 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   expect(host.querySelector('.kbn-thread-subentries')?.textContent).not.toContain('review')
   host.querySelector<HTMLButtonElement>('.kbn-thread-more')!.click()
   expect(open).toHaveBeenCalledWith(root)
-  expect(host.querySelector('.kbn-thread-peek')?.textContent).toContain('To review')
+  const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
+  expect(peek.querySelectorAll('.kbn-thread-row[data-thread-state="to-review"]')).toHaveLength(PEEK_ROWS)
+  expect([...peek.querySelectorAll('.kbn-thread-more')].map(b => b.textContent)).toEqual([`+ ${16 - PEEK_ROWS} more`])
+})
+it('draws a lone extra waiting thread rather than folding it into "+ 1 more"', () => {
+  saveWaitingThreadEntries(true)
+  const root = card({ id: 'root' })
+  const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: root.id, status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
+  const host = document.createElement('div')
+  installThreadPeek(host, host, root, new ThreadIndex([root, ...waits]), vi.fn())
+  expect(host.querySelectorAll('.kbn-thread-subentries .kbn-thread-row')).toHaveLength(3)
+  expect(host.querySelector('.kbn-thread-subentries .kbn-thread-more')).toBeNull()
 })
 describe('role seats', () => {
   it('a seat with threads carries its badge beside the chip; a seat without stays a bare chip', () => {
@@ -137,7 +152,7 @@ describe('a large family stays a peek, not a column', () => {
     const host = document.createElement('div'); document.body.append(host)
     installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), open)
     const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
-    expect([...peek.querySelectorAll('h4')].map(h => h.textContent)).toEqual(['Waiting', 'To review', 'Working'])
+    expect(peek.querySelectorAll('h4')).toHaveLength(0)
     expect(peek.querySelectorAll('.kbn-thread-row')).toHaveLength(3 * PEEK_ROWS)
     const more = [...peek.querySelectorAll<HTMLButtonElement>('.kbn-thread-more')]
     expect(more.map(b => b.textContent)).toEqual([`+ ${12 - PEEK_ROWS} more`, `+ ${24 - PEEK_ROWS} more`, `+ ${12 - PEEK_ROWS} more`])
@@ -171,33 +186,95 @@ describe('a mouse on a family', () => {
   })
 })
 describe('sub-entries in an open family', () => {
-  it('stay where they are when the badge opens the family, whose list continues below them', () => {
+  it('fold away when the badge opens the family, whose tree draws each thread once, and come back when it folds', () => {
     saveWaitingThreadEntries(true)
     const root = card({ id: 'root' })
-    const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
+    const waits = [1, 2, 3, 4].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
     const work = card({ id: 'root/work', orchestrator: 'root', status: 'active' })
     const open = vi.fn(), openRoot = vi.fn()
     const host = document.createElement('div'); document.body.append(host)
     host.addEventListener('click', openRoot)
     installThreadPeek(host, host, root, new ThreadIndex([root, ...waits, work]), open)
     const entries = host.querySelector<HTMLElement>('.kbn-thread-subentries')!
-    const before = [...entries.querySelectorAll('.kbn-thread-row')]
+    // At rest: stubs off the card, the last folding the rest.
+    expect([...entries.querySelectorAll('.kbn-tree-guides')].map(g => [...g.children].map(i => (i as HTMLElement).dataset.g).join())).toEqual(['tee', 'tee', 'elbow'])
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
     expect(host.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
-    expect(entries.hidden).toBe(false)
-    expect([...entries.querySelectorAll('.kbn-thread-row')]).toEqual(before)
-    // The peek picks up where the sub-entries stop: the third ask, then the
-    // rest; no thread is drawn twice, and the sub-entries' "+ 1 more" steps aside.
+    expect(entries.hidden).toBe(true)
     const visible = [...host.querySelectorAll<HTMLElement>('.kbn-thread-row')].filter(row => !row.closest('[hidden]'))
-    expect(visible.map(row => row.querySelector('.kbn-thread-name')!.textContent)).toEqual(['root/w1', 'root/w2', 'root/w3', 'root/work'])
-    expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(true)
-    expect([...host.querySelectorAll('.kbn-thread-peek h4')].map(h => h.textContent)).toEqual(['Working'])
-    ;(before[0] as HTMLElement).click()
+    expect(visible.map(row => row.querySelector('.kbn-thread-name')!.textContent)).toEqual(['root/w1', 'root/w2', 'root/w3', 'root/w4', 'root/work'])
+    visible[0].click()
     expect(open).toHaveBeenLastCalledWith(waits[0])
     host.querySelector<HTMLElement>('.kbn-thread-peek')!.click()
     expect(openRoot).not.toHaveBeenCalled()
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
-    expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(false)
+    expect(entries.hidden).toBe(false)
+  })
+})
+describe('a family drawn as a tree', () => {
+  const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
+  it('names each thread once and no state word more than once, at rest or open', () => {
+    saveWaitingThreadEntries(true)
+    const root = card({ id: 'root' })
+    const threads = [
+      ...[1, 2, 3].map(n => card({ id: `root/w${n}`, name: `asking ${n}`, orchestrator: 'root', status: 'active', ask })),
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => card({ id: `root/r${n}`, name: `done ${n}`, orchestrator: 'root', status: 'closed' })),
+      card({ id: 'root/work', name: 'busy', orchestrator: 'root', status: 'active' }),
+      card({ id: 'root/work/deep', name: 'deeper', orchestrator: 'root/work', status: 'open' }),
+      card({ id: 'root/rest', name: 'asleep', orchestrator: 'root', status: 'open', effectiveHorizon: 'stashed' }),
+    ]
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), vi.fn())
+    for (const open of [false, true]) {
+      if (open) host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
+      const drawn = [...host.querySelectorAll<HTMLElement>('.kbn-thread-subentries, .kbn-thread-peek')].filter(el => !el.hidden).map(el => el.textContent).join(' ')
+      for (const word of Object.values(THREAD_LABEL)) {
+        expect(drawn.split(new RegExp(`\\b${word}\\b`, 'i')).length - 1, `${word} (${open ? 'open' : 'at rest'})`).toBeLessThanOrEqual(1)
+      }
+      const names = [...host.querySelectorAll<HTMLElement>('.kbn-thread-name')].filter(n => !n.closest('[hidden]')).map(n => n.textContent)
+      expect(new Set(names).size).toBe(names.length)
+    }
+  })
+  it('a line under the pointer or the keyboard whispers its state, age and what its agent last said', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-07-02T15:00:00Z'))
+    saveWaitingThreadEntries(false)
+    const transcript = [
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'An **earlier** reply.' }] } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The cut is ready; see [the report](report.html).' }, { type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
+    ].map(r => JSON.stringify(r)).join('\n') + '\n'
+    const fetcher = vi.fn(async (url: string) => url.includes('/raw?')
+      ? new Response(transcript)
+      : new Response(JSON.stringify({ byte_count: transcript.length })))
+    const root = card({ id: 'root' })
+    const child = card({ id: 'root/child', name: 'Choose the cut', orchestrator: 'root', status: 'closed', outcome: 'Cut chosen.',
+      sessionUuid: 'sess-1', shuttleHost: 'far', closedAt: '2026-07-02T12:00:00Z' })
+    const host = document.createElement('div'); document.body.append(host)
+    const families = new ThreadFamilies(new LastReplies('http://daemon', fetcher as unknown as typeof fetch))
+    installThreadPeek(host, host, root, new ThreadIndex([root, child]), vi.fn(), families)
+    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
+    const row = host.querySelector<HTMLElement>('.kbn-thread-peek .kbn-thread-row')!
+    // Nothing inline but the name.
+    expect(row.textContent).toBe('Choose the cut')
+    const pointer = new Event('pointerenter'); Object.assign(pointer, { pointerType: 'mouse' }); row.dispatchEvent(pointer)
+    const whisper = () => document.querySelector<HTMLElement>('.kbn-thread-whisper')
+    expect(whisper()?.hidden ?? true).toBe(true)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(whisper()!.hidden).toBe(false)
+    expect(whisper()!.querySelector('.kbn-thread-whisper-head')!.textContent).toBe('To review · 3h')
+    expect(whisper()!.querySelector('.kbn-thread-whisper-body')!.textContent).toBe('The cut is ready; see the report.')
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      'http://daemon/api/v1/transcript?session=sess-1&host=far',
+      'http://daemon/api/v1/transcript/raw?session=sess-1&host=far&offset=0',
+    ])
+    row.dispatchEvent(new Event('pointerleave'))
+    expect(whisper()!.hidden).toBe(true)
+    // The keyboard's focus shows it at once, from the reply already read.
+    row.focus()
+    expect(whisper()!.hidden).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(whisper()!.querySelector('.kbn-thread-whisper-body')!.textContent).toBe('The cut is ready; see the report.')
+    expect(fetcher).toHaveBeenCalledTimes(2)
   })
 })
 describe('quiet families', () => {
@@ -224,20 +301,21 @@ describe('pinned threads', () => {
     expect(entries!.querySelector('.kbn-thread-row')!.classList.contains('kbn-thread-pinned')).toBe(true)
     expect(entries!.querySelector('.kbn-thread-pin')!.getAttribute('aria-pressed')).toBe('true')
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
-    expect(names(host.querySelector('.kbn-thread-peek'))).toEqual(['root/other'])
-    expect(host.querySelector('.kbn-thread-peek .kbn-thread-pin')!.getAttribute('aria-pressed')).toBe('false')
+    expect(names(host.querySelector('.kbn-thread-peek'))).toEqual(['root/other', 'root/work'])
+    expect(entries!.closest('[hidden]')).toBe(entries)
+    expect([...host.querySelectorAll('.kbn-thread-peek .kbn-thread-pin')].map(p => p.getAttribute('aria-pressed'))).toEqual(['false', 'true'])
   })
   it('pinned rows come ahead of the waiting ones and never fold into "+ N more"', () => {
     saveWaitingThreadEntries(true)
     const root = card({ id: 'root' })
     const pins = [1, 2, 3].map(n => card({ id: `root/p${n}`, orchestrator: 'root', status: 'active', tags: ['pinned'] }))
-    const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask }))
+    const waits = [1, 2, 3, 4].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask }))
     const pinnedWait = card({ id: 'root/pw', orchestrator: 'root', status: 'active', ask, tags: ['pinned'] })
     const host = document.createElement('div'); document.body.append(host)
     installThreadPeek(host, host, root, new ThreadIndex([root, ...waits, ...pins, pinnedWait]), vi.fn())
     const entries = host.querySelector('.kbn-thread-subentries')!
     expect(names(entries)).toEqual(['root/pw', 'root/p1', 'root/p2', 'root/p3', 'root/w1', 'root/w2'])
-    expect(entries.querySelector('.kbn-thread-more')!.textContent).toBe('+ 1 more')
+    expect(entries.querySelector('.kbn-thread-more')!.textContent).toBe('+ 2 more')
   })
   it('the pin control asks the board to pin an unpinned thread and to unpin a pinned one', () => {
     saveWaitingThreadEntries(false)

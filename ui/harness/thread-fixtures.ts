@@ -1,4 +1,4 @@
-import { WORKSPACE_HOST, WORKSPACE_ID, type WorkspaceExample } from './workspace-fixtures.js'
+import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, type WorkspaceExample } from './workspace-fixtures.js'
 
 /** A small family with every state, a plain-folder gap and three constitution levels. */
 export function addThreadFixtures(example: WorkspaceExample, now: number, many = false): void {
@@ -19,8 +19,8 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
     const id = `${WORKSPACE_ID}/${slug}`
     example.feed.fibers.push({
       origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${id}/${slug.split('/').at(-1)}.md`,
-      orchestrator: parent ? `${WORKSPACE_ID}/${parent}` : WORKSPACE_ID,
-      fiber: { id, uid: `thread-${slug}`, name, status, horizon: slug === 'rest' ? 'stashed' : undefined, created_at: new Date(now - 3600000).toISOString(),
+      orchestrator: parent ? `thread-${parent}` : WORKSPACE_UID,
+      fiber: { id, uid: `thread-${slug}`, name, status, tags: slug === 'review' ? ['pinned'] : undefined, horizon: slug === 'rest' ? 'stashed' : undefined, created_at: new Date(now - 3600000).toISOString(),
         closed_at: status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
         tempered: slug === 'archive' ? true : slug === 'discard' ? false : undefined,
         outcome: `${name}: evidence and next steps are ready.`,
