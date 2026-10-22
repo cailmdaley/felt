@@ -296,12 +296,44 @@ defmodule Shuttle.ThreadsTest do
     assert pending(data) == []
     received_result = File.read!(Path.join(store, "received"))
     assert length(String.split(received_result, "thread hub/child closed:")) == 2
+    native = File.read!(Path.join(store, "ready")) |> String.trim()
+    tasks_dir = Path.join([store, "tasks", native])
+    File.mkdir_p!(tasks_dir)
+    Env.put_env("SHUTTLE_CLAUDE_TASKS_DIR", Path.join(store, "tasks"))
+
+    File.write!(
+      Path.join(tasks_dir, "1.json"),
+      Jason.encode!(%{
+        id: "1",
+        subject: "Read the result",
+        activeForm: "Reading the result",
+        status: "in_progress"
+      })
+    )
+
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Choose a kernel?"])
     send(poller, :run_poll_cycle)
 
     await(fn ->
       length(Path.wildcard(Path.join(data, "mailboxes/fiber/*/offered/*.json"))) == 2
     end)
+
+    assert {:ok, %{fibers: feed}} = Poller.cached_fiber_documents(poller)
+
+    assert %{
+             runtime: %{
+               session_uuid: ^native,
+               state: "running",
+               tasks: [
+                 %{
+                   id: "1",
+                   subject: "Read the result",
+                   status: "in_progress",
+                   activeForm: "Reading the result"
+                 }
+               ]
+             }
+           } = Enum.find(feed, &(Threads.address(&1.fiber) == "hub"))
 
     assert_receive {:wake, ask_text}
     assert ask_text =~ "thread hub/child asked: Choose a kernel?"

@@ -178,6 +178,7 @@ defmodule Shuttle.Poller do
       # entries by modified_at.
       document_cache: %{},
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
+      task_reads: %{},
       document_cache_ready: false,
       # Memoized owner-feed filter+sort: `{document_cache_it_was_built_from,
       # base_rows}`, `nil` until first computed. `owner_feed_base/1` recomputes
@@ -190,7 +191,7 @@ defmodule Shuttle.Poller do
       # hit of the 5s-polled owner feed is enough on its own to push a "pure
       # state read" past callers' timeouts (see felt fiber
       # felt/debug/fibers-endpoint-login-node-contention).
-      # `stamp_runtime/2` (cheap; a no-op when nothing is running) still runs
+      # `stamp_runtime/3` (cheap; a no-op when nothing is running) still runs
       # per-request over the memoized base so live worker status stays
       # request-fresh.
       owner_feed_cache: nil,
@@ -377,7 +378,7 @@ defmodule Shuttle.Poller do
   Returns the serve-time held overlay for boot-quarantine-parked launches.
 
   The parked-launch analog of the runtime overlay (`Snapshot.runtime_index/2`,
-  applied by `stamp_runtime/2`): keyed by fiber_id/uid so the
+  applied by `stamp_runtime/3`): keyed by fiber_id/uid so the
   owning host's per-fiber feed can stamp a `held` marker onto a card WITHOUT any
   board-side lookup of the daemon-global `pending_launch`. A parked (fresh,
   awaiting-release) launch reads as `held` on its card; released or reclassified
@@ -1250,11 +1251,11 @@ defmodule Shuttle.Poller do
     # `owner_feed_base/1` memoizes the filter+sort against `document_cache`'s own
     # identity, so a request reuses it in O(1) whenever `document_cache` hasn't
     # changed since the last request. Only the cheap runtime overlay
-    # (`stamp_runtime/2`, a no-op when nothing is running) runs fresh every time.
+    # (`stamp_runtime/3`, a no-op when nothing is running) runs fresh every time.
     {entries, state} =
       if state.document_cache_ready do
         {base, state} = owner_feed_base(state)
-        {stamp_runtime(base, state.running), state}
+        {stamp_runtime(base, state.running, state.task_reads), state}
       else
         # Log once per cold period, not once per (5s-cadence) request.
         state =
@@ -1628,7 +1629,8 @@ defmodule Shuttle.Poller do
        discovery: discovery,
        document_cache: document_cache,
        document_cache_stats: document_cache_stats,
-       document_cache_refresh_ms: div(refresh_us, 1000)
+       document_cache_refresh_ms: div(refresh_us, 1000),
+       task_reads: read_worker_tasks(state)
      }}
   rescue
     error ->
@@ -1644,17 +1646,20 @@ defmodule Shuttle.Poller do
   # Task's read is reflected in `state` and respected here, never overwritten
   # from a stale snapshot. Reconcile runs against the current `running`, not
   # the Task's snapshot.
-  defp apply_poll_cycle(%State{} = state, %{
-         felt_stores: felt_stores,
-         candidates: candidates,
-         store_map: new_store_map,
-         store_listings: store_listings,
-         full_listings: full_listings,
-         discovery: discovery,
-         document_cache: document_cache,
-         document_cache_stats: document_cache_stats,
-         document_cache_refresh_ms: document_cache_refresh_ms
-       }) do
+  defp apply_poll_cycle(
+         %State{} = state,
+         %{
+           felt_stores: felt_stores,
+           candidates: candidates,
+           store_map: new_store_map,
+           store_listings: store_listings,
+           full_listings: full_listings,
+           discovery: discovery,
+           document_cache: document_cache,
+           document_cache_stats: document_cache_stats,
+           document_cache_refresh_ms: document_cache_refresh_ms
+         } = world
+       ) do
     log_discovery_mode_changes(state.discovery, discovery)
     log_document_cache_refresh(state, document_cache_stats, document_cache_refresh_ms)
 
@@ -1708,6 +1713,7 @@ defmodule Shuttle.Poller do
         document_cache_refreshed_at: refreshed_at,
         document_cache_last_refresh_ms: document_cache_refresh_ms,
         document_cache_partial: not listings_ok?,
+        task_reads: Map.get(world, :task_reads, state.task_reads),
         # Ready is (re)established this tick: re-arm the cold-serve log guard so a
         # future cold period (only reachable in tests) logs once again.
         cold_feed_logged: false,
@@ -2198,9 +2204,9 @@ defmodule Shuttle.Poller do
   # join keys by `uid` (rename-safe) — `state.running` is keyed by the fiber's
   # runtime_key (uid when present), and we also index by the meta's address so a
   # uid-less fiber still matches. A row with no live worker carries no `:runtime`.
-  defp stamp_runtime(entries, running) when map_size(running) == 0, do: entries
+  defp stamp_runtime(entries, running, _tasks) when map_size(running) == 0, do: entries
 
-  defp stamp_runtime(entries, running) do
+  defp stamp_runtime(entries, running, tasks) do
     # `activity` is the `session => %{last_event_at, phase}` map derived from
     # this host's events.jsonl — the real last-activity timestamp and phase
     # category ("attention" / "waiting" / "working") of each tracked session.
@@ -2209,7 +2215,7 @@ defmodule Shuttle.Poller do
     activity = session_activity()
     index = Snapshot.runtime_index(running, activity)
     binding = session_bindings()
-    Enum.map(entries, &Snapshot.put_runtime(&1, index, activity, binding))
+    Enum.map(entries, &Snapshot.put_runtime(&1, index, activity, binding, tasks))
   end
 
   # The activity source. Defaults to the host-local event stream; overridable
@@ -2394,6 +2400,29 @@ defmodule Shuttle.Poller do
       {:error, _} ->
         state
     end
+  end
+
+  defp read_worker_tasks(state) do
+    binding = session_bindings()
+
+    Enum.reduce(state.running, %{}, fn {_key, meta}, reads ->
+      fiber = cached_fiber(state, fiber_address(meta))
+      cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+
+      session =
+        case Shuttle.AppWorkers.id(meta.session) do
+          nil -> Shuttle.SessionBinding.current(binding, worker_session_uuid(meta, fiber))
+          id -> Shuttle.AppWorkers.transcript_id(id)
+        end
+
+      if is_binary(session) do
+        previous = Map.get(state.task_reads, session, %{cursor: %{}})
+        {tasks, cursor} = Shuttle.HarnessTasks.read(cli, session, previous.cursor)
+        Map.put(reads, session, %{tasks: tasks, cursor: cursor})
+      else
+        reads
+      end
+    end)
   end
 
   defp deliver_thread_results(state) do

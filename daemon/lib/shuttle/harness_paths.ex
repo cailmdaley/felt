@@ -16,6 +16,17 @@ defmodule Shuttle.HarnessPaths do
     end)
   end
 
+  @doc "The Claude Code task root, with test and operator overrides."
+  def claude_tasks_root(opts \\ []) do
+    configured_path(opts, [:tasks_root], "SHUTTLE_CLAUDE_TASKS_DIR", fn ->
+      config =
+        non_empty(Shuttle.Env.get("CLAUDE_CONFIG_DIR")) ||
+          Path.join(Shuttle.Env.home(), ".claude")
+
+      Path.join(config, "tasks")
+    end)
+  end
+
   @doc "The pi sessions root, with test and operator overrides."
   @spec pi_sessions_root(keyword()) :: String.t()
   def pi_sessions_root(opts \\ []) do

@@ -225,6 +225,12 @@ A strong `ETag` hashes the response bytes; matching `If-None-Match` returns 304 
 Full metadata and `body=true` listings without `fields=index` stay live.
 `shuttle=true` without bodies takes precedence and serves the poller's owner feed, independently of the all-fiber index cache.
 
+The owner feed's live-worker `runtime` carries `tasks` beside its existing `phase` and session fields.
+Each task has `{id, subject, status, activeForm}`; `activeForm` is null when the harness supplies none.
+The asynchronous daemon poll reads Claude Code's session task directory in numeric id order and follows Codex's native transcript for the latest valid `update_plan`.
+Missing or malformed task records yield no tasks; a worker without a checklist has `tasks: []`.
+The snapshot's running-worker rows carry the same checklist, and the owner feed performs no harness filesystem reads while serving a request.
+
 `GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
 `origin=<host>` also supports host-addressed reads.
 `modes` lists the recording inputs that host supports: `call` (its microphone and system audio) or `phone` (streamed phone microphone).

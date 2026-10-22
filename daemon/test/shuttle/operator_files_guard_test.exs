@@ -14,7 +14,8 @@ defmodule Shuttle.OperatorFilesGuardTest do
     # Read from a process outside every test scope: the suite-wide pins alone.
     task = fn ->
       [
-        {:data_dir, Shuttle.data_dir()}
+        {:data_dir, Shuttle.data_dir()},
+        {:claude_tasks, Shuttle.HarnessPaths.claude_tasks_root()}
         | for(id <- Shuttle.ConfigFiles.ids(), do: {id, Shuttle.ConfigFiles.path(id)})
       ]
     end

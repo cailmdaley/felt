@@ -8,6 +8,9 @@ File.mkdir_p!(test_tmp)
 System.put_env("TMPDIR", test_tmp)
 System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
 
+# Task reads use an empty per-VM harness tree unless a test supplies its own.
+System.put_env("SHUTTLE_CLAUDE_TASKS_DIR", Path.join(test_tmp, "claude-tasks"))
+
 # Pin the agent registry for the whole suite: keep it off whatever
 # ~/.config/shuttle/agents.json the developer has. The fixture carries the same
 # records as the built-in layer, so the effective registry is the shipped one.

@@ -38,6 +38,7 @@ defmodule Shuttle.Poller.Snapshot do
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
         })
         |> native_activity(meta.session)
+        |> put_tasks(state.task_reads)
       end)
 
     dispatch_blocked =
@@ -193,7 +194,8 @@ defmodule Shuttle.Poller.Snapshot do
         %{fiber: fiber} = entry,
         index,
         activity \\ %{},
-        binding \\ Shuttle.SessionBinding.new()
+        binding \\ Shuttle.SessionBinding.new(),
+        tasks \\ %{}
       ) do
     fiber
     |> index_match(index)
@@ -235,7 +237,7 @@ defmodule Shuttle.Poller.Snapshot do
             payload
           end
 
-        Map.put(entry, :runtime, put_session_link(payload, fiber))
+        Map.put(entry, :runtime, payload |> put_session_link(fiber) |> put_tasks(tasks))
     end
   end
 
@@ -268,6 +270,13 @@ defmodule Shuttle.Poller.Snapshot do
       nil -> entry
       %{parked_at: at} -> entry |> Map.put(:held, true) |> Map.put(:held_since, at)
     end
+  end
+
+  defp put_tasks(payload, tasks) do
+    session =
+      if payload.surface == "app", do: payload.transcript_session_uuid, else: payload.session_uuid
+
+    Map.put(payload, :tasks, get_in(tasks, [session, :tasks]) || [])
   end
 
   # Where a phone opens this worker: the claude.ai bridge URL of the session
