@@ -66,7 +66,7 @@ export function AppearanceSection(): JSX.Element {
           <input type="checkbox" checked={threadEntries} onChange={event => {
             setThreadEntries(event.target.checked); saveWaitingThreadEntries(event.target.checked)
           }} />
-          <span><strong>Show waiting threads under cards</strong><span className="set-opening-note">Keep threads waiting on Cail visible without hovering. Off by default.</span></span>
+          <span><strong>Show waiting threads under cards</strong><span className="set-opening-note">Show up to two waiting threads per card without hovering. On by default.</span></span>
         </label>
       </fieldset>
       {error && <div className="set-error" role="alert">This browser cannot save preferences, so this choice lasts until the page reloads.</div>}

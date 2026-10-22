@@ -59,6 +59,15 @@ export class ThreadRail {
   }
   private paint(): void {
     if (!this.card) return
+    const active = document.activeElement
+    const focus = active instanceof HTMLElement && this.tree.contains(active) ? active.dataset.threadFocus : undefined
+    const detailsState = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
+    const identify = (el: HTMLElement, kind: string, card: KanbanCard): void => {
+      el.dataset.threadFocus = JSON.stringify([kind, card.originId, card.feltStore, card.id])
+    }
+    const rowFor = (card: KanbanCard, scope: string): HTMLButtonElement => {
+      const row = threadRow(card, this.open); identify(row, scope, card); return row
+    }
     const cards = this.cards, subtree = threadSubtree(this.card, cards)
     const nodes = (parent: KanbanCard, seen: Set<KanbanCard>, archiveMode = false): HTMLElement => {
       const list = document.createElement('ul')
@@ -73,23 +82,25 @@ export class ThreadRail {
         const key = JSON.stringify([child.originId, child.id])
         if (expandable) {
           const fold = document.createElement('button'); fold.type = 'button'; fold.textContent = this.folded.has(key) ? '▸' : '▾'
+          identify(fold, 'fold', child)
           fold.setAttribute('aria-label', `Toggle threads of ${child.name}`); fold.setAttribute('aria-expanded', String(!this.folded.has(key)))
           fold.addEventListener('click', () => { if (this.folded.has(key)) this.folded.delete(key); else this.folded.add(key); this.paint() })
           line.append(fold)
         }
-        line.append(threadRow(child, this.open)); item.append(line)
+        line.append(rowFor(child, 'tree')); item.append(line)
         if (expandable && !this.folded.has(key)) item.append(nodes(child, new Set([...seen, child]), archiveMode))
         list.append(item)
       }
       if (archived.length) {
         const item = document.createElement('li'), archive = document.createElement('details')
         const key = JSON.stringify([parent.originId, parent.feltStore, parent.id])
+        archive.dataset.threadDetails = `archive:${key}`
         archive.open = this.archivesOpen.has(key)
-        const summary = document.createElement('summary')
+        const summary = document.createElement('summary'); identify(summary, 'archive', parent)
         summary.textContent = `${archived.reduce((n, c) => n + 1 + threadSubtree(c, cards).length, 0)} archived`
         archive.append(summary)
-        for (const child of archived) archive.append(threadRow(child, this.open), nodes(child, new Set([...seen, child]), true))
-        archive.addEventListener('toggle', () => { if (archive.open) this.archivesOpen.add(key); else this.archivesOpen.delete(key) })
+        for (const child of archived) archive.append(rowFor(child, 'tree'), nodes(child, new Set([...seen, child]), true))
+        archive.addEventListener('toggle', () => { if (archive.isConnected) { if (archive.open) this.archivesOpen.add(key); else this.archivesOpen.delete(key) } })
         item.append(archive); list.append(item)
       }
       return list
@@ -99,10 +110,12 @@ export class ThreadRail {
       const members = subtree.filter(c => threadState(c) === state)
       if (!members.length) continue
       const group = document.createElement(state !== 'waiting-cail' ? 'details' : 'section'); group.className = 'ws-thread-pointers'
+      if (group instanceof HTMLDetailsElement) group.dataset.threadDetails = `group:${state}`
       const heading = document.createElement(state !== 'waiting-cail' ? 'summary' : 'h3')
+      identify(heading, `group:${state}`, this.card)
       heading.textContent = `${label} · ${members.length}`; group.append(heading)
       for (const card of members) {
-        const row = threadRow(card, this.open)
+        const row = rowFor(card, `group:${state}`)
         const prefix = document.createElement('span'); prefix.className = 'ws-thread-path'
         prefix.textContent = `${card.id.slice(this.card.id.length + 1).split('/').slice(0, -1).join('/')} / `
         if (prefix.textContent !== ' / ') row.prepend(prefix)
@@ -111,6 +124,14 @@ export class ThreadRail {
       this.tree.append(group)
     }
     this.tree.append(nodes(this.card, new Set([this.card])))
+    for (const details of this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')) {
+      const open = detailsState.get(details.dataset.threadDetails!)
+      if (open !== undefined) details.open = open
+    }
     this.layout()
+    if (focus) {
+      const target = [...this.tree.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
+      ;(target ?? this.toggle).focus({ preventScroll: true })
+    }
   }
 }

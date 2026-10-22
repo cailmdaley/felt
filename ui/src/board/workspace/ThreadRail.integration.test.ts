@@ -33,3 +33,34 @@ it('keeps pure containment beside flat waiting pointers, folds archives, navigat
   expect(rail.el.querySelector('.ws-thread-pointers')).toBeNull()
   vi.unstubAllGlobals()
 })
+
+it('preserves focused folds and rows across toggles and live repaints without stealing outside focus', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  const root = card({ id: 'hub' }), branch = card({ id: 'hub/branch', name: 'Branch', orchestrator: root.id, status: 'active' })
+  const draft = card({ id: 'hub/branch/draft', name: 'Draft', orchestrator: branch.id, status: 'open' })
+  const rail = new ThreadRail(vi.fn(), vi.fn()), outside = document.createElement('button')
+  document.body.append(rail.el, outside)
+  try {
+    rail.show(root, [root, branch, draft])
+    const fold = rail.el.querySelector<HTMLButtonElement>('[aria-label="Toggle threads of Branch"]')!
+    fold.focus(); fold.click()
+    expect(document.activeElement).toBe(rail.el.querySelector('[aria-label="Toggle threads of Branch"]'))
+    ;(document.activeElement as HTMLButtonElement).click()
+    const group = rail.el.querySelector<HTMLDetailsElement>('.ws-thread-pointers')!
+    group.open = true
+    const row = group.querySelector<HTMLButtonElement>('.kbn-thread-row')!
+    row.focus()
+    rail.show(root, [root, branch, { ...draft, outcome: 'New evidence' }])
+    const refreshed = rail.el.querySelector<HTMLDetailsElement>('.ws-thread-pointers')!
+    expect(refreshed.open).toBe(true)
+    expect(document.activeElement).toBe(refreshed.querySelector('.kbn-thread-row'))
+    expect(document.activeElement?.textContent).toContain('New evidence')
+    outside.focus()
+    rail.show(root, [root, branch, { ...draft, outcome: 'Another update' }])
+    expect(document.activeElement).toBe(outside)
+    const currentRow = rail.el.querySelector<HTMLButtonElement>('.ws-thread-tree > ul .kbn-thread-row')!
+    currentRow.focus()
+    rail.show(root, [root, { ...draft, orchestrator: root.id }])
+    expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-toggle'))
+  } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
+})
