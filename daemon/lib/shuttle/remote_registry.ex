@@ -389,8 +389,43 @@ defmodule Shuttle.RemoteRegistry do
   # Every poll cycle — tick or the synchronous `poll_now/1` — starts by picking
   # up a fleet edit, so the two paths can never disagree about the fleet.
   defp poll_all(%State{} = state) do
-    state |> reload_remotes() |> poll_configured()
+    state |> reload_remotes() |> poll_configured() |> report_fleet()
   end
+
+  # The Poller files threads by whether a worker runs anywhere in the fleet.
+  # It keeps this report rather than calling a registry whose sweep can hold
+  # its mailbox for a slow remote's whole timeout; it reads staleness off each
+  # remote's `last_polled_at`, so a report that stops coming ages out.
+  defp report_fleet(%State{} = state) do
+    fleet =
+      Map.new(state.snapshots, fn {name, entry} ->
+        {name,
+         %{
+           remote: entry.remote,
+           last_polled_at: entry.last_polled_at,
+           running: running_keys(entry.snapshot)
+         }}
+      end)
+
+    case GenServer.whereis(Shuttle.Env.server(Shuttle.Poller)) do
+      pid when is_pid(pid) -> send(pid, {:fleet, fleet})
+      _ -> :ok
+    end
+
+    state
+  end
+
+  # A remote's running workers, by every key its roster can name them with.
+  defp running_keys(%{} = snapshot) do
+    for worker <- List.wrap(snapshot["eligible"]) ++ List.wrap(snapshot["running_detail"]),
+        is_map(worker),
+        key <- [worker["uid"], worker["fiber_id"], worker["runtime_key"]],
+        is_binary(key),
+        into: MapSet.new(),
+        do: key
+  end
+
+  defp running_keys(_), do: MapSet.new()
 
   defp poll_configured(%State{remotes: remotes} = state) do
     now = state.clock.()

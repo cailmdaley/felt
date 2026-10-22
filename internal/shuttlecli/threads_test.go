@@ -14,6 +14,8 @@ const threadsTreeJSON = `{"fiber_id":"hub","uid":"01HUB","name":"Hub","felt_stor
    {"id":"hub/a/deep","name":"Deep","column":"in_flight","state":"Working","threads":[]}]},
  {"id":"hub/b","name":"B","column":"tempered","state":"Archived","threads":[]},
  {"id":"hub/c","name":"C","column":"in_flight","state":"Waiting","outcome":"Which one?","threads":[]},
+ {"id":"hub/e","name":"E","host":"nersc","column":"in_flight","state":"Armed","host_unreachable":true,"threads":[]},
+ {"id":"hub/f","name":"F","host":"laptop","column":"in_flight","state":"Armed","host_unreachable":false,"threads":[]},
  {"id":"hub/d","name":"D","column":"drafts","state":"Draft","threads":[
    {"id":"hub/d/x","name":"X","column":"discarded","state":"Archived","threads":[]}]}]}`
 
@@ -48,6 +50,10 @@ func TestThreadsGroupsDirectThreadsByState(t *testing.T) {
 
 Waiting
   hub/c  Waiting  C: Which one?
+
+Armed
+  hub/e  Armed · host unreachable  E
+  hub/f  Armed  F
 
 To review
   hub/a  To review  A: Found it. (1 thread)
@@ -101,7 +107,7 @@ func TestThreadsJSONCarriesColumnsAndCounts(t *testing.T) {
 			t.Fatalf("deeper levels without --all: %+v", r)
 		}
 	}
-	if got.FiberID != "hub" || got.Archived != 1 || strings.Join(ids, ",") != "hub/c=in_flight,hub/a=awaiting_review,hub/d=drafts" || got.Threads[1].Unfinished != 1 {
+	if got.FiberID != "hub" || got.Archived != 1 || strings.Join(ids, ",") != "hub/c=in_flight,hub/e=in_flight,hub/f=in_flight,hub/a=awaiting_review,hub/d=drafts" || got.Threads[3].Unfinished != 1 || !got.Threads[1].HostUnreachable || got.Threads[2].HostUnreachable {
 		t.Fatalf("unexpected %s", out)
 	}
 }

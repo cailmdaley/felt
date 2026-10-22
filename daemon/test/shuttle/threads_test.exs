@@ -346,6 +346,59 @@ defmodule Shuttle.ThreadsTest do
     refute Map.has_key?(child.fiber, "closed_at")
   end
 
+  test "an archived constitution orchestrates nothing: its live threads report to the next one up",
+       %{store: store, data: data} do
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "thread",
+               "hub/child",
+               "Deep work",
+               "--slug",
+               "deep",
+               "--disabled"
+             ])
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, ["close", "hub/child", "--tempered=true", "--local"])
+
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    hub = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    deep = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/child/deep"))
+    assert Threads.orchestrator(deep, entries).fiber["uid"] == hub.fiber["uid"]
+
+    stamped = Threads.put_orchestrators(entries)
+
+    assert Enum.find(stamped, &(Threads.address(&1.fiber) == "hub/child/deep")).orchestrator ==
+             hub.fiber["id"]
+
+    assert [
+             %{"id" => "hub/child", "state" => "Archived", "threads" => []},
+             %{"id" => "hub/child/deep"}
+           ] =
+             Threads.tree("hub", store, entries, MapSet.new())
+
+    assert Shuttle.Dispatcher.render_prompt("hub/child/deep", felt_store: store) =~
+             "You are a thread of hub (Hub)."
+
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child/deep", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+    hub_uid = hub.fiber["uid"]
+
+    # The tempered child's own close and its thread's both go to the hub.
+    assert [
+             %{"parent_uid" => ^hub_uid, "text" => "thread hub/child closed: "},
+             %{"parent_uid" => ^hub_uid, "text" => "thread hub/child/deep closed: "}
+           ] =
+             Shuttle.ThreadOutbox.pending("test-host")
+             |> Enum.map(&elem(&1, 1))
+             |> Enum.sort_by(& &1["text"])
+
+    Threads.deliver_results(entries, "test-host")
+    assert "thread hub/child/deep closed: " in Enum.map(pending(data), & &1["request"]["text"])
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+  end
+
   @tag first_boot: true
   test "snapshot migration preserves the cutoff, intended UID, pending text and acknowledgment dedup",
        %{store: store, data: data} do
@@ -962,6 +1015,38 @@ defmodule Shuttle.ThreadsTest do
   end
 
   describe "orchestrator roster" do
+    test "the fleet view adds fresh remotes' workers and names the hosts it covers" do
+      remote = fn name ->
+        %Shuttle.Remote{
+          name: name,
+          url: "http://#{name}:1",
+          poll_interval_ms: 1_000,
+          stale_multiplier: 4
+        }
+      end
+
+      now = ~U[2026-10-23 12:00:00Z]
+
+      fleet = %{
+        "candide" => %{
+          remote: remote.("candide"),
+          last_polled_at: DateTime.add(now, -1, :second),
+          running: MapSet.new(["u-a"])
+        },
+        "nersc" => %{
+          remote: remote.("nersc"),
+          last_polled_at: DateTime.add(now, -60, :second),
+          running: MapSet.new(["u-b"])
+        }
+      }
+
+      assert Threads.with_fleet(MapSet.new(["u-local"]), "laptop", fleet, now) ==
+               {MapSet.new(["u-local", "u-a"]), MapSet.new(["laptop", "candide"])}
+
+      assert Threads.with_fleet(MapSet.new(["u-local"]), "laptop", nil, now) ==
+               {MapSet.new(["u-local"]), nil}
+    end
+
     defp thread(id, fiber, store \\ "/s"),
       do: %{
         felt_store: store,
@@ -978,11 +1063,11 @@ defmodule Shuttle.ThreadsTest do
                  {c["name"], c["column"]}
 
         assert {c["name"], Shuttle.Threads.thread_state(c["fiber"], c["live"])} ==
-                 {c["name"], c["state"]}
+                 {c["name"], c["roster"] || c["state"]}
       end
     end
 
-    test "the tree nests threads to every depth, archived included" do
+    test "the tree nests threads to every depth, archived included and passed over" do
       entries = [
         thread("hub", %{"status" => "active"}),
         thread("hub/a", %{"status" => "closed", "outcome" => "Done."}),
@@ -998,16 +1083,18 @@ defmodule Shuttle.ThreadsTest do
                  "column" => "awaiting_review",
                  "state" => "To review",
                  "outcome" => "Done.",
+                 # The discarded b orchestrates nothing; its draft answers to a.
                  "threads" => [
                    %{
                      "id" => "hub/a/b",
                      "column" => "discarded",
                      "state" => "Archived",
-                     "threads" => [%{"id" => "hub/a/b/c", "state" => "Draft", "threads" => []}]
-                   }
+                     "threads" => []
+                   },
+                   %{"id" => "hub/a/b/c", "state" => "Draft", "threads" => []}
                  ]
                },
-               %{"id" => "hub/notes/z", "state" => "Working"}
+               %{"id" => "hub/notes/z", "state" => "Armed", "host_unreachable" => false}
              ] = Shuttle.Threads.tree("hub", "/s", entries, MapSet.new())
     end
 
@@ -1019,6 +1106,9 @@ defmodule Shuttle.ThreadsTest do
         thread("hub/review", %{"status" => "closed", "outcome" => "Found it. Then more."}),
         thread("hub/live", %{"status" => "active"}),
         thread("hub/live/deep", %{"status" => "active"}),
+        thread("hub/armed", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}),
+        thread("hub/away", %{"status" => "active", "shuttle" => %{"host" => "nersc"}}),
+        thread("hub/elsewhere", %{"status" => "active", "shuttle" => %{"host" => "candide"}}),
         thread("hub/asking", %{
           "status" => "active",
           "shuttle" => %{"ask" => %{"text" => "?", "at" => "t"}}
@@ -1032,7 +1122,9 @@ defmodule Shuttle.ThreadsTest do
       prompt =
         Shuttle.Dispatcher.render_prompt("hub",
           felt_store: "/s",
-          threads: {entries, MapSet.new(["u-hub/live"])}
+          threads:
+            {entries, MapSet.new(["u-hub/live", "u-hub/elsewhere"]),
+             MapSet.new(["test-host", "candide"])}
         )
 
       assert prompt =~ "## Threads"
@@ -1044,7 +1136,10 @@ defmodule Shuttle.ThreadsTest do
 
       assert rows == [
                {"hub/asking", "Waiting"},
+               {"hub/elsewhere", "Working"},
                {"hub/live", "Working"},
+               {"hub/armed", "Armed"},
+               {"hub/away", "Armed · host unreachable"},
                {"hub/review", "To review"},
                {"hub/draft", "Draft"},
                {"hub/rest", "Resting"}
@@ -1058,7 +1153,7 @@ defmodule Shuttle.ThreadsTest do
       refute Shuttle.Dispatcher.render_prompt("hub/rest",
                felt_store: "/nonexistent",
                runner: FailingMailboxRunner,
-               threads: {entries, MapSet.new()}
+               threads: {entries, MapSet.new(), nil}
              ) =~ "## Threads"
     end
   end

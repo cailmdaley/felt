@@ -7,7 +7,7 @@
    "fiber": {"status": "closed", "shuttle": {"kind": "oneshot"}}},
   {"name": "closed with a live worker still awaits review", "live": true, "column": "awaiting_review", "state": "To review",
    "fiber": {"status": "closed", "shuttle": {"kind": "oneshot"}}},
-  {"name": "armed oneshot", "live": false, "column": "in_flight", "state": "Working",
+  {"name": "armed oneshot", "live": false, "column": "in_flight", "state": "Working", "roster": "Armed",
    "fiber": {"status": "active", "shuttle": {"kind": "oneshot"}}},
   {"name": "armed oneshot asking", "live": true, "column": "in_flight", "state": "Waiting",
    "fiber": {"status": "active", "shuttle": {"kind": "oneshot", "ask": {"text": "which?", "at": "2026-10-22T10:00:00Z"}}}},
@@ -31,7 +31,7 @@
    "fiber": {"status": "open", "shuttle": {"kind": "oneshot", "seat": true, "role": "editor"}}},
   {"name": "standing seat asleep", "live": false, "column": "roles", "state": "Resting",
    "fiber": {"status": "active", "shuttle": {"kind": "standing", "seat": true, "role": "vizier"}}},
-  {"name": "armed oneshot seat", "live": false, "column": "in_flight", "state": "Working",
+  {"name": "armed oneshot seat", "live": false, "column": "in_flight", "state": "Working", "roster": "Armed",
    "fiber": {"status": "active", "shuttle": {"kind": "oneshot", "seat": true, "role": "editor"}}},
   {"name": "seat without a role is no seat", "live": false, "column": "drafts", "state": "Draft",
    "fiber": {"status": "open", "shuttle": {"kind": "oneshot", "seat": true}}}

@@ -1,9 +1,12 @@
 defmodule Shuttle.Threads do
   @moduledoc "Constitution containment and owner-local result delivery."
 
-  alias Shuttle.{Delivery, OriginRouter, ThreadOutbox}
+  alias Shuttle.{Delivery, OriginRouter, Remote, ThreadOutbox}
 
-  @doc "Nearest strict ancestor carrying a shuttle block, in the same felt store."
+  @doc """
+  Nearest strict ancestor that orchestrates, in the same felt store: one
+  carrying a shuttle block and not archived (a tempered or discarded verdict).
+  """
   def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
 
   def orchestrator(entry, index) when is_map(index) do
@@ -12,11 +15,11 @@ defmodule Shuttle.Threads do
 
   defp index(entries), do: Map.new(entries, &{{&1.felt_store, address(&1.fiber)}, &1})
 
-  @doc "Stamp each constitution with its nearest orchestrator's wire id, or null."
+  @doc "Stamp each constitution with its orchestrator's wire id, or null."
   def put_orchestrators(entries), do: stamp(entries, & &1.felt_store)
 
   @doc """
-  Stamp the cross-host board's constitutions with their nearest orchestrators.
+  Stamp the cross-host board's constitutions with their orchestrators.
 
   `rows` mixes this host's atom-keyed entries with remote feeds' string-keyed
   rows. Containment is a property of the felt store, whose tree is the same on
@@ -74,10 +77,16 @@ defmodule Shuttle.Threads do
   defp nearest(path, lookup) do
     entry = lookup.(path)
 
-    if entry && is_map(field(entry, :fiber)["shuttle"]),
+    if entry && orchestrates?(field(entry, :fiber)),
       do: entry,
       else: nearest(Path.dirname(path), lookup)
   end
+
+  # An archived constitution's work is over: its threads report past it.
+  defp orchestrates?(fiber),
+    do:
+      is_map(fiber["shuttle"]) and
+        not (fiber["status"] == "closed" and is_boolean(fiber["tempered"]))
 
   def address(fiber), do: fiber["slug"] || fiber["id"]
 
@@ -109,24 +118,27 @@ defmodule Shuttle.Threads do
       end
 
     case opts[:threads] do
-      {entries, live} -> [lineage, roster(fiber_id, opts[:felt_store], entries, live)]
-      _ -> [lineage]
+      {entries, live, reachable} ->
+        [lineage, roster(fiber_id, opts[:felt_store], entries, live, reachable)]
+
+      _ ->
+        [lineage]
     end
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
 
   @roster_cap 40
-  @state_order ["Waiting", "Working", "To review", "Draft", "Resting"]
+  @state_order ["Waiting", "Working", "Armed", "To review", "Draft", "Resting"]
 
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: its direct
   threads, Waiting first, each with the count of unfinished threads below it
   (the board's thread badge), and the archived ones as a count. Empty when it
-  has none.
+  has none. `live` and `reachable` are as `tree/5` takes them.
   """
-  def roster(fiber_id, felt_store, entries, live) do
-    case tree(fiber_id, felt_store, entries, live) do
+  def roster(fiber_id, felt_store, entries, live, reachable \\ nil) do
+    case tree(fiber_id, felt_store, entries, live, reachable) do
       [] ->
         ""
 
@@ -148,7 +160,7 @@ defmodule Shuttle.Threads do
             count =
               if n > 0, do: "\n  (#{n} #{if n == 1, do: "thread", else: "threads"})", else: ""
 
-            "- #{row["id"]} — #{row["state"]} — #{first_sentence(row["outcome"])}#{count}"
+            "- #{row["id"]} — #{state_label(row)} — #{first_sentence(row["outcome"])}#{count}"
           end)
 
         more =
@@ -171,6 +183,10 @@ defmodule Shuttle.Threads do
     end
   end
 
+  @doc "A thread's roster state as written: Armed says when its host is out of sight."
+  def state_label(%{"host_unreachable" => true}), do: "Armed · host unreachable"
+  def state_label(%{"state" => state}), do: state
+
   # The thread badge's count: unfinished threads anywhere below.
   defp unfinished(threads),
     do:
@@ -182,10 +198,13 @@ defmodule Shuttle.Threads do
   @doc """
   An orchestrator's threads to every depth, in containment order: one map per
   thread with its `id`, `uid`, `name`, `host`, board `column`, roster `state`,
-  full `outcome` and its own `threads`. `entries` are the poller's cached
-  constitutions; `live` holds the running workers' runtime keys (uid, else id).
+  `host_unreachable`, full `outcome` and its own `threads`. `entries` are the
+  poller's cached constitutions; `live` holds the running workers' runtime keys
+  (uid, else id) across the fleet; `reachable` is the set of hosts whose
+  workers `live` covers (`with_fleet/4`), or nil when the fleet is unknown. An
+  Armed thread on a host outside `reachable` is `host_unreachable`.
   """
-  def tree(fiber_id, felt_store, entries, live) do
+  def tree(fiber_id, felt_store, entries, live, reachable \\ nil) do
     index = index(entries)
 
     children =
@@ -198,25 +217,30 @@ defmodule Shuttle.Threads do
         end
       end)
 
-    grow(children, {felt_store, fiber_id}, live)
+    grow(children, {felt_store, fiber_id}, {live, reachable})
   end
 
-  defp grow(children, key, live) do
+  defp grow(children, key, {live, reachable} = seen) do
     children
     |> Map.get(key, [])
     |> Enum.sort_by(&address(&1.fiber))
     |> Enum.map(fn %{fiber: fiber} = entry ->
       live? = live?(fiber, live)
+      host = get_in(fiber, ["shuttle", "host"])
+      state = thread_state(fiber, live?)
 
       %{
         "id" => address(fiber),
         "uid" => fiber["uid"],
         "name" => fiber["name"],
-        "host" => get_in(fiber, ["shuttle", "host"]),
+        "host" => host,
         "column" => column(fiber, live?),
-        "state" => thread_state(fiber, live?),
+        "state" => state,
+        "host_unreachable" =>
+          state == "Armed" and is_binary(host) and reachable != nil and
+            not MapSet.member?(reachable, host),
         "outcome" => fiber["outcome"],
-        "threads" => grow(children, {entry.felt_store, address(fiber)}, live)
+        "threads" => grow(children, {entry.felt_store, address(fiber)}, seen)
       }
     end)
   end
@@ -225,12 +249,34 @@ defmodule Shuttle.Threads do
     do: MapSet.member?(live, fiber["uid"] || fiber["id"]) or MapSet.member?(live, address(fiber))
 
   @doc """
+  Widen this host's liveness to the fleet's: `{live, reachable}`, where `live`
+  adds the running workers of every remote polled within its staleness window
+  and `reachable` is this host with those remotes. `fleet` is the remote
+  registry's last report (`%{name => %{remote, last_polled_at, running}}`), or
+  nil before its first, when no host but this one is known and `reachable` is
+  nil.
+  """
+  def with_fleet(live, own_host, fleet, now \\ DateTime.utc_now())
+
+  def with_fleet(live, _own_host, nil, _now), do: {live, nil}
+
+  def with_fleet(live, own_host, fleet, now) do
+    fresh =
+      for {name, %{remote: remote, last_polled_at: at, running: running}} <- fleet,
+          not Remote.stale?(remote, at, now),
+          do: {name, running}
+
+    {Enum.reduce(fresh, live, fn {_name, running}, acc -> MapSet.union(acc, running) end),
+     MapSet.new([own_host | Enum.map(fresh, &elem(&1, 0))])}
+  end
+
+  @doc """
   The Desk column a constitution sits in, as the board files it
   (`ui/src/board/deskColumn.ts`): `drafts`, `in_flight`, `awaiting_review`,
   `tempered`, `discarded`, `resting` (a draft put down, or a standing
   constitution between firings) or `roles` (a seat at rest). `live?` is whether
   its worker is running. `shuttle status --json` reports the same column
-  (`internal/shuttle/column.go`); `test/fixtures/columns.json` holds them equal.
+  (`internal/shuttle/column.go`); `test/fixtures/columns/cases.json` holds them equal.
   """
   def column(fiber, live?) do
     shuttle = fiber["shuttle"] || %{}
@@ -270,19 +316,33 @@ defmodule Shuttle.Threads do
   end
 
   @doc """
-  A thread's state on the board's rails (`ui/src/board/threads.ts`
-  `threadState`): its column, with In flight split into Waiting (an
-  outstanding ask) and Working, a verdict archived, and a rest or a seat
-  Resting. The board also reads a harness stopped on a prompt as Waiting; the
-  daemon's runtime record does not carry that turn.
+  A thread's roster state: its column, with In flight split into Waiting (an
+  outstanding ask), Working (a live worker) and Armed (active with no worker
+  running), a verdict archived, and a rest or a seat Resting. The board's rails
+  (`ui/src/board/threads.ts` `threadState`) file Armed as Working, and also
+  read a harness stopped on a prompt as Waiting; the daemon's runtime record
+  does not carry that turn.
   """
   def thread_state(fiber, live?) do
     case column(fiber, live?) do
-      verdict when verdict in ["tempered", "discarded"] -> "Archived"
-      "awaiting_review" -> "To review"
-      "drafts" -> "Draft"
-      "in_flight" -> if asking?(fiber), do: "Waiting", else: "Working"
-      _ -> "Resting"
+      verdict when verdict in ["tempered", "discarded"] ->
+        "Archived"
+
+      "awaiting_review" ->
+        "To review"
+
+      "drafts" ->
+        "Draft"
+
+      "in_flight" ->
+        cond do
+          asking?(fiber) -> "Waiting"
+          live? -> "Working"
+          true -> "Armed"
+        end
+
+      _ ->
+        "Resting"
     end
   end
 

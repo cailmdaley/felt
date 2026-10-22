@@ -1053,7 +1053,7 @@ defmodule Shuttle.DispatcherTest do
              Dispatcher.dispatch("tests/haiku",
                runner: MockRunner,
                felt_store: "/tmp",
-               threads: {entries, MapSet.new(["u-tests/haiku/live"])}
+               threads: {entries, MapSet.new(["u-tests/haiku/live"]), nil}
              )
 
     script = read_run_script_for(session)

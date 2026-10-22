@@ -300,6 +300,30 @@ defmodule Shuttle.RemoteRegistryTest do
       assert candide.last_error == nil
       assert get_in(candide, [:snapshot, "host"]) == "candide"
     end
+
+    test "each poll reports the fleet's running workers to the Poller" do
+      Shuttle.Test.Env.put_server(Shuttle.Poller, self())
+
+      MockClient.set(
+        "http://localhost:4001/api/v1/state",
+        {:ok, snapshot_with_running(["work/foo"])}
+      )
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_fleet,
+          remotes: [candide_remote()],
+          client: MockClient,
+          auto_poll: false,
+          tick_interval_ms: 60_000
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_fleet)
+
+      assert_receive {:fleet, %{"candide" => %{remote: %Remote{name: "candide"}} = candide}}
+      assert MapSet.member?(candide.running, "work/foo")
+      assert %DateTime{} = candide.last_polled_at
+    end
   end
 
   # ── Failure paths ──

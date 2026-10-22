@@ -121,3 +121,23 @@ func TestRoutedRestCarriesTheCallersSession(t *testing.T) {
 		t.Fatalf("routed body %v", body)
 	}
 }
+
+// An archived constitution orchestrates nothing: a thread under a tempered one
+// answers to the next live orchestrator up.
+func TestOrchestratorSkipsArchivedAncestors(t *testing.T) {
+	t.Parallel()
+	_, storage := newStore(t)
+	yes := true
+	seedShuttleRole(t, storage, "hub", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "hub/landing", felt.StatusClosed, oneshot(), &yes)
+	seedShuttleRole(t, storage, "hub/landing/seed", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "hub/review", felt.StatusClosed, oneshot(), nil)
+	seedShuttleRole(t, storage, "hub/review/t", felt.StatusActive, oneshot(), nil)
+
+	for thread, want := range map[string]string{"hub/landing/seed": "hub", "hub/review/t": "hub/review"} {
+		got := orchestratorOf(storage, mustRead(t, storage, thread))
+		if got == nil || got.ID != want {
+			t.Errorf("%s: orchestrator %v, want %s", thread, got, want)
+		}
+	}
+}

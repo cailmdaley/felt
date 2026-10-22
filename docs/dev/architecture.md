@@ -35,7 +35,7 @@ frontmatter field. The editorial chain lives in the constitution body's
 
 ## Thread results
 
-A child constitution publishes lifecycle results to its nearest ancestor constitution.
+A child constitution publishes lifecycle results to its nearest ancestor constitution that is not archived (tempered or discarded).
 Only the child's owning daemon publishes them.
 Results reach only that nearest orchestrator; each orchestrator decides what to pass on, with no automatic upward propagation.
 Close wakes the orchestrator by default; `shuttle close --quiet` publishes context without waking, while ask always wakes.

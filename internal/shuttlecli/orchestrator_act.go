@@ -27,15 +27,17 @@ func (a *app) actorSession(flag string) string {
 	return id
 }
 
-// orchestratorOf is a thread's nearest strict ancestor with a shuttle: block in
-// its own store, or nil for a constitution with none above it.
+// orchestratorOf is a thread's nearest strict ancestor in its own store that
+// carries a shuttle: block and is not archived (a tempered or discarded
+// verdict), or nil for a constitution with none above it. The daemon reads the
+// relation by the same rule (Shuttle.Threads.orchestrator/2).
 func orchestratorOf(st *felt.Storage, f *felt.Felt) *felt.Felt {
 	for dir := path.Dir(f.ID); dir != "." && dir != "/"; dir = path.Dir(dir) {
 		parent, err := st.Read(dir)
 		if err != nil {
 			continue
 		}
-		if _, ok, err := shuttle.BlockOf(parent); err == nil && ok {
+		if _, ok, err := shuttle.BlockOf(parent); err == nil && ok && shuttle.Verdict(parent) == "" {
 			return parent
 		}
 	}

@@ -74,7 +74,7 @@ Questions lead Your turn and are drawn heavier: an outstanding `ask`, or a harne
 
 ## Working a constitution
 
-**Threads.** A constitution nested under another constitution is a *thread*; its *orchestrator* is the nearest ancestor with a `shuttle:` block.
+**Threads.** A constitution nested under another constitution is a *thread*; its *orchestrator* is the nearest ancestor with a `shuttle:` block that is not archived; a tempered or discarded constitution orchestrates nothing, so its live threads answer to the next one up.
 Create one with `shuttle thread <parent> "<ask>"`: it inherits the parent's host, project directory, role, agent and compatible execution surface unless overridden, and starts armed unless `--disabled` keeps it in drafts.
 Changing `--host` requires an explicit `--project-dir` for that host.
 An absent parent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent.
@@ -88,6 +88,7 @@ Results reach **only that nearest orchestrator**, never automatically propagatin
 Give the ask a lede and a checkable Desired State before arming it ([references/authoring.md](references/authoring.md#threads)).
 Every thread has a role: inherit the parent's unless it doesn't fit.
 Your launch prompt's `## Threads` lists your threads as they stood then; `shuttle threads <your-id>` lists them now (`--all` for archived threads and deeper levels).
+Armed means a thread is armed with no worker running; `Armed · host unreachable` means its host is out of your daemon's sight, so it may be running there or stuck.
 When a result arrives, read its outcome and evidence against Desired State, decide what it changes, and act.
 You may temper or discard threads at any level; review and report before tempering one the human asked for, messaged, or expressed curiosity about, while threads you initiate may be tempered on your own judgment.
 Keep outcomes, reports and thread chips easy to inspect: give the human the high-level overview, with the detail one click down.

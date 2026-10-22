@@ -7,26 +7,29 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
-var threadStates = []string{"Waiting", "Working", "To review", "Draft", "Resting", "Archived"}
+var threadStates = []string{"Waiting", "Working", "Armed", "To review", "Draft", "Resting", "Archived"}
 
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
-// threads to every depth.
+// threads to every depth. HostUnreachable marks an Armed thread whose host the
+// daemon's fleet view cannot currently see.
 type ThreadNode struct {
-	ID      string       `json:"id"`
-	UID     string       `json:"uid,omitempty"`
-	Name    string       `json:"name,omitempty"`
-	Host    string       `json:"host,omitempty"`
-	Column  string       `json:"column"`
-	State   string       `json:"state"`
-	Outcome string       `json:"outcome,omitempty"`
-	Threads []ThreadNode `json:"threads"`
+	ID              string       `json:"id"`
+	UID             string       `json:"uid,omitempty"`
+	Name            string       `json:"name,omitempty"`
+	Host            string       `json:"host,omitempty"`
+	Column          string       `json:"column"`
+	State           string       `json:"state"`
+	HostUnreachable bool         `json:"host_unreachable,omitempty"`
+	Outcome         string       `json:"outcome,omitempty"`
+	Threads         []ThreadNode `json:"threads"`
 }
 
 // threadTree is the endpoint's response: the orchestrator and its threads.
@@ -41,15 +44,16 @@ type threadTree struct {
 // threadRow is one thread in `shuttle threads --json`: the node with the count
 // of unfinished threads below it, and those threads themselves under --all.
 type threadRow struct {
-	ID         string      `json:"id"`
-	UID        string      `json:"uid,omitempty"`
-	Name       string      `json:"name,omitempty"`
-	Host       string      `json:"host,omitempty"`
-	Column     string      `json:"column"`
-	State      string      `json:"state"`
-	Outcome    string      `json:"outcome,omitempty"`
-	Unfinished int         `json:"unfinished"`
-	Threads    []threadRow `json:"threads,omitempty"`
+	ID              string      `json:"id"`
+	UID             string      `json:"uid,omitempty"`
+	Name            string      `json:"name,omitempty"`
+	Host            string      `json:"host,omitempty"`
+	Column          string      `json:"column"`
+	State           string      `json:"state"`
+	HostUnreachable bool        `json:"host_unreachable,omitempty"`
+	Outcome         string      `json:"outcome,omitempty"`
+	Unfinished      int         `json:"unfinished"`
+	Threads         []threadRow `json:"threads,omitempty"`
 }
 
 func (a *app) threadsCmd() *cobra.Command {
@@ -59,7 +63,7 @@ func (a *app) threadsCmd() *cobra.Command {
 		Short: "A constitution's threads, grouped by state",
 		Long: `Lists the threads of a constitution: the constitutions nested under it, as
 the orchestrator's launch prompt and the board's thread rail see them. Direct
-threads are grouped Waiting, Working, To review, Draft, Resting; each row gives
+threads are grouped Waiting, Working, Armed, To review, Draft, Resting; each row gives
 the thread's id, state, name and the first sentence of its outcome, and the
 number of unfinished threads below it. Archived threads (a tempered or
 discarded verdict) are a count.
@@ -68,9 +72,12 @@ discarded verdict) are a count.
 indented under its orchestrator in containment order.
 
 The roster comes from this host's daemon (GET /api/v1/threads/<id>), which
-classifies threads by the board's rules over its cached constitutions; a
-thread is Working when its worker runs on this host or it is armed. --json
-prints the orchestrator and its rows, each with its board column.`,
+classifies threads by the board's rules over its cached constitutions. A
+thread is Working when its worker runs on this host or on a remote the daemon
+polls fresh, and Armed when it is active with no worker running; "Armed · host
+unreachable" means the daemon cannot currently see its host, so whether a
+worker runs there is unknown. --json prints the orchestrator and its rows, each
+with its board column.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tree, err := a.fetchThreads(a.threadsQuery(args[0]))
@@ -142,12 +149,20 @@ func (a *app) fetchThreads(id string) (*threadTree, error) {
 
 // threadRows orders the direct threads by state, Waiting first (the daemon
 // serves each level in address order, which a stable sort keeps within a
-// state), and counts the archived ones. Under --all the archived stay, and
-// every row carries its own threads in containment order.
+// state), and counts the archived ones. A state this build does not name
+// follows the named ones, so a newer daemon's rows are never dropped. Under
+// --all the archived stay, and every row carries its own threads in
+// containment order.
 func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 	rows := make([]threadRow, 0, len(nodes))
 	archived := 0
-	for _, state := range threadStates {
+	states := append([]string(nil), threadStates...)
+	for _, n := range nodes {
+		if !slices.Contains(states, n.State) {
+			states = append(states, n.State)
+		}
+	}
+	for _, state := range states {
 		for _, n := range nodes {
 			if n.State != state {
 				continue
@@ -165,7 +180,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, Outcome: n.Outcome, Unfinished: unfinishedThreads(n.Threads)}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, Unfinished: unfinishedThreads(n.Threads)}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -207,7 +222,7 @@ func (a *app) printThreads(tree *threadTree, rows []threadRow, archived int, all
 }
 
 func printThreadRow(a *app, row threadRow, depth int) {
-	line := fmt.Sprintf("%s%s  %s  %s", strings.Repeat("  ", depth), row.ID, row.State, shuttleNonEmpty(row.Name, row.ID))
+	line := fmt.Sprintf("%s%s  %s  %s", strings.Repeat("  ", depth), row.ID, row.stateLabel(), shuttleNonEmpty(row.Name, row.ID))
 	if sentence := firstSentence(row.Outcome); sentence != "" {
 		line += ": " + sentence
 	}
@@ -218,6 +233,15 @@ func printThreadRow(a *app, row threadRow, depth int) {
 	for _, child := range row.Threads {
 		printThreadRow(a, child, depth+2)
 	}
+}
+
+// stateLabel is the row's state as the launch roster writes it
+// (Shuttle.Threads.state_label/1).
+func (row threadRow) stateLabel() string {
+	if row.HostUnreachable {
+		return "Armed · host unreachable"
+	}
+	return row.State
 }
 
 func plural(n int, one, many string) string {

@@ -2,9 +2,10 @@ defmodule ShuttleWeb.ThreadsController do
   @moduledoc """
   Agent-API endpoint: GET /api/v1/threads/*id
 
-  A constitution's threads to every depth, as `Shuttle.Threads.tree/4` builds
-  them from this daemon's cached constitutions, local and synced, with this
-  daemon's running workers as the live ones. `id` is a uid or a fiber address;
+  A constitution's threads to every depth, as `Shuttle.Threads.tree/5` builds
+  them from this daemon's cached constitutions, local and synced, with the
+  workers running on this host and on every remote it polls fresh as the live
+  ones. `id` is a uid or a fiber address;
   `shuttle threads` renders the response.
 
   Returns: 200  %{fiber_id, uid, name, felt_store, threads: [...]}
@@ -20,14 +21,14 @@ defmodule ShuttleWeb.ThreadsController do
   def show(conn, %{"id" => segments}) do
     id = segments |> List.wrap() |> Enum.join("/")
 
-    with {:ok, {entries, live}} <- inputs(),
+    with {:ok, {entries, live, reachable}} <- inputs(),
          %{fiber: fiber, felt_store: store} <- Enum.find(entries, &names?(&1.fiber, id)) do
       json(conn, %{
         fiber_id: Threads.address(fiber),
         uid: fiber["uid"],
         name: fiber["name"],
         felt_store: store,
-        threads: Threads.tree(Threads.address(fiber), store, entries, live)
+        threads: Threads.tree(Threads.address(fiber), store, entries, live, reachable)
       })
     else
       nil -> conn |> put_status(:not_found) |> json(%{error: "not_found", id: id})

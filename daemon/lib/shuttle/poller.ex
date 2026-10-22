@@ -180,6 +180,11 @@ defmodule Shuttle.Poller do
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
       task_reads: %{},
       document_cache_ready: false,
+      # The remote registry's last report of the fleet (`{:fleet, view}`):
+      # each remote's last poll and running workers, so the thread roster can
+      # tell a worker on another host from none without calling a registry
+      # whose polls hold its mailbox. nil until its first report.
+      fleet: nil,
       # Memoized owner-feed filter+sort: `{document_cache_it_was_built_from,
       # base_rows}`, `nil` until first computed. `owner_feed_base/1` recomputes
       # iff `state.document_cache` is no longer the SAME term this was built
@@ -392,9 +397,10 @@ defmodule Shuttle.Poller do
   end
 
   @doc """
-  The inputs of `Shuttle.Threads.tree/4`: `{:ok, {entries, live}}`, the cached
-  constitutions and the running workers' runtime keys, or `{:error, :cold}`
-  before the first poll has warmed the cache.
+  The inputs of `Shuttle.Threads.tree/5`: `{:ok, {entries, live, reachable}}`,
+  the cached constitutions, the running workers' runtime keys across the fleet
+  and the hosts those cover (`Shuttle.Threads.with_fleet/4`), or
+  `{:error, :cold}` before the first poll has warmed the cache.
   """
   def thread_inputs(server \\ Shuttle.Env.server(__MODULE__)) do
     GenServer.call(server, :thread_inputs, @orchestrator_state_call_timeout_ms)
@@ -1238,6 +1244,9 @@ defmodule Shuttle.Poller do
         end
     end
   end
+
+  def handle_info({:fleet, fleet}, state) when is_map(fleet),
+    do: {:noreply, %{state | fleet: fleet}}
 
   def handle_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")
@@ -3504,8 +3513,14 @@ defmodule Shuttle.Poller do
   # What an orchestrator's roster is computed from: the cached constitutions,
   # local and synced, and the running workers' runtime keys.
   defp cached_thread_inputs(state) do
-    {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end),
-     MapSet.new(Map.keys(state.running))}
+    {live, reachable} =
+      Shuttle.Threads.with_fleet(
+        MapSet.new(Map.keys(state.running)),
+        state.own_host_id,
+        state.fleet
+      )
+
+    {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end), live, reachable}
   end
 
   defp do_claim_app_session(state, fiber_id, uid, id, opts) do
