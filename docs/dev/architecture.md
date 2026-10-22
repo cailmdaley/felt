@@ -33,6 +33,23 @@ The daemon detects clean worker exits via the `shuttle.runtime.handed_off_at`
 frontmatter field. The editorial chain lives in the constitution body's
 `## Status` block plus the git log of the fiber.
 
+## Thread results
+
+A child constitution publishes lifecycle results to its nearest ancestor constitution.
+Only the child's owning daemon publishes them.
+Before the first poll, the daemon establishes a durable first-deployment timestamp in its host-local thread outbox.
+Signals stamped at or before that baseline stay in fiber history and are never backfilled.
+The baseline survives restarts; invalid or unreadable state refuses startup rather than replaying historical results.
+
+The sender captures each new publication's immutable recipient, text and message ID before attempting delivery.
+Pending publications survive cleared lifecycle stamps and daemon restarts.
+An acknowledgment means the parent daemon has durably enqueued the result in its fiber mailbox, not that a worker has consumed it.
+Acknowledged IDs stay in the sender outbox to prevent republication.
+Pending publications are retried independently of the baseline.
+
+The parent Poller reserves a durable, monotonically increasing receiver generation while serializing worker selection, including selections with no available conversation.
+Asynchronous delivery carries that generation, so a delayed predecessor selection cannot replace its successor's consumption authority.
+
 ## Stores and views
 
 Fiber documents synchronize through ordinary Git. Workers use `felt sync`

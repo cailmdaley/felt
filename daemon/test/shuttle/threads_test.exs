@@ -11,7 +11,7 @@ defmodule Shuttle.ThreadsTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
-  setup %{tmp_dir: dir} do
+  setup %{tmp_dir: dir} = context do
     home = Path.join(dir, "home")
     data = Path.join(dir, "data")
     File.mkdir_p!(home)
@@ -22,6 +22,7 @@ defmodule Shuttle.ThreadsTest do
     Env.put_env("SHUTTLE_DATA_DIR", data)
     Env.put_env("SHUTTLE_HOST", "test-host")
     Env.put_env("SHUTTLE_STORES", dir)
+    unless context[:first_boot], do: Shuttle.ThreadOutbox.boot_baseline()
     Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
     assert {:ok, _} = CLI.run_felt(["-C", dir, "init"])
     assert {:ok, _} = CLI.run_felt(["-C", dir, "add", "hub", "Hub"])
@@ -159,6 +160,115 @@ defmodule Shuttle.ThreadsTest do
       Threads.deliver_results(entries, "test-host")
       assert StubPostClient.last() == nil
     end
+  end
+
+  test "corrupt baseline fails closed and migration retains pending outbox records", %{data: data} do
+    alias Shuttle.ThreadOutbox
+    path = Path.join(data, "thread-outbox.json")
+
+    record = %{
+      "owner" => "test-host",
+      "text" => "immutable",
+      "parent" => %{},
+      "store" => "store",
+      "wake" => true
+    }
+
+    File.write!(path, Jason.encode!(%{version: 1, records: %{"pending" => record}}))
+    assert :ok = ThreadOutbox.boot_baseline()
+    baseline = ThreadOutbox.baseline()
+    assert [{"pending", ^record}] = ThreadOutbox.pending("test-host")
+    assert :ok = ThreadOutbox.boot_baseline()
+    assert ThreadOutbox.baseline() == baseline
+
+    for corrupt <- [
+          "{",
+          ~s({"version":2,"records":{},"baseline":"not-a-date"}),
+          ~s({"version":2,"records":{}})
+        ] do
+      File.write!(path, corrupt)
+
+      try do
+        ThreadOutbox.boot_baseline()
+        flunk("corrupt baseline was accepted")
+      rescue
+        _ in [Jason.DecodeError, MatchError, RuntimeError] -> :ok
+      end
+
+      assert File.read!(path) == corrupt
+    end
+  end
+
+  @tag first_boot: true
+  test "first boot suppresses historical tempered results and restart retains the baseline", %{
+    store: store,
+    data: data
+  } do
+    import Shuttle.Test.PollerHelpers
+    bin = Path.join(store, "isolated-bin")
+    File.mkdir_p!(bin)
+    tmux = Shuttle.Env.find_executable("tmux")
+    socket = Path.join(System.tmp_dir!(), "baseline-#{System.unique_integer([:positive])}.sock")
+
+    File.write!(
+      Path.join(bin, "tmux"),
+      "#!/bin/sh\nexec '#{tmux}' -S '#{socket}' -f /dev/null \"$@\"\n"
+    )
+
+    File.chmod!(Path.join(bin, "tmux"), 0o700)
+    Env.prepend_path(bin)
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "thread",
+               "hub",
+               "Discarded",
+               "--slug",
+               "discarded",
+               "--disabled"
+             ])
+
+    for {slug, verdict} <- [{"child", "true"}, {"discarded", "false"}] do
+      assert {:ok, _} =
+               CLI.run_in_store(store, [
+                 "close",
+                 "hub/" <> slug,
+                 "--tempered=" <> verdict,
+                 "--local"
+               ])
+
+      path = Path.join([store, ".felt", "hub", slug, slug <> ".md"])
+
+      old =
+        File.read!(path)
+        |> String.replace(~r/closed-at: [^\n]+/, "closed-at: 2020-01-01T00:00:00Z")
+
+      File.write!(path, old)
+    end
+
+    opts = [
+      runner: SocketRunner,
+      own_host_id: "test-host",
+      felt_stores: [store],
+      boot_quarantine: true,
+      poll_interval_ms: 600_000
+    ]
+
+    assert {:ok, poller} = start_poller!(opts)
+    await_boot_cycle!(poller)
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.deliver_results(entries, "test-host")
+    assert pending(data) == []
+
+    # Stamp a fresh signal before restarting. A per-boot baseline would lose it.
+    assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "A new question"])
+    GenServer.stop(poller)
+    assert {:ok, restarted} = start_poller!(opts)
+    await_boot_cycle!(restarted)
+    assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+    Threads.deliver_results(latest, "test-host")
+    assert [%{"request" => %{"text" => text}}] = pending(data)
+    assert text == "thread hub/child asked: A new question"
   end
 
   test "fresh, resume and standing prompts identify the nearest current orchestrator", %{

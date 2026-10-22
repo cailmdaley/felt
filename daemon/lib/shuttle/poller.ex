@@ -620,6 +620,9 @@ defmodule Shuttle.Poller do
 
   @impl true
   def init(opts) do
+    # Establish the durable deployment cutoff before scheduling or reading work.
+    # Corrupt/unreadable state refuses startup rather than replaying history.
+    Shuttle.ThreadOutbox.boot_baseline()
     sweep_stale_ids_dirs()
 
     {felt_stores, auto_discover} =

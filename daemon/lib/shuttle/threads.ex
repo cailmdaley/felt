@@ -83,13 +83,15 @@ defmodule Shuttle.Threads do
   @doc "Persist immutable publications before any asynchronous network attempt."
   def capture_results(entries, own_host) do
     index = index(entries)
+    {:ok, baseline, _} = DateTime.from_iso8601(ThreadOutbox.baseline())
 
     records =
       for entry <- entries,
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
           parent = orchestrator(entry, index),
           parent != nil,
-          {verb, stamp, text} <- signals(entry.fiber) do
+          {verb, stamp, text} <- signals(entry.fiber),
+          after_baseline?(stamp, baseline) do
         id =
           "thread-" <>
             digest({entry.felt_store, entry.fiber["uid"] || entry.fiber["id"], verb, stamp})
@@ -147,6 +149,13 @@ defmodule Shuttle.Threads do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  defp after_baseline?(stamp, baseline) do
+    case DateTime.from_iso8601(stamp) do
+      {:ok, time, _} -> DateTime.compare(time, baseline) == :gt
+      _ -> false
     end
   end
 
