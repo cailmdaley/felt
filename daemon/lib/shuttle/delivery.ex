@@ -92,4 +92,43 @@ defmodule Shuttle.Delivery do
 
   defp message_id,
     do: "deliver-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+
+  @doc "Queue context in the owning fiber's hook mailbox without arming or launching it."
+  def context(entry, text, message_id, opts \\ []) do
+    if get_in(entry.fiber, ["shuttle", "host"]) == Poller.own_host_id() do
+      wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
+      args = ["context-mailbox", "put", context_key(entry), message_id, text]
+      args = if wake, do: args ++ ["--wake"], else: args
+
+      with {:ok, _} <- Shuttle.CLI.run(args) do
+        flush_context(entry)
+        {:ok, :queued}
+      end
+    else
+      {:error, :not_owner}
+    end
+  end
+
+  @doc "Offer a fiber's pending context to its current live conversation."
+  def flush_context(entry) do
+    case live_context_worker(entry) do
+      %{session_uuid: native, cli: cli} when is_binary(native) and is_binary(cli) ->
+        address = Messaging.address(Poller.own_host_id(), Harnesses.normalize(cli), native)
+
+        Shuttle.CLI.run(["context-mailbox", "deliver", context_key(entry), address],
+          timeout_ms: 32_000
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp live_context_worker(entry) do
+    if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))),
+      do: Poller.live_worker(Shuttle.Threads.address(entry.fiber))
+  end
+
+  defp context_key(entry),
+    do: entry.felt_store <> ":" <> (entry.fiber["uid"] || entry.fiber["id"])
 end

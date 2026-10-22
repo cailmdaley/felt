@@ -26,7 +26,8 @@ defmodule ShuttleWeb.DeliverController do
         Map.get(params, "fiber_id"),
         Map.get(params, "text"),
         Map.get(params, "origin"),
-        Map.get(params, "from")
+        Map.get(params, "from"),
+        Map.take(params, ["context_only", "message_id", "wake"])
       )
 
     conn |> put_status(status) |> json(body)
@@ -34,7 +35,7 @@ defmodule ShuttleWeb.DeliverController do
 
   @doc "Deliver on the owning daemon, forwarding when `origin` names a remote."
   @spec route(term(), term(), String.t() | nil, term()) :: {pos_integer(), map()}
-  def route(fiber_id, text, origin, from \\ nil) do
+  def route(fiber_id, text, origin, from \\ nil, context \\ %{}) do
     cond do
       not (is_binary(fiber_id) and String.trim(fiber_id) != "") ->
         {400, %{delivered: false, error: "fiber_id is required"}}
@@ -47,16 +48,36 @@ defmodule ShuttleWeb.DeliverController do
           {:remote, remote} ->
             payload =
               %{"fiber_id" => fiber_id, "text" => text}
+              |> Map.merge(context)
               |> then(&if(is_binary(from), do: Map.put(&1, "from", from), else: &1))
 
             remote |> OriginRouter.forward("/api/v1/deliver", payload) |> relay()
 
           :local ->
             opts = if is_binary(from) and from != "", do: [from: from], else: []
-            fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
+
+            if context["context_only"] == true do
+              context_reply(fiber_id, text, context["message_id"], context["wake"] == true)
+            else
+              fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
+            end
         end
     end
   end
+
+  defp context_reply(fiber_id, text, message_id, wake)
+       when is_binary(message_id) and message_id != "" do
+    with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
+         {:ok, :queued} <- Delivery.context(entry, text, message_id, wake: wake) do
+      {202, %{delivery: "context", delivered: false, queued: true, fiber_id: fiber_id}}
+    else
+      {:error, :not_owner} -> {409, %{error: "this daemon does not own the fiber"}}
+      error -> {422, %{error: inspect(error)}}
+    end
+  end
+
+  defp context_reply(_fiber_id, _text, _id, _wake),
+    do: {400, %{error: "message_id is required for context"}}
 
   defp reply({:message, status, receipt}, fiber_id) do
     body = %{delivery: "message", fiber_id: fiber_id, receipt: receipt}

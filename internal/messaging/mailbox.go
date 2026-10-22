@@ -171,31 +171,35 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
 	}
-	dir := filepath.Join(mailboxDir(env, a.Harness, a.ID), "pending")
-	if err := ensureDir(dir, 0700); err != nil {
+	if err := enqueueMailbox(mailboxDir(env, a.Harness, a.ID), r); err != nil {
 		return rejected(r, transport, err.Error()), err
+	}
+	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: "queued for the session's next prompt or tool hook; no turn started"}, nil
+}
+
+func enqueueMailbox(root string, r Request) error {
+	dir := filepath.Join(root, "pending")
+	if err := ensureDir(dir, 0700); err != nil {
+		return err
 	}
 	f, err := os.Open(dir)
 	if err != nil {
-		return rejected(r, transport, err.Error()), err
+		return err
 	}
 	entries, scanErr := f.ReadDir(129)
 	f.Close()
 	if scanErr != nil && !errors.Is(scanErr, io.EOF) {
-		return rejected(r, transport, scanErr.Error()), scanErr
+		return scanErr
 	}
 	if len(entries) >= 128 {
-		return rejected(r, transport, "mailbox is full"), errCode("queue_full", "mailbox is full")
+		return errCode("queue_full", "mailbox is full")
 	}
 	b, err := json.Marshal(mailboxEntry{Request: r, QueuedAt: time.Now().UnixNano()})
 	if err != nil {
-		return rejected(r, transport, err.Error()), err
+		return err
 	}
 	path := filepath.Join(dir, mailboxKey(r.MessageID)+".json")
-	if err = mailboxWrite(path, b, true); err != nil {
-		return rejected(r, transport, err.Error()), err
-	}
-	return Receipt{MessageID: r.MessageID, Address: r.Address, Status: StatusQueued, Transport: transport, Detail: "queued for the session's next prompt or tool hook; no turn started"}, nil
+	return mailboxWrite(path, b, true)
 }
 
 // OfferMailbox serializes concurrent hooks and acknowledges only successful
@@ -206,7 +210,22 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	if !MailboxAvailable(env, harness, id, host) {
 		return nil
 	}
-	dir := mailboxDir(env, harness, id)
+	offered := false
+	err := offerMailbox(mailboxDir(env, harness, id), func(r Request) bool {
+		a, err := ParseAddress(r.Address)
+		return err == nil && a.Harness == harness && a.ID == id && a.Host == host
+	}, func(batch []Request) error {
+		offered = true
+		return emit(batch)
+	})
+	if err != nil || offered {
+		return err
+	}
+	// One output envelope per hook, with the same batch bounds as session mail.
+	return offerLinkedFiberContext(env, harness, id, host, emit)
+}
+
+func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) error) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -241,8 +260,7 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 		if json.Unmarshal(b, &entry) != nil || entry.Request.MessageID == "" || len(entry.Request.Text) > 64<<10 {
 			continue
 		}
-		a, err := ParseAddress(entry.Request.Address)
-		if err != nil || a.Harness != harness || a.ID != id || a.Host != host {
+		if !accepts(entry.Request) {
 			continue
 		}
 		items = append(items, item{path, entry})

@@ -311,7 +311,8 @@ defmodule Shuttle.Dispatcher do
   def render_prompt(fiber_id, opts \\ []) do
     compose_prompt(
       "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{fiber_id}",
-      opts
+      opts,
+      fiber_id
     )
   end
 
@@ -351,7 +352,8 @@ defmodule Shuttle.Dispatcher do
   def render_resume_prompt(fiber_id, opts \\ []) do
     compose_prompt(
       "You are a Shuttle worker. Activate the felt and shuttle skills.\nMode: resume\nFiber: #{fiber_id}",
-      Keyword.delete(opts, :previous_session)
+      Keyword.delete(opts, :previous_session),
+      fiber_id
     )
   end
 
@@ -392,7 +394,7 @@ defmodule Shuttle.Dispatcher do
     header =
       "You are a Shuttle worker. Activate the felt and shuttle skills.\nFiber: #{fiber_id}\nRun: #{run_id}\nRun mode: #{mode}"
 
-    compose_prompt(header, opts)
+    compose_prompt(header, opts, fiber_id)
   end
 
   # A launch message carries only what this dispatch knows and the skill
@@ -400,7 +402,7 @@ defmodule Shuttle.Dispatcher do
   # conversation surface and headless mode when they differ from a terminal
   # session, and the previous session. Everything else (the exit contract,
   # standing runs' handoff) lives in the fiber or the shuttle skill.
-  defp compose_prompt(header, opts) do
+  defp compose_prompt(header, opts, fiber_id) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     [
@@ -408,7 +410,8 @@ defmodule Shuttle.Dispatcher do
       if(felt_store, do: "Felt store: #{felt_store}", else: ""),
       if(Keyword.get(opts, :surface) == "app", do: "Surface: app", else: ""),
       if(Keyword.get(opts, :headless) == true, do: "Headless: true", else: ""),
-      render_previous_session_line(opts)
+      render_previous_session_line(opts),
+      Shuttle.Threads.prompt(fiber_id, Keyword.put(opts, :felt_store, felt_store))
     ]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")

@@ -1716,6 +1716,8 @@ defmodule Shuttle.Poller do
         resume_loop: evict_stale_by_candidates(state.resume_loop, candidates)
     }
 
+    state = deliver_thread_results(state)
+
     # Downtime recovery: a standing constitution whose tmux session is gone but whose
     # document is still armed (status:active, no verdict) never fired
     # `handle_worker_exit` (the daemon was down across the exit). Mark such
@@ -2392,6 +2394,19 @@ defmodule Shuttle.Poller do
       {:error, _} ->
         state
     end
+  end
+
+  defp deliver_thread_results(state) do
+    entries = Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end)
+    own_host = state.own_host_id
+    callers = Shuttle.Env.callers()
+
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+      Shuttle.Env.adopt_callers(callers)
+      Shuttle.Threads.deliver_results(entries, own_host)
+    end)
+
+    state
   end
 
   defp refresh_document_entry(%State{} = state, fiber_id) do
