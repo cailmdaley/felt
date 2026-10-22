@@ -74,13 +74,15 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   badge.title = `${live.length} unfinished threads · ${waiting.length} waiting · ${review.length} to review`
   badge.setAttribute('aria-label', badge.title)
   const peek = document.createElement('div'); peek.className = 'kbn-thread-peek'; peek.hidden = true
-  let entries: HTMLElement | undefined
-  // Expanded, the peek holds every waiting row, so the sub-entries step aside
-  // rather than give the keyboard two stops for one thread.
+  // Sub-entries are the first waiting rows, drawn under the card at rest.
+  // Expanded, they stay put (the pointer that opened the peek was aiming at
+  // one) and the peek continues below them, so no thread is drawn twice.
+  const entryRows = waitingThreadEntries() ? waiting.slice(0, 2) : []
+  let entriesMore: HTMLElement | undefined
   const paint = (expansion: Expansion | undefined): void => {
     const expanded = expansion !== undefined
     peek.hidden = !expanded; badge.setAttribute('aria-expanded', String(expanded))
-    if (entries) entries.hidden = expanded
+    if (entriesMore) entriesMore.hidden = expanded
     families.set(card, expansion)
   }
   const keepsFocus = (): boolean => peek.contains(document.activeElement)
@@ -95,10 +97,12 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     if (event.pointerType !== 'touch' && families.get(card) === 'hover' && !keepsFocus()) paint(undefined)
   })
   peek.addEventListener('pointerdown', event => event.stopPropagation())
+  // The peek's own padding is not the card: a click that misses a row opens nothing.
+  peek.addEventListener('click', event => event.stopPropagation())
   peek.draggable = true
   peek.addEventListener('dragstart', event => { event.preventDefault(); event.stopPropagation() })
   for (const [label, members] of [
-    ['Waiting', waiting],
+    ['Waiting', waiting.slice(entryRows.length)],
     ['To review', review],
     ['Working', live.filter(c => index.state(c) === 'working')],
     ['Drafts', live.filter(c => index.state(c) === 'drafts')],
@@ -106,17 +110,18 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     ['Resting', live.filter(c => index.state(c) === 'resting')],
   ] as const) {
     if (!members.length) continue
-    const heading = document.createElement('h4'); heading.textContent = label
-    peek.append(heading, ...members.slice(0, PEEK_ROWS).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('peek', threadKey(c)); return row }))
+    // Waiting rows below the sub-entries continue their list, unheaded.
+    if (label !== 'Waiting' || !entryRows.length) { const heading = document.createElement('h4'); heading.textContent = label; peek.append(heading) }
+    peek.append(...members.slice(0, PEEK_ROWS).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('peek', threadKey(c)); return row }))
     if (members.length > PEEK_ROWS) peek.append(moreButton(members.length - PEEK_ROWS, focusId('peek-more', label), () => open(card)))
   }
   const archived = descendants.length - live.length
   if (archived) { const note = document.createElement('small'); note.textContent = `${archived} archived`; peek.append(note) }
   badgeHost.append(badge); host.append(peek)
-  if (waitingThreadEntries() && waiting.length) {
-    entries = document.createElement('div'); entries.className = 'kbn-thread-subentries'
-    entries.append(...waiting.slice(0, 2).map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('entry', threadKey(c)); return row }))
-    if (waiting.length > 2) entries.append(moreButton(waiting.length - 2, focusId('more'), () => open(card)))
+  if (entryRows.length) {
+    const entries = document.createElement('div'); entries.className = 'kbn-thread-subentries'
+    entries.append(...entryRows.map(c => { const row = threadRow(c, index, open); row.dataset.threadFocus = focusId('entry', threadKey(c)); return row }))
+    if (waiting.length > entryRows.length) { entriesMore = moreButton(waiting.length - entryRows.length, focusId('more'), () => open(card)); entries.append(entriesMore) }
     host.insertBefore(entries, peek)
   }
   const restored = families.get(card)

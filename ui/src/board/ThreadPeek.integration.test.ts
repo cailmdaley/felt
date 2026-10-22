@@ -167,3 +167,36 @@ describe('a mouse on the badge', () => {
     expect(peek.hidden).toBe(true)
   })
 })
+describe('sub-entries under the pointer', () => {
+  const pointer = (el: HTMLElement, type: string): void => {
+    const event = new Event(type); Object.assign(event, { pointerType: 'mouse' }); el.dispatchEvent(event)
+  }
+  it('stay where they are when the hover opens the peek, which continues below them', () => {
+    saveWaitingThreadEntries(true)
+    const root = card({ id: 'root' })
+    const waits = [1, 2, 3].map(n => card({ id: `root/w${n}`, orchestrator: 'root', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
+    const work = card({ id: 'root/work', orchestrator: 'root', status: 'active' })
+    const open = vi.fn(), openRoot = vi.fn()
+    const host = document.createElement('div'); document.body.append(host)
+    host.addEventListener('click', openRoot)
+    installThreadPeek(host, host, root, new ThreadIndex([root, ...waits, work]), open)
+    const entries = host.querySelector<HTMLElement>('.kbn-thread-subentries')!
+    const before = [...entries.querySelectorAll('.kbn-thread-row')]
+    pointer(host, 'pointerenter')
+    expect(host.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
+    expect(entries.hidden).toBe(false)
+    expect([...entries.querySelectorAll('.kbn-thread-row')]).toEqual(before)
+    // The peek picks up where the sub-entries stop: the third ask, then the
+    // rest; no thread is drawn twice, and the sub-entries' "+ 1 more" steps aside.
+    const visible = [...host.querySelectorAll<HTMLElement>('.kbn-thread-row')].filter(row => !row.closest('[hidden]'))
+    expect(visible.map(row => row.querySelector('.kbn-thread-name')!.textContent)).toEqual(['root/w1', 'root/w2', 'root/w3', 'root/work'])
+    expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(true)
+    expect([...host.querySelectorAll('.kbn-thread-peek h4')].map(h => h.textContent)).toEqual(['Working'])
+    ;(before[0] as HTMLElement).click()
+    expect(open).toHaveBeenLastCalledWith(waits[0])
+    host.querySelector<HTMLElement>('.kbn-thread-peek')!.click()
+    expect(openRoot).not.toHaveBeenCalled()
+    pointer(host, 'pointerleave')
+    expect(entries.querySelector<HTMLElement>('.kbn-thread-more')!.hidden).toBe(false)
+  })
+})

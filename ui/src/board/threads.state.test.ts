@@ -59,9 +59,10 @@ describe('every thread surface names a thread the way the Desk files it', () => 
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('small')!.textContent]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       expect(labels(rail.el, '.ws-thread-tree > ul')).toEqual(want)
-      expect(labels(host, '.kbn-thread-peek')).toEqual(want)
+      // The waiting thread is a sub-entry; the peek draws the rest beneath it.
       expect(labels(host, '.kbn-thread-subentries')).toEqual({ [asking.name]: 'Waiting' })
-      expect([...host.querySelectorAll('.kbn-thread-peek h4')].map(h => h.textContent)).toEqual(['Waiting', 'Working', 'Roles', 'Resting'])
+      expect(labels(host, '.kbn-thread-family')).toEqual(want)
+      expect([...host.querySelectorAll('.kbn-thread-peek h4')].map(h => h.textContent)).toEqual(['Working', 'Roles', 'Resting'])
       expect(host.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
     } finally { vi.unstubAllGlobals() }
   })
