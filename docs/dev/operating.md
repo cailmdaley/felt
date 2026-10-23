@@ -61,12 +61,14 @@ codex app-server daemon version
 ```
 
 The default endpoint is `$CODEX_HOME/app-server-control/app-server-control.sock`, with `CODEX_HOME` defaulting to `~/.codex`.
-`SHUTTLE_CODEX_SOCKET` selects an explicit Unix WebSocket socket for the Shuttle daemon, native messaging, and terminal viewers.
+`SHUTTLE_CODEX_SOCKET` selects an explicit Unix WebSocket socket for the Shuttle daemon, native messaging, and terminal viewers; it does not configure Codex's listener.
+For a custom socket, independently supervise `codex app-server --listen unix://PATH`; `codex app-server daemon start` manages only Codex's default endpoint.
 Shuttle never restarts or replaces that server to recover a connection failure.
-Restore the selected backend, then retry; do not select another server just because both can read the same rollout files.
+Managed conversation records pin the owning host and endpoint for both surfaces. A changed endpoint, another host with the same socket pathname, or an unrecorded owner blocks backend operations without releasing the assignment. Restore the recorded backend, then retry; do not select another server just because both can read the same rollout files. Records without ownership metadata require deliberate operator reconciliation, not an inferred migration.
 Codex's detached process is not reboot-persistent; another managed start is needed after reboot.
 Its environment is shared by all clients, so configure tool credentials and other environment settings before starting it.
-Per-agent environment overrides and unsupported arbitrary CLI flags are refused by managed Codex dispatch.
+Per-agent environment overrides and unsupported arbitrary CLI flags are refused by managed Codex dispatch and history resume.
+The agent wrapper launches only the terminal viewer; it does not supply the environment in which the shared backend runs tools.
 
 On a cluster whose home directory is shared across login nodes, use a host-local `CODEX_HOME` and start the backend on that host, or configure a host-local App Server socket explicitly.
 Codex's default socket, pidfile, lifecycle locks, and recovery state have no host component.

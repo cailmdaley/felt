@@ -142,6 +142,11 @@ backend. A completed turn can wait for a reply without releasing its task or
 starting another conversation. An explicit stop or completed handoff releases
 ownership.
 
+The durable record pins the backend's host and endpoint, independently of presentation.
+Recovery, resume, stop, attachment, and native messaging check that owner before native operations; matching a thread ID in another server's rollout store is insufficient.
+The daemon owns record writes. The Go native adapter reads only the ownership projection needed to refuse a different host or endpoint; shared fixtures enforce that contract.
+Missing or unreadable ownership does not authorize migration to the currently configured server.
+
 App Server transport errors preserve uncertainty instead of becoming worker-death signals.
 Resume targets the recorded conversation and reports failures; creating a fresh conversation is an explicit operation.
 For Codex, closing a terminal viewer does not release the task, interrupt the turn, or authorize a replacement conversation.
