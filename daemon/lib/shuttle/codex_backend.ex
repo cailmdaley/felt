@@ -256,8 +256,12 @@ defmodule Shuttle.CodexBackend do
         String.contains?(args, path)
 
     launch_script = String.contains?(args, "shuttle-run-" <> session(path) <> ".")
+    # A tmux server can retain the new-session argv (and launch-script path)
+    # that first forked it. It owns the pane, not the Codex process lifetime.
+    command = args |> String.split() |> List.first("") |> Path.basename()
+    tmux = command == "tmux" or String.starts_with?(command, "tmux:")
     # --remote viewers are clients, not evidence that the dead server lives.
-    server or launch_script
+    not tmux and (server or launch_script)
   end
 
   defp launch(path, runner, slot) do

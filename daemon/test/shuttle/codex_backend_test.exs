@@ -108,6 +108,23 @@ defmodule Shuttle.CodexBackendTest do
     refute "-k" in args
   end
 
+  test "Linux tmux server retaining the launch argv is not a live Codex holder", %{
+    opts: opts,
+    runner: runner,
+    path: path
+  } do
+    script = Path.join(Path.dirname(path), "shuttle-run-#{CodexBackend.session(path)}.123.sh")
+
+    change(runner,
+      scan: {"555 1 tmux new-session -d -s #{CodexBackend.session(path)} bash -l #{script}\n", 0},
+      session: {"", 0},
+      pane: {"1|#{path}\n", 0}
+    )
+
+    assert %{state: :starting} = CodexBackend.check(opts)
+    assert [{"tmux", ["respawn-pane" | _]}] = starts(runner)
+  end
+
   test "a remote TUI is a client, not a holder preventing dead-server recovery", %{
     opts: opts,
     runner: runner,
