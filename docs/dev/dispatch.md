@@ -87,7 +87,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
 - **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent and chooses its execution backend.
-  Claude and Pi workers use `<leaf>-<uid>-shuttle` tmux sessions, parsed by `Shuttle.ULID.from_tmux/1`.
+  Claude and Pi workers are started under a conversation UUID the launch assigns and names in the fiber's runtime first (`--session-id`; Pi 0.84 or later), each in a tmux session of its own, `<leaf>-<uuid8>-<uid>-shuttle`, which `Shuttle.ULID.from_tmux/1` parses for the uid it was launched with (operating.md, "Which worker serves which fiber").
   Codex uses a durable `AppWorkers` record on either surface; terminal presentation opens a `codex-terminal-<thread-id>` viewer after the backend confirms the initial turn.
   Conversation identity is known before dispatch is published, without scraping a rollout or guessing which thread a terminal currently shows.
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
@@ -107,10 +107,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   transcript's age decides: last written within the warm window (45 minutes,
   `config :shuttle, :resume_warm_window_s`) → resume `session_uuid`; older, or
   not on this host → fresh, with the prompt naming the cut-off session and its
-  transcript path. A transcript last written before `dispatched_at` is not
-  that dispatch's session — a codex/pi launch stamps `dispatched_at` at once
-  but its own id only when the scrape backfills it, so the marker can still
-  name the predecessor — and that dispatch goes plain fresh. A resume replays
+  transcript path. A transcript last written before `dispatched_at` was never
+  written by that dispatch's worker (it died at launch), and that dispatch
+  goes plain fresh. A resume replays
   the whole transcript into the model, which is cheap only while the
   harness's prompt cache still holds it, so a worker killed by a host outage
   hours ago costs less as a fresh worker reading `## Status` — whatever the

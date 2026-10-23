@@ -170,7 +170,8 @@ shuttle snapshot                    # raw JSON snapshot
 make status                              # daemon-side view (ps + snapshot)
 make logs                                # daemon stdout/stderr — ~/Library/Logs/shuttle.log
                                          # (macOS) / ~/.shuttle/shuttle.log (Linux)
-tmux ls | grep -- '-shuttle:'            # live workers (<leaf>-<uid>-shuttle)
+shuttle ps                               # live workers and the fibers they serve
+tmux ls | grep -- '-shuttle:'            # sessions launched by Shuttle (<leaf>-<uuid8>-<uid>-shuttle)
 curl -s http://127.0.0.1:4000/api/v1/agents | jq
 curl -s http://127.0.0.1:4000/api/v1/state | jq
 curl -s http://127.0.0.1:4000/api/v1/state/composite | jq
@@ -217,9 +218,9 @@ depends on your bash: 5.x reports `alias` and you get the alias-specific text;
 generic "did not resolve" text. Both refuse the dispatch.)
 
 **The card sits blocked with "has no intrinsic id".** A worker's tmux session
-is `<leaf>-<uid>-shuttle`, so a fiber whose frontmatter carries no `id:` (a
-file made by hand and never backfilled) has no worker name, and the daemon
-refuses it before anything else. Run `felt backfill-ids` in its store, or add
+is named `<leaf>-<uuid8>-<uid>-shuttle`, so a fiber whose frontmatter carries
+no `id:` (a file made by hand and never backfilled) has no worker name, and the
+daemon refuses it before anything else. Run `felt backfill-ids` in its store, or add
 an `id:` ULID by hand; any felt write to the fiber also stamps one. The refusal
 parks the fiber like the ones below, so a force-dispatch launches it at once.
 
@@ -241,6 +242,69 @@ Repeatedly increasing `stalls` means the daemon is alive but an input remains
 wedged; inspect `~/.config/shuttle/stores.json` and remote tunnel health rather
 than restarting the daemon to clear the symptom.
 
+## Which worker serves which fiber
+
+A terminal launch assigns its conversation UUID before anything starts: the
+fiber's `shuttle.runtime` names `session_uuid` under a new `dispatched_at`,
+then the harness starts under it (`--session-id`, Claude and Pi) from a run
+script keyed by it, `<tmp>/shuttle-run-<uuid>.<n>.sh`, in a tmux session of its
+own, `<leaf>-<uuid8>-<uid>-shuttle`. A fiber is *assigned* that execution while
+its runtime names it and no `handed_off_at` at or after `dispatched_at`
+concludes it. The worker is whatever process holds it:
+
+- a process whose argv carries the UUID (`--session-id`, `--resume`,
+  `--session`) or the run script keyed by it;
+- a run script an earlier build named for its session, which this host's
+  session ledger pairs with the UUID;
+- a hook receiver bound to the UUID by a session start (`/clear` and
+  `/resume` move the conversation, and the runtime follows), while its pid
+  still has the same kernel start token;
+- for a claimer known only by its tmux pane, the pane's process, bound in
+  `shuttle.runtime.pane` as `<pid>:<start>` — a reused pid never counts.
+
+Session names are labels for `attach` and the board. Nothing is renamed, and a
+name never decides which fiber a worker serves; `shuttle session-name`,
+`attach`, `ps` and `status` ask the daemon. Liveness, adoption and stops all go
+through the holder: a stop kills the holder's exact tmux pane (`%N`, found by
+process ancestry) and then waits, escalating to SIGTERM and SIGKILL on the
+pane's process group; a process table the daemon cannot read is never a reason
+to signal anything. Nothing about this is persisted beyond the fiber's own
+runtime, so a restart re-derives it: boot adopts each host-owned, unconcluded
+fiber whose execution a process holds.
+
+**A claim moves a live worker to another fiber.** `shuttle claim <fiber>` from
+inside a worker (or `POST /api/v1/claim`) runs as one Poller transition:
+
+1. every other fiber assigned the claimer's execution is concluded on its own
+   generation (`mark-runtime --handed-off-at … --if-dispatched-at
+   <its dispatched_at>`), gets a `superseded_by_claim` session-ledger line,
+   loses its watcher without exit handling, and has its message receiver
+   revoked — its worker is not signalled;
+2. the claimed fiber's runtime names the execution under a new generation;
+3. the claimed fiber is registered on it.
+
+The released fiber stays `active` and its next start is fresh — never a resume
+of the conversation the claimed fiber now holds. A crash between steps 1 and 2
+leaves the worker serving no fiber: nothing adopts, stops or resumes it, and
+the same claim again completes the move. A retry after success answers as the
+first claim did. A Codex thread moves the same way, its AppWorkers record
+released by its old fiber before the claimed fiber takes it.
+
+**A conversation two live fibers name** — the shape an older build's claim
+could leave, its rename having put one fiber's run script under the other's
+session name — is held: neither fiber is adopted onto it, stopped or resumed,
+and each shows a `blocked` row reading `shared conversation <uuid>`. The hold
+is derived on every poll, so it clears on its own: once its process exits
+(each fiber then starts fresh until only one names the conversation), once all
+but one of the fibers hand off, or when the claimed fiber claims again.
+
+**Upgrading with workers live.** Workers launched by an earlier build keep
+running and are adopted by the same rule: their harness argv carries
+`--session-id` or `--resume`, and a run script named for its session is paired
+through the ledger. A worker whose session an older claim renamed is adopted by
+the one fiber that still names its conversation, and held as shared when both
+do.
+
 ## A worker tmux cannot see
 
 tmux reaches its server through a socket file, `/tmp/tmux-<uid>/default`
@@ -249,13 +313,12 @@ runs — a `/tmp` cleaner, a careless `rm` — every tmux command answers "no se
 running" although every worker under the server is still alive. The daemon
 does not read that as death:
 
-- **Every session's run script names it.** A worker runs as
-  `bash -l <tmp>/shuttle-run-<session>.<n>.sh`, and that bash lives as long as
-  the worker. When tmux says a session is absent, the daemon scans its own
-  uid's processes (`ps -ww -o pid=,ppid=,args= -U <uid>`); a live run script
-  makes the session `:unknown` — held as present, never struck dead — and the
-  poller's session listing includes it. A scan that cannot run is uncertainty
-  too, never evidence of death.
+- **A worker is its processes.** Liveness is the holder in the daemon's own
+  uid's process table (`ps -ww -o pid=,ppid=,args= -U <uid>`), not tmux: a
+  worker whose server lost its socket still holds its conversation, so it stays
+  present and is adopted after a restart. A scan that cannot run is
+  uncertainty, never evidence of death. A stop that cannot find the holder's
+  pane through tmux signals the holder's process group directly.
 - **No resume onto a held transcript.** Before resuming a fiber onto harness
   session `<uuid>` (the dispatcher, or a History row's resume), the daemon
   refuses if any process carries `<uuid>` in its argv. The poller parks the

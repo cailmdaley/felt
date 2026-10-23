@@ -3,8 +3,12 @@ defmodule Shuttle.Tmux do
   Shared classification of a tmux session's liveness.
 
   A worker is its processes; tmux is the view humans and the daemon reach them
-  through. So `tmux has-session` is asked first and the process table
-  (`Shuttle.WorkerProcess`) settles what tmux cannot. The naive read — "exit 0
+  through. A daemon worker is classified and stopped by the process holding
+  its execution (`worker_status/2`, `stop_worker/2`), whatever its session is
+  called. The name-based classification below serves sessions classified by
+  name alone — helper sessions and viewers the daemon names itself — and asks
+  `tmux has-session` first, letting the process table
+  (`Shuttle.WorkerProcess`) settle what tmux cannot. The naive read — "exit 0
   means alive, ANY non-zero means dead" — conflates three outcomes: the worker
   genuinely exited; `has-session` failed for an environmental reason (tmux not
   on PATH, a server hiccup, a fork failure under load); or tmux's server lost
@@ -20,8 +24,8 @@ defmodule Shuttle.Tmux do
     * `:gone`    — tmux's own absence message ("can't find session", "no
                    server running", …) AND no live process of this daemon's
                    uid runs the session's run script. A real worker death, and
-                   the only result that counts toward declaring a worker dead
-                   or frees its name for a fresh dispatch.
+                   the only result that counts toward declaring a worker
+                   dead.
     * `:unknown` — anything else: a non-zero exit without an absence message,
                    an absence message while the session's run script is still
                    running (the worker is alive but tmux cannot reach it), or
@@ -312,7 +316,7 @@ defmodule Shuttle.Tmux do
   running", "can't find session", …) — POSITIVE evidence that the server or
   session is not there, as opposed to a command that merely failed. Shared by
   every surface that must distinguish absence-evidence from uncertainty (e.g.
-  the poller's `list_shuttle_sessions/1`).
+  `Shuttle.WorkerProcess.panes/1`).
   """
   @spec absence_message?(term()) :: boolean()
   def absence_message?(output), do: absent?(output)

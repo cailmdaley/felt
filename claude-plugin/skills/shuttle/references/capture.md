@@ -9,8 +9,9 @@ A capture starts from the user's idea rather than an existing constitution: you 
 5. **Activate.** Run `shuttle resume <fiber-id>` only after the claim succeeds; activating sooner lets the poller launch a duplicate worker.
 6. **Work it** by the worker loop and exits in the shuttle skill.
 
-A Claude/Pi terminal claim names your `tmux_session` and, when supplied, your native `session_uuid`, and renames the terminal to the fiber's worker name.
-A managed Codex claim names the exact conversation `session_uuid` and its presentation (`surface: cli` or `surface: app`); it renames no terminal.
+A Claude/Pi terminal claim names your `tmux_session` and, when supplied, your native `session_uuid`; the terminal keeps its name.
+A managed Codex claim names the exact conversation `session_uuid` and its presentation (`surface: cli` or `surface: app`).
+Either way, a fiber this conversation served before is released (its next worker starts fresh), and you serve only the claimed fiber from then on: hand off or close that one.
 Use the supplied body unchanged apart from the fiber id, never another conversation's id or a new App Server.
 For `Backend: codex-app-server` or `Surface: app`, run exit verbs with `env -u TMUX -u TMUX_PANE -u SHUTTLE_FIBER_PATH shuttle -C <store> handoff <fiber-id>` to continue, or the same prefix with `close` to stop, then end your turn.
 Your tools run in the shared server, not its terminal viewer; never kill the shared backend or a parent process.

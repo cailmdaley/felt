@@ -15,14 +15,10 @@ defmodule ShuttleWeb.DispatchReply do
     # card to inFlight immediately rather than after the next poll.
     Shuttle.Poller.refresh_document(fiber_id)
 
-    # WHICH session this dispatch started. The tmux session name is
-    # `<leaf>-<uid>-shuttle` — keyed on the FIBER's uid, so it is byte-for-byte
-    # identical before and after a fresh dispatch and cannot distinguish the
-    # new session from the one it replaced. The runtime UUID can: it is
-    # stamped synchronously at launch for a Claude worker, and the refresh
-    # above just re-read it off disk. `nil` for a Pi worker (scraped
-    # and backfilled seconds later) — a client then falls back to comparing
-    # against the value it saw before dispatching.
+    # WHICH conversation this dispatch started: the runtime UUID the launch
+    # named before its worker started, which the refresh above just re-read
+    # off disk. `nil` for a launch that names none — a client then falls back
+    # to comparing against the value it saw before dispatching.
     {200,
      Map.merge(
        %{

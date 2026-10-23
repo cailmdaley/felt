@@ -152,7 +152,16 @@ directly; an existing native conversation is adopted only after exact
 read-verification by this host's App Server. In either case it must not belong
 to another fiber.
 A managed terminal Codex capture also claims by `session_uuid`, with `surface: "cli"`; its durable record supplies its terminal viewer.
-Other CLI claims use `tmux_session`.
+Other CLI claims use `tmux_session`, optionally `tmux_pane` (the claimer's
+exact `%N` pane), and `session_uuid`, the conversation whose holding process is
+the worker; without one, or when no process argv carries it, the claimer's
+pane is bound instead. The fiber the worker served before is concluded and
+released first (a `superseded_by_claim` session-ledger line), and the worker
+keeps running for the claimed fiber; tmux names are never changed. A claim is
+refused with `session_mismatch` when the conversation runs in another pane,
+`process_scan_failed` when the process table cannot be read, and
+`source_not_concluded` when the earlier fiber's conclusion cannot be written;
+nothing has moved in any of these, and the same claim can be retried.
 The dispatch prompt supplies the claim information and the appropriate completion instructions.
 A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
 

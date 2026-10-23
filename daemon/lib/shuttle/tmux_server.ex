@@ -66,8 +66,8 @@ defmodule Shuttle.TmuxServer do
 
   # The session kitty starts to hold a fresh server alive. It deliberately does
   # NOT end in `-shuttle`, so every "is this a worker?" predicate in the system
-  # (`Shuttle.Dispatcher.shuttle_session?/1`, the poller's
-  # `list_shuttle_sessions/1`, Go's `isShuttleTmuxSessionName`) ignores it.
+  # (`Shuttle.Dispatcher.shuttle_session?/1`, Go's
+  # `isShuttleTmuxSessionName`) ignores it.
   @anchor "shuttle-anchor"
 
   # Poll budget for the server appearing after kitty forks it. Generous enough

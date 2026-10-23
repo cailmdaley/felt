@@ -141,11 +141,11 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`) |
-| `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
+| `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`). The fiber the conversation served before is concluded and released; its worker keeps running for the claimed fiber |
+| `shuttle pause <fiber>` | Set status to `open` and stop the fiber's live worker (`--no-kill` to leave it running). Routes through the owning daemon, which alone knows which worker serves the fiber; `--local`, or a daemon that cannot be reached, writes here and stops nothing |
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
-| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
+| `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (its exact tmux pane, or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write that stops nothing either |
 | `shuttle reopen <fiber>` | Reopen a closed/reviewed fiber for active work (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`). A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further |
 | `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |
@@ -161,13 +161,16 @@ A new charter starts with a short lede naming the constitution it serves and ask
 Without `--new`, assigning a role still requires an existing charter.
 | `shuttle ask <fiber> "<one-line question>"` | Raise a non-blocking question for the human in `shuttle.ask: {text, at}`; the worker keeps working and its In flight card leads **Your turn**, above idle turns and **Working**. `--clear` removes it. Resume, reopen, and messaging the fiber's worker clear it too. Works offline and accepts `-C <store>` |
 | `shuttle set-outcome <fiber>` | Set the `outcome:` field (`--outcome`, or stdin for multi-line) |
-| `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends. A block naming an agent the registry does not know is refused before stamping, so the successor never launches on it: fix it with `shuttle set-agent` and hand off again |
+| `shuttle handoff <fiber>` | Stamp the clean-exit signal; a worker's final action before its tmux session ends. The session ends only when the fiber is the caller's own: the one whose runtime names its conversation, not one it has since claimed away from. A block naming an agent the registry does not know is refused before stamping, so the successor never launches on it: fix it with `shuttle set-agent` and hand off again |
 
 To adopt your current conversation, install the constitution with
 `shuttle install <fiber> --disabled --project-dir <dir> -m <agent>`, then run
 `shuttle claim <fiber>` and, only after it succeeds, `shuttle resume <fiber>`.
 Terminal claims identify the current tmux pane; `--tmux-session` supplies an
-explicit existing session. App claims use `CODEX_THREAD_ID` or `--session`
+explicit existing session. The worker is the process holding the conversation
+(`CLAUDE_CODE_SESSION_ID`, `PI_SESSION_ID`, or `--session`), which must run in
+that pane; a harness whose argv does not carry its conversation is bound by
+its pane instead. App claims use `CODEX_THREAD_ID` or `--session`
 and require the daemon to verify the native conversation. The claimed host
 and surface must match the installed task. If verification fails, leave the
 constitution open; activating it could launch another worker.
@@ -189,8 +192,8 @@ constitution open; activating it could launch another worker.
 | `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
 | `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
 | `shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
-| `shuttle attach <fiber>` | Attach to a running worker's terminal; recreate a missing terminal Codex viewer of the same owned thread without starting a turn |
-| `shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
+| `shuttle attach <fiber>` | Attach to the terminal of the worker the daemon runs for the fiber; recreate a missing terminal Codex viewer of the same owned thread without starting a turn |
+| `shuttle session-name <fiber>` | Print the tmux session of the worker the daemon runs for the fiber; a session's name does not say which fiber its worker serves, so this fails when no daemon confirms one |
 
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.

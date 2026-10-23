@@ -474,12 +474,10 @@ defmodule Shuttle.Poller do
   The harness session UUID currently stamped on `fiber_id`'s
   `shuttle.runtime.session_uuid`, read from the document cache, or `nil`.
 
-  What the dispatch endpoint answers with so a client knows WHICH session its
-  dispatch just started — the tmux session name is `<leaf>-<uid>-shuttle` and
-  is the same string before and after a fresh dispatch, so it cannot tell the
-  new session from the one it replaced. Read after `refresh_document/2`, this
-  is the new UUID for a Claude worker (pre-specified at launch) and `nil` for a
-  Pi worker, whose UUID is scraped and backfilled seconds later.
+  What the dispatch endpoint answers with so a client knows WHICH conversation
+  its dispatch just started. Read after `refresh_document/2`, this is the UUID
+  the launch assigned (or, for a resume, reused) and named before the worker
+  started.
 
   `nil` (not an error) when the Poller is unavailable or the fiber is not in
   the cache — the caller degrades to comparing against the previous value.
@@ -530,21 +528,23 @@ defmodule Shuttle.Poller do
     do: Shuttle.Env.app(:dispatch_call_timeout_ms, @dispatch_call_timeout_ms)
 
   @doc """
-  First-class claim: register an already-live tmux session as the running
-  worker for `fiber_id`, exactly as if the daemon had dispatched it.
+  First-class claim: bind an already-live worker to `fiber_id`, exactly as if
+  the daemon had dispatched it.
 
   The write-and-claim path for capture sessions (a session that authored its
-  own fiber claims itself), and generally any externally-spawned worker.
-  Validates the fiber (exists, not closed, no live worker) and the tmux
-  session, renames the session to the canonical `<leaf>-<uid>-shuttle` name
-  (so restart re-adoption, liveness, and the kanban treat it
-  identically to a dispatched worker), starts a watcher, and writes the same
-  per-host dispatch marker the dispatcher writes at spawn (when `:session_uuid`
-  is provided) so resume works.
+  own fiber claims itself), and generally any externally-spawned worker,
+  including one the daemon launched for another fiber. The worker is the
+  process holding `:session_uuid`, which must run in the claimer's pane, else
+  that pane (`:tmux_pane`, or `tmux_session`'s). Any fiber the worker served
+  is concluded and released first, then the claimed fiber's runtime names the
+  execution under a new dispatch generation and a watcher starts; nothing is
+  renamed or signalled (see the claim transition below). A retry of a claim
+  that succeeded answers as it did.
 
   Options: `:agent` (optional execution agent asserted by the claimant; the
   fiber's shuttle.agent remains the display fallback),
-  `:session_uuid` (the harness transcript UUID, for the dispatch marker),
+  `:session_uuid` (the harness conversation UUID),
+  `:tmux_pane` (the claimer's exact pane id, `%N`),
   `:meeting` (the launch id of the meeting a capture scribes, stamped as
   `shuttle.runtime.meeting` so the meeting's daemon can find the fiber).
   """
@@ -577,7 +577,7 @@ defmodule Shuttle.Poller do
   when nothing is running for the fiber.
 
   The stop succeeds once the worker's processes are gone, whether or not tmux
-  could still see its session (`Shuttle.Tmux.stop/2`). A failed stop means a
+  could still see its session (`Shuttle.Tmux.stop_worker/2`). A failed stop means a
   worker may have survived it; tracking is left in place — no `{:ok, ...}`
   reply and no runtime teardown — so the board doesn't show a stopped card
   while a worker keeps mutating the fiber.
@@ -4656,8 +4656,8 @@ defmodule Shuttle.Poller do
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the
   # kanban New-session button and drag-launch both send these) stamps the
   # clean-exit marker, stops the live worker — waiting until its processes are
-  # gone (`Shuttle.Tmux.stop/2`), since the fresh session reuses its name — and
-  # drops the runtime entry, THEN lets the caller's `cond` fall through to a
+  # gone (`Shuttle.Tmux.stop_worker/2`), so two workers never serve the fiber —
+  # and drops the runtime entry, THEN lets the caller's `cond` fall through to a
   # fresh dispatch instead of returning `:already_running`. Without this,
   # starting fresh on an open session meant the costly resume →
   # reload-stale-transcript → handoff dance.

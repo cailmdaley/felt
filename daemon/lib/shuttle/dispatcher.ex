@@ -138,8 +138,6 @@ defmodule Shuttle.Dispatcher do
 
         resume_intent ->
           create_worker(fiber_id, agent, work_dir, runner, prompt_context, resume_intent,
-            poller: Keyword.get(opts, :poller),
-            identity_token: Keyword.get(opts, :identity_token),
             felt_store: felt_store,
             surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
@@ -457,11 +455,10 @@ defmodule Shuttle.Dispatcher do
   spawned session's prompt, together with the felt store and instructions to
   crystallize the idea into a fiber, install a `shuttle:` block, claim the
   session via `POST /api/v1/claim`, and then continue as the worker realizing
-  the new constitution. The session name (`capture-<hex>`) deliberately does
-  NOT end in `-shuttle`: the daemon's orphan/adoption machinery ignores it
-  until the worker claims it, at which point the claim verb renames the tmux
-  session to the canonical `<leaf>-<uid>-shuttle` form — from then on it is
-  indistinguishable from a dispatched worker.
+  the new constitution. The session is named `capture-<hex>` and keeps that
+  name; its conversation UUID is assigned up front and keys its run script, so
+  once the worker claims its fiber, the fiber's runtime names that
+  conversation and the worker is supervised exactly like a dispatched one.
 
   Options:
     * `:runner` — `Shuttle.Runner` impl (default `Shuttle.Runner.Default`)

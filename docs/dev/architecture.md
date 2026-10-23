@@ -64,13 +64,12 @@ A corrupt or missing baseline in an established store refuses startup without to
 Recover by restoring the exact trusted cutoff from backup; never delete the outbox or reset the cutoff to the current time.
 
 The parent Poller publishes one durable receiver identity and epoch synchronously with worker registration, recovery, removal and conversation rotation.
-A CLI claim binds its supplied conversation UUID in worker metadata before registration publishes authority, never borrowing the predecessor's runtime UUID.
-Recovery restores the durable receiver for the same live execution before consulting frontmatter: a known conversation and an explicitly unknown identity both survive failed runtime-mirror writes.
-The execution retains its committed receiver harness in worker metadata and restores it from that record on adoption, independently of the current agent registry.
+A terminal worker's conversation is the one its fiber's runtime names (operating.md, "Which worker serves which fiber"): dispatch names it before the worker starts, and a claim names it under a new generation only after concluding the fiber it served.
+A claim's failed runtime write fails the claim: nothing is registered and no authority is granted, and the same claim again completes it.
+An adopted worker keeps the receiver harness its committed record names for that same conversation, independently of the current agent registry.
 A missing registry entry remains visibly unresolved in the fiber and live-worker view; it neither blocks startup nor changes the receiver identity, address, or epoch.
-A claim whose frontmatter write fails retains its committed receiver, exposes the mirror error, and retries the identity mirror during polling.
 Mirror repair does not rotate the receiver epoch or append a duplicate session-resume event.
-Boot recovery completes only after both the session scan and document listings are healthy; an uncertain boot defers authority reconciliation to a healthy poll.
+Boot recovery completes only after both the process scan and document listings are healthy; an uncertain boot defers authority reconciliation to a healthy poll.
 Recovery adopts live workers before revoking untracked receivers.
 An unchanged worker keeps its epoch across flushes and daemon restarts.
 Publishing a worker transition revokes the predecessor before the Poller reports completion, even before a successor's delivery task runs.

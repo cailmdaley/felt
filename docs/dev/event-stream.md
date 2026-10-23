@@ -85,17 +85,9 @@ Interactive and nested sessions can have their own records, but only the session
 A pane name remains transport context for terminals, sent files, and activity; sharing a pane is not evidence of session ownership.
 
 The worker's `shuttle.runtime.session_uuid` is the binding anchor.
-Claude launches with a daemon-generated UUID supplied through `--session-id`, and resume and claim paths supply their known session id.
-Fresh Codex and Pi launches use the dispatcher's transcript capture to learn their UUID; until capture succeeds, the worker has no hook-derived phase.
-Re-adoption restarts capture from the durable dispatch boundary and owning project directory, matching the store-relative fiber id the launch prompt names.
-Resume-to-fresh fallback signals live under the host data directory, keyed by the worker handle and dispatch boundary.
-Re-adoption restores their monitor or observes an already-started fallback; an observed fallback invalidates the in-memory predecessor even when clearing the durable UUID fails.
-Successful capture records explicit fallback completion only after the acquired UUID is persisted.
-Session succession alone cannot complete a pending fallback; later restarts keep the acquired identity only when acquisition completed.
-Capture attempts time out after two minutes and retry after 30 seconds while the worker remains unattributed.
-The owner snapshot and board expose `identity_pending` (Identifying session) or `identity_failed` (Session attribution failed), never Working, for that live worker.
-A timeout also carries `identity_error`; the failure remains visible during retries until acquisition succeeds.
-An existing-worker claim with an explicit UUID repairs missing identity without moving `dispatched_at` or replacing an already-known UUID.
+Claude and Pi launch under a daemon-generated UUID supplied through `--session-id`, which the runtime names before the worker starts; a resume, and the fresh launch its failure falls back to, reuse it, and a claim supplies the claimer's own.
+A claim that names no conversation binds the claimer's pane instead; its conversation stays unknown, and the owner snapshot and board show `identity_pending` (Identifying session), never Working, until a later claim names it.
+A failed runtime-mirror write shows `identity_failed` with its `identity_error` until a later poll repairs the mirror.
 There is no first-hook or first-session-in-the-pane fallback.
 The runtime timestamp falls back to the worker's liveness timestamp when no session state is available.
 Codex app workers retain their App Server's native phase signal.
@@ -192,7 +184,7 @@ most until the 48-hour prune drops the session.
 
 The daemon reconstructs session state from the retained raw event files; it does not migrate or copy a pane-keyed phase cache.
 A worker with a known UUID can therefore recover its idle state immediately, including from event lines without receiver metadata.
-A worker without a known UUID stays unattributed until dispatch capture or an explicit claim supplies it.
+A worker without a known UUID stays unattributed until a claim names its conversation.
 A session-id change without receiver evidence cannot be inferred safely from pane coincidence.
 The same limit applies when the retained files no longer contain the anchor-to-successor relation and the continuation marker has not been updated.
 Refreshing the installed harness hooks supplies receiver evidence for subsequent changes; the daemon does not rewrite old events.

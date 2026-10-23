@@ -85,16 +85,17 @@ The examples use `http://localhost:4000`. On a shared host the daemon listens on
 shuttle pause <fiber>
 
 # 2. claim, from inside the tmux session that becomes the worker
-#    (the claim renames it to the worker name <leaf>-<uid>-shuttle)
+#    (`shuttle claim <fiber>` does the same; the session keeps its name)
 curl -s -X POST http://localhost:4000/api/v1/claim -H 'Content-Type: application/json' \
   -d '{"fiber_id": "<fiber>", "tmux_session": "'"$(tmux display-message -p '#S')"'",
+       "tmux_pane": "'"$TMUX_PANE"'",
        "session_uuid": "<your transcript uuid>", "agent": "<registry id>"}'
 
 # 3. arm, only after the claim succeeds
 shuttle resume <fiber>
 ```
 
-Keep that order: arming before the claim lets the poller launch a duplicate worker while the daemon can't yet see you. `session_uuid` is optional but enables resume and transcript lineage. The claim is idempotent, so retry a lost response with the same body. Its errors say what to do first: `already_running` (pause the live worker), `closed` (`shuttle reopen`), `not_installed` (`shuttle install`), `session_not_found` (the tmux name didn't resolve). Stopping a live worker loses whatever sat in its input box, so `tmux capture-pane` anything visible first.
+Keep that order: arming before the claim lets the poller launch a duplicate worker while the daemon can't yet see you. `session_uuid` is optional but enables resume and transcript lineage. If this session was already another fiber's worker, that fiber is released and starts fresh next time; from then on hand off or close only the claimed fiber. The claim is idempotent, so retry a lost response with the same body. Its errors say what to do first: `already_running` (pause the live worker), `closed` (`shuttle reopen`), `not_installed` (`shuttle install`), `session_not_found` (the tmux name didn't resolve), `session_mismatch` (that conversation runs in another pane). Stopping a live worker loses whatever sat in its input box, so `tmux capture-pane` anything visible first.
 
 To claim from a Codex app conversation, send `"surface": "app"` with the
 exact conversation id as `session_uuid`, then run

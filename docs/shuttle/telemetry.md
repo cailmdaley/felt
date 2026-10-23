@@ -67,7 +67,8 @@ against it — one line per session, not per event:
 
 Nothing installs this — the daemon writes it itself, at each moment it
 certainly knows the pairing (`kind` names which: `dispatch`, `claim`, or
-`resume`).
+`resume`), and once more when a session stops serving a fiber because its
+worker claimed another (`superseded_by_claim`, with `superseded_by`).
 
 The alternative is inference — read the tmux session name, pull the ULID out
 of it, hope the worker is still alive — and that disappears the moment the
