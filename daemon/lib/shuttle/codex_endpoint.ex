@@ -2,8 +2,12 @@ defmodule Shuttle.CodexEndpoint do
   @moduledoc "Host-local control paths; persistent Codex configuration and credentials stay in CODEX_HOME."
   import Bitwise
 
-  def current do
-    with {:ok, hostname} <- :inet.gethostname() do
+  # :inet.gethostname/0 shortens at the first dot. The raw kernel hostname
+  # must agree with Go's os.Hostname, including FQDNs on cluster hosts.
+  def hostname_source, do: &:net.gethostname/0
+
+  def current(read_hostname \\ hostname_source()) do
+    with {:ok, hostname} <- read_hostname.() do
       resolve(
         Shuttle.Env.get("SHUTTLE_CODEX_SOCKET") || "",
         Shuttle.Host.euid(),

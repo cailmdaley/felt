@@ -18,6 +18,22 @@ defmodule Shuttle.CodexEndpointTest do
     end
   end
 
+  test "the default hostname producer is the raw OS API, and current preserves a kernel FQDN" do
+    # Negative control: selecting :inet.gethostname/0 instead makes the
+    # producer assertion fail even on a developer host with a short hostname.
+    source = CodexEndpoint.hostname_source()
+    assert {:module, :net} = Function.info(source, :module)
+    assert {:name, :gethostname} = Function.info(source, :name)
+    assert {:arity, 0} = Function.info(source, :arity)
+    Env.put_env("SHUTTLE_CODEX_SOCKET", "")
+
+    assert CodexEndpoint.current(fn -> {:ok, ~c"node-b.example"} end) ==
+             CodexEndpoint.resolve("", Shuttle.Host.euid(), "node-b.example")
+
+    refute CodexEndpoint.current(fn -> {:ok, ~c"node-b.example"} end) ==
+             CodexEndpoint.resolve("", Shuttle.Host.euid(), "node-b")
+  end
+
   setup do
     root = "/tmp/shuttle-endpoint-test-#{System.unique_integer([:positive])}"
     on_exit(fn -> File.rm_rf!(root) end)
