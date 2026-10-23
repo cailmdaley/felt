@@ -859,24 +859,24 @@ test('A click on the bare stage closes the reader to its origin; a press on a ne
   assert.equal(await activeBarView(p), 'desk', 'the reader closes back to its origin view')
 })
 
-test('The map in the board bar indexes pages as legible tiles, captions a hover, and follows a re-send to the head of the sent run', async p => {
+test('The map above the centre column indexes pages as legible tiles, captions a hover, and follows a re-send to the head of the sent run', async p => {
   await open(p); await reportReady(p)
-  const film = p.locator('.kbn-viewtabs-reader > [data-part="page-band"].ws-head-index > .ws-tabs')
+  const film = p.locator('.ws-stage-column > [data-part="page-band"].ws-head-index > .ws-tabs')
   const bar = await p.locator('.kbn-viewtabs').boundingBox(), page = await selected(p).boundingBox()
   assert.ok(bar.height <= 60, `the bar is one row: ${bar.height}`)
   assert.equal(await p.locator('.ws-navbar').isVisible(), false, 'the desktop reader draws no head of its own')
   assert.ok(page.y <= 70, `the page starts no lower than 70 px: ${page.y}`)
   assert.ok(innerHeightGap(page, p.viewportSize()) <= 30, `the page runs to the foot, less the gutter: ${JSON.stringify(page)}`)
   assert.equal(await p.locator('[data-part="chrome-plate"]').count(), 0, 'no chrome plates')
-  assert.equal(await p.locator('.kbn-viewtabs-reader [role="tablist"]').count(), 1, 'the bar carries the one list of pages')
-  assert.equal(await p.locator('.ws-reader [role="tablist"]').count(), 0, 'nothing in the reader lists the pages')
+  assert.equal(await p.locator('.ws-stage-column [role="tablist"]').count(), 1, 'the centre column carries the one list of pages')
+  assert.equal(await p.locator('.kbn-viewtabs [data-part="page-band"]').count(), 0, 'the board bar carries no map')
   // The tiles sit between Find and the count, hang from the bar level with its tabs, and clear the pages below.
   const geometry = await p.evaluate(() => {
     const rect = sel => document.querySelector(sel).getBoundingClientRect()
-    const find = rect('.kbn-viewtabs-find'), strip = rect('.kbn-viewtabs-reader .ws-tabs'), count = rect('.kbn-viewtabs-position .ws-head-position'), gear = rect('.kbn-viewtabs-settings')
+    const find = rect('.kbn-viewtabs-find'), strip = rect('.ws-stage-column .ws-tabs'), count = rect('.kbn-viewtabs-position .ws-head-position'), gear = rect('.kbn-viewtabs-settings')
     const viewtab = rect('.kbn-viewtab'), tile = rect('.ws-tab:not([aria-selected="true"])'), page = rect('.ws-page.ws-selected')
     return { find: find.right, left: strip.left, right: strip.right, count: count.left, countRight: count.right, gear: gear.left, tileTop: tile.top, tabTop: viewtab.top, tileBottom: tile.bottom, pageTop: page.top,
-      tile: [tile.width, tile.height], overflow: getComputedStyle(document.querySelector('.kbn-viewtabs-reader .ws-tabs')).flexWrap }
+      tile: [tile.width, tile.height], overflow: getComputedStyle(document.querySelector('.ws-stage-column .ws-tabs')).flexWrap }
   })
   assert.ok(geometry.left >= geometry.find && geometry.right <= geometry.count && geometry.countRight <= geometry.gear, `the index stays between Find and the count, and the count before Settings: ${JSON.stringify(geometry)}`)
   assert.ok(Math.abs(geometry.tileTop - geometry.tabTop) <= 3, `the tiles hang level with the bar's tabs: ${JSON.stringify(geometry)}`)
@@ -907,8 +907,8 @@ test('The map in the board bar indexes pages as legible tiles, captions a hover,
   await poll(p, () => document.querySelector('.ws-tab:last-child')?.getAttribute('aria-selected') === 'true')
   await p.waitForTimeout(350)
   const last = await p.evaluate(() => {
-    const strip = document.querySelector('.kbn-viewtabs-reader .ws-tabs').getBoundingClientRect(), tile = document.querySelector('.ws-tab[aria-selected="true"]').getBoundingClientRect()
-    return { inside: tile.left >= strip.left && tile.right <= strip.right, scrolled: document.querySelector('.kbn-viewtabs-reader .ws-tabs').scrollLeft > 0 }
+    const strip = document.querySelector('.ws-stage-column .ws-tabs').getBoundingClientRect(), tile = document.querySelector('.ws-tab[aria-selected="true"]').getBoundingClientRect()
+    return { inside: tile.left >= strip.left && tile.right <= strip.right, scrolled: document.querySelector('.ws-stage-column .ws-tabs').scrollLeft > 0 }
   })
   assert.deepEqual(last, { inside: true, scrolled: true }, 'the last tile is in view')
   await p.keyboard.press('Home')
@@ -1035,7 +1035,7 @@ for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps 
   const geometry = async () => p.evaluate(() => {
     const rect = el => el.getBoundingClientRect()
     const page = rect(document.querySelector('.ws-page.ws-selected')), sidebar = rect(document.querySelector('.ws-sidebar'))
-    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage')), strip = rect(document.querySelector('.kbn-viewtabs-reader .ws-tabs'))
+    const tile = rect(document.querySelector('.ws-tab[aria-selected="true"]')), stage = rect(document.querySelector('.ws-stage')), strip = rect(document.querySelector('.ws-stage-column .ws-tabs'))
     return { gutter: page.left - sidebar.right, right: stage.right - page.right, page: page.left + page.width / 2, tile: tile.left + tile.width / 2,
       clamped: tile.right <= strip.right && strip.right - tile.right <= 48,
       ground: getComputedStyle(document.querySelector('.ws-sidebar')).backgroundColor }
@@ -2231,7 +2231,7 @@ test('Sidebar current card follows j/k, Alt navigation and browser Back immediat
     index += delta
     await assertCurrent(names[index])
     // A keyboard switch hands focus to the selected tile in the bar's map.
-    if (key.startsWith('Alt+')) await poll(p, () => document.activeElement?.matches('.kbn-viewtabs-reader .ws-tab[aria-selected="true"]'))
+    if (key.startsWith('Alt+')) await poll(p, () => document.activeElement?.matches('.ws-stage-column .ws-tab[aria-selected="true"]'))
   }
   await p.goBack()
   await poll(p, previous => document.querySelector('.ws-channel-title')?.textContent === previous, names[index + 1])

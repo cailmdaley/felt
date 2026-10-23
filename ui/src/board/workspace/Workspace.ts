@@ -445,6 +445,7 @@ export class Workspace {
       ancestry: ancestry.map(card => ({ name: card.name, open: () => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) } })),
       origin: { label: this.origin, open: () => this.returnToOrigin() },
       trail: this.reader.pagesButton,
+      constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
     })
   }
   /** The chat page: the constitution's band, seated whole. */

@@ -147,7 +147,11 @@ export class PageSheet {
     const { channel, selected, fresh } = model
     const keys = new Set(channel.documents.map(doc => doc.key))
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.thumb.dispose(); row.button.remove(); this.rows.delete(key) }
-    channel.documents.forEach((doc, index) => {
+    // A run that ends in its chat is listed from the chat outward, the chat first.
+    const order = channel.documents.map((_, index) => index)
+    if (channel.documents.at(-1)?.kind === 'chat') order.reverse()
+    order.forEach((index, position) => {
+      const doc = channel.documents[index]
       let row = this.rows.get(doc.key)
       if (!row) {
         const button = document.createElement('button')
@@ -178,7 +182,7 @@ export class PageSheet {
       else row.button.removeAttribute('aria-current')
       row.button.classList.toggle('ws-page-sheet-fresh', fresh.has(doc.key))
       row.button.setAttribute('aria-label', `${row.title.textContent}${fresh.has(doc.key) ? ', new arrival' : ''}`)
-      const at = this.list.children[index]
+      const at = this.list.children[position]
       if (at !== row.button) this.list.insertBefore(row.button, at ?? null)
       row.thumb.schedule()
     })

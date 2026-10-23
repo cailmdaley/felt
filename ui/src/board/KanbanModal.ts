@@ -44,7 +44,6 @@ import { Workspace } from './workspace/Workspace.js'
 import { Dock, type MeetingJoinResult } from './workspace/Dock.js'
 import { confirmWorkerStop } from './workspace/Verdicts.js'
 import { constitutionAction } from './workspace/fiberPageState.js'
-import { invalidateWorkspaceMeasures } from './workspace/measures.js'
 import { DeskKeyboard } from './DeskKeyboard.js'
 import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
@@ -213,7 +212,6 @@ export class KanbanModal {
   /** The bar's Find: one field on every view (constitutions; the Board's folios; the reader's sidebar). */
   private findEl: HTMLInputElement | null = null
   /** The bar's centre while the reader is open: its map of pages. */
-  private readerSlotEl: HTMLDivElement | null = null
   /** The bar's right end while the reader is open: its page count, before Settings. */
   /**
    * Wrapper around the Desk surfaces (Now + Resting).
@@ -595,7 +593,6 @@ export class KanbanModal {
       onRest: card => this.openRestPopover(card),
       onExpand: (expanded) => { this.container?.classList.toggle('kbn-reader-expanded', expanded); this.placeReader() },
     })
-    this.readerSlotEl?.append(this.workspace.reader.barIndex)
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
@@ -762,13 +759,6 @@ export class KanbanModal {
     if (!this.container || !this.tabsEl) return
     const bar = this.tabsEl.getBoundingClientRect()
     this.container.style.setProperty('--kbn-bar-bottom', `${Math.max(0, Math.round(bar.bottom - this.container.getBoundingClientRect().top))}px`)
-    // How far the map's tiles reach below the bar: the pages start clear of them.
-    const map = this.readerSlotEl?.getBoundingClientRect()
-    const overhang = `${map?.height ? Math.max(0, Math.ceil(map.bottom - bar.bottom)) : 0}px`
-    if (this.container.style.getPropertyValue('--kbn-bar-overhang') === overhang) return
-    this.container.style.setProperty('--kbn-bar-overhang', overhang)
-    // The reader's stage top derives from the overhang.
-    invalidateWorkspaceMeasures()
   }
 
   /** While the reader is open its origin's tab closes it, and says so. */
@@ -905,16 +895,13 @@ export class KanbanModal {
     find.append(this.findEl, findKey)
     strip.append(find)
 
-    // The centre is each view's own: the Desk's cycle lens chips, held to the
-    // right of it, or the reader's map of pages. It always takes the room
-    // between Find and Settings, so Settings never moves between views.
+    // The centre holds the Desk's cycle lens chips, at its right end. It always
+    // takes the room between Find and Settings, so Settings never moves between views.
     const centre = document.createElement('div')
     centre.className = 'kbn-viewtabs-centre'
     this.lensSlotEl = document.createElement('div')
     this.lensSlotEl.className = 'kbn-viewtabs-lens'
-    this.readerSlotEl = document.createElement('div')
-    this.readerSlotEl.className = 'kbn-viewtabs-reader'
-    centre.append(this.readerSlotEl, this.lensSlotEl)
+    centre.append(this.lensSlotEl)
     strip.append(centre)
 
     // Settings rides the same row as the pages without being one of them. It
@@ -1193,7 +1180,6 @@ export class KanbanModal {
     this.tabsEl = null
     this.lensSlotEl = null
     this.findEl = null
-    this.readerSlotEl = null
     this.deskEl = null
     this.viewHostEl = null
     this.activeView = null

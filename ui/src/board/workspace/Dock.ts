@@ -419,6 +419,8 @@ export interface ChatNav {
   ancestry?: readonly Ancestor[]
   origin?: { label: string; open(): void }
   trail?: HTMLElement
+  /** Opens the constitution's own page, which has no tile in the reader's map. */
+  constitution?: () => void
 }
 
 /** A constitution's lifecycle as the header's chip says it: the rail's state, a waiting one by whose turn, a verdict by its kind. */
@@ -475,6 +477,9 @@ export class Dock {
   openFile?: (path: string, title?: string) => void
   /** The menu's slot for a way back that the header line has no room for. */
   private menuBack: HTMLElement | null = null
+  /** The menu's way to the constitution's page, shown while the nav carries one. */
+  private menuConstitution: HTMLButtonElement | null = null
+  private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -577,6 +582,8 @@ export class Dock {
       if (inMenu) menuBack.push(button); else back.unshift(button)
     }
     if (this.menuBack) { this.menuBack.replaceChildren(...menuBack); this.menuBack.hidden = !menuBack.length }
+    this.openConstitution = nav.constitution ?? null
+    if (this.menuConstitution) this.menuConstitution.hidden = !this.openConstitution
     this.lead.replaceChildren(...back)
     this.lead.hidden = !back.length
     this.trail.replaceChildren(...(nav.trail ? [nav.trail] : []))
@@ -666,7 +673,7 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.verdictMenu = null
-    this.menuBack = null
+    this.menuBack = this.menuConstitution = this.openConstitution = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -1091,6 +1098,8 @@ export class Dock {
     meetingItem.hidden = !this.meeting
     // The meter's figures: in the header on the desktop, here on the phone.
     const meterSlot = document.createElement('div'); meterSlot.className = 'ws-chat-menu-meter'; meterSlot.hidden = true
+    const constitutionItem = this.menuConstitution = item('Constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
+    constitutionItem.hidden = !this.openConstitution
     const consoleItem = item('Console', 'ws-chat-console', () => { this.openConversation(card) })
     consoleItem.title = 'Open the worker’s own conversation'
     this.drawerClose = () => {
@@ -1105,7 +1114,7 @@ export class Dock {
     facts.className = 'ws-chat-menu-facts'
     const backSlot = this.menuBack = document.createElement('div'); backSlot.className = 'ws-chat-menu-back'; backSlot.hidden = true
     backSlot.addEventListener('click', () => { menu.open = false })
-    choices.append(facts, meterSlot, verdict, rule, freshItem, meetingItem, settingsItem, sessionsItem, consoleItem, backSlot)
+    choices.append(facts, meterSlot, verdict, rule, freshItem, meetingItem, constitutionItem, settingsItem, sessionsItem, consoleItem, backSlot)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.

@@ -169,7 +169,7 @@ describe('Reader channel sidebar', () => {
     target.click()
     expect(open).toHaveBeenCalledOnce()
   })
-  it("draws the card's own worker pill bare at the head's right end; the page count rides the map", () => {
+  it("draws the card's own worker pill bare at the head's right end; the map rides the centre column", () => {
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
     listedCards = [working]
     const open = vi.fn()
@@ -182,10 +182,11 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
-    // The trail ends with the worker; the head's centre holds the map, with no page count beside it.
+    // The trail ends with the worker; the top bar holds no map and no page count.
     expect(head.nextElementSibling).toBeNull()
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
-    expect(reader.el.querySelector('.ws-navbar .ws-nav-lead + [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
+    expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
+    expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.turn).toBe('working')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()

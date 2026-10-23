@@ -1,8 +1,8 @@
-/* On the desktop the reader starts beneath the board's bar, which carries its
-   map of pages; the map overhangs the bar, and the pages start clear of it. */
+/* On the desktop the reader starts beneath the board's bar; its map of pages
+   floats above the centre column, and the pages start beneath it. */
 .ws-reader {
   --ws-corner-inset: 8px;
-  --ws-stage-top: calc(var(--kbn-bar-overhang, 0px) + var(--ws-stage-gap));
+  --ws-stage-top: var(--ws-stage-gap);
   position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
   background: transparent; color: var(--ws-ink);

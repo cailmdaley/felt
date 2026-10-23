@@ -722,16 +722,24 @@ describe('workspace reader integration', () => {
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0])
     await flush()
-    // The chat leads the run and is the page it opens on; the body is one tab away.
+    // The chat ends the run and is the page it opens on; the body has no tile and opens from the chat's menu.
     expect(document.querySelector('.ws-page.ws-selected')?.classList.contains('ws-chat-frame')).toBe(true)
     expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock textarea')).not.toBeNull()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
     expect(article.querySelector('.ws-dock')).toBeNull()
     expect(article.querySelector('.kbn-detail-lede')).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
+    const tabs = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')]
+    expect(tabs().at(-1)?.dataset.kind).toBe('chat')
+    expect(tabs().some(b => b.dataset.kind === 'fiber')).toBe(false)
 
-    const proseTab = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(b => b.getAttribute('aria-label') === 'Constitution')!
-    proseTab.click()
+    const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
+    expect(constitution.hidden).toBe(false)
+    expect(constitution.textContent).toBe('Constitution')
+    constitution.click()
+    expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
+    const proseTab = tabs().find(b => b.dataset.kind === 'fiber')!
+    expect(proseTab.getAttribute('aria-selected')).toBe('true')
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
     await flush()

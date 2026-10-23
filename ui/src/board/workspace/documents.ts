@@ -284,14 +284,18 @@ export function buildChannel(input: ChannelInput): Channel {
 
   documents.delete(prose.key)
   const run = arrangeDocuments(prose, documents.values(), declared)
-  // A conversation leads the run: the chat is the page a constitution opens
-  // on, and its latest word beside it, one step away: the report, else the
-  // newest sent file.
-  const latest = run.find(isReport) ?? run.filter(d => lastSent(d) !== undefined).sort((x, y) => lastSent(y)! - lastSent(x)!)[0]
-  const ordered = input.conversation ? [{
+  // A conversation's run ends in its chat, the page a constitution opens on.
+  // The files run left of it, outward from its latest word one step away (the
+  // report, else the newest sent file), then the declared documents in body
+  // order and the sent ones newest first. The constitution page, read rarely,
+  // stands at the far end.
+  const files = run.filter(d => d !== prose)
+  const latest = files.find(isReport) ?? files.filter(d => lastSent(d) !== undefined).sort((x, y) => lastSent(y)! - lastSent(x)!)[0]
+  const outward = [...(latest ? [latest] : []), ...files.filter(d => d !== latest).sort(compareDocuments(declared))]
+  const ordered = input.conversation ? [prose, ...outward.reverse(), {
     key: chatKey(input.owner, input.uid), owner: input.owner, path: prose.path, name: input.name,
     kind: 'chat' as const, provenance: [{ kind: 'fiber' as const }],
-  }, ...(latest ? [latest] : []), ...run.filter(d => d !== latest)] : run
+  }] : run
 
   const channel: Channel = {
     uid: input.uid, owner: input.owner, name: input.name,
@@ -336,19 +340,21 @@ export function defaultSelection(channel: Channel): DocKey {
 
 /**
  * Keep selection if it survives; otherwise walk the old run from it toward
- * the fiber page and take the first page that survives, else the fiber page.
+ * its anchor (the chat, else the fiber page) and take the first page that
+ * survives, else the anchor.
  */
 export function fallbackSelection(previousKeys: DocKey[], nextKeys: DocKey[], selected: DocKey): DocKey | undefined {
   if (!nextKeys.length) return undefined
   if (nextKeys.includes(selected)) return selected
   const survives = new Set(nextKeys)
+  const isAnchor = (keys: DocKey[]) => keys.some(key => key.startsWith('chat:')) ? (key: DocKey) => key.startsWith('chat:') : (key: DocKey) => key.startsWith('fiber:')
   const from = previousKeys.indexOf(selected)
-  const anchor = previousKeys.findIndex(key => key.startsWith('fiber:'))
+  const anchor = previousKeys.findIndex(isAnchor(previousKeys))
   if (from >= 0 && anchor >= 0) {
     const step = anchor > from ? 1 : -1
     for (let i = from + step; i !== anchor + step; i += step) if (survives.has(previousKeys[i])) return previousKeys[i]
   }
-  return nextKeys.find(key => key.startsWith('fiber:')) ?? nextKeys[0]
+  return nextKeys.find(isAnchor(nextKeys)) ?? nextKeys[0]
 }
 
 /** Use the shortest unique path suffix, with report pages named for their folder. */
