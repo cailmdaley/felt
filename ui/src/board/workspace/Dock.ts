@@ -1175,10 +1175,11 @@ export class Dock {
       this.head.dataset.column = column
       title.textContent = card.name
       title.title = card.name
+      // The state is said once: a live worker's pill says it, else this chip.
       const stage = lifecycleOf(card)
       lifecycle.textContent = stage.label
       lifecycle.dataset.state = stage.state
-      lifecycle.hidden = !shuttleManaged
+      lifecycle.hidden = !shuttleManaged || hasLiveWorker(card)
       standing.paint(card.outcome?.trim() ?? '')
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent

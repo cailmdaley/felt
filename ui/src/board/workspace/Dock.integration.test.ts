@@ -415,11 +415,13 @@ describe('state-shaped act zone', () => {
     expect(message.value).toBe('')
   })
   it('names the lifecycle beside the title in the rail\'s words, kept current', () => {
-    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', workerState: 'running', runtimePhase: 'working' }))
+    // A live worker's pill says its state; the chip does not say it again.
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
     const chip = band.el.querySelector<HTMLElement>('.ws-chat-head .ws-chat-state')!
-    expect([chip.textContent, chip.dataset.state]).toEqual(['Working', 'working'])
+    expect(band.el.querySelector('.ws-chat-head .kbn-card-worker')?.textContent).toMatch(/^working/i)
+    expect(chip.hidden).toBe(true)
     dock.bandFor(task({ status: 'active', sessionUuid: 's', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
-    expect([chip.textContent, chip.dataset.state]).toEqual(['Waiting', 'question'])
+    expect([chip.hidden, chip.textContent, chip.dataset.state]).toEqual([false, 'Waiting', 'question'])
     dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
     expect([chip.textContent, chip.dataset.state]).toEqual(['To review', 'to-review'])
     dock.bandFor(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
