@@ -304,8 +304,19 @@ rejected receipts—including `session_unavailable`, `session_not_found`,
 `wake_required`, and `wake_refused`—return 200. HTTP 5xx means the Shuttle CLI did not
 provide a valid receipt or the owner could not be reached; the daemon may
 include a synthetic `unknown` receipt. `shuttle message` exits 0 for
-`accepted`, `submitted`, `queued`, and `context_added`; it exits 1 for
-`rejected`, `unknown`, or another command error. A target that does not
+`accepted`, `submitted`, `queued`, `context_added`, and
+`queued_for_next_worker`; it exits 1 for `rejected`, `unknown`, or another
+command error.
+
+A fiber target with no live worker (a seat at rest, an unarmed thread, a
+closed constitution) is not rejected: its owning daemon queues the text in the
+fiber's durable context mailbox, the same one thread results wait in, and the
+receipt reads `queued for <fiber>'s next worker` (`status:
+queued_for_next_worker` in `--json`). It is not delivered; the fiber's next
+worker reads it as context when it starts, and a plain message wakes a worker
+that appeared in the meantime. Retrying with the same `--message-id` queues it
+once. Attachments cannot wait in the mailbox, so a message carrying them needs
+a live worker, and a fiber with no `shuttle:` block is still refused. A target that does not
 resolve, is ambiguous, or has no session-ledger worker fails before any
 request is sent, with exit 1 and no receipt. Once resolved, it prints
 `sending <id> to <resolved address>` to stderr before delivery; if interrupted,

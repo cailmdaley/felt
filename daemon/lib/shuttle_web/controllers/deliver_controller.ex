@@ -2,11 +2,19 @@ defmodule ShuttleWeb.DeliverController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/deliver
 
-  Body `{fiber_id, text, from?, origin?}`. Puts `text` in front of the fiber's
+  Body `{fiber_id, text, from?, origin?, context_only?, message_id?, wake?,
+  unless_live?}`. Puts `text` in front of the fiber's
   worker on its owning host (`Shuttle.Delivery`): a live worker is messaged, a
   dormant one resumes (or dispatches, if it never ran) with `text` as its From
   User. A request carrying `origin` is forwarded to that owner's identical
   route.
+
+  With `context_only` (and a `message_id`), `text` is queued in the fiber's
+  context mailbox instead (`Shuttle.Delivery.context/4`): 202 `{delivery:
+  "context", queued: true}`, launching nothing. `unless_live` makes that queue
+  the next worker's: a fiber with a live worker answers 409 `{live: true}` and
+  queues nothing, and a queued answer carries `status:
+  "queued_for_next_worker"`. `shuttle message <fiber>` sends this shape.
 
   The answer names what happened in `delivery`: `"message"` with the messaging
   `receipt`, or `"resume"` / `"dispatch"` with the `/dispatch` envelope.
@@ -27,7 +35,7 @@ defmodule ShuttleWeb.DeliverController do
         Map.get(params, "text"),
         Map.get(params, "origin"),
         Map.get(params, "from"),
-        Map.take(params, ["context_only", "message_id", "wake"])
+        Map.take(params, ["context_only", "message_id", "wake", "unless_live"])
       )
 
     conn |> put_status(status) |> json(body)
@@ -57,7 +65,11 @@ defmodule ShuttleWeb.DeliverController do
             opts = if is_binary(from) and from != "", do: [from: from], else: []
 
             if context["context_only"] == true do
-              context_reply(fiber_id, text, context["message_id"], context["wake"] == true)
+              context_reply(fiber_id, text, context["message_id"],
+                wake: context["wake"] == true,
+                unless_live: context["unless_live"] == true,
+                from: if(is_binary(from) and from != "", do: from)
+              )
             else
               fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
             end
@@ -65,18 +77,41 @@ defmodule ShuttleWeb.DeliverController do
     end
   end
 
-  defp context_reply(fiber_id, text, message_id, wake)
+  defp context_reply(fiber_id, text, message_id, opts)
        when is_binary(message_id) and message_id != "" do
     with {:ok, %{fibers: [entry | _]}} <- Shuttle.FiberDocuments.get_shuttle(fiber_id),
-         {:ok, :queued} <- Delivery.context(entry, text, message_id, wake: wake) do
-      {202, %{delivery: "context", delivered: false, queued: true, fiber_id: fiber_id}}
+         {:ok, :queued} <- Delivery.context(entry, text, message_id, opts) do
+      body = %{delivery: "context", delivered: false, queued: true, fiber_id: fiber_id}
+
+      # Asked to queue only for a dormant fiber, the queue is its next worker's.
+      body =
+        if opts[:unless_live], do: Map.put(body, :status, "queued_for_next_worker"), else: body
+
+      {202, body}
     else
-      {:error, :not_owner} -> {409, %{error: "this daemon does not own the fiber"}}
-      error -> {422, %{error: inspect(error)}}
+      {:ok, %{fibers: []}} ->
+        {404, %{delivered: false, queued: false, error: "no constitution #{fiber_id} here"}}
+
+      {:error, :live_worker} ->
+        {409,
+         %{
+           delivery: "context",
+           delivered: false,
+           queued: false,
+           live: true,
+           fiber_id: fiber_id,
+           error: "the fiber has a live worker; message it directly"
+         }}
+
+      {:error, :not_owner} ->
+        {409, %{error: "this daemon does not own the fiber"}}
+
+      error ->
+        {422, %{error: inspect(error)}}
     end
   end
 
-  defp context_reply(_fiber_id, _text, _id, _wake),
+  defp context_reply(_fiber_id, _text, _id, _opts),
     do: {400, %{error: "message_id is required for context"}}
 
   defp reply({:message, status, receipt}, fiber_id) do

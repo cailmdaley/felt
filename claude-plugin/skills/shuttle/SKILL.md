@@ -163,6 +163,7 @@ shuttle reopen <fiber> --message "Pick up X"     # start a worker on the fiber's
 ```
 
 A target is an address, a session ID, or a fiber, meaning its current worker.
+A fiber with no live worker queues the message for its next worker (`queued for <fiber>'s next worker`): not delivered, read as context when that worker starts.
 Delivered headers keep the exact sending session in `from` and show a fiber worker's durable reply target separately as `reply to <fiber>` (`reply_to` in JSON).
 Use `shuttle message <fiber> ...` for a reply that follows the work across handoffs; an explicit session reply stays pinned to that session and never forwards to a successor.
 Nonworker senders have no fiber reply target.

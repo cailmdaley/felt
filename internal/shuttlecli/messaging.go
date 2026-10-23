@@ -157,10 +157,21 @@ daemon to the owning host. The text is the second argument, '-' for stdin, or
 --file; it is capped at 64 KiB. At least one of text, --file, or --attach is required.
 
 By default the addressed session is woken; --context-only (or --wake=false)
-adds the message as context without starting or steering a model turn. Prints
+adds the message as context without starting or steering a model turn.
+
+A fiber with no live worker (a seat at rest, an unarmed thread, a closed
+constitution) takes the message into its durable mailbox instead: it is not
+delivered, and the fiber's next worker reads it as context when it starts.
+The receipt says "queued for <fiber>'s next worker" (JSON status
+queued_for_next_worker); retrying with the same --message-id queues it once.
+Attachments cannot wait, so a message carrying them needs a live worker. A
+fiber with no shuttle: block is refused.
+
+Prints
 "sending <message-id> to <resolved address>" to stderr before delivery, then prints the
 receipt status and message id. If interrupted, retry with the printed id using
---message-id <id>. Exit 0 means accepted, submitted, queued, or context_added;
+--message-id <id>. Exit 0 means accepted, submitted, queued, context_added, or
+queued_for_next_worker;
 exit 1 means rejected, unknown, or another command error.`,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if messageOpts.requestJSON {
@@ -187,6 +198,15 @@ exit 1 means rejected, unknown, or another command error.`,
 			request, err := a.buildMessageRequest(cmd.InOrStdin(), args, messageOpts)
 			if err != nil {
 				return err
+			}
+			if !messageOpts.requestJSON && !messageOpts.local {
+				queued, err := a.queueForNextWorker(request)
+				if err != nil {
+					return err
+				}
+				if queued != nil {
+					return a.printNextWorkerReceipt(queued)
+				}
 			}
 			if !messageOpts.requestJSON {
 				request.Address, err = a.resolveMessageTarget(request.Address)

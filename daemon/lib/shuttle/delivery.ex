@@ -93,19 +93,34 @@ defmodule Shuttle.Delivery do
   defp message_id,
     do: "deliver-" <> Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
 
-  @doc "Queue context in the owning fiber's hook mailbox without arming or launching it."
-  def context(entry, text, message_id, opts \\ []) do
-    if get_in(entry.fiber, ["shuttle", "host"]) == Poller.own_host_id() do
-      wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
-      args = ["context-mailbox", "put", context_key(entry), message_id, text]
-      args = if wake, do: args ++ ["--wake"], else: args
+  @doc """
+  Queue context in the owning fiber's hook mailbox without arming or launching
+  it. The mailbox keeps it, deduplicated by `message_id`, until a worker of the
+  fiber takes it: the live one, or the next one to launch.
 
-      with {:ok, _} <- Shuttle.CLI.run(args) do
-        flush_context(entry)
-        {:ok, :queued}
-      end
-    else
-      {:error, :not_owner}
+  Options: `:wake` starts a turn when a worker is live; `:from` labels the
+  sender (default `"shuttle"`); `:unless_live` refuses with
+  `{:error, :live_worker}` while a worker is live, queueing nothing, so the
+  sender messages that worker directly.
+  """
+  def context(entry, text, message_id, opts \\ []) do
+    cond do
+      get_in(entry.fiber, ["shuttle", "host"]) != Poller.own_host_id() ->
+        {:error, :not_owner}
+
+      Keyword.get(opts, :unless_live, false) and live_context_worker(entry) != nil ->
+        {:error, :live_worker}
+
+      true ->
+        wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
+        from = Keyword.get(opts, :from) || "shuttle"
+        args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
+        args = if wake, do: args ++ ["--wake"], else: args
+
+        with {:ok, _} <- Shuttle.CLI.run(args) do
+          flush_context(entry)
+          {:ok, :queued}
+        end
     end
   end
 

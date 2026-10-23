@@ -12,10 +12,12 @@ import (
 func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
+	var from string
 	put := &cobra.Command{Use: "put <fiber-key> <message-id> <text>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		return messaging.QueueFiberContext(a.env, args[0], messaging.Request{MessageID: args[1], Text: args[2], From: "shuttle", Wake: wake})
+		return messaging.QueueFiberContext(a.env, args[0], messaging.Request{MessageID: args[1], Text: args[2], From: from, Wake: wake})
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
+	put.Flags().StringVar(&from, "from", "shuttle", "Sender label the receiving worker sees")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])

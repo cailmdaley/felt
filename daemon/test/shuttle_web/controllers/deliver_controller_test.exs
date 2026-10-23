@@ -314,6 +314,71 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Jason.decode!(last.body) == %{"fiber_id" => "tests/remote", "text" => "hello"}
   end
 
+  # `shuttle message <fiber>`'s request: context unless a worker is live. The
+  # context path reads the fiber from the configured stores.
+  defp queue_for_next_worker(fiber_id, id) do
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+
+    api_conn()
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{
+        "fiber_id" => fiber_id,
+        "text" => "read this when you start",
+        "from" => "shuttle://elsewhere/claude/sender",
+        "context_only" => true,
+        "unless_live" => true,
+        "wake" => true,
+        "message_id" => id
+      })
+    )
+  end
+
+  defp mailbox_puts,
+    do:
+      for(
+        {"shuttle", ["context-mailbox", "put" | _] = args} <- MockRunner.commands(),
+        do: args
+      )
+
+  defp launches,
+    do: Enum.count(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+  test "a message to a fiber with no live worker waits in its mailbox for the next worker" do
+    put_constitution("tests/deliver-dormant")
+    Env.put_app_env(:felt_runner, MockRunner)
+    before = launches()
+
+    body = "tests/deliver-dormant" |> queue_for_next_worker("msg-dormant-1") |> json_response(202)
+
+    assert %{
+             "delivery" => "context",
+             "queued" => true,
+             "delivered" => false,
+             "status" => "queued_for_next_worker"
+           } = body
+
+    assert [args] = mailbox_puts()
+    assert "msg-dormant-1" in args and "read this when you start" in args
+    assert ["--from", "shuttle://elsewhere/claude/sender"] -- args == []
+    assert launches() == before
+
+    # The same message id queues once.
+    assert %{"queued" => true} =
+             "tests/deliver-dormant" |> queue_for_next_worker("msg-dormant-1") |> json_response(202)
+  end
+
+  test "a message to a fiber with a live worker is the sender's to deliver, not queued" do
+    message_live_worker("tests/deliver-live-queue")
+
+    body =
+      "tests/deliver-live-queue" |> queue_for_next_worker("msg-live-1") |> json_response(409)
+
+    assert %{"live" => true, "queued" => false} = body
+    assert mailbox_puts() == []
+    refute_received {:message, _}
+  end
+
   test "fiber_id and text are required" do
     assert %{"error" => "text is required"} =
              api_conn()

@@ -6,6 +6,17 @@ defmodule Shuttle.ContractTest do
     def cmd("shuttle", ["contract"], _opts), do: {"14\n", 0}
   end
 
+  defmodule Level16Runner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["contract"], _opts), do: {"16\n", 0}
+  end
+
+  test "a CLI at level 16 lacks the sender label on queued fiber context" do
+    result = Shuttle.Contract.check(Level16Runner)
+    refute result.ok
+    assert result.reason =~ "context-mailbox put --from"
+  end
+
   test "the expected level covers the receiver-authority verbs" do
     assert Shuttle.Contract.expected_level() >= 15
   end

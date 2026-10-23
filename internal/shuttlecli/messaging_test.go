@@ -237,7 +237,7 @@ func TestMessageExitFollowsReceiptEvidence(t *testing.T) {
 func TestMessageHelpDocumentsReceiptExitStatuses(t *testing.T) {
 	t.Parallel()
 	long := newApp(testEnv(t)).shuttleMessageCmd().Long
-	for _, detail := range []string{"sending <message-id> to <resolved address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, or", "exit 1 means rejected, unknown"} {
+	for _, detail := range []string{"sending <message-id> to <resolved address>", "If interrupted, retry with", "Exit 0 means accepted, submitted, queued, context_added, or\nqueued_for_next_worker", "exit 1 means rejected, unknown"} {
 		if !strings.Contains(long, detail) {
 			t.Errorf("message help omits %q", detail)
 		}
