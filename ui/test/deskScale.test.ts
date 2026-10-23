@@ -39,3 +39,14 @@ describe('the Desk reads at the board label size', () => {
     expect(px(row['font-size'])).toBeLessThanOrEqual(14)
   })
 })
+
+describe('pigment on the Desk is state', () => {
+  it('draws the leading glyph in faint ink, whoever drives the card', () => {
+    const glyph = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-glyph')
+    expect(glyph.color).toBe('var(--kbn-ink)')
+    expect(Number(glyph.opacity)).toBeLessThanOrEqual(0.4)
+    const resting = rule(deskRows, '.kbn-cluster-item[data-card-uid] .kbn-cluster-item-glyph')
+    expect(resting.color).toBe('var(--kbn-ink)')
+    expect(deskRows).not.toMatch(/\.kbn-col-list[^{]*\.kbn-card-glyph-(agent|human)/)
+  })
+})

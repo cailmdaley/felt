@@ -42,10 +42,16 @@
   --kbn-row-ground: var(--kbn-paper-bright);
   border-color: color-mix(in srgb, var(--kbn-ink) 34%, transparent);
 }
+/* The leading glyph is ink, faint: it says "a line" and nothing more, so
+   pigment on the Desk is left to state alone (the turn pill's red, gold or
+   blue dot; a family's marks). */
 .kbn-col-list .kbn-card .kbn-card-glyph {
   width: 12px;
   font-size: calc(10px * var(--kbn-type-scale, 1));
+  color: var(--kbn-ink);
+  opacity: .32;
 }
+.kbn-cluster-item[data-card-uid] .kbn-cluster-item-glyph { color: var(--kbn-ink); opacity: .32; }
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
   min-width: 0;
