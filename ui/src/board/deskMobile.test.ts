@@ -47,12 +47,12 @@ describe('folioScrollTarget', () => {
 
 describe('band collapse state', () => {
   it('defaults to Roles open and Resting folded', () => {
-    expect(DEFAULT_BAND_STATE).toEqual({ roles: true, resting: false })
+    expect(DEFAULT_BAND_STATE).toEqual({ roles: false, resting: false })
     expect(parseBandState(null)).toEqual(DEFAULT_BAND_STATE)
   })
 
   it('falls back per key on partial or malformed payloads', () => {
-    expect(parseBandState('{"resting":false}')).toEqual({ roles: true, resting: false })
+    expect(parseBandState('{"resting":true}')).toEqual({ roles: false, resting: true })
     expect(parseBandState('{"roles":false,"resting":true}')).toEqual({ roles: false, resting: true })
     expect(parseBandState('{"resting":"yes"}')).toEqual(DEFAULT_BAND_STATE)
     expect(parseBandState('not json')).toEqual(DEFAULT_BAND_STATE)

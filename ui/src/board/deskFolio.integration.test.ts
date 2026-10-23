@@ -6,7 +6,7 @@ import { card, response } from './testFixtures.js'
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
-it('a fresh phone Desk opens on In flight, its leaves named in full', () => {
+it('a fresh phone Desk opens on In flight, its tabs one plain word each, the full name in the label', () => {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === MOBILE_MEDIA, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
   const frames: FrameRequestCallback[] = []
   vi.stubGlobal('requestAnimationFrame', (run: FrameRequestCallback) => frames.push(run))
@@ -19,6 +19,8 @@ it('a fresh phone Desk opens on In flight, its leaves named in full', () => {
   for (const run of frames.splice(0)) run(0)
   expect(document.querySelector<HTMLElement>('.kbn-now-board')!.scrollLeft).toBe(390)
   const segs = [...document.querySelectorAll<HTMLElement>('.kbn-folio-seg')]
-  expect(segs.map(seg => seg.querySelector('.kbn-folio-name')!.textContent)).toEqual(['Drafts', 'In flight', 'Awaiting review'])
+  expect(segs.map(seg => seg.querySelector('.kbn-folio-name')!.textContent)).toEqual(['Drafts', 'Live', 'Review'])
+  expect(segs.map(seg => seg.getAttribute('aria-label'))).toEqual(['Drafts (1)', 'In flight (1)', 'Awaiting review (0)'])
+  expect(document.querySelector('.kbn-folio .kbn-cap')).toBeNull()
   expect(segs.map(seg => seg.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false'])
 })

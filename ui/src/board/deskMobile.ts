@@ -44,9 +44,9 @@ export interface BandState {
   resting: boolean
 }
 
-/** Roles is a launcher you reach for; Resting is an archive you go looking
- *  for. So Roles opens and Resting stays folded until asked. */
-export const DEFAULT_BAND_STATE: BandState = { roles: true, resting: false }
+/** A fresh phone visit is about the live work above, so both bands start
+ *  folded; whichever one the reader opens stays open on their next visit. */
+export const DEFAULT_BAND_STATE: BandState = { roles: false, resting: false }
 
 /** Coerce whatever came back out of storage into a BandState. Anything absent
  *  or malformed falls back per-key, so one corrupt field can't lose the other. */

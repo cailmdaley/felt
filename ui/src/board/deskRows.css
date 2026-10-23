@@ -197,11 +197,31 @@
   }
   .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
 
-  /* The folio strip gives each leaf the width its full name needs, the rest
-     shared out, so "Awaiting review" is never cut to a word. */
-  .kbn-folio.kbn-folio { grid-template-columns: repeat(3, auto); }
-  .kbn-folio .kbn-folio-seg { padding-inline: 6px; }
-  .kbn-folio .kbn-folio-name { overflow: visible; text-overflow: clip; letter-spacing: 0.03em; }
+  /* The tabs are plain navigation: one word and its count at a readable
+     size, ornament left to the column itself. */
+  .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
+  .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
+  .kbn-folio .kbn-folio-name {
+    font-size: 14px; font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0;
+    overflow: visible; text-overflow: clip;
+  }
+  .kbn-folio .kbn-folio-count { font-family: inherit; font-size: 14px; color: var(--kbn-ink-muted); }
+
+  /* A live card is a tile of two rows: its title across the full width, then
+     its state, threads and reviews. The report leaf stays in the card, one
+     tap away; the row gives its room to the words. */
+  .kbn-col-list .kbn-card .kbn-card-name { flex: 1 1 calc(100% - 24px); }
+  .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { flex: 1 0 100%; justify-content: flex-start; gap: 8px; padding: 4px 0 1px 19px; }
+  .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
+
+  /* A seat with threads is one tile, its badge inside the tile's right end,
+     so every Roles line shares the same right edge. */
+  .kbn-role-seat {
+    position: relative; box-sizing: border-box; align-items: center; gap: 0;
+    background: var(--kbn-paper); border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent); border-radius: 3px;
+  }
+  .kbn-role-seat > .kbn-role-chip { margin: -1px 0 -1px -1px; border-color: transparent; background: transparent; }
+  .kbn-role-seat .kbn-thread-badge { margin-right: 8px; }
 
   /* The cycle chip in the bottom bar is a compact label that fits its slot:
      its name, ellipsized if it must be. The dates and the count stay on the
@@ -489,4 +509,13 @@
     background: none;
   }
   .kbn-cluster-item-verdicts[data-verdict-pending] { position: relative; min-height: 19px; }
+}
+
+/* A portrait phone gives the live leaf the screen its folded bands leave:
+   the strip above, Roles and Resting folded below, and the bottom bar take
+   about 260px; the leaf takes the rest, never less than its 58vh. */
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  @media (orientation: portrait) {
+    .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 260px - env(safe-area-inset-bottom, 0px))); }
+  }
 }

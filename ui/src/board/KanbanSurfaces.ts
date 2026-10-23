@@ -76,6 +76,9 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   composted: 'Discarded',
 }
 
+/** The phone's tab for each Now column: one plain word. */
+const FOLIO_LABELS: Record<NowColumnKind, string> = { drafts: 'Drafts', inFlight: 'Live', awaitingReview: 'Review' }
+
 /** The same paper face in a Desk column, a folio, or a compact constitution card. */
 export function buildCardPaper(card: KanbanCard): HTMLElement {
   const el = document.createElement('div')
@@ -426,8 +429,8 @@ export class KanbanSurfaceRenderer {
     strip.setAttribute('aria-label', 'Now — which column is showing')
 
     NOW_COLUMN_ORDER.forEach((kind, i) => {
-      // The leaf's full name: "Awaiting review" says what is awaited. The
-      // strip sizes its segments to their names (see deskRows.css).
+      // A tab says the leaf in one plain word and its count; the column's
+      // full name is its accessible name.
       const title = COLUMN_TITLES[kind]
       // A div, not a button: on a phone the column's own action glyph moves
       // into this segment (see `adoptColumnActions`), and a real <button>
@@ -439,12 +442,9 @@ export class KanbanSurfaceRenderer {
       seg.tabIndex = -1
       seg.setAttribute('aria-label', `${title} (${counts[i]})`)
 
-      // The illuminated initial IS the word's first letter — "𝕯rafts", not
-      // "𝕯 Drafts". One capped run, the way the column heads and view titles
-      // set theirs; repeating the letter read as a typo on the phone.
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
-      appendCappedText(name, title)
+      name.textContent = FOLIO_LABELS[kind]
 
       const count = document.createElement('span')
       count.className = 'kbn-folio-count'
