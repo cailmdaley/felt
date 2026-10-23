@@ -39,6 +39,7 @@ A child constitution publishes lifecycle results to its nearest ancestor constit
 Only the child's owning daemon publishes them.
 Results reach only that nearest orchestrator; each orchestrator decides what to pass on, with no automatic upward propagation.
 Close wakes the orchestrator by default; `shuttle close --quiet` publishes context without waking, while ask always wakes.
+A thread resting until a fiber (`shuttle.blocked_on`, set by `shuttle rest --until`) publishes `unblocked` as context when that fiber closes with any verdict; it never wakes and arms nothing.
 The quiet marker names its exact close timestamp and an ordinary close clears it, so it cannot affect a later publication.
 The outbox freezes the wake choice with the publication through retries and restarts.
 Before the first poll, the daemon establishes a durable first-deployment timestamp in its host-local thread outbox.

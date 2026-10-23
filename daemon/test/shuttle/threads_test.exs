@@ -129,6 +129,137 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  describe "a thread resting until a fiber" do
+    setup %{store: store} do
+      assert {:ok, _} = CLI.run_felt(["-C", store, "add", "blocker", "The mocks land"])
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, ["rest", "hub/child", "--until", "blocker", "--local"])
+
+      :ok
+    end
+
+    defp unblocked(data),
+      do: data |> pending() |> Enum.filter(&(&1["request"]["text"] =~ "unblocked"))
+
+    defp deliver(store) do
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.deliver_results(entries, "test-host")
+    end
+
+    for {how, edit} <- [
+          {"closes", ["-s", "closed"]},
+          {"is tempered", ["-s", "closed", "--set", "tempered=true"]},
+          {"is discarded", ["-s", "closed", "--set", "tempered=false"]}
+        ] do
+      @edit edit
+      test "its orchestrator hears once, as context, when the blocker #{how}", %{
+        store: store,
+        data: data
+      } do
+        deliver(store)
+        assert unblocked(data) == []
+
+        assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker" | @edit])
+        deliver(store)
+        deliver(store)
+
+        assert [%{"request" => request}] = unblocked(data)
+        assert request["text"] == "thread hub/child unblocked: The mocks land closed"
+        refute request["wake"]
+        assert {:ok, output} = CLI.run_in_store(store, ["show", "hub", "--json"])
+        assert Jason.decode!(output)["status"] == "open"
+      end
+    end
+
+    test "a wait on free text, or one already cleared, publishes nothing", %{
+      store: store,
+      data: data
+    } do
+      assert {:ok, _} = CLI.run_felt(["-C", store, "add", "other", "Other"])
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, [
+                 "thread",
+                 "hub",
+                 "Waits on words",
+                 "--slug",
+                 "worded",
+                 "--disabled"
+               ])
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, [
+                 "rest",
+                 "hub/worded",
+                 "--until",
+                 "the other mocks",
+                 "--local"
+               ])
+
+      assert {:ok, _} = CLI.run_in_store(store, ["resume", "hub/child", "--local"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker", "-s", "closed"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "other", "-s", "closed"])
+      deliver(store)
+      assert unblocked(data) == []
+    end
+
+    test "the roster and the tree name what a thread waits for", %{store: store} do
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      # A blocker outside the poller's cache is read from the store.
+      entries = Enum.reject(entries, &(&1.fiber["name"] == "The mocks land"))
+
+      assert [%{"id" => "hub/child", "until" => "The mocks land", "blocked_on" => uid}] =
+               Threads.tree("hub", store, entries, MapSet.new())
+
+      assert Shuttle.ULID.valid?(uid)
+
+      assert Threads.roster("hub", store, entries, MapSet.new()) =~
+               "- hub/child — Resting · ⏸ until The mocks land — "
+    end
+
+    test "a note its orchestrator could not take survives a publisher restart", %{
+      store: store
+    } do
+      alias Shuttle.Test.StubPostClient
+      StubPostClient.start!()
+      Env.put_app_env(:write_forward_client, StubPostClient)
+      Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
+      path = Path.join(store, ".felt/hub/hub.md")
+      File.write!(path, String.replace(File.read!(path), "host: test-host", "host: parent-host"))
+
+      StubPostClient.set_response({:error, :unavailable})
+      assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker", "-s", "closed"])
+      deliver(store)
+
+      assert [{id, %{"text" => "thread hub/child unblocked: The mocks land closed"} = record}] =
+               Enum.filter(Shuttle.ThreadOutbox.pending("test-host"), fn {_id, r} ->
+                 r["text"] =~ "unblocked"
+               end)
+
+      refute record["wake"]
+      # The wait is cleared and the blocker reopened before the retry.
+      assert {:ok, _} = CLI.run_in_store(store, ["resume", "hub/child", "--local"])
+      assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker", "-s", "open"])
+      StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+
+      Task.async(fn ->
+        Shuttle.ThreadOutbox.boot_baseline()
+        Threads.retry_results("test-host")
+      end)
+      |> Task.await(30_000)
+
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      sent = StubPostClient.last().body |> Jason.decode!()
+      assert sent["message_id"] == id
+      assert sent["text"] == "thread hub/child unblocked: The mocks land closed"
+      assert sent["context_only"] and not sent["wake"]
+      Threads.capture_unblocks(entries, "test-host")
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+  end
+
   test "failed close and ask publications survive cleared stamps and publisher restart", %{
     store: store
   } do

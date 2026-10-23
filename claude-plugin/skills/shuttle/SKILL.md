@@ -116,7 +116,7 @@ Use a handoff when context pressure calls for a fresh worker, at a coherent sub-
 
 ## Exiting
 
-Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close wakes your conversation by default, ask always wakes, and handoff and rest arrive as context.
+Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close wakes your conversation by default, ask always wakes, and handoff and rest arrive as context, as does `unblocked` when the fiber a resting thread waits for closes.
 A close, rest or ask you make yourself on one of your threads is not delivered back to you.
 Use `shuttle close <id> --quiet` when the thread is wrapped up and its orchestrator has nothing to do: its outcome arrives as context without waking that conversation.
 The choice belongs to that close; the next ordinary close wakes again.

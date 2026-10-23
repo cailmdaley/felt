@@ -1,7 +1,7 @@
 defmodule Shuttle.Threads do
   @moduledoc "Constitution containment and owner-local result delivery."
 
-  alias Shuttle.{Delivery, OriginRouter, Remote, ThreadOutbox}
+  alias Shuttle.{Delivery, FiberDocuments, OriginRouter, Remote, ThreadOutbox}
 
   @doc """
   Nearest strict ancestor that orchestrates, in the same felt store: one
@@ -175,7 +175,8 @@ defmodule Shuttle.Threads do
             more ++
             tail ++
             [
-              "Results from these arrive as messages (close/ask wake you; handoff/rest arrive as context). " <>
+              "Results from these arrive as messages (close/ask wake you; handoff/rest arrive as context, " <>
+                "as does `unblocked` when what a resting thread waits for closes). " <>
                 "`shuttle thread #{fiber_id} \"<ask>\"` files a new one."
             ],
           "\n"
@@ -183,8 +184,15 @@ defmodule Shuttle.Threads do
     end
   end
 
-  @doc "A thread's roster state as written: Armed says when its host is out of sight."
+  @doc """
+  A thread's roster state as written: Armed says when its host is out of
+  sight, and a rest says what it waits for.
+  """
   def state_label(%{"host_unreachable" => true}), do: "Armed · host unreachable"
+
+  def state_label(%{"state" => state, "until" => until}) when is_binary(until) and until != "",
+    do: "#{state} · ⏸ until #{until}"
+
   def state_label(%{"state" => state}), do: state
 
   # The thread badge's count: unfinished threads anywhere below.
@@ -198,7 +206,9 @@ defmodule Shuttle.Threads do
   @doc """
   An orchestrator's threads to every depth, in containment order: one map per
   thread with its `id`, `uid`, `name`, `host`, board `column`, roster `state`,
-  `host_unreachable`, full `outcome` and its own `threads`. `entries` are the
+  `host_unreachable`, full `outcome`, what it rests until (`blocked_on` as
+  stored and the `until` name it reads as, both nil when it waits for nothing)
+  and its own `threads`. `entries` are the
   poller's cached constitutions; `live` holds the running workers' runtime keys
   (uid, else id) across the fleet; `reachable` is the set of hosts whose
   workers `live` covers (`with_fleet/4`), or nil when the fleet is unknown. An
@@ -217,10 +227,10 @@ defmodule Shuttle.Threads do
         end
       end)
 
-    grow(children, {felt_store, fiber_id}, {live, reachable})
+    grow(children, {felt_store, fiber_id}, {live, reachable, by_uid(entries)})
   end
 
-  defp grow(children, key, {live, reachable} = seen) do
+  defp grow(children, key, {live, reachable, by_uid} = seen) do
     children
     |> Map.get(key, [])
     |> Enum.sort_by(&address(&1.fiber))
@@ -228,6 +238,7 @@ defmodule Shuttle.Threads do
       live? = live?(fiber, live)
       host = get_in(fiber, ["shuttle", "host"])
       state = thread_state(fiber, live?)
+      blocked = blocked_on(fiber)
 
       %{
         "id" => address(fiber),
@@ -240,8 +251,62 @@ defmodule Shuttle.Threads do
           state == "Armed" and is_binary(host) and reachable != nil and
             not MapSet.member?(reachable, host),
         "outcome" => fiber["outcome"],
+        "blocked_on" => blocked,
+        "until" => blocked && blocker_name(blocked, entry.felt_store, by_uid),
         "threads" => grow(children, {entry.felt_store, address(fiber)}, seen)
       }
+    end)
+  end
+
+  @doc "What a constitution rests until (`shuttle.blocked_on`), or nil."
+  def blocked_on(fiber) do
+    case get_in(fiber, ["shuttle", "blocked_on"]) do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The fiber a `blocked_on` value names, or nil when it is free text or names
+  nothing this host can read. The poller's cached constitutions answer first;
+  any other fiber is read from `felt_store` by its uid through the address
+  the daemon last read it at, so a repeat costs one direct `felt show`.
+  """
+  def blocker(value, felt_store, by_uid) do
+    cond do
+      not fiber_ref?(value) ->
+        nil
+
+      fiber = Map.get(by_uid, String.upcase(value)) || Map.get(by_uid, value) ->
+        fiber
+
+      true ->
+        case FiberDocuments.get(value,
+               felt_stores: [felt_store],
+               address: Shuttle.FiberAddresses.lookup(value)
+             ) do
+          {:ok, %{fibers: [%{fiber: fiber} | _]}} -> fiber
+          _ -> nil
+        end
+    end
+  end
+
+  # A stored uid, or the id of a fiber felt gave none; anything else is text.
+  defp fiber_ref?(value),
+    do: Shuttle.ULID.valid?(String.upcase(value)) or String.contains?(value, "/")
+
+  defp blocker_name(value, felt_store, by_uid) do
+    case blocker(value, felt_store, by_uid) do
+      %{} = fiber -> fiber["name"] || address(fiber)
+      nil -> value
+    end
+  end
+
+  defp by_uid(entries) do
+    Enum.reduce(entries, %{}, fn %{fiber: fiber}, acc ->
+      acc
+      |> then(&if(is_binary(fiber["uid"]), do: Map.put(&1, fiber["uid"], fiber), else: &1))
+      |> Map.put(address(fiber), fiber)
     end)
   end
 
@@ -360,6 +425,7 @@ defmodule Shuttle.Threads do
   @doc "Reconcile durable lifecycle signals. Only a child's owner publishes its results."
   def deliver_results(entries, own_host) do
     capture_results(entries, own_host)
+    capture_unblocks(entries, own_host)
     retry_results(own_host)
 
     # A parent can receive remote results while dormant. Its next live worker
@@ -393,6 +459,49 @@ defmodule Shuttle.Threads do
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
            "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
            "wake" => wake
+         }}
+      end
+
+    ThreadOutbox.capture(records)
+  end
+
+  @doc """
+  Persist one context note for each owned thread whose `blocked_on` names a
+  fiber that has closed (any verdict), addressed to the thread's orchestrator:
+  `thread <id> unblocked: <name> closed`. It never wakes and arms nothing. A
+  cleared wait, free text, or a close at or before the outbox baseline
+  publishes nothing; each close of the blocker publishes once. Reading a
+  blocker outside the poller's cache shells felt, so this runs on the delivery
+  task, not the poll.
+  """
+  def capture_unblocks(entries, own_host) do
+    index = index(entries)
+    by_uid = by_uid(entries)
+    {:ok, baseline, _} = DateTime.from_iso8601(ThreadOutbox.baseline())
+
+    records =
+      for entry <- entries,
+          get_in(entry.fiber, ["shuttle", "host"]) == own_host,
+          blocked = blocked_on(entry.fiber),
+          blocked != nil and fiber_ref?(blocked),
+          parent = orchestrator(entry, index),
+          parent != nil,
+          blocker = blocker(blocked, entry.felt_store, by_uid),
+          is_map(blocker) and blocker["status"] == "closed",
+          stamp = blocker["closed_at"],
+          is_binary(stamp) and after_baseline?(stamp, baseline) do
+        thread = entry.fiber["uid"] || entry.fiber["id"]
+        blocker_id = blocker["uid"] || address(blocker)
+
+        {"thread-" <> digest({entry.felt_store, thread, "unblocked", blocker_id, stamp}),
+         %{
+           "owner" => own_host,
+           "store" => parent.felt_store,
+           "parent_uid" => Map.fetch!(parent.fiber, "uid"),
+           "text" =>
+             "thread #{address(entry.fiber)} unblocked: " <>
+               "#{blocker["name"] || address(blocker)} closed",
+           "wake" => false
          }}
       end
 
