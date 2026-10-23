@@ -417,7 +417,7 @@ defmodule Shuttle.CodexApp.TransportTest do
   test "resume sends explicit developer instructions and omits absent overrides" do
     {path, peer} =
       initialized_peer(fn socket ->
-        for instructions <- ["PRESERVED_CONTEXT_MARKER", nil] do
+        for instructions <- ["PRESERVED_CONTEXT_MARKER", nil, nil] do
           assert %{"id" => id, "method" => "thread/resume", "params" => params} =
                    recv_json(socket)
 
@@ -439,6 +439,7 @@ defmodule Shuttle.CodexApp.TransportTest do
              )
 
     assert {:ok, _} = CodexApp.resume_thread("thread-1")
+    assert {:ok, _} = CodexApp.resume_thread("thread-1", developer_instructions: nil)
     await_peer(peer)
   end
 

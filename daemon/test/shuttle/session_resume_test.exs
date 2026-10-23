@@ -171,6 +171,7 @@ defmodule Shuttle.SessionResumeTest do
       "SHUTTLE_CLAUDE_PROJECTS_DIR" => Path.join(root, "claude"),
       "SHUTTLE_CODEX_SESSIONS_DIR" => Path.join(root, "codex"),
       "SHUTTLE_PI_SESSIONS_DIR" => Path.join(root, "pi"),
+      "SHUTTLE_UI_DIST" => Path.join(root, "ui"),
       "SHUTTLE_SESSIONS_FILE" => ledger
     }
 
@@ -346,8 +347,13 @@ defmodule Shuttle.SessionResumeTest do
           {"--dangerously-bypass-approvals-and-sandbox",
            [approval_policy: "never", approvals_reviewer: nil, sandbox: "danger-full-access"]}
         ] do
-      Runner.set_agent_patch(%{"extra_flags" => preset})
+      Runner.set_agent_patch(%{
+        "extra_flags" => preset,
+        "developer_instructions" => "AGENT_ONLY_MARKER"
+      })
+
       assert {:ok, plan} = SessionResume.plan(@codex, runner: Runner)
+      assert Keyword.fetch!(plan.backend_opts, :developer_instructions) == nil
       assert plan.backend_opts[:model] == "gpt-6-luna"
       assert plan.backend_opts[:effort] == "max"
       for {key, value} <- expected, do: assert(plan.backend_opts[key] == value)
@@ -356,6 +362,7 @@ defmodule Shuttle.SessionResumeTest do
                SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
 
       assert_received {:native_resume_options, @codex, native_opts}
+      assert Keyword.fetch!(native_opts, :developer_instructions) == nil
       assert native_opts == plan.backend_opts
       assert plan.command =~ "--remote 'unix://"
       refute plan.command =~ preset

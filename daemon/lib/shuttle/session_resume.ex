@@ -89,7 +89,10 @@ defmodule Shuttle.SessionResume do
            agent: agent.id,
            cwd: cwd,
            backend_opts:
-             if(harness == "codex", do: Dispatcher.codex_options(agent, cwd, []), else: []),
+             if(harness == "codex",
+               do: Dispatcher.codex_options(agent, cwd, developer_instructions: nil),
+               else: []
+             ),
            command:
              if(harness == "codex",
                do:
