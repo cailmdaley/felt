@@ -221,3 +221,18 @@ it('draws nothing when the family is only the open thread, never listing a threa
     expect(rail.el.hidden).toBe(true)
   } finally { vi.unstubAllGlobals() }
 })
+
+it('draws what asks for the reader first: waiting, then reviews, then the working', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const root = card({ id: 'hub' })
+    const work = card({ id: 'hub/work', orchestrator: root.id, status: 'active', name: 'Work' })
+    const review = card({ id: 'hub/review', orchestrator: root.id, status: 'closed', name: 'Review' })
+    const ask = card({ id: 'hub/ask', orchestrator: root.id, status: 'active', ask: { text: 'Which?', at: '2026-07-02T12:00:00Z' }, name: 'Ask' })
+    const index = new ThreadIndex([root, work, review, ask])
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(root, index)
+    const order = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')].map(g => g.dataset.threadDetails)
+    expect(order).toEqual(['waiting', 'to-review', 'working'])
+  } finally { vi.unstubAllGlobals() }
+})

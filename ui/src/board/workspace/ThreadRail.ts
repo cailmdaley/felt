@@ -10,11 +10,11 @@ import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
 const MIN_WIDTH = 220, MAX_WIDTH = 640, STEP = 16
-/** The groups, in the order they are drawn; roles rest with Resting and discarded threads sit with the Tempered. */
+/** The groups, in the order they are drawn: what asks for the reader first (waiting, then reviews), then what to watch; roles rest with Resting and discarded threads sit with the Tempered. */
 const GROUPS: readonly { key: string; label: string; states: readonly ThreadState[] }[] = [
   { key: 'waiting', label: 'Waiting', states: ['waiting'] },
-  { key: 'working', label: 'Working', states: ['working'] },
   { key: 'to-review', label: 'To review', states: ['to-review'] },
+  { key: 'working', label: 'Working', states: ['working'] },
   { key: 'drafts', label: 'Drafts', states: ['drafts'] },
   { key: 'resting', label: 'Resting', states: ['resting', 'roles'] },
   { key: 'tempered', label: 'Tempered', states: ['archived'] },
