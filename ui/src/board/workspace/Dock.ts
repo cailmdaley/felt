@@ -1,3 +1,4 @@
+import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
@@ -408,12 +409,12 @@ interface AgentRecord {
 }
 
 /**
- * Where the chat's header line leads: back to the thread's orchestrator, and
- * on the phone back to the view the reader was opened from; `trail` is a
- * control the reader seats at the line's right end.
+ * Where the chat's header leads: up a thread's ancestry, the family's head
+ * first, and on the phone back to the view the reader was opened from;
+ * `trail` is a control the reader seats at the line's right end.
  */
 export interface ChatNav {
-  orchestrator?: { name: string; open(): void }
+  ancestry?: readonly Ancestor[]
   origin?: { label: string; open(): void }
   trail?: HTMLElement
 }
@@ -432,9 +433,10 @@ export interface DockOptions {
 }
 
 /**
- * A constitution's chat: one header line (the way back, the name, the worker's
- * state, its context meter and one menu holding the verdicts, settings,
- * sessions and the console), the conversation as a column, and the composer
+ * A constitution's chat: a header (the name, wrapping rather than truncating,
+ * beside the worker's state, its context meter and one menu holding the
+ * verdicts, settings, sessions and the console; inside a thread its ancestry
+ * as a line of links beneath), the conversation as a column, and the composer
  * pinned beneath it. A fiber with no conversation shows the header and the
  * drawer only, inside its fiber page.
  */
@@ -445,6 +447,7 @@ export class Dock {
   private header: HTMLElement | null = null
   private lead: HTMLElement | null = null
   private trail: HTMLElement | null = null
+  private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
   private headWorkerKey: string | null = null
   private card: KanbanCard | null = null
@@ -539,22 +542,15 @@ export class Dock {
    * home too: a fiber page drawn before the chat existed may have borrowed them.
    */
   setNav(nav: ChatNav): void {
-    if (!this.lead || !this.trail || !this.header) return
+    if (!this.lead || !this.trail || !this.header || !this.ancestry) return
     if (this.head.parentElement !== this.header) this.header.insertBefore(this.head, this.trail)
     const back: HTMLButtonElement[] = []
-    if (nav.orchestrator) {
-      const { name, open } = nav.orchestrator
-      const button = ctlButton(`‹ ${name}`, 'ws-chat-back ws-chat-orchestrator')
-      button.title = `Back to the orchestrator, ${name} (b)`
-      button.setAttribute('aria-label', `Back to the orchestrator, ${name}`)
-      button.addEventListener('click', () => open())
-      back.push(button)
-    }
-    // Inside a thread the orchestrator is the line's way back; the origin waits in the menu.
+    paintAncestry(this.ancestry, nav.ancestry ?? [])
+    // Inside a thread the ancestry is the way back; the origin waits in the menu.
     const menuBack: HTMLButtonElement[] = []
     if (nav.origin) {
       const { label, open } = nav.origin
-      const inMenu = Boolean(nav.orchestrator)
+      const inMenu = Boolean(nav.ancestry?.length)
       const button = inMenu ? document.createElement('button') : ctlButton('‹', 'ws-chat-back ws-chat-origin')
       if (inMenu) { button.type = 'button'; button.className = 'kbn-ctl-menu-item ws-chat-origin-item'; button.textContent = `‹ ${label}` }
       button.title = `Return to ${label}`
@@ -670,7 +666,7 @@ export class Dock {
     this.root?.replaceChildren()
     this.headRoot?.replaceChildren()
     this.headWorkerKey = null
-    this.header = this.lead = this.trail = null
+    this.header = this.lead = this.trail = this.ancestry = null
     this.drawerClose = null
   }
 
@@ -1114,7 +1110,10 @@ export class Dock {
     const trail = this.trail = document.createElement('span')
     trail.className = 'ws-chat-trail'
     trail.hidden = true
-    header.append(lead, title, this.head, trail)
+    const ancestry = this.ancestry = document.createElement('nav')
+    ancestry.className = 'ws-chat-ancestry'
+    ancestry.hidden = true
+    header.append(lead, title, this.head, trail, ancestry)
 
     const log = document.createElement('div')
     log.className = 'ws-chat-log'

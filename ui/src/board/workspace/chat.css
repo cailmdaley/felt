@@ -14,13 +14,11 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  flex: none; display: flex; align-items: center; gap: 12px; min-width: 0;
-  min-height: 44px; padding: 6px calc(var(--ws-chat-gutter) - 10px) 6px var(--ws-chat-gutter);
+  flex: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 12px; min-width: 0;
+  min-height: 44px; padding: 8px calc(var(--ws-chat-gutter) - 10px) 8px var(--ws-chat-gutter);
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
-.ws-chat-lead { display: inline-flex; flex: 0 1 auto; min-width: 0; max-width: 34%; align-items: center; gap: 2px; }
-.ws-chat .ws-chat-lead .ws-chat-back { max-width: 100%; }
-.ws-chat-title { flex-shrink: 1; min-width: 6em; }
+.ws-chat-lead { display: inline-flex; flex: none; align-items: center; gap: 2px; }
 .ws-chat .ws-chat-back {
   flex: none; min-height: 28px; padding: 2px 6px; margin-left: -6px;
   border: 0 !important; background: transparent; color: var(--ws-ink-muted);
@@ -28,28 +26,26 @@
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
-/* Inside a thread the way back to its orchestrator is the line's first, plain-spoken control. */
-.ws-chat .ws-chat-orchestrator {
-  margin-left: 0; padding: 3px 12px; border-radius: 999px;
-  color: var(--ws-ink); background: var(--ws-fill);
-}
-.ws-chat .ws-chat-orchestrator:hover { background: var(--ws-hover); }
 /* The origin's way back is the phone's; the desktop leaves by Escape and the board bar. */
 .ws-chat .ws-chat-origin { display: none; }
 .ws-chat .ws-chat-menu-back { display: none; }
+/* The name takes the line and wraps rather than truncating; the acts keep to its first line. */
 .ws-chat-title {
-  flex: 1 1 auto; min-width: 0; margin: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 0; min-width: 0; margin: 0; padding-block: 3px;
+  overflow: hidden; white-space: normal; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
-.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 14px; }
+.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 12px; min-height: 32px; }
+/* Inside a thread its ancestry runs beneath the name, a line of its own. */
+.ws-chat-ancestry { flex: 1 0 100%; order: 1; margin-top: 1px; }
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
 .ws-chat-acts .ws-fiber-worker:empty { display: none; }
 .ws-chat-trail { display: none; }
 
 /* The meter: context tokens tinted as they fill the window, the window's
    share, the cache's warmth and the last turn's hit, in one mono run. */
-.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 7px; }
+.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
 .ws-chat .ws-transcript-share::before { content: '·'; margin-right: 7px; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
@@ -157,8 +153,9 @@
   .ws-chat .ws-chat-menu-back:not([hidden]) { display: block; border-top: var(--ws-line-width) solid var(--ws-hairline-soft); margin-top: 4px; padding-top: 4px; }
   .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }
   .ws-chat .ws-chat-back { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
-  .ws-chat .ws-chat-orchestrator { min-height: 32px; padding-inline: 10px; margin-left: 8px; }
-  .ws-chat-title { font-size: var(--ws-label-size); }
+  .ws-chat-head { align-items: center; }
+  .ws-chat-title { font-size: var(--ws-label-size); -webkit-line-clamp: 1; }
+  .ws-chat-ancestry { padding: 0 0 6px calc(var(--ws-phone-target) + 4px); }
   .ws-chat-acts { gap: 6px; }
   .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
   .ws-chat-acts .ws-fiber-worker .kbn-card-worker { min-width: 28px; min-height: var(--ws-phone-target); justify-content: center; padding: 0; border: 0; background: transparent; }

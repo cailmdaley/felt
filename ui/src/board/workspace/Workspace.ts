@@ -437,11 +437,12 @@ export class Workspace {
   private conversation(state: Pick<ChannelState, 'card' | 'metadataKnown'>, uid: string): boolean {
     return state.metadataKnown && !uid.startsWith('other:') && isAgentCard(state.card)
   }
-  /** The header line's way back: to the orchestrator inside a thread; to the origin view on the phone. */
+  /** The header's ways back: up the ancestry inside a thread; to the origin view on the phone. */
   private seatNav(state: ChannelState, dock: Dock): void {
-    const parent = this.orchestrator(state.card)
+    const ancestry: KanbanCard[] = []
+    for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
     dock.setNav({
-      orchestrator: parent ? { name: parent.name, open: () => { this.openOrchestrator() } } : undefined,
+      ancestry: ancestry.map(card => ({ name: card.name, open: () => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) } })),
       origin: { label: this.origin, open: () => this.returnToOrigin() },
       trail: this.reader.pagesButton,
     })

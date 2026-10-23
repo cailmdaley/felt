@@ -127,8 +127,7 @@
 .ws-thread-tree .kbn-thread-item > .kbn-thread-pin { top: 9px; right: 4px; }
 .ws-thread-tree .kbn-thread-pin[aria-pressed='true'] { color: var(--tone); }
 
-.ws-thread-breadcrumb { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 18px; font-size: var(--ws-small-size); color: var(--kbn-ink-muted); }
-.ws-thread-breadcrumb button:hover { color: var(--kbn-ink); text-decoration: underline; }
+.ws-thread-breadcrumb { padding: 8px 18px; }
 /* The phone draws no tree under its chat, whatever width it rotates to. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-thread-rail { display: none; }

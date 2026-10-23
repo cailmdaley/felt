@@ -5,6 +5,7 @@ import { untilLine, untilOf } from '../blockedOn.js'
 import { deskColumn } from '../deskColumn.js'
 import { threadKey, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
+import { paintAncestry } from './ancestryTrail.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
@@ -20,9 +21,10 @@ const GROUPS: readonly { key: string; label: string; states: readonly ThreadStat
 ]
 
 /**
- * A view of the open constitution's family: its own subtree, or inside a
- * thread its orchestrator's, with the open thread marked, so siblings stay
- * one click away. Navigation never changes containment.
+ * A view of the open constitution's whole family, from the top-level
+ * constitution down: inside a thread the same family stays, the open thread
+ * marked in place and its ancestry's groups opened, so siblings and cousins
+ * stay one click away. Navigation never changes containment.
  */
 export class ThreadRail {
   readonly el = document.createElement('aside')
@@ -34,8 +36,10 @@ export class ThreadRail {
   private signature = ''
   private width: number | null = null
   private card: KanbanCard | null = null
-  /** The constitution whose subtree the rail draws: the open one, or its orchestrator. */
+  /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
+  /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
+  private revealed = ''
   private index: ThreadIndex | null = null
   private readonly open: (card: KanbanCard) => void
   private readonly layout: () => void
@@ -118,11 +122,11 @@ export class ThreadRail {
   }
   show(card: KanbanCard, index: ThreadIndex): void {
     card = index.card(card)
-    const scope = index.parentOf(card) ?? card
-    this.card = card; this.scope = scope; this.index = index
-    const descendants = index.subtree(scope)
     const ancestors: KanbanCard[] = []
     for (let parent = index.parentOf(card); parent; parent = index.parentOf(parent)) ancestors.unshift(parent)
+    const scope = ancestors[0] ?? card
+    this.card = card; this.scope = scope; this.index = index
+    const descendants = index.subtree(scope)
     // The phone draws no tree under its chat, only the breadcrumb.
     if (window.matchMedia(MOBILE_MEDIA).matches) {
       this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
@@ -132,17 +136,13 @@ export class ThreadRail {
     const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
-    this.el.hidden = !descendants.length
+    // A family that is only the open thread has nothing to show beside it.
+    this.el.hidden = !descendants.some(c => !(c.id === card.id && c.originId === card.originId))
     this.paintBreadcrumb(ancestors)
     this.paint()
   }
   private paintBreadcrumb(ancestors: readonly KanbanCard[]): void {
-    this.breadcrumb.hidden = !ancestors.length
-    this.breadcrumb.replaceChildren()
-    for (const ancestor of ancestors) {
-      const button = document.createElement('button'); button.type = 'button'; button.textContent = `‹ ${ancestor.name}`
-      button.addEventListener('click', () => this.open(ancestor)); this.breadcrumb.append(button)
-    }
+    paintAncestry(this.breadcrumb, ancestors.map(ancestor => ({ name: ancestor.name, open: () => this.open(ancestor) })))
   }
   private paint(): void {
     if (!this.card || !this.scope) return
@@ -217,20 +217,29 @@ export class ThreadRail {
     }
     this.tree.replaceChildren()
     const subtree = index.subtree(scope)
+    // Arriving at a thread opens the groups holding it and its ancestry, once; the reader may fold them after.
+    const visit = JSON.stringify([current.id, current.originId, scope.id])
+    const arriving = visit !== this.revealed
+    this.revealed = visit
+    const lineage = new Set<string>([threadKey(current)])
+    for (let p = index.parentOf(current); p; p = index.parentOf(p)) lineage.add(threadKey(p))
+    let currentRow: HTMLElement | null = null
     for (const { key, label, states } of GROUPS) {
       const members = subtree.filter(c => states.includes(index.state(c)))
       if (!members.length) continue
       const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
-      group.open = open.get(key) ?? key !== 'tempered'
+      group.open = (arriving && members.some(c => lineage.has(threadKey(c)))) || (open.get(key) ?? key !== 'tempered')
       const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, scope)
       const name = document.createElement('span'); name.className = 'ws-thread-group-label'; name.textContent = label
       const count = document.createElement('span'); count.className = 'ws-thread-group-count'; count.textContent = String(members.length)
       summary.append(name, count); summary.setAttribute('aria-label', `${label}, ${members.length}`)
       const keys = new Set(members.map(threadKey)), memo = new Map<string, number>()
       group.append(summary, ...members.map(card => rowFor(card, key, label, keys, memo)))
+      currentRow ??= group.querySelector<HTMLElement>('.ws-thread-current')
       this.tree.append(group)
     }
     this.layout()
+    if (arriving && currentRow && typeof currentRow.scrollIntoView === 'function') currentRow.scrollIntoView({ block: 'nearest' })
     if (focus) {
       const target = [...this.tree.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
       ;(target ?? this.heading).focus({ preventScroll: true })

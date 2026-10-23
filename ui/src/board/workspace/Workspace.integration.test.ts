@@ -403,13 +403,14 @@ describe('workspace reader integration', () => {
     expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 2'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
   })
-  it("leads a thread's chat back to its orchestrator, by its header line and by b", async () => {
+  it("leads a thread's chat up its ancestry, by the header's trail and by b", async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
     const feed = [
       thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
       thread({ id: 'hub/sub', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'hub/sub/leaf', orchestrator: 'hub-sub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
     ]
     bodyCards = feed
     workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
@@ -417,15 +418,19 @@ describe('workspace reader integration', () => {
     workspace.open(feed[0], 'Desk'); await flush()
     expect(title()).toBe('hub')
     // A root has no orchestrator: no way back on its line, and b does nothing.
-    expect(document.querySelector('.ws-page.ws-selected .ws-chat-orchestrator')).toBeNull()
+    expect(document.querySelector<HTMLElement>('.ws-page.ws-selected .ws-chat-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
     workspace.open(feed[1], 'Desk'); await flush()
     expect(title()).toBe('hub/sub')
-    const back = document.querySelector<HTMLButtonElement>('.ws-page.ws-selected .ws-chat-orchestrator')!
-    expect(back.textContent).toBe('‹ hub')
-    back.click(); await flush()
+    const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-page.ws-selected .ws-chat-ancestry .ws-ancestry-link')]
+    expect(links().map(b => b.textContent)).toEqual(['hub'])
+    links()[0].click(); await flush()
+    expect(title()).toBe('hub')
+    workspace.open(feed[2], 'Desk'); await flush()
+    expect(links().map(b => b.textContent)).toEqual(['hub', 'hub/sub'])
+    links()[0].click(); await flush()
     expect(title()).toBe('hub')
     workspace.open(feed[1], 'Desk'); await flush()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))

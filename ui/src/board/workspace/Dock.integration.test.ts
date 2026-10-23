@@ -377,17 +377,22 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('.ws-transcript-msg-sending')?.textContent).toContain('Carry on')
     expect(message.value).toBe('')
   })
-  it('inside a thread the line goes back to the orchestrator and the menu holds the origin', () => {
+  it('inside a thread the header traces the ancestry beneath the name and the menu holds the origin', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))
-    const origin = vi.fn()
-    band.setNav({ orchestrator: { name: 'Chair', open: vi.fn() }, origin: { label: 'Board', open: origin } })
-    const lead = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-chat-lead button')].map(b => b.textContent)
-    expect(lead).toEqual(['‹ Chair'])
+    const origin = vi.fn(), chair = vi.fn()
+    band.setNav({ ancestry: [{ name: 'Chair', open: chair }, { name: 'Validation', open: vi.fn() }], origin: { label: 'Board', open: origin } })
+    const trail = band.el.querySelector<HTMLElement>('.ws-chat-head .ws-chat-ancestry')!
+    expect(trail.hidden).toBe(false)
+    expect(trail.textContent).toBe('Chair/Validation')
+    expect(band.el.querySelector('.ws-chat-lead button')).toBeNull()
+    trail.querySelector<HTMLButtonElement>('.ws-ancestry-link')!.click()
+    expect(chair).toHaveBeenCalled()
     const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-origin-item')!
     expect(item.textContent).toBe('‹ Board')
     item.click()
     expect(origin).toHaveBeenCalled()
     band.setNav({ origin: { label: 'Board', open: origin } })
+    expect(trail.hidden).toBe(true)
     expect(band.el.querySelector('.ws-chat-menu-back')!.hasAttribute('hidden')).toBe(true)
     expect(band.el.querySelector('.ws-chat-lead .ws-chat-origin')).not.toBeNull()
   })

@@ -178,3 +178,46 @@ it('indents a thread beneath a parent in its own group and names the parent only
     expect(drafted.querySelector('.ws-thread-parent')?.textContent).toBe('Branch')
   } finally { vi.unstubAllGlobals() }
 })
+
+it("inside a deep thread keeps the whole family from its top-level constitution, the thread marked in place and its group opened", () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const chair = card({ id: 'chair', name: 'Chair' })
+    const validation = card({ id: 'chair/validation', orchestrator: chair.id, status: 'closed', tempered: true, name: 'Validation' })
+    const seed = card({ id: 'chair/validation/seed', orchestrator: validation.id, status: 'closed', tempered: true, name: 'Seed' })
+    const cousin = card({ id: 'chair/cousin', orchestrator: chair.id, status: 'active', name: 'Cousin' })
+    const all = [chair, validation, seed, cousin], open = vi.fn()
+    const rail = new ThreadRail(open, vi.fn())
+    rail.show(seed, new ThreadIndex(all))
+    expect(rail.el.hidden).toBe(false)
+    const names = [...rail.el.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)
+    expect(names).toEqual(['Cousin', 'Validation', 'Seed'])
+    expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
+    expect(rail.el.querySelector('.ws-thread-current .kbn-thread-name')?.textContent).toBe('Seed')
+    // Tempered folds by default, but not when it holds the open thread.
+    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
+    expect(tempered.open).toBe(true)
+    // A repaint of the same visit leaves a fold the reader made.
+    tempered.open = false
+    rail.show(seed, new ThreadIndex([chair, validation, { ...seed, outcome: 'news' }, cousin]))
+    expect(rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!.open).toBe(false)
+    // The breadcrumb is the ancestry trail, the head first.
+    expect([...rail.breadcrumb.querySelectorAll('.ws-ancestry-link')].map(b => b.textContent)).toEqual(['Chair', 'Validation'])
+    expect(rail.breadcrumb.querySelector('.ws-ancestry-sep')?.textContent).toBe('/')
+    rail.breadcrumb.querySelector<HTMLButtonElement>('.ws-ancestry-link')!.click()
+    expect(open).toHaveBeenLastCalledWith(chair)
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('draws nothing when the family is only the open thread, never listing a thread as its own', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const chair = card({ id: 'chair', name: 'Chair' })
+    const only = card({ id: 'chair/only', orchestrator: chair.id, status: 'active', name: 'Only' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(only, new ThreadIndex([chair, only]))
+    expect(rail.el.hidden).toBe(true)
+    rail.show(chair, new ThreadIndex([chair]))
+    expect(rail.el.hidden).toBe(true)
+  } finally { vi.unstubAllGlobals() }
+})
