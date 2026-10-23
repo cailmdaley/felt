@@ -65,7 +65,7 @@
    share, the cache's warmth and the session's cached share, in one mono run. */
 .ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
-.ws-chat .ws-transcript-share::before { content: '·'; margin-right: 7px; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+.ws-chat .ws-transcript-share::before, .ws-chat .ws-transcript-meter > :not([hidden]) ~ .ws-transcript-hit::before { content: '·'; margin-right: 7px; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
 .ws-chat .ws-chat-menu summary { min-width: 32px; min-height: 32px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); }
