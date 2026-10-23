@@ -3,7 +3,7 @@ import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
 import { untilLine, untilOf } from '../blockedOn.js'
 import { deskColumn } from '../deskColumn.js'
-import { threadKey, type ThreadIndex, type ThreadState } from '../threads.js'
+import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
 import { paintAncestry } from './ancestryTrail.js'
 import './thread-rail.css'
@@ -36,6 +36,8 @@ export class ThreadRail {
   private signature = ''
   private width: number | null = null
   private card: KanbanCard | null = null
+  /** Every thread in the family besides the open one is archived: the rail has nothing that asks for the eye. */
+  quiet = false
   /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
   /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
@@ -137,7 +139,9 @@ export class ThreadRail {
     if (signature === this.signature) return
     this.signature = signature
     // A family that is only the open thread has nothing to show beside it.
-    this.el.hidden = !descendants.some(c => !(c.id === card.id && c.originId === card.originId))
+    const others = descendants.filter(c => !(c.id === card.id && c.originId === card.originId))
+    this.el.hidden = others.length === 0
+    this.quiet = others.every(c => threadState(c) === 'archived')
     this.paintBreadcrumb(ancestors)
     this.paint()
   }

@@ -1,5 +1,5 @@
 import { ThreadRail } from './ThreadRail.js'
-import { ThreadIndex } from '../threads.js'
+import { ThreadIndex, threadKey } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -176,6 +176,8 @@ export class Reader {
   /** The rail's toggle, the sidebar's mirror in the opposite corner. */
   private readonly railToggle: HTMLButtonElement
   private railChoice = true
+  /** This view's own answer for a quiet rail, set by its toggle and kept until another thread opens; the stored choice stays untouched. */
+  private railPeek: { thread: string; open: boolean } | null = null
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
@@ -359,6 +361,7 @@ export class Reader {
     this.selected = selected
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     if (this.currentCard) this.threadRail.show(this.currentCard, index)
+    if (this.railPeek && (!this.currentCard || threadKey(this.currentCard) !== this.railPeek.thread)) this.railPeek = null
     this.paintPages(this.currentCard && familyCounts(this.currentCard, index))
     this.paintRail()
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
@@ -940,16 +943,29 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
-  /** The rail shows or hides on its own toggle, remembered for this viewer; a constitution without threads draws neither. */
+  /**
+   * The rail shows or hides on its own toggle, remembered for this viewer; a
+   * constitution without threads draws neither. A quiet family's toggle answers
+   * for this view alone and leaves the remembered choice as it was.
+   */
   private toggleRail(): void {
-    this.railChoice = !this.railChoice
-    try { localStorage.setItem(RAIL_STORAGE, String(this.railChoice)) } catch { /* Storage is optional. */ }
+    const open = !this.railOpen
+    if (this.threadRail.quiet && this.currentCard) this.railPeek = { thread: threadKey(this.currentCard), open }
+    else {
+      this.railPeek = null
+      this.railChoice = open
+      try { localStorage.setItem(RAIL_STORAGE, String(this.railChoice)) } catch { /* Storage is optional. */ }
+    }
     this.paintRail()
     this.layout(false)
   }
-  /** Whether the threads rail stands beside the stage: chosen, with threads to show, off the phone. */
+  /** Whether the rail is wanted: this view's answer, else folded for a quiet family, else the remembered choice. */
+  private get railOpen(): boolean {
+    return this.railPeek?.open ?? (this.threadRail.quiet ? false : this.railChoice)
+  }
+  /** Whether the threads rail stands beside the stage: wanted, with threads to show, off the phone. */
   private get railShown(): boolean {
-    return !this.phone.matches && this.railChoice && !this.threadRail.el.hidden
+    return !this.phone.matches && this.railOpen && !this.threadRail.el.hidden
   }
   /** Zen: on the desktop with neither side column, the page stands alone and its neighbours fade. */
   private paintZen(): void {
@@ -957,12 +973,13 @@ export class Reader {
   }
   private paintRail(): void {
     const has = !this.threadRail.el.hidden
-    this.el.classList.toggle('ws-rail-off', !this.railChoice)
+    const open = this.railOpen
+    this.el.classList.toggle('ws-rail-off', !open)
     this.el.classList.toggle('ws-with-rail', this.railShown)
     this.paintZen()
     this.railToggle.hidden = !has
-    this.railToggle.setAttribute('aria-expanded', String(this.railChoice))
-    this.railToggle.setAttribute('aria-label', this.railChoice ? 'Hide threads' : 'Show threads')
+    this.railToggle.setAttribute('aria-expanded', String(open))
+    this.railToggle.setAttribute('aria-label', open ? 'Hide threads' : 'Show threads')
   }
   private stagePlaces(): { page: number; tabs: number[]; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0

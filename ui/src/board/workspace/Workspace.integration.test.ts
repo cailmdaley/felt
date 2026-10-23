@@ -449,6 +449,49 @@ describe('workspace reader integration', () => {
     expect(reader.classList.contains('ws-with-rail')).toBe(true)
     expect(reader.classList.contains('ws-zen')).toBe(false)
   })
+  it('folds a quiet rail by default and opens it for this view alone, the stored choice untouched', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:rail', 'true')
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
+    const feed = [
+      thread({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }),
+      thread({ id: 'hub/dropped', orchestrator: 'hub', status: 'closed', tempered: false }),
+      thread({ id: 'loud', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+      thread({ id: 'loud/sub', orchestrator: 'loud', status: 'active', workerState: 'running', runtimePhase: 'working' }),
+    ]
+    bodyCards = feed
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
+    const toggle = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!
+    // Every other thread archived: the rail stays folded, its toggle still offered.
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect([reader().classList.contains('ws-with-rail'), toggle().hidden, toggle().getAttribute('aria-expanded')]).toEqual([false, false, 'false'])
+    toggle().click()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
+    toggle().click()
+    expect(reader().classList.contains('ws-with-rail')).toBe(false)
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
+    toggle().click()
+    // A family with live threads keeps the stored choice; coming back, the quiet one is folded again.
+    workspace.open(feed[3], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    toggle().click()
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('false')
+    toggle().click()
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(false)
+    // The view's answer lasts until another thread opens. The rail draws the head's descendants, the head
+    // itself standing in the breadcrumb, so from the tempered thread only the discarded one is beside it: quiet.
+    toggle().click()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    workspace.open(feed[1], 'Desk'); await flush()
+    expect([reader().classList.contains('ws-with-rail'), toggle().hidden]).toEqual([false, false])
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
+  })
   it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
