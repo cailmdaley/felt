@@ -20,8 +20,9 @@ defmodule Shuttle.SessionResumeTest do
   @nocwd "fef866ba-b397-4277-a01b-16fcecc2b256"
 
   defmodule App do
-    def resume_thread(id, _opts) do
+    def resume_thread(id, opts) do
       send(self(), {:native_resume, id})
+      send(self(), {:native_resume_options, id, opts})
       {:ok, %{"id" => id}}
     end
   end
@@ -59,6 +60,7 @@ defmodule Shuttle.SessionResumeTest do
     def set_running(running), do: Agent.update(__MODULE__, &Map.put(&1, :running, running))
     def set_duplicate(dup), do: Agent.update(__MODULE__, &Map.put(&1, :duplicate, dup))
     def set_ps(result), do: Agent.update(__MODULE__, &Map.put(&1, :ps, result))
+    def set_agent_patch(patch), do: Agent.update(__MODULE__, &Map.put(&1, :agent_patch, patch))
 
     def cmd(command, args, _opts) do
       Agent.update(
@@ -72,8 +74,13 @@ defmodule Shuttle.SessionResumeTest do
 
         {"shuttle", ["agents", "resolve", id, "--json"]} ->
           case @agents[id] do
-            nil -> {"unknown agent #{id}", 1}
-            agent -> {Jason.encode!(agent), 0}
+            nil ->
+              {"unknown agent #{id}", 1}
+
+            agent ->
+              {Jason.encode!(
+                 Map.merge(agent, Agent.get(__MODULE__, &Map.get(&1, :agent_patch, %{})))
+               ), 0}
           end
 
         {"ps", _} ->
@@ -300,6 +307,58 @@ defmodule Shuttle.SessionResumeTest do
       end
 
       assert StubKitty.opened() == []
+    end
+  end
+
+  test "historical Codex rejects unsupported env and flags before loading its thread" do
+    for {patch, diagnostic} <- [
+          {%{"env" => %{"PER_WORKER_ENV" => "cannot-honor"}}, "per-worker agent env"},
+          {%{"extra_flags" => "--unsupported-config"}, "extra_flags"}
+        ] do
+      Runner.set_agent_patch(patch)
+
+      assert {:error, message} =
+               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+      assert message =~ diagnostic
+      refute_received {:native_resume, _}
+
+      refute Enum.any?(Runner.calls(), fn {cmd, args} ->
+               cmd == "tmux" and "new-session" in args
+             end)
+    end
+  end
+
+  test "historical Codex uses dispatch protocol options for supported approval presets" do
+    for {preset, expected} <- [
+          {"--approve-for-me",
+           [
+             approval_policy: "on-request",
+             approvals_reviewer: "auto_review",
+             sandbox: "workspace-write"
+           ]},
+          {"--not-so-yolo",
+           [
+             approval_policy: "on-request",
+             approvals_reviewer: "auto_review",
+             sandbox: "workspace-write"
+           ]},
+          {"--dangerously-bypass-approvals-and-sandbox",
+           [approval_policy: "never", approvals_reviewer: nil, sandbox: "danger-full-access"]}
+        ] do
+      Runner.set_agent_patch(%{"extra_flags" => preset})
+      assert {:ok, plan} = SessionResume.plan(@codex, runner: Runner)
+      assert plan.backend_opts[:model] == "gpt-6-luna"
+      assert plan.backend_opts[:effort] == "max"
+      for {key, value} <- expected, do: assert(plan.backend_opts[key] == value)
+
+      assert {:ok, %{created: true}} =
+               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+      assert_received {:native_resume_options, @codex, native_opts}
+      assert native_opts == plan.backend_opts
+      assert plan.command =~ "--remote 'unix://"
+      refute plan.command =~ preset
     end
   end
 

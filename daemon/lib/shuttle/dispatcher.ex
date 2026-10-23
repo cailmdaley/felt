@@ -1091,14 +1091,14 @@ defmodule Shuttle.Dispatcher do
 
   defp preflight_surface("cli", %{cli: "codex"} = agent, work_dir, runner) do
     with :ok <- preflight_terminal(agent, work_dir, runner),
-         do: preflight_codex_environment(agent)
+         do: validate_codex_agent(agent)
   end
 
   defp preflight_surface("cli", agent, work_dir, runner),
     do: preflight_terminal(agent, work_dir, runner)
 
   defp preflight_surface("app", %{cli: "codex", headless: false} = agent, _work_dir, _runner),
-    do: preflight_codex_environment(agent)
+    do: validate_codex_agent(agent)
 
   defp preflight_surface(_, _, _, _),
     do:
@@ -1110,7 +1110,8 @@ defmodule Shuttle.Dispatcher do
     with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_tmux_server(runner)
   end
 
-  defp preflight_codex_environment(agent) do
+  @doc "Validates agent configuration that must be honored by the shared Codex backend."
+  def validate_codex_agent(agent) do
     cond do
       map_size(agent[:env] || %{}) != 0 ->
         {:error,
@@ -1155,7 +1156,8 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp app_opts(agent, work_dir, opts),
+  @doc "Protocol options shared by managed dispatch and historical Codex resume."
+  def codex_options(agent, work_dir, opts),
     do: [
       cwd: work_dir,
       felt_store: Keyword.get(opts, :felt_store),
@@ -1190,7 +1192,7 @@ defmodule Shuttle.Dispatcher do
     start =
       case intent do
         :fresh ->
-          client.start_thread(app_opts(agent, work_dir, opts))
+          client.start_thread(codex_options(agent, work_dir, opts))
 
         {:previous, id} ->
           resume_app_thread(
@@ -1241,7 +1243,7 @@ defmodule Shuttle.Dispatcher do
             _ -> render_resume_prompt(fiber_id, opts)
           end
 
-        case Shuttle.AppWorkers.start_turn(id, prompt, app_opts(agent, work_dir, opts)) do
+        case Shuttle.AppWorkers.start_turn(id, prompt, codex_options(agent, work_dir, opts)) do
           {:ok, _} -> finish_app_launch(id, runner)
           error -> error
         end
@@ -1267,7 +1269,7 @@ defmodule Shuttle.Dispatcher do
              Keyword.get(opts, :uid),
              Keyword.get(opts, :felt_store)
            ) do
-      case Shuttle.AppWorkers.call(id, :resume_thread, [app_opts(agent, work_dir, opts)]) do
+      case Shuttle.AppWorkers.call(id, :resume_thread, [codex_options(agent, work_dir, opts)]) do
         {:ok, %{"id" => ^id}} = result ->
           result
 
@@ -1292,7 +1294,8 @@ defmodule Shuttle.Dispatcher do
   defp capture_app(yap, agent, work_dir, felt_store, opts) do
     client = Shuttle.AppWorkers.client()
 
-    with {:ok, %{"id" => id} = thread} <- client.start_thread(app_opts(agent, work_dir, opts)),
+    with {:ok, %{"id" => id} = thread} <-
+           client.start_thread(codex_options(agent, work_dir, opts)),
          :ok <-
            put_app_worker(
              thread,
@@ -1320,7 +1323,7 @@ defmodule Shuttle.Dispatcher do
                  managed_codex: true
                )
              ),
-             app_opts(agent, work_dir, Keyword.put(opts, :felt_store, felt_store))
+             codex_options(agent, work_dir, Keyword.put(opts, :felt_store, felt_store))
            ),
          {:ok, _} <- finish_app_launch(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)) do
       {:ok,
@@ -1388,7 +1391,7 @@ defmodule Shuttle.Dispatcher do
              :ok <-
                check_resume_target_free(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)),
              {:ok, %{"id" => ^id} = thread} <-
-               Shuttle.AppWorkers.client().resume_thread(id, app_opts(agent, work_dir, opts)),
+               Shuttle.AppWorkers.client().resume_thread(id, codex_options(agent, work_dir, opts)),
              :ok <-
                put_app_worker(
                  thread,

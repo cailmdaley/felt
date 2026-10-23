@@ -80,28 +80,40 @@ defmodule Shuttle.SessionResume do
          {:ok, cwd} <- work_dir(harness, path) do
       agent = agent_for(session, harness, runner, opts)
 
-      {:ok,
-       %{
-         session: session,
-         tmux: tmux_name(session),
-         harness: harness,
-         agent: agent.id,
-         cwd: cwd,
-         backend_opts: [cwd: cwd, model: agent.model, effort: agent.effort],
-         command:
-           if(harness == "codex",
-             do:
-               Shuttle.CodexTerminal.command(
-                 agent.wrapper,
-                 cwd,
-                 session,
-                 "unix://" <> Shuttle.CodexApp.Transport.default_socket()
-               ),
-             else: Agents.build_resume_command(agent, session, "")
-           )
-       }}
+      with :ok <- validate_resume_agent(harness, agent) do
+        {:ok,
+         %{
+           session: session,
+           tmux: tmux_name(session),
+           harness: harness,
+           agent: agent.id,
+           cwd: cwd,
+           backend_opts:
+             if(harness == "codex", do: Dispatcher.codex_options(agent, cwd, []), else: []),
+           command:
+             if(harness == "codex",
+               do:
+                 Shuttle.CodexTerminal.command(
+                   agent.wrapper,
+                   cwd,
+                   session,
+                   "unix://" <> Shuttle.CodexApp.Transport.default_socket()
+                 ),
+               else: Agents.build_resume_command(agent, session, "")
+             )
+         }}
+      end
     end
   end
+
+  defp validate_resume_agent("codex", agent) do
+    case Dispatcher.validate_codex_agent(agent) do
+      :ok -> :ok
+      {:error, {:invalid_axes, message}} -> {:error, message}
+    end
+  end
+
+  defp validate_resume_agent(_harness, _agent), do: :ok
 
   @doc """
   Start the resume of `session` in its tmux session, unless it is already
