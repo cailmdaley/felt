@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -407,28 +405,9 @@ func codexHookOwnsInput(ctx context.Context, env *sysenv.Env, a Address) bool {
 			return false
 		}
 	}
-	out, err := env.CommandContext(probe, "ps", "-ww", "-p", strconv.Itoa(reg.PID), "-o", "args=").Output()
-	if err != nil {
-		return true
-	}
-	return !codexExplicitEndpoint(string(out), "unix://"+socket)
-}
-
-func codexExplicitEndpoint(command, endpoint string) bool {
-	executable, args, ok := strings.Cut(strings.TrimSpace(command), " ")
-	if !ok || filepath.Base(executable) != "codex" {
-		return false
-	}
-	// ps renders argv without quoting. Match only the leading launch form,
-	// retaining the endpoint's spaces; never search config or prompt text.
-	args = strings.TrimLeft(args, " ")
-	for _, prefix := range []string{"--remote ", "--remote=", "app-server --listen ", "app-server --listen="} {
-		launch := prefix + endpoint
-		if args == launch || strings.HasPrefix(args, launch+" ") {
-			return true
-		}
-	}
-	return false
+	// ps flattens argv without quoting, so it cannot prove which socket a
+	// receiver uses. Unknown or mismatched peers leave input with the hooks.
+	return true
 }
 
 // An explicit remote endpoint keeps a TUI on the same conversation owner as

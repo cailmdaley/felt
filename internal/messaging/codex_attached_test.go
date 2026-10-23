@@ -48,8 +48,7 @@ func TestCodexExplicitRemoteHookStillAcceptsNativeInput(t *testing.T) {
 				t.Fatal(err)
 			}
 			env.Set("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
-			receiver := startReceiver(t)
-			if err := RegisterMailbox(env, "codex", "thread-1", "host", "/work", receiver.Process.Pid, true); err != nil {
+			if err := RegisterMailbox(env, "codex", "thread-1", "host", "/work", os.Getpid(), true); err != nil {
 				t.Fatal(err)
 			}
 			receipt, err := Send(context.Background(), env, "host", Request{Address: "shuttle://host/codex/thread-1", Text: "wake", MessageID: "remote-hook", Wake: true})
@@ -114,19 +113,42 @@ func TestCodexHookPeerProbeValidatesEndpointBeforeConnecting(t *testing.T) {
 	}
 }
 
-func TestCodexHookEndpointClassificationIgnoresPromptAndConfigText(t *testing.T) {
+func TestCodexHookAmbiguousEndpointArgvCannotBypassMismatchingPeer(t *testing.T) {
 	t.Parallel()
-	endpoint := "unix:///tmp/private/control with spaces.sock"
-	for _, command := range []string{
-		"codex resume thread-1 --remote " + endpoint,
-		"codex -c developer_instructions=use --remote " + endpoint,
-		"bash -c codex --remote " + endpoint,
-		"codex --remote " + endpoint + "-different resume thread-1",
-		"codex app-server --listen " + endpoint + "-different",
-	} {
-		if codexExplicitEndpoint(command, endpoint) {
-			t.Errorf("accepted non-owner launch: %s", command)
-		}
+	for _, launch := range []string{"--remote ", "--remote=", "app-server --listen ", "app-server --listen="} {
+		t.Run(launch, func(t *testing.T) {
+			env := testEnv(t)
+			fake := &fakeCodex{state: "idle", mutation: "turn/start", mutationReply: map[string]any{"turn": map[string]any{"id": "shadow-turn", "status": "inProgress"}}}
+			socket := startFakeCodex(t, fake)
+			env.Set("SHUTTLE_CODEX_SOCKET", socket)
+			// A single socket argument ending in " other.sock" is flattened by
+			// ps into text that looks like the selected socket plus another arg.
+			command := "codex " + launch + "unix://" + socket + " other.sock"
+			bin := t.TempDir()
+			if err := os.WriteFile(filepath.Join(bin, "ps"), []byte("#!/bin/sh\nprintf '%s\\n' '"+command+"'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
+			receiver := startReceiver(t) // Live, but not the fake server's kernel peer.
+			if err := RegisterMailbox(env, "codex", "thread-1", "host", "/work", receiver.Process.Pid, true); err != nil {
+				t.Fatal(err)
+			}
+			req := Request{Address: "shuttle://host/codex/thread-1", Text: "wake", MessageID: "ambiguous-wake", Wake: true}
+			receipt, err := Send(context.Background(), env, "host", req)
+			if err == nil || receipt.Status != StatusRejected {
+				t.Fatalf("mismatching peer woke native shadow: %#v %v", receipt, err)
+			}
+			req.Wake, req.MessageID = false, "ambiguous-context"
+			receipt, err = Send(context.Background(), env, "host", req)
+			if err != nil || receipt.Status != StatusQueued || receipt.Transport != "codex-hook" {
+				t.Fatalf("hook context: %#v %v", receipt, err)
+			}
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if len(fake.methods) != 0 {
+				t.Fatalf("mismatching peer received native RPC: %v", fake.methods)
+			}
+		})
 	}
 }
 
