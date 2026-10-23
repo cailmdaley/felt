@@ -210,6 +210,12 @@ defmodule Shuttle.CodexBackend do
       {:error, :enoent} ->
         :ok
 
+      # verify_socket/1 has admitted only Codex's exact rendezvous alias. With
+      # its target gone (a reboot or /tmp pruning clears it) nothing can be
+      # listening, and Codex's own lock reclaims the dangling alias on start.
+      {:ok, %File.Stat{type: :symlink}} when reason == {:transport, :enoent} ->
+        if File.exists?(path), do: {:error, :alias_target_present}, else: :ok
+
       {:ok, _}
       when slot == :dead and reason in [{:transport, :econnrefused}, {:transport, :enoent}] ->
         # The retained owned pane proves death. Codex's native per-endpoint

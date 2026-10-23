@@ -155,6 +155,33 @@ defmodule Shuttle.CodexBackendTest do
     assert [] = starts(runner)
   end
 
+  # Negative control: dropping the dangling-alias clause leaves this waiting,
+  # and a probe failure other than enoent never takes it.
+  test "a genuine alias left dangling by a cleared /tmp starts a fresh server", %{
+    opts: opts,
+    path: path,
+    runner: runner
+  } do
+    :ok = Shuttle.CodexEndpoint.ensure_root(path)
+    uid = Shuttle.Host.euid()
+    tmp = if match?({:ok, _}, File.read_link("/tmp")), do: "/private/tmp", else: "/tmp"
+    literal = tmp <> String.trim_leading(path, "/tmp")
+    hash = :crypto.hash(:sha256, literal) |> Base.encode16(case: :lower)
+    protected = Path.join(tmp, "codex-daemon-#{uid}")
+
+    if File.exists?(Path.join(protected, hash)) == false do
+      File.ln_s!(Path.join(protected, hash), path)
+
+      refused = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :econnrefused}} end)
+      assert %{state: :waiting} = CodexBackend.check(refused)
+      assert [] = starts(runner)
+
+      gone = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :enoent}} end)
+      assert %{state: :starting} = CodexBackend.check(gone)
+      assert [{"tmux", ["new-session" | _]}] = starts(runner)
+    end
+  end
+
   test "hostile precreated root never reaches even the probe", %{
     opts: opts,
     path: path,
