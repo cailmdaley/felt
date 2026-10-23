@@ -144,7 +144,7 @@ func TestStampHandedOff_ConcurrentWithStorageRMW(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < iterations; i++ {
-			if _, err := stampHandedOff(path); err != nil {
+			if _, err := stampHandedOff(path, nil); err != nil {
 				t.Errorf("stampHandedOff: %v", err)
 				return
 			}

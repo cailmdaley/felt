@@ -43,6 +43,9 @@ type FiberStatus struct {
 	NextDueAt string `json:"next_due_at,omitempty"`
 	LastRunAt string `json:"last_run_at,omitempty"`
 	Stale     bool   `json:"stale,omitempty"`
+	// AgentProblem says why the block's agent cannot launch: it names an id
+	// the registry does not know. Empty when the agent resolves.
+	AgentProblem string `json:"agent_problem,omitempty"`
 }
 
 // shuttleEntry is one shuttle-bearing fiber discovered by the in-process walk.
@@ -106,6 +109,7 @@ The daemon's boot quarantine can still hold an eligible fiber until
 
 			live := a.liveTmuxSessions()
 			owners := sessionOwnerMap(entries)
+			reg := a.statusAgentRegistry()
 
 			rows := make([]FiberStatus, 0, len(entries))
 			seenSessions := map[string]bool{}
@@ -116,12 +120,13 @@ The daemon's boot quarantine can still hold an eligible fiber until
 					seenSessions[session] = true
 				}
 				rows = append(rows, FiberStatus{
-					FiberID: entry.FiberID,
-					Kind:    entry.Block.Kind,
-					Agent:   entry.Block.Agent,
-					State:   computeState(entry.Block, entry.Status, running),
-					Running: running,
-					Session: session,
+					FiberID:      entry.FiberID,
+					Kind:         entry.Block.Kind,
+					Agent:        entry.Block.Agent,
+					State:        computeState(entry.Block, entry.Status, running),
+					Running:      running,
+					Session:      session,
+					AgentProblem: agentProblem(reg, entry.Block),
 				})
 			}
 
@@ -222,6 +227,31 @@ func (a *app) psCmd() *cobra.Command {
 	return psCmd
 }
 
+// statusAgentRegistry is the registry status checks blocks against, or nil
+// when it cannot load; status then names the registry's failure once and
+// flags no agent.
+func (a *app) statusAgentRegistry() *shuttle.AgentRegistry {
+	reg, err := shuttle.LoadAgentRegistry(a.env)
+	if err != nil {
+		fmt.Fprintf(a.env.Stderr, "warning: agent registry unavailable, agents unchecked: %v\n", err)
+		return nil
+	}
+	return reg
+}
+
+// agentProblem is why a block's named agent cannot launch, or "" when it
+// names none or one reg knows. The daemon resolves no other name, so a block
+// flagged here fails every dispatch until `shuttle set-agent` fixes it.
+func agentProblem(reg *shuttle.AgentRegistry, block *shuttle.Block) string {
+	if reg == nil || block == nil || block.Agent == "" {
+		return ""
+	}
+	if err := reg.NotAnAgent(block.Agent); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // ---- single-fiber report ---------------------------------------------------
 
 // runStatusOneFiber prints the detailed report for one fiber: the whole block,
@@ -246,6 +276,7 @@ func (a *app) runStatusOneFiber(query string) error {
 	session, running := a.liveWorkerSession(f)
 	column := shuttle.Column(f, block, running, time.Now())
 	until := blockerName(st, block.BlockedOn)
+	problem := agentProblem(a.statusAgentRegistry(), block)
 
 	if a.json {
 		out := map[string]any{
@@ -266,6 +297,9 @@ func (a *app) runStatusOneFiber(query string) error {
 		if block.Agent != "" {
 			out["agent"] = block.Agent
 		}
+		if problem != "" {
+			out["agent_problem"] = problem
+		}
 		if block.ProjectDir != "" {
 			out["project_dir"] = block.ProjectDir
 		}
@@ -284,6 +318,9 @@ func (a *app) runStatusOneFiber(query string) error {
 
 	fmt.Fprintf(a.env.Stdout, "shuttle: fiber %s\n\n", f.ID)
 	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
+	if problem != "" {
+		fmt.Fprintf(a.env.Stdout, "  ! agent:     %s (shuttle set-agent %s <agent>)\n", problem, f.ID)
+	}
 	if block.BlockedOn != "" {
 		fmt.Fprintf(a.env.Stdout, "  until:       %s\n", until)
 	}
@@ -603,8 +640,16 @@ func (a *app) printStatusTable(rows []FiberStatus, showClosed bool) {
 	for _, r := range rows {
 		agent := shuttleNonEmpty(r.Agent, "(default)")
 		next := shuttleNonEmpty(r.NextDueAt, "-")
+		if r.AgentProblem != "" {
+			agent += " !"
+		}
 		fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n",
 			shuttleTruncateID(r.FiberID, 50), r.Kind, r.State, next, agent)
+	}
+	for _, r := range rows {
+		if r.AgentProblem != "" {
+			fmt.Fprintf(a.env.Stdout, "! %s: %s (shuttle set-agent %s <agent>)\n", r.FiberID, r.AgentProblem, r.FiberID)
+		}
 	}
 	a.printHiddenClosedTrailer(hidden)
 }

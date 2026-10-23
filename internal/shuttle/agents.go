@@ -172,6 +172,16 @@ func (r *AgentRegistry) BuiltinsMode() string { return r.builtinsMode }
 // BuiltinCount is the size of the built-in layer before the fold.
 func (r *AgentRegistry) BuiltinCount() int { return r.builtinCount }
 
+// NotAnAgent is the refusal for a name that is neither an agent id nor an
+// alias in r, or nil when r knows it. Every write naming an agent, and the
+// status that flags a block, says it this way.
+func (r *AgentRegistry) NotAnAgent(name string) error {
+	if _, ok := r.Find(name); ok {
+		return nil
+	}
+	return fmt.Errorf("%s is not an agent; `shuttle agents` lists them", name)
+}
+
 // Find returns the agent with the given ID or alias.
 func (r *AgentRegistry) Find(nameOrAlias string) (AgentRecord, bool) {
 	lower := strings.ToLower(nameOrAlias)
@@ -201,7 +211,7 @@ func (r *AgentRegistry) Find(nameOrAlias string) (AgentRecord, bool) {
 func (r *AgentRegistry) Resolve(name, blockEffort string, blockChrome bool) (AgentRecord, Axes, error) {
 	rec, ok := r.Find(name)
 	if !ok {
-		return AgentRecord{}, Axes{}, fmt.Errorf("unknown agent %q (known: %s)", name, strings.Join(r.IDs(), ", "))
+		return AgentRecord{}, Axes{}, r.NotAnAgent(name)
 	}
 
 	// Overlay alias axes beneath block axes (block wins).

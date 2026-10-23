@@ -114,6 +114,7 @@ Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resumi
 
 **Hand off before context runs out.** `## Status` and the constitution give the next worker most of your picture, and a clean handoff beats pushing through auto-compact.
 Use a handoff when context pressure calls for a fresh worker, at a coherent sub-task boundary.
+To pick the successor's agent, `shuttle set-agent <id> <agent>` with a registry id from `shuttle agents`, never a model name; handoff refuses a block naming an agent the registry does not know.
 
 ## Exiting
 

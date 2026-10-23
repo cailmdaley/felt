@@ -137,8 +137,8 @@ func TestResolve_UnknownAgent(t *testing.T) {
 	t.Parallel()
 	reg := loadReg(t)
 	_, _, err := reg.Resolve("nope", "", false)
-	if err == nil || !strings.Contains(err.Error(), "unknown agent") {
-		t.Fatalf("expected unknown-agent error, got: %v", err)
+	if err == nil || err.Error() != "nope is not an agent; `shuttle agents` lists them" {
+		t.Fatalf("expected the not-an-agent refusal, got: %v", err)
 	}
 }
 

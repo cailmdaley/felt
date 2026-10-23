@@ -37,7 +37,7 @@ session running.`,
 			if err != nil {
 				return err
 			}
-			at, err := stampHandedOff(path)
+			at, err := stampHandedOff(path, a.successorAgentKnown)
 			if err != nil {
 				return err
 			}
@@ -143,7 +143,28 @@ func (a *app) canonicalPath(p string) (string, error) {
 // daemon-shelled `mark-runtime` (the dispatch stamp, or a conclude re-arm) can
 // race the same fiber file; without the lock, whichever writes last silently
 // drops the other's field. The lock forces them to serialize instead.
-func stampHandedOff(path string) (string, error) {
+// successorAgentKnown refuses a handoff whose block names an agent the
+// registry does not know: the successor would launch with it, and the daemon
+// cannot resolve it. A registry that cannot load does not hold up the exit.
+func (a *app) successorAgentKnown(f *felt.Felt) error {
+	block, ok, err := shuttle.BlockOf(f)
+	if err != nil || !ok || block.Agent == "" {
+		return nil
+	}
+	reg, err := shuttle.LoadAgentRegistry(a.env)
+	if err != nil {
+		fmt.Fprintf(a.env.Stderr, "warning: agent registry unavailable, %s's agent unchecked: %v\n", f.ID, err)
+		return nil
+	}
+	if err := reg.NotAnAgent(block.Agent); err != nil {
+		return fmt.Errorf("cannot hand off %s: its successor's agent %w; name one with `shuttle set-agent %s <agent>` and hand off again", f.ID, err, f.ID)
+	}
+	return nil
+}
+
+// stampHandedOff stamps handed_off_at once check accepts the fiber as read
+// under its lock; a nil check accepts every fiber.
+func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 	unlock, err := felt.LockFiberFile(path)
 	if err != nil {
 		return "", err
@@ -157,6 +178,11 @@ func stampHandedOff(path string) (string, error) {
 	f, err := felt.Parse(idFromPath(path), content)
 	if err != nil {
 		return "", err
+	}
+	if check != nil {
+		if err := check(f); err != nil {
+			return "", err
+		}
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {

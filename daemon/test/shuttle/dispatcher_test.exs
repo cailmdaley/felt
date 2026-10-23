@@ -156,6 +156,11 @@ defmodule Shuttle.DispatcherTest do
           "resolved" => %{"agent" => @claude_sonnet_resolved}
         }
       },
+      "tests/model-name-agent" => %{
+        status: "active",
+        tags: ["constitution"],
+        shuttle: %{"enabled" => true, "kind" => "oneshot", "agent" => "claude-opus-5-5"}
+      },
       "tests/shuttle-agent-block" => %{
         status: "active",
         tags: ["constitution"],
@@ -1060,6 +1065,12 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ "## Threads"
     assert script =~ "- tests/haiku/live — Working —"
     assert script =~ "- tests/haiku/blinding — To review — Rebuilt."
+  end
+
+  test "a block naming no registry agent is refused with the id and the way to fix it" do
+    assert {:error, reason} = Dispatcher.dispatch("tests/model-name-agent", runner: MockRunner)
+    assert reason =~ ~s(agent "claude-opus-5-5" did not resolve)
+    assert reason =~ "shuttle status tests/model-name-agent"
   end
 
   test "dispatch uses Shuttle's resolved agent (claude-opus) when present" do

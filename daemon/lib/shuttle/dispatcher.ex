@@ -106,7 +106,7 @@ defmodule Shuttle.Dispatcher do
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
-         {:ok, agent} <- resolve_agent(fiber),
+         {:ok, agent} <- resolve_agent(fiber, fiber_id),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
          :ok <-
@@ -837,20 +837,22 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp resolve_agent(fiber) do
+  defp resolve_agent(fiber, fiber_id) do
     # Shuttle resolves name + axes → the effective record and inlines it under
     # shuttle.resolved.agent (`shuttle show -j`). The daemon consumes that
     # finished record and renders it (Agents.build_command); it keeps no
-    # registry. Absent resolved.agent ⇒ Shuttle could not resolve the agent or
-    # `shuttle` is not on PATH — fail the dispatch rather than launch a broken
-    # worker.
+    # registry and maps no other name (a model name, say) to an agent. Absent
+    # resolved.agent ⇒ the block names an id the registry does not know, an
+    # axis it refuses, or `shuttle` is not on PATH — fail the dispatch rather
+    # than launch a broken worker, naming the check that says which.
     case get_in(fiber, ["shuttle", "resolved", "agent"]) do
       resolved when is_map(resolved) ->
         {:ok, Agents.from_resolved(resolved)}
 
       _ ->
         {:error,
-         "no resolved agent in Shuttle JSON for #{inspect(get_in(fiber, ["shuttle", "agent"]))} (shuttle must emit shuttle.resolved.agent)"}
+         "agent #{inspect(get_in(fiber, ["shuttle", "agent"]))} did not resolve; " <>
+           "`shuttle status #{fiber_id}` says why and `shuttle agents` lists the ids"}
     end
   end
 
