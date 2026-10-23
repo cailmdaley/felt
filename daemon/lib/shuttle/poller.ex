@@ -3554,6 +3554,10 @@ defmodule Shuttle.Poller do
         state = %{state | dispatch_failures: Map.delete(state.dispatch_failures, runtime_key)}
         {state, {:error, :already_running}}
 
+      {:error, {:backend_not_ready, message} = reason} ->
+        Logger.debug("Dispatch waiting for #{fiber_id}: #{message}")
+        {record_dispatch_failure(state, fiber, reason), {:error, reason}}
+
       {:error, reason} ->
         Logger.warning("Dispatch failed for #{fiber_id}: #{inspect(reason)}")
         state = record_dispatch_failure(state, fiber, reason)
@@ -3913,6 +3917,17 @@ defmodule Shuttle.Poller do
             fiber_id: slug,
             uid: uid
           }
+      end
+
+    # Dependency readiness is a retryable wait, not a failed launch. It is
+    # deliberately absent from preflight_cooldown_open?/2's refusal list.
+    entry =
+      case reason do
+        {:backend_not_ready, _} ->
+          Map.merge(entry, %{attempts: 0, waiting: true, retryable: true})
+
+        _ ->
+          entry
       end
 
     %{state | dispatch_failures: Map.put(state.dispatch_failures, runtime_key, entry)}

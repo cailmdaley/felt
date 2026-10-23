@@ -138,6 +138,20 @@ defmodule ShuttleWeb.CaptureController do
           {:error, :app_server_unavailable} ->
             app_server_unavailable(conn, %{}, meeting_row)
 
+          {:error, {:backend_not_ready, message}} ->
+            capture_error(
+              conn,
+              503,
+              %{
+                spawned: false,
+                waiting: true,
+                retryable: true,
+                reason: "backend_not_ready",
+                message: message
+              },
+              meeting_row
+            )
+
           {:error, {:invalid_axes, msg}} ->
             capture_error(conn, 422, %{spawned: false, reason: msg}, meeting_row)
 

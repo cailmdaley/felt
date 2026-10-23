@@ -174,6 +174,7 @@ defmodule Shuttle.SessionResume do
   defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts}) do
     result =
       with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
+           :ok <- Shuttle.CodexBackend.require_ready(),
            do: Shuttle.AppWorkers.client().resume_thread(id, opts)
 
     case result do
@@ -182,7 +183,7 @@ defmodule Shuttle.SessionResume do
 
       {:error, reason} ->
         {:error,
-         "Managed Codex resume refused: #{inspect(reason)}. Start codex app-server daemon or configure SHUTTLE_CODEX_SOCKET; no embedded fallback is used."}
+         "Managed Codex resume is waiting: #{inspect(reason)}. Inspect codex_backend in /api/v1/version and restore the recorded endpoint; no embedded fallback is used."}
 
       _ ->
         {:error, "Managed Codex resume returned a different thread"}

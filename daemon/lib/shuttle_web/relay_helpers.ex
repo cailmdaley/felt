@@ -18,9 +18,9 @@ defmodule ShuttleWeb.RelayHelpers do
 
   @doc "Recovery guidance for an unavailable managed Codex App Server."
   def app_server_unavailable_message do
-    "The configured Codex App Server socket on this host is unavailable. " <>
-      "Restore that endpoint, or run `codex app-server daemon start` for the default socket " <>
-      "(SHUTTLE_CODEX_SOCKET selects an explicit endpoint). Both Codex surfaces require it; no embedded fallback is used."
+    "The selected Codex App Server on this host is unavailable. " <>
+      "Shuttle reconciles the dependency without replacing live servers; inspect codex_backend in /api/v1/version. " <>
+      "Restore the recorded endpoint for an existing conversation. Both Codex surfaces wait; no embedded fallback is used."
   end
 
   @doc """

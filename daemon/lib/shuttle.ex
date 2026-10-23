@@ -123,6 +123,7 @@ defmodule Shuttle.Application do
     {:start_interrupt_watcher, Shuttle.InterruptWatcher},
     {:start_log_rotator, Shuttle.LogRotator},
     {:start_remote_control, Shuttle.RemoteControl},
+    {:start_codex_backend, Shuttle.CodexBackend},
     {:start_poller, Shuttle.Poller}
   ]
 

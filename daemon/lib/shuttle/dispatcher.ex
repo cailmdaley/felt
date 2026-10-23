@@ -50,6 +50,7 @@ defmodule Shuttle.Dispatcher do
   """
   defguard refusal?(tag, message)
            when tag in [
+                  :backend_not_ready,
                   :uid_missing,
                   :wrapper_unresolved,
                   :work_dir_missing,
@@ -1090,15 +1091,17 @@ defmodule Shuttle.Dispatcher do
        {:invalid_axes, "Codex workers require an interactive agent; headless is not supported."}}
 
   defp preflight_surface("cli", %{cli: "codex"} = agent, work_dir, runner) do
-    with :ok <- preflight_terminal(agent, work_dir, runner),
-         do: validate_codex_agent(agent)
+    with :ok <- validate_codex_agent(agent),
+         :ok <- Shuttle.CodexBackend.require_ready(),
+         do: preflight_terminal(agent, work_dir, runner)
   end
 
   defp preflight_surface("cli", agent, work_dir, runner),
     do: preflight_terminal(agent, work_dir, runner)
 
-  defp preflight_surface("app", %{cli: "codex", headless: false} = agent, _work_dir, _runner),
-    do: validate_codex_agent(agent)
+  defp preflight_surface("app", %{cli: "codex", headless: false} = agent, _work_dir, _runner) do
+    with :ok <- validate_codex_agent(agent), do: Shuttle.CodexBackend.require_ready()
+  end
 
   defp preflight_surface(_, _, _, _),
     do:

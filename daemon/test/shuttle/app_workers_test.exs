@@ -49,6 +49,7 @@ defmodule Shuttle.AppWorkersTest do
 
     def start_thread(opts) do
       record({:start, opts})
+      if parent = Agent.get(__MODULE__, &Map.get(&1, :notify)), do: send(parent, :thread_started)
 
       {:ok,
        %{
@@ -196,6 +197,60 @@ defmodule Shuttle.AppWorkersTest do
       "kind: oneshot\nagent: codex\nsurface: cli\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
       "active"
     )
+  end
+
+  defmodule Dependency do
+    def status,
+      do: %{
+        state: Shuttle.Env.app(:test_codex_dependency, :starting),
+        error: "initializing",
+        endpoint: "/tmp/fixture.sock"
+      }
+  end
+
+  test "backend readiness waits without conversations or cooldown, then retries on the next poll" do
+    fiber("tests/waiting")
+    Env.put_app_env(:codex_backend, Dependency)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    assert :ok = Poller.release_boot_quarantine(poller)
+    assert {:error, {:backend_not_ready, _}} = Poller.dispatch_fiber(poller, "tests/waiting", [])
+    assert [] = App.calls()
+    assert [] = AppWorkers.active()
+    assert [%{attempts: 0, reason: message}] = Poller.snapshot(poller).blocked
+    assert message =~ "initializing"
+    assert {:error, {:backend_not_ready, _}} = Poller.dispatch_fiber(poller, "tests/waiting", [])
+    assert [] = App.calls()
+    App.set(:notify, self())
+    Env.put_app_env(:test_codex_dependency, :ready)
+    send(poller, :run_poll_cycle)
+    assert_receive :thread_started
+    assert [] = Poller.snapshot(poller).blocked
+    assert [{:start, _}, {:turn, "app-session-1", _, _}] = App.calls()
+  end
+
+  test "capture returns waiting and does not create an unassigned conversation" do
+    Env.put_app_env(:codex_backend, Dependency)
+
+    assert {:error, {:backend_not_ready, _}} =
+             Dispatcher.capture("Discuss",
+               runner: Runner,
+               work_dir: "/tmp",
+               felt_store: Runner.felt_root(),
+               agent: "codex",
+               surface: "app"
+             )
+
+    assert [] = App.calls()
+    assert [] = AppWorkers.active()
   end
 
   test "terminal dispatch owns the same backend and presents only the exact thread" do

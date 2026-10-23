@@ -34,6 +34,18 @@ defmodule ShuttleWeb.DispatchReply do
      )}
   end
 
+  def render(fiber_id, {:error, {:backend_not_ready, message}}) do
+    {503,
+     %{
+       dispatched: false,
+       waiting: true,
+       retryable: true,
+       fiber_id: fiber_id,
+       reason: "backend_not_ready",
+       message: message
+     }}
+  end
+
   def render(fiber_id, {:error, {:app_launch_failed, id, :app_server_unavailable}}),
     do: app_server_unavailable(fiber_id, %{session_uuid: id})
 

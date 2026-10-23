@@ -6,6 +6,8 @@ config :shuttle,
   scoped_env: true,
   start_poller: false,
   start_remote_control: false,
+  start_codex_backend: false,
+  codex_backend: Shuttle.Test.ReadyCodexBackend,
   # Tests boot pollers constantly; quarantining every one would park the very
   # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:
   # true` to Poller.start_link explicitly.
