@@ -58,10 +58,16 @@ defmodule Shuttle.CodexApp do
       |> maybe_put("effort", opts[:effort])
 
     with_rpc("turn/start", params, fn
-      %{"turn" => turn} when is_map(turn) -> {:ok, turn}
+      %{"turn" => turn} -> validate_started_turn(turn)
       _ -> {:error, {:transport, :malformed_turn_response}}
     end)
   end
+
+  def validate_started_turn(%{"id" => id, "status" => status} = turn)
+      when is_binary(id) and byte_size(id) > 0 and status in ["inProgress", "completed"],
+      do: {:ok, turn}
+
+  def validate_started_turn(_), do: {:error, {:transport, :unconfirmed_turn_start}}
 
   def interrupt(id, turn_id) when is_binary(id) and is_binary(turn_id) do
     with_rpc("turn/interrupt", %{"threadId" => id, "turnId" => turn_id}, fn _ -> :ok end)

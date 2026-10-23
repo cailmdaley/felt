@@ -453,6 +453,48 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  test "turn start acknowledges only a nonempty identity with running or completed status" do
+    invalid = [
+      nil,
+      %{},
+      %{"id" => "turn-1"},
+      %{"id" => "", "status" => "inProgress"},
+      %{"id" => "turn-1", "status" => "failed"},
+      %{"id" => "turn-1", "status" => "interrupted"}
+    ]
+
+    valid = [
+      %{"id" => "running-turn", "status" => "inProgress"},
+      %{"id" => "completed-turn", "status" => "completed"}
+    ]
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        for turn <- invalid ++ valid do
+          assert %{
+                   "id" => request_id,
+                   "method" => "turn/start",
+                   "params" => %{"threadId" => "thread-1"}
+                 } = recv_json(socket)
+
+          send_result(socket, request_id, %{"turn" => turn})
+        end
+      end)
+
+    configure_adapter(path)
+
+    for _ <- invalid do
+      assert {:error, {:transport, :unconfirmed_turn_start}} =
+               CodexApp.start_turn("thread-1", "hello")
+    end
+
+    for turn <- valid do
+      assert {:ok, ^turn} = CodexApp.start_turn("thread-1", "hello")
+    end
+
+    await_peer(peer)
+  end
+
   test "adapter keeps state errors unknown and distinguishes idle from unresolved active turns" do
     {path, peer} =
       initialized_peer(fn socket ->

@@ -30,7 +30,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     def start_turn(id, prompt, opts) do
       send(self(), {:codex_turn, id, prompt, opts})
-      {:ok, %{"id" => "managed-turn"}}
+      {:ok, %{"id" => "managed-turn", "status" => "inProgress"}}
     end
 
     def name_thread(_id, _name), do: :ok

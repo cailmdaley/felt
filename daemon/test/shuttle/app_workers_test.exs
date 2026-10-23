@@ -21,7 +21,14 @@ defmodule Shuttle.AppWorkersTest do
 
     def start_link(_),
       do:
-        Agent.start_link(fn -> %{calls: [], result: {:ok, %{"id" => "turn-1"}}, state: :idle} end,
+        Agent.start_link(
+          fn ->
+            %{
+              calls: [],
+              result: {:ok, %{"id" => "turn-1", "status" => "inProgress"}},
+              state: :idle
+            }
+          end,
           name: __MODULE__
         )
 
@@ -273,6 +280,59 @@ defmodule Shuttle.AppWorkersTest do
     refute Enum.any?(Runner.commands(), fn {cmd, args} ->
              cmd == "tmux" and "new-session" in args
            end)
+  end
+
+  test "unconfirmed initial-turn acknowledgments retain the exact identity and pending prompt" do
+    terminal_fiber("tests/terminal")
+
+    for turn <- [
+          nil,
+          %{},
+          %{"id" => "turn-1"},
+          %{"id" => "", "status" => "inProgress"},
+          %{"id" => 1, "status" => "completed"},
+          %{"id" => "turn-1", "status" => "failed"},
+          %{"id" => "turn-1", "status" => "interrupted"},
+          %{"id" => "turn-1", "status" => "unknown"}
+        ] do
+      App.set(:result, {:ok, turn})
+
+      assert {:error,
+              {:app_launch_failed, "app-session-1", {:transport, :unconfirmed_turn_start}}} =
+               dispatch("tests/terminal", resume_mode: "fresh")
+
+      assert {:ok, %{"active" => true, "launch_state" => "blocked", "pending_prompt" => prompt}} =
+               AppWorkers.get("app-session-1")
+
+      assert prompt =~ "Fiber: tests/terminal"
+
+      assert {:error, :initial_turn_unconfirmed} =
+               Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+      assert {:error, :already_running} = dispatch("tests/terminal")
+      # Explicit test cleanup permits the next independent launch case.
+      assert :ok = AppWorkers.deactivate("app-session-1")
+    end
+
+    assert 8 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert 8 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+
+    refute Enum.any?(Runner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end)
+  end
+
+  test "an already completed initial-turn acknowledgment permits the exact terminal viewer" do
+    terminal_fiber("tests/terminal")
+    App.set(:result, {:ok, %{"id" => "completed-turn", "status" => "completed"}})
+    assert {:ok, "codex-app:app-session-1"} = dispatch("tests/terminal")
+
+    assert {:ok,
+            %{"launch_state" => "running", "pending_prompt" => nil, "turn_id" => "completed-turn"}} =
+             AppWorkers.get("app-session-1")
+
+    assert {:ok, %{created: false}} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
   end
 
   test "terminal preflight runs before any conversation mutation" do

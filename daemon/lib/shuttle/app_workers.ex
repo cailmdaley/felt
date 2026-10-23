@@ -92,7 +92,11 @@ defmodule Shuttle.AppWorkers do
 
   def start_turn(id, prompt, opts) do
     with :ok <- update(id, %{"launch_state" => "starting", "pending_prompt" => prompt}) do
-      case client().start_turn(id, prompt, opts) do
+      result =
+        with {:ok, turn} <- client().start_turn(id, prompt, opts),
+             do: Shuttle.CodexApp.validate_started_turn(turn)
+
+      case result do
         {:ok, turn} = result ->
           :ok =
             update(id, %{
