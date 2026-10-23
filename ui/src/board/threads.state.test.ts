@@ -61,8 +61,11 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       // The rail has no Roles group: a seat rests with Resting.
       expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })
-      // The waiting thread is a sub-entry; the opened tree draws every thread.
+      // The waiting thread is a sub-entry.
       expect(labels(host, '.kbn-thread-subentries')).toEqual({ [asking.name]: 'Waiting' })
+      // Opened, the tree draws the live work; each quiet state unfolds from its own line.
+      let fold: HTMLButtonElement | null
+      while ((fold = host.querySelector<HTMLButtonElement>('.kbn-thread-fold[aria-expanded="false"]'))) fold.click()
       expect(labels(host, '.kbn-thread-peek')).toEqual(want)
       expect(host.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
     } finally { vi.unstubAllGlobals() }

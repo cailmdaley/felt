@@ -4,7 +4,7 @@ import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { THREAD_LABEL, ThreadIndex } from './threads.js'
 import { LastReplies } from './threadReply.js'
 import { response } from './testFixtures.js'
-import { badgeWords, installThreadPeek, PEEK_ROWS, THREAD_PIN, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
+import { badgeWords, installThreadPeek, THREAD_PIN, TREE_LINES_IN_VIEW, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
 import { saveWaitingThreadEntries, waitingThreadEntries } from './threadPreferences.js'
 afterEach(() => { document.body.replaceChildren(); saveWaitingThreadEntries(false); vi.useRealTimers() })
@@ -113,8 +113,8 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   host.querySelector<HTMLButtonElement>('.kbn-thread-more')!.click()
   expect(open).toHaveBeenCalledWith(root)
   const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
-  expect(peek.querySelectorAll('.kbn-thread-row[data-thread-state="to-review"]')).toHaveLength(PEEK_ROWS)
-  expect([...peek.querySelectorAll('.kbn-thread-more')].map(b => b.textContent)).toEqual([`+ ${16 - PEEK_ROWS} more`])
+  expect(peek.querySelectorAll('.kbn-thread-row[data-thread-state="to-review"]')).toHaveLength(16)
+  expect([...peek.querySelectorAll('.kbn-thread-more')].map(b => b.textContent)).toEqual(['all 20 threads →'])
 })
 it('draws a lone extra waiting thread rather than folding it into "+ 1 more"', () => {
   saveWaitingThreadEntries(true)
@@ -154,7 +154,7 @@ describe('role seats', () => {
   })
 })
 describe('a large family stays a peek, not a column', () => {
-  it('caps each group at a few rows, folding the rest into "+ N more" that opens the root', () => {
+  it('draws its live work in a scrolling box, and offers every thread through the constitution', () => {
     saveWaitingThreadEntries(false)
     const root = card({ id: 'hub', status: 'active' }), open = vi.fn()
     const threads = Array.from({ length: 48 }, (_, n) => card({ id: `hub/t${n}`, orchestrator: 'hub', status: n % 2 ? 'closed' : 'active',
@@ -163,11 +163,51 @@ describe('a large family stays a peek, not a column', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), open)
     const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
     expect(peek.querySelectorAll('h4')).toHaveLength(0)
-    expect(peek.querySelectorAll('.kbn-thread-row')).toHaveLength(3 * PEEK_ROWS)
-    const more = [...peek.querySelectorAll<HTMLButtonElement>('.kbn-thread-more')]
-    expect(more.map(b => b.textContent)).toEqual([`+ ${12 - PEEK_ROWS} more`, `+ ${24 - PEEK_ROWS} more`, `+ ${12 - PEEK_ROWS} more`])
-    more[1].click()
+    expect(peek.querySelectorAll('.kbn-thread-tree-body .kbn-thread-row')).toHaveLength(48)
+    const all = peek.querySelector<HTMLButtonElement>('.kbn-thread-tree-foot .kbn-thread-all')!
+    expect(all.textContent).toBe('all 48 threads →')
+    all.click()
     expect(open).toHaveBeenCalledWith(root)
+  })
+  it('says nothing of all threads while the tree shows every one at a glance', () => {
+    const root = card({ id: 'hub' })
+    const threads = Array.from({ length: TREE_LINES_IN_VIEW }, (_, n) => card({ id: `hub/t${n}`, orchestrator: 'hub', status: 'active' }))
+    const host = document.createElement('div')
+    installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), vi.fn())
+    expect(host.querySelector('.kbn-thread-all')).toBeNull()
+    expect(host.querySelector<HTMLElement>('.kbn-thread-tree-foot')!.hidden).toBe(true)
+  })
+})
+describe('an opened family focuses on live work', () => {
+  const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
+  const root = card({ id: 'root' })
+  const work = card({ id: 'root/work', name: 'busy', orchestrator: 'root', status: 'active' })
+  const plan = card({ id: 'root/plan', name: 'a plan', orchestrator: 'root' })
+  // A draft that holds a waiting thread stays drawn, as its ancestor.
+  const holder = card({ id: 'root/holder', name: 'holder', orchestrator: 'root' })
+  const asking = card({ id: 'root/holder/ask', name: 'asking', orchestrator: 'root/holder', status: 'active', ask })
+  const asleep = [1, 2].map(n => card({ id: `root/rest${n}`, name: `asleep ${n}`, orchestrator: 'root', status: 'open', effectiveHorizon: 'stashed' }))
+  const index = new ThreadIndex([root, work, plan, holder, asking, ...asleep])
+  const names = (host: Element) => [...host.querySelectorAll('.kbn-thread-peek .kbn-thread-name')].map(n => n.textContent)
+  it('draws waiting, working and review threads with their ancestors; drafts and resting fold behind a line each that unfolds in place', () => {
+    saveWaitingThreadEntries(false)
+    const families = new ThreadFamilies()
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, index, vi.fn(), families)
+    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
+    expect(names(host)).toEqual(['busy', 'holder', 'asking'])
+    const folds = () => [...host.querySelectorAll<HTMLButtonElement>('.kbn-thread-fold')]
+    expect(folds().map(f => [f.textContent, f.getAttribute('aria-expanded')])).toEqual([['· 2 drafts', 'false'], ['· 2 resting', 'false']])
+    folds()[0].click()
+    expect(names(host)).toEqual(['busy', 'a plan', 'holder', 'asking'])
+    expect(document.activeElement).toBe(folds()[0])
+    expect(folds()[0].getAttribute('aria-expanded')).toBe('true')
+    // The unfolding holds through a repaint, which rebuilds the card.
+    const again = document.createElement('div'); document.body.append(again)
+    installThreadPeek(again, again, root, index, vi.fn(), families)
+    expect(names(again)).toEqual(['busy', 'a plan', 'holder', 'asking'])
+    folds()[0].click()
+    expect(names(host)).toEqual(['busy', 'holder', 'asking'])
   })
 })
 describe('a mouse on a family', () => {

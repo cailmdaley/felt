@@ -2,6 +2,7 @@ import type { KanbanCard } from './KanbanTypes.js'
 import { THREAD_LABEL, threadKey, type ThreadIndex, type ThreadState } from './threads.js'
 import { waitingThreadEntries } from './threadPreferences.js'
 import { LastReplies, ThreadWhisper } from './threadReply.js'
+import { untilOf } from './blockedOn.js'
 import { turnOf } from './turn.js'
 import './threads.css'
 
@@ -67,8 +68,13 @@ export function threadMark(card: KanbanCard): HTMLElement | null {
   return mark
 }
 
-/** Lines one state draws among a set of siblings before the rest fold into "+ N more", which opens the root and its rail. */
-export const PEEK_ROWS = 5
+/** The states an opened family draws by default: the live work. The others fold behind one quiet line each, in the order given. */
+const FOLDED_STATES = ['drafts', 'roles', 'resting'] as const satisfies readonly ThreadState[]
+type FoldedState = typeof FOLDED_STATES[number]
+const FOLD_WORDS: Record<FoldedState, [string, string]> = { drafts: ['draft', 'drafts'], roles: ['role', 'roles'], resting: ['resting', 'resting'] }
+const isFolded = (state: ThreadState): state is FoldedState => (FOLDED_STATES as readonly ThreadState[]).includes(state)
+/** Lines an opened tree draws before it says "all N threads →": past this it scrolls inside its cap. */
+export const TREE_LINES_IN_VIEW = 12
 /** Waiting threads drawn as sub-entries before the rest fold into "+ N more"; pinned threads are never folded. */
 export const ENTRY_WAITING_ROWS = 2
 
@@ -123,9 +129,10 @@ export function treeLine(card: KanbanCard, index: ThreadIndex, open: (card: Kanb
   row.addEventListener('click', event => { event.stopPropagation(); whisper?.hide(); open(card) })
   row.addEventListener('pointerdown', event => { pressedAt = Date.now(); event.stopPropagation() })
   if (whisper) {
-    row.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') whisper.show(row, card, state, 260) })
+    const until = untilOf(card, index)
+    row.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') whisper.show(row, card, state, 260, until) })
     row.addEventListener('pointerleave', () => whisper.hide(row))
-    row.addEventListener('focus', () => { if (Date.now() - pressedAt > 600) whisper.show(row, card, state, 0) })
+    row.addEventListener('focus', () => { if (Date.now() - pressedAt > 600) whisper.show(row, card, state, 0, until) })
     row.addEventListener('blur', () => whisper.hide(row))
   }
   const pinned = isPinned(card)
@@ -161,6 +168,7 @@ function moreLine(count: number, focus: string, cells: readonly TreeGuide[], kin
  */
 export class ThreadFamilies {
   private readonly open = new Set<string>()
+  private readonly unfolded = new Set<string>()
   readonly whisper: ThreadWhisper
   constructor(replies?: LastReplies) { this.whisper = new ThreadWhisper(replies) }
   isOpen(card: KanbanCard): boolean { return this.open.has(threadKey(card)) }
@@ -168,15 +176,24 @@ export class ThreadFamilies {
     if (open) this.open.add(threadKey(card))
     else this.open.delete(threadKey(card))
   }
+  /** Whether a family's quiet threads of `state` are unfolded into its tree. */
+  isUnfolded(card: KanbanCard, state: ThreadState): boolean { return this.unfolded.has(JSON.stringify([threadKey(card), state])) }
+  setUnfolded(card: KanbanCard, state: ThreadState, unfolded: boolean): void {
+    const key = JSON.stringify([threadKey(card), state])
+    if (unfolded) this.unfolded.add(key)
+    else this.unfolded.delete(key)
+  }
 }
 
 /**
  * The badge, and the family drawn as a tree under the card. At rest the
  * tree is pruned to its sub-entries (pinned threads, then the first waiting
- * ones), each a stub off the card; opened, it is the whole subtree, one line
- * a thread, siblings ordered by state. Archived threads are not drawn: their
- * live descendants hang from the nearest live ancestor, and a count closes
- * the tree.
+ * ones), each a stub off the card. Opened, it draws the live work (waiting,
+ * working, to review) with the ancestors that hold it, siblings ordered by
+ * state, in a capped box that scrolls; drafts and resting threads fold behind
+ * one quiet line each beneath it and unfold in place. Archived threads are not
+ * drawn: their live descendants hang from the nearest live ancestor, and a
+ * count closes the tree.
  */
 export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, families = new ThreadFamilies()): void {
   // Archived threads alone draw nothing here; the rail keeps them.
@@ -197,6 +214,9 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   badge.setAttribute('aria-label', badge.title)
   const peek = document.createElement('div'); peek.className = 'kbn-thread-peek kbn-thread-tree'; peek.hidden = true
   peek.setAttribute('role', 'group'); peek.setAttribute('aria-label', `Threads of ${card.name}`)
+  const body = document.createElement('div'); body.className = 'kbn-thread-tree-body'
+  const foot = document.createElement('div'); foot.className = 'kbn-thread-tree-foot'
+  peek.append(body, foot)
 
   let entries: HTMLElement | undefined
   const paint = (expanded: boolean): void => {
@@ -220,30 +240,62 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   // The live threads under `parent`, an archived thread's own drawn in its place.
   const liveChildren = (parent: KanbanCard): KanbanCard[] =>
     index.children(parent).flatMap(child => isLive(child) ? [child] : liveChildren(child)).sort(index.compare)
-  const grow = (parent: KanbanCard, above: readonly TreeGuide[]): void => {
-    // Each state's run of siblings draws PEEK_ROWS lines; a fold stands for two or more, never for one line it could have drawn.
-    const runs = new Map<ThreadState, KanbanCard[]>()
-    for (const child of liveChildren(parent)) runs.set(index.state(child), [...runs.get(index.state(child)) ?? [], child])
-    const lines: Array<KanbanCard | { count: number; state: ThreadState }> = []
-    for (const [state, run] of runs) {
-      if (run.length <= PEEK_ROWS + 1) lines.push(...run)
-      else lines.push(...run.slice(0, PEEK_ROWS), { count: run.length - PEEK_ROWS, state })
+  const folded = new Map<FoldedState, number>()
+  for (const c of live) { const state = index.state(c); if (isFolded(state)) folded.set(state, (folded.get(state) ?? 0) + 1) }
+  // A thread is drawn when its state is live work or unfolded, or when it holds a thread that is drawn.
+  const drawn = new Map<KanbanCard, boolean>()
+  const isDrawn = (c: KanbanCard): boolean => {
+    let shown = drawn.get(c)
+    if (shown === undefined) {
+      const state = index.state(c)
+      shown = !isFolded(state) || families.isUnfolded(card, state)
+      shown = liveChildren(c).map(isDrawn).some(Boolean) || shown
+      drawn.set(c, shown)
     }
+    return shown
+  }
+  let lineCount = 0
+  const grow = (parent: KanbanCard, above: readonly TreeGuide[]): void => {
+    const lines = liveChildren(parent).filter(isDrawn)
     lines.forEach((line, n) => {
       const last = n === lines.length - 1
-      const cells = [...above, last ? 'elbow' : 'tee'] as const
-      if ('count' in line) {
-        peek.append(moreLine(line.count, focusId('peek-more', threadKey(parent), line.state), cells, line.state,
-          `${line.count} more ${THREAD_LABEL[line.state].toLowerCase()} — open ${card.name} for every thread`, () => open(card)))
-        return
-      }
-      peek.append(treeLine(line, index, open, focusId('thread', threadKey(line)), cells, whisper))
+      body.append(treeLine(line, index, open, focusId('thread', threadKey(line)), [...above, last ? 'elbow' : 'tee'], whisper))
+      lineCount++
       grow(line, [...above, last ? 'gap' : 'pipe'])
     })
   }
-  grow(card, [])
-  const archived = descendants.length - live.length
-  if (archived) { const note = document.createElement('small'); note.className = 'kbn-tree-archived'; note.textContent = `${archived} archived`; peek.append(note) }
+  const draw = (): void => {
+    drawn.clear(); lineCount = 0; body.replaceChildren(); foot.replaceChildren()
+    grow(card, [])
+    for (const [state, count] of folded) {
+      const unfolded = families.isUnfolded(card, state)
+      const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'kbn-thread-more kbn-thread-fold'
+      fold.dataset.threadFocus = focusId('fold', state)
+      fold.setAttribute('aria-expanded', String(unfolded))
+      fold.textContent = `· ${count} ${FOLD_WORDS[state][count === 1 ? 0 : 1]}`
+      fold.title = `${unfolded ? 'Fold' : 'Show'} the ${FOLD_WORDS[state][1]} threads in the tree`
+      fold.addEventListener('click', event => {
+        event.stopPropagation()
+        families.setUnfolded(card, state, !unfolded)
+        whisper.hide(); draw()
+        restoreThreadFocus(peek, fold.dataset.threadFocus)
+      })
+      foot.append(fold)
+    }
+    const archived = descendants.length - live.length
+    if (archived) { const note = document.createElement('small'); note.className = 'kbn-tree-archived'; note.textContent = `· ${archived} archived`; foot.append(note) }
+    // The whole family lives in the constitution's own view; the Desk says so once the tree no longer shows it at a glance.
+    if (lineCount < live.length || lineCount > TREE_LINES_IN_VIEW) {
+      const all = document.createElement('button'); all.type = 'button'; all.className = 'kbn-thread-more kbn-thread-all'
+      all.dataset.threadFocus = focusId('all')
+      all.textContent = `all ${live.length} threads →`
+      all.title = `Open ${card.name} with every thread`
+      all.addEventListener('click', event => { event.stopPropagation(); whisper.hide(); open(card) })
+      foot.append(all)
+    }
+    foot.hidden = !foot.childElementCount
+  }
+  draw()
   badgeHost.append(badge); host.append(peek)
 
   // Sub-entries: the tree pruned to what must stay in sight, each a stub off the card.
