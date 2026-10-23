@@ -182,11 +182,12 @@
   padding: 0 var(--ws-sidebar-overflow) var(--ws-sidebar-bottom) 0;
   scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent;
 }
+/* Rows are plain type on the column's ground; only the open one is set off. */
 .ws-sidebar .ws-constitution-card {
-  width: 100%; margin-bottom: var(--ws-sidebar-card-gap); padding: var(--ws-inset); gap: var(--ws-small-gap);
-  background: var(--ws-paper); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius);
-  box-shadow: var(--ws-shadow-low), var(--ws-paper-light); color: var(--ws-ink-soft); cursor: pointer;
-  font-family: var(--ws-serif); transition: transform var(--ws-crossing) var(--ws-ease);
+  width: 100%; margin-bottom: 1px; padding: var(--ws-inset); gap: var(--ws-small-gap);
+  background: transparent; border: 0; border-radius: var(--ws-control-radius);
+  box-shadow: none; color: var(--ws-ink-soft); cursor: pointer;
+  font-family: var(--ws-serif); transition: background-color var(--ws-crossing) var(--ws-ease);
 }
 .ws-sidebar .ws-constitution-card .kbn-card-id { display: none; }
 .ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-prose-size)/1.2 var(--ws-serif); }
@@ -209,13 +210,9 @@
 .ws-sidebar .ws-constitution-row .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-sidebar .ws-constitution-row :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
 .ws-sidebar .ws-constitution-row .ws-worker-dot { position: static; translate: none; }
-.ws-sidebar .ws-constitution-card:hover { background: var(--ws-paper); border-color: var(--ws-ink-faint); transform: translateY(var(--ws-sidebar-lift)); }
-@media (prefers-reduced-motion: reduce) { .ws-sidebar .ws-constitution-card:hover:not([aria-current='true']) { transform: none; } }
-.ws-sidebar .ws-constitution-card[aria-current='true'] {
-  background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink);
-  transform: translate(var(--ws-sidebar-pull), var(--ws-sidebar-lift));
-  box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light);
-}
+.ws-sidebar .ws-constitution-card:hover { background: var(--ws-hover); }
+.ws-sidebar .ws-constitution-card[aria-current='true'] { background: var(--ws-fill); color: var(--ws-ink); }
+.ws-sidebar .ws-constitution-card[aria-current='true'] .kbn-card-name { font-weight: 600; }
 /* Each group's caption holds the top of the list while its cards pass beneath,
    and a card scrolled into view keeps clear of it, so a landing shows both.
    Its ground and the fade below it show only while it is stuck, where the
@@ -240,7 +237,7 @@
 .ws-sidebar-source, .ws-sidebar .ws-card-travelling { opacity: 0 !important; }
 .ws-sidebar.ws-sidebar-flight { display: block; position: fixed; inset: 0; width: auto; padding: 0; pointer-events: none; z-index: calc(var(--ws-reader-layer) + 1); }
 .ws-sidebar-flight .ws-constitution-card { overflow: hidden; pointer-events: none; transition: none; }
-.ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); border-color: var(--ws-ink); box-shadow: var(--ws-shadow-contact), var(--ws-shadow-mid), var(--ws-paper-light); }
+.ws-sidebar-flight .ws-flight-current { background: var(--ws-fill); color: var(--ws-ink); }
 /* The column has its own ground: the reader's paper ground, held over the veil so
    the blurred Desk stops at its edge, and one hairline where it meets the stage.
    The current card still reaches across that line toward the page. */

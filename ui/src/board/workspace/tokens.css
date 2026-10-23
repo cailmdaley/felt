@@ -138,10 +138,7 @@
   --ws-sidebar-time: 220ms;
   --ws-sidebar-ease: cubic-bezier(0.2, 0, 0, 1);
   --ws-sidebar-overflow: 32px;
-  --ws-sidebar-pull: 18px;
-  --ws-sidebar-lift: -2px;
   --ws-sidebar-bottom: 40px;
-  --ws-sidebar-card-gap: 12px;
   /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
   --ws-meta-row: 19px;
   --ws-sidebar-glyph-size: 15px;

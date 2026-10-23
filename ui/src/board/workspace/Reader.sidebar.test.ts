@@ -5,7 +5,7 @@ import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { claudeOpening, saveClaudeOpening } from '../conversationOpening.js'
 import { terminalWorkerPill } from '../appConversation.js'
-import { Reader, SIDEBAR_MEDIA, type ReaderOptions } from './Reader.js'
+import { Reader, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { buildChannel, type Channel, type DocKey } from './documents.js'
 
@@ -23,7 +23,7 @@ const channel = (card: KanbanCard): Channel => ({
   body: '',
 })
 
-let viewport: { wide: boolean; phone: boolean }
+let viewport: { phone: boolean }
 let storage: Map<string, string>
 let reduced: boolean
 const scrollCurrent = vi.fn()
@@ -64,7 +64,7 @@ function rowNames(reader: Reader): string[] {
 }
 
 beforeEach(() => {
-  viewport = { wide: false, phone: false }
+  viewport = { phone: false }
   reduced = false
   scrollCurrent.mockClear()
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollCurrent })
@@ -79,7 +79,7 @@ beforeEach(() => {
     clear: () => storage.clear(),
   })
   vi.stubGlobal('matchMedia', (query: string) => ({
-    matches: query === SIDEBAR_MEDIA ? viewport.wide : query === MOBILE_MEDIA ? viewport.phone : query === '(prefers-reduced-motion: reduce)' ? reduced : false,
+    matches: query === MOBILE_MEDIA ? viewport.phone : query === '(prefers-reduced-motion: reduce)' ? reduced : false,
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   }))
@@ -289,26 +289,25 @@ describe('Reader channel sidebar', () => {
     }
   })
 
-  it('defaults open at wide widths and closed at narrow widths, with a labelled Constitutions lead control', () => {
+  it('defaults closed until the viewer opens it, with a labelled Constitutions lead control', () => {
     storage.clear()
-    viewport.wide = true
-    const wide = makeReader()
-    const wideToggle = wide.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    expect(wide.el.classList.contains('ws-with-sidebar')).toBe(true)
-    expect(wideToggle.textContent).toBe('')
-    expect(wideToggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-    expect(wideToggle.title).toBe('Constitutions · s')
-    expect(wideToggle.getAttribute('aria-expanded')).toBe('true')
-    disposeReader(wide)
+    const fresh = makeReader()
+    const toggle = fresh.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
+    expect(fresh.el.classList.contains('ws-with-sidebar')).toBe(false)
+    expect(toggle.textContent).toBe('')
+    expect(toggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(toggle.title).toBe('Constitutions · s')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    toggle.click()
+    expect(storage.get('shuttle:workspace:sidebar')).toBe('true')
+    disposeReader(fresh)
 
-    viewport.wide = false
-    const narrow = makeReader()
-    expect(narrow.el.classList.contains('ws-with-sidebar')).toBe(false)
-    expect(narrow.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('false')
+    const remembered = makeReader()
+    expect(remembered.el.classList.contains('ws-with-sidebar')).toBe(true)
+    expect(remembered.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('true')
   })
 
   it('toggles by click and Cmd+\\, persists the choice, and applies stored choices at any desktop width', () => {
-    viewport.wide = true
     const reader = makeReader()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     toggle.click()
@@ -326,7 +325,6 @@ describe('Reader channel sidebar', () => {
     disposeReader(storedFalse)
 
     storage.set('shuttle:workspace:sidebar', 'true')
-    viewport.wide = false
     const storedTrue = makeReader()
     expect(storedTrue.el.classList.contains('ws-with-sidebar')).toBe(true)
   })
@@ -362,7 +360,6 @@ describe('Reader channel sidebar', () => {
   })
 
   it('never shows the sidebar on a phone, even when it is stored open', () => {
-    viewport.wide = true
     viewport.phone = true
     storage.set('shuttle:workspace:sidebar', 'true')
     const reader = makeReader()
@@ -402,7 +399,6 @@ describe('Reader channel sidebar', () => {
   })
 
   it('focuses the sidebar find from the title when open and opens a switcher when closed', () => {
-    viewport.wide = true
     const open = makeReader()
     open.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     open.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
@@ -411,7 +407,6 @@ describe('Reader channel sidebar', () => {
     disposeReader(open)
 
     storage.set('shuttle:workspace:sidebar', 'false')
-    viewport.wide = false
     const closed = makeReader()
     closed.el.querySelector<HTMLButtonElement>('.ws-channel-title')!.click()
     const switcher = closed.el.querySelector<HTMLElement>('.ws-switcher')!
@@ -421,7 +416,6 @@ describe('Reader channel sidebar', () => {
   })
 
   it('lists channels in overview order, marks the current channel, filters, and opens the chosen card', () => {
-    viewport.wide = true
     const reader = makeReader(beta)
     reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     const rows = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-channel-row')]
@@ -451,7 +445,6 @@ describe('Reader channel sidebar', () => {
   })
 
   it('refreshes sidebar rows without clearing the find text', () => {
-    viewport.wide = true
     const reader = makeReader()
     reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar .ws-channel-find')!

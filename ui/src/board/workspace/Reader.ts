@@ -85,8 +85,6 @@ function button(cls: string, text: string, action: () => void, label = text): HT
   return b
 }
 
-/** The viewport at which the desktop sidebar defaults open. */
-export const SIDEBAR_MEDIA = '(min-width: 1280px)'
 const SIDEBAR_STORAGE = 'shuttle:workspace:sidebar'
 const SIDEBAR_WIDTH_STORAGE = 'shuttle:workspace:sidebar-width'
 /** The viewer's threads-rail choice; absent, the rail shows wherever it has threads. */
@@ -182,7 +180,6 @@ export class Reader {
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
   private sidebarWidthChoice: number | null = null
-  private readonly wide = window.matchMedia(SIDEBAR_MEDIA)
   private liveWidth: number | null = null
   private cancelResize: (() => void) | null = null
   private cancelSidebarSlide: (() => void) | null = null
@@ -323,7 +320,6 @@ export class Reader {
     document.addEventListener('pointerdown', this.pointerInput, true)
     this.motion.addEventListener('change', this.relayout)
     this.phone.addEventListener('change', this.relayout)
-    this.wide.addEventListener('change', this.relayout)
     this.el.addEventListener('workspace-theme-change', this.themeChanged)
     this.el.addEventListener('mousedown', e => {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
@@ -904,8 +900,9 @@ export class Reader {
     if (this.active && this.sidebarShown) this.fillSidebar()
     if (this.active && this.picker.isOpen) this.picker.refresh()
   }
+  /** The sidebar opens only when this viewer has asked for it; the chat has the room by default. */
   private get sidebarShown(): boolean {
-    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? this.wide.matches)
+    return !this.phone.matches && !this.expanded && (this.sidebarChoice ?? false)
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column
@@ -1236,7 +1233,6 @@ export class Reader {
     cancelAnimationFrame(this.instantRaf)
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
-    this.wide.removeEventListener('change', this.relayout)
     this.stopTitles()
     this.tabs.dispose()
     this.picker.dispose()
