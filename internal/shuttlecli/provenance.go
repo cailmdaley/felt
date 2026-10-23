@@ -1,10 +1,9 @@
 package shuttlecli
 
-// Session provenance is intentionally a small client-side composition of the
-// daemon's ledgers and file surface. The daemon owns session identity and host
-// routing; felt only filters the composite ledger and, for a remote transcript,
-// copies the exact bytes into a managed local cache. Reading/searching the file
-// remains the harness skill's job (jq, rg, tail, ...), not another felt DSL.
+// Session provenance is a client-side composition of the daemon's ledgers and
+// transcript file surface. The daemon owns session identity and host routing;
+// felt filters the composite ledger and materializes remote transcript bytes.
+// Transcript search uses a separate local, rebuildable index over native JSONL.
 
 import (
 	"crypto/sha256"
@@ -562,7 +561,8 @@ fleet. Use --host or --harness to filter, and pass a returned address to
 With a fiber or session argument, reads Shuttle's composite session ledger and reports the sessions that
 belong to a fiber UID, including historical fiber paths, host, harness, and explicit transcript
 availability. It does not read or search transcript content; use the native
-harness jq/rg recipes on the path returned by 'shuttle transcript'.
+harness jq/rg recipes on the path returned by 'shuttle transcript'; use
+shuttle transcript search for cross-session local full-text search.
 
 Reverse lookup: pass a session UUID instead of a fiber, or --commit <sha>, to
 resolve the owning fiber and its disposition from the ledgers, then list that
@@ -876,7 +876,8 @@ func (a *app) shuttleTranscriptCmd() *cobra.Command {
 		Long: `Resolves a complete native transcript by session ID. When the transcript
 is on this host, prints its original native path. When it is remote, streams the
 exact bytes through Shuttle's native transcript surface into the managed
-felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it.`,
+felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it, or
+shuttle transcript search to search across indexed local transcripts.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !sessionUUIDPattern.MatchString(args[0]) {
@@ -921,6 +922,7 @@ felt cache and prints that ordinary local path. Use jq/rg/tail to inspect it.`,
 			}
 		},
 	}
+	shuttleTranscriptCmd.AddCommand(a.transcriptSearchCmd(), a.transcriptIndexCmd())
 	return shuttleTranscriptCmd
 }
 

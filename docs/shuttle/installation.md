@@ -78,7 +78,7 @@ needs:
 
 | Tool | Required | Purpose |
 | --- | --- | --- |
-| `go` 1.23+ | yes | Builds both Go CLIs from the same checkout as the daemon. |
+| `go` 1.26+ | yes | Builds both Go CLIs from the same checkout as the daemon. |
 | `elixir` 1.19+ / OTP 28 | yes | `daemon/mix.exs` declares `elixir: "~> 1.19"`. CI builds on OTP 28, and a fetched release carries the OTP runtime it was built with. |
 | `node` 22+ / `npm` | yes | Source builds compile the board into `ui/dist` on each host. A fetched daemon ships the bundle already built. |
 

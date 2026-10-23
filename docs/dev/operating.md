@@ -162,6 +162,10 @@ If an exact successor address cannot be established, the receipt still names the
 This enrichment survives daemon routing and never changes the explicit recipient.
 If a marker or ledger pairing is absent, preserve uncertainty rather than inferring an end or successor.
 
+## Searching local transcripts
+
+`shuttle transcript index` incrementally indexes complete JSONL records from the configured Claude Code, Codex, and Pi transcript roots into a private, rebuildable SQLite FTS5 cache. Search ranks matching messages with BM25 and applies session, ledger-resolved fiber, age, project-prefix, and harness filters. Indexing is explicit on first use, catches up on subsequent searches, and can be rebuilt with `--rebuild`; SessionEnd hooks schedule only the ended file as an advisory background update. Use `--no-index` when a search must not walk transcript roots. The index contains transcript text, so keep its configured cache path private and treat it as sensitive local data.
+
 ## Inspecting state
 
 ```bash

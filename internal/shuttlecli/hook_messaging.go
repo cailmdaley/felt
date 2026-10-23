@@ -19,6 +19,10 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		return nil
 	}
 	_ = a.runEventHook(bytes.NewReader(b))
+	var hookInput eventHookInput
+	if json.Unmarshal(b, &hookInput) == nil && hookInput.HookEventName == "SessionEnd" && hookInput.TranscriptPath != "" {
+		_ = a.startTranscriptIndexHook(hookInput)
+	}
 	if a.env.Getenv("SHUTTLE_MESSAGES") == "off" {
 		return nil
 	}

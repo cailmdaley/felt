@@ -76,6 +76,24 @@ people.
 | `felt hook pretool` | PreToolUse gate: deny non-felt tool calls until the felt skill activates |
 | `felt hook posttool` | PostToolUse: stamp `updated-at` when an agent edits a fiber file directly |
 
+## Transcript search
+
+`shuttle transcript <session-id>` resolves a transcript's native path, materializing a remote transcript into the local cache when needed. The same command family searches local Claude Code, Codex, and Pi JSONL transcripts:
+
+```sh
+shuttle transcript index                 # incremental catch-up
+shuttle transcript index --rebuild       # discard and rebuild
+shuttle transcript search "socket timeout" --since 30d
+shuttle transcript search "worker launch" --fiber constitutions/worker-threads
+shuttle transcript search "retry" --session <uuid> --harness codex -n 5
+```
+
+The first search does not build an empty index implicitly: run `shuttle transcript index` once. Later searches catch up changed transcripts unless `--no-index` is supplied. The SQLite index is rebuildable private cache data (default `~/.cache/felt/transcript-index.sqlite`; override with `SHUTTLE_TRANSCRIPT_INDEX`). Transcript roots can be overridden with `SHUTTLE_CLAUDE_PROJECTS_DIR`, `SHUTTLE_CODEX_SESSIONS_DIR`, and `SHUTTLE_PI_SESSIONS_DIR`.
+
+Search terms are literal keywords (punctuation separates terms), combined with AND; FTS syntax is not evaluated. Filters are repeatable `--session`, `--fiber`, `--since 30d|YYYY-MM-DD`, `--project <path-prefix>`, `--harness claude|codex|pi`, and `-n, --limit` (default 20). A fiber filter resolves through the session ledger and never broadens on ledger failure. Ledger enrichment adds linked fiber names to hits; an unavailable ledger is reported in `errors` without discarding otherwise valid search results. `--json` returns `{query,index,hits,errors}` with arrays always present; each hit includes source location, timestamp, role, score, marked snippet, and fiber links. Human output shows the project basename and an `open: <path>:<line>` hint for the native transcript.
+
+A SessionEnd hook starts a detached, best-effort single-file index update; hook latency and success do not depend on it.
+
 ## Shuttle hooks
 
 These event and commit adapters are also installed by the felt plugin, but the
