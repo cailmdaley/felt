@@ -34,9 +34,11 @@ export function isSentAttachment(doc: WorkspaceDocument): boolean {
  * Clamp the scroll offset that puts a tab's centre at `focus` inside a
  * horizontally scrolling strip (by default, the strip's own centre).
  */
-export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number, focus = viewportWidth / 2): number {
+export function centeredScrollLeft(tabLeft: number, tabWidth: number, viewportWidth: number, contentWidth: number, focus = viewportWidth / 2, run?: { left: number; width: number }): number {
   const maximum = Math.max(0, contentWidth - viewportWidth)
-  const centred = tabLeft + tabWidth / 2 - focus
+  // A run that fits the viewport is centred in it as a whole, wherever the selection sits in it.
+  const fits = run !== undefined && run.width <= viewportWidth
+  const centred = fits ? run.left + run.width / 2 - viewportWidth / 2 : tabLeft + tabWidth / 2 - focus
   return Math.max(0, Math.min(maximum, centred))
 }
 
@@ -381,7 +383,11 @@ export class TabStrip {
   private place(animate: boolean, start: number): void {
     const selected = this.records[this.selectedIndex]?.button
     if (!selected) return
-    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2)
+    const tiles = [...this.el.children].filter((c): c is HTMLElement => c instanceof HTMLElement && c.offsetWidth > 0)
+    const first = tiles[0] ?? selected
+    const last = tiles.at(-1) ?? selected
+    const run = { left: first.offsetLeft, width: last.offsetLeft + last.offsetWidth - first.offsetLeft }
+    const target = centeredScrollLeft(selected.offsetLeft, selected.offsetWidth, this.el.clientWidth, this.el.scrollWidth, this.focus ?? this.el.clientWidth / 2, run)
     this.animationTarget = target
     this.cancelAnimation()
     if (!animate || this.motion?.matches || this.el.clientWidth === 0) {

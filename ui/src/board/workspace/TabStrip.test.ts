@@ -67,6 +67,12 @@ describe('TabStrip', () => {
     expect(centeredScrollLeft(200, 90, 100, 500)).toBe(195)
     expect(centeredScrollLeft(450, 100, 100, 500)).toBe(400)
     expect(centeredScrollLeft(20, 30, 100, 90)).toBe(0)
+    // a run that fits is centred whole: the selection does not move it
+    const run = { left: 50, width: 60 }
+    expect(centeredScrollLeft(50, 20, 100, 200, 70, run)).toBe(30)
+    expect(centeredScrollLeft(90, 20, 100, 200, 70, run)).toBe(30)
+    // a run wider than the viewport follows the selection
+    expect(centeredScrollLeft(200, 90, 100, 500, 50, { left: 0, width: 300 })).toBe(195)
     expect(TAB_CROSSING_MS).toBe(280)
   })
 
