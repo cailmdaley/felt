@@ -4611,7 +4611,7 @@ defmodule Shuttle.Poller do
           # receiver's durable identity or its address during re-publication.
           if receiver["Host"] == state.own_host_id and receiver["identity"] == identity do
             meta
-            |> Map.put(:session_uuid, uuid)
+            |> Map.put(:session_uuid, successor_in_session(meta.session, uuid, fiber))
             |> Map.put(:context_harness, present_string(receiver["Harness"]))
           else
             # A record for another identity (a revoked predecessor, or a
@@ -4624,6 +4624,27 @@ defmodule Shuttle.Poller do
         _ ->
           Map.put(meta, :session_uuid, nil)
       end
+    end
+  end
+
+  # A worker name outlives a handoff, so a receiver record that names this
+  # session may still be the predecessor's when the successor's publish
+  # failed. The runtime mirror's UUID replaces it only when hook evidence shows
+  # both starting in this tmux session and the mirror's starting later.
+  defp successor_in_session(session, recorded, fiber) do
+    mirrored =
+      present_string(fiber && get_in(fiber, ["shuttle", "runtime", "session_uuid"]))
+
+    binding = session_bindings()
+
+    with true <- mirrored not in [nil, recorded],
+         recorded_at when is_integer(recorded_at) <-
+           Shuttle.SessionBinding.started_in(binding, recorded, session),
+         mirrored_at when is_integer(mirrored_at) and mirrored_at > recorded_at <-
+           Shuttle.SessionBinding.started_in(binding, mirrored, session) do
+      mirrored
+    else
+      _ -> recorded
     end
   end
 

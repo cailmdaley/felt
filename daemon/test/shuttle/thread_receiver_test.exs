@@ -472,6 +472,49 @@ defmodule Shuttle.ThreadReceiverTest do
     drain_results!(poller)
   end
 
+  test "adoption keeps the dispatched successor over a surviving predecessor receiver record",
+       context do
+    %{store: store, data: data, key: key, canonical: canonical} = context
+    # Predecessor A held authority in the canonical session and handed off.
+    # The dispatch of B under the same worker name recorded B in the runtime
+    # mirror, but B's receiver publish failed, so the durable record still
+    # names A.
+    seed_receiver!(store, key, canonical <> ":A", "A")
+    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "B"])
+    now = System.system_time(:millisecond)
+
+    binding =
+      [{"A", 1, now - 60_000}, {"B", 2, now - 1_000}]
+      |> Enum.map(fn {id, pid, at} ->
+        %{
+          "sessionId" => id,
+          "type" => "session_start",
+          "timestamp" => at,
+          "harness" => "claude-code",
+          "receiverPid" => pid,
+          "receiverBirth" => "birth-#{pid}",
+          "tmuxSession" => canonical
+        }
+      end)
+      |> Enum.reduce(
+        Shuttle.SessionBinding.new(),
+        &Shuttle.SessionBinding.apply_event(&2, &1, now)
+      )
+
+    Env.put_app_env(:session_bindings_source, fn -> binding end)
+    start_tmux!(canonical)
+    poller = start_poller_for!(store)
+    await_boot_cycle!(poller)
+    cycle!(poller)
+
+    assert %{session: ^canonical, session_uuid: "B"} = Poller.live_worker(poller, "hub")
+    assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
+    assert get_in(Jason.decode!(json), ["shuttle", "runtime", "session_uuid"]) == "B"
+    assert authority!(data)["ID"] == "B"
+    assert authority!(data)["identity"] == canonical <> ":B"
+    drain_results!(poller)
+  end
+
   test "boot revocation creates no state for an inactive fiber without a mailbox", context do
     %{store: store, data: data} = context
 
