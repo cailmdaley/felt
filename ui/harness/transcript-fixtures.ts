@@ -4,7 +4,7 @@ import codexUsage from '../src/board/transcript/fixtures/codex-usage.jsonl?raw'
 export const WORKSPACE_LATEST_SESSION = 'c1a5e0d2-5b8f-4c1e-9a7e-2f3d4b5c6a71'
 export const WORKSPACE_EARLIER_SESSION = 'd2b6f1e3-6c90-4d2f-8b5a-3e4f6a7b8c92'
 
-export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context'
+export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context' | 'search'
 
 export const LONG_OUTCOME = 'What changed in the deck:\n\n' + Array.from({ length: 12 }, (_, i) =>
   `${i + 1}. **Validation slide ${i + 1}.** The fictional response and mask-split results are shown alongside the independent reference bins. The source products and reviewer notes are ready for the next check.`,
@@ -61,6 +61,34 @@ function ordinaryTranscript(now: number, earlier: boolean, longOutcome = false):
         : longOutcome ? LONG_OUTCOME : 'The check is complete: no correction is needed for these fictional bins. The literal tag stays text, not executable markup.',
     }]),
   ].join('')
+}
+
+/**
+ * A longer working session in which one fictional convention, the mask split,
+ * is raised, settled, questioned and applied: enough turns that the board
+ * draws only the last few, and several messages for a search to stand on.
+ */
+function searchTranscript(now: number): string {
+  const topics = [
+    ['Which mask split should the null test use?', 'Two candidates: an equal-area north and south split, or the survey footprint split into four patches. The **mask split** decides how the covariance is estimated, so it is worth fixing before we compare anything.'],
+    ['Use the equal-area split for now.', 'Agreed. With the equal-area mask split the fiducial covariance has 40% more jackknife regions, which keeps the noise estimate stable.'],
+    ['Check the response against the reference bins.', 'The response stays within 0.3% of unity across the fixture bins.'],
+    ['And the bins above ell = 800?', 'Those are noisier; the high-ell bins carry the largest deviation, 0.9%, still inside tolerance.'],
+    ['Write the method note.', 'Drafted. The note states the mask split, the bin edges and the tolerance, and points at the fixture table.'],
+    ['Does the note say why we chose equal-area?', 'It does now: equal-area keeps every patch statistically comparable, which the four-patch footprint split does not.'],
+    ['Run the batch validation.', 'Batch validation finished: twelve bins, no deviation above tolerance.'],
+    ['Why is bin 7 higher than its neighbours?', 'Bin 7 sits across the boundary of two patches. It is the one place the mask split shows up directly in the numbers.'],
+    ['Try the footprint split on bin 7 only.', 'With the footprint split bin 7 moves by 0.2%, so the choice of mask split matters at the edge but not for the conclusion.'],
+    ['Record that in the note.', 'Added a paragraph: the mask split changes bin 7 by 0.2% and nothing else.'],
+    ['Summarize for review.', 'The response passes at every scale. Method note, bin table and the mask split comparison are ready for review.'],
+    ['Reviewer asks: is the mask split documented in the plots?', 'The figures now carry the mask split in their captions, and the legend names the patch each curve belongs to.'],
+    ['Last check, then close.', 'Final check clean. The mask split is documented in the note, the captions and the table.'],
+    ['Thanks. Close it out.', 'Closed. Everything about the mask split is in the note.'],
+  ]
+  return topics.flatMap(([ask, answer], index) => [
+    user(now, -(topics.length - index) * 600_000, ask),
+    assistant(now, -(topics.length - index) * 600_000 + 30_000, [{ type: 'text', text: answer }]),
+  ]).join('')
 }
 
 function largeTranscript(now: number): string {
@@ -127,6 +155,7 @@ export function workspaceTranscriptBytes(
   const transcriptStart = options.earlier ? now - 5 * 60_000 : now
   const source = scenario === 'large'
     ? largeTranscript(now)
+    : scenario === 'search' && !options.earlier ? searchTranscript(now)
     : ordinaryTranscript(transcriptStart, options.earlier === true, scenario === 'long-outcome') + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
   return encoder.encode(source + headFacts(now, scenario))
 }

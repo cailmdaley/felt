@@ -12,7 +12,8 @@
  * Capture with the daemon reporting meeting support.
  * `?example=workspace` selects the fictional documentation example; add
  * `?transcript=live` to watch a synthetic worker append records or
- * `?transcript=large` to exercise lazy reading of thousands of turns.
+ * `?transcript=large` to exercise lazy reading of thousands of turns, or
+ * `?transcript=search` for a longer session to search (the field's "all transcripts" answers from a mock index).
  * `?transcript=warm|cold|context` stages captured usage facts with a shifted timestamp.
  * `?identity=all` adds synthetic CLI workers with pending and failed session attribution.
  *
@@ -1377,6 +1378,8 @@ const mockFleet = (host: string) => {
 }
 
 // ── Fetch stub: stand in for the daemon ──────────────────────────────────────
+const MOCK_TRANSCRIPT_INDEX = { path: '/fixture-store/.cache/felt/transcript-index.sqlite', sessions: 4210, messages: 1830000, updated_at: new Date(Date.now() - 3 * 60_000).toISOString() }
+
 const realFetch = (window as unknown as { __harnessNativeFetch?: typeof fetch }).__harnessNativeFetch ?? window.fetch.bind(window)
 const mockRequests: Array<Record<string, unknown>> = []
 const mockHandlers: Array<Record<string, unknown>> = []
@@ -1622,6 +1625,26 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     await new Promise((resolve) => setTimeout(resolve, 300))
     return json({ attached: true })
   }
+  if (url.includes('/api/v1/transcripts/search')) {
+    const query = new URL(url, 'http://harness').searchParams.get('q') ?? ''
+    const ago = (minutes: number): string => new Date(now - minutes * 60_000).toISOString()
+    if (query.trim().toLowerCase() === 'nothing') return json({ query, index: MOCK_TRANSCRIPT_INDEX, hits: [], errors: [] })
+    return json({
+      query,
+      index: MOCK_TRANSCRIPT_INDEX,
+      hits: [
+        { session: WORKSPACE_LATEST_SESSION, harness: 'claude', project: '/fixture-store/workspace', path: '/fixture-store/.claude/projects/workspace/latest.jsonl', line: 18, timestamp: ago(40), role: 'assistant', score: 14.2,
+          snippet: '…the equal-area «mask» «split» keeps every patch statistically comparable, which the four-patch footprint split does not…', fibers: [{ id: 'research/workspace/calibration-report', name: 'Calibration report' }] },
+        { session: WORKSPACE_EARLIER_SESSION, harness: 'claude', project: '/fixture-store/workspace', path: '/fixture-store/.claude/projects/workspace/earlier.jsonl', line: 4, timestamp: ago(60 * 26), role: 'user', score: 11.8,
+          snippet: '…compare the north and south fixture patches before changing the «mask»…', fibers: [{ id: 'research/workspace/calibration-report', name: 'Calibration report' }] },
+        { session: '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d', harness: 'codex', project: '/fixture-store/pipeline', path: '/fixture-store/.codex/sessions/rollout-pipeline.jsonl', line: 233, timestamp: ago(60 * 24 * 6), role: 'tool_result', score: 8.4,
+          snippet: '…config.yaml: «mask»: footprint, «split»: four-patch (unused)…', fibers: [] },
+        { session: '5f6a7b8c-9d0e-4f1a-a2b3-c4d5e6f7a8b9', harness: 'pi', project: '/fixture-store/notes', path: '/fixture-store/.pi/sessions/notes.jsonl', line: 57, timestamp: ago(60 * 24 * 40), role: 'user', score: 6.1,
+          snippet: '…what was the «split» we used for the «mask» in the first run?…', fibers: [{ id: 'notes/first-run', name: 'First run notes' }] },
+      ],
+      errors: [],
+    })
+  }
   if (url.includes('/api/v1/transcript/raw')) {
     const query = new URL(url, 'http://harness').searchParams
     const session = query.get('session') ?? ''
@@ -1637,7 +1660,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     const offset = offsetText === null ? 0 : Number(offsetText)
     if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
-    const mode: TranscriptScenario = isLatest && ['live', 'large', 'long-outcome', 'warm', 'cold', 'context'].includes(transcriptScenario ?? '')
+    const mode: TranscriptScenario = isLatest && ['live', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search'].includes(transcriptScenario ?? '')
       ? transcriptScenario as TranscriptScenario : 'normal'
     const updates = mode === 'live' ? liveTranscriptReads++ : 0
     const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })

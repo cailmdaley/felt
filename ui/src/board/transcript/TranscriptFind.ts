@@ -229,7 +229,7 @@ export class TranscriptFind {
   private foot(result: TranscriptSearchResult): HTMLElement | null {
     const pieces: string[] = []
     const { index } = result
-    if (index?.sessions !== undefined) pieces.push(`${index.sessions.toLocaleString('en-US')} sessions indexed`)
+    if (index?.sessions !== undefined) pieces.push(`${String(index.sessions).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} sessions indexed`)
     const updated = index?.updated_at ? Date.parse(index.updated_at) : NaN
     if (Number.isFinite(updated)) pieces.push(`as of ${ago(updated)}`)
     pieces.push(...result.errors)

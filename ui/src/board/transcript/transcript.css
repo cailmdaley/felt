@@ -586,7 +586,7 @@
   height: 26px;
   padding: 0;
   border-radius: var(--ws-control-radius);
-  font-size: 12px;
+  font-size: var(--ws-small-size);
   line-height: 1;
 }
 .ws-transcript-find .ws-transcript-find-step:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
@@ -600,7 +600,8 @@
 }
 .ws-transcript-find .ws-transcript-find-all:hover:not(:disabled) { color: var(--ws-ink); text-decoration-color: currentColor; }
 .ws-transcript-find :is(.ws-transcript-find-step, .ws-transcript-find-all):disabled { opacity: .4; cursor: default; }
-.ws-transcript-find :is(button, input):focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 1px; }
+.ws-transcript-find .ws-transcript-find-input:focus-visible,
+.ws-reader .ws-transcript-find .ws-transcript-find-input:focus-visible { outline: none; border-bottom-color: var(--ws-focus, var(--kbn-owed)); }
 
 /* Matches in the words. The current message carries a halo, its marks a deeper wash. */
 :is(.ws-dock, .ws-transcript-pane) mark.ws-transcript-found-mark,
@@ -691,7 +692,7 @@
 }
 .ws-transcript-find-hit:is(:hover, :focus-within) .ws-transcript-find-copy { opacity: 1; }
 @media (hover: none) { .ws-transcript-find .ws-transcript-find-copy { opacity: 1; } }
-@media (max-width: 700px) {
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-transcript-find-count { min-width: 0; margin-left: auto; }
   .ws-transcript-find .ws-transcript-find-step { width: 44px; height: 44px; }
 }
