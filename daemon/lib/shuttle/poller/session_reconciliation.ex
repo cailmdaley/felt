@@ -26,6 +26,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
   alias Shuttle.{Poller, WorkerProcess}
   alias Shuttle.Poller.{Executions, State}
 
+  @conclusions_per_cycle 5
+
   # Re-adopt every live worker at boot. The daemon was down or restarting; the
   # workers kept running.
   def adopt_orphans(%State{} = state) do
@@ -69,12 +71,14 @@ defmodule Shuttle.Poller.SessionReconciliation do
       state
       |> Executions.listed()
       |> Enum.filter(&(Poller.running_key(state, &1["id"]) == nil))
-      |> Enum.reduce({state, %{}}, fn fiber, {state, holds} ->
+      |> Enum.reduce({state, %{conclusions: 0}}, fn fiber, {state, holds} ->
         case Executions.handle(fiber) do
           nil -> {state, holds}
           handle -> reconcile_assigned(state, holds, fiber, handle, procs)
         end
       end)
+
+    holds = Map.delete(holds, :conclusions)
 
     %{state | holds: Map.values(holds), unowned: unowned(state, procs)}
   end
@@ -108,8 +112,12 @@ defmodule Shuttle.Poller.SessionReconciliation do
     cond do
       # A closed fiber's worker is gone: conclude the dispatch, so its
       # conversation names no worker of it any more.
-      held == nil and fiber["status"] == "closed" ->
+      # A few per cycle, so a backlog never holds the Poller up.
+      held == nil and fiber["status"] == "closed" and holds.conclusions < @conclusions_per_cycle ->
         Poller.stamp_handoff_if_stale(state, fiber["id"], fiber)
+        {state, Map.update!(holds, :conclusions, &(&1 + 1))}
+
+      held == nil and fiber["status"] == "closed" ->
         {state, holds}
 
       held == nil or match?({:error, :unknown}, held) ->
@@ -253,6 +261,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
          "closed" <- fresh["status"],
          %{} = current <- Executions.handle(fresh),
          true <- Executions.same?(current, handle),
+         {:ok, procs} <- WorkerProcess.scan(state.runner),
+         %{} = worker <- WorkerProcess.find(procs, current, state.runner),
+         false <- tracked_worker?(state, procs, worker),
          :ok <-
            Shuttle.Continuation.mark_handed_off(
              state.runner,

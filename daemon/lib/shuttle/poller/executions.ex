@@ -32,7 +32,7 @@ defmodule Shuttle.Poller.Executions do
   def handle(fiber, session \\ nil) do
     case Continuation.execution(fiber) do
       nil -> nil
-      execution -> Map.put(execution, :session, session)
+      execution -> execution |> Map.put(:session, session) |> Map.put(:uid, fiber["uid"])
     end
   end
 

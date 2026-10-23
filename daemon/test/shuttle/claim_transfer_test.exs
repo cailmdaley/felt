@@ -350,6 +350,8 @@ defmodule Shuttle.ClaimTransferTest do
       Runner.put_shuttle_fields("tests/b", %{"dispatched_at" => "2026-10-22T21:00:29Z"})
       Runner.put_shuttle_fields("tests/b", %{"session_uuid" => uuid})
       pane = Runner.add_worker(b_name, uuid, script_key: a_name, child: "claude --resume #{uuid}")
+      # The older claim recorded its pairing under the name it gave the session.
+      SessionLedger.record(fiber: "tests/b", session: uuid, tmux: b_name, kind: :claim)
       write_transcript(uuid)
       %{uuid: uuid, b_name: b_name, pane: pane}
     end
@@ -432,6 +434,7 @@ defmodule Shuttle.ClaimTransferTest do
     })
 
     pane = Runner.add_worker(b_name, uuid, script_key: a_name, child: "claude --resume #{uuid}")
+    SessionLedger.record(fiber: "tests/b", session: uuid, tmux: b_name, kind: :claim)
     poller = start()
 
     assert %{session: ^b_name, holder_uuid: ^uuid} = Poller.worker_status(poller, "tests/b")

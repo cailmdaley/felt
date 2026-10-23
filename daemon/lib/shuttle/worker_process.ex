@@ -216,9 +216,9 @@ defmodule Shuttle.WorkerProcess do
 
   @doc """
   The worker process of the execution `handle` (`%{uuid, pane}`): the process
-  its claim bound (`pane`, `<pid>:<start>`) while that lifetime lives, else a
-  process holding its conversation UUID that a Shuttle launch runs
-  (`launch_root/2`). A process that merely holds the conversation — a History
+  its claim bound (`pane`, `<pid>:<start>`) while that lifetime lives, else
+  the run script of the Shuttle launch of its conversation
+  (`launch_root/3`). A process that merely holds the conversation — a History
   resume, or a human's `claude --resume` in a terminal of their own — is not
   the worker: it is never adopted or signalled as one, though it still keeps a
   resume off the transcript (`check_free/2`). `{:error, :unknown}` when a
@@ -227,41 +227,89 @@ defmodule Shuttle.WorkerProcess do
   @spec find([proc()], map(), module()) :: proc() | nil | {:error, :unknown}
   def find(procs, handle, runner \\ Shuttle.Runner.Default) do
     case pane_holder(procs, Map.get(handle, :pane), runner) do
-      nil -> conversation_worker(procs, Map.get(handle, :uuid), runner)
+      nil -> conversation_worker(procs, Map.put_new(handle, :uuid, nil), runner)
       found -> found
     end
   end
 
-  defp conversation_worker(procs, uuid, runner) when is_binary(uuid) and uuid != "" do
-    case Enum.find(procs, &(opens?(&1, uuid) and launch_root(procs, &1) != nil)) do
+  # Only the launch of this very conversation: a run script keyed by it, or
+  # an earlier build's script launched for the same fiber (its session name
+  # carries the fiber's uid) or that the session ledger pairs with it.
+  # Another launch's subprocess that opens the conversation is not its worker.
+  defp conversation_worker(procs, %{uuid: uuid} = handle, runner)
+       when is_binary(uuid) and uuid != "" do
+    uid = Map.get(handle, :uid)
+
+    case Enum.find(procs, &(opens?(&1, uuid) and launched_for?(procs, &1, uuid, uid, runner))) do
       nil ->
         case bound_holder(procs, uuid, runner) do
-          %{} = proc -> if launch_root(procs, proc), do: proc
-          other -> other
+          %{} = proc ->
+            if launched_for?(procs, proc, uuid, uid, runner), do: launch_root(procs, proc, uuid)
+
+          other ->
+            other
         end
 
       proc ->
-        proc
+        launch_root(procs, proc, uuid)
     end
   end
 
-  defp conversation_worker(_procs, _uuid, _runner), do: nil
+  defp conversation_worker(_procs, _handle, _runner), do: nil
+
+  defp launched_for?(procs, proc, uuid, uid, runner) do
+    case launch_root(procs, proc, uuid) do
+      nil ->
+        false
+
+      root ->
+        case script_session(root) do
+          ^uuid ->
+            true
+
+          key ->
+            not uuid?(key) and
+              ((is_binary(uid) and Shuttle.ULID.from_tmux(key) == uid) or
+                 ledger_paired?(procs, root, key, uuid, runner))
+        end
+    end
+  end
+
+  # An earlier build's script is named for the session it launched, which an
+  # older claim may since have renamed: the ledger's newest pairing of `uuid`
+  # on this host names that session, or the one the script's pane is in now.
+  defp ledger_paired?(procs, root, key, uuid, runner) do
+    with %{"host" => host, "tmux" => tmux} when is_binary(tmux) <-
+           Shuttle.SessionLedger.latest_for_session(uuid),
+         true <- host == Shuttle.Poller.own_host_id() do
+      tmux == key or
+        with {:ok, panes} <- panes(runner),
+             %{session: ^tmux} <- pane_of(procs, panes, root) do
+          true
+        else
+          _ -> false
+        end
+    else
+      _ -> false
+    end
+  end
 
   @doc """
-  The Shuttle launch running `proc`: the outermost run script at or above it,
+  The Shuttle launch running `proc` (a script keyed by `uuid` counts too,
+  whatever its shape): the outermost run script at or above it,
   below any tmux server, that a dispatch or capture started — keyed by its
-  conversation UUID, or by the session name an earlier build gave it. The
-  scripts of a History resume, a Codex terminal viewer and remote control are
-  not launches. nil when none.
+  conversation UUID, or by the session name an earlier build gave it. Helper
+  scripts (a History resume, a Codex viewer or App Server, remote control)
+  are not launches. nil when none.
   """
-  @spec launch_root([proc()], proc()) :: proc() | nil
-  def launch_root(procs, proc) do
+  @spec launch_root([proc()], proc(), String.t() | nil) :: proc() | nil
+  def launch_root(procs, proc, uuid \\ nil) do
     by_pid = Map.new(procs, &{&1.pid, &1})
 
     by_pid
     |> ancestry(proc, 32)
     |> Enum.take_while(&(not tmux?(&1)))
-    |> Enum.filter(&launch_script?/1)
+    |> Enum.filter(&(launch_script?(&1) or (is_binary(uuid) and script_session(&1) == uuid)))
     |> List.last()
   end
 
@@ -270,17 +318,30 @@ defmodule Shuttle.WorkerProcess do
   `proc` itself (a claimed harness).
   """
   @spec worker_root([proc()], proc()) :: proc()
-  def worker_root(procs, proc), do: launch_root(procs, proc) || proc
+  def worker_root(procs, proc, uuid \\ nil), do: launch_root(procs, proc, uuid) || proc
 
-  # Every run script but the helpers': a History resume, a Codex terminal
-  # viewer and the remote-control session run scripts of their own.
-  @helper_prefixes ["resume-", "codex-terminal-", "shuttle-remote-control"]
-
+  # A launch's script is keyed by its conversation UUID; an earlier build's
+  # by its worker session (`<leaf>-<uid>-shuttle`) or capture session. Every
+  # other run script — a History resume, a Codex viewer or App Server, remote
+  # control — is a helper's.
   defp launch_script?(proc) do
     case script_session(proc) do
-      key when is_binary(key) -> not String.starts_with?(key, @helper_prefixes)
-      _ -> false
+      key when is_binary(key) ->
+        uuid?(key) or String.starts_with?(key, "capture-") or
+          Shuttle.Dispatcher.shuttle_session?(key)
+
+      _ ->
+        false
     end
+  end
+
+  @doc "True when `proc` is a login or interactive shell."
+  @spec shell?(proc()) :: boolean()
+  def shell?(%{args: args}) do
+    command =
+      args |> String.split() |> List.first("") |> Path.basename() |> String.trim_leading("-")
+
+    command in ~w(sh bash zsh fish dash ksh tcsh csh login)
   end
 
   defp uuid?(key),
@@ -289,16 +350,17 @@ defmodule Shuttle.WorkerProcess do
   @doc """
   The claimer's own harness: the process on the ancestry of `pid` (the
   claiming CLI) whose parent is the pane process `pane_pid`, or the launch
-  running that chain. nil when `pid` does not run in that pane.
+  running that chain. nil when `pid` does not run in that pane under a
+  harness — a CLI typed straight into the pane's shell names none.
   """
-  @spec claimer([proc()], integer(), integer()) :: proc() | nil
-  def claimer(procs, pid, pane_pid) do
+  @spec claimer([proc()], integer(), integer(), String.t() | nil) :: proc() | nil
+  def claimer(procs, pid, pane_pid, uuid \\ nil) do
     by_pid = Map.new(procs, &{&1.pid, &1})
 
     with %{} = proc <- Map.get(by_pid, pid),
          chain = ancestry(by_pid, proc, 32),
          index when is_integer(index) <- Enum.find_index(chain, &(&1.pid == pane_pid)) do
-      launch_root(procs, proc) || if(index > 0, do: Enum.at(chain, index - 1), else: proc)
+      launch_root(procs, proc, uuid) || if(index > 1, do: Enum.at(chain, index - 1))
     else
       _ -> nil
     end

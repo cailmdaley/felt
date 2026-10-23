@@ -232,7 +232,7 @@ defmodule Shuttle.Tmux do
         # A launch's run script is its pane's process, so the pane goes with
         # it. A claimed harness in a pane of someone else's is signalled alone.
         killed? =
-          with %{} = root <- WorkerProcess.launch_root(procs, proc),
+          with %{} = root <- WorkerProcess.launch_root(procs, proc, handle[:uuid]),
                {:ok, panes} <- WorkerProcess.panes(runner),
                %{pane: pane, pid: pid} when pid == root.pid <-
                  WorkerProcess.pane_of(procs, panes, root),
@@ -310,7 +310,7 @@ defmodule Shuttle.Tmux do
   defp signal_holder(runner, handle, signal) do
     with {:ok, procs} <- WorkerProcess.scan(runner),
          %{} = proc <- WorkerProcess.find(procs, handle, runner) do
-      case WorkerProcess.launch_root(procs, proc) do
+      case WorkerProcess.launch_root(procs, proc, handle[:uuid]) do
         %{pid: pid} -> kill(runner, signal, pid)
         nil -> runner.cmd("kill", ["-#{signal}", "#{proc.pid}"], stderr_to_stdout: true)
       end

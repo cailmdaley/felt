@@ -4018,7 +4018,7 @@ defmodule Shuttle.PollerTest do
       MockRunner.set_ps_result(
         {"""
            700     1 tmux new-session -d -s shuttle-anchor
-           812   700 bash -l /tmp/shuttle-run-transcript-held-01KTHDNZS287ZSSG8X8V59XKW1-shuttle.3.sh
+           812   700 bash -l /tmp/shuttle-run-#{FiberUid.session(ctx.fiber_id)}.3.sh
            813   812 claude --resume held-session-uuid-0001
          """, 0}
       )
@@ -6183,16 +6183,16 @@ defmodule Shuttle.PollerTest do
              Poller.claim_session(poller, id, "capture-dead", [])
 
     # Fiber unknown.
-    MockRunner.add_worker("capture-live01", "uuid-live01", child: nil)
+    MockRunner.add_worker("capture-live01", "11111111-0000-4000-8000-000000000001", child: nil)
 
     assert {:error, :not_found} =
              Poller.claim_session(poller, "tests/no-such-fiber", "capture-live01", [])
 
     # A conversation named by a session whose pane does not hold it is refused.
-    MockRunner.add_worker("capture-other", "uuid-other")
+    MockRunner.add_worker("capture-other", "11111111-0000-4000-8000-000000000003")
 
     assert {:error, :session_mismatch} =
-             Poller.claim_session(poller, id, "capture-live01", session_uuid: "uuid-other")
+             Poller.claim_session(poller, id, "capture-live01", session_uuid: "11111111-0000-4000-8000-000000000003")
 
     # First claim wins (a claimer without a UUID is bound by its pane); a
     # different worker claiming the same fiber is refused.
@@ -6200,7 +6200,7 @@ defmodule Shuttle.PollerTest do
              Poller.claim_session(poller, id, "capture-live01", [])
 
     assert %{pane: %{"pid" => _, "start" => _}} = Poller.worker_status(poller, id)
-    MockRunner.add_worker("capture-live02", "uuid-live02", child: nil)
+    MockRunner.add_worker("capture-live02", "11111111-0000-4000-8000-000000000002", child: nil)
     assert {:error, :already_running} = Poller.claim_session(poller, id, "capture-live02", [])
 
     # Idempotent retry: the same body returns the registered session — a lost

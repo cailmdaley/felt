@@ -3618,7 +3618,7 @@ defmodule Shuttle.Poller do
          true <-
            claimer_holds?(state.runner, procs, holder, claimer) || {:error, :session_mismatch},
          %{} = worker <-
-           claimer_worker(procs, holder, claimer, Keyword.get(opts, :claimer_pid)) ||
+           claimer_worker(procs, holder, claimer, Keyword.get(opts, :claimer_pid), uuid) ||
              {:error, :session_not_found},
          {:ok, start} <- process_start(state.runner, worker.pid) do
       {:ok,
@@ -3636,25 +3636,32 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp claimer_worker(procs, holder, claimer, pid) do
+  defp claimer_worker(procs, holder, claimer, pid, uuid) do
     cond do
-      is_integer(pid) and is_map(claimer) -> WorkerProcess.claimer(procs, pid, claimer.pid)
-      is_map(holder) -> WorkerProcess.worker_root(procs, holder)
-      is_map(claimer) -> pane_harness(procs, claimer.pid)
+      is_integer(pid) and is_map(claimer) -> WorkerProcess.claimer(procs, pid, claimer.pid, uuid)
+      is_map(holder) -> WorkerProcess.worker_root(procs, holder, uuid)
+      is_map(claimer) -> pane_harness(procs, claimer.pid, uuid)
       true -> nil
     end
   end
 
-  # The pane's own process when it is a launch, else its one child — the
-  # harness a shell started — else the pane's process when it runs alone. A
-  # pane running several children names no worker.
-  defp pane_harness(procs, pane_pid) do
+  # The pane's launch; else the pane's own process unless it is a shell; else
+  # the shell's one child, the harness it started. A shell running several
+  # children, or none, names no worker.
+  defp pane_harness(procs, pane_pid, uuid) do
     with %{} = pane <- Enum.find(procs, &(&1.pid == pane_pid)) do
-      case {WorkerProcess.launch_root(procs, pane), Enum.filter(procs, &(&1.ppid == pane_pid))} do
-        {%{} = launch, _} -> launch
-        {nil, [child]} -> child
-        {nil, []} -> pane
-        _ -> nil
+      cond do
+        launch = WorkerProcess.launch_root(procs, pane, uuid) ->
+          launch
+
+        not WorkerProcess.shell?(pane) ->
+          pane
+
+        true ->
+          case Enum.filter(procs, &(&1.ppid == pane_pid)) do
+            [child] -> child
+            _ -> nil
+          end
       end
     end
   end

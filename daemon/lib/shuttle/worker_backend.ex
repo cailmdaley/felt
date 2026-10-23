@@ -18,7 +18,12 @@ defmodule Shuttle.WorkerBackend do
   def handle(%{session: session} = meta) do
     if AppWorkers.app?(session),
       do: session,
-      else: %{session: session, uuid: Map.get(meta, :holder_uuid), pane: Map.get(meta, :pane)}
+      else: %{
+        session: session,
+        uuid: Map.get(meta, :holder_uuid),
+        pane: Map.get(meta, :pane),
+        uid: Map.get(meta, :uid)
+      }
   end
 
   def session_status(runner, %{} = handle), do: Shuttle.Tmux.worker_status(runner, handle)
