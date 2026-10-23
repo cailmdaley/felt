@@ -25,9 +25,9 @@
   align-items: center;
   column-gap: 7px;
   row-gap: 0;
-  min-height: 30px;
+  min-height: 35px;
   box-sizing: border-box;
-  padding: 4px 6px 4px 8px;
+  padding: 5px 6px 5px 8px;
   background-color: var(--kbn-row-ground);
 }
 .kbn-col-list .kbn-card.kbn-card-drafts { --kbn-row-ground: var(--kbn-recess); }
@@ -49,13 +49,21 @@
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
   min-width: 0;
-  font-size: calc(13.5px * var(--kbn-type-scale, 1));
+  font-size: calc(14.5px * var(--kbn-type-scale, 1));
   font-weight: 500;
-  line-height: 1.3;
-  white-space: nowrap;
+  line-height: 1.25;
+  /* A long title takes a second line rather than losing the words that tell
+     it from its neighbours. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
+/* The column heads step down so the titles beneath them are what the eye
+   lands on; the illuminated initial keeps its em ratio and comes down with
+   the word. The line box keeps the 0.868 strut the full-size head uses. */
+.kbn-now-board .kbn-col-title { font-size: calc(32px * var(--kbn-type-scale, 1)); }
 
 /* The line's right end: report, turn chip, thread badge. */
 .kbn-col-list .kbn-card > .kbn-card-meta {
@@ -164,7 +172,7 @@
     min-height: 44px;
     padding: 6px 9px;
   }
-  .kbn-col-list .kbn-card .kbn-card-name { font-size: 14px; }
+  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
 }
 
 /* ── The preview ───────────────────────────────────────────────────────────

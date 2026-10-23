@@ -9,7 +9,7 @@
    its branches hairlines grown from the tree's shape, its state a mark, its
    name the only word. The stem leaves from under the card's glyph. */
 .kbn-thread-tree {
-  --tree-cell: 14px; --tree-stem: 6px; --tree-line: 20px;
+  --tree-cell: 15px; --tree-stem: 6px; --tree-line: 25px;
   --tree-branch: color-mix(in srgb, var(--kbn-ink-muted) 38%, transparent);
   grid-column: 1 / -1; flex-basis: 100%; min-width: 0; width: 100%;
   padding: 1px 0 3px; font-family: var(--font-serif, 'EB Garamond', serif);
@@ -27,7 +27,7 @@
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-row {
   display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; height: 100%; width: auto;
   padding: 0 22px 0 3px; margin: 0; border: 0; border-radius: 3px; background: transparent;
-  font: inherit; font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 1; color: var(--kbn-ink-soft); text-align: left; cursor: pointer;
+  font: inherit; font-size: calc(14px * var(--kbn-type-scale, 1)); line-height: 1.2; color: var(--kbn-ink-soft); text-align: left; cursor: pointer;
 }
 .kbn-thread-tree .kbn-thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kbn-thread-tree .kbn-thread-row:hover, .kbn-thread-tree .kbn-thread-row:focus-visible, .kbn-thread-tree .kbn-thread-row.kbn-key-selected { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); outline: none; }
@@ -43,10 +43,10 @@
 .kbn-tree-mark[data-mark='drafts'] { background: transparent; border: 1px solid var(--kbn-ink-faint); }
 .kbn-tree-mark:is([data-mark='roles'], [data-mark='resting']) { width: 4px; height: 4px; margin: 0 1px; opacity: .7; }
 /* A cap's fold and the archived count: the tree's quietest lines. */
-.kbn-thread-tree .kbn-thread-more { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0 3px; font: inherit; font-size: calc(11.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
+.kbn-thread-tree .kbn-thread-more { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0 3px; font: inherit; font-size: calc(12.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
 .kbn-thread-tree .kbn-thread-more .kbn-tree-mark { opacity: .55; }
 .kbn-thread-tree .kbn-thread-more:hover, .kbn-thread-tree .kbn-thread-more:focus-visible { color: var(--kbn-ink); text-decoration: none; }
-.kbn-tree-archived { display: block; padding: 3px 0 0 calc(var(--tree-cell) + 3px); font-size: calc(11px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
+.kbn-tree-archived { display: block; padding: 3px 0 0 calc(var(--tree-cell) + 3px); font-size: calc(12.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
 /* The pin waits at the line's end, out of sight until the line is pointed at or focused. */
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-pin { position: static; align-self: center; margin-left: -20px; width: 16px; height: 16px; }
 
@@ -88,6 +88,6 @@
 @media (hover: none) { .kbn-thread-pin { opacity: 0.45; } }
 /* A phone draws the same tree, a touch taller a line. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-thread-tree { --tree-line: 26px; }
-  .kbn-thread-tree .kbn-thread-row { font-size: calc(13.5px * var(--kbn-type-scale, 1)); }
+  .kbn-thread-tree { --tree-line: 30px; }
+  .kbn-thread-tree .kbn-thread-row { font-size: calc(14.5px * var(--kbn-type-scale, 1)); }
 }
