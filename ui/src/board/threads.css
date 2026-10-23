@@ -26,11 +26,13 @@
   padding: 1px 0 3px; font-family: var(--font-serif, 'EB Garamond', serif);
 }
 /* An opened family is a peek, not a column: the tree scrolls inside a cap, and the lines beneath it (folds, archived, all threads) stay in reach. */
-.kbn-thread-tree-body { max-height: min(320px, 50vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--kbn-rule-strong) transparent; }
-.kbn-thread-tree-foot { display: flex; flex-direction: column; align-items: flex-start; padding: 2px 0 0 calc(var(--tree-cell) + 3px); }
+.kbn-thread-tree-body { max-height: min(272px, 45vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--kbn-rule-strong) transparent; }
+.kbn-thread-tree-foot { display: flex; align-items: baseline; gap: 12px; padding: 4px 0 0 calc(var(--tree-cell) + 3px); font-size: calc(12.5px * var(--kbn-type-scale, 1)); color: var(--kbn-ink-faint); }
 .kbn-thread-tree-foot[hidden] { display: none; }
-.kbn-thread-tree .kbn-thread-tree-foot > .kbn-thread-more { height: calc(var(--tree-line) - 4px); padding: 0; border-radius: 2px; cursor: pointer; }
-.kbn-thread-tree .kbn-thread-more.kbn-thread-fold[aria-expanded='true'] { color: var(--kbn-ink-muted); }
+.kbn-thread-tree-more { min-width: 0; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kbn-thread-tree .kbn-thread-tree-foot .kbn-thread-more { display: inline; padding: 0; border-radius: 2px; cursor: pointer; font-size: inherit; }
+.kbn-thread-tree .kbn-thread-more.kbn-thread-fold:hover, .kbn-thread-tree .kbn-thread-more.kbn-thread-fold[aria-expanded='true'] { color: var(--kbn-ink-muted); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; }
+.kbn-thread-tree .kbn-thread-tree-foot .kbn-thread-all { flex: none; margin-left: auto; }
 .kbn-thread-tree .kbn-thread-more.kbn-thread-all { color: var(--kbn-ink-muted); font-style: normal; }
 .kbn-thread-tree[hidden], .kbn-thread-more[hidden] { display: none; }
 .kbn-thread-tree .kbn-tree-line { position: relative; display: flex; align-items: stretch; min-width: 0; height: var(--tree-line); }
@@ -56,6 +58,14 @@
 .kbn-thread-tree .kbn-thread-row.kbn-key-selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
 .kbn-thread-tree .kbn-thread-row[data-thread-state='waiting'] { color: var(--kbn-ink); font-weight: 600; }
 .kbn-thread-tree .kbn-thread-row:is([data-thread-state='drafts'], [data-thread-state='roles'], [data-thread-state='resting']) { color: var(--kbn-ink-muted); }
+/* A waiting or review line's word, at its end: the name gives way before it does. */
+.kbn-thread-tree .kbn-tree-line > .kbn-thread-row:has(> .kbn-tree-tag) { flex: 1 1 0; }
+.kbn-tree-tag {
+  flex: none; margin-left: auto; padding: 1px 5px 2px; border-radius: 3px; line-height: 1;
+  font-size: calc(11px * var(--kbn-type-scale, 1)); font-style: normal; font-weight: 500; letter-spacing: .02em;
+}
+.kbn-tree-tag[data-tag='to-review'] { color: var(--kbn-tempered); background: color-mix(in srgb, var(--kbn-tempered) 13%, transparent); }
+.kbn-tree-tag[data-tag='waiting'] { color: var(--kbn-owed-ink); background: color-mix(in srgb, var(--kbn-owed-bright) 18%, transparent); }
 /* The mark: whose turn by colour (the sidebar's dots), a ring for done or not begun. */
 .kbn-tree-mark { flex: none; box-sizing: border-box; width: 6px; height: 6px; border-radius: 50%; background: var(--kbn-ink-faint); }
 .kbn-tree-mark[data-mark='question'] { background: var(--kbn-you); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--kbn-you) 20%, transparent); }
@@ -70,7 +80,7 @@
 .kbn-thread-tree .kbn-thread-more:hover, .kbn-thread-tree .kbn-thread-more:focus-visible { color: var(--kbn-ink); text-decoration: none; }
 .kbn-thread-tree .kbn-thread-more:focus { outline: none; }
 .kbn-thread-tree .kbn-thread-more:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: 1px; }
-.kbn-tree-archived { display: block; line-height: calc(var(--tree-line) - 4px); font-size: calc(12.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
+.kbn-tree-archived { font-size: inherit; }
 /* The pin waits at the line's end, out of sight until the line is pointed at or focused. */
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-pin { position: static; align-self: center; margin-left: -20px; width: 16px; height: 16px; }
 

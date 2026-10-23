@@ -114,7 +114,7 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   expect(open).toHaveBeenCalledWith(root)
   const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
   expect(peek.querySelectorAll('.kbn-thread-row[data-thread-state="to-review"]')).toHaveLength(16)
-  expect([...peek.querySelectorAll('.kbn-thread-more')].map(b => b.textContent)).toEqual(['all 20 threads →'])
+  expect([...peek.querySelectorAll('.kbn-thread-more')].map(b => b.textContent)).toEqual(['Open family →'])
 })
 it('draws a lone extra waiting thread rather than folding it into "+ 1 more"', () => {
   saveWaitingThreadEntries(true)
@@ -165,7 +165,7 @@ describe('a large family stays a peek, not a column', () => {
     expect(peek.querySelectorAll('h4')).toHaveLength(0)
     expect(peek.querySelectorAll('.kbn-thread-tree-body .kbn-thread-row')).toHaveLength(48)
     const all = peek.querySelector<HTMLButtonElement>('.kbn-thread-tree-foot .kbn-thread-all')!
-    expect(all.textContent).toBe('all 48 threads →')
+    expect(all.textContent).toBe('Open family →')
     all.click()
     expect(open).toHaveBeenCalledWith(root)
   })
@@ -197,7 +197,8 @@ describe('an opened family focuses on live work', () => {
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
     expect(names(host)).toEqual(['busy', 'holder', 'asking'])
     const folds = () => [...host.querySelectorAll<HTMLButtonElement>('.kbn-thread-fold')]
-    expect(folds().map(f => [f.textContent, f.getAttribute('aria-expanded')])).toEqual([['· 2 drafts', 'false'], ['· 2 resting', 'false']])
+    expect(folds().map(f => [f.textContent, f.getAttribute('aria-expanded')])).toEqual([['2 drafts', 'false'], ['2 resting', 'false']])
+    expect(host.querySelector('.kbn-thread-tree-more')!.textContent).toBe('More: 2 drafts · 2 resting')
     folds()[0].click()
     expect(names(host)).toEqual(['busy', 'a plan', 'holder', 'asking'])
     expect(document.activeElement).toBe(folds()[0])
@@ -263,7 +264,7 @@ describe('sub-entries in an open family', () => {
 })
 describe('a family drawn as a tree', () => {
   const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
-  it('names each thread once and no state word more than once, at rest or open', () => {
+  it('names each thread once; only waiting and review lines carry a state word, at their end', () => {
     saveWaitingThreadEntries(true)
     const root = card({ id: 'root' })
     const threads = [
@@ -277,10 +278,13 @@ describe('a family drawn as a tree', () => {
     installThreadPeek(host, host, root, new ThreadIndex([root, ...threads]), vi.fn())
     for (const open of [false, true]) {
       if (open) host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
-      const drawn = [...host.querySelectorAll<HTMLElement>('.kbn-thread-subentries, .kbn-thread-peek')].filter(el => !el.hidden).map(el => el.textContent).join(' ')
-      for (const word of Object.values(THREAD_LABEL)) {
-        expect(drawn.split(new RegExp(`\\b${word}\\b`, 'i')).length - 1, `${word} (${open ? 'open' : 'at rest'})`).toBeLessThanOrEqual(1)
-      }
+      const shown = [...host.querySelectorAll<HTMLElement>('.kbn-thread-subentries, .kbn-thread-peek')].filter(el => !el.hidden)
+      const tags = shown.flatMap(el => [...el.querySelectorAll<HTMLElement>('.kbn-thread-row')].map(row =>
+        [row.dataset.threadState, row.querySelector('.kbn-tree-tag')?.textContent ?? null]))
+      for (const [state, tag] of tags) expect(tag, `${state} (${open ? 'open' : 'at rest'})`).toBe(open ? ({ waiting: 'waiting', 'to-review': 'review' } as Record<string, string>)[state!] ?? null : null)
+      // Outside the tags, no line says its state.
+      const rest = shown.map(el => { const copy = el.cloneNode(true) as HTMLElement; copy.querySelectorAll('.kbn-tree-tag').forEach(t => t.remove()); return copy.textContent }).join(' ')
+      for (const word of Object.values(THREAD_LABEL)) expect(rest.split(new RegExp(`\\b${word}\\b`, 'i')).length - 1, word).toBeLessThanOrEqual(1)
       const names = [...host.querySelectorAll<HTMLElement>('.kbn-thread-name')].filter(n => !n.closest('[hidden]')).map(n => n.textContent)
       expect(new Set(names).size).toBe(names.length)
     }
@@ -305,7 +309,8 @@ describe('a family drawn as a tree', () => {
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
     const row = host.querySelector<HTMLElement>('.kbn-thread-peek .kbn-thread-row')!
     // Nothing inline but the name.
-    expect(row.textContent).toBe('Choose the cut')
+    expect(row.querySelector('.kbn-thread-name')!.textContent).toBe('Choose the cut')
+    expect(row.querySelector('.kbn-tree-tag')!.textContent).toBe('review')
     const pointer = new Event('pointerenter'); Object.assign(pointer, { pointerType: 'mouse' }); row.dispatchEvent(pointer)
     const whisper = () => document.querySelector<HTMLElement>('.kbn-thread-whisper')
     expect(whisper()?.hidden ?? true).toBe(true)
