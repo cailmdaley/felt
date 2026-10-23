@@ -136,7 +136,9 @@ defmodule Shuttle.AppWorkersTest do
 
   defmodule LegacyHeldRunner do
     def cmd("ps", _args, _opts),
-      do: {"1234 1 codex resume 11111111-2222-3333-4444-555555555555\n5678 1 codex --remote unix:///control.sock resume app-session-1\n", 0}
+      do:
+        {"1234 1 codex resume 11111111-2222-3333-4444-555555555555\n5678 1 codex --remote unix:///control.sock resume app-session-1\n",
+         0}
 
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
   end
@@ -440,8 +442,32 @@ defmodule Shuttle.AppWorkersTest do
 
     assert {:ok, %{"active" => true, "terminal_error" => error}} = AppWorkers.get("app-session-1")
     assert error =~ "no rollout found"
-    {:ok, poller} = start_poller!(runner: Runner, name: nil, felt_stores: [Runner.felt_root()], poll_interval_ms: 60_000)
-    assert [%{terminal_error: ^error, session_uuid: "app-session-1"}] = Poller.snapshot(poller).eligible
+
+    assert {502,
+            %{
+              surface: "cli",
+              session_uuid: "app-session-1",
+              terminal_error: ^error,
+              message: message
+            }} =
+             ShuttleWeb.DispatchReply.render(
+               "tests/terminal",
+               {:error, {:app_launch_failed, "app-session-1", {:terminal_unavailable, reason}}}
+             )
+
+    assert message =~ "Use shuttle attach"
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert [%{terminal_error: ^error, session_uuid: "app-session-1"}] =
+             Poller.snapshot(poller).eligible
+
     assert {:error, :already_running} = dispatch("tests/terminal")
     assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
 

@@ -130,16 +130,7 @@ defmodule ShuttleWeb.CaptureController do
               capture_error(
                 conn,
                 502,
-                %{
-                  spawned: false,
-                  surface: "app",
-                  session_uuid: id,
-                  tmux_session: nil,
-                  reason: "app_launch_failed",
-                  error: inspect(reason),
-                  message:
-                    "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-                },
+                Map.put(ShuttleWeb.DispatchReply.app_launch_failure(id, reason), :spawned, false),
                 meeting_row
               )
             end

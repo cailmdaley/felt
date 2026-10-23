@@ -20,7 +20,7 @@ defmodule ShuttleWeb.DispatchReply do
     # identical before and after a fresh dispatch and cannot distinguish the
     # new session from the one it replaced. The runtime UUID can: it is
     # stamped synchronously at launch for a Claude worker, and the refresh
-    # above just re-read it off disk. `nil` for a codex/pi worker (scraped
+    # above just re-read it off disk. `nil` for a Pi worker (scraped
     # and backfilled seconds later) — a client then falls back to comparing
     # against the value it saw before dispatching.
     {200,
@@ -38,17 +38,7 @@ defmodule ShuttleWeb.DispatchReply do
     do: app_server_unavailable(fiber_id, %{session_uuid: id})
 
   def render(_fiber_id, {:error, {:app_launch_failed, id, reason}}) do
-    {502,
-     %{
-       dispatched: false,
-       surface: "app",
-       session_uuid: id,
-       tmux_session: nil,
-       reason: "app_launch_failed",
-       error: inspect(reason),
-       message:
-         "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-     }}
+    {502, Map.put(app_launch_failure(id, reason), :dispatched, false)}
   end
 
   def render(fiber_id, {:error, :app_server_unavailable}), do: app_server_unavailable(fiber_id)
@@ -137,6 +127,20 @@ defmodule ShuttleWeb.DispatchReply do
       _ ->
         base
     end
+  end
+
+  def app_launch_failure(id, reason) do
+    message =
+      case reason do
+        {:terminal_unavailable, _} ->
+          "The conversation and initial turn were created, but its terminal viewer could not be opened. Use shuttle attach to retry the same conversation."
+
+        _ ->
+          "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
+      end
+
+    Shuttle.WorkerBackend.wire(Shuttle.AppWorkers.ref(id))
+    |> Map.merge(%{reason: "app_launch_failed", error: inspect(reason), message: message})
   end
 
   defp put_present(map, _key, nil), do: map
