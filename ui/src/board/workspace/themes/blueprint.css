@@ -158,22 +158,6 @@
 }
 .ws-thumbnail [data-part="thumbnail-face"] .ws-thumbnail-kind { color: var(--ws-accent); }
 
-:scope[data-part="sidebar-card"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-paper);
-  background-image:
-    linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
-  background-size: 24px 24px;
-  border-color: var(--ws-hairline-soft);
-  border-top: 2px solid var(--ws-accent);
-  clip-path: polygon(0 8px, 8px 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 0 100%);
-}
-:scope[data-part="sidebar-card"][aria-current="true"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-fill);
-  border-color: var(--ws-accent);
-}
 :scope[data-part="sidebar-card"] :is(.kbn-card-name, .kbn-card-outcome) { color: var(--ws-ink-soft); }
 :scope[data-part="sidebar-card"] .kbn-card-name {
   color: var(--ws-ink);

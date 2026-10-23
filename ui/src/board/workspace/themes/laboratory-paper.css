@@ -153,24 +153,6 @@
 }
 .ws-thumbnail [data-part="thumbnail-face"] .ws-thumbnail-kind { color: var(--ws-accent); }
 
-:scope[data-part="sidebar-card"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-paper);
-  background-image:
-    linear-gradient(90deg, transparent 17px, var(--ws-margin-rule) 17px 18px, transparent 18px),
-    linear-gradient(var(--ws-lab-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--ws-lab-grid) 1px, transparent 1px);
-  background-repeat: no-repeat, repeat, repeat;
-  background-size: 42px 100%, 24px 24px, 24px 24px;
-  border-color: var(--ws-hairline-soft);
-  border-top: 2px solid var(--ws-accent);
-  border-radius: var(--ws-control-radius);
-}
-:scope[data-part="sidebar-card"][aria-current="true"] {
-  color: var(--ws-ink);
-  background-color: var(--ws-fill);
-  border-color: var(--ws-accent);
-}
 :scope[data-part="sidebar-card"] :is(.kbn-card-name, .kbn-card-outcome) { color: var(--ws-ink-soft); }
 :scope[data-part="sidebar-card"] .kbn-card-name { color: var(--ws-ink); }
 :scope[data-part="sidebar-card"] .ws-channel-owner { color: var(--ws-ink-muted); }
