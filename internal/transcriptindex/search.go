@@ -25,14 +25,18 @@ type Hit struct {
 	Snippet   string  `json:"snippet"`
 }
 
-// literalQuery quotes every keyword, so paths, error strings and FTS operator
-// names are ordinary searches rather than an executable FTS expression.
+// literalQuery quotes whitespace-separated terms, so operator names are
+// ordinary words, and punctuation-separated path fragments stay adjacent.
+// SQLite applies the index's tokenizer inside each quoted term.
 func literalQuery(query string) string {
-	words := strings.FieldsFunc(query, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) && r != '_' })
-	for j := range words {
-		words[j] = "\"" + strings.ReplaceAll(words[j], "\"", "\"\"") + "\""
+	var terms []string
+	for _, word := range strings.Fields(query) {
+		if !strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) || r == '_' }) {
+			continue
+		}
+		terms = append(terms, "\""+strings.ReplaceAll(word, "\"", "\"\"")+"\"")
 	}
-	return strings.Join(words, " AND ")
+	return strings.Join(terms, " AND ")
 }
 func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, error) {
 	hits := []Hit{}

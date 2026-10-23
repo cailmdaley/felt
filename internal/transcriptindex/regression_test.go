@@ -8,6 +8,22 @@ import (
 	"testing"
 )
 
+func TestPathQueryKeepsFragmentsAdjacent(t *testing.T) {
+	i := testIndex(t)
+	path := filepath.Join(t.TempDir(), "paths.jsonl")
+	text := userLine("src/sky_map.go") + userLine("src contains sky_map and go functions")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.IndexFile(ctx, path, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	hits := search(t, i, "src/sky_map.go", Options{})
+	if len(hits) != 1 || hits[0].Line != 1 || hits[0].Snippet != "«src/sky_map.go»" {
+		t.Fatalf("path fragments matched unrelated words: %+v", hits)
+	}
+}
+
 func TestExplicitRootScanInitializesEmptyAndHookOnlyIndexes(t *testing.T) {
 	i := testIndex(t)
 	if ready, err := i.Ready(ctx); err != nil || ready {
