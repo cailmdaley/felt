@@ -77,4 +77,40 @@ defmodule Shuttle.CodexEndpointTest do
 
     refute File.exists?(Path.join(real, "private"))
   end
+
+  # Negative control: requiring the protected root to exist makes the cleared
+  # case red, and dropping the exact-target check makes the foreign link pass.
+  test "a genuine rendezvous alias stays acceptable after /tmp loses its protected root",
+       %{root: root} do
+    uid = Shuttle.Host.euid()
+    File.mkdir!(root)
+    File.chmod!(root, 0o700)
+    endpoint = Path.join(root, "app-server.sock")
+
+    tmp =
+      case File.read_link("/tmp") do
+        {:ok, t} when t in ["/private/tmp", "private/tmp"] -> "/private/tmp"
+        _ -> "/tmp"
+      end
+
+    literal = tmp <> String.trim_leading(endpoint, "/tmp")
+    hash = :crypto.hash(:sha256, literal) |> Base.encode16(case: :lower)
+
+    # A uid nobody owns names a protected root that cannot exist here.
+    ghost_uid = uid + 1_000_003
+    File.ln_s!(Path.join([tmp, "codex-daemon-#{ghost_uid}", hash]), endpoint)
+    assert {:error, _} = CodexEndpoint.verify_socket(endpoint, uid)
+
+    File.rm!(endpoint)
+    protected = Path.join(tmp, "codex-daemon-#{uid}")
+
+    unless File.exists?(protected) do
+      File.ln_s!(Path.join(protected, hash), endpoint)
+      assert :ok = CodexEndpoint.verify_socket(endpoint, uid)
+    end
+
+    File.rm(endpoint)
+    File.ln_s!(Path.join(protected, "not-the-hash"), endpoint)
+    assert {:error, _} = CodexEndpoint.verify_socket(endpoint, uid)
+  end
 end

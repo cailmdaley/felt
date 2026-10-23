@@ -82,8 +82,7 @@ defmodule Shuttle.CodexEndpoint do
     expected = Path.join(root, hash)
 
     with {:ok, ^expected} <- File.read_link(endpoint),
-         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <- File.lstat(root),
-         true <- (mode &&& 0o777) == 0o700 do
+         :ok <- alias_root(root, uid) do
       case File.lstat(expected) do
         {:ok, %File.Stat{uid: ^uid, mode: mode}}
         when (mode &&& 0o170000) == 0o140000 and (mode &&& 0o077) == 0 ->
@@ -98,6 +97,22 @@ defmodule Shuttle.CodexEndpoint do
       end
     else
       other -> {:error, "unsafe Codex rendezvous alias #{endpoint}: #{inspect(other)}"}
+    end
+  end
+
+  # The protected root lives in /tmp, which the OS clears on reboot and
+  # prunes when idle. A genuine alias whose root has been cleared is dangling
+  # like any other: the next Codex server recreates the root.
+  defp alias_root(root, uid) do
+    case File.lstat(root) do
+      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} when (mode &&& 0o777) == 0o700 ->
+        :ok
+
+      {:error, :enoent} ->
+        :ok
+
+      other ->
+        {:error, {:unsafe_root, root, other}}
     end
   end
 
