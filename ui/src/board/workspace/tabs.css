@@ -46,7 +46,7 @@
 .ws-tab .ws-tab-thumb { position: absolute; inset: 0; border-radius: inherit; background: transparent; }
 .ws-tab .ws-tab-thumb .ws-thumbnail-face { padding: var(--ws-tile-pad); }
 .ws-tab .ws-tab-thumb .ws-thumbnail-title {
-  font: 500 var(--ws-tile-title-size)/1.14 var(--ws-serif); color: var(--ws-ink-soft); letter-spacing: 0;
+  font: 500 var(--ws-small-size)/1.14 var(--ws-serif); color: var(--ws-ink-soft); letter-spacing: 0;
   -webkit-line-clamp: var(--ws-tile-title-lines); overflow-wrap: break-word; hyphens: auto;
 }
 .ws-tab[aria-selected='true'] .ws-tab-thumb .ws-thumbnail-title { color: var(--ws-ink); }
@@ -73,7 +73,7 @@
   content: attr(data-caption); position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
   height: var(--ws-tile-caption-height); padding: 0 var(--ws-tile-pad); border-radius: 0 0 var(--ws-tile-radius) var(--ws-tile-radius);
   background: color-mix(in srgb, var(--ws-paper) 92%, transparent); border-top: var(--ws-line-width) solid var(--ws-hairline-soft);
-  color: var(--ws-ink-muted); font: 500 var(--ws-tile-caption-size)/var(--ws-tile-caption-height) var(--ws-serif); letter-spacing: 0;
+  color: var(--ws-ink-muted); font: 500 var(--ws-small-size)/var(--ws-tile-caption-height) var(--ws-serif); letter-spacing: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; pointer-events: none;
 }
 .ws-tab[aria-selected='true'][data-caption]:has(.ws-thumbnail-ready)::before { color: var(--ws-ink); }
@@ -86,7 +86,7 @@
   position: relative; flex: none; width: var(--ws-tile-width); height: var(--ws-tile-height); padding: 0;
   border-radius: var(--ws-tile-radius); background: transparent; color: var(--ws-ink-muted);
   border: var(--ws-line-width) dashed var(--ws-hairline) !important; cursor: pointer;
-  font: 500 var(--ws-tile-title-size)/1 var(--ws-serif); font-variant-numeric: tabular-nums;
+  font: 500 var(--ws-small-size)/1 var(--ws-serif); font-variant-numeric: tabular-nums;
   transition: color var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
 }
 .ws-tab-more:hover, .ws-tab-more:focus-visible { color: var(--ws-ink); border-color: var(--ws-ink-muted) !important; }

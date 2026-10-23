@@ -88,10 +88,10 @@ These are the stable styling tokens:
 | `--ws-verdict` | Verdict ink |
 | `--ws-serif`, `--ws-mono`, `--ws-mono-tracking` | Prose/name stack, metadata stack and tracking |
 | `--ws-heading-size`, `--ws-section-size`, `--ws-lede-size`, `--ws-prose-size` | Fiber title, section, outcome and body sizes |
-| `--ws-label-size`, `--ws-small-size`, `--ws-chrome-size` | Labels, metadata and controls |
+| `--ws-row-size`, `--ws-label-size`, `--ws-note-size`, `--ws-small-size`, `--ws-chrome-size` | Row titles, controls, secondary lines, metadata and the reader's base text |
 | `--ws-radius`, `--ws-control-radius`, `--ws-line-width`, `--ws-float` | Frame shape, control shape, borders and elevation shadow |
 
-The default scale is 11 px mono metadata, 15 px serif names and verbs, 18–21 px serif prose, 24 px outcomes and 34 px fiber titles.
+The default scale has seven steps: 11 px mono metadata, 14 px secondary lines, 15 px controls and labels, 16 px row titles, 18 px prose, 21 px titles and outcomes, and 34 px fiber titles. `--ws-chrome-size` follows the label step and `--ws-lede-size` the section step unless a theme sets them.
 Themes can restyle those fonts and sizes through the variables above; act zones keep Shuttle's default typography.
 
 Set related text and background tokens together and check contrast.

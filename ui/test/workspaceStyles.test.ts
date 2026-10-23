@@ -8,14 +8,18 @@ const tokens = read('tokens.css')
 describe('workspace style contracts', () => {
   it('keeps the default type scale named and workspace font sizes on those tokens', () => {
     for (const [token, size] of Object.entries({
-      'small-size': 11, 'label-size': 15, 'chrome-size': 15, 'prose-size': 18,
-      'section-size': 21, 'lede-size': 21.6, 'heading-size': 34,
+      'small-size': 11, 'note-size': 14, 'label-size': 15, 'row-size': 16, 'prose-size': 18,
+      'section-size': 21, 'heading-size': 34,
     })) expect(tokens).toMatch(new RegExp(`--ws-${token}:\\s*${size}px;`))
-    const styleFiles = [...readdirSync(new URL('../src/board/workspace/', import.meta.url)).filter(name => name.endsWith('.css') && name !== 'tokens.css'), '../keymap.css']
-    for (const name of styleFiles) {
-      const styles = read(name).replace(/\/\*[\s\S]*?\*\//g, '')
+    // The theme hooks alias steps of the scale rather than adding their own.
+    expect(tokens).toMatch(/--ws-chrome-size:\s*var\(--ws-label-size\);/)
+    expect(tokens).toMatch(/--ws-lede-size:\s*var\(--ws-section-size\);/)
+    const dir = (path: string): string[] => readdirSync(new URL(path, import.meta.url)).filter(name => name.endsWith('.css') && name !== 'tokens.css').map(name => `${path}${name}`)
+    const styleFiles = [...dir('../src/board/workspace/'), ...dir('../src/board/transcript/'), '../src/board/keymap.css']
+    for (const path of styleFiles) {
+      const styles = readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
       for (const declaration of styles.matchAll(/\bfont(?:-size)?\s*:\s*([^;{}]+)/g)) {
-        expect(declaration[1], `${name}: ${declaration[0]}`).not.toMatch(/\b\d+(?:\.\d+)?(?:px|rem)\b/)
+        expect(declaration[1], `${path}: ${declaration[0]}`).not.toMatch(/\b\d+(?:\.\d+)?(?:px|rem)\b/)
       }
     }
   })

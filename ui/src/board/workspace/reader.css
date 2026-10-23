@@ -133,7 +133,7 @@
 .ws-reader .ws-channel-find:focus-visible { outline: none; border-color: var(--ws-ink-faint); }
 .ws-channel-find::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 .ws-channel-list { overflow: auto; }
-.ws-channel-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius); background: none; cursor: pointer; font: 500 var(--ws-prose-size)/1.25 var(--ws-serif); color: var(--ws-ink-soft); }
+.ws-channel-row { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid transparent; border-radius: var(--ws-control-radius); background: none; cursor: pointer; font: 400 var(--ws-row-size)/1.3 var(--ws-serif); color: var(--ws-ink-soft); }
 .ws-channel-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .ws-channel-row small { font: var(--ws-small-size)/1.5 var(--ws-mono); letter-spacing: var(--ws-mono-tracking); color: var(--ws-ink-faint); }
 .ws-channel-row:hover { background: var(--ws-hover); color: var(--ws-ink); }
@@ -190,10 +190,10 @@
   font-family: var(--ws-serif); transition: background-color var(--ws-crossing) var(--ws-ease);
 }
 .ws-sidebar .ws-constitution-card .kbn-card-id { display: none; }
-.ws-sidebar .ws-constitution-card .kbn-card-name { font: 500 var(--ws-prose-size)/1.2 var(--ws-serif); }
+.ws-sidebar .ws-constitution-card .kbn-card-name { font: 400 var(--ws-row-size)/1.3 var(--ws-serif); color: var(--ws-ink-soft); }
 /* A theme may dress the name; the column keeps the board's plain serif. */
 .ws-sidebar .ws-constitution-row .kbn-card-name { font-family: var(--ws-serif) !important; font-variant-caps: normal !important; text-transform: none !important; letter-spacing: 0 !important; }
-.ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-label-size)/1.35 var(--ws-serif); pointer-events: none; }
+.ws-sidebar .ws-constitution-card .kbn-card-outcome { -webkit-line-clamp: var(--ws-sidebar-outcome-lines); font: var(--ws-note-size)/1.35 var(--ws-serif); pointer-events: none; }
 .ws-sidebar .ws-constitution-card .kbn-card-meta { justify-content: space-between; gap: var(--ws-small-gap); font: var(--ws-small-size)/1.4 var(--ws-mono); }
 /* The meta row's line box is the worker pill's, held whether or not a worker runs, so one starting moves nothing. */
 .ws-sidebar .ws-constitution-card .kbn-card-meta { min-height: var(--ws-meta-row); }
@@ -212,7 +212,7 @@
 .ws-sidebar .ws-constitution-row .ws-worker-dot { position: static; translate: none; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-hover); }
 .ws-sidebar .ws-constitution-card[aria-current='true'] { background: var(--ws-fill); color: var(--ws-ink); }
-.ws-sidebar .ws-constitution-card[aria-current='true'] .kbn-card-name { font-weight: 600; }
+.ws-sidebar .ws-constitution-card[aria-current='true'] .kbn-card-name { color: var(--ws-ink); }
 /* Each group's caption holds the top of the list while its cards pass beneath,
    and a card scrolled into view keeps clear of it, so a landing shows both.
    Its ground and the fade below it show only while it is stuck, where the
@@ -221,7 +221,7 @@
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; height: var(--ws-control-height);
   margin: var(--ws-small-gap) 0;
 }
-.ws-sidebar .kbn-flight-caption { font: var(--ws-label-size)/1.2 var(--ws-serif); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; }
+.ws-sidebar .kbn-flight-caption { font: 400 var(--ws-note-size)/1.2 var(--ws-serif); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; }
 .ws-sidebar .ws-channel-group:first-child > .kbn-flight-caption { margin-top: 0; }
 .ws-sidebar .kbn-flight-caption::before, .ws-sidebar .kbn-flight-caption::after { content: ''; position: absolute; left: 0; right: 0; z-index: -1; pointer-events: none; }
 .ws-sidebar .kbn-flight-caption::before { top: 0; bottom: 0; background: var(--ws-ground); }
