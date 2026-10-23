@@ -1,15 +1,13 @@
 defmodule ShuttleWeb.RelayHelpersTest do
   use ExUnit.Case, async: true
 
-  test "gives actionable ChatGPT connection guidance without exposing daemon internals" do
+  test "names the managed socket and its recovery without suggesting an embedded fallback" do
     message = ShuttleWeb.RelayHelpers.app_server_unavailable_message()
 
-    assert message ==
-             "The ChatGPT connection on this host is unavailable. " <>
-               "Open or reconnect this host in ChatGPT, then try again."
-
-    refute message =~ "App Server"
-    refute message =~ "remote host"
-    refute message =~ "CLI"
+    assert message =~ "Codex App Server socket"
+    assert message =~ "codex app-server daemon start"
+    assert message =~ "SHUTTLE_CODEX_SOCKET"
+    assert message =~ "Both Codex surfaces require it"
+    refute message =~ "ChatGPT"
   end
 end

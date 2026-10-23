@@ -87,7 +87,18 @@ defmodule Shuttle.SessionResume do
          harness: harness,
          agent: agent.id,
          cwd: cwd,
-         command: Agents.build_resume_command(agent, session, "")
+         backend_opts: [cwd: cwd, model: agent.model, effort: agent.effort],
+         command:
+           if(harness == "codex",
+             do:
+               Shuttle.CodexTerminal.command(
+                 agent.wrapper,
+                 cwd,
+                 session,
+                 "unix://" <> Shuttle.CodexApp.Transport.default_socket()
+               ),
+             else: Agents.build_resume_command(agent, session, "")
+           )
        }}
     end
   end
@@ -111,15 +122,48 @@ defmodule Shuttle.SessionResume do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     live = Keyword.get(opts, :live_sessions, &live_sessions/0)
 
-    with :ok <- not_the_worker(session, live.()),
-         {:ok, plan} <- plan(session, opts) do
-      if running?(plan.tmux, runner) do
-        {:ok, %{tmux_session: plan.tmux, created: false}}
-      else
-        start(plan, runner)
-      end
+    case Shuttle.AppWorkers.get(session) do
+      {:ok, %{"active" => true, "surface" => "cli"}} ->
+        Shuttle.CodexTerminal.prepare(session, opts)
+
+      _ ->
+        with :ok <- not_the_worker(session, live.()),
+             {:ok, plan} <- plan(session, opts) do
+          if running?(plan.tmux, runner) do
+            {:ok, %{tmux_session: plan.tmux, created: false}}
+          else
+            with :ok <- resume_identity_free(plan, runner),
+                 :ok <- prepare_backend(plan),
+                 do: start(plan, runner)
+          end
+        end
     end
   end
+
+  defp resume_identity_free(%{harness: "codex", session: id}, runner) do
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, _} -> :ok
+      _ -> not_held(id, runner)
+    end
+  end
+
+  defp resume_identity_free(plan, runner), do: not_held(plan.session, runner)
+
+  defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts}) do
+    case Shuttle.AppWorkers.client().resume_thread(id, opts) do
+      {:ok, %{"id" => ^id}} ->
+        :ok
+
+      {:error, reason} ->
+        {:error,
+         "Managed Codex resume refused: #{inspect(reason)}. Start codex app-server daemon or configure SHUTTLE_CODEX_SOCKET; no embedded fallback is used."}
+
+      _ ->
+        {:error, "Managed Codex resume returned a different thread"}
+    end
+  end
+
+  defp prepare_backend(_plan), do: :ok
 
   defp not_the_worker(session, live) do
     if session in live,
@@ -167,8 +211,7 @@ defmodule Shuttle.SessionResume do
   end
 
   defp start(plan, runner) do
-    with :ok <- not_held(plan.session, runner),
-         :ok <- tmux_server(runner) do
+    with :ok <- tmux_server(runner) do
       script = WorkerProcess.script_path(plan.tmux)
 
       File.write!(script, run_script(plan))

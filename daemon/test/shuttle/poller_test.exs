@@ -1051,10 +1051,9 @@ defmodule Shuttle.PollerTest do
 
   for {cli, agent, project} <- [
         {"pi", "pi-luna", :absolute},
-        {"codex", "codex", :absolute},
         {"pi", "pi-luna", :tilde},
         {"pi", "pi-luna", :empty},
-        {"codex", "codex", :old}
+        {"pi", "pi-luna", :old}
       ] do
     @tag :pr53_identity
     @tag :timing
@@ -1063,7 +1062,6 @@ defmodule Shuttle.PollerTest do
       id = "tests/recover-#{cli}"
       root = MockRunner.felt_root()
       Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
-      Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", Path.join(root, "codex-sessions"))
       Env.put_app_env(:session_capture_timeout_ms, 25)
       Env.put_app_env(:session_capture_poll_ms, 5)
       Env.put_app_env(:session_capture_retry_ms, 100)
@@ -1145,18 +1143,8 @@ defmodule Shuttle.PollerTest do
       uuid = "recovered-#{cli}"
       header = %{"id" => uuid, "cwd" => root, "timestamp" => boundary}
 
-      {path, event} =
-        if cli == "pi" do
-          {Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl"),
-           Map.put(header, "type", "session")}
-        else
-          {Path.join([
-             root,
-             "codex-sessions",
-             Calendar.strftime(dispatched_at, "%Y/%m/%d"),
-             "rollout-session.jsonl"
-           ]), %{"type" => "session_meta", "payload" => header}}
-        end
+      path = Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl")
+      event = Map.put(header, "type", "session")
 
       File.mkdir_p!(Path.dirname(path))
 
@@ -1175,7 +1163,7 @@ defmodule Shuttle.PollerTest do
 
           File.write!(
             Path.join(Path.dirname(path), "rollout-zzzz-#{label}.jsonl"),
-            Jason.encode!(%{"type" => "session_meta", "payload" => candidate}) <>
+            Jason.encode!(Map.put(candidate, "type", "session")) <>
               "\n" <> Jason.encode!(%{"text" => "Fiber: #{prompt}"}) <> "\n"
           )
         end

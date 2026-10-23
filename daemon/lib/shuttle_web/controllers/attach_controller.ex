@@ -38,7 +38,12 @@ defmodule ShuttleWeb.AttachController do
   end
 
   def create(conn, %{"tmux_session" => session} = params) when is_binary(session) do
-    attach(conn, session, Map.get(params, "shuttle_host"))
+    host = Map.get(params, "shuttle_host")
+
+    case prepare_terminal(session, host) do
+      :ok -> attach(conn, session, host)
+      {:error, reason} -> conn |> put_status(422) |> json(%{error: inspect(reason)})
+    end
   end
 
   def create(conn, %{"session" => session} = params) when is_binary(session) do
@@ -57,6 +62,38 @@ defmodule ShuttleWeb.AttachController do
   def create(conn, _params) do
     conn |> put_status(400) |> json(%{error: "tmux_session or session is required"})
   end
+
+  defp prepare_terminal("codex-terminal-" <> id = tmux, host) do
+    case OriginRouter.route_host(host) do
+      :local ->
+        case Shuttle.CodexTerminal.prepare(id,
+               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
+             ) do
+          {:ok, %{tmux_session: ^tmux}} -> :ok
+          {:error, _} = error -> error
+          _ -> {:error, :terminal_identity_mismatch}
+        end
+
+      {:remote, remote} ->
+        case OriginRouter.forward(remote, "/api/v1/sessions/prepare-terminal", %{
+               "tmux_session" => tmux
+             }) do
+          {:forwarded, 200, body} ->
+            case Jason.decode(body) do
+              {:ok, %{"tmux_session" => ^tmux}} -> :ok
+              _ -> {:error, :terminal_identity_mismatch}
+            end
+
+          other ->
+            {:error, other}
+        end
+
+      error ->
+        {:error, error}
+    end
+  end
+
+  defp prepare_terminal(_tmux, _host), do: :ok
 
   defp attach(conn, tmux, host) do
     case kitty().open(tmux, host) do
@@ -83,9 +120,12 @@ defmodule ShuttleWeb.AttachController do
           {:forwarded, 200, body} ->
             case Jason.decode(body) do
               {:ok, %{"tmux_session" => tmux}} when is_binary(tmux) ->
-                if tmux == SessionResume.tmux_name(session),
-                  do: {:ok, tmux},
-                  else: {:error, 502, "#{remote.name} answered an unexpected tmux session"}
+                if tmux in [
+                     SessionResume.tmux_name(session),
+                     Shuttle.CodexTerminal.tmux_name(session)
+                   ],
+                   do: {:ok, tmux},
+                   else: {:error, 502, "#{remote.name} answered an unexpected tmux session"}
 
               _ ->
                 {:error, 502, "#{remote.name} answered the resume with no tmux session"}

@@ -399,6 +399,11 @@ defmodule Shuttle.CodexApp.TransportTest do
 
         assert params["projectId"] == "existing"
         assert params["runtimeWorkspaceRoots"] == [cwd, felt]
+        assert params["model"] == "configured-model"
+        assert params["config"] == %{"model_reasoning_effort" => "high"}
+        assert params["approvalPolicy"] == "on-request"
+        assert params["approvalsReviewer"] == "auto_review"
+        assert params["sandbox"] == "workspace-write"
         send_result(socket, start_id, %{"thread" => %{"id" => "thread-1"}})
 
         assert %{
@@ -413,7 +418,15 @@ defmodule Shuttle.CodexApp.TransportTest do
     configure_adapter(path)
 
     assert {:ok, %{"id" => "thread-1", "projectId" => "existing"}} =
-             CodexApp.start_thread(cwd: cwd, felt_store: felt)
+             CodexApp.start_thread(
+               cwd: cwd,
+               felt_store: felt,
+               model: "configured-model",
+               effort: "high",
+               approval_policy: "on-request",
+               approvals_reviewer: "auto_review",
+               sandbox: "workspace-write"
+             )
 
     assert :ok = CodexApp.name_thread("thread-1", "Friendly fiber")
 

@@ -84,21 +84,37 @@ defmodule Shuttle.WorkerBackend do
         Shuttle.Tmux.stop(runner, session)
 
       id ->
-        result =
-          if AppWorkers.client().state(id) == :missing,
-            do: :ok,
-            else: AppWorkers.client().interrupt(id)
+        :global.trans({{Shuttle.CodexTerminal, id}, self()}, fn ->
+          stop_app(runner, session, id)
+        end)
+    end
+  end
 
-        case result do
-          stopped when stopped in [:ok, {:error, :thread_missing}] ->
-            case AppWorkers.deactivate(id) do
-              :ok -> {"", 0}
-              error -> {inspect(error), 1}
-            end
+  defp stop_app(runner, session, id) do
+    result =
+      if AppWorkers.client().state(id) == :missing,
+        do: :ok,
+        else: AppWorkers.client().interrupt(id)
 
-          error ->
-            {inspect(error), 1}
+    case result do
+      stopped when stopped in [:ok, {:error, :thread_missing}] ->
+        with {_, 0} <- stop_viewer(runner, session),
+             :ok <- AppWorkers.deactivate(id) do
+          {"", 0}
+        else
+          {output, _status} -> {output, 1}
+          error -> {inspect(error), 1}
         end
+
+      error ->
+        {inspect(error), 1}
+    end
+  end
+
+  defp stop_viewer(runner, session) do
+    case tmux(session) do
+      nil -> {"", 0}
+      terminal -> Shuttle.Tmux.stop(runner, terminal)
     end
   end
 
@@ -108,23 +124,26 @@ defmodule Shuttle.WorkerBackend do
         %{surface: "cli", tmux_session: session}
 
       id ->
-        project_id =
+        record =
           case AppWorkers.get(id) do
-            {:ok, record} -> record["project_id"]
-            _ -> nil
+            {:ok, record} -> record
+            _ -> %{}
           end
 
+        surface = record["surface"] || "app"
+
         %{
-          surface: "app",
-          tmux_session: nil,
+          surface: surface,
+          tmux_session: if(surface == "cli", do: record["terminal_tmux"]),
           session_uuid: id,
           thread_id: id,
           transcript_session_uuid: AppWorkers.transcript_id(id),
           desktop_link: Shuttle.SessionLink.desktop_url(id),
-          project_id: project_id
+          project_id: record["project_id"],
+          terminal_error: record["terminal_error"]
         }
     end
   end
 
-  def tmux(session), do: if(AppWorkers.app?(session), do: nil, else: session)
+  def tmux(session), do: wire(session).tmux_session
 end

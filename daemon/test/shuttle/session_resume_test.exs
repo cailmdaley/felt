@@ -19,6 +19,13 @@ defmodule Shuttle.SessionResumeTest do
   @pi "01a042f4-6b7f-7f79-9c6c-8140ffd0126c"
   @nocwd "fef866ba-b397-4277-a01b-16fcecc2b256"
 
+  defmodule App do
+    def resume_thread(id, _opts) do
+      send(self(), {:native_resume, id})
+      {:ok, %{"id" => id}}
+    end
+  end
+
   # Scripted runner: `tmux has-session` answers per `:running`, the registry
   # resolves the agents below, everything else succeeds. Records every call.
   defmodule Runner do
@@ -164,6 +171,8 @@ defmodule Shuttle.SessionResumeTest do
 
     start_supervised!(Runner)
     start_supervised!(StubKitty)
+    Env.put_app_env(:codex_app_client, App)
+    Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
     Env.put_app_env(:session_resume_runner, Runner)
     Env.put_app_env(:session_resume_live, fn -> [] end)
     Env.put_app_env(:kitty_impl, StubKitty)
@@ -192,7 +201,7 @@ defmodule Shuttle.SessionResumeTest do
       assert plan.cwd == project
 
       assert plan.command ==
-               "codex --model 'gpt-6-luna' -c model_reasoning_effort='max' --approve-for-me resume '#{@codex}'"
+               "codex --remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}' -C '#{project}' resume '#{@codex}'"
     end
 
     test "pi with no ledgered agent resumes with the bare CLI, in its header's cwd", %{
@@ -292,6 +301,26 @@ defmodule Shuttle.SessionResumeTest do
 
       assert StubKitty.opened() == []
     end
+  end
+
+  test "historical Codex refuses an embedded holder before native resume" do
+    Runner.set_ps({"1234 1 codex resume #{@codex}\n", 0})
+
+    assert {:error, {:live, message}} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert message =~ "1234"
+    refute_received {:native_resume, _}
+  end
+
+  test "durably owned historical Codex does not confuse an App Server identity with an embedded holder" do
+    :ok = Shuttle.AppWorkers.put(%{"session_uuid" => @codex, "active" => false})
+    Runner.set_ps({"1234 1 codex --remote unix:///control.sock resume #{@codex}\n", 0})
+
+    assert {:ok, %{tmux_session: "resume-" <> @codex, created: true}} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert_received {:native_resume, @codex}
   end
 
   test "a double click that races tmux's duplicate-session error is the session, not a failure" do

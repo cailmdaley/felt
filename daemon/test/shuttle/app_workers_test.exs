@@ -5,9 +5,16 @@ defmodule Shuttle.AppWorkersTest do
   # never waits this long, and a loaded machine can take seconds per task.
   @race_timeout 60_000
   import Shuttle.Test.PollerHelpers
+  import Shuttle.Test.ApiConn
+  import Phoenix.ConnTest
+  @endpoint ShuttleWeb.Endpoint
   alias Shuttle.{AppWorkers, Dispatcher, Poller, WorkerBackend}
   alias Shuttle.Test.FeltStoreRunner, as: Runner
   alias Shuttle.Test.{Env, FakeCli}
+
+  defmodule Kitty do
+    def open(_tmux, _host), do: :ok
+  end
 
   defmodule App do
     use Agent
@@ -127,6 +134,13 @@ defmodule Shuttle.AppWorkersTest do
     defp mark_runtime?(_), do: false
   end
 
+  defmodule LegacyHeldRunner do
+    def cmd("ps", _args, _opts),
+      do: {"1234 1 codex resume 11111111-2222-3333-4444-555555555555\n5678 1 codex --remote unix:///control.sock resume app-session-1\n", 0}
+
+    def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+  end
+
   defmodule MissingTmuxRunner do
     def cmd("tmux", _args, _opts), do: {"tmux unavailable", :timeout}
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
@@ -162,6 +176,307 @@ defmodule Shuttle.AppWorkersTest do
       id,
       Keyword.merge([runner: Runner, work_dir: "/tmp", felt_store: Runner.felt_root()], opts)
     )
+  end
+
+  defp terminal_fiber(id) do
+    fiber(id)
+
+    Runner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: codex\nsurface: cli\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
+      "active"
+    )
+  end
+
+  test "terminal dispatch owns the same backend and presents only the exact thread" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    assert ref == "codex-app:app-session-1"
+    assert {:ok, record} = AppWorkers.get("app-session-1")
+    assert record["surface"] == "cli"
+    assert record["terminal_tmux"] == "codex-terminal-app-session-1"
+    assert record["terminal_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+
+    assert [
+             {:start, _},
+             {:turn, "app-session-1", prompt, _},
+             {:read, "app-session-1"},
+             {:resume, "app-session-1", []}
+           ] =
+             App.calls()
+
+    assert prompt =~ "Fiber: tests/terminal"
+    assert prompt =~ "Backend: codex-app-server"
+    assert prompt =~ "Activate the felt and shuttle skills"
+    refute prompt =~ "Surface: app"
+
+    assert %{
+             surface: "cli",
+             tmux_session: "codex-terminal-app-session-1",
+             thread_id: "app-session-1"
+           } = WorkerBackend.wire(ref)
+
+    {"tmux", args} =
+      Enum.find(Runner.commands(), fn {cmd, args} -> cmd == "tmux" and "new-session" in args end)
+
+    script = File.read!(List.last(args))
+
+    assert script =~
+             "--remote 'unix://#{record["terminal_endpoint"]}' -C '/tmp' resume 'app-session-1'"
+
+    refute script =~ "||"
+    refute script =~ "model_reasoning_effort"
+  end
+
+  test "closing a terminal leaves the conversation owned; attach recreates only its viewer" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    tmux = WorkerBackend.tmux(ref)
+    Runner.remove_tmux_session(tmux)
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+    assert :idle = WorkerBackend.observe(ref)
+    assert {:error, :already_running} = dispatch("tests/terminal")
+
+    assert {:ok, %{tmux_session: ^tmux, created: true}} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert {:ok, %{tmux_session: ^tmux, created: false}} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+    App.set(:read_result, {:error, :disconnected})
+
+    assert {:error, :disconnected} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+  end
+
+  test "a failed initial turn retains identity and never creates a viewer or replacement" do
+    terminal_fiber("tests/terminal")
+    App.set(:result, {:error, :timeout})
+    assert {:error, {:app_launch_failed, "app-session-1", :timeout}} = dispatch("tests/terminal")
+
+    assert {:error, :initial_turn_unconfirmed} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert {:error, :already_running} = dispatch("tests/terminal")
+
+    assert {:ok, %{"active" => true, "launch_state" => "blocked", "pending_prompt" => prompt}} =
+             AppWorkers.get("app-session-1")
+
+    assert prompt =~ "Fiber: tests/terminal"
+
+    refute Enum.any?(Runner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end)
+  end
+
+  test "terminal preflight runs before any conversation mutation" do
+    terminal_fiber("tests/terminal")
+    Runner.set_wrapper_missing(true)
+    assert {:error, {:wrapper_unresolved, _}} = dispatch("tests/terminal")
+    assert [] = App.calls()
+    assert [] = AppWorkers.active()
+  end
+
+  test "a changed endpoint or a missing exact native thread cannot create a viewer" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    assert :ok = AppWorkers.update("app-session-1", %{"terminal_endpoint" => "/different/socket"})
+
+    assert {:error, :terminal_endpoint_changed} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert :ok =
+             AppWorkers.update("app-session-1", %{
+               "terminal_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+             })
+
+    App.set(:read_result, {:ok, %{"id" => "other", "status" => %{"type" => "active"}}})
+
+    assert {:error, :native_thread_unverified} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+  end
+
+  test "terminal capture has synchronous identity and claims its backend rather than a tmux process" do
+    terminal_fiber("tests/terminal")
+
+    assert {:ok, %{session_uuid: id, surface: "cli", tmux_session: tmux}} =
+             Dispatcher.capture("Discuss first",
+               runner: Runner,
+               work_dir: "/tmp",
+               felt_store: Runner.felt_root(),
+               agent: "codex",
+               surface: "cli"
+             )
+
+    assert tmux == "codex-terminal-" <> id
+    assert [{:start, _}, {:turn, ^id, prompt, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert prompt =~ ~s(\"surface\":\"cli\")
+    assert prompt =~ ~s(\"session_uuid\":\"#{id}\")
+    refute prompt =~ "tmux_session"
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert {:ok, %{session: "codex-app:" <> ^id}} =
+             Poller.claim_session(poller, "tests/terminal", nil, surface: "cli", session_uuid: id)
+
+    assert %{session: "codex-app:" <> ^id, context_address: "shuttle://test-host/codex/" <> ^id} =
+             Poller.worker_status(poller, "tests/terminal")
+  end
+
+  test "restart adopts terminal backend identity even with no terminal" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert %{session: ^ref, context_address: "shuttle://test-host/codex/app-session-1"} =
+             Poller.worker_status(poller, "tests/terminal")
+
+    snapshot = Poller.snapshot(poller)
+
+    assert [
+             %{
+               surface: "cli",
+               tmux_session: "codex-terminal-app-session-1",
+               session_uuid: "app-session-1"
+             }
+           ] = snapshot.eligible
+
+    assert {:ok, %{created: true}} =
+             Shuttle.SessionResume.prepare("app-session-1",
+               runner: Runner,
+               live_sessions: fn -> ["app-session-1"] end
+             )
+  end
+
+  test "terminal resume of an owned inactive thread has no holder check or new-thread fallback" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    assert {_, 0} = WorkerBackend.stop(Runner, ref)
+    App.set(:resume_result, {:error, :disconnected})
+
+    assert {:error, {:app_launch_failed, "app-session-1", :disconnected}} =
+             dispatch("tests/terminal", runner: LegacyHeldRunner, resume_mode: "previous")
+
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+  end
+
+  test "prepare-terminal and board attach recreate the same viewer without a turn" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    tmux = WorkerBackend.tmux(ref)
+    Runner.remove_tmux_session(tmux)
+    Env.put_app_env(:terminal_runner, Runner)
+    Env.put_app_env(:kitty_impl, Kitty)
+
+    body =
+      post(
+        api_conn(),
+        "/api/v1/sessions/prepare-terminal",
+        Jason.encode!(%{"fiber" => "01KTHDNZS287ZSSG8X8V59XKWB"})
+      )
+      |> json_response(200)
+
+    assert body == %{"tmux_session" => tmux, "created" => true}
+    Runner.remove_tmux_session(tmux)
+
+    body =
+      post(api_conn(), "/api/v1/attach", Jason.encode!(%{"tmux_session" => tmux}))
+      |> json_response(200)
+
+    assert body == %{"attached" => true, "session" => tmux}
+    assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+
+    assert %{"error" => "no owned terminal Codex conversation"} =
+             post(
+               api_conn(),
+               "/api/v1/sessions/prepare-terminal",
+               Jason.encode!(%{"fiber" => "not-the-uid"})
+             )
+             |> json_response(404)
+
+    assert :ok = AppWorkers.deactivate("app-session-1")
+
+    assert %{"error" => "no owned terminal Codex conversation"} =
+             post(
+               api_conn(),
+               "/api/v1/sessions/prepare-terminal",
+               Jason.encode!(%{"tmux_session" => tmux})
+             )
+             |> json_response(404)
+  end
+
+  test "a lost initial rollout is never replaced and exposes terminal refusal" do
+    terminal_fiber("tests/terminal")
+
+    reason =
+      {:peer, %{"code" => -32_600, "message" => "no rollout found for thread id app-session-1"}}
+
+    App.set(:resume_result, {:error, reason})
+
+    assert {:error, {:app_launch_failed, "app-session-1", {:terminal_unavailable, ^reason}}} =
+             dispatch("tests/terminal")
+
+    assert {:ok, %{"active" => true, "terminal_error" => error}} = AppWorkers.get("app-session-1")
+    assert error =~ "no rollout found"
+    {:ok, poller} = start_poller!(runner: Runner, name: nil, felt_stores: [Runner.felt_root()], poll_interval_ms: 60_000)
+    assert [%{terminal_error: ^error, session_uuid: "app-session-1"}] = Poller.snapshot(poller).eligible
+    assert {:error, :already_running} = dispatch("tests/terminal")
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+
+    refute Enum.any?(Runner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and "new-session" in args
+           end)
+  end
+
+  test "uncertain terminal stop retains assignment instead of releasing a usable viewer" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.set_kill_session_failure(true)
+    assert {_, 1} = WorkerBackend.stop(Runner, ref)
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+    assert {:error, :already_running} = dispatch("tests/terminal")
+    Runner.set_kill_session_failure(false)
+    assert {_, 0} = WorkerBackend.stop(Runner, ref)
+    assert :gone = WorkerBackend.session_status(Runner, ref)
+  end
+
+  test "unknown legacy Codex identity cannot migrate while an embedded process holds it" do
+    terminal_fiber("tests/terminal")
+
+    Runner.set_shuttle(
+      "tests/terminal",
+      "kind: oneshot\nagent: codex\nsurface: cli\nruntime:\n  session_uuid: 11111111-2222-3333-4444-555555555555\n",
+      "active"
+    )
+
+    assert {:error, {:transcript_held, message}} =
+             dispatch("tests/terminal", runner: LegacyHeldRunner, resume_mode: "previous")
+
+    assert message =~ "1234"
+    assert [] = App.calls()
+    assert [] = AppWorkers.active()
   end
 
   test "dispatch records exact app identity before its first turn and never launches tmux" do

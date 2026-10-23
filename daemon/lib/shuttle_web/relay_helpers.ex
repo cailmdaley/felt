@@ -16,10 +16,11 @@ defmodule ShuttleWeb.RelayHelpers do
 
   alias Shuttle.FeltStores
 
-  @doc "The recovery guidance shown when ChatGPT is unavailable on the selected host."
+  @doc "Recovery guidance for an unavailable managed Codex App Server."
   def app_server_unavailable_message do
-    "The ChatGPT connection on this host is unavailable. " <>
-      "Open or reconnect this host in ChatGPT, then try again."
+    "The configured Codex App Server socket on this host is unavailable. " <>
+      "Restore that endpoint, or run `codex app-server daemon start` for the default socket " <>
+      "(SHUTTLE_CODEX_SOCKET selects an explicit endpoint). Both Codex surfaces require it; no embedded fallback is used."
   end
 
   @doc """

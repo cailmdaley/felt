@@ -232,6 +232,10 @@ defmodule Shuttle.CodexApp do
     |> maybe_put("cwd", opts[:cwd])
     |> maybe_put("model", opts[:model])
     |> maybe_put("runtimeWorkspaceRoots", workspace_roots(opts))
+    |> maybe_put("approvalPolicy", opts[:approval_policy])
+    |> maybe_put("approvalsReviewer", opts[:approvals_reviewer])
+    |> maybe_put("sandbox", opts[:sandbox])
+    |> maybe_put("config", if(opts[:effort], do: %{"model_reasoning_effort" => opts[:effort]}))
   end
 
   # The worker's checkout and the felt store it reports to.

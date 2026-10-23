@@ -316,7 +316,7 @@ defmodule Shuttle.Poller.Snapshot do
 
     %{
       tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
-      surface: if(app_id, do: "app", else: "cli"),
+      surface: Shuttle.WorkerBackend.wire(meta.session).surface,
       session_uuid: app_id || Map.get(meta, :session_uuid),
       thread_id: app_id,
       desktop_link: Shuttle.SessionLink.desktop_url(app_id),
@@ -324,6 +324,7 @@ defmodule Shuttle.Poller.Snapshot do
       agent: Map.get(meta, :agent_id),
       state: Map.get(meta, :state, "running"),
       launch_error: Map.get(meta, :launch_error),
+      terminal_error: Map.get(Shuttle.WorkerBackend.wire(meta.session), :terminal_error),
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }

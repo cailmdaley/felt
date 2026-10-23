@@ -435,7 +435,7 @@ defmodule Shuttle.CodexApp.Transport do
   defp deadline(timeout), do: System.monotonic_time(:millisecond) + timeout
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 
-  defp default_socket do
+  def default_socket do
     home =
       case Shuttle.Env.get("CODEX_HOME") do
         value when value in [nil, ""] -> Path.join(Shuttle.Env.home(), ".codex")

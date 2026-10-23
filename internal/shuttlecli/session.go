@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -171,6 +172,31 @@ works from any directory.`,
 	return sessionNameCmd
 }
 
+func (a *app) prepareWorkerTerminal(f *felt.Felt) (string, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/sessions/prepare-terminal")
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(map[string]string{"fiber": f.UID})
+	if err != nil {
+		return "", err
+	}
+	body, err := a.postDaemon(endpoint, payload, daemonPostTimeout)
+	if err != nil {
+		return "", err
+	}
+	var result struct {
+		TmuxSession string `json:"tmux_session"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.TmuxSession == "" {
+		return "", fmt.Errorf("daemon returned no terminal viewer")
+	}
+	return result.TmuxSession, nil
+}
+
 func (a *app) attachCmd() *cobra.Command {
 	attachCmd := &cobra.Command{
 		Use:   "attach <fiber>",
@@ -191,7 +217,12 @@ Exits with a clear error if no session is live.`,
 			}
 			session, _ := a.liveWorkerSession(f)
 			if session == "" {
-				return fmt.Errorf("no tmux session %q — fiber %s has no live worker\n(run 'shuttle ps' to list active workers)", want, args[0])
+				// A managed Codex terminal is a replaceable viewer, not the
+				// conversation owner. Preparing it never starts a model turn.
+				session, err = a.prepareWorkerTerminal(f)
+				if err != nil {
+					return fmt.Errorf("no live worker terminal %q — cannot attach fiber %s: %w", want, args[0], err)
+				}
 			}
 
 			tmux, err := a.env.LookPath("tmux")

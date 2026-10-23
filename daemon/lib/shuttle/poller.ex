@@ -471,7 +471,7 @@ defmodule Shuttle.Poller do
   is the same string before and after a fresh dispatch, so it cannot tell the
   new session from the one it replaced. Read after `refresh_document/2`, this
   is the new UUID for a Claude worker (pre-specified at launch) and `nil` for a
-  codex/pi worker, whose UUID is scraped and backfilled seconds later.
+  Pi worker, whose UUID is scraped and backfilled seconds later.
 
   `nil` (not an error) when the Poller is unavailable or the fiber is not in
   the cache — the caller degrades to comparing against the previous value.
@@ -1400,7 +1400,11 @@ defmodule Shuttle.Poller do
     uid = resolved_uid(state, slug, runtime_key)
 
     {state, reply} =
-      if Keyword.get(opts, :surface) == "app" do
+      if Keyword.get(opts, :surface) == "app" or
+           match?(
+             {:ok, %{"surface" => "cli"}},
+             Shuttle.AppWorkers.get(Keyword.get(opts, :session_uuid) || "")
+           ) do
         do_claim_app_session(state, slug, uid, Keyword.get(opts, :session_uuid), opts)
       else
         do_claim_session(state, slug, uid, tmux_session, opts)
@@ -2385,7 +2389,7 @@ defmodule Shuttle.Poller do
         fallback_signal: signal
       ]
 
-      with true <- cli in ["codex", "pi"],
+      with true <- cli == "pi",
            {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
         cond do
           signal != nil and not File.exists?(signal) ->
@@ -3577,7 +3581,7 @@ defmodule Shuttle.Poller do
     with true <- is_binary(id) and id != "",
          {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
          true <- Map.get(fiber, "status") != "closed",
-         true <- get_in(fiber, ["shuttle", "surface"]) == "app",
+         true <- managed_claim_surface?(fiber, id),
          true <- get_in(fiber, ["shuttle", "host"]) == state.own_host_id,
          true <- is_nil(other) or other == session,
          true <- is_nil(running) or running.session == session,
@@ -3621,6 +3625,15 @@ defmodule Shuttle.Poller do
     else
       false -> {state, {:error, :invalid_app_claim}}
       {:error, reason} -> {state, {:error, reason}}
+    end
+  end
+
+  defp managed_claim_surface?(fiber, id) do
+    surface = get_in(fiber, ["shuttle", "surface"]) || "cli"
+
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, record} -> surface == (record["surface"] || "app")
+      _ -> surface == "app"
     end
   end
 
@@ -3932,9 +3945,14 @@ defmodule Shuttle.Poller do
 
           cond do
             handed_off? and idle? ->
-              :ok = Shuttle.AppWorkers.deactivate(Shuttle.AppWorkers.id(meta.session))
-              stop_watcher(meta)
-              handle_worker_exit(state_acc, fiber_id)
+              case Shuttle.WorkerBackend.stop(state_acc.runner, meta.session) do
+                {_, 0} ->
+                  stop_watcher(meta)
+                  handle_worker_exit(state_acc, fiber_id)
+
+                _ ->
+                  state_acc
+              end
 
             Map.get(fiber, "status") == "closed" and not app? ->
               stamp_handoff_if_stale(state_acc, fiber_id, fiber)
@@ -3943,10 +3961,15 @@ defmodule Shuttle.Poller do
               remove_running(state_acc, runtime_key)
 
             Map.get(fiber, "status") == "closed" and idle? ->
-              stamp_handoff_if_stale(state_acc, fiber_id, fiber)
-              :ok = Shuttle.AppWorkers.deactivate(Shuttle.AppWorkers.id(meta.session))
-              stop_watcher(meta)
-              remove_running(state_acc, runtime_key)
+              case Shuttle.WorkerBackend.stop(state_acc.runner, meta.session) do
+                {_, 0} ->
+                  stamp_handoff_if_stale(state_acc, fiber_id, fiber)
+                  stop_watcher(meta)
+                  remove_running(state_acc, runtime_key)
+
+                _ ->
+                  state_acc
+              end
 
             true ->
               state_acc

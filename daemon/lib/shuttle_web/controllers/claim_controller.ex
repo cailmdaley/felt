@@ -50,7 +50,7 @@ defmodule ShuttleWeb.ClaimController do
         conn |> put_status(400) |> json(%{error: "fiber_id is required"})
 
       not present?(tmux_session) and
-          not (params["surface"] == "app" and present?(params["session_uuid"])) ->
+          not (params["surface"] in ["app", "cli"] and present?(params["session_uuid"])) ->
         conn |> put_status(400) |> json(%{error: "tmux_session is required"})
 
       true ->

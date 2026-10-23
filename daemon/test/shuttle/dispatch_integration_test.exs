@@ -15,6 +15,30 @@ defmodule Shuttle.DispatchIntegrationTest do
     @moduletag skip: "felt and shuttle binaries are required for this CLI integration suite"
   end
 
+  defmodule CodexApp do
+    def start_thread(opts) do
+      send(self(), {:codex_start, opts})
+      {:ok, %{"id" => "managed-codex-thread"}}
+    end
+
+    def resume_thread(id, opts) do
+      send(self(), {:codex_resume, id, opts})
+      {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+    end
+
+    def read_thread(id), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+
+    def start_turn(id, prompt, opts) do
+      send(self(), {:codex_turn, id, prompt, opts})
+      {:ok, %{"id" => "managed-turn"}}
+    end
+
+    def name_thread(_id, _name), do: :ok
+    def state(_id), do: :idle
+    def status(_id), do: %{state: :idle, phase: "waiting"}
+    def interrupt(_id), do: :ok
+  end
+
   # ── Integration Runner ─────────────────────────────────────────────────────
   # Passes content and Shuttle commands to their owning real CLI, scoped to a
   # temporary store. Intercepts `tmux` calls with an in-memory session set.
@@ -137,6 +161,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     File.mkdir_p!(data_dir)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data_dir)
+    Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(data_dir, "app-workers"))
+    Shuttle.Test.Env.put_app_env(:codex_app_client, CodexApp)
 
     # The session ledger lands under the same throwaway data dir, so each test
     # reads only its own pairings. test_helper.exs pins a suite-wide
@@ -742,8 +768,11 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     assert script =~ "codex"
+    assert script =~ "--remote 'unix://"
     assert script =~ "resume '40740310-2345-4e33-a1e4-7950db41ce10'"
-    assert script =~ "Mode: resume"
+    assert_received {:codex_turn, "40740310-2345-4e33-a1e4-7950db41ce10", prompt, _}
+    assert prompt =~ "Mode: resume"
+    refute_received {:codex_start, _}
   end
 
   # The board Resume button posts user_message with resume_mode=previous.
@@ -833,8 +862,6 @@ defmodule Shuttle.DispatchIntegrationTest do
     matrix = [
       {"claude-sonnet", "claude-session-111", ["claude", "--resume 'claude-session-111'", "<<<"],
        ["codex resume", "pi "]},
-      {"codex-sol", "codex-session-222", ["codex", "resume 'codex-session-222'", "Mode: resume"],
-       ["--resume", "--session"]},
       {"pi-kimi", "pi-session-333", ["pi", "--session 'pi-session-333'", "Mode: resume"],
        ["--resume", "<<<"]}
     ]
@@ -866,7 +893,6 @@ defmodule Shuttle.DispatchIntegrationTest do
   } do
     matrix = [
       {"claude-sonnet", "claude-history-session", "--resume 'claude-history-session'"},
-      {"codex-sol", "codex-history-session", "resume 'codex-history-session'"},
       {"pi-kimi", "pi-history-session", "--session 'pi-history-session'"}
     ]
 
@@ -887,7 +913,9 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
   end
 
-  test "codex session capture ignores newer non-worker session in same cwd", %{host: host} do
+  test "Codex launch obtains identity from the backend, never a neighbouring rollout", %{
+    host: host
+  } do
     root = put_codex_sessions_root(Path.join(host, "codex-sessions"))
     session_dir = codex_day_dir(root, 0)
 
@@ -926,45 +954,36 @@ defmodule Shuttle.DispatchIntegrationTest do
     A codex fiber whose session UUID should be captured from its own transcript.
     """)
 
-    assert {:ok, FiberUid.session("tests/codex-capture")} ==
+    assert {:ok, "codex-app:managed-codex-thread"} ==
              Dispatcher.dispatch("tests/codex-capture",
                runner: IntegrationRunner,
                felt_store: host,
                work_dir: work_dir
              )
 
-    # F2: dispatched_at is the dispatch-boundary ground truth and must exist
-    # the moment the tmux session launches — codex/pi doesn't know its session
-    # UUID yet at that instant, but the marker is stamped SYNCHRONOUSLY before
-    # `dispatch/1` returns, carrying `--dispatched-at` and an empty `--session`
-    # that clears predecessor identity until capture completes.
+    # The exact backend identity is stamped synchronously before presentation.
     assert Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
              cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
                "--dispatched-at" in args and
-               Enum.member?(Enum.chunk_every(args, 2), ["--session", ""])
+               Enum.member?(Enum.chunk_every(args, 2), ["--session", "managed-codex-thread"])
            end),
            "expected dispatched_at to be stamped synchronously before dispatch returned"
 
-    # The captured worker session id is backfilled into that already-stamped
-    # marker via `shuttle mark-runtime --session` so resume can recover it; the
-    # wrong (human) session is ignored. Shuttle owns the nested update, and the
-    # CLI tests cover `mark-runtime` writing under `shuttle.runtime`.
-    assert eventually(fn ->
-             Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-                 "--session" in args and "right-worker-session" in args and
-                 "--dispatched-at" not in args
-             end)
-           end)
+    assert_received {:codex_start, opts}
+
+    {agent_json, 0} =
+      IntegrationRunner.cmd("shuttle", ["agents", "resolve", "codex-sol", "--json"], [])
+
+    assert opts[:model] == Jason.decode!(agent_json)["model"]
+    assert opts[:approval_policy] == "on-request"
+    assert opts[:approvals_reviewer] == "auto_review"
+    assert opts[:sandbox] == "workspace-write"
+    assert_received {:codex_turn, "managed-codex-thread", prompt, _}
+    assert prompt =~ "Backend: codex-app-server"
+    refute read_run_script() =~ "right-worker-session"
   end
 
-  # Codex files a rollout under the LOCAL civil day, and a dispatch can straddle
-  # local midnight: the tmux launch lands at 23:59 and Codex writes the
-  # transcript at 00:01 the next day, into a directory the dispatch-time date
-  # never names. The capture therefore searches yesterday/today/tomorrow in
-  # local time. Against a single-directory search this test fails with the
-  # capture timing out, which is the live UTC-vs-local bug in miniature.
-  test "codex session capture finds a transcript filed under the adjacent local day", %{
+  test "Codex launch identity is independent of local rollout day", %{
     host: host
   } do
     root = put_codex_sessions_root(Path.join(host, "codex-sessions"))
@@ -996,20 +1015,16 @@ defmodule Shuttle.DispatchIntegrationTest do
     A codex fiber whose transcript lands after local midnight.
     """)
 
-    assert {:ok, FiberUid.session("tests/codex-straddle")} ==
+    assert {:ok, "codex-app:managed-codex-thread"} ==
              Dispatcher.dispatch("tests/codex-straddle",
                runner: IntegrationRunner,
                felt_store: host,
                work_dir: work_dir
              )
 
-    assert eventually(fn ->
-             Enum.any?(IntegrationRunner.commands(), fn {cmd, args} ->
-               cmd == "shuttle" and match?(["-C", _store, "mark-runtime" | _], args) and
-                 "--session" in args and "straddle-worker-session" in args
-             end)
-           end),
-           "expected the transcript filed under tomorrow's local day to be captured"
+    assert_received {:codex_start, _}
+    assert_received {:codex_turn, "managed-codex-thread", _, _}
+    refute read_run_script() =~ "straddle-worker-session"
   end
 
   # The directory set is derived from the LOCAL civil day, never `Date.utc_today/0`.
