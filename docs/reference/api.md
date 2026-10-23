@@ -214,6 +214,7 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /fibers/composite` | fan-in | The cross-host board feed, with reconciled per-host liveness |
 | `GET /fibers/*id` | owner-routed | One fiber by canonical id, body fetched from its owner |
 | `GET /search` | local | Search constitution bodies in this daemon's configured stores |
+| `GET /transcripts/search` | local | Full-text search over every transcript on this host — shells `shuttle transcript search --json` (`q`, repeatable `session`, `fiber`, `since`, `harness`, `limit`) |
 | `GET /roles` | local | Shared role charters as an array of `{slug, name, outcome}`; shells `shuttle roles --json` in configured stores, deduplicates by slug, and sorts by slug. CLI failures or malformed responses contribute no roles (200, empty array when none are available). Role charters are synchronized documents, not owner-routed host state |
 | `GET /remote_control` | host-scoped | Reconciled Claude Remote Control host status, last exit screen, and retry time; see [status fields](#remote-control-status) |
 | `GET /agents` | host-addressed | The effective agent registry (shells `shuttle agents --json`) — a per-host fact, since the built-in layer travels with that host's shuttle binary |

@@ -7,6 +7,8 @@ import { toolLabel } from './tools.js'
 import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
 import { TaskChecklist, type WorkerTask } from './tasks.js'
+import { TranscriptFind } from './TranscriptFind.js'
+import { findMatches, markTerms, nearestMatch, queryTerms, snippetTerms, termPattern, unmark, type Match, type TranscriptHit } from './find.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -86,6 +88,8 @@ interface Message {
   source?: string
   identity?: string
   unclamped: boolean
+  /** The find pattern whose marks the prose carries; unset when its words were just repainted. */
+  marked?: string
 }
 
 interface TurnView {
@@ -113,6 +117,11 @@ const FOLLOW_SLACK = 24
 
 /** A warm cache dot drains on this cadence. */
 const CACHE_REPAINT_MS = 15_000
+
+/** The class of a find mark in a message's words. */
+const FOUND_MARK = 'ws-transcript-found-mark'
+/** The message the find is standing on. */
+const FOUND_MESSAGE = 'ws-transcript-found'
 
 /**
  * The window a session's context is read against. Claude transcripts record
@@ -309,6 +318,7 @@ function paintText(message: Message, author: string, entry: Text): void {
   }
   if (message.source !== entry.text) {
     message.source = entry.text
+    message.marked = undefined
     message.prose.innerHTML = renderMarkdown(entry.text, { untrusted: true })
   }
 }
@@ -364,6 +374,7 @@ function paintPrompt(message: Message, prompt: Prompt): void {
   const text = message.prose
   if (message.source !== prompt.text) {
     message.source = prompt.text
+    message.marked = undefined
     text.innerHTML = promptHtml(prompt.text)
   }
   if (!text.dataset.clampable) {
@@ -512,6 +523,14 @@ export class TranscriptBand {
   private visibleStart = -1
   private intersecting = true
   private disposed = false
+  private readonly find: TranscriptFind
+  private findPattern: RegExp | null = null
+  private findKey = ''
+  private matches: Match[] = []
+  private currentMatch = -1
+  private pendingHit: { query: string; at?: number } | null = null
+  private findFrame: number | null = null
+  private readonly findListener = (event: KeyboardEvent): void => this.findShortcut(event)
   private readonly visibilityListener = (): void => this.visibilityChanged()
   private observer: IntersectionObserver | null = null
   private resizer: ResizeObserver | null = null
@@ -617,14 +636,22 @@ export class TranscriptBand {
     this.inlineWorking.textContent = 'working'
     this.inlineWorking.hidden = true
     this.sentList.className = 'ws-transcript-sent'
+    this.find = new TranscriptFind({
+      shuttleBase: this.shuttleBase,
+      fetch: this.fetcher,
+      query: (text) => this.setQuery(text),
+      step: (direction) => this.stepMatch(direction),
+      open: (hit, query) => this.openHit(hit, query),
+      cleared: () => this.clearQuery(),
+    })
     if (this.inline) {
       this.scroller.append(this.sentList, this.inlineWorking)
-      this.pane.append(this.scroller)
+      this.pane.append(this.find.el, this.scroller)
       this.pane.hidden = false
       this.fullOpen = true
       this.el.append(this.note, this.latestButton, this.pane)
     } else {
-      this.pane.append(panelHead, this.scroller)
+      this.pane.append(panelHead, this.find.el, this.scroller)
       this.el.append(headRow, this.note, this.body)
     }
 
@@ -652,8 +679,11 @@ export class TranscriptBand {
       if (event.key !== 'Escape' || event.isComposing) return
       event.preventDefault()
       event.stopPropagation()
-      this.closeFull()
+      // The first Escape clears a search in progress; the next peels the pane.
+      if (this.find.value || this.matches.length) this.find.clear()
+      else this.closeFull()
     })
+    document.addEventListener('keydown', this.findListener)
     this.latestButton.addEventListener('click', () => {
       this.pinned = false
       this.showTarget(this.latest)
@@ -719,6 +749,10 @@ export class TranscriptBand {
     this.resizer?.disconnect()
     this.resizer = null
     document.removeEventListener('visibilitychange', this.visibilityListener)
+    document.removeEventListener('keydown', this.findListener)
+    if (this.findFrame !== null) cancelAnimationFrame(this.findFrame)
+    this.findFrame = null
+    this.find.dispose()
     this.pane.remove()
     this.el.replaceChildren()
   }
@@ -1118,6 +1152,7 @@ export class TranscriptBand {
       this.paintHead()
       this.scheduleLayout()
       this.setNote(null)
+      if (this.findPattern) this.scheduleFindRefresh()
     })
   }
 
@@ -1141,6 +1176,7 @@ export class TranscriptBand {
     if (this.fullOpen) this.renderFull()
     this.paintHead()
     this.scheduleLayout()
+    this.settleFind()
     this.setNote(this.model.turns.length === 0 && this.target?.live ? 'empty-live' : null)
   }
 
@@ -1359,6 +1395,7 @@ export class TranscriptBand {
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
     })
     view.node.replaceChildren(...children)
+    this.markView(view)
   }
 
   private groupFor(view: TurnView, start: number): StepGroup {
@@ -1632,6 +1669,166 @@ export class TranscriptBand {
     }
     this.fullFollowing = false
     this.scheduleLayout()
+  }
+
+  // ── Finding words ────────────────────────────────────────────────────
+
+  /** ⌘F / Ctrl-F inside the open transcript goes to its own field, not the browser's. */
+  private findShortcut(event: KeyboardEvent): void {
+    if (this.disposed || !this.fullOpen || event.isComposing || event.altKey || event.shiftKey) return
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'f') return
+    const active = document.activeElement
+    const within = (node: Element | null): boolean => !!node && (this.el.contains(node) || this.pane.contains(node))
+    if (!within(active) && !this.el.matches(':hover') && !this.pane.matches(':hover')) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.find.focus()
+  }
+
+  private currentKey(): string {
+    const match = this.matches[this.currentMatch]
+    return match ? `${match.turn}:${match.step ?? 'p'}` : ''
+  }
+
+  private matchKey(match: Match): string { return `${match.turn}:${match.step ?? 'p'}` }
+
+  /** The words in the field changed: mark them, then stand on the first match from the reader's place. */
+  private setQuery(text: string, at?: number): void {
+    const terms = queryTerms(text)
+    this.findPattern = termPattern(terms)
+    this.findKey = terms.join(' ')
+    this.matches = findMatches(this.model.turns, terms)
+    this.currentMatch = -1
+    this.markAll()
+    if (!this.matches.length) { this.find.setCount(0, 0); return }
+    this.revealMatch(at === undefined ? this.firstFromPlace() : nearestMatch(this.matches, at))
+  }
+
+  private clearQuery(): void {
+    this.findPattern = null
+    this.findKey = ''
+    this.matches = []
+    this.currentMatch = -1
+    this.pendingHit = null
+    this.markAll()
+  }
+
+  /** The first match at or after the turn the reader is looking at, wrapping to the first. */
+  private firstFromPlace(): number {
+    const top = this.scroller.getBoundingClientRect().top
+    const seen = [...this.list.children].find((node) => node.getBoundingClientRect().bottom > top) as HTMLElement | undefined
+    const place = seen ? Number(seen.dataset.turn) : 0
+    const index = this.matches.findIndex((match) => match.turn >= place)
+    return index < 0 ? 0 : index
+  }
+
+  private stepMatch(direction: 1 | -1): void {
+    const total = this.matches.length
+    if (!total) return
+    this.revealMatch(this.currentMatch < 0 ? (direction > 0 ? 0 : total - 1) : (this.currentMatch + direction + total) % total)
+  }
+
+  /** Stand on a match: draw its turn if it is not drawn, open what hides it, and bring it into view. */
+  private revealMatch(index: number): void {
+    const match = this.matches[index]
+    if (!match || !this.hasInitialRender) return
+    this.currentMatch = index
+    this.find.setCount(index + 1, this.matches.length)
+    if (!this.fullRendered) return
+    if (match.turn < this.visibleStart) {
+      const previous = this.visibleStart
+      this.visibleStart = match.turn
+      for (let turn = this.visibleStart; turn < previous; turn++) this.renderTurn(turn)
+      this.updateEarlierButton()
+    }
+    this.renderTurn(match.turn)
+    this.markAll()
+    const view = this.views.get(match.turn)
+    const message = match.step === undefined ? view?.prompt : view?.texts.get(match.step)
+    if (!message) return
+    this.unfold(message)
+    this.fullFollowing = false
+    this.scroller.scrollTop += message.node.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - 3 * ANCHOR_MARGIN
+    this.fullScroll = this.scroller.scrollTop
+  }
+
+  /** A clamped prompt or a folded brief shows its words whole when a match stands in it. */
+  private unfold(message: Message): void {
+    if (message.node.classList.contains('ws-transcript-msg-brief')) {
+      message.unclamped = true
+      paintBrief(message)
+    } else if (message.prose.classList.contains('ws-transcript-prompt-text') && !message.unclamped) {
+      message.unclamped = true
+      message.prose.classList.add('ws-transcript-unclamped')
+      message.prose.classList.remove('ws-transcript-overflowing')
+      message.prose.setAttribute('aria-expanded', 'true')
+      message.prose.removeAttribute('aria-label')
+    }
+  }
+
+  private markAll(): void {
+    for (const view of this.views.values()) this.markView(view)
+  }
+
+  /** Bring every drawn message of a turn up to date with the words being sought. */
+  private markView(view: TurnView): void {
+    const current = this.matches[this.currentMatch]
+    const stands = (step?: number): boolean => !!current && current.turn === view.index && current.step === step
+    if (view.prompt) this.markMessage(view.prompt, stands(undefined))
+    for (const [step, message] of view.texts) this.markMessage(message, stands(step))
+  }
+
+  private markMessage(message: Message, current: boolean): void {
+    if (message.marked !== this.findKey) {
+      unmark(message.prose, FOUND_MARK)
+      if (this.findPattern) markTerms(message.prose, this.findPattern, FOUND_MARK)
+      message.marked = this.findKey
+    }
+    message.node.classList.toggle(FOUND_MESSAGE, current)
+  }
+
+  private scheduleFindRefresh(): void {
+    if (this.findFrame !== null) return
+    this.findFrame = requestAnimationFrame(() => {
+      this.findFrame = null
+      if (!this.disposed) this.refreshFind()
+    })
+  }
+
+  /** The transcript grew or was read again: recount, staying on the match the reader was on. */
+  private refreshFind(): void {
+    if (!this.findPattern) return
+    const standing = this.currentKey()
+    this.matches = findMatches(this.model.turns, queryTerms(this.find.value))
+    const kept = standing ? this.matches.findIndex((match) => this.matchKey(match) === standing) : -1
+    this.currentMatch = kept
+    this.find.setCount(kept + 1, this.matches.length)
+    this.markAll()
+  }
+
+  /** A first draw of a session: a hit chosen elsewhere lands on its match; a search left in the field is run again here. */
+  private settleFind(): void {
+    const pending = this.pendingHit
+    this.pendingHit = null
+    if (pending) this.setQuery(pending.query, pending.at)
+    else if (this.find.value.trim()) this.setQuery(this.find.value)
+  }
+
+  /** Read the session a hit came from, standing on the match nearest the hit's time. */
+  private openHit(hit: TranscriptHit, query: string): void {
+    const time = Date.parse(hit.timestamp)
+    const at = Number.isFinite(time) ? time : undefined
+    // The index folds case and stems; the terms the snippet marked are what the transcript is searched for.
+    const words = snippetTerms(hit.snippet)
+    const text = words.length ? words.join(' ') : query
+    this.find.hideResults()
+    this.find.set(text)
+    if (this.target?.session === hit.session && this.hasInitialRender) {
+      this.setQuery(text, at)
+      return
+    }
+    this.pendingHit = { query: text, at }
+    this.read({ session: hit.session, agent: hit.harness || undefined, live: false, ...(at === undefined ? {} : { at }) })
   }
 
   /** After a paint: measure prompt clamps, then keep each window on the newest message while its reader follows. */
