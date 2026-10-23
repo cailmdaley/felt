@@ -709,10 +709,10 @@ export function byCreatedAtDesc(a: KanbanCard, b: KanbanCard): number {
   return descByKey(instantMs(a.createdAt), instantMs(b.createdAt)) || byCardIdentity(a, b);
 }
 
-export type InFlightBand = 'yourTurn' | 'working';
+export type InFlightBand = 'yourTurn' | 'working' | 'held';
 
 /** In flight's bands in drawn order, with the caption each surface gives them. */
-export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working']];
+export const IN_FLIGHT_BANDS: ReadonlyArray<readonly [InFlightBand, string]> = [['yourTurn', 'Your turn'], ['working', 'Working'], ['held', 'Held']];
 
 /**
  * A card whose worker needs an answer: an outstanding `ask` or a harness
@@ -726,15 +726,18 @@ export function isQuestion(card: KanbanCard): boolean {
 /**
  * Whose move it is, read from the card's one turn derivation (`turnOf`). A
  * root whose threads wait on the human is the human's move too: the Desk draws
- * only roots, so the band says what the family needs, not the root alone.
+ * only roots, so the band says what the family needs, not the root alone. A
+ * launch the daemon holds in boot quarantine is nobody's work yet: it sits in
+ * Held, after Working, until it is released.
  */
 export function inFlightBand(card: KanbanCard): InFlightBand {
-  return turnOf(card).yours || (card.threadSummary?.waiting ?? 0) > 0 ? 'yourTurn' : 'working';
+  if (turnOf(card).yours || (card.threadSummary?.waiting ?? 0) > 0) return 'yourTurn';
+  return card.held ? 'held' : 'working';
 }
 
-/** Your turn before Working; within Your turn, questions first; then newest first. */
+/** Your turn, then Working, then Held; within Your turn, questions first; then newest first. */
 export function byInFlightBand(a: KanbanCard, b: KanbanCard): number {
-  const order: Record<InFlightBand, number> = { yourTurn: 0, working: 1 };
+  const order: Record<InFlightBand, number> = { yourTurn: 0, working: 1, held: 2 };
   return order[inFlightBand(a)] - order[inFlightBand(b)]
     || Number(isQuestion(b)) - Number(isQuestion(a))
     || byCreatedAtDesc(a, b);

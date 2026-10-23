@@ -125,6 +125,11 @@
   transition: none;
 }
 
+/* Under its own Held caption the pill offers what it does, release, rather
+   than saying held a second time. */
+.kbn-flight-band[data-flight-band='held'] .kbn-card-held .kbn-card-held-label { display: none; }
+.kbn-flight-band[data-flight-band='held'] .kbn-card-held .kbn-card-held-release { display: inline; }
+
 /* The newest report: a small leaf with the document's kind on it. */
 .kbn-card-report {
   box-sizing: border-box;

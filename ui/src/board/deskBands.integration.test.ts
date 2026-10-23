@@ -133,6 +133,19 @@ describe('In flight bands', () => {
     expect(attention.querySelector('[data-fiber-id="question"] .ws-worker-state')?.textContent).toBe('question')
   })
 
+  it('draws a launch held in boot quarantine in its own Held band after Working, never as a running worker', () => {
+    const data = workerFeed(['working'])
+    const held = { ...data.now.inFlight[0], id: 'held', uid: 'held', name: 'Held launch', tmuxSession: undefined, runtimePhase: undefined, workerState: undefined, held: true }
+    data.now.inFlight.unshift(held)
+    data.now.inFlight.sort(byInFlightBand)
+    expect(data.now.inFlight.map(card => card.id)).toEqual(['worker-0', 'held'])
+    const root = renderer(data).renderNowSection(data.now, {})
+    expect(flightOrder(root)).toEqual([
+      { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-0'] },
+      { band: 'held', caption: 'Held', label: 'Held', ids: ['held'] },
+    ])
+  })
+
   it('renders two quiet captions, puts questions before idle turns, and retains creation order within each', () => {
     const data = workerFeed(['working', 'attention', 'blocked', 'waiting', 'unobserved'])
     const openDetail = vi.fn()
