@@ -42,3 +42,7 @@ Paths, identifiers and the images themselves are replaced: every payload is the 
 `claude-queued-messages.jsonl` holds four `queued_command` attachments from a real Claude Code session on 2026-10-22, the records Claude Code writes when a message arrives while the agent works: a human prompt as a string, a human prompt as blocks with a pasted image, another session's Shuttle message (`origin.kind: 'peer'`, `isMeta`) and a background task's notification.
 Texts are shortened, sockets, ids and the session are replaced, and the image is a 1×1 PNG.
 A message the worker has not yet taken in has no record at all: the chat shows it from the composer until a prompt with its words appears.
+
+# Captured thread spawn
+
+`claude-shuttle-thread-command.jsonl` is a real Bash call from a chair's Claude Code session on 2026-10-22 that opened two threads with `shuttle thread … --slug …` and nested them with `felt nest`, with its real result. Only the tool-use id is replaced.

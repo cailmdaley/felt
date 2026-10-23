@@ -204,6 +204,8 @@ function shortPath(value: string): string {
 function buildToolInput(step: ToolStep): HTMLElement {
   const detail = document.createElement('div')
   detail.className = 'ws-transcript-tool-detail'
+  // A tool's arguments and results are code, never prose to link.
+  detail.dataset.mentionIgnore = ''
   const input = inputObject(step.input)
   const name = step.name
   const putPath = (path: string): void => {
@@ -259,8 +261,10 @@ function spawnMention(step: Step): HTMLElement | null {
   const input = inputObject(step.input)
   const command = inputString(input?.command) ?? inputString(input?.cmd) ?? inputString(step.input) ?? ''
   if (!/\bshuttle\s+thread\b/.test(command)) return null
-  const row = document.createElement('div')
+  // A command is code: it reads as typed, and fiber ids in it never become chips.
+  const row = document.createElement('pre')
   row.className = 'ws-transcript-spawn'
+  row.dataset.mentionIgnore = ''
   row.textContent = [command, step.result?.text].filter(Boolean).join('\n')
   return row
 }

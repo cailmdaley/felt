@@ -497,7 +497,7 @@
 }
 .ws-transcript-thread-notice time { font: 11px var(--ws-mono); }
 .ws-transcript-thread-notice p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ws-transcript-spawn { margin: 6px 0; font: 12px/1.5 var(--ws-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-transcript-spawn { margin: 6px 0; padding: 8px 10px; border-radius: var(--ws-control-radius); background: var(--ws-hover); color: var(--ws-ink-soft); font: 12px/1.5 var(--ws-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .ws-transcript-checklist {
   position: sticky;
