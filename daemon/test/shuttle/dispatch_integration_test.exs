@@ -759,6 +759,13 @@ defmodule Shuttle.DispatchIntegrationTest do
       "40740310-2345-4e33-a1e4-7950db41ce10"
     )
 
+    Shuttle.SessionLedger.record(
+      fiber: "tests/kanban-history-resume",
+      session: "40740310-2345-4e33-a1e4-7950db41ce10",
+      harness: "codex",
+      kind: :dispatch
+    )
+
     assert {:ok, _} =
              Dispatcher.dispatch("tests/kanban-history-resume",
                runner: IntegrationRunner,
