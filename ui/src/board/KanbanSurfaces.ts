@@ -1203,7 +1203,11 @@ export class KanbanSurfaceRenderer {
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
-    el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''}`)
+    // The agent is inventory, not a next move: it rides in the label and the
+    // line's title, and the preview names it, so the title gets the width.
+    const who = agentName ? ` — ${agentName}` : ''
+    el.setAttribute('aria-label', `${card.name}${who}`)
+    el.title = `${card.name}${who}`
 
     if (!isStale) this.installDraggable(el, card, false)
 
@@ -1214,12 +1218,6 @@ export class KanbanSurfaceRenderer {
     title.className = 'kbn-cluster-item-title'
     title.textContent = card.name
     el.append(glyph, title)
-    if (agentName) {
-      const agent = document.createElement('span')
-      agent.className = 'kbn-cluster-item-agent-name'
-      agent.textContent = agentName
-      el.append(agent)
-    }
 
     // TWO WAYS OF COMING BACK, said differently on purpose.
     //
@@ -1240,14 +1238,14 @@ export class KanbanSurfaceRenderer {
       const detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
       chip.title = `Sleeping on its schedule${detail ? ` — ${detail}` : ''}. It dispatches itself.`
       el.append(chip)
-      el.title = `${card.name} — sleeping on its schedule${detail ? ` (${detail})` : ''}`
+      el.title = `${card.name}${who} — sleeping on its schedule${detail ? ` (${detail})` : ''}`
     } else if (card.due) {
       const wakes = document.createElement('span')
       wakes.className = 'kbn-cluster-item-wakes'
       wakes.textContent = `wakes ${formatDue(card.due)}`
       wakes.title = `Resting until ${formatDue(card.due)} — it returns to the desk that day`
       el.append(wakes)
-      el.title = `${card.name} — resting until ${formatDue(card.due)}`
+      el.title = `${card.name}${who} — resting until ${formatDue(card.due)}`
     } else {
       const until = untilOf(card, threadIndexFor(this.o.getLastResponse()))
       if (until) el.append(untilLine(until, this.o.openDetail))

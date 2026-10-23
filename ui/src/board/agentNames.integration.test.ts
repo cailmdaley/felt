@@ -89,8 +89,12 @@ describe('agent names follow each owning fleet default', () => {
       card({ id: 'rest-default', originId: 'alpha', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),
       card({ id: 'rest-custom', originId: 'beta', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),
     ], {})
-    expect(resting.querySelector('[data-fiber-id="rest-default"] .kbn-cluster-item-agent-name')).toBeNull()
-    expect(resting.querySelector('[data-fiber-id="rest-custom"] .kbn-cluster-item-agent-name')?.textContent).toBe('claude-opus')
+    // A resting line gives its width to the title: the agent rides in its label and title, never inline.
+    expect(resting.querySelector('.kbn-cluster-item-agent-name')).toBeNull()
+    expect(rowAgent(resting, 'rest-default')).toBeNull()
+    expect(resting.querySelector<HTMLElement>('[data-fiber-id="rest-default"]')!.title).toBe('rest-default')
+    expect(resting.querySelector<HTMLElement>('[data-fiber-id="rest-custom"]')!.getAttribute('aria-label')).toBe('rest-custom — claude-opus')
+    expect(resting.querySelector<HTMLElement>('[data-fiber-id="rest-custom"]')!.title).toBe('rest-custom — claude-opus')
   })
 
   it('uses the literal default while a fleet registry has not answered', () => {
