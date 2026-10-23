@@ -95,21 +95,29 @@
 .ws-chat .ws-transcript-inline .ws-transcript-checklist { margin-top: 8px; }
 .ws-chat .ws-transcript-inline .ws-transcript-turn { gap: 10px; padding-block: 18px 6px; }
 .ws-chat .ws-transcript-inline .ws-transcript-turn + .ws-transcript-turn { border-top: 0; }
-/* Your turns are lightly set off, at the column's right; the worker's are prose. */
+/* Your turns are a soft bubble at the column's right, a step lighter than the page, the time under it; the worker's are prose. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you {
-  align-self: flex-end; max-width: 85%; padding: 8px 14px 10px;
-  border: 0; border-radius: 14px; background: var(--ws-fill);
+  display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end;
+  max-width: 70%; padding: 0; border: 0; border-radius: 0; background: none;
 }
-.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text { color: var(--ws-ink); font: var(--ws-prose-size)/1.5 var(--ws-serif); max-height: 9em; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text {
+  padding: 7px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--ws-sheet) 70%, var(--ws-paper));
+  color: var(--ws-ink); font: var(--ws-prose-size)/1.5 var(--ws-serif); max-height: 9em;
+}
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
-.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker { justify-content: flex-end; }
-/* The bubble already says who spoke; its kicker keeps the time. */
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
+  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: 11px; color: var(--ws-ink-muted);
+}
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
+/* The bubble already says who spoke; the line under it keeps the time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
 /* A message the worker has not yet read stands after the last turn, faded, until the transcript records it. */
 .ws-chat .ws-transcript-sent { display: flex; flex-direction: column; gap: 10px; padding-block: 18px 6px; }
 .ws-chat .ws-transcript-sent:empty { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-sending { opacity: .72; }
 .ws-chat .ws-transcript-sending { font-style: italic; }
+.ws-chat .ws-transcript-msg-sending .ws-transcript-sending + .ws-transcript-author-you + .ws-transcript-sep { display: inline; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }
@@ -161,5 +169,5 @@
   .ws-chat-pages svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
   .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding-inline: 16px; }
   .ws-chat-compose { padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
-  .ws-chat .ws-transcript-inline .ws-transcript-msg-you { max-width: 92%; }
+  .ws-chat .ws-transcript-inline .ws-transcript-msg-you { max-width: 85%; }
 }
