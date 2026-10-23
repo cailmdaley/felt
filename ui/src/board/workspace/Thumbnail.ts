@@ -1,7 +1,7 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
 import { RESOURCE_FRESH_MS } from '../documentResources.js'
-import { docKey, documentKind } from './documents.js'
+import { docKey, documentKind, KIND_GLYPH } from './documents.js'
 import { cacheDocumentTitle, declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import './thumbnail.css'
 
@@ -124,7 +124,7 @@ export class Thumbnail {
     this.face = document.createElement('div'); this.face.className = 'ws-thumbnail-face ws-overview-thumb-face'
     this.face.dataset.part = 'thumbnail-face'
     const glyph = document.createElement('span'); glyph.className = 'ws-thumbnail-kind'
-    glyph.textContent = opts.glyph ?? { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }[kind]
+    glyph.textContent = opts.glyph ?? KIND_GLYPH[kind]
     this.title = document.createElement('strong'); this.title.className = 'ws-thumbnail-title'
     this.preview = document.createElement('span'); this.preview.className = 'ws-thumbnail-preview'
     this.face.append(this.title, this.preview, glyph)

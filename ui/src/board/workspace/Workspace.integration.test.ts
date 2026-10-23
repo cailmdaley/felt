@@ -507,7 +507,7 @@ describe('workspace reader integration', () => {
       const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
       workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
       const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.el.querySelector('.ws-page-ticks')!]
-      const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
+      const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => ['fiber', 'chat'].includes(tab.dataset.kind!) ? '§' : tab.dataset.tabKey!)
       const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
       // Before the body, the selected page shows; the strip and ticks wait unseen, and stepping does nothing.
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
@@ -551,7 +551,7 @@ describe('workspace reader integration', () => {
     expect(strip.classList.contains('ws-run-pending')).toBe(false)
     expect(choice.getAttribute('aria-disabled')).toBe('false')
     expect(live.textContent).toBe('Note, 2 of 3')
-    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.classList.contains('ws-tab-anchor') ? '§' : tab.dataset.tabKey!)
+    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => ['fiber', 'chat'].includes(tab.dataset.kind!) ? '§' : tab.dataset.tabKey!)
     expect(tabs).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
   })
   it('holds a sent page opened by address between the channel\'s body and its receipts', async () => {
@@ -1007,7 +1007,7 @@ describe('workspace reader integration', () => {
     await flush()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
 
-    document.querySelector<HTMLButtonElement>('.ws-tab-anchor')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-tab:is([data-kind="fiber"], [data-kind="chat"])')!.click()
     const scroller = document.querySelector<HTMLElement>('.ws-selected .ws-prose-scroll')!
     let scrollHeight = 1800
     Object.defineProperties(scroller, {

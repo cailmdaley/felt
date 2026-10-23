@@ -101,6 +101,9 @@ export function chatKey(owner: string, uid: string): DocKey {
   return `chat:${owner}:${uid}`
 }
 
+/** Each kind of page's mark, shared by thumbnails and the reader's tabs. */
+export const KIND_GLYPH: Record<Exclude<WorkspaceDocument['kind'], 'chat'>, string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }
+
 /** Reuse the extension vocabulary that drives FileViewerPanel. A path is never a conversation. */
 export function documentKind(path: string): Exclude<WorkspaceDocument['kind'], 'chat'> {
   const kind = fileKind(path)

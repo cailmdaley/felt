@@ -1,8 +1,8 @@
-/* The reader's map: a row of tiles at the centre of the board's bar, a scale model
-   of the run. Its strip holds the selected tile over the selected page (inline
-   padding up to that point lets the first and last tiles sit there too), scrolls
-   sideways inside its slot when the run is longer than the room, and fades where
-   tiles run past. It never wraps. */
+/* The reader's map: a row of compact text tabs at the centre of the board's bar,
+   in the run's order. Its strip holds the selected tab over the selected page
+   (inline padding up to that point lets the first and last tabs sit there too),
+   scrolls sideways inside its slot when the run is longer than the room, and
+   fades where tabs run past. It never wraps. */
 .ws-head-index { position: relative; min-width: 0; display: flex; }
 .ws-head-index > .ws-tabs { flex: 1; }
 .ws-tabs {
@@ -16,84 +16,46 @@
 .ws-tabs.ws-fade-l { --ws-fade-left: var(--ws-index-fade); }
 .ws-tabs.ws-fade-r { --ws-fade-right: var(--ws-index-fade); }
 
-/* A tile is a small sheet of the page's paper, opaque so the veil's drawing stays
-   beneath it. Unselected tiles recede a little (their faces dim on the paper);
-   the selected one is lifted, with an ink hairline and a contact shadow. */
+/* A tab: a kind mark and a name in the serif, muted until hovered; the selected
+   one sits on paper inside a hairline, in ink. */
 .ws-tab {
-  position: relative; flex: none; width: var(--ws-tile-width); height: var(--ws-tile-height); padding: 0;
-  border-radius: var(--ws-tile-radius); background: var(--ws-paper); color: var(--ws-ink-muted);
-  border: var(--ws-line-width) solid var(--ws-hairline-soft) !important;
-  transition: transform var(--ws-crossing) var(--ws-ease),
-    box-shadow var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
-}
-.ws-tab:hover { border-color: var(--ws-hairline) !important; }
-.ws-tab .ws-tab-thumb { opacity: var(--ws-tile-receded-opacity); transition: opacity var(--ws-crossing) var(--ws-ease); }
-.ws-tab:hover .ws-tab-thumb { opacity: var(--ws-tile-hover-opacity); }
-.ws-tab[aria-selected='true'] .ws-tab-thumb { opacity: 1; }
-.ws-tab[aria-selected='true'] {
-  color: var(--ws-ink); transform: translateY(var(--ws-tile-lift));
-  border-color: var(--ws-ink) !important; box-shadow: var(--ws-shadow-contact);
-}
-/* Names live in the tiles' faces and the caption; this label speaks only to assistive technology. */
-.ws-tab-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-/* The face: the title in the serif, small, and the kind in a corner. */
-.ws-tab .ws-tab-thumb { position: absolute; inset: 0; border-radius: inherit; background: transparent; }
-.ws-tab .ws-tab-thumb .ws-thumbnail-face { padding: var(--ws-tile-pad); }
-.ws-tab .ws-tab-thumb .ws-thumbnail-title {
-  font: 500 var(--ws-tile-title-size)/1.14 var(--ws-serif); color: var(--ws-ink-soft); letter-spacing: 0;
-  -webkit-line-clamp: var(--ws-tile-title-lines); overflow-wrap: break-word; hyphens: auto;
-}
-.ws-tab[aria-selected='true'] .ws-tab-thumb .ws-thumbnail-title { color: var(--ws-ink); }
-.ws-tab .ws-tab-thumb .ws-thumbnail-preview { display: none; }
-.ws-tab .ws-tab-thumb .ws-thumbnail-kind { right: 5px; bottom: 3px; font-size: var(--ws-tile-glyph-size); }
-/* The constitution's tile is its § alone, set large: the anchor of the run. */
-.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-face { align-items: center; justify-content: center; }
-.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-title { display: none; }
-.ws-tab-anchor .ws-tab-thumb .ws-thumbnail-kind { position: static; color: inherit; font: var(--ws-tile-anchor-size)/1 var(--ws-serif); }
-/* Declared documents run left of the §, sent ones right: a little more air either side of it sets the three apart. */
-.ws-tab-anchor:not(:first-child) { margin-left: var(--ws-tile-group-gap); }
-.ws-tab-anchor:not(:last-child) { margin-right: var(--ws-tile-group-gap); }
-/* A recording's sketch: the loudest moment of each stretch, along the foot. */
-.ws-tile-sketch {
-  position: absolute; left: var(--ws-tile-pad); right: 18px; bottom: 5px; height: 11px;
-  display: flex; align-items: center; gap: 1px; color: var(--ws-ink-muted);
-}
-.ws-tile-sketch i { flex: 1; min-width: 1px; max-width: 2px; border-radius: 1px; background: currentColor; }
-.ws-tile-sketch[data-form='duration'] { font: var(--ws-tile-glyph-size)/1 var(--ws-mono); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-/* A live thumbnail fills the tile once it loads and the face beneath hides, so the
-   title rides the tile's foot on a strip of paper: a flat figure or a report that
-   reads as texture is still named. */
-.ws-tab[data-caption]:has(.ws-thumbnail-ready)::before {
-  content: attr(data-caption); position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
-  height: var(--ws-tile-caption-height); padding: 0 var(--ws-tile-pad); border-radius: 0 0 var(--ws-tile-radius) var(--ws-tile-radius);
-  background: color-mix(in srgb, var(--ws-paper) 92%, transparent); border-top: var(--ws-line-width) solid var(--ws-hairline-soft);
-  color: var(--ws-ink-muted); font: 500 var(--ws-tile-caption-size)/var(--ws-tile-caption-height) var(--ws-serif); letter-spacing: 0;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; pointer-events: none;
-}
-.ws-tab[aria-selected='true'][data-caption]:has(.ws-thumbnail-ready)::before { color: var(--ws-ink); }
-.ws-tab .ws-tab-thumb .kbn-thumbnail-image img { object-fit: cover; }
-.ws-tab .ws-tab-thumb :is(.kbn-thumbnail-glyph, .kbn-thumbnail-name) { display: none; }
-
-/* The +N tile closes the run when the cap has folded sent documents away: a tile-sized
-   outline in the serif, with no page behind it, so it reads as a place to open, not a page. */
-.ws-tab-more {
-  position: relative; flex: none; width: var(--ws-tile-width); height: var(--ws-tile-height); padding: 0;
+  position: relative; flex: none; display: inline-flex; align-items: center; gap: 5px;
+  max-width: var(--ws-tile-max-width); height: var(--ws-tile-height); padding: 0 var(--ws-tile-pad);
   border-radius: var(--ws-tile-radius); background: transparent; color: var(--ws-ink-muted);
-  border: var(--ws-line-width) dashed var(--ws-hairline) !important; cursor: pointer;
-  font: 500 var(--ws-tile-title-size)/1 var(--ws-serif); font-variant-numeric: tabular-nums;
-  transition: color var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
+  border: var(--ws-line-width) solid transparent !important; cursor: pointer;
+  font: 500 var(--ws-label-size)/1 var(--ws-serif); letter-spacing: 0; white-space: nowrap;
+  transition: color var(--ws-crossing) var(--ws-ease), background-color var(--ws-crossing) var(--ws-ease), border-color var(--ws-crossing) var(--ws-ease);
 }
-.ws-tab-more:hover, .ws-tab-more:focus-visible { color: var(--ws-ink); border-color: var(--ws-ink-muted) !important; }
+.ws-tab:hover { color: var(--ws-ink-soft); background: var(--ws-hover); }
+.ws-tab[aria-selected='true'] { color: var(--ws-ink); background: var(--ws-paper); border-color: var(--ws-hairline) !important; }
+.ws-tab-glyph { flex: none; font: var(--ws-tile-glyph-size)/1 var(--ws-mono); color: var(--ws-ink-faint); }
+.ws-tab-glyph[hidden] { display: none; }
+.ws-tab[aria-selected='true'] .ws-tab-glyph { color: var(--ws-ink-muted); }
+.ws-tab-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The constitution's tab is its § alone, a little larger. */
+.ws-tab[data-kind='fiber'] .ws-tab-label { font-size: var(--ws-tile-anchor-size); }
+/* Declared documents run left of the §, sent ones right: a little more air either side of it sets the three apart. */
+.ws-tab[data-kind='fiber']:not(:first-child) { margin-left: var(--ws-tile-group-gap); }
+.ws-tab[data-kind='fiber']:not(:last-child) { margin-right: var(--ws-tile-group-gap); }
 
-/* The gold fresh mark sits at the tile's shoulder. */
+/* The +N tab closes the run when the cap has folded sent documents away: the count alone, a place to open. */
+.ws-tab-more {
+  position: relative; flex: none; height: var(--ws-tile-height); padding: 0 var(--ws-tile-pad);
+  border-radius: var(--ws-tile-radius); background: transparent; color: var(--ws-ink-muted);
+  border: 0 !important; cursor: pointer;
+  font: 500 var(--ws-label-size)/1 var(--ws-serif); font-variant-numeric: tabular-nums;
+  transition: color var(--ws-crossing) var(--ws-ease), background-color var(--ws-crossing) var(--ws-ease);
+}
+.ws-tab-more:hover, .ws-tab-more:focus-visible { color: var(--ws-ink); background: var(--ws-hover); }
+
+/* The gold fresh mark sits at the tab's shoulder. */
 .ws-tab-fresh::after {
-  content: ''; position: absolute; top: -3px; right: -3px; z-index: 1; width: 6px; height: 6px; border-radius: 50%;
+  content: ''; position: absolute; top: 1px; right: 1px; z-index: 1; width: 6px; height: 6px; border-radius: 50%;
   background: var(--kbn-owed); box-shadow: 0 0 0 2px var(--ws-paper);
 }
 
-/* The hovered tile's title: a caption in the serif on a slip of paper, hung beneath
-   its tile over the page's top edge. */
+/* The hovered tab's full name, when its face shortens it: a caption in the serif
+   on a slip of paper, hung beneath its tab over the page's top edge. */
 .ws-tab-tip {
   position: absolute; left: 0; top: calc(100% - var(--ws-tile-air) + var(--ws-small-gap)); z-index: 4; transform: translateX(-50%);
   max-width: min(420px, 70%); display: flex; align-items: center; height: var(--ws-tip-height); padding: 0 var(--ws-inset);
@@ -119,4 +81,4 @@
 .ws-run-pending { visibility: hidden; opacity: 0; }
 .ws-run-landing { animation: ws-run-land var(--ws-crossing) var(--ws-ease); }
 @keyframes ws-run-land { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab-more, .ws-tab .ws-tab-thumb { transition: none; } .ws-run-landing { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .ws-tab, .ws-tab-more { transition: none; } .ws-run-landing { animation: none; } }

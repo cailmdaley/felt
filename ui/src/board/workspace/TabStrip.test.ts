@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { centeredScrollLeft, indexCaptions, TAB_CROSSING_MS, TabStrip, TIP_DELAY_MS } from './TabStrip.js'
-import { noteAudioSketch } from './audioSketch.js'
 import type { KeyIntent } from '../keymap.js'
 import { buildChannel } from './documents.js'
-import { cacheDocumentTitle } from './DocumentTitles.js'
 
 let strips: TabStrip[] = []
 afterEach(() => {
@@ -168,16 +166,13 @@ describe('TabStrip', () => {
     expect(strip.el.classList.contains('ws-fade-r')).toBe(true)
   })
 
-  it('follows document identity through a title change and styles declared titles even when the words match the filename', () => {
+  it('follows document identity through a title change', () => {
     const channel = buildChannel({ uid: 'u', owner: 'typography', name: 'Note', path: '/note.md', fiberDir: '/', body: '', embeds: [{ path: '/doc.html' }] })
     const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
     strip.mark(1, false)
     const selected = strip.buttons[1]
-    cacheDocumentTitle(channel.documents[1].key, '/doc.html', '<title>doc.html</title>', 'same-words')
-    strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-    expect(selected.querySelector('.ws-tab-label')?.classList.contains('ws-tab-title')).toBe(true)
     strip.render(['Note', 'Declared title'], channel.documents.map(d => d.key), channel)
     expect(strip.buttons[1]).toBe(selected)
     expect(selected.getAttribute('aria-selected')).toBe('true')
@@ -192,29 +187,21 @@ describe('TabStrip', () => {
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
     expect(strip.buttons.map(button => button.querySelector('.ws-tab-label')?.textContent)).toEqual(['take.flac', 'take.wav', 'song', '§'])
     expect(strip.buttons.map(button => button.getAttribute('aria-label'))).toEqual(channel.labels)
-    expect(strip.buttons[3].classList.contains('ws-tab-anchor')).toBe(true)
+    expect(strip.buttons[3].dataset.kind).toBe('fiber')
     expect(strip.buttons.some(button => button.hasAttribute('title'))).toBe(false)
   })
 
-  it('gives every tile a legible face at once: its title, its kind, and a recording its sketch or length', () => {
-    const channel = buildChannel({ uid: 'faces', owner: 'faces-host', name: 'Faces', path: '/fiber.md', fiberDir: '/', body: 'Body', embeds: [{ path: '/report.html', title: 'The composer’s desk' }, { path: '/etude.mp3' }, { path: '/score.pdf' }, { path: '/coda.mp3' }] })
-    noteAudioSketch(channel.documents[2].key, [0.1, 0.9, 0.4, 0.2], 61)
-    noteAudioSketch(channel.documents[0].key, null, 125)
+  it('draws each page as a text tab: its kind mark and its name, the constitution as its § alone, the chat as Chat', () => {
+    const channel = buildChannel({ uid: 'faces', owner: 'faces-host', name: 'Faces', path: '/fiber.md', fiberDir: '/', body: 'Body', isConstitution: true, conversation: true,
+      embeds: [{ path: '/report.html', title: 'The composer’s desk' }, { path: '/score.pdf' }] })
     const strip = new TabStrip(vi.fn(), vi.fn(), { shuttleBase: '' })
     strips.push(strip)
     strip.render(channel.labels, channel.documents.map(d => d.key), channel)
-    const face = (i: number): Element => strip.buttons[i].querySelector('[data-part="thumbnail-face"]')!
-    expect(strip.buttons.map(b => b.dataset.kind)).toEqual(['audio', 'pdf', 'audio', 'html', 'fiber'])
-    expect(strip.buttons.map(b => b.dataset.caption)).toEqual(['coda', 'score', 'etude', 'The composer’s desk', undefined])
-    expect(face(4).querySelector('.ws-thumbnail-kind')?.textContent).toBe('§')
-    expect(face(3).querySelector('.ws-thumbnail-title')?.textContent).toBe('The composer’s desk')
-    expect(face(2).querySelector('.ws-thumbnail-title')?.textContent).toBe('etude')
-    expect(face(2).querySelectorAll('.ws-tile-sketch[data-form="peaks"] i')).toHaveLength(4)
-    expect(face(1).querySelector('.ws-thumbnail-title')?.textContent).toBe('score')
-    expect(face(1).querySelector('.ws-thumbnail-kind')?.textContent).toBe('▧')
-    expect(face(0).querySelector('.ws-tile-sketch')?.textContent).toBe('2:05')
-    noteAudioSketch(channel.documents[0].key, [0.5, 0.5], 125)
-    expect(face(0).querySelectorAll('.ws-tile-sketch i')).toHaveLength(2)
+    const face = (b: HTMLButtonElement): [string, string] => [b.querySelector<HTMLElement>('.ws-tab-glyph')!.hidden ? '' : b.querySelector('.ws-tab-glyph')!.textContent!, b.querySelector('.ws-tab-label')!.textContent!]
+    expect(strip.buttons.map(face)).toEqual(channel.documents.map(d =>
+      d.kind === 'chat' ? ['❝', 'Chat'] : d.kind === 'fiber' ? ['', '§'] : d.kind === 'pdf' ? ['▧', 'score'] : ['▣', 'The composer’s desk']))
+    expect(channel.documents.map(d => d.kind)).toContain('chat')
+    expect(strip.el.querySelector('.ws-thumbnail, img, iframe')).toBeNull()
   })
 
   for (const side of ['sent', 'declared'] as const) describe(`hover caption (${side} tiles)`, () => {
@@ -307,7 +294,7 @@ describe('TabStrip', () => {
       const channel = many()
       const strip = make(channel)
       expect(names(strip)).toEqual(['fiber:cap-host:cap', 'sent-6.html', 'sent-5.html', 'sent-4.html'])
-      expect(strip.el.querySelectorAll('.ws-tab-thumb')).toHaveLength(4)
+      expect(strip.el.querySelectorAll('.ws-tab')).toHaveLength(4)
       expect(more(strip)?.textContent).toBe('+4')
       expect(more(strip)?.getAttribute('aria-label')).toBe('Show 4 more documents')
       expect(strip.el.lastElementChild).toBe(more(strip))
@@ -332,7 +319,7 @@ describe('TabStrip', () => {
       const strip = make(channel)
       more(strip)!.click()
       expect(strip.buttons).toHaveLength(channel.documents.length)
-      expect(strip.el.querySelectorAll('.ws-tab-thumb')).toHaveLength(channel.documents.length)
+      expect(strip.el.querySelectorAll('.ws-tab')).toHaveLength(channel.documents.length)
       expect(more(strip)).toBeNull()
       strip.render(channel.labels, channel.documents.map(d => d.key), channel)
       expect(strip.buttons).toHaveLength(channel.documents.length)

@@ -1,18 +1,12 @@
 import type { KeyIntent } from '../keymap.js'
-import { extractEmbeds } from '../attachments.js'
-import { isDeclared, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { isDeclared, KIND_GLYPH, type Channel, type WorkspaceDocument } from './documents.js'
 import { probeDocumentTitles } from './titleProbe.js'
-import { declaredTitle } from './DocumentTitles.js'
-import { Thumbnail } from './Thumbnail.js'
-import { audioSketch, sketchBars, sketchDuration, watchAudioSketches } from './audioSketch.js'
 import './tabs.css'
 import { ReceiptMotion } from './receiptMotion.js'
 
 export const TAB_CROSSING_MS = 280
 /** The first hover waits this long before naming a tile; its neighbours are named at once while a name shows. */
 export const TIP_DELAY_MS = 360
-/** Bars in an audio tile's sketch of its recording. */
-const SKETCH_BARS = 18
 /** Sent attachments (documents the body neither embeds nor links) a channel's strip shows before folding the rest behind a +N tile. */
 export const SENT_TILE_CAP = 3
 
@@ -67,18 +61,17 @@ export function indexCaptions(labels: string[], channel?: Pick<Channel, 'documen
   return captions.map((caption, index) => caption !== '§' && (counts.get(caption) ?? 0) > 1 ? labels[index] : caption)
 }
 
-/** The chat's tile mark: a quotation, the conversation. */
+/** The chat's tab mark: a quotation, the conversation. */
 export const CHAT_GLYPH = '❝'
 
-type TabRecord = { key: string; label: string; docIndex: number; button: HTMLButtonElement; thumb?: Thumbnail; caption: string; doc?: WorkspaceDocument }
+type TabRecord = { key: string; label: string; docIndex: number; button: HTMLButtonElement; caption: string; doc?: WorkspaceDocument }
 interface StripOptions { shuttleBase: string }
 
 /**
- * The reader's map of pages: one roving-focus tablist of tiles in the running
- * head, a scale model of the run, whose selected tile stays over the page's
- * centre through one interruptible crossing. Every tile has a designed
- * face at once (its title in the serif and a kind mark; a recording adds
- * its sketch); a live thumbnail fades in over it where one helps.
+ * The reader's map of pages: one roving-focus tablist of compact text tabs in
+ * the running head, in the run's order, whose selected tab stays over the
+ * page's centre through one interruptible crossing. A tab is a small kind mark
+ * and its page's name, truncated; the constitution's own page is its § alone.
  */
 export class TabStrip {
   readonly el: HTMLDivElement
@@ -108,7 +101,6 @@ export class TabStrip {
   private expandTile: HTMLButtonElement | null = null
   private focus: number | null = null
   private readonly shuttleBase: string | null
-  private readonly stopSketches: () => void
 
   constructor(onSelect: (index: number) => void, onExpand: () => void, options?: StripOptions) {
     this.onSelect = onSelect
@@ -134,10 +126,6 @@ export class TabStrip {
     this.el.addEventListener('scroll', this.onScroll, { passive: true })
     window.addEventListener('resize', this.onResize)
     this.motion?.addEventListener('change', this.onMotionChange)
-    this.stopSketches = watchAudioSketches(key => {
-      const record = this.records.find(r => r.doc?.key === key)
-      if (record) this.paintSketch(record)
-    })
   }
 
   /** Current buttons, exposed for keyboard integrations and focused tests. */
@@ -169,7 +157,6 @@ export class TabStrip {
   setVisible(visible: boolean): void {
     this.visible = visible
     if (!visible) this.hideTip()
-    for (const record of this.records) record.thumb?.schedule()
   }
 
   /**
@@ -232,7 +219,6 @@ export class TabStrip {
     })
 
     const retained = new Set(next.map((record) => record.button))
-    for (const record of this.records) if (!retained.has(record.button)) record.thumb?.dispose()
     const focusTarget = next.find((record) => record.key === active)?.button
     const nextSelected = next.findIndex((record) => record.key === oldSelectedKey)
     this.selectedIndex = next.length ? (nextSelected >= 0 ? nextSelected : Math.min(Math.max(this.selectedIndex, 0), next.length - 1)) : -1
@@ -250,7 +236,6 @@ export class TabStrip {
     if (this.tipFor && !retained.has(this.tipFor)) this.hideTip()
     this.updateSelection()
     this.scheduleLayout()
-    for (const record of this.records) record.thumb?.schedule()
     if (active && focusTarget) focusTarget.focus({ preventScroll: true })
   }
 
@@ -377,7 +362,6 @@ export class TabStrip {
     this.cancelAnimation()
     this.hideTip()
     this.receiptMotion.dispose()
-    this.stopSketches()
     this.el.removeEventListener('pointerover', this.onPointerOver)
     this.el.removeEventListener('pointerleave', this.onPointerLeave)
     this.el.removeEventListener('pointerdown', this.hideTip)
@@ -385,81 +369,26 @@ export class TabStrip {
     this.el.removeEventListener('scroll', this.onScroll)
     window.removeEventListener('resize', this.onResize)
     this.motion?.removeEventListener('change', this.onMotionChange)
-    for (const record of this.records) record.thumb?.dispose()
     this.tip.remove()
     this.el.replaceChildren()
     this.records = []
   }
 
   /**
-   * A tile names its page for assistive technology in a hidden label; with
-   * a channel it also wears a face: the title in the serif and a kind mark,
-   * the fiber's own page as its § alone.
+   * A tab is its kind's mark and its caption; the constitution's own page is
+   * its § alone. The full name is the tab's accessible label.
    */
   private paint(record: TabRecord): void {
-    const { button, caption, label, doc } = record
+    const { button, caption, doc } = record
+    let glyph = button.querySelector<HTMLElement>('.ws-tab-glyph')
     let text = button.querySelector<HTMLElement>('.ws-tab-label')
-    if (!text) { text = document.createElement('span'); text.className = 'ws-tab-label'; button.prepend(text) }
+    if (!glyph) { glyph = document.createElement('span'); glyph.className = 'ws-tab-glyph'; glyph.setAttribute('aria-hidden', 'true'); button.prepend(glyph) }
+    if (!text) { text = document.createElement('span'); text.className = 'ws-tab-label'; button.append(text) }
     text.textContent = caption
-    text.classList.toggle('ws-tab-title', !!doc && (!!declaredTitle(doc.key)?.title || doc.provenance.some(p => p.kind === 'embed' && p.title === label)))
-    button.classList.toggle('ws-tab-anchor', doc?.kind === 'fiber' || doc?.kind === 'chat')
+    const mark = !doc || doc.kind === 'fiber' ? '' : doc.kind === 'chat' ? CHAT_GLYPH : KIND_GLYPH[doc.kind]
+    glyph.textContent = mark; glyph.hidden = !mark
     if (doc) button.dataset.kind = doc.kind
     else delete button.dataset.kind
-    if (doc && doc.kind !== 'fiber') button.dataset.caption = caption
-    else delete button.dataset.caption
-    if (!doc || this.shuttleBase === null) return
-    if (!record.thumb) record.thumb = this.thumbnail(record, doc)
-    else record.thumb.retitle()
-    if (doc.kind === 'fiber' && this.channel) {
-      record.thumb.setProse(extractEmbeds(this.channel.body).body || this.channel.outcome || '', '§')
-    }
-    this.paintSketch(record)
-  }
-
-  private thumbnail(record: TabRecord, doc: WorkspaceDocument): Thumbnail {
-    const key: DocKey = doc.key
-    // Reports and pictures load miniature pages; PDFs load only their title metadata.
-    // Text, media and files not drawn here read better as their titled face.
-    const live = doc.kind === 'html' || doc.kind === 'image' || doc.kind === 'pdf'
-    const thumb = new Thumbnail({
-      key: `tile:${key}`, shuttleBase: this.shuttleBase!,
-      file: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : { fullPath: doc.path, owner: doc.owner, basename: doc.name },
-      fallback: '', className: `ws-tab-thumb ws-tab-kind-${doc.kind}`, captioned: true, ...(doc.kind === 'chat' ? { glyph: CHAT_GLYPH } : {}),
-      title: () => doc.kind === 'fiber' || doc.kind === 'chat' ? '' : record.caption,
-      priority: () => live && this.visible && !this.disposed && this.el.isConnected && this.el.clientWidth > 0
-        ? (this.onScreen(record.button) ? 2 : 0) : 0,
-      distance: () => Math.abs(this.records.indexOf(record) - this.selectedIndex),
-    })
-    record.button.append(thumb.el)
-    return thumb
-  }
-
-  /** A recording's tile carries its sketch when its peaks are known, else its length. */
-  private paintSketch(record: TabRecord): void {
-    const doc = record.doc
-    if (doc?.kind !== 'audio' || !record.thumb) return
-    const sketch = audioSketch(doc.key)
-    const signature = JSON.stringify([sketch?.peaks?.length ?? 0, sketch?.peaks?.[0], sketch?.duration ?? 0])
-    let mark = record.button.querySelector<HTMLElement>('.ws-tile-sketch')
-    if (mark?.dataset.signature === signature) return
-    if (!mark) {
-      mark = document.createElement('span')
-      mark.className = 'ws-tile-sketch'
-      record.thumb.adorn(mark)
-    }
-    mark.dataset.signature = signature
-    const bars = sketch?.peaks ? sketchBars(sketch.peaks, SKETCH_BARS) : []
-    if (bars.length) {
-      mark.replaceChildren(...bars.map(peak => {
-        const bar = document.createElement('i')
-        bar.style.height = `${Math.max(12, Math.round(peak * 100))}%`
-        return bar
-      }))
-      mark.dataset.form = 'peaks'
-    } else {
-      mark.textContent = sketch?.duration ? sketchDuration(sketch.duration) : ''
-      mark.dataset.form = 'duration'
-    }
   }
 
   private createButton(key: string): HTMLButtonElement {
@@ -487,11 +416,6 @@ export class TabStrip {
       button.setAttribute('aria-selected', String(selected))
       button.tabIndex = selected ? 0 : -1
     })
-  }
-
-  private onScreen(button: HTMLElement): boolean {
-    const strip = this.el.getBoundingClientRect(), tab = button.getBoundingClientRect()
-    return tab.width > 0 && tab.right > strip.left && tab.left < strip.right
   }
 
   /** An edge fades only where a tile runs past it, not over the strip's centring margin. */
@@ -534,15 +458,17 @@ export class TabStrip {
     if (!this.tip.hidden) this.tipWarmUntil = performance.now() + TIP_DELAY_MS
     this.hideTip()
   }
-  /** The hovered tile's title; the selected tile's is already on its page's label bar. */
+  /** The hovered tab's full name, when its face does not already say it all: the §, a dropped extension, a truncation. */
   private showTip(tab: HTMLButtonElement): void {
     this.tipFor = tab
-    if (tab.getAttribute('aria-selected') === 'true') {
+    const record = this.records.find(r => r.button === tab)
+    const text = tab.querySelector<HTMLElement>('.ws-tab-label')
+    const whole = !!record && record.caption === record.label && !!text && text.scrollWidth <= text.clientWidth
+    if (tab.getAttribute('aria-selected') === 'true' || whole) {
       if (!this.tip.hidden) this.tipWarmUntil = performance.now() + TIP_DELAY_MS
       this.tip.hidden = true
       return
     }
-    const record = this.records.find(r => r.button === tab)
     const name = document.createElement('span')
     name.className = 'ws-tab-tip-title'
     name.textContent = record?.doc?.kind === 'fiber' ? this.channel?.name ?? record.label : record?.label ?? ''
@@ -560,7 +486,7 @@ export class TabStrip {
     this.tipFor = null
     this.tip.hidden = true
   }
-  private readonly onScroll = (): void => { this.scheduleLayout(); for (const record of this.records) record.thumb?.schedule() }
+  private readonly onScroll = (): void => { this.scheduleLayout() }
   private readonly onResize = (): void => { this.mark(this.records[this.selectedIndex]?.docIndex ?? -1, false) }
   private readonly onMotionChange = (): void => {
     if (!this.motion?.matches || this.animationFrame === null) return
