@@ -810,15 +810,31 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, %{"id" => ^id}} = AppWorkers.import_embedded(id, %{}, [], Runner)
     uid = Runner.fiber("tests/terminal")["uid"]
 
+    Shuttle.SessionLedger.record(
+      fiber: "tests/terminal",
+      uid: uid,
+      session: id,
+      thread_id: id,
+      harness: "codex",
+      kind: :resume,
+      at: System.system_time(:millisecond) + 1
+    )
+
+    assert %{"thread_id" => ^id} = Shuttle.SessionLedger.latest_for_session(id)
+
     assert {:error, :session_owner_mismatch} =
              AppWorkers.reserve_resume(id, "tests/copied", "OTHER", Runner.felt_root())
 
-    assert :ok = AppWorkers.reserve_resume(id, "tests/terminal", uid, Runner.felt_root())
+    assert {:ok, %{"resume_origin" => %{"uid" => ^uid, "host" => host}}} = AppWorkers.get(id)
+    assert host == Poller.own_host_id()
+    App.set(:calls, [])
+    assert {:ok, ref} = dispatch("tests/terminal", resume_mode: "previous")
+    assert ref == AppWorkers.ref(id)
     assert {:ok, record} = AppWorkers.get(id)
     assert record["uid"] == uid
     assert record["felt_store"] == Runner.felt_root()
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
-    assert [{:resume, ^id, []}] = App.calls()
+    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
   end
 
   test "embedded migration refuses unknown process observations without native calls" do

@@ -100,16 +100,21 @@ func checkCodexOwnerEndpoint(env *sysenv.Env, host, id string) error {
 	return nil
 }
 
-func dialCodex(ctx context.Context, env *sysenv.Env) (*rpcClient, error) {
+func validatedCodexSocket(env *sysenv.Env) (string, error) {
 	hostname, err := env.Hostname()
+	if err != nil {
+		return "", err
+	}
+	return codexendpoint.Resolve(env.Getenv("SHUTTLE_CODEX_SOCKET"), env.EUID(), hostname)
+}
+
+func dialCodex(ctx context.Context, env *sysenv.Env) (*rpcClient, error) {
+	socket, err := validatedCodexSocket(env)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := codexendpoint.Resolve(env.Getenv("SHUTTLE_CODEX_SOCKET"), env.EUID(), hostname); err != nil {
-		return nil, err
-	}
 	d := websocket.Dialer{EnableCompression: false, HandshakeTimeout: 3 * time.Second, NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", codexSocket(env))
+		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
 	c, _, err := d.DialContext(ctx, "ws://localhost/", http.Header{"Host": []string{"localhost"}})
 	if err != nil {
@@ -387,27 +392,39 @@ func codexHookOwnsInput(ctx context.Context, env *sysenv.Env, a Address) bool {
 	if err != nil || reg.ID != a.ID || reg.Host != a.Host || !reg.live() {
 		return false
 	}
+	socket, err := validatedCodexSocket(env)
+	if err != nil {
+		return true
+	}
 	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
+	// Hooks run in the backend's process tree. The actual Unix peer proves
+	// ownership independently of the server's argv rendering or flag order.
+	if conn, dialErr := (&net.Dialer{}).DialContext(probe, "unix", socket); dialErr == nil {
+		pid, peerErr := claudePeerPID(conn)
+		conn.Close()
+		if peerErr == nil && pid == reg.PID {
+			return false
+		}
+	}
 	out, err := env.CommandContext(probe, "ps", "-ww", "-p", strconv.Itoa(reg.PID), "-o", "args=").Output()
 	if err != nil {
 		return true
 	}
-	return !codexExplicitEndpoint(strings.Fields(string(out)), "unix://"+codexSocket(env))
+	return !codexExplicitEndpoint(string(out), "unix://"+socket)
 }
 
-func codexExplicitEndpoint(args []string, endpoint string) bool {
-	if len(args) < 3 || filepath.Base(args[0]) != "codex" {
+func codexExplicitEndpoint(command, endpoint string) bool {
+	executable, args, ok := strings.Cut(strings.TrimSpace(command), " ")
+	if !ok || filepath.Base(executable) != "codex" {
 		return false
 	}
-	for i := 1; i < len(args); i++ {
-		if args[i] == "resume" || args[i] == "exec" {
-			break
-		}
-		if args[i] == "--remote="+endpoint || (args[i] == "--remote" && i+1 < len(args) && args[i+1] == endpoint) {
-			return true
-		}
-		if args[i] == "app-server" && i+2 < len(args) && args[i+1] == "--listen" && args[i+2] == endpoint {
+	// ps renders argv without quoting. Match only the leading launch form,
+	// retaining the endpoint's spaces; never search config or prompt text.
+	args = strings.TrimLeft(args, " ")
+	for _, prefix := range []string{"--remote ", "--remote=", "app-server --listen ", "app-server --listen="} {
+		launch := prefix + endpoint
+		if args == launch || strings.HasPrefix(args, launch+" ") {
 			return true
 		}
 	}

@@ -239,7 +239,7 @@ defmodule Shuttle.AppWorkers do
 
         {:error, :not_found} ->
           with :ok <- check_known_endpoint(id),
-               :ok <- embedded_provenance(id, attributes),
+               {:ok, origin} <- embedded_provenance(id, attributes),
                :ok <- Shuttle.WorkerProcess.check_free(runner, id),
                :ok <- Shuttle.CodexBackend.require_ready(),
                {:ok, thread} <- load_embedded(id, backend_opts),
@@ -253,7 +253,8 @@ defmodule Shuttle.AppWorkers do
                      "backend_host" => Shuttle.Poller.own_host_id(),
                      "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
                      "active" => false,
-                     "launch_state" => "idle"
+                     "launch_state" => "idle",
+                     "resume_origin" => origin
                    })
                  ) do
             {:ok, thread}
@@ -281,7 +282,7 @@ defmodule Shuttle.AppWorkers do
             {:error, :session_owner_mismatch}
 
           true ->
-            :ok
+            {:ok, %{"host" => host, "fiber_id" => row["fiber"], "uid" => row["uid"]}}
         end
 
       _ ->
@@ -301,7 +302,7 @@ defmodule Shuttle.AppWorkers do
     :global.trans({{__MODULE__, id}, self()}, fn ->
       with {:ok, record} <- get(id),
            :ok <- check_endpoint(record, id),
-           true <- resume_assignment_matches?(record, id, fiber_id, uid, store),
+           true <- resume_assignment_matches?(record, fiber_id, uid, store),
            false <- record["active"] == true,
            :ok <-
              put(
@@ -322,10 +323,13 @@ defmodule Shuttle.AppWorkers do
     end)
   end
 
-  defp resume_assignment_matches?(record, id, fiber_id, uid, store) do
+  defp resume_assignment_matches?(record, fiber_id, uid, store) do
+    origin = record["resume_origin"]
+
     (same_fiber?(record, fiber_id, uid) and record["felt_store"] == store) or
       (is_nil(record["fiber_id"]) and is_nil(record["uid"]) and is_nil(record["felt_store"]) and
-         embedded_provenance(id, %{"fiber_id" => fiber_id, "uid" => uid}) == :ok)
+         is_map(origin) and origin["host"] == Shuttle.Poller.own_host_id() and
+         same_fiber?(origin, fiber_id, uid))
   end
 
   @doc "Reloads a durably owned app thread only when the native server confirms it is not loaded."

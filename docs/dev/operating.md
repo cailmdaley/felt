@@ -114,6 +114,7 @@ Embedded Codex conversations have three migration cases:
   Ordinary resume keeps the persisted developer instructions.
 - The board's **Resume previous** and a History row's **Resume** use that same migration boundary.
   Resume previous sends the managed worker's continuation prompt; History opens a human terminal viewer without a model turn.
+  A History import retains its verified original fiber binding in the durable record, so later native ledger rows don't prevent Resume previous from assigning it back to that fiber.
   A clean handoff followed by an ordinary re-arm starts a fresh conversation by design; explicitly choosing Resume previous still selects the saved ID.
 
 A runtime marker records an ID and timestamps, not the host that wrote them.
