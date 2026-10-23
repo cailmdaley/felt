@@ -848,6 +848,87 @@ defmodule Shuttle.AppWorkersTest do
     assert [] = App.calls()
   end
 
+  defmodule ReceiverHolderRunner do
+    def cmd("ps", _args, _opts), do: {"813 1 /usr/bin/sleep 60\n", 0}
+
+    def cmd("shuttle", ["process-identity", "813"], _opts),
+      do: Shuttle.Env.app(:test_receiver_identity, {~s({"status":"unknown"}), 0})
+
+    def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+  end
+
+  defp embedded_receiver(id, start) do
+    root = Shuttle.Env.app(:app_workers_dir)
+    Env.put_env("SHUTTLE_DATA_DIR", root)
+    key = :crypto.hash(:sha256, id) |> Base.encode16(case: :lower)
+    dir = Path.join([root, "mailboxes", "codex", key])
+    File.mkdir_p!(dir)
+
+    File.write!(
+      Path.join(dir, "receiver.json"),
+      Jason.encode!(%{"id" => id, "host" => Poller.own_host_id(), "pid" => 813, "start" => start})
+    )
+  end
+
+  test "a recycled hook PID permits managed migration of the exact embedded ID" do
+    id = embedded_fiber()
+    embedded_receiver(id, "123456")
+    Env.put_app_env(:test_receiver_identity, {~s({"status":"present","start":"654321"}), 0})
+
+    assert {:ok, ref} =
+             dispatch("tests/terminal", runner: ReceiverHolderRunner, resume_mode: "previous")
+
+    assert ref == AppWorkers.ref(id)
+    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert {:ok, record} = AppWorkers.get(id)
+    assert record["backend_host"] == Poller.own_host_id()
+    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+  end
+
+  test "a recycled hook PID permits exact-ID History import" do
+    id = embedded_fiber()
+    embedded_receiver(id, "1700000000.123456")
+
+    Env.put_app_env(
+      :test_receiver_identity,
+      {~s({"status":"present","start":"1700000001.123456"}), 0}
+    )
+
+    assert {:ok, %{"id" => ^id}} = AppWorkers.import_embedded(id, %{}, [], ReceiverHolderRunner)
+    assert [{:resume, ^id, []}] = App.calls()
+    assert {:ok, record} = AppWorkers.get(id)
+    assert record["backend_host"] == Poller.own_host_id()
+  end
+
+  test "unknown receiver lifetime blocks managed migration and History with zero native RPC" do
+    id = embedded_fiber()
+
+    for start <- ["123456", "1700000000.123456", nil, ""] do
+      embedded_receiver(id, start)
+
+      for result <- [{~s({"status":"unknown"}), 0}, {"permission denied", 1}] do
+        Env.put_app_env(:test_receiver_identity, result)
+
+        assert {:error, {:transcript_held, _}} =
+                 dispatch("tests/terminal", runner: ReceiverHolderRunner, resume_mode: "previous")
+
+        assert {:error, {:unknown, _}} =
+                 AppWorkers.import_embedded(id, %{}, [], ReceiverHolderRunner)
+
+        assert [] = App.calls()
+        assert {:error, :not_found} = AppWorkers.get(id)
+      end
+    end
+  end
+
+  test "matching hook lifetime blocks embedded import even without a UUID in argv" do
+    id = embedded_fiber()
+    embedded_receiver(id, "123456")
+    Env.put_app_env(:test_receiver_identity, {~s({"status":"present","start":"123456"}), 0})
+    assert {:error, {:held, _}} = AppWorkers.import_embedded(id, %{}, [], ReceiverHolderRunner)
+    assert [] = App.calls()
+  end
+
   test "embedded migration rejects remote or App Server ledger provenance without native calls" do
     id = embedded_fiber()
     row = Shuttle.SessionLedger.latest_for_session(id)

@@ -28,6 +28,17 @@ defmodule Shuttle.ContractTest do
     assert result.reason =~ "context-mailbox pending"
   end
 
+  defmodule Level18Runner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["contract"], _opts), do: {"18\n", 0}
+  end
+
+  test "a CLI at level 18 cannot verify a hook receiver's kernel lifetime" do
+    result = Shuttle.Contract.check(Level18Runner)
+    refute result.ok
+    assert result.reason =~ "process-identity PID"
+  end
+
   test "the expected level covers the receiver-authority verbs" do
     assert Shuttle.Contract.expected_level() >= 15
   end

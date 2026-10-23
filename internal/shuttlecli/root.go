@@ -216,6 +216,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.claimCmd(),
 		a.codexDesktopBridgeCmd(),
 		a.shuttleContractCmd(),
+		a.processIdentityCmd(),
 		a.installCmd(),
 		a.threadCmd(),
 		a.threadsCmd(),

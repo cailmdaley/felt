@@ -45,6 +45,8 @@ func kinfoProc(pid int) ([]byte, bool) {
 	return buf, true
 }
 
+func processSignalZero(pid int) error { return syscall.Kill(pid, 0) }
+
 func processStartToken(pid int) string {
 	b, ok := kinfoProc(pid)
 	if !ok {

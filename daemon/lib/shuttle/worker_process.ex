@@ -11,7 +11,7 @@ defmodule Shuttle.WorkerProcess do
   two harness processes interleaving one conversation in one worktree. This
   module is how the daemon tells the two apart.
 
-  Two signals, both read from `ps` over the daemon's own uid:
+  Holder evidence starts with `ps` over the daemon's own uid:
 
     * **The run script.** Every tmux session the daemon starts runs
       `bash -l <tmp>/shuttle-run-<session>.<n>.sh` (`script_path/1`). The
@@ -25,6 +25,9 @@ defmodule Shuttle.WorkerProcess do
       <uuid>`, `codex resume <uuid>`, `pi --session <uuid>`), so
       `holder/2` finds whichever process holds a transcript open — including a
       worker whose run script predates the naming above.
+    * **The hook receiver.** A local live receiver registration binds fresh
+      embedded Codex argv to its session only when its start token matches a
+      kernel lifetime observation through `shuttle process-identity`.
 
   A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`,
   and every caller reads uncertainty as "present" — the doctrine of
@@ -118,9 +121,14 @@ defmodule Shuttle.WorkerProcess do
   `--session <uuid>`, `resume <uuid>`, or `--flag=<uuid>`). A uuid that merely
   appears as a word — inside a prompt argument naming a previous session, or
   a shell command line — does not hold the transcript.
+
+  A hook receiver without a UUID in argv must match its kernel start token.
+  An unobservable receiver lifetime returns `{:error, :unknown}`.
   """
-  @spec holder([proc()], String.t()) :: proc() | nil
-  def holder(procs, uuid) when is_binary(uuid) and uuid != "" do
+  @spec holder([proc()], String.t(), module()) :: proc() | nil | {:error, :unknown}
+  def holder(procs, uuid, runner \\ Shuttle.Runner.Default)
+
+  def holder(procs, uuid, runner) when is_binary(uuid) and uuid != "" do
     Enum.find(procs, fn %{args: args} = proc ->
       not tmux?(proc) and
         args
@@ -130,12 +138,12 @@ defmodule Shuttle.WorkerProcess do
           [flag, ^uuid] when flag in @session_flags -> true
           [token, _] -> String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
         end)
-    end) || bound_holder(procs, uuid)
+    end) || bound_holder(procs, uuid, runner)
   end
 
-  def holder(_procs, _uuid), do: nil
+  def holder(_procs, _uuid, _runner), do: nil
 
-  defp bound_holder(procs, uuid) do
+  defp bound_holder(procs, uuid, runner) do
     row = Shuttle.SessionLedger.latest_for_session(uuid)
 
     script_holder =
@@ -147,7 +155,7 @@ defmodule Shuttle.WorkerProcess do
         _ -> nil
       end
 
-    script_holder || hook_holder(procs, uuid)
+    script_holder || hook_holder(procs, uuid, runner)
   end
 
   defp latest_for_tmux(tmux) do
@@ -156,23 +164,46 @@ defmodule Shuttle.WorkerProcess do
     |> Enum.max_by(& &1["at"], fn -> nil end)
   end
 
-  defp hook_holder(procs, uuid) do
+  defp hook_holder(procs, uuid, runner) do
     key = :crypto.hash(:sha256, uuid) |> Base.encode16(case: :lower)
     path = Path.join([Shuttle.data_dir(), "mailboxes", "codex", key, "receiver.json"])
 
     with {:ok, bytes} <- File.read(path),
          {:ok, %{"id" => ^uuid, "host" => host, "pid" => pid} = reg} <- Jason.decode(bytes),
-         true <- host == Shuttle.Poller.own_host_id() and reg["ended"] != true do
-      Enum.find(procs, &(&1.pid == pid))
+         true <- host == Shuttle.Poller.own_host_id() and reg["ended"] != true,
+         %{} = proc <- Enum.find(procs, &(&1.pid == pid)) do
+      receiver_holder(proc, reg["start"], runner)
     else
+      {:error, :enoent} -> nil
+      {:error, _reason} -> {:error, :unknown}
       _ -> nil
     end
   end
 
+  defp receiver_holder(proc, start, runner) when is_binary(start) and start != "" do
+    with {:ok, output} <-
+           Shuttle.CLI.run(["process-identity", Integer.to_string(proc.pid)],
+             runner: runner,
+             timeout_ms: 2_000
+           ),
+         {:ok, identity} <- Jason.decode(output) do
+      case identity do
+        %{"status" => "present", "start" => ^start} -> proc
+        %{"status" => "present", "start" => actual} when is_binary(actual) and actual != "" -> nil
+        %{"status" => "gone"} -> nil
+        _ -> {:error, :unknown}
+      end
+    else
+      _ -> {:error, :unknown}
+    end
+  end
+
+  defp receiver_holder(_proc, _start, _runner), do: {:error, :unknown}
+
   @doc """
   `:ok` when no process of this uid holds harness session `uuid`; otherwise a
   refusal saying what is true and what to do. `{:held, message}` names the
-  process; `{:unknown, message}` says the scan could not run — uncertainty
+  process; `{:unknown, message}` says the scan or lifetime is unobservable — uncertainty
   counts as held, since a second harness process on one transcript
   interleaves it.
   """
@@ -181,9 +212,12 @@ defmodule Shuttle.WorkerProcess do
   def check_free(runner, uuid) do
     case scan(runner) do
       {:ok, procs} ->
-        case holder(procs, uuid) do
+        case holder(procs, uuid, runner) do
           nil ->
             :ok
+
+          {:error, :unknown} ->
+            unknown_holder(uuid)
 
           proc ->
             server = tmux_server(procs, proc)
@@ -198,11 +232,16 @@ defmodule Shuttle.WorkerProcess do
         end
 
       {:error, :unknown} ->
-        {:error,
-         {:unknown,
-          "could not check whether a running process still holds session #{uuid} " <>
-            "(the process scan failed), so it is not resumed; the next attempt checks again."}}
+        unknown_holder(uuid)
     end
+  end
+
+  defp unknown_holder(uuid) do
+    {:error,
+     {:unknown,
+      "could not check whether a running process still holds session #{uuid} " <>
+        "(the process scan or receiver lifetime could not be verified), so it is not resumed; " <>
+        "the next attempt checks again."}}
   end
 
   @doc """

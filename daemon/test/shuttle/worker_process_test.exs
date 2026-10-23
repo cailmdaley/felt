@@ -5,6 +5,11 @@ defmodule Shuttle.WorkerProcessTest do
 
   defmodule PsRunner do
     def cmd("ps", _args, _opts), do: Process.get(:ps_result, {"", 0})
+
+    def cmd("shuttle", ["process-identity", pid], _opts) do
+      send(self(), {:identity_probe, pid})
+      Process.get(:identity_result, {~s({"status":"unknown"}), 0})
+    end
   end
 
   @uuid "11111111-2222-3333-4444-555555555555"
@@ -85,24 +90,139 @@ defmodule Shuttle.WorkerProcessTest do
     assert nil == WorkerProcess.holder(table, @uuid)
   end
 
-  @tag :tmp_dir
-  test "hook receiver binds an idle or detached embedded process without a UUID in argv", %{
-    tmp_dir: root
-  } do
+  defp receiver(root, pid, start, extra \\ %{}) do
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(root, "sessions.jsonl"))
     key = :crypto.hash(:sha256, @uuid) |> Base.encode16(case: :lower)
     dir = Path.join([root, "mailboxes", "codex", key])
     File.mkdir_p!(dir)
 
     File.write!(
       Path.join(dir, "receiver.json"),
-      Jason.encode!(%{"id" => @uuid, "host" => Shuttle.Poller.own_host_id(), "pid" => 813})
+      Jason.encode!(
+        Map.merge(
+          %{
+            "id" => @uuid,
+            "host" => Shuttle.Poller.own_host_id(),
+            "pid" => pid,
+            "start" => start
+          },
+          extra
+        )
+      )
     )
+  end
 
-    assert %{pid: 813} =
-             WorkerProcess.holder(WorkerProcess.parse("813 1 codex -m gpt-sol\n"), @uuid)
+  @tag :tmp_dir
+  test "hook receiver lifetime matches on both platforms; a reused PID is not the old holder", %{
+    tmp_dir: root
+  } do
+    Process.put(:ps_result, {"813 1 codex -m gpt-sol\n", 0})
 
-    assert nil == WorkerProcess.holder([], @uuid)
+    for start <- ["123456", "1700000000.123456"] do
+      receiver(root, 813, start)
+
+      Process.put(
+        :identity_result,
+        {Jason.encode!(%{"status" => "present", "start" => start}), 0}
+      )
+
+      assert {:error, {:held, message}} = WorkerProcess.check_free(PsRunner, @uuid)
+      assert message =~ "pid 813"
+      assert_receive {:identity_probe, "813"}
+
+      # An unrelated process now occupies the registered PID.
+      Process.put(:ps_result, {"813 1 /usr/bin/sleep 60\n", 0})
+
+      Process.put(
+        :identity_result,
+        {Jason.encode!(%{"status" => "present", "start" => start <> "9"}), 0}
+      )
+
+      assert :ok = WorkerProcess.check_free(PsRunner, @uuid)
+      assert_receive {:identity_probe, "813"}
+    end
+
+    Process.put(:identity_result, {~s({"status":"gone"}), 0})
+    assert :ok = WorkerProcess.check_free(PsRunner, @uuid)
+    assert_receive {:identity_probe, "813"}
+    assert nil == WorkerProcess.holder([], @uuid, PsRunner)
+    refute_receive {:identity_probe, _}
+  end
+
+  @tag :tmp_dir
+  test "unobservable or missing receiver lifetimes are explicitly unknown", %{tmp_dir: root} do
+    Process.put(:ps_result, {"813 1 /usr/bin/sleep 60\n", 0})
+
+    for start <- ["123456", "1700000000.123456"] do
+      receiver(root, 813, start)
+
+      for result <- [
+            {~s({"status":"unknown"}), 0},
+            {~s({"status":"present"}), 0},
+            {~s({"status":"present","start":""}), 0},
+            {"not json", 0},
+            {"permission denied", 1},
+            {"timed out", :timeout}
+          ] do
+        Process.put(:identity_result, result)
+        assert {:error, {:unknown, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+        assert_receive {:identity_probe, "813"}
+      end
+    end
+
+    for start <- [nil, ""] do
+      receiver(root, 813, start)
+      assert {:error, {:unknown, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+      refute_receive {:identity_probe, _}
+    end
+
+    receiver(root, 813, nil, %{"ended" => true})
+    assert :ok = WorkerProcess.check_free(PsRunner, @uuid)
+    refute_receive {:identity_probe, _}
+  end
+
+  @tag :tmp_dir
+  test "unreadable or malformed receiver evidence cannot prove the holder gone", %{tmp_dir: root} do
+    receiver(root, 813, "123456")
+    key = :crypto.hash(:sha256, @uuid) |> Base.encode16(case: :lower)
+    path = Path.join([root, "mailboxes", "codex", key, "receiver.json"])
+    Process.put(:ps_result, {"813 1 codex -m fixture\n", 0})
+    File.write!(path, "not json")
+    assert {:error, {:unknown, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+    File.rm!(path)
+    File.mkdir!(path)
+    assert {:error, {:unknown, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+    refute_receive {:identity_probe, _}
+  end
+
+  @tag :tmp_dir
+  test "explicit UUID and local run-script bindings do not depend on hook lifetime", %{
+    tmp_dir: root
+  } do
+    receiver(root, 813, nil)
+    Process.put(:ps_result, {"813 1 codex resume #{@uuid}\n", 0})
+    assert {:error, {:held, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+    refute_receive {:identity_probe, _}
+
+    tmux = "leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle"
+    row = %{"session" => @uuid, "tmux" => tmux, "host" => Shuttle.Poller.own_host_id(), "at" => 1}
+    File.write!(Path.join(root, "sessions.jsonl"), Jason.encode!(row) <> "\n")
+    Process.put(:ps_result, {"813 1 bash -l /tmp/shuttle-run-#{tmux}.42.sh\n", 0})
+    assert {:error, {:held, _}} = WorkerProcess.check_free(PsRunner, @uuid)
+    refute_receive {:identity_probe, _}
+  end
+
+  @tag :tmp_dir
+  test "hook lifetime uses the real current-process kernel probe", %{tmp_dir: root} do
+    pid = System.pid() |> String.to_integer()
+    assert {:ok, output} = Shuttle.CLI.run(["process-identity", System.pid()])
+    assert %{"status" => "present", "start" => start} = Jason.decode!(output)
+    assert start != ""
+    receiver(root, pid, start)
+
+    assert %{pid: ^pid} =
+             WorkerProcess.holder(WorkerProcess.parse("#{pid} 1 codex -m fixture\n"), @uuid)
   end
 
   test "tmux_server climbs the ppid chain to the tmux process" do

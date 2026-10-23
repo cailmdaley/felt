@@ -34,6 +34,8 @@ func processAlive(pid int, start string) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
+func processSignalZero(pid int) error { return syscall.Kill(pid, 0) }
+
 func processStartToken(pid int) string {
 	start, _ := linuxProcessStartTime(pid)
 	return start
