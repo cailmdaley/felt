@@ -377,6 +377,17 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('.ws-transcript-msg-sending')?.textContent).toContain('Carry on')
     expect(message.value).toBe('')
   })
+  it('names the lifecycle beside the title in the rail\'s words, kept current', () => {
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', workerState: 'running', runtimePhase: 'working' }))
+    const chip = band.el.querySelector<HTMLElement>('.ws-chat-head .ws-chat-state')!
+    expect([chip.textContent, chip.dataset.state]).toEqual(['Working', 'working'])
+    dock.bandFor(task({ status: 'active', sessionUuid: 's', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
+    expect([chip.textContent, chip.dataset.state]).toEqual(['Waiting', 'question'])
+    dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
+    expect([chip.textContent, chip.dataset.state]).toEqual(['To review', 'to-review'])
+    dock.bandFor(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
+    expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
+  })
   it("opens the conversation on the fiber's outcome, kept current and hidden when there is none", () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees with its original posterior.' }))
     const strip = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-chat-outcome')!

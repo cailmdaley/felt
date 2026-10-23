@@ -1,3 +1,5 @@
+import { turnOf } from '../turn.js'
+import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
@@ -417,6 +419,16 @@ export interface ChatNav {
   ancestry?: readonly Ancestor[]
   origin?: { label: string; open(): void }
   trail?: HTMLElement
+}
+
+/** A constitution's lifecycle as the header's chip says it: the rail's state, a waiting one by whose turn, a verdict by its kind. */
+export function lifecycleOf(card: KanbanCard): { state: string; label: string } {
+  const state = threadState(card)
+  if (state === 'waiting') return turnOf(card).turn === 'question' ? { state: 'question', label: 'Waiting' } : { state: 'waiting', label: 'Waiting' }
+  if (state === 'archived') return deskColumn(card) === 'composted' ? { state: 'discarded', label: 'Discarded' } : { state: 'tempered', label: 'Tempered' }
+  if (state === 'drafts') return { state, label: 'Draft' }
+  if (state === 'roles') return { state: 'resting', label: 'Resting' }
+  return { state, label: THREAD_LABEL[state] }
 }
 
 /** The menu's muted line: agent, office and host, the office only where it is not the name again. */
@@ -857,7 +869,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -1113,7 +1125,11 @@ export class Dock {
     const ancestry = this.ancestry = document.createElement('nav')
     ancestry.className = 'ws-chat-ancestry'
     ancestry.hidden = true
-    header.append(lead, title, this.head, trail, ancestry)
+    // Where the constitution stands in its lifecycle, in the rail's words and tones.
+    const lifecycle = document.createElement('span')
+    lifecycle.className = 'ws-chat-state'
+    lifecycle.dataset.part = 'lifecycle'
+    header.append(lead, title, lifecycle, this.head, trail, ancestry)
 
     const log = document.createElement('div')
     log.className = 'ws-chat-log'
@@ -1138,6 +1154,10 @@ export class Dock {
       this.head.dataset.column = column
       title.textContent = card.name
       title.title = card.name
+      const stage = lifecycleOf(card)
+      lifecycle.textContent = stage.label
+      lifecycle.dataset.state = stage.state
+      lifecycle.hidden = !shuttleManaged
       standing.textContent = card.outcome?.trim() ?? ''
       standing.title = standing.textContent
       standing.hidden = !standing.textContent

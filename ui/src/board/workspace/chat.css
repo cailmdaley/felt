@@ -36,6 +36,21 @@
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
 .ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 12px; min-height: 32px; }
+/* The lifecycle chip: the rail's state word in its tone, beside the name's first line. */
+.ws-chat-state {
+  --tone: var(--ws-ink-muted);
+  flex: none; align-self: flex-start; margin-top: 7px; padding: 1px 8px; border-radius: 999px;
+  color: var(--tone); background: color-mix(in srgb, var(--tone) 13%, transparent);
+  font: 500 var(--ws-small-size)/1.5 var(--ws-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
+}
+.ws-chat-state[hidden] { display: none; }
+.ws-chat-state[data-state='question'] { --tone: var(--ws-state-question); }
+.ws-chat-state[data-state='waiting'] { --tone: var(--ws-state-idle); }
+.ws-chat-state[data-state='working'] { --tone: var(--ws-state-working); }
+.ws-chat-state[data-state='to-review'] { --tone: var(--ws-state-review); }
+.ws-chat-state[data-state='drafts'] { --tone: var(--ws-state-drafts); }
+.ws-chat-state[data-state='resting'] { --tone: var(--ws-state-resting); color: var(--ws-ink-muted); }
+.ws-chat-state:is([data-state='tempered'], [data-state='discarded']) { --tone: var(--ws-state-tempered); }
 /* Inside a thread its ancestry runs beneath the name, a line of its own. */
 .ws-chat-ancestry { flex: 1 0 100%; order: 1; margin-top: 1px; }
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
