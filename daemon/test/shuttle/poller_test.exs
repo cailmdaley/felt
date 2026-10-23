@@ -4018,7 +4018,7 @@ defmodule Shuttle.PollerTest do
       MockRunner.set_ps_result(
         {"""
            700     1 tmux new-session -d -s shuttle-anchor
-           812   700 bash -l /tmp/shuttle-run-9859.sh
+           812   700 bash -l /tmp/shuttle-run-transcript-held-01KTHDNZS287ZSSG8X8V59XKW1-shuttle.3.sh
            813   812 claude --resume held-session-uuid-0001
          """, 0}
       )

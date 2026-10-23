@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -106,10 +107,12 @@ leave the task as an open draft.`,
 				return err
 			}
 			payload := map[string]any{"fiber_id": id, "surface": surface, "tmux_session": tmux, "session_uuid": session, "agent": block.Agent}
-			// The claimer's exact pane, when it claims from inside it: the daemon
-			// binds a worker it cannot find by its conversation to this pane.
+			// The claimer's exact pane and this process, when it claims from
+			// inside the pane: the daemon binds the harness that ran this
+			// command, the pane's child on this process's ancestry.
 			if pane := strings.TrimSpace(a.env.Getenv("TMUX_PANE")); surface == "cli" && pane != "" && a.env.Getenv("TMUX") != "" {
 				payload["tmux_pane"] = pane
+				payload["claimer_pid"] = os.Getpid()
 			}
 			body, err := json.Marshal(payload)
 			if err != nil {

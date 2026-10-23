@@ -282,37 +282,46 @@ defmodule Shuttle.ClaimTransferTest do
     assert length(ledger("superseded_by_claim")) == 1
   end
 
-  test "a hand-started claimer with no conversation in its argv is bound by its pane" do
+  test "a hand-started claimer with no conversation in its argv is bound by its own process" do
     uuid = "6d688234-9445-4d16-93d3-6bef110ea659"
     Runner.add_tmux_session("human")
     Runner.set_panes(%{9100 => "human"})
-    Runner.set_ps_result({"9100 1 -zsh\n9101 9100 claude --model opus\n", 0})
+
+    Runner.set_ps_result(
+      {"9100 1 -zsh\n9101 9100 claude --model opus\n9102 9101 bash -c shuttle\n" <>
+         "9103 9102 shuttle claim tests/b\n", 0}
+    )
+
     poller = start()
 
     assert {:ok, %{session: "human"}} =
              Poller.claim_session(poller, "tests/b", "human",
                session_uuid: uuid,
-               tmux_pane: "%9100"
+               tmux_pane: "%9100",
+               claimer_pid: 9103
              )
 
-    assert %{pane: %{"pid" => 9100}, holder_uuid: ^uuid} = Poller.worker_status(poller, "tests/b")
-    assert runtime("tests/b")["pane"] == "9100:start-9100"
+    # The harness that ran the claim, not the pane's shell.
+    assert %{pane: %{"pid" => 9101}, holder_uuid: ^uuid} = Poller.worker_status(poller, "tests/b")
+    assert runtime("tests/b")["pane"] == "9101:start-9101"
 
-    # Across a restart, the pane binding still finds it.
+    # Across a restart, the binding still finds it.
     GenServer.stop(poller)
     poller = start()
     assert %{session: "human"} = Poller.worker_status(poller, "tests/b")
 
-    # A stop reaches it by its exact pane.
+    # A stop signals that harness alone: never the human's pane or shell.
     assert {:ok, "human"} = Poller.kill_session(poller, "tests/b")
-    assert {"tmux", ["kill-pane", "-t", "%9100"]} in Runner.commands()
+    assert {"kill", ["-TERM", "9101"]} in Runner.commands()
+    refute Enum.any?(Runner.commands(), &match?({"tmux", ["kill-pane" | _]}, &1))
+    refute Enum.any?(Runner.commands(), &match?({"kill", [_, "--", "-9100" | _]}, &1))
   end
 
-  test "a reused pid never stands for a pane-bound worker" do
+  test "a reused pid never stands for a bound worker" do
     uuid = "6d688234-9445-4d16-93d3-6bef110ea65a"
     Runner.add_tmux_session("human")
     Runner.set_panes(%{9200 => "human"})
-    Runner.set_ps_result({"9200 1 -zsh\n", 0})
+    Runner.set_ps_result({"9200 1 -zsh\n9201 9200 claude --model opus\n", 0})
     poller = start()
 
     assert {:ok, _} =
@@ -321,8 +330,8 @@ defmodule Shuttle.ClaimTransferTest do
                tmux_pane: "%9200"
              )
 
-    # The pane's process exits and an unrelated process takes its pid.
-    Runner.set_process_start(9200, "another-lifetime")
+    # The harness exits and an unrelated process takes its pid.
+    Runner.set_process_start(9201, "another-lifetime")
     assert wait_until(fn -> Poller.worker_status(poller, "tests/b") == nil end)
     assert {:ok, :no_session} = Poller.kill_session(poller, "tests/b")
     assert signals() == []
@@ -476,31 +485,29 @@ defmodule Shuttle.ClaimTransferTest do
       assert {:ok, _} = Poller.dispatch_fiber(poller, "tests/b", force: true)
     end
 
-    test "a pane-bound worker that exits reads gone and frees its fiber" do
+    test "a bound harness that exits reads gone and frees its fiber, its shell notwithstanding" do
       Runner.add_tmux_session("human")
       Runner.set_panes(%{9300 => "human"})
-      Runner.set_ps_result({"9300 1 -zsh\n", 0})
+      Runner.set_ps_result({"9300 1 -zsh\n9301 9300 claude --model opus\n", 0})
       poller = start()
       assert {:ok, _} = Poller.claim_session(poller, "tests/b", "human", tmux_pane: "%9300")
-      Runner.set_panes(%{})
-      Runner.set_ps_result({"", 0})
+      Runner.set_ps_result({"9300 1 -zsh\n", 0})
       assert wait_until(fn -> Poller.worker_status(poller, "tests/b") == nil end)
       poll(poller)
       assert {:ok, _} = Poller.dispatch_fiber(poller, "tests/b", force: true)
     end
 
-    test "a live worker whose fiber closes externally can still claim another" do
+    test "a live worker whose fiber closes externally is reaped, and nothing strands" do
       poller = start()
       worker = launch!(poller, "tests/a")
       Runner.set_fiber("tests/a", Map.put(Runner.fiber("tests/a"), "status", "closed"))
       poll(poller)
-      assert Poller.worker_status(poller, "tests/a") == nil
-      assert {:ok, _} = claim(poller, "tests/b", worker)
-      assert %{holder_uuid: _} = Poller.worker_status(poller, "tests/b")
-      Runner.remove_tmux_session(worker.session)
-      assert wait_until(fn -> Poller.worker_status(poller, "tests/b") == nil end)
       poll(poller)
+      assert Poller.worker_status(poller, "tests/a") == nil
+      assert concluded?("tests/a")
+      assert Runner.launched_pid(worker.session) == nil
       assert {:ok, _} = Poller.dispatch_fiber(poller, "tests/b", force: true)
+      assert {:ok, _} = Poller.dispatch_fiber(poller, "tests/a", force: true)
     end
 
     test "an earlier build's adopted worker claims another, and both dispatch after it exits" do

@@ -86,7 +86,7 @@ A pane name remains transport context for terminals, sent files, and activity; s
 
 The worker's `shuttle.runtime.session_uuid` is the binding anchor.
 Claude and Pi launch under a daemon-generated UUID supplied through `--session-id`, which the runtime names before the worker starts; a resume, and the fresh launch its failure falls back to, reuse it, and a claim supplies the claimer's own.
-A claim that names no conversation binds the claimer's pane instead; its conversation stays unknown, and the owner snapshot and board show `identity_pending` (Identifying session), never Working, until a later claim names it.
+A claim that names no conversation binds only the claimer's worker process; its conversation stays unknown, and the owner snapshot and board show `identity_pending` (Identifying session), never Working, until a later claim names it.
 A failed runtime-mirror write shows `identity_failed` with its `identity_error` until a later poll repairs the mirror.
 There is no first-hook or first-session-in-the-pane fallback.
 The runtime timestamp falls back to the worker's liveness timestamp when no session state is available.

@@ -211,10 +211,12 @@ defmodule Shuttle.Tmux do
   @doc """
   Stops the execution `handle` and returns once no process holds it.
 
-  The holder is found in the process table, and its tmux pane by ancestry;
-  that exact pane (`%N`) is killed, whatever its session is now called. The
-  ladder then waits, escalating to SIGTERM and SIGKILL on the holder's pane
-  process group. A holder tmux cannot show is signalled directly. When the
+  The worker is found in the process table (`Shuttle.WorkerProcess.find/3`).
+  A launch's run script is its pane's process, so that exact pane (`%N`) is
+  killed, whatever its session is now called; the ladder then waits,
+  escalating to SIGTERM and SIGKILL on the run script's process group. A
+  launch tmux cannot show is signalled directly; a claimed harness in a pane
+  of someone else's is signalled alone, never its pane or shell. When the
   process table cannot be read, nothing is signalled and the stop fails: an
   uncertain holder is never a kill target. A handle nothing holds is already
   stopped.
@@ -227,9 +229,13 @@ defmodule Shuttle.Tmux do
 
       with {:ok, procs} <- WorkerProcess.scan(runner),
            %{} = proc <- WorkerProcess.find(procs, handle, runner) do
+        # A launch's run script is its pane's process, so the pane goes with
+        # it. A claimed harness in a pane of someone else's is signalled alone.
         killed? =
-          with {:ok, panes} <- WorkerProcess.panes(runner),
-               %{pane: pane} <- WorkerProcess.pane_of(procs, panes, proc),
+          with %{} = root <- WorkerProcess.launch_root(procs, proc),
+               {:ok, panes} <- WorkerProcess.panes(runner),
+               %{pane: pane, pid: pid} when pid == root.pid <-
+                 WorkerProcess.pane_of(procs, panes, root),
                {_, 0} <- runner.cmd("tmux", ["kill-pane", "-t", pane], stderr_to_stdout: true) do
             true
           else
@@ -297,12 +303,17 @@ defmodule Shuttle.Tmux do
     :ok
   end
 
-  # Re-found on every step: only a process that holds the execution now is
-  # signalled, through the outermost process of its pane.
+  # Re-found on every step: only the worker of the execution now is
+  # signalled — its launch's run script and process group, or a claimed
+  # harness alone. Nothing above a launch, and no process that merely holds
+  # the conversation, is ever a target.
   defp signal_holder(runner, handle, signal) do
     with {:ok, procs} <- WorkerProcess.scan(runner),
          %{} = proc <- WorkerProcess.find(procs, handle, runner) do
-      kill(runner, signal, WorkerProcess.signal_root(procs, proc).pid)
+      case WorkerProcess.launch_root(procs, proc) do
+        %{pid: pid} -> kill(runner, signal, pid)
+        nil -> runner.cmd("kill", ["-#{signal}", "#{proc.pid}"], stderr_to_stdout: true)
+      end
     end
 
     :ok

@@ -153,9 +153,11 @@ read-verification by this host's App Server. In either case it must not belong
 to another fiber.
 A managed terminal Codex capture also claims by `session_uuid`, with `surface: "cli"`; its durable record supplies its terminal viewer.
 Other CLI claims use `tmux_session`, optionally `tmux_pane` (the claimer's
-exact `%N` pane), and `session_uuid`, the conversation whose holding process is
-the worker; without one, or when no process argv carries it, the claimer's
-pane is bound instead. The fiber the worker served before is concluded and
+exact `%N` pane) with `claimer_pid` (the claiming process, whose ancestry
+names the harness in that pane), and `session_uuid`, the conversation. The
+claimed fiber binds the claimer's worker process: the launch running it, else
+that harness; without `claimer_pid`, the conversation's holder, else the
+pane's one child process. The fiber the worker served before is concluded and
 released first (a `superseded_by_claim` session-ledger line), and the worker
 keeps running for the claimed fiber; tmux names are never changed. A claim is
 refused with `session_mismatch` when the conversation runs in another pane,

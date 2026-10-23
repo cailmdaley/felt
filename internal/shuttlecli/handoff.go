@@ -263,19 +263,22 @@ func stampHandedOffLocked(path string, check func(*felt.Felt) error) (string, er
 	return at, nil
 }
 
-// endOwnTmuxSession tears down the tmux session this process is running in — the
-// worker's <leaf>-<UID>-shuttle session. Exit verbs call it after their durable
-// document write or successful daemon route. Best-effort and a no-op outside tmux (e.g.
-// a manual/test invocation), so it never kills a stray shell: it asks tmux for the
-// session of its own pane ($TMUX_PANE) and kills exactly that.
+// endOwnTmuxSession ends the worker this process runs in by killing its own
+// tmux pane ($TMUX_PANE) — a daemon launch's whole session, which holds that one
+// pane, and only the pane of a human's session a claimed harness runs in. Exit
+// verbs call it after their durable document write or successful daemon route.
+// Best-effort and a no-op outside tmux (e.g. a manual/test invocation).
 func (a *app) endOwnTmuxSession() {
-	session, err := a.tmuxCurrentSession()
-	if err != nil || session == "" {
+	if a.env.Getenv("TMUX") == "" {
+		return
+	}
+	pane := strings.TrimSpace(a.env.Getenv("TMUX_PANE"))
+	if pane == "" {
 		return
 	}
 	// This kills our own pane mid-call; the field is already durably on disk (the
 	// rename completed before we got here), so nothing is lost.
-	_ = a.env.Command("tmux", "kill-session", "-t", session).Run()
+	_ = a.env.Command("tmux", "kill-pane", "-t", pane).Run()
 }
 
 // idFromPath derives a cosmetic fiber id from a .md path (the leaf stem). The id

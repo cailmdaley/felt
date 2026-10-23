@@ -248,34 +248,49 @@ A terminal launch assigns its conversation UUID before anything starts: the
 fiber's `shuttle.runtime` names `session_uuid` under a new `dispatched_at`,
 then the harness starts under it (`--session-id`, Claude and Pi) from a run
 script keyed by it, `<tmp>/shuttle-run-<uuid>.<n>.sh`, in a tmux session of its
-own, `<leaf>-<uuid8>-<uid>-shuttle`. A fiber is *assigned* that execution while
-its runtime names it and no `handed_off_at` at or after `dispatched_at`
-concludes it. The worker is whatever process holds it:
+own, `<leaf>-<uuid8>-<uid>-shuttle` (a Pi older than 0.84, which lacks
+`--session-id`, is refused at preflight). A fiber is *assigned* that execution
+while its runtime names it and no `handed_off_at` at or after `dispatched_at`
+concludes it. Its worker is:
 
-- a process whose argv carries the UUID (`--session-id`, `--resume`,
-  `--session`) or the run script keyed by it;
-- a run script an earlier build named for its session, which this host's
-  session ledger pairs with the UUID;
-- a hook receiver bound to the UUID by a session start (`/clear` and
-  `/resume` move the conversation, and the runtime follows), while its pid
-  still has the same kernel start token;
-- for a claimer known only by its tmux pane, the pane's process, bound in
-  `shuttle.runtime.pane` as `<pid>:<start>` — a reused pid never counts.
+- the process a claim bound, `shuttle.runtime.pane` as `<pid>:<start>`, while
+  that pid keeps the same kernel start token — a reused pid never counts; or
+- a process holding the conversation — its argv carries the UUID
+  (`--session-id`, `--resume`, `--session`), or a session-start hook bound it
+  (`/clear` and `/resume` move the conversation, and the runtime follows) —
+  that a Shuttle launch runs: a run script keyed by the UUID, or one an
+  earlier build named for its session, which the session ledger pairs with it.
 
-Session names are labels for `attach` and the board. Nothing is renamed, and a
-name never decides which fiber a worker serves; `shuttle session-name`,
-`attach`, `ps` and `status` ask the daemon. Liveness, adoption and stops all go
-through the holder: a stop kills the holder's exact tmux pane (`%N`, found by
-process ancestry) and then waits, escalating to SIGTERM and SIGKILL on the
-pane's process group; a process table the daemon cannot read is never a reason
-to signal anything. Nothing about this is persisted beyond the fiber's own
-runtime, so a restart re-derives it: boot adopts each host-owned, unconcluded
-fiber whose execution a process holds.
+A process that merely holds the conversation — a History resume
+(`resume-<uuid>`), or a human's `claude --resume` in a terminal of their own —
+is not a worker: it is never adopted, stopped or reaped as one, though no
+dispatch resumes the conversation while it runs. Session names are labels for
+`attach` and the board. Nothing is renamed, and a name never decides which
+fiber a worker serves; `shuttle session-name`, `attach`, `ps` and `status` ask
+the daemon.
+
+Liveness, adoption and stops all go through the worker. A stop of a launch
+kills its exact tmux pane (`%N`, the run script's) and waits, escalating to
+SIGTERM and SIGKILL on the run script's process group; a claimed harness in a
+pane of someone else's is signalled alone, never its pane or shell. A process
+table the daemon cannot read is never a reason to signal anything. Nothing
+about this is persisted beyond the fiber's own runtime, so a restart re-derives
+it: boot adopts each host-owned, unconcluded fiber whose worker runs, and never
+one onto a process another tracked fiber's worker already is. A fiber closed
+while its worker runs is concluded at once and its worker released; one still
+running a poll later is stopped. A closed fiber whose worker is gone is
+concluded, so its conversation names no worker of it any more.
 
 **A claim moves a live worker to another fiber.** `shuttle claim <fiber>` from
-inside a worker (or `POST /api/v1/claim`) runs as one Poller transition:
+inside a worker (or `POST /api/v1/claim`) runs as one Poller transition. The
+claimer's worker is the launch running the claiming CLI, else the harness
+that ran it — the child of the claimer's pane on the CLI's ancestry, which
+`shuttle claim` names by sending its own pid and `TMUX_PANE`; a conversation
+UUID some other pane's process holds is refused. The claimed fiber binds that
+process, then:
 
-1. every other fiber assigned the claimer's execution is concluded on its own
+1. every other fiber whose worker is that same process, or whose runtime
+   names the same conversation, is concluded on its own
    generation (`mark-runtime --handed-off-at … --if-dispatched-at
    <its dispatched_at>`), gets a `superseded_by_claim` session-ledger line,
    loses its watcher without exit handling, and has its message receiver
@@ -287,8 +302,7 @@ The released fiber stays `active` and its next start is fresh — never a resume
 of the conversation the claimed fiber now holds. A crash between steps 1 and 2
 leaves the worker serving no fiber: nothing adopts, stops or resumes it, the
 snapshot lists it under `unowned`, and the same claim again completes the
-move. A retry after success answers as the
-first claim did. A Codex thread moves the same way, its AppWorkers record
+move. A retry after success answers as the first claim did. A Codex thread moves the same way, its AppWorkers record
 released by its old fiber before the claimed fiber takes it.
 
 **A conversation two live fibers name** — the shape an older build's claim
@@ -300,9 +314,10 @@ is derived on every poll, so it clears on its own: once its process exits
 but one of the fibers hand off, or when the claimed fiber claims again.
 
 **Upgrading with workers live.** Workers launched by an earlier build keep
-running and are adopted by the same rule: their harness argv carries
-`--session-id` or `--resume`, and a run script named for its session is paired
-through the ledger. A worker whose session an older claim renamed is adopted by
+running and are adopted by the same rule: their run scripts are named for
+their sessions (or captures), and their harness argv carries `--session-id`
+or `--resume`, or the ledger pairs the script's session with the
+conversation. A worker whose session an older claim renamed is adopted by
 the one fiber that still names its conversation, and held as shared when both
 do.
 

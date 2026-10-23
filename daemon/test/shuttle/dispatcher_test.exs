@@ -293,9 +293,25 @@ defmodule Shuttle.DispatcherTest do
     end
 
     defp handle_wrapper_probe(["-lc", script]) do
+      if String.ends_with?(script, " --help"),
+        do: help_probe(script),
+        else: kind_probe(script)
+    end
+
+    defp handle_wrapper_probe(_args), do: {"", 0}
+
+    # A Pi help probe lists `--session-id` unless the test says this Pi predates it.
+    defp help_probe(script) do
+      if Map.get(wrapper_kinds(), String.trim_trailing(script, " --help")) == :old_pi,
+        do: {"usage: pi [options]\n", 0},
+        else: {"  --session-id <id>   Use exact project session ID\n", 0}
+    end
+
+    defp kind_probe(script) do
       wrapper = probed_wrapper(script)
 
       case Map.get(wrapper_kinds(), wrapper, "file") do
+        :old_pi -> {"file\n", 0}
         # `type -t` prints nothing and exits non-zero when the token resolves
         # to nothing at all.
         :missing -> {"", 1}
@@ -303,8 +319,6 @@ defmodule Shuttle.DispatcherTest do
         kind -> {kind <> "\n", 0}
       end
     end
-
-    defp handle_wrapper_probe(_args), do: {"", 0}
 
     # Pull the single-quoted token back out of `type -t -- 'claude'`.
     defp probed_wrapper(script) do
@@ -1060,7 +1074,11 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "dispatch refuses a fiber whose unconcluded dispatch names a held conversation" do
-    MockRunner.set_ps("812 1 claude --resume 6d688234-9445-4d16-93d3-6bef110ea659\n")
+    MockRunner.set_ps(
+      "811 1 bash -l /tmp/shuttle-run-6d688234-9445-4d16-93d3-6bef110ea659.1.sh\n" <>
+        "812 811 claude --resume 6d688234-9445-4d16-93d3-6bef110ea659\n"
+    )
+
     assert {:error, :already_running} = Dispatcher.dispatch("tests/live", runner: MockRunner)
   end
 
@@ -1089,6 +1107,17 @@ defmodule Shuttle.DispatcherTest do
       end)
 
     List.last(args)
+  end
+
+  test "a Pi that predates --session-id is refused before anything is launched" do
+    MockRunner.set_wrapper_kind("pi", :old_pi)
+
+    assert {:error, {:wrapper_unresolved, message}} =
+             Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner)
+
+    assert message =~ "--session-id"
+    assert message =~ "0.84"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
   test "dispatch reads Shuttle's resolved pi agent (pi-tagged fiber)" do

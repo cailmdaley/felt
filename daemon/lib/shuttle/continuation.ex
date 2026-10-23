@@ -219,8 +219,9 @@ defmodule Shuttle.Continuation do
   end
 
   @doc """
-  The tmux pane a claim bound, `shuttle.runtime.pane` (`<pid>:<start>`), as
-  `%{"pid" => pid, "start" => start}`, or `nil`.
+  The worker process a claim bound, `shuttle.runtime.pane` (`<pid>:<start>`,
+  found in the claimer's pane), as `%{"pid" => pid, "start" => start}`, or
+  `nil`.
   """
   @spec pane(map()) :: map() | nil
   def pane(fiber) do

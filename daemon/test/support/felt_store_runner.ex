@@ -533,6 +533,10 @@ defmodule Shuttle.Test.FeltStoreRunner do
       # The dispatcher's wrapper preflight. Resolves by default so every other
       # test dispatches as before; `set_wrapper_missing(true)` makes the login
       # shell find nothing, the shape a real missing wrapper produces.
+      command == "bash" and match?(["-lc", _], args) and
+          String.ends_with?(List.last(args), " --help") ->
+        {"  --session-id <id>   Use exact project session ID\n", 0}
+
       command == "bash" and match?(["-lc", _], args) ->
         if Agent.get(server(), &Map.get(&1, :wrapper_missing, false)) do
           {"", 1}
@@ -650,11 +654,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
             if delay_ms > 0, do: Process.sleep(delay_ms)
         end
 
+        # A field query (`--any field:shuttle`, the poller's listing) matches
+        # every status, as the real CLI does; a bare listing shows open work.
         show_all =
-          case Enum.find_index(args, &(&1 in ["-s", "--status"])) do
-            nil -> false
-            idx -> Enum.at(args, idx + 1) == "all"
-          end
+          "--any" in args or
+            case Enum.find_index(args, &(&1 in ["-s", "--status"])) do
+              nil -> false
+              idx -> Enum.at(args, idx + 1) == "all"
+            end
 
         ids_from =
           case Enum.find_index(args, &(&1 == "--ids-from")) do
@@ -729,11 +736,31 @@ defmodule Shuttle.Test.FeltStoreRunner do
           end
         end)
 
+      # A signal ends the lingering worker (unless it lingers `:forever`) and
+      # every set-result process it names, with a group's members.
       command == "kill" ->
+        pids =
+          for arg <- args, {pid, ""} <- [Integer.parse(String.trim_leading(arg, "-"))], do: pid
+
         Agent.update(server(), fn state ->
-          if match?({_, :forever}, state[:lingering]),
-            do: state,
-            else: Map.delete(state, :lingering)
+          state =
+            if match?({_, :forever}, state[:lingering]),
+              do: state,
+              else: Map.delete(state, :lingering)
+
+          Map.update(state, :ps_result, {"", 0}, fn
+            {output, 0} ->
+              kept =
+                output
+                |> Shuttle.WorkerProcess.parse()
+                |> Enum.reject(&(&1.pid in pids or &1.ppid in pids))
+                |> Enum.map_join(&"#{&1.pid} #{&1.ppid} #{&1.args}\n")
+
+              {kept, 0}
+
+            failure ->
+              failure
+          end)
         end)
 
         {"", 0}

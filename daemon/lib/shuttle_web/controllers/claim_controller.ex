@@ -15,7 +15,8 @@ defmodule ShuttleWeb.ClaimController do
   the watcher.
 
   Body: `fiber_id` (required), `tmux_session` (required), `tmux_pane`
-  (optional exact pane id, `%N`, of the claimer), `agent` (optional registry
+  (optional exact pane id, `%N`, of the claimer), `claimer_pid` (the claiming
+  CLI's pid, through which the daemon finds the harness that ran it), `agent` (optional registry
   name; defaults to the fiber's shuttle.agent), `session_uuid` (the harness
   conversation UUID: the process holding it is the worker, and the fiber's
   runtime names it so Resume previous works on claimed sessions too; without
@@ -62,6 +63,7 @@ defmodule ShuttleWeb.ClaimController do
                surface: Map.get(params, "surface"),
                session_uuid: Map.get(params, "session_uuid"),
                tmux_pane: Map.get(params, "tmux_pane"),
+               claimer_pid: if(is_integer(params["claimer_pid"]), do: params["claimer_pid"]),
                meeting: Map.get(params, "meeting")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->

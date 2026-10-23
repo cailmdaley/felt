@@ -22,7 +22,7 @@ func stubWorkerExitTmux(t *testing.T, env *sysenv.Env, session, fiberPath string
 	script := `#!/bin/sh
 case "$1" in
   display-message) printf '%s\n' "$SHUTTLE_TEST_SESSION" ;;
-  kill-session)
+  kill-pane)
     cp "$SHUTTLE_TEST_FIBER" "$SHUTTLE_TEST_SNAPSHOT" || exit 1
     printf '%s\n' "$*" >> "$SHUTTLE_TEST_KILLS"
     ;;
@@ -103,7 +103,7 @@ func TestShuttleHandoff_RenamedFiber(t *testing.T) {
 		t.Fatalf("document at exit lacks handoff: %s (%v)", data, err)
 	}
 	data, err = os.ReadFile(kills)
-	if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
+	if err != nil || string(data) != "kill-pane -t %1\n" {
 		t.Fatalf("kills = %q (%v)", data, err)
 	}
 }
@@ -149,7 +149,7 @@ func TestShuttleHandoff_ClaimedAwayWorkerExitsOnlyForTheClaimedFiber(t *testing.
 	if out, err := runIn(t, env, dir, "handoff", "meeting"); err != nil {
 		t.Fatalf("handoff meeting: %v\n%s", err, out)
 	}
-	if data, err := os.ReadFile(kills); err != nil || !strings.Contains(string(data), "kill-session") {
+	if data, err := os.ReadFile(kills); err != nil || !strings.Contains(string(data), "kill-pane") {
 		t.Fatalf("the claimed fiber's handoff must end the worker: %q (%v)", data, err)
 	}
 }

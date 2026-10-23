@@ -63,6 +63,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   defp adopt_assigned(%State{} = state, procs) do
+    state = reap_closing(state, procs)
+
     {state, holds} =
       state
       |> Executions.listed()
@@ -104,6 +106,12 @@ defmodule Shuttle.Poller.SessionReconciliation do
     held = WorkerProcess.find(procs, handle, state.runner)
 
     cond do
+      # A closed fiber's worker is gone: conclude the dispatch, so its
+      # conversation names no worker of it any more.
+      held == nil and fiber["status"] == "closed" ->
+        Poller.stamp_handoff_if_stale(state, fiber["id"], fiber)
+        {state, holds}
+
       held == nil or match?({:error, :unknown}, held) ->
         {state, holds}
 
@@ -145,7 +153,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
          true <- is_nil(handle) or Executions.same?(current, handle),
          [] <- Executions.sharers(state, fiber_id, current),
          {:ok, procs} <- if(procs, do: {:ok, procs}, else: WorkerProcess.scan(state.runner)),
-         %{} = holder <- WorkerProcess.find(procs, current, state.runner) do
+         %{} = holder <- WorkerProcess.find(procs, current, state.runner),
+         false <- tracked_worker?(state, procs, holder) do
       session =
         Executions.session_of(state.runner, procs, holder) ||
           Shuttle.Dispatcher.session_name(fiber_id, fiber["uid"], current.uuid || "pane") ||
@@ -155,6 +164,20 @@ defmodule Shuttle.Poller.SessionReconciliation do
     else
       _ -> state
     end
+  end
+
+  # A process another tracked fiber's worker already is: adopting it too would
+  # put one worker under two fibers.
+  defp tracked_worker?(state, procs, holder) do
+    root = WorkerProcess.worker_root(procs, holder).pid
+
+    Enum.any?(state.running, fn {_key, meta} ->
+      not Shuttle.AppWorkers.app?(meta.session) and
+        case WorkerProcess.find(procs, Shuttle.WorkerBackend.handle(meta), state.runner) do
+          %{} = proc -> WorkerProcess.worker_root(procs, proc).pid == root
+          _ -> false
+        end
+    end)
   end
 
   defp adopt_live_session(state, fiber_id, fiber, handle, session) do
@@ -198,20 +221,49 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end
   end
 
+  # A worker whose fiber was closed while it ran had a poll to end itself;
+  # one still running then is stopped, unless the fiber was reopened.
+  defp reap_closing(%State{closing: closing} = state, _procs) when map_size(closing) == 0,
+    do: state
+
+  defp reap_closing(%State{} = state, procs) do
+    {due, fresh} = Enum.split_with(state.closing, fn {_id, entry} -> match?({:due, _}, entry) end)
+
+    Enum.each(due, fn {fiber_id, {:due, handle}} ->
+      with {:ok, %{"status" => "closed"}} <- Poller.fetch_fiber_full(fiber_id, state),
+           %{} = worker <- WorkerProcess.find(procs, handle, state.runner),
+           false <- tracked_worker?(state, procs, worker) do
+        Logger.info("Stopping the worker of closed fiber #{fiber_id}, still running")
+        Shuttle.WorkerBackend.stop(state.runner, handle)
+      end
+    end)
+
+    %{state | closing: Map.new(fresh, fn {id, handle} -> {id, {:due, handle}} end)}
+  end
+
   # A live worker whose fiber is closed: the worker's deliberate exit (closed
   # implies handoff), so stamp the clean-exit marker on its generation before
   # stopping it.
+  #
+  # The poll's listing predates this cycle's closure reconciliation, so the
+  # fiber is read afresh: a worker that closed it and is exiting on its own
+  # was concluded by that reconciliation, and is left to finish.
   defp stop_closed(state, fiber, handle) do
-    Logger.info("Stopping the live worker of closed fiber #{fiber["id"]}")
+    with {:ok, fresh} <- Poller.fetch_fiber_full(fiber["id"], state),
+         "closed" <- fresh["status"],
+         %{} = current <- Executions.handle(fresh),
+         true <- Executions.same?(current, handle),
+         :ok <-
+           Shuttle.Continuation.mark_handed_off(
+             state.runner,
+             Poller.owning_store(fiber["id"], state),
+             fiber["id"],
+             %{if_dispatched_at: current.generation}
+           ) do
+      Logger.info("Stopping the live worker of closed fiber #{fiber["id"]}")
+      _ = Shuttle.WorkerBackend.stop(state.runner, Map.take(current, [:session, :uuid, :pane]))
+    end
 
-    Shuttle.Continuation.mark_handed_off(
-      state.runner,
-      Poller.owning_store(fiber["id"], state),
-      fiber["id"],
-      %{if_dispatched_at: handle.generation}
-    )
-
-    _ = Shuttle.WorkerBackend.stop(state.runner, Map.take(handle, [:session, :uuid, :pane]))
     state
   end
 

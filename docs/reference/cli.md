@@ -167,10 +167,10 @@ To adopt your current conversation, install the constitution with
 `shuttle install <fiber> --disabled --project-dir <dir> -m <agent>`, then run
 `shuttle claim <fiber>` and, only after it succeeds, `shuttle resume <fiber>`.
 Terminal claims identify the current tmux pane; `--tmux-session` supplies an
-explicit existing session. The worker is the process holding the conversation
-(`CLAUDE_CODE_SESSION_ID`, `PI_SESSION_ID`, or `--session`), which must run in
-that pane; a harness whose argv does not carry its conversation is bound by
-its pane instead. App claims use `CODEX_THREAD_ID` or `--session`
+explicit existing session. The claimed fiber binds the harness that ran the
+command in that pane (or the launch running it), and names its conversation
+(`CLAUDE_CODE_SESSION_ID`, `PI_SESSION_ID`, or `--session`), which no other
+pane's process may hold. Exit verbs end only the caller's own pane. App claims use `CODEX_THREAD_ID` or `--session`
 and require the daemon to verify the native conversation. The claimed host
 and surface must match the installed task. If verification fails, leave the
 constitution open; activating it could launch another worker.

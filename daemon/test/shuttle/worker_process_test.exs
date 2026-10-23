@@ -248,4 +248,42 @@ defmodule Shuttle.WorkerProcessTest do
     assert {:error, {:unknown, message}} = WorkerProcess.check_free(PsRunner, @uuid)
     assert message =~ "could not check"
   end
+
+  describe "which process is a worker" do
+    @u "6d688234-9445-4d16-93d3-6bef110ea659"
+
+    @workers """
+      700     1 tmux new-session -d -s anchor
+      710   700 bash -l /tmp/shuttle-run-#{@u}.3.sh
+      711   710 claude --session-id #{@u}
+      720   700 bash -l /tmp/shuttle-run-resume-#{@u}.4.sh
+      721   720 claude --resume #{@u}
+      730     1 /usr/libexec/gnome-terminal-server
+      731   730 claude --resume #{@u}
+      740   700 -zsh
+      741   740 claude --model opus
+      742   741 bash -c shuttle
+      743   742 shuttle claim tests/b
+    """
+
+    test "a launch's run script makes its holder the worker; a History resume or a terminal of one's own does not" do
+      procs = WorkerProcess.parse(@workers)
+      by_pid = Map.new(procs, &{&1.pid, &1})
+      assert %{pid: 710} = WorkerProcess.launch_root(procs, by_pid[711])
+      assert WorkerProcess.launch_root(procs, by_pid[721]) == nil
+      assert WorkerProcess.launch_root(procs, by_pid[731]) == nil
+      assert %{pid: 710} = WorkerProcess.find(procs, %{uuid: @u, pane: nil}, PsRunner)
+
+      # Without the launch, nothing holding the conversation is its worker.
+      rest = Enum.reject(procs, &(&1.pid in [710, 711]))
+      assert WorkerProcess.find(rest, %{uuid: @u, pane: nil}, PsRunner) == nil
+    end
+
+    test "a claimer is the harness its CLI runs under in that pane, never the pane's shell" do
+      procs = WorkerProcess.parse(@workers)
+      assert %{pid: 741} = WorkerProcess.claimer(procs, 743, 740)
+      assert WorkerProcess.claimer(procs, 743, 710) == nil
+      assert %{pid: 710} = WorkerProcess.claimer(procs, 711, 710)
+    end
+  end
 end

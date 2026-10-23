@@ -171,6 +171,9 @@ defmodule Shuttle.Poller do
       # Derived from scratch each cycle, so either clears once it heals.
       holds: [],
       unowned: [],
+      # Workers of fibers closed while they ran, released from tracking; one
+      # still running at the next adoption pass is stopped then.
+      closing: %{},
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
       # poll cycle. Entries are never evicted.
       fiber_store_cache: %{},
@@ -2331,7 +2334,7 @@ defmodule Shuttle.Poller do
   defp execution_pane(state, meta) do
     with {:ok, procs} <- WorkerProcess.scan(state.runner),
          %{} = holder <- WorkerProcess.find(procs, WorkerBackend.handle(meta), state.runner),
-         root = WorkerProcess.signal_root(procs, holder),
+         root = WorkerProcess.worker_root(procs, holder),
          {:ok, output} <-
            Shuttle.CLI.run(["process-identity", Integer.to_string(root.pid)],
              runner: state.runner,
@@ -3552,7 +3555,7 @@ defmodule Shuttle.Poller do
     with {:ok, fiber} <- claim_target(state, fiber_id),
          {:ok, execution} <- claimer_execution(state, tmux_session, opts),
          current = running_worker(state, fiber_id),
-         :ok <- claim_slot(current, execution),
+         :ok <- claim_slot(state, current, execution),
          {:ok, state} <- release_claim_sources(state, fiber_id, execution, opts) do
       cond do
         is_nil(current) ->
@@ -3576,10 +3579,10 @@ defmodule Shuttle.Poller do
   end
 
   # The target is free, or already runs this very execution (a retry).
-  defp claim_slot(nil, _execution), do: :ok
+  defp claim_slot(_state, nil, _execution), do: :ok
 
-  defp claim_slot(current, execution) do
-    if Executions.runs?(current, execution),
+  defp claim_slot(state, current, execution) do
+    if same_backend?(state, current, execution),
       do: :ok,
       else: {:error, :already_running}
   end
@@ -3594,10 +3597,13 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # The claimer's execution. With a conversation UUID that a process holds,
-  # that holder — which must run in the claimer's pane when tmux can show
-  # both. Otherwise the claimer's pane itself, bound by its process's start
-  # token. An unobservable process table refuses the claim.
+  # The claimer's execution: its conversation UUID, and its worker process —
+  # the launch running the claiming CLI, else the claimer's own harness in
+  # its pane — bound by pid and start token so a reused pid never stands for
+  # it. A conversation some other pane's process holds is refused. Without
+  # the CLI's pid (an older CLI, a raw POST), the holder of the UUID stands
+  # for the claimer, else the pane's launch or its one child process. An
+  # unobservable process table refuses the claim.
   defp claimer_execution(state, tmux_session, opts) do
     uuid = present_string(Keyword.get(opts, :session_uuid))
 
@@ -3608,21 +3614,62 @@ defmodule Shuttle.Poller do
     with {:ok, procs} <- WorkerProcess.scan(state.runner),
          holder when not is_tuple(holder) <-
            uuid && WorkerProcess.holder(procs, uuid, state.runner),
-         {:ok, claimer} <- claimer_pane(state.runner, target) do
-      cond do
-        is_nil(holder) ->
-          pane_execution(state.runner, procs, uuid, claimer)
-
-        claimer_holds?(state.runner, procs, holder, claimer) ->
-          session = Executions.session_of(state.runner, procs, holder)
-          {:ok, %{uuid: uuid, pane: nil, session: session || (claimer && claimer.session)}}
-
-        true ->
-          {:error, :session_mismatch}
-      end
+         {:ok, claimer} <- claimer_pane(state.runner, target),
+         true <-
+           claimer_holds?(state.runner, procs, holder, claimer) || {:error, :session_mismatch},
+         %{} = worker <-
+           claimer_worker(procs, holder, claimer, Keyword.get(opts, :claimer_pid)) ||
+             {:error, :session_not_found},
+         {:ok, start} <- process_start(state.runner, worker.pid) do
+      {:ok,
+       %{
+         uuid: uuid,
+         pane: %{"pid" => worker.pid, "start" => start},
+         root: worker.pid,
+         procs: procs,
+         session:
+           Executions.session_of(state.runner, procs, worker) || (claimer && claimer.session)
+       }}
     else
       {:error, :unknown} -> {:error, :process_scan_failed}
       {:error, _} = error -> error
+    end
+  end
+
+  defp claimer_worker(procs, holder, claimer, pid) do
+    cond do
+      is_integer(pid) and is_map(claimer) -> WorkerProcess.claimer(procs, pid, claimer.pid)
+      is_map(holder) -> WorkerProcess.worker_root(procs, holder)
+      is_map(claimer) -> pane_harness(procs, claimer.pid)
+      true -> nil
+    end
+  end
+
+  # The pane's own process when it is a launch, else its one child — the
+  # harness a shell started — else the pane's process when it runs alone. A
+  # pane running several children names no worker.
+  defp pane_harness(procs, pane_pid) do
+    with %{} = pane <- Enum.find(procs, &(&1.pid == pane_pid)) do
+      case {WorkerProcess.launch_root(procs, pane), Enum.filter(procs, &(&1.ppid == pane_pid))} do
+        {%{} = launch, _} -> launch
+        {nil, [child]} -> child
+        {nil, []} -> pane
+        _ -> nil
+      end
+    end
+  end
+
+  defp process_start(runner, pid) do
+    with {:ok, output} <-
+           Shuttle.CLI.run(["process-identity", Integer.to_string(pid)],
+             runner: runner,
+             timeout_ms: 2_000
+           ),
+         {:ok, %{"status" => "present", "start" => start}} when is_binary(start) and start != "" <-
+           Jason.decode(output) do
+      {:ok, start}
+    else
+      _ -> {:error, :session_not_found}
     end
   end
 
@@ -3651,7 +3698,9 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # A holder tmux cannot place, or a claim naming no pane, is not contradicted.
+  # A conversation no process holds, a holder tmux cannot place, or a claim
+  # naming no pane, is not contradicted.
+  defp claimer_holds?(_runner, _procs, nil, _claimer), do: true
   defp claimer_holds?(_runner, _procs, _holder, nil), do: true
 
   defp claimer_holds?(runner, procs, holder, claimer) do
@@ -3663,22 +3712,15 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp pane_execution(_runner, _procs, _uuid, nil), do: {:error, :session_not_found}
-
-  defp pane_execution(runner, procs, uuid, claimer) do
-    with %{} <- Enum.find(procs, &(&1.pid == claimer.pid)),
-         {:ok, output} <-
-           Shuttle.CLI.run(["process-identity", Integer.to_string(claimer.pid)],
-             runner: runner,
-             timeout_ms: 2_000
-           ),
-         {:ok, %{"status" => "present", "start" => start}} when is_binary(start) and start != "" <-
-           Jason.decode(output) do
-      {:ok,
-       %{uuid: uuid, pane: %{"pid" => claimer.pid, "start" => start}, session: claimer.session}}
-    else
-      _ -> {:error, :session_not_found}
-    end
+  # True when `handle` names the claimer's execution: the same conversation or
+  # bound process, or a worker that resolves to the claimer's own process.
+  defp claimer_runs?(state, handle, execution) do
+    Executions.same?(handle, execution) or
+      (is_integer(execution[:root]) and is_map(handle) and
+         case WorkerProcess.find(execution.procs, handle, state.runner) do
+           %{} = proc -> WorkerProcess.worker_root(execution.procs, proc).pid == execution.root
+           _ -> false
+         end)
   end
 
   # Step 1 of a claim, for terminal executions and Codex threads alike: every
@@ -3692,7 +3734,7 @@ defmodule Shuttle.Poller do
     tracked =
       for {key, meta} <- state.running,
           fiber_address(meta) != target_id,
-          same_backend?(meta, execution),
+          same_backend?(state, meta, execution),
           do: {key, meta}
 
     ids =
@@ -3701,9 +3743,11 @@ defmodule Shuttle.Poller do
           claim_named_sources(state, target_id, execution)
       )
 
+    tracked_ids = MapSet.new(tracked, fn {_key, meta} -> fiber_address(meta) end)
+
     concluded =
       Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
-        case conclude_claim_source(state, id, execution) do
+        case conclude_claim_source(state, id, execution, MapSet.member?(tracked_ids, id)) do
           {:ok, fiber} -> {:cont, {:ok, [{id, fiber} | acc]}}
           {:error, reason} -> {:halt, {:error, {:source_not_concluded, id, reason}}}
         end
@@ -3729,9 +3773,13 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp same_backend?(meta, %{app: id}), do: meta.session == Shuttle.AppWorkers.ref(id)
+  defp same_backend?(_state, meta, %{app: id}), do: meta.session == Shuttle.AppWorkers.ref(id)
 
-  defp same_backend?(meta, execution), do: Executions.runs?(meta, execution)
+  defp same_backend?(state, meta, execution) do
+    Executions.runs?(meta, execution) or
+      (not Shuttle.AppWorkers.app?(meta.session) and
+         claimer_runs?(state, WorkerBackend.handle(meta), execution))
+  end
 
   # The polled fibers whose runtime names the execution, closed ones included:
   # a closed fiber still naming it would resume it on reopening. A Codex
@@ -3740,7 +3788,7 @@ defmodule Shuttle.Poller do
     listed =
       for fiber <- Executions.listed(state),
           fiber["id"] != target_id,
-          Executions.same?(Executions.handle(fiber), execution),
+          claimer_runs?(state, Executions.handle(fiber), execution),
           do: fiber["id"]
 
     owner =
@@ -3760,11 +3808,13 @@ defmodule Shuttle.Poller do
 
   # Concludes `id`'s dispatch if a fresh read shows it still assigned the
   # execution; `{:ok, fiber}` either way, the fiber as read.
-  defp conclude_claim_source(state, id, execution) do
+  # A tracked source is concluded whatever its document names now: its
+  # watcher is released, so no dispatch of it may resume onto this worker.
+  defp conclude_claim_source(state, id, execution, tracked?) do
     with {:ok, fiber} <- fetch_fiber_full(id, state) do
       case Executions.handle(fiber) do
         %{} = handle ->
-          if Executions.same?(handle, execution) do
+          if tracked? or claimer_runs?(state, handle, execution) do
             case Shuttle.Continuation.mark_handed_off(
                    state.runner,
                    owning_store(id, state),
@@ -3959,11 +4009,17 @@ defmodule Shuttle.Poller do
                   state_acc
               end
 
+            # The worker that closed its fiber ends its own pane next; one
+            # still running a poll later is stopped then (`closing`).
             Map.get(fiber, "status") == "closed" and not app? ->
               stamp_handoff_if_stale(state_acc, fiber_id, fiber)
-              Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
+              Logger.info("Fiber closed: #{fiber_id}; releasing its watcher")
               stop_watcher(meta)
-              remove_running(state_acc, runtime_key)
+
+              %{
+                remove_running(state_acc, runtime_key)
+                | closing: Map.put(state_acc.closing, fiber_id, WorkerBackend.handle(meta))
+              }
 
             Map.get(fiber, "status") == "closed" and idle? ->
               case Shuttle.WorkerBackend.stop(state_acc.runner, meta.session) do
@@ -4202,7 +4258,38 @@ defmodule Shuttle.Poller do
         {stop_untracked_worker(state, fiber_id, untracked), state}
 
       runtime_key ->
-        meta = Map.get(state.running, runtime_key)
+        case shared_with(state, runtime_key, Map.get(state.running, runtime_key)) do
+          [] -> stop_tracked(state, fiber_id, runtime_key)
+          ids -> {{:error, shared_refusal(ids)}, state}
+        end
+    end
+  end
+
+  # Other tracked fibers whose worker is this one's very process: a stop of
+  # one would end the other's worker too.
+  defp shared_with(state, runtime_key, meta) do
+    with false <- Shuttle.AppWorkers.app?(meta.session),
+         {:ok, procs} <- WorkerProcess.scan(state.runner),
+         %{} = proc <- WorkerProcess.find(procs, WorkerBackend.handle(meta), state.runner) do
+      root = WorkerProcess.worker_root(procs, proc).pid
+
+      for {key, other} <- state.running,
+          key != runtime_key,
+          not Shuttle.AppWorkers.app?(other.session),
+          %{} = found <- [WorkerProcess.find(procs, WorkerBackend.handle(other), state.runner)],
+          WorkerProcess.worker_root(procs, found).pid == root,
+          do: fiber_address(other)
+    else
+      _ -> []
+    end
+  end
+
+  defp stop_tracked(state, fiber_id, runtime_key) do
+    case Map.fetch(state.running, runtime_key) do
+      :error ->
+        {{:ok, :no_session}, state}
+
+      {:ok, meta} ->
         session = meta.session
         # Stop the watcher BEFORE the kill so its liveness check doesn't also
         # report the exit and double-handle through handle_worker_exit.
@@ -4257,7 +4344,10 @@ defmodule Shuttle.Poller do
             status = Map.get(fiber, "status", "")
 
             cond do
+              # A worker that closed its fiber and exited: its conversation
+              # names no worker of the fiber any more.
               status == "closed" ->
+                stamp_handoff_if_stale(state, fiber_id, fiber)
                 state
 
               standing?(fiber) ->

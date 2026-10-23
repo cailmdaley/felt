@@ -54,7 +54,7 @@ func TestClaimTerminalInferenceRejectionAndUnsupportedIdentity(t *testing.T) {
 		calls = append(calls, r.URL.Path)
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		if body["tmux_session"] != "exact-session" || body["session_uuid"] != "claude-session" || body["tmux_pane"] != "%7" {
+		if body["tmux_session"] != "exact-session" || body["session_uuid"] != "claude-session" || body["tmux_pane"] != "%7" || body["claimer_pid"] == nil {
 			t.Errorf("wrong identity %v", body)
 		}
 		w.WriteHeader(422)

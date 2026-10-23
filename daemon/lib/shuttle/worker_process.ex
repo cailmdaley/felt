@@ -30,12 +30,16 @@ defmodule Shuttle.WorkerProcess do
       binds fresh embedded Codex argv. Either counts only while the live
       process's start token matches (`shuttle process-identity`), so a reused
       pid never does.
-    * **The pane.** A claimer with none of the above (a hand-started harness)
-      is bound to its tmux pane's process and start token (`pane_holder/3`).
+    * **The claim.** A claim binds the claimer's worker process — its launch's
+      run script, else the harness that ran the claim in its pane — by pid
+      and start token (`pane_holder/3`).
 
-  A holder maps to the tmux pane that runs it by process ancestry
-  (`pane_of/3`), which is how a stop reaches it by exact pane id whatever its
-  session is called.
+  Holding a conversation is not being its worker: `find/3` counts only a
+  bound process or a holder a Shuttle launch runs (`launch_root/2`), so a
+  History resume or a human's own `--resume` is never adopted or signalled as
+  a worker. A launch maps to its tmux pane by process ancestry (`pane_of/3`),
+  which is how a stop reaches it by exact pane id whatever its session is
+  called.
 
   A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`,
   and every caller reads uncertainty as "present" — the doctrine of
@@ -137,23 +141,26 @@ defmodule Shuttle.WorkerProcess do
   def holder(procs, uuid, runner \\ Shuttle.Runner.Default)
 
   def holder(procs, uuid, runner) when is_binary(uuid) and uuid != "" do
-    Enum.find(procs, fn %{args: args} = proc ->
-      not tmux?(proc) and
-        (script_session_in(args) == uuid or
-           args
-           |> String.split()
-           |> Enum.chunk_every(2, 1, [nil])
-           |> Enum.any?(fn
-             [flag, ^uuid] when flag in @session_flags ->
-               true
-
-             [token, _] ->
-               String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
-           end))
-    end) || bound_holder(procs, uuid, runner)
+    Enum.find(procs, &opens?(&1, uuid)) || bound_holder(procs, uuid, runner)
   end
 
   def holder(_procs, _uuid, _runner), do: nil
+
+  # The process carries `uuid` as a harness session flag or its run script's key.
+  defp opens?(%{args: args} = proc, uuid) do
+    not tmux?(proc) and
+      (script_session_in(args) == uuid or
+         args
+         |> String.split()
+         |> Enum.chunk_every(2, 1, [nil])
+         |> Enum.any?(fn
+           [flag, ^uuid] when flag in @session_flags ->
+             true
+
+           [token, _] ->
+             String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
+         end))
+  end
 
   # A run script keyed by its tmux session name holds the conversation the
   # ledger last paired with that session. Only such scripts are looked up,
@@ -208,14 +215,92 @@ defmodule Shuttle.WorkerProcess do
   def pane_holder(_procs, _pane, _runner), do: nil
 
   @doc """
-  The process holding the execution `handle` (`%{uuid, pane}`): the holder of
-  its conversation UUID, else its bound pane. nil when neither is held.
+  The worker process of the execution `handle` (`%{uuid, pane}`): the process
+  its claim bound (`pane`, `<pid>:<start>`) while that lifetime lives, else a
+  process holding its conversation UUID that a Shuttle launch runs
+  (`launch_root/2`). A process that merely holds the conversation — a History
+  resume, or a human's `claude --resume` in a terminal of their own — is not
+  the worker: it is never adopted or signalled as one, though it still keeps a
+  resume off the transcript (`check_free/2`). `{:error, :unknown}` when a
+  lifetime cannot be observed.
   """
   @spec find([proc()], map(), module()) :: proc() | nil | {:error, :unknown}
   def find(procs, handle, runner \\ Shuttle.Runner.Default) do
-    case holder(procs, Map.get(handle, :uuid), runner) do
-      nil -> pane_holder(procs, Map.get(handle, :pane), runner)
+    case pane_holder(procs, Map.get(handle, :pane), runner) do
+      nil -> conversation_worker(procs, Map.get(handle, :uuid), runner)
       found -> found
+    end
+  end
+
+  defp conversation_worker(procs, uuid, runner) when is_binary(uuid) and uuid != "" do
+    case Enum.find(procs, &(opens?(&1, uuid) and launch_root(procs, &1) != nil)) do
+      nil ->
+        case bound_holder(procs, uuid, runner) do
+          %{} = proc -> if launch_root(procs, proc), do: proc
+          other -> other
+        end
+
+      proc ->
+        proc
+    end
+  end
+
+  defp conversation_worker(_procs, _uuid, _runner), do: nil
+
+  @doc """
+  The Shuttle launch running `proc`: the outermost run script at or above it,
+  below any tmux server, that a dispatch or capture started — keyed by its
+  conversation UUID, or by the session name an earlier build gave it. The
+  scripts of a History resume, a Codex terminal viewer and remote control are
+  not launches. nil when none.
+  """
+  @spec launch_root([proc()], proc()) :: proc() | nil
+  def launch_root(procs, proc) do
+    by_pid = Map.new(procs, &{&1.pid, &1})
+
+    by_pid
+    |> ancestry(proc, 32)
+    |> Enum.take_while(&(not tmux?(&1)))
+    |> Enum.filter(&launch_script?/1)
+    |> List.last()
+  end
+
+  @doc """
+  The process that stands for worker `proc`: its launch's run script, else
+  `proc` itself (a claimed harness).
+  """
+  @spec worker_root([proc()], proc()) :: proc()
+  def worker_root(procs, proc), do: launch_root(procs, proc) || proc
+
+  # Every run script but the helpers': a History resume, a Codex terminal
+  # viewer and the remote-control session run scripts of their own.
+  @helper_prefixes ["resume-", "codex-terminal-", "shuttle-remote-control"]
+
+  defp launch_script?(proc) do
+    case script_session(proc) do
+      key when is_binary(key) -> not String.starts_with?(key, @helper_prefixes)
+      _ -> false
+    end
+  end
+
+  defp uuid?(key),
+    do: Regex.match?(~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, key)
+
+  @doc """
+  The claimer's own harness: the process on the ancestry of `pid` (the
+  claiming CLI) whose parent is the pane process `pane_pid`, or the launch
+  running that chain. nil when `pid` does not run in that pane.
+  """
+  @spec claimer([proc()], integer(), integer()) :: proc() | nil
+  def claimer(procs, pid, pane_pid) do
+    by_pid = Map.new(procs, &{&1.pid, &1})
+
+    with %{} = proc <- Map.get(by_pid, pid),
+         chain = ancestry(by_pid, proc, 32),
+         index when is_integer(index) <- Enum.find_index(chain, &(&1.pid == pane_pid)) do
+      launch_root(procs, proc) || if(index > 0, do: Enum.at(chain, index - 1), else: proc)
+    else
+      _ -> nil
     end
   end
 
@@ -263,21 +348,6 @@ defmodule Shuttle.WorkerProcess do
     by_pid = Map.new(procs, &{&1.pid, &1})
     by_pane = Map.new(panes, &{&1.pid, &1})
     ancestry(by_pid, proc, 32) |> Enum.find_value(&Map.get(by_pane, &1.pid))
-  end
-
-  @doc """
-  The process a stop signals for holder `proc`: its outermost ancestor below
-  the tmux server — the pane's run script or shell, which leads the process
-  group holding the harness — else `proc` itself.
-  """
-  @spec signal_root([proc()], proc()) :: proc()
-  def signal_root(procs, proc) do
-    by_pid = Map.new(procs, &{&1.pid, &1})
-
-    by_pid
-    |> ancestry(proc, 32)
-    |> Enum.take_while(&(not tmux?(&1)))
-    |> List.last(proc)
   end
 
   defp ancestry(_by_pid, nil, _depth), do: []
@@ -443,11 +513,7 @@ defmodule Shuttle.WorkerProcess do
   """
   @spec launches([proc()]) :: [{String.t(), proc()}]
   def launches(procs) do
-    for proc <- procs,
-        key = script_session(proc),
-        is_binary(key) and
-          Regex.match?(~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, key),
-        do: {key, proc}
+    for proc <- procs, key = script_session(proc), is_binary(key) and uuid?(key), do: {key, proc}
   end
 
   defp session_keyed_script?(proc) do

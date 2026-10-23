@@ -1097,6 +1097,11 @@ defmodule Shuttle.Dispatcher do
   # is genuinely the predecessor's.
   defp previous_session_info(fiber, uid) do
     case Shuttle.SessionLedger.latest_for_uid(uid) do
+      # The fiber's last conversation moved to another fiber with its worker:
+      # it is that fiber's now, not this one's lineage.
+      %{"kind" => "superseded_by_claim"} ->
+        nil
+
       %{"session" => session} = record ->
         %{uuid: session, harness: record["harness"]}
 
@@ -1140,8 +1145,41 @@ defmodule Shuttle.Dispatcher do
         "App surface requires an interactive Codex agent; surface must be cli or app."}}
 
   def preflight_terminal(agent, work_dir, runner) do
-    with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_tmux_server(runner)
+    with :ok <- preflight_wrapper(agent, work_dir, runner),
+         :ok <- preflight_session_id(agent, work_dir, runner),
+         do: ensure_tmux_server(runner)
   end
+
+  # A Pi worker is started under the conversation UUID its launch assigns
+  # (`--session-id`, Pi 0.84 and later); a Pi without it is refused rather
+  # than launched into a worker no conversation identifies. A timeout is no
+  # evidence either way.
+  defp preflight_session_id(%{cli: "pi", wrapper: wrapper} = agent, work_dir, runner)
+       when is_binary(wrapper) do
+    opts = [stderr_to_stdout: true, timeout_ms: @wrapper_probe_timeout_ms]
+
+    opts =
+      if is_binary(work_dir) and work_dir != "", do: Keyword.put(opts, :cd, work_dir), else: opts
+
+    case runner.cmd("bash", ["-lc", "#{wrapper} --help"], opts) do
+      {_output, :timeout} ->
+        :ok
+
+      {output, _status} ->
+        if String.contains?(to_string(output), "--session-id") do
+          :ok
+        else
+          dispatch_refused(
+            :wrapper_unresolved,
+            "agent #{agent.id}'s Pi (`#{wrapper}`) does not offer `--session-id`, which Shuttle " <>
+              "starts every Pi worker under so it can tell which fiber the worker serves. " <>
+              "Upgrade Pi to 0.84 or later (`pi --version`)."
+          )
+        end
+    end
+  end
+
+  defp preflight_session_id(_agent, _work_dir, _runner), do: :ok
 
   @doc "Validates agent configuration that must be honored by the shared Codex backend."
   def validate_codex_agent(agent) do

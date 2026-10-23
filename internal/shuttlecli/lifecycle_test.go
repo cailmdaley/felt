@@ -129,7 +129,7 @@ func TestShuttleClose_OwnSession(t *testing.T) {
 					}
 					return
 				}
-				if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
+				if err != nil || string(data) != "kill-pane -t %1\n" {
 					t.Fatalf("kills = %q (%v)", data, err)
 				}
 				data, err = os.ReadFile(snapshot)

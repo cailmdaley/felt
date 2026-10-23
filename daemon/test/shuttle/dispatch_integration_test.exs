@@ -159,6 +159,15 @@ defmodule Shuttle.DispatchIntegrationTest do
       end)
     end
 
+    # A Pi help probe: this Pi offers `--session-id`.
+    def cmd("bash", ["-lc", script] = args, _opts) do
+      Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{"bash", args}]} end)
+
+      if String.ends_with?(script, " --help"),
+        do: {"  --session-id <id>   Use exact project session ID\n", 0},
+        else: {"", 0}
+    end
+
     def cmd(cmd, args, _opts) do
       Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{cmd, args}]} end)
       {"", 0}
@@ -387,7 +396,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     write_dispatch_marker(host, "tests/running-fiber", "c1a0e5e0-0000-4000-8000-0000000000aa")
 
     IntegrationRunner.set_ps_results([
-      {"8699 1 claude --resume c1a0e5e0-0000-4000-8000-0000000000aa\n", 0}
+      {"8698 1 bash -l /tmp/shuttle-run-c1a0e5e0-0000-4000-8000-0000000000aa.1.sh\n" <>
+         "8699 8698 claude --resume c1a0e5e0-0000-4000-8000-0000000000aa\n", 0}
     ])
 
     assert {:error, :already_running} =
