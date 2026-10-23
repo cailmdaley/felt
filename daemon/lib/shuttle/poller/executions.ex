@@ -99,21 +99,28 @@ defmodule Shuttle.Poller.Executions do
   read of the fiber: `{:ok, handle}` with the holder's current tmux session
   as `:session` (nil when tmux cannot show it), `nil` when nothing holds its
   execution, `:unknown` when the process table cannot say, and `{:shared,
-  ids}` when other fibers are assigned the same execution.
+  ids}` when a live holder serves other fibers assigned the same execution
+  too. A shared execution nothing holds is nobody's worker: `nil`.
   """
   @spec untracked(%State{}, map()) :: {:ok, map()} | nil | :unknown | {:shared, [String.t()]}
   def untracked(%State{} = state, fiber) do
     with %{} = handle <- handle(fiber),
-         [] <- sharers(state, fiber["id"], handle),
          {:ok, procs} <- WorkerProcess.scan(state.runner) do
       case WorkerProcess.find(procs, handle, state.runner) do
-        nil -> nil
-        {:error, :unknown} -> :unknown
-        proc -> {:ok, %{handle | session: session_of(state.runner, procs, proc)}}
+        nil ->
+          nil
+
+        {:error, :unknown} ->
+          :unknown
+
+        proc ->
+          case sharers(state, fiber["id"], handle) do
+            [] -> {:ok, %{handle | session: session_of(state.runner, procs, proc)}}
+            ids -> {:shared, ids}
+          end
       end
     else
       nil -> nil
-      [_ | _] = ids -> {:shared, ids}
       {:error, :unknown} -> :unknown
     end
   end

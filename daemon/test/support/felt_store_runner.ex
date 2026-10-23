@@ -343,6 +343,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
   def set_ps_result(result),
     do: Agent.update(server(), &Map.put(&1, :ps_result, result))
 
+  # Make every `shuttle mark-runtime` of the fibers `ids` fail, as a write
+  # the CLI cannot complete would.
+  def set_mark_runtime_failures(ids),
+    do: Agent.update(server(), &Map.put(&1, :mark_runtime_failures, ids))
+
   # Extra tmux panes beyond the launched ones: `%{pane_pid => session}`, each
   # with pane id `%<pid>`.
   def set_panes(panes), do: Agent.update(server(), &Map.put(&1, :panes, panes))
@@ -787,10 +792,24 @@ defmodule Shuttle.Test.FeltStoreRunner do
             script = launched_script(session)
             remove_tmux_session(session)
 
-            Agent.update(
-              server(),
-              &Map.update(&1, :panes, %{}, fn panes -> Map.delete(panes, pid) end)
-            )
+            # The pane's processes die with it, set results included.
+            Agent.update(server(), fn state ->
+              state
+              |> Map.update(:panes, %{}, &Map.delete(&1, pid))
+              |> Map.update(:ps_result, {"", 0}, fn
+                {output, 0} ->
+                  kept =
+                    output
+                    |> Shuttle.WorkerProcess.parse()
+                    |> Enum.reject(&(pid in [&1.pid, &1.ppid]))
+                    |> Enum.map_join(&"#{&1.pid} #{&1.ppid} #{&1.args}\n")
+
+                  {kept, 0}
+
+                failure ->
+                  failure
+              end)
+            end)
 
             linger(script || "/tmp/shuttle-run-#{session}.1.sh")
             {"", 0}
@@ -896,8 +915,12 @@ defmodule Shuttle.Test.FeltStoreRunner do
           end)
 
         current = get_in(fiber(id) || %{}, ["shuttle", "runtime", "dispatched_at"]) || ""
+        failing? = id in Agent.get(server(), &Map.get(&1, :mark_runtime_failures, []))
 
         case Enum.find(pairs, &match?(["--if-dispatched-at", _], &1)) do
+          _ when failing? ->
+            {"injected mark-runtime failure for #{id}", 1}
+
           ["--if-dispatched-at", expected] when expected != current ->
             {"mark-runtime: dispatched_at mismatch for #{id}: got #{inspect(current)}, " <>
                "expected #{inspect(expected)}", 1}
