@@ -4,7 +4,7 @@ import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { THREAD_LABEL, ThreadIndex } from './threads.js'
 import { LastReplies } from './threadReply.js'
 import { response } from './testFixtures.js'
-import { installThreadPeek, PEEK_ROWS, THREAD_PIN, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
+import { badgeWords, installThreadPeek, PEEK_ROWS, THREAD_PIN, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
 import { saveWaitingThreadEntries, waitingThreadEntries } from './threadPreferences.js'
 afterEach(() => { document.body.replaceChildren(); saveWaitingThreadEntries(false); vi.useRealTimers() })
@@ -79,7 +79,7 @@ it('expands deep asks before work, hides archived rows, and opens the selected t
   const host = document.createElement('div'), meta = document.createElement('div'); host.append(meta); document.body.append(host)
   const open = vi.fn()
   installThreadPeek(host, meta, root, new ThreadIndex([root, child, ask, archived]), open)
-  expect(meta.textContent).toBe('⑂ 2')
+  expect(meta.textContent).toBe('2 threads')
   expect(meta.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
   const peek = host.querySelector<HTMLElement>('.kbn-thread-peek')!
   expect(peek.hidden).toBe(true)
@@ -105,7 +105,8 @@ it('caps enabled Desk subentries at two actual waits, never reviews, and opens t
   const reviews = Array.from({ length: 16 }, (_, n) => card({ id: `root/review${n}`, orchestrator: root.id, status: 'closed' }))
   const host = document.createElement('div'), meta = document.createElement('div'); host.append(meta)
   installThreadPeek(host, meta, root, new ThreadIndex([root, ...waits, ...reviews]), open)
-  expect(meta.textContent).toContain('16 to review')
+  expect(meta.textContent).toBe('20 threads · 16 reviews')
+  expect(meta.querySelector('.kbn-thread-badge-review')?.textContent).toBe('16 reviews')
   expect(host.querySelector('.kbn-thread-subentries')?.nextElementSibling).toBe(host.querySelector('.kbn-thread-peek'))
   expect(host.querySelectorAll('.kbn-thread-subentries .kbn-thread-row')).toHaveLength(2)
   expect(host.querySelector('.kbn-thread-subentries')?.textContent).not.toContain('review')
@@ -123,6 +124,15 @@ it('draws a lone extra waiting thread rather than folding it into "+ 1 more"', (
   installThreadPeek(host, host, root, new ThreadIndex([root, ...waits]), vi.fn())
   expect(host.querySelectorAll('.kbn-thread-subentries .kbn-thread-row')).toHaveLength(3)
   expect(host.querySelector('.kbn-thread-subentries .kbn-thread-more')).toBeNull()
+})
+it('says the badge in words: threads, then reviews, or reviews alone when every thread is one', () => {
+  const words = (threads: number, reviews: number) => badgeWords(threads, reviews).map(el => el.textContent).join('')
+  expect(words(1, 0)).toBe('1 thread')
+  expect(words(24, 0)).toBe('24 threads')
+  expect(words(24, 2)).toBe('24 threads · 2 reviews')
+  expect(words(24, 1)).toBe('24 threads · 1 review')
+  expect(words(3, 3)).toBe('3 reviews')
+  expect(badgeWords(24, 2).at(-1)!.className).toBe('kbn-thread-badge-review')
 })
 describe('role seats', () => {
   it('a seat with threads carries its badge beside the chip; a seat without stays a bare chip', () => {

@@ -1,4 +1,15 @@
-.kbn-thread-badge { font: inherit; font-size: 11px; color: var(--kbn-ink-muted); background: transparent; border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 2px 5px; cursor: pointer; }
+/* The thread badge says its count in words. Drawn at the row's small size,
+   it answers the pointer across a 28px band, so a glance and a click land on it. */
+.kbn-thread-badge {
+  position: relative; flex: none; display: inline-flex; align-items: baseline; white-space: nowrap;
+  font: inherit; font-family: var(--font-serif, 'EB Garamond', serif); font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 18px;
+  color: var(--kbn-ink-muted); background: transparent; border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 0 6px; cursor: pointer;
+}
+.kbn-thread-badge::after { content: ''; position: absolute; inset: -5px -2px; }
+.kbn-thread-badge:hover, .kbn-thread-badge[aria-expanded='true'] { color: var(--kbn-ink); border-color: var(--kbn-rule-strong); }
+.kbn-thread-badge:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 1px; }
+.kbn-thread-badge-sep { white-space: pre; opacity: .6; }
+.kbn-thread-badge-review { color: var(--kbn-tempered); font-weight: 600; }
 .kbn-thread-badge-waiting { color: var(--kbn-owed-ink); font-weight: 700; border-color: var(--kbn-owed); background: color-mix(in srgb, var(--kbn-owed) 12%, transparent); }
 .kbn-thread-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }

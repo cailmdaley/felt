@@ -92,6 +92,16 @@ function mark(kind: string): HTMLElement {
   return el
 }
 
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+/** The badge in words: how many threads, then how many wait on a review, in the review's verdigris; reviews alone when they are all there is. */
+export function badgeWords(threads: number, reviews: number): HTMLElement[] {
+  const part = (text: string, kind: string): HTMLElement => { const el = document.createElement('span'); el.className = `kbn-thread-badge-${kind}`; el.textContent = text; return el }
+  const count = part(plural(threads, 'thread'), 'count'), review = part(plural(reviews, 'review'), 'review')
+  if (!reviews) return [count]
+  if (reviews === threads) return [review]
+  return [count, part(' · ', 'sep'), review]
+}
+
 /** The last pointer press, so a click's focus does not raise the whisper a keyboard's focus does. */
 let pressedAt = 0
 /**
@@ -181,7 +191,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   const badge = document.createElement('button'); badge.type = 'button'; badge.className = 'kbn-thread-badge'
   const waiting = live.filter(c => index.state(c) === 'waiting')
   const review = live.filter(c => index.state(c) === 'to-review')
-  badge.textContent = `⑂ ${live.length}${!review.length ? '' : review.length === live.length ? ' to review' : ` · ${review.length} to review`}`
+  badge.append(...badgeWords(live.length, review.length))
   badge.classList.toggle('kbn-thread-badge-waiting', waiting.length > 0)
   badge.title = `${live.length} unfinished threads · ${waiting.length} waiting · ${review.length} to review`
   badge.setAttribute('aria-label', badge.title)
