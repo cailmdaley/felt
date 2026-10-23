@@ -73,6 +73,9 @@ defmodule ShuttleWeb.Router do
     # BODY of every constitution needs the daemon, which is what this shells
     # `felt ls --body --has-field shuttle -s all` for. Local stores only.
     get("/search", SearchController, :show)
+    # Full-text search over every transcript on this host; shells
+    # `shuttle transcript search --json`. Local host only.
+    get("/transcripts/search", TranscriptSearchController, :show)
     get("/agents", AgentsController, :show)
     get("/roles", RolesController, :index)
     # One agent's default-effort override, owner-routed; shells `shuttle
