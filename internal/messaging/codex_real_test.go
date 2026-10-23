@@ -40,6 +40,8 @@ func TestCodexRealTerminalAppServer(t *testing.T) {
 	t.Cleanup(unblock)
 	var calls atomic.Int32
 	var sawContext atomic.Bool
+	var developerRequests atomic.Int32
+	developerInstructions := "WAKE_CONTEXT_MARKER\n\nFELT_CONTEXT_MARKER\n\nAGENT_CONTEXT_MARKER\n\nDISPATCH_CONTEXT_MARKER"
 	model := wsTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/responses" {
 			http.Error(w, "fixture only serves Responses", http.StatusNotFound)
@@ -54,6 +56,29 @@ func TestCodexRealTerminalAppServer(t *testing.T) {
 		encoded, _ := json.Marshal(request)
 		if strings.Contains(string(encoded), "REMOTE_CONTEXT_ONLY") {
 			sawContext.Store(true)
+		}
+		// Thread title inference is not a worker turn. Check the actual model
+		// input's developer messages for every worker request, including turns
+		// after a remote TUI resume that supplies its own CLI config override.
+		if strings.Contains(string(encoded), "REMOTE_EXTERNAL_START") {
+			var developer strings.Builder
+			if input, ok := request["input"].([]any); ok {
+				for _, raw := range input {
+					if item, ok := raw.(map[string]any); ok && item["role"] == "developer" {
+						text, _ := json.Marshal(item)
+						developer.Write(text)
+					}
+				}
+			}
+			for _, marker := range strings.Split(developerInstructions, "\n\n") {
+				if !strings.Contains(developer.String(), marker) {
+					t.Errorf("model request omitted developer instruction %q", marker)
+				}
+			}
+			if strings.Contains(developer.String(), "SERVER_CONFIG_REPLACED") || strings.Contains(developer.String(), "TUI_OVERRIDE_NOT_FORWARDED") {
+				t.Error("native thread context unexpectedly contains the server or TUI override marker")
+			}
+			developerRequests.Add(1)
 		}
 		if request["model"] != "probe-model" {
 			t.Errorf("unexpected model: %v", request["model"])
@@ -86,6 +111,7 @@ func TestCodexRealTerminalAppServer(t *testing.T) {
 	config := fmt.Sprintf(`model="probe-model"
 model_provider="probe"
 check_for_update_on_startup=false
+developer_instructions="SERVER_CONFIG_REPLACED"
 approval_policy="never"
 sandbox_mode="read-only"
 [model_providers.probe]
@@ -102,11 +128,11 @@ trust_level="trusted"
 	var processEnv []string
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if !strings.HasPrefix(key, "CODEX_") && !strings.HasPrefix(key, "OPENAI_") && !strings.HasPrefix(key, "SHUTTLE_") && key != "TMUX" && key != "TERM" {
+		if !strings.HasPrefix(key, "CODEX_") && !strings.HasPrefix(key, "OPENAI_") && !strings.HasPrefix(key, "SHUTTLE_") && key != "TMUX" && key != "TERM" && key != "HOME" {
 			processEnv = append(processEnv, entry)
 		}
 	}
-	processEnv = append(processEnv, "CODEX_HOME="+root, "TERM=xterm-256color")
+	processEnv = append(processEnv, "HOME="+root, "CODEX_HOME="+root, "TERM=xterm-256color")
 	logPath := filepath.Join(root, "server.log")
 	log, err := os.Create(logPath)
 	if err != nil {
@@ -155,6 +181,7 @@ trust_level="trusted"
 	if err := rpc.call(ctx, "thread/start", map[string]any{
 		"cwd": root, "model": "probe-model", "runtimeWorkspaceRoots": []string{root},
 		"approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+		"developerInstructions": developerInstructions,
 	}, &created); err != nil || created.Thread.ID == "" {
 		t.Fatalf("create backend conversation: %#v %v", created, err)
 	}
@@ -200,7 +227,7 @@ trust_level="trusted"
 	}
 	// Match daemon dispatch: create and start the owned thread before opening
 	// a view-only TUI. An empty thread has no resumable rollout yet.
-	if out, err := runTmux("new-session", "-d", "-s", "viewer", "-x", "180", "-y", "55", codex, "--remote", "unix://"+socket, "--no-alt-screen", "-C", root, "resume", session.ID); err != nil {
+	if out, err := runTmux("new-session", "-d", "-s", "viewer", "-x", "180", "-y", "55", codex, "--remote", "unix://"+socket, "--no-alt-screen", "-c", `developer_instructions="TUI_OVERRIDE_NOT_FORWARDED"`, "-C", root, "resume", session.ID); err != nil {
 		t.Fatalf("start TUI: %v\n%s", err, out)
 	}
 	await("TUI attached to the running turn", func() bool { return strings.Contains(pane(), "REMOTE_EXTERNAL_START") })
@@ -258,6 +285,9 @@ trust_level="trusted"
 	})
 	if calls.Load() != completedCalls {
 		t.Fatalf("view-only resume started inference: %d -> %d requests", completedCalls, calls.Load())
+	}
+	if developerRequests.Load() < 2 {
+		t.Fatalf("developer context was checked in only %d worker model requests", developerRequests.Load())
 	}
 	t.Logf("real Codex App Server + terminal TUI: idle start, active steer, context, dedup, same-thread resume; %d local fixture calls, no external inference", calls.Load())
 }
