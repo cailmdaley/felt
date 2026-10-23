@@ -25,44 +25,19 @@ defmodule Shuttle.CodexApp.TransportTest do
     :ok
   end
 
-  test "selects an explicit socket or the configured Codex home" do
-    # Rooted at /tmp, not System.tmp_dir!(): macOS's per-user TMPDIR pushes the
-    # socket path past the 104-byte sun_path limit.
-    home = Path.join("/tmp", "felt-endpoint-#{System.unique_integer([:positive])}")
+  test "selects the explicit socket without touching the machine's default backend" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => id, "method" => "endpoint/probe"} = recv_json(socket)
+        send_result(socket, id, %{"selected" => true})
+      end)
 
-    on_exit(fn -> File.rm_rf!(home) end)
-
-    Shuttle.Test.Env.put_env("CODEX_HOME", home)
-
-    for mode <- [:override, :codex_home, :empty_override] do
-      {path, peer} =
-        initialized_peer(fn socket ->
-          %{"id" => id, "method" => "endpoint/probe"} = recv_json(socket)
-          send_result(socket, id, %{"selected" => true})
-        end)
-
-      if mode == :override do
-        Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", path)
-      else
-        directory = Path.join(home, "app-server-control")
-        File.mkdir_p!(directory)
-        selected = Path.join(directory, "app-server-control.sock")
-        File.rm(selected)
-        File.ln_s!(path, selected)
-
-        if mode == :empty_override,
-          do: Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", ""),
-          else: Shuttle.Test.Env.delete_env("SHUTTLE_CODEX_SOCKET")
-      end
-
-      {:ok, client} = Transport.start_link(connect_timeout: @ample)
-
-      assert {:ok, %{"selected" => true}} =
-               Transport.request(client, "endpoint/probe", %{}, @ample)
-
-      Transport.close(client)
-      await_peer(peer)
-    end
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", path)
+    Shuttle.Test.Env.put_env("CODEX_HOME", "/network/home/codex")
+    {:ok, client} = Transport.start_link(connect_timeout: @ample)
+    assert {:ok, %{"selected" => true}} = Transport.request(client, "endpoint/probe", %{}, @ample)
+    Transport.close(client)
+    await_peer(peer)
   end
 
   test "preserves upgrade bytes and handles segmented, fragmented, ping, and coalesced startup frames" do

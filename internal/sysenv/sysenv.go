@@ -71,6 +71,12 @@ func New(dir string, environ []string) *Env {
 	}
 }
 
+// Hostname returns the kernel hostname, independent of environment overrides.
+func (e *Env) Hostname() (string, error) { return os.Hostname() }
+
+// EUID is the effective OS user; environment variables cannot select a principal.
+func (e *Env) EUID() int { return os.Geteuid() }
+
 // Live reports whether e reads the real process.
 func (e *Env) Live() bool { return e.live }
 

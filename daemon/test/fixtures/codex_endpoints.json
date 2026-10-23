@@ -1,0 +1,10 @@
+[
+ {"name":"linux network HOME", "uid":1001,"hostname":"node-a","env":{"HOME":"/network/users/person","CODEX_HOME":"/network/codex","TMPDIR":"/network/tmp","XDG_RUNTIME_DIR":"/run/user/1001"},"override":"","want":"/tmp/shuttle-codex-1001-66570ff05a207404/control.sock"},
+ {"name":"macOS environment disagreement", "uid":501,"hostname":"node-a","env":{"HOME":"/Users/person","TMPDIR":"/var/folders/session"},"override":"","want":"/tmp/shuttle-codex-501-66570ff05a207404/control.sock"},
+ {"name":"another actual OS host", "uid":1001,"hostname":"node-b.example","override":"","want":"/tmp/shuttle-codex-1001-da796f008ab6da70/control.sock"},
+ {"name":"explicit authoritative", "uid":1001,"hostname":"node-a","override":"/tmp/private/control.sock","want":"/tmp/private/control.sock"},
+ {"name":"relative refused", "uid":1001,"hostname":"node-a","override":"relative/control.sock","error":true},
+ {"name":"dot component refused", "uid":1001,"hostname":"node-a","override":"/tmp/private/../control.sock","error":true},
+ {"name":"duplicate separator refused", "uid":1001,"hostname":"node-a","override":"/tmp//control.sock","error":true},
+ {"name":"newline refused", "uid":1001,"hostname":"node-a","override":"/tmp/control\n.sock","error":true}
+]

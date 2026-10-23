@@ -38,7 +38,8 @@ defmodule Shuttle.CodexApp.Transport do
     timeout = Keyword.get(opts, :connect_timeout, 5_000)
     deadline = deadline(timeout)
 
-    with {:ok, socket} <-
+    with {:ok, ^socket_path} <- Shuttle.CodexEndpoint.resolve(socket_path, 0, "unused"),
+         {:ok, socket} <-
            :gen_tcp.connect(
              {:local, String.to_charlist(socket_path)},
              0,
@@ -447,18 +448,11 @@ defmodule Shuttle.CodexApp.Transport do
   defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
 
   def default_socket do
-    home =
-      case Shuttle.Env.get("CODEX_HOME") do
-        value when value in [nil, ""] -> Path.join(Shuttle.Env.home(), ".codex")
-        value -> value
-      end
-
-    case Shuttle.Env.get("SHUTTLE_CODEX_SOCKET") do
-      value when value in [nil, ""] ->
-        Path.join([home, "app-server-control", "app-server-control.sock"])
-
-      value ->
-        value
+    case Shuttle.CodexEndpoint.current() do
+      {:ok, endpoint} -> endpoint
+      # Keep an invalid explicit override authoritative; the transport and
+      # dependency manager reject it rather than selecting another backend.
+      {:error, _} -> Shuttle.Env.get("SHUTTLE_CODEX_SOCKET") || ""
     end
   end
 

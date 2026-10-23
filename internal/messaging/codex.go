@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/codexendpoint"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/gorilla/websocket"
 )
@@ -44,12 +45,9 @@ func codexSocket(env *sysenv.Env) string {
 	if p := env.Getenv("SHUTTLE_CODEX_SOCKET"); p != "" {
 		return p
 	}
-	home := env.Getenv("CODEX_HOME")
-	if home == "" {
-		h, _ := env.UserHomeDir()
-		home = filepath.Join(h, ".codex")
-	}
-	return filepath.Join(home, "app-server-control", "app-server-control.sock")
+	hostname, _ := env.Hostname()
+	path, _ := codexendpoint.Resolve("", env.EUID(), hostname)
+	return path
 }
 
 // A durable AppWorkers record pins the native conversation owner. An absent
@@ -101,6 +99,13 @@ func checkCodexOwnerEndpoint(env *sysenv.Env, host, id string) error {
 }
 
 func dialCodex(ctx context.Context, env *sysenv.Env) (*rpcClient, error) {
+	hostname, err := env.Hostname()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := codexendpoint.Resolve(env.Getenv("SHUTTLE_CODEX_SOCKET"), env.EUID(), hostname); err != nil {
+		return nil, err
+	}
 	d := websocket.Dialer{EnableCompression: false, HandshakeTimeout: 3 * time.Second, NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", codexSocket(env))
 	}}

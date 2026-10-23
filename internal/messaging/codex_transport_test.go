@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/codexendpoint"
 	"github.com/gorilla/websocket"
 )
 
@@ -24,15 +25,21 @@ func TestCodexSocketSelection(t *testing.T) {
 	}
 	env.Set("CODEX_HOME", "")
 	env.Set("SHUTTLE_CODEX_SOCKET", "")
-	want := filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
+	hostname, _ := env.Hostname()
+	want, err := codexendpoint.Resolve("", env.EUID(), hostname)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := codexSocket(env); got != want {
 		t.Fatalf("default socket = %q, want %q", got, want)
 	}
 	custom := filepath.Join(t.TempDir(), "custom-codex")
 	env.Set("CODEX_HOME", custom)
-	want = filepath.Join(custom, "app-server-control", "app-server-control.sock")
+	env.Set("HOME", "/network/home")
+	env.Set("TMPDIR", "/network/tmp")
+	env.Set("XDG_RUNTIME_DIR", "/different/environment")
 	if got := codexSocket(env); got != want {
-		t.Fatalf("custom home socket = %q, want %q", got, want)
+		t.Fatalf("host-local socket changed with persistent home/environment = %q, want %q", got, want)
 	}
 	override := filepath.Join(home, "desktop.sock")
 	env.Set("SHUTTLE_CODEX_SOCKET", override)
