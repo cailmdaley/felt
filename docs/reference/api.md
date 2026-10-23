@@ -54,7 +54,8 @@ is not enough.
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
 | `POST /attach` | **not** owner-routed | Open a tmux session in kitty — a worker's, or a past session's resume — where the human is, ssh-ing out for a remote host |
-| `POST /sessions/resume` | local | Start (or find) the `resume-<uuid>` tmux session resuming a past harness session on this host |
+| `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
+| `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
@@ -103,16 +104,13 @@ scribe is not launched and the response is **503** with the failed `meeting` row
 and `recording: false`. A recording that is still loading, or whose state tmux
 can't report yet, counts as started (`state: "starting"`).
 
-### Codex app conversations
+### Codex conversations and terminal presentation
 
-Existing-fiber dispatch reads the persisted
-`shuttle.surface`; omission preserves CLI execution. Model and effort remain
-agent-registry choices. App execution requires the owning host's local Codex
-App Server and reports an error if it cannot be reached.
-An unavailable managed server returns HTTP 503 with
-`reason: "app_server_unavailable"` and guidance to choose a configured remote
-host or CLI execution. Shuttle does not start an independent app runtime or
-silently change the selected surface.
+Existing-fiber dispatch reads the persisted `shuttle.surface`; omission selects terminal presentation.
+Both Codex surfaces use the owning host's selected App Server and report an error if it cannot be reached.
+Model and effort remain agent-registry choices.
+An unavailable managed server returns HTTP 503 with `reason: "app_server_unavailable"` and guidance to restore the selected backend.
+Shuttle does not start an independent runtime, launch embedded, or silently change the selected endpoint.
 
 Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 `project_id`, `thread_id`, `session_uuid`, `transcript_session_uuid`, and
@@ -120,8 +118,11 @@ Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 conversation identity (the same value as `thread_id`);
 `transcript_session_uuid` is the native transcript identity, which can differ
 for a fork. Session ledgers keep the transcript identity in `session` and carry
-`thread_id` as the Codex App address identity. CLI responses carry
-`surface: "cli"` and their real `tmux_session`. A claim can attach an existing
+`thread_id` as the Codex address identity.
+Terminal Codex responses carry the same conversation identities, `surface: "cli"`, and their real `tmux_session`.
+`terminal_error` on a running snapshot row reports a failed viewer launch without releasing the conversation.
+Other CLI responses carry `surface: "cli"` and their real `tmux_session`.
+A claim can attach an existing
 native Codex conversation only after the connected App Server read-verifies its
 exact id and active or idle state. The claim records ownership without starting,
 resuming, naming, or interrupting a turn. An app conversation waiting
@@ -146,13 +147,20 @@ To claim an app conversation, post `fiber_id`, `surface: "app"`, and
 `session_uuid` to `/claim`. A Shuttle-created capture claims its durable record
 directly; an existing native conversation is adopted only after exact
 read-verification by this host's App Server. In either case it must not belong
-to another fiber. CLI claims use `tmux_session`. The app dispatch prompt
-supplies the claim information and the appropriate completion instructions.
+to another fiber.
+A managed terminal Codex capture also claims by `session_uuid`, with `surface: "cli"`; its durable record supplies its terminal viewer.
+Other CLI claims use `tmux_session`.
+The dispatch prompt supplies the claim information and the appropriate completion instructions.
 A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
 
-`/attach` is a terminal operation. An app conversation's UUID
-is not a terminal name or a verified mobile URL. Phone conversation access
-uses the host's Codex project listing until a direct app URL is available.
+`/attach` is a terminal operation.
+A Codex thread UUID is not a terminal name or a verified mobile URL.
+For a terminal Codex worker, `/attach` prepares its recorded viewer on the owning host before opening the local terminal tab.
+`POST /sessions/prepare-terminal` accepts `{fiber: "<intrinsic UID>"}` or `{tmux_session: "<recorded name>"}`, with optional `origin` or `shuttle_host` for owner routing.
+It returns `{tmux_session, created}` after verifying active ownership and the exact thread on the selected endpoint.
+A missing viewer is recreated without a prompt or model turn; an uncertain endpoint or tmux observation refuses preparation rather than launching a duplicate.
+It returns 404 without an owned terminal conversation, or 422 when preparation is refused.
+Phone conversation access uses the host's Codex project listing until a direct app URL is available.
 
 `/attach` takes `{tmux_session, shuttle_host?}` for a live worker, or
 `{session, shuttle_host?}` for a past harness session (the card's History). For
@@ -168,6 +176,9 @@ recorded working directory to resume in. The other way round, a dispatcher
 resume of a session whose `resume-<uuid>` is open is refused
 (`session_open_in_resume`) and the fiber shows as blocked, rather than two
 harness processes sharing one transcript.
+An already-owned Codex backend can have multiple viewers of the same thread without opening a second execution runtime.
+For historical Codex sessions, the host verifies/resumes the selected App Server thread and launches an explicit remote TUI; it never falls back to embedded.
+A process holding an unowned embedded transcript still blocks that migration.
 
 ## Remote Control status
 

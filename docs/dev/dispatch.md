@@ -86,11 +86,11 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   `/api/v1/projects`, showing the owning daemon's own 400 ("not a directory:
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
-- **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent, spawns
-  the `<leaf>-<uid>-shuttle` tmux session. That is the only worker name, and
-  `Shuttle.ULID.from_tmux/1` is its only parser: a fiber without a ULID `id:`
-  is refused with `{:uid_missing, message}`, a preflight refusal like the
-  others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
+- **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent and chooses its execution backend.
+  Claude and Pi workers use `<leaf>-<uid>-shuttle` tmux sessions, parsed by `Shuttle.ULID.from_tmux/1`.
+  Codex uses a durable `AppWorkers` record on either surface; terminal presentation opens a `codex-terminal-<thread-id>` viewer after the backend confirms the initial turn.
+  Conversation identity is known before dispatch is published, without scraping a rollout or guessing which thread a terminal currently shows.
+  A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing constitutions** — `shuttle.kind: standing` with a cron
   `schedule:`. Nothing due is stored: an armed (`active`, untempered) one is due when a
   cron occurrence has passed since it was last serviced — the later of
@@ -116,9 +116,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   hours ago costs less as a fresh worker reading `## Status` — whatever the
   transcript's size. The lookup is one resolve through
   `Shuttle.Transcript.path/2` and one stat, taken only on that no-handoff
-  branch. A `surface: app` conversation is exempt from the transcript check:
-  it keeps its identity in the Codex App Server, so it resumes whenever it did
-  not hand off. A standing constitution starts fresh on the autonomous loop.
+  branch.
+  A durably owned Codex conversation on either surface is exempt from the transcript check: it keeps its identity in the App Server, so it resumes whenever it did not hand off.
+  A standing constitution starts fresh on the autonomous loop.
 
   `resume_mode` overrides the autonomous rule: `"previous"` (the board's
   Resume) resumes unconditionally; `"fresh"` (New session) never resumes but
@@ -134,6 +134,29 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   attach`); a worker that wants a human's word before it ends stays alive at
   the checkpoint instead of handing off. This is
   the contract, not a gap.
+
+## Codex conversation ownership and terminal viewers
+
+Both Codex presentations use the App Server selected by `SHUTTLE_CODEX_SOCKET`, or the default socket under `CODEX_HOME`.
+The server must already be available; dispatch does not start another backend on failure.
+Terminal dispatch preflights its wrapper and tmux before creating a conversation.
+The backend owns the thread, configured model and effort, initial turn, and task assignment.
+A terminal viewer only renders and accepts human input for that conversation.
+Native messages address the thread through `thread/read`, `turn/steer`, `turn/start`, and `thread/inject_items` on that same server.
+There is no terminal-paste transport.
+
+The durable record precedes the initial turn.
+A failed or ambiguous turn start preserves that identity and its pending prompt rather than launching fresh.
+The initial turn must be confirmed before attaching a viewer because an empty thread has no resumable rollout.
+Viewer failure leaves the conversation owned; `shuttle attach <fiber>` prepares the same viewer again without sending a prompt.
+Idle turns, closed viewers, and server transport errors never become worker-death evidence.
+Restart recovery adopts the durable conversation, not a second CLI execution.
+`WorkerProcess.holder` still protects historical embedded transcripts and non-Codex CLI resumes; it does not serialize viewers of an already-owned App Server conversation.
+
+A shared backend inherits its server's environment.
+Per-worker agent `env` and unsupported arbitrary `extra_flags` are refused; supported approval presets, model, and effort are expressed through thread/turn protocol fields.
+The worker prompt identifies the App Server backend even with terminal presentation, so worker tools do not mistake the viewer's tmux context for their own execution environment.
+See [operating](operating.md#terminal-codex-workers) for starting the dependency and handling hook-only sessions.
 
 ## tmux server ownership (macOS)
 

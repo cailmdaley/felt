@@ -144,6 +144,20 @@ trust_level="trusted"
 		rpc.c.Close()
 		return true
 	})
+	rpc, err := dialCodex(ctx, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rpc.c.Close()
+	var created struct {
+		Thread codexThread `json:"thread"`
+	}
+	if err := rpc.call(ctx, "thread/start", map[string]any{
+		"cwd": root, "model": "probe-model", "runtimeWorkspaceRoots": []string{root},
+		"approvalPolicy": "on-request", "approvalsReviewer": "auto_review", "sandbox": "workspace-write",
+	}, &created); err != nil || created.Thread.ID == "" {
+		t.Fatalf("create backend conversation: %#v %v", created, err)
+	}
 	tmuxSocket := filepath.Join(root, "tmux.sock")
 	runTmux := func(args ...string) (string, error) {
 		cmd := exec.CommandContext(ctx, tmux, append([]string{"-S", tmuxSocket}, args...)...)
@@ -152,9 +166,6 @@ trust_level="trusted"
 		return string(out), err
 	}
 	t.Cleanup(func() { exec.Command(tmux, "-S", tmuxSocket, "kill-server").Run() })
-	if out, err := runTmux("new-session", "-d", "-s", "viewer", "-x", "180", "-y", "55", codex, "--remote", "unix://"+socket, "--no-alt-screen", "-C", root); err != nil {
-		t.Fatalf("start TUI: %v\n%s", err, out)
-	}
 	lastPane := ""
 	pane := func() string {
 		out, err := runTmux("capture-pane", "-p", "-S", "-500", "-t", "viewer")
@@ -165,9 +176,9 @@ trust_level="trusted"
 	}
 	diagnostic = func() string { return lastPane }
 	var session Session
-	await("TUI thread", func() bool {
+	await("backend thread discovery", func() bool {
 		ss, err := (codexAdapter{}).discover(ctx, env, "probe")
-		if err == nil && len(ss) == 1 && strings.Contains(pane(), "probe-model") {
+		if err == nil && len(ss) == 1 && ss[0].ID == created.Thread.ID {
 			session = ss[0]
 			return session.State == "idle"
 		}
@@ -187,6 +198,12 @@ trust_level="trusted"
 	if receipt := send("external-start", "REMOTE_EXTERNAL_START", true); receipt.Status != StatusAccepted || receipt.Detail != "started turn" {
 		t.Fatalf("idle delivery: %#v", receipt)
 	}
+	// Match daemon dispatch: create and start the owned thread before opening
+	// a view-only TUI. An empty thread has no resumable rollout yet.
+	if out, err := runTmux("new-session", "-d", "-s", "viewer", "-x", "180", "-y", "55", codex, "--remote", "unix://"+socket, "--no-alt-screen", "-C", root, "resume", session.ID); err != nil {
+		t.Fatalf("start TUI: %v\n%s", err, out)
+	}
+	await("TUI attached to the running turn", func() bool { return strings.Contains(pane(), "REMOTE_EXTERNAL_START") })
 	select {
 	case <-started:
 	case <-ctx.Done():

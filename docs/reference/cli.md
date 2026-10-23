@@ -189,7 +189,7 @@ constitution open; activating it could launch another worker.
 | `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
 | `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
 | `shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
-| `shuttle attach <fiber>` | Attach to a running worker's tmux session |
+| `shuttle attach <fiber>` | Attach to a running worker's terminal; recreate a missing terminal Codex viewer of the same owned thread without starting a turn |
 | `shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
 
 `attach`, `session-name`, and fiber message targets require one exact match across
@@ -275,14 +275,16 @@ fiber differs, the command notes it on stderr and still uses the ledger's
 worker. A fiber with no ledger row, an unavailable ledger, or a stale or
 failing ledger feed from the worker's host or the fiber's owning host is
 refused, since a newer worker there could be missing.
-A Codex App ledger row keeps its transcript id in `session` and its address id
-in `thread_id`; a Codex row whose thread id cannot be established is refused. Ambiguous session IDs fail with
+A managed Codex ledger row on either surface keeps its transcript id in `session` and its address id in `thread_id`.
+A hook-only CLI peer can establish the ledger session's exact address for context delivery even without a separate thread mapping.
+A Codex row whose thread identity cannot otherwise be established is refused.
+Ambiguous session IDs fail with
 their candidate addresses. Addresses
 use `claude`, `codex`, and `pi`; the ledger spelling `claude-code` normalizes
 to `claude`.
 
-`--context-only` queues or adds context without starting a turn or invoking native
-steering. Hooks offer queued context when the receiver next prompts or uses a
+`--context-only` queues or adds context without starting a new turn.
+An active Codex turn accepts it through native steering; an idle loaded thread receives persistent model context through `thread/inject_items`, without a separate visible TUI turn. Hooks offer queued context when the receiver next prompts or uses a
 tool; Pi offers it before the next agent turn. `--wake` remains an explicit alias
 for the default; `--wake=false` is equivalent to `--context-only`.
 
@@ -294,6 +296,13 @@ Hooks alone cannot wake Claude or Codex: install and enable the receiver's hooks
 for context delivery, and use a supported live native endpoint for wake.
 A failed wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
+
+Both Codex surfaces use the same native App Server transport.
+Terminal Codex viewers attach explicitly with `codex --remote unix://PATH`; native messages address the exact thread even if a terminal is closed or currently showing another thread.
+Shuttle does not paste into Codex terminals.
+Hook-only embedded sessions retain `--context-only` and reject wake with attachment guidance.
+The selected server must be reachable; an endpoint failure never selects another runtime or launches embedded.
+See [terminal Codex operations](../dev/operating.md#terminal-codex-workers) for dependency startup, shared-home limits, and shell-wrapper context injection.
 
 Receipts describe delivery evidence, not task completion. HTTP 200 carries a
 processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports

@@ -52,12 +52,12 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
 
 ## Critical invariants
 
-- **Execution backends own conversations; shuttle owns task assignment and
-  observation.** CLI workers live in tmux and remain attachable via
-  `shuttle attach <fiber>`. Codex app conversations live in the local Codex
-  App Server and remain addressable while idle. Neither an idle turn nor an
-  unreachable App Server means a conversation has died. Preserve its identity
-  across daemon restarts; never substitute a CLI launch for an app failure.
+- **Execution backends own conversations; shuttle owns task assignment and observation.**
+  Claude and Pi workers live in tmux.
+  Both Codex surfaces use the selected local App Server; `surface: cli` adds a replaceable tmux TUI attached with explicit `--remote`.
+  `shuttle attach <fiber>` prepares that exact thread's viewer without starting a turn.
+  An idle turn, closed terminal viewer, or unreachable App Server never means the Codex conversation has died.
+  Preserve its identity across daemon restarts; never substitute an embedded CLI launch or a fresh conversation for a backend failure.
 - **felt is the fiber library; shuttle owns Shuttle's schema and behavior.**
   felt preserves a `shuttle:` block as opaque frontmatter and never validates
   or resolves it. The shuttle CLI uses felt's Go library to read and write

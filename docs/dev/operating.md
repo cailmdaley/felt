@@ -49,6 +49,51 @@ Authentication errors and a folder already served by another host appear in the 
 A short failure doubles the retry delay from 2 seconds to a 300-second cap.
 Uncertain tmux visibility holds rather than launching a duplicate; the missing-socket recovery below applies to this host too.
 
+## Terminal Codex workers
+
+Codex 0.162.1 supports a terminal TUI attached to the same App Server that Shuttle messages.
+Both `surface: cli` and `surface: app` require that backend; terminal presentation does not provide an embedded fallback.
+Start Codex's dependency explicitly, without a worker's inherited terminal context:
+
+```sh
+env -u TMUX -u TMUX_PANE -u SHUTTLE_FIBER_PATH codex app-server daemon start
+codex app-server daemon version
+```
+
+The default endpoint is `$CODEX_HOME/app-server-control/app-server-control.sock`, with `CODEX_HOME` defaulting to `~/.codex`.
+`SHUTTLE_CODEX_SOCKET` selects an explicit Unix WebSocket socket for the Shuttle daemon, native messaging, and terminal viewers.
+Shuttle never restarts or replaces that server to recover a connection failure.
+Restore the selected backend, then retry; do not select another server just because both can read the same rollout files.
+Codex's detached process is not reboot-persistent; another managed start is needed after reboot.
+Its environment is shared by all clients, so configure tool credentials and other environment settings before starting it.
+Per-agent environment overrides and unsupported arbitrary CLI flags are refused by managed Codex dispatch.
+
+On a cluster whose home directory is shared across login nodes, use a host-local `CODEX_HOME` and start the backend on that host, or configure a host-local App Server socket explicitly.
+Codex's default socket, pidfile, lifecycle locks, and recovery state have no host component.
+A socket file on shared storage is still a host-local kernel endpoint; another machine cannot use it to connect to the first machine's process.
+Keep socket directories private to the owning user.
+
+`shuttle attach <fiber>` opens or recreates a terminal viewer of the existing owned thread, without starting a turn.
+Closing that viewer leaves the conversation and its task assignment alive.
+An idle conversation can be woken, and a running turn can be steered, through `shuttle message` using its fiber or exact address.
+The TUI displays external messages and replies when showing that thread; a message does not force a user's terminal to switch from another selected thread.
+`--context-only` adds context for the next model request without creating a visible user turn.
+
+A hand-started embedded Codex session remains hook-only: `--context-only` can queue to its hooks, but a plain wake is rejected.
+To use the shared backend by hand, launch `codex --remote unix://PATH`, or `codex --remote unix://PATH resume THREAD_ID` for a saved conversation.
+The explicit endpoint reports errors rather than silently launching embedded.
+Shuttle does not paste into terminals or infer the reader from a pane's foreground process.
+
+Shell wrappers need a separate context-injection check before adding `--remote`.
+Most `-c` overrides disable Codex's implicit shared-daemon attachment, and the remote TUI forwards only supported per-thread settings.
+In the default 0.162.1 configuration, a wrapper's `-c developer_instructions=…` is not forwarded by TUI start/resume.
+Use the App Server's supported `thread/start` `developerInstructions` field, or deliberately move static instructions and dynamic session context to an appropriate server-side or launch-message source.
+Do not assume a successful terminal connection preserved those instructions.
+
+The token-free integration test is `go test ./internal/messaging -run TestCodexRealTerminalAppServer -v`.
+It runs a real Codex App Server and tmux TUI against a local Responses fixture, covering backend creation, idle wake, active steer, live terminal rendering, persistent context, deduplication, and same-thread viewer recreation.
+It skips when Codex or tmux is absent, and under `go test -short`.
+
 ## Message identity and handoffs
 
 A delivered message header keeps the sending session in `from` and shows a worker's fiber separately as `reply to <fiber>` (`reply_to` in JSON).

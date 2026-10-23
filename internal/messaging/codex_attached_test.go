@@ -9,6 +9,7 @@ import (
 	"testing"
 )
 
+// Mutation: omit native SessionID from discovery; fork transcript joins must fail.
 func TestCodexNativeDiscoveryPreservesThreadAndTranscriptIdentity(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

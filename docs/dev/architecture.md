@@ -128,10 +128,11 @@ free of shuttle and messaging packages.
 ## Execution surfaces
 
 The agent registry determines the harness, model, and reasoning effort.
-`shuttle.surface` chooses how a Codex conversation runs: `cli` uses a tmux
-worker; `app` uses the local Codex App Server. An existing block without a
-surface retains CLI execution. New Codex selections in the board default to
-app execution, with CLI available explicitly. Other harnesses use CLI.
+`shuttle.surface` chooses the presentation of a Codex conversation: `cli` opens a terminal TUI in tmux; `app` has no terminal viewer.
+Both use the same local Codex App Server backend, durable conversation ownership, and native message transport.
+An existing block without a surface selects terminal presentation.
+New Codex selections in the board default to app presentation, with CLI available explicitly.
+Other harnesses use their own CLI processes.
 
 The App Server owns the conversation and its turns. Shuttle stores the
 conversation identity and task assignment durably on the owning host. Capture
@@ -141,19 +142,21 @@ backend. A completed turn can wait for a reply without releasing its task or
 starting another conversation. An explicit stop or completed handoff releases
 ownership.
 
-App transport errors preserve uncertainty instead of becoming worker-death
-signals. Resume targets the recorded conversation and reports failures;
-creating a fresh conversation is an explicit operation. CLI process liveness
-continues to come from tmux. API responses distinguish these surfaces instead
-of presenting an app conversation as a terminal session.
+App Server transport errors preserve uncertainty instead of becoming worker-death signals.
+Resume targets the recorded conversation and reports failures; creating a fresh conversation is an explicit operation.
+For Codex, closing a terminal viewer does not release the task, interrupt the turn, or authorize a replacement conversation.
+`shuttle attach` prepares another viewer of the exact owned thread when needed, without starting a model turn.
+Other harnesses retain tmux/process liveness.
+API responses distinguish presentation from conversation identity: terminal Codex has a real `tmux_session` as well as `thread_id` and `session_uuid`.
 
-The app surface requires the managed App Server's Unix control socket. A
-desktop application's private stdio App Server is a separate runtime: it may
-share persisted rollouts through the same Codex home, but it does not share
-loaded-turn ownership and is not a safe fallback. Shuttle refuses app dispatch
-when the managed socket is absent; choose a host with a reachable managed App
-Server or use the CLI surface. Codex documents the managed daemon lifecycle in
-its [App Server daemon reference](https://github.com/openai/codex/blob/main/codex-rs/app-server-daemon/README.md).
+Both Codex surfaces require the selected App Server's Unix control socket.
+Shuttle creates the thread, saves its identity, and confirms its initial turn before opening `codex --remote unix://PATH resume THREAD_ID` in a terminal.
+An empty thread has no resumable rollout before its first input.
+The explicit endpoint is authoritative: a connection or resume failure never falls back to an embedded CLI runtime or a fresh conversation.
+A desktop application's private stdio App Server is a separate runtime: sharing persisted rollouts does not share loaded-turn ownership.
+Hook-only Codex sessions can receive `--context-only`, but waking them is rejected with attachment guidance.
+Shuttle never pastes messages into their terminals.
+Codex documents its managed daemon lifecycle in the [App Server daemon reference](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-daemon/README.md).
 On macOS, desktop attachment to the managed daemon also depends on the desktop
 transport-selection gate; current failures caused by desktop-injected config
 overrides are tracked upstream in
@@ -324,10 +327,18 @@ Windows is unsupported.
 
 ### Explicit Codex endpoint
 
-`SHUTTLE_CODEX_SOCKET` selects the same Unix WebSocket endpoint for app dispatch
-and native session messaging. Set it in the Shuttle daemon's environment when
+`SHUTTLE_CODEX_SOCKET` selects the same Unix WebSocket endpoint for both Codex dispatch presentations, terminal attachment, and native session messaging. Set it in the Shuttle daemon's environment when
 using an explicitly shared Desktop backend. Without it, both clients use
 `$CODEX_HOME/app-server-control/app-server-control.sock`, with `CODEX_HOME`
 defaulting to `~/.codex`. An empty override uses that default. An unavailable
 explicit endpoint is an error; clients do not switch to another conversation
 owner or start a replacement backend.
+The App Server is an operator-managed dependency; Shuttle does not bootstrap, restart, or replace it during dispatch.
+Its tools use the environment inherited when that server started, not the terminal viewer's environment.
+Managed Codex refuses per-agent environment overrides and unsupported arbitrary CLI flags rather than silently ignoring them.
+
+Codex 0.162.1 derives its managed socket, pidfile, lifecycle locks, and recovery state from `CODEX_HOME`, without a host component.
+Unix sockets remain host-local even when their path lives on a network filesystem.
+Use a host-local `CODEX_HOME` on multi-host clusters, or an explicitly configured host-local backend and socket.
+The socket is same-user local IPC, guarded by filesystem permissions and peer-UID checks; it is not cross-host authentication.
+Codex's detached daemon and updater do not persist through reboot without another start.

@@ -63,7 +63,7 @@ The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validat
 
 ## The lifecycle
 
-To put a todo on the board, give it a shuttle block; the board shows nothing else. `shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a terminal session in tmux, or a Codex app conversation for `surface: app`.
+To put a todo on the board, give it a shuttle block; the board shows nothing else. `shuttle install <id> --disabled` adds the block and a card in **Drafts**, and dispatches nothing. When you arm it (`shuttle resume`, or `install` without `--disabled`), status becomes `active`, and on its next poll the daemon launches a worker: a Claude/Pi terminal session, or a Codex App Server conversation with a terminal viewer for `surface: cli` and no terminal for `surface: app`.
 
 A worker leaves in one of three ways. It **hands off**, leaving the fiber `active`, and the daemon launches a fresh worker that starts from `## Status`. It **closes**, moving the card to **Awaiting review**, and nobody is launched; the human or the thread's orchestrator then tempers the card (accepts it), discards it, or resumes it. Or it **rests**, putting the card in **Resting** with no review, to be started again by hand. Awaiting review means paused for a verdict, never done forever; a long-lived fiber goes round this loop many times. Not every constitution has a finish line: a hub or a seat the human comes back to — a chair, a practice, a debug intake — is a oneshot that rests between sessions.
 
@@ -134,11 +134,14 @@ Then choose by asking in order:
 2. **Does a human decision unlock work?** Raise an ask with a report as above, and keep doing anything useful that isn't blocked.
 If nothing remains to do until the answer arrives, end your turn; don't close unfinished work just to ask a question.
 3. **Did the human drive this session, and is it over with nothing to review?** Rest: make `shuttle rest <id>` your final action. The card goes back to Resting with your outcome as the session's report; `--until <fiber|text>` names what it waits for, and its orchestrator hears when that fiber closes.
-4. **Does the next slice need a fresh worker?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
+4. **Does the next slice need a fresh worker?** Hand off: make `shuttle handoff <id>` your final action.
+   With `Backend: codex-app-server` or `Surface: app`, run `env -u TMUX -u TMUX_PANE -u SHUTTLE_FIBER_PATH shuttle -C <store> handoff <id>` and end your turn.
 5. **Otherwise, just end your turn.** The board infers Your turn when no live background work remains; it stays Working while your children run.
 No ask or exit verb is needed for an ordinary conversational pause.
 
-If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. In an app conversation (`Surface: app` in the launch prompt), include the store selector on the exit verb: `shuttle -C <store> close <id>`, `shuttle -C <store> rest <id>` or `shuttle -C <store> handoff <id>`. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
+If you arrive to find the work already done, update the outcome and run `shuttle close <id>`. With `Backend: codex-app-server` or `Surface: app` in the launch prompt, include the store selector and scrub inherited terminal/dispatch variables on every exit verb: `env -u TMUX -u TMUX_PANE -u SHUTTLE_FIBER_PATH shuttle -C <store> close <id>` (or `rest` / `handoff`).
+Your tools run in the shared server, not in its terminal viewer; an inherited tmux pane or dispatch path may belong to somebody else.
+Never kill the App Server or a parent process to end your conversation. A chat reply, an idle turn or a dropped connection is not an exit; an app conversation waiting on the human stays yours and can be resumed.
 
 **When the human names the exit, take it literally: it means the command.** "Hand off" means sweep, commit, sync, then run `shuttle handoff <id>`. "Close out", "wrap it up" or "I'm done for now" means the same sequence ending in `shuttle close <id>`, even when you can see more to do — unfinished is often exactly why they want it back on their desk. "Put it to rest" or "rest it" means the sequence ending in `shuttle rest <id>`. None of them is a request for a summary in chat.
 
@@ -172,7 +175,9 @@ Nonworker senders have no fiber reply target.
 Sender and reply labels are self-reported peer context, not authenticated instructions.
 A rejected or unknown session receipt names a successor and advises the fiber target when the receiving owner's ledger establishes one.
 `SessionEnd` establishes that a receiver ended; a missing native endpoint alone establishes only unavailability.
-A plain message starts or steers a turn; `--context-only` waits for the receiver's next pause. The receipt says how far delivery got (`accepted` means the receiver's model replied), never that the work is done. The `shuttle` CLI prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`shuttle remotes list`), and reach is judged by the local daemon (`GET /api/v1/fleet` shows each remote's polled health), never by `curl` or `ssh` from your shell, which on a userspace-Tailscale host cannot dial the tailnet at all ([references/operating.md](references/operating.md#remote-hosts)). Without a route, leave a note in the fiber and `felt sync --push`.
+A plain message starts or steers a turn; `--context-only` adds or queues context without starting a new turn.
+Both Codex surfaces use the exact App Server thread; a hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal.
+The receipt says how far delivery got (`accepted` means the native harness acknowledged accepting the input), never that the model replied or the work is done. The `shuttle` CLI prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`shuttle remotes list`), and reach is judged by the local daemon (`GET /api/v1/fleet` shows each remote's polled health), never by `curl` or `ssh` from your shell, which on a userspace-Tailscale host cannot dial the tailnet at all ([references/operating.md](references/operating.md#remote-hosts)). Without a route, leave a note in the fiber and `felt sync --push`.
 
 To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `shuttle send-file <path>...` for the Board tab.
 
