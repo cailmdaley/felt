@@ -903,6 +903,35 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, "not json"} = File.read(path)
   end
 
+  test "malformed records cannot redirect status writes or register another thread" do
+    File.mkdir_p!(AppWorkers.root())
+    other = Path.join(AppWorkers.root(), "other.json")
+
+    original =
+      Jason.encode!(%{"session_uuid" => "other", "thread_id" => "other", "active" => true})
+
+    File.write!(other, original)
+    path = Path.join(AppWorkers.root(), "corrupt.json")
+
+    for record <- [
+          nil,
+          [],
+          42,
+          %{},
+          %{"session_uuid" => "other", "thread_id" => "other", "active" => true},
+          %{"session_uuid" => "corrupt", "thread_id" => "other", "active" => true}
+        ] do
+      bytes = Jason.encode!(record)
+      File.write!(path, bytes)
+      assert %{state: :unknown, phase: nil} = AppWorkers.status("corrupt")
+      assert {:error, _} = AppWorkers.update("corrupt", %{"backend_error" => "rejected"})
+      assert {:error, _} = AppWorkers.check_known_endpoint("corrupt")
+      assert File.read!(other) == original
+      assert File.read!(path) == bytes
+      assert [%{"session_uuid" => "other"}] = AppWorkers.active()
+    end
+  end
+
   test "dangling owner records are not unmanaged sessions" do
     assert :ok = AppWorkers.check_known_endpoint("dangling-owner")
     File.mkdir_p!(AppWorkers.root())
@@ -1262,9 +1291,9 @@ defmodule Shuttle.AppWorkersTest do
     :ok = File.mkdir_p(AppWorkers.root())
     :ok = File.write(Path.join(AppWorkers.root(), id <> ".json"), "null")
 
-    assert {:ok, nil} = AppWorkers.get(id)
+    assert {:error, :ownership_record_unreadable} = AppWorkers.get(id)
 
-    assert {:error, :session_owner_mismatch} =
+    assert {:error, :ownership_record_unreadable} =
              AppWorkers.recover(id, "tests/invalid-record", "invalid-uid", Runner.felt_root())
 
     assert App.calls() == []
@@ -1356,6 +1385,7 @@ defmodule Shuttle.AppWorkersTest do
   test "durable prompts are private before atomic publication" do
     record = %{
       "session_uuid" => "private-thread",
+      "thread_id" => "private-thread",
       "active" => true,
       "pending_prompt" => "private text"
     }

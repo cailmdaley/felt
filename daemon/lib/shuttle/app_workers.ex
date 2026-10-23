@@ -102,6 +102,9 @@ defmodule Shuttle.AppWorkers do
           _ ->
             {:error, :ownership_record_unreadable}
         end
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -144,12 +147,16 @@ defmodule Shuttle.AppWorkers do
   end
 
   def get(id) when is_binary(id) do
-    with true <- Regex.match?(~r/^[A-Za-z0-9_-]+$/, id),
-         {:ok, bytes} <- File.read(Path.join(root(), id <> ".json")),
-         {:ok, record} <- Jason.decode(bytes) do
+    with :ok <- check_id(id),
+         {:ok, bytes} <- File.read(record_path(id)),
+         {:ok, record} when is_map(record) <- Jason.decode(bytes),
+         true <- record["session_uuid"] == id and record["thread_id"] == id do
       {:ok, record}
     else
-      _ -> {:error, :not_found}
+      {:error, :invalid_session_id} = error -> error
+      {:error, :enoent} -> {:error, :not_found}
+      false -> {:error, :session_owner_mismatch}
+      _ -> {:error, :ownership_record_unreadable}
     end
   end
 
@@ -178,15 +185,9 @@ defmodule Shuttle.AppWorkers do
   def active do
     Path.wildcard(Path.join(root(), "*.json"))
     |> Enum.flat_map(fn path ->
-      case File.read(path) do
-        {:ok, bytes} ->
-          case Jason.decode(bytes) do
-            {:ok, %{"active" => true} = record} -> [record]
-            _ -> []
-          end
-
-        _ ->
-          []
+      case get(Path.basename(path, ".json")) do
+        {:ok, %{"active" => true} = record} -> [record]
+        _ -> []
       end
     end)
   end
