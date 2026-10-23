@@ -291,10 +291,10 @@ defmodule Shuttle.Dispatcher do
   defp managed_codex?(fiber) do
     get_in(fiber, ["shuttle", "resolved", "agent", "cli"]) == "codex" or
       get_in(fiber, ["shuttle", "surface"]) == "app" or
-      match?(
-        {:ok, _},
-        Shuttle.AppWorkers.get(Shuttle.Continuation.resumable_session_id(fiber) || "")
-      )
+      case Shuttle.AppWorkers.get(Shuttle.Continuation.resumable_session_id(fiber) || "") do
+        {:ok, _} -> true
+        {:error, reason} -> reason in [:session_owner_mismatch, :ownership_record_unreadable]
+      end
   end
 
   # The previous-session record for a fresh launch after a cut-off session.
@@ -1146,8 +1146,16 @@ defmodule Shuttle.Dispatcher do
       case intent do
         {:previous, id} ->
           case Shuttle.AppWorkers.get(id) do
-            {:ok, _} -> {:error, :session_surface_mismatch}
-            _ -> create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
+            {:ok, _} ->
+              {:error, :session_surface_mismatch}
+
+            {:error, :not_found} ->
+              with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
+                   do:
+                     create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
+
+            {:error, _} = error ->
+              error
           end
 
         _ ->
@@ -1374,8 +1382,11 @@ defmodule Shuttle.Dispatcher do
             {:error, {:app_launch_failed, id, {:terminal_unavailable, reason}}}
         end
 
-      _ ->
+      {:ok, _} ->
         {:ok, Shuttle.AppWorkers.ref(id)}
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -1405,6 +1416,9 @@ defmodule Shuttle.Dispatcher do
                  opts
                ),
              do: Shuttle.AppWorkers.deactivate(id)
+
+      {:error, _} = error ->
+        error
     end
   end
 

@@ -358,9 +358,8 @@ defmodule Shuttle.AppWorkers do
             do_claim(id, fiber, store)
 
           {:error, :not_found} ->
-            # `get/1` deliberately does not disclose a malformed private
-            # record as a different public read result. Adoption needs the
-            # stronger answer: only an absent path may become a new owner.
+            # Only an absent path may become a new owner; a dangling
+            # record symlink still requires explicit repair.
             case File.lstat(record_path(id)) do
               {:error, :enoent} ->
                 put(%{
@@ -383,6 +382,9 @@ defmodule Shuttle.AppWorkers do
               _ ->
                 {:error, :ownership_record_unreadable}
             end
+
+          {:error, _} = error ->
+            error
         end
       end)
     else

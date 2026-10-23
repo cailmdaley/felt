@@ -138,6 +138,10 @@ defmodule Shuttle.SessionResume do
       {:ok, %{"active" => true, "surface" => "cli"}} ->
         Shuttle.CodexTerminal.prepare(session, opts)
 
+      {:error, reason} = error
+      when reason in [:session_owner_mismatch, :ownership_record_unreadable] ->
+        error
+
       _ ->
         with :ok <- not_the_worker(session, live.()),
              {:ok, plan} <- plan(session, opts) do
@@ -154,8 +158,14 @@ defmodule Shuttle.SessionResume do
 
   defp resume_identity_free(%{harness: "codex", session: id}, runner) do
     case Shuttle.AppWorkers.get(id) do
-      {:ok, record} -> Shuttle.AppWorkers.check_endpoint(record)
-      _ -> not_held(id, runner)
+      {:ok, record} ->
+        Shuttle.AppWorkers.check_endpoint(record)
+
+      {:error, :not_found} ->
+        with :ok <- Shuttle.AppWorkers.check_known_endpoint(id), do: not_held(id, runner)
+
+      {:error, _} = error ->
+        error
     end
   end
 

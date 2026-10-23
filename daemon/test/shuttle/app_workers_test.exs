@@ -89,6 +89,7 @@ defmodule Shuttle.AppWorkersTest do
     end
 
     def read_thread(id) do
+      if hook = Agent.get(__MODULE__, &Map.get(&1, :read_hook)), do: hook.(id)
       record({:read, id})
 
       Agent.get(
@@ -901,6 +902,51 @@ defmodule Shuttle.AppWorkersTest do
              )
 
     assert {:ok, "not json"} = File.read(path)
+  end
+
+  test "previous managed dispatch refuses corrupt owners without native operations" do
+    fiber("tests/corrupt-resume")
+    saved = Runner.fiber("tests/corrupt-resume")
+
+    Runner.set_fiber(
+      "tests/corrupt-resume",
+      put_in(saved, ["shuttle", "runtime"], %{"session_uuid" => "corrupt-resume"})
+    )
+
+    File.mkdir_p!(AppWorkers.root())
+    path = Path.join(AppWorkers.root(), "corrupt-resume.json")
+
+    for {bytes, reason} <- [
+          {"null", :ownership_record_unreadable},
+          {Jason.encode!(%{"session_uuid" => "other", "thread_id" => "other"}),
+           :session_owner_mismatch}
+        ] do
+      File.write!(path, bytes)
+      assert {:error, ^reason} = dispatch("tests/corrupt-resume", resume_mode: "previous")
+
+      assert {:error, ^reason} =
+               AppWorkers.claim_or_adopt("corrupt-resume", saved, Runner.felt_root())
+
+      assert App.calls() == []
+      assert File.read!(path) == bytes
+    end
+  end
+
+  test "adoption propagates corrupt owner errors appearing during native verification" do
+    fiber("tests/adopt-race")
+    File.mkdir_p!(AppWorkers.root())
+    path = Path.join(AppWorkers.root(), "adopt-race.json")
+    App.set(:read_hook, fn "adopt-race" -> File.write!(path, "null") end)
+
+    assert {:error, :ownership_record_unreadable} =
+             AppWorkers.claim_or_adopt(
+               "adopt-race",
+               Runner.fiber("tests/adopt-race"),
+               Runner.felt_root()
+             )
+
+    assert App.calls() == [{:read, "adopt-race"}]
+    assert File.read!(path) == "null"
   end
 
   test "malformed records cannot redirect status writes or register another thread" do

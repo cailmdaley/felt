@@ -1399,15 +1399,21 @@ defmodule Shuttle.Poller do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
     uid = resolved_uid(state, slug, runtime_key)
 
+    owner = Shuttle.AppWorkers.get(Keyword.get(opts, :session_uuid) || "")
+
     {state, reply} =
-      if Keyword.get(opts, :surface) == "app" or
-           match?(
-             {:ok, %{"surface" => "cli"}},
-             Shuttle.AppWorkers.get(Keyword.get(opts, :session_uuid) || "")
-           ) do
-        do_claim_app_session(state, slug, uid, Keyword.get(opts, :session_uuid), opts)
-      else
-        do_claim_session(state, slug, uid, tmux_session, opts)
+      case owner do
+        {:error, reason} = error
+        when reason in [:session_owner_mismatch, :ownership_record_unreadable] ->
+          {state, error}
+
+        _ ->
+          if Keyword.get(opts, :surface) == "app" or
+               match?({:ok, %{"surface" => "cli"}}, owner) do
+            do_claim_app_session(state, slug, uid, Keyword.get(opts, :session_uuid), opts)
+          else
+            do_claim_session(state, slug, uid, tmux_session, opts)
+          end
       end
 
     {:reply, reply, state}

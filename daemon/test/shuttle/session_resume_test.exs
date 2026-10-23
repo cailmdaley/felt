@@ -362,6 +362,25 @@ defmodule Shuttle.SessionResumeTest do
     end
   end
 
+  test "historical Codex refuses malformed ownership before native resume" do
+    File.mkdir_p!(Shuttle.AppWorkers.root())
+    path = Path.join(Shuttle.AppWorkers.root(), @codex <> ".json")
+
+    for {bytes, reason} <- [
+          {"null", :ownership_record_unreadable},
+          {Jason.encode!(%{"session_uuid" => "other", "thread_id" => "other"}),
+           :session_owner_mismatch}
+        ] do
+      File.write!(path, bytes)
+
+      assert {:error, ^reason} =
+               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+      refute_received {:native_resume, _}
+      assert File.read!(path) == bytes
+    end
+  end
+
   test "historical owned Codex refuses another endpoint before native resume" do
     assert :ok =
              Shuttle.AppWorkers.put(%{
