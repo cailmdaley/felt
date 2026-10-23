@@ -84,8 +84,33 @@ defmodule Shuttle.Runner do
           _ -> nil
         end
 
+      # Whoever owns the command must reap it: the Poller's stall watchdog
+      # `:kill`s a poll task mid-command, which skips `collect/7`'s own timeout
+      # kill, and closing the port only closes the child's stdin.
+      guard = if os_pid, do: spawn_guard(self(), Shuttle.Env.callers(), os_pid)
+
       deadline = System.monotonic_time(:millisecond) + timeout_ms
-      collect(port, os_pid, command, args, timeout_ms, deadline, [])
+
+      try do
+        collect(port, os_pid, command, args, timeout_ms, deadline, [])
+      after
+        if guard, do: send(guard, :released)
+      end
+    end
+
+    # An unlinked sentinel that reaps `os_pid`'s process group if `owner` dies
+    # before releasing it. It reads the owner's `Shuttle.Env` scope, since the
+    # owner is gone when it acts.
+    defp spawn_guard(owner, callers, os_pid) do
+      spawn(fn ->
+        Shuttle.Env.adopt_callers(callers)
+        ref = Process.monitor(owner)
+
+        receive do
+          :released -> :ok
+          {:DOWN, ^ref, :process, _, _} -> reap(os_pid)
+        end
+      end)
     end
 
     defp collect(port, os_pid, command, args, timeout_ms, deadline, acc) do
@@ -103,17 +128,22 @@ defmodule Shuttle.Runner do
           # port and drain anything it raced onto our mailbox between the kill
           # and the close — a non-trapping GenServer caller must never see a
           # stray `{port, …}` message on a later receive.
-          if os_pid, do: kill9(os_pid)
+          if os_pid, do: reap(os_pid)
           safe_close(port)
           flush_port(port)
           {"#{command} #{Enum.join(args, " ")} timed out after #{timeout_ms}ms", :timeout}
       end
     end
 
-    # `:os.cmd`-free, port-free kill: /bin/kill exists on macOS and every
-    # Linux cluster. Spawned bare (not through cmd/3) to avoid recursion.
-    defp kill9(os_pid) do
-      Shuttle.Env.cmd("kill", ["-9", Integer.to_string(os_pid)], stderr_to_stdout: true)
+    # SIGKILL the command and everything it spawned. The port driver starts each
+    # child as the leader of its own process group, so `-pid` addresses the
+    # whole tree (an `ssh` or `felt` under a shell wrapper included); the plain
+    # pid covers a child that is not a group leader. /bin/kill exists on macOS
+    # and every Linux cluster. Spawned bare (not through cmd/3) to avoid recursion.
+    defp reap(os_pid) do
+      pid = Integer.to_string(os_pid)
+      Shuttle.Env.cmd("kill", ["-9", "--", "-" <> pid], stderr_to_stdout: true)
+      Shuttle.Env.cmd("kill", ["-9", pid], stderr_to_stdout: true)
     rescue
       # No `kill` on PATH (pathological) — the process leaks, but the caller
       # still unblocks; nothing better to do here.

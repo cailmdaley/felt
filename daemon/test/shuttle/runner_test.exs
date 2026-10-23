@@ -76,6 +76,56 @@ defmodule Shuttle.RunnerTest do
     refute_receive _, 200
   end
 
+  # The Poller's stall watchdog `Process.exit(task, :kill)`s a poll task that may
+  # be mid-command; the task's own timeout path never runs, so whoever owns the
+  # command must reap it when the caller dies.
+  for {name, script} <- [
+        {"a direct child", "echo $$ > $PID_FILE; exec sleep 1000"},
+        {"a grandchild", "sleep 1000 & echo $! > $PID_FILE; wait"}
+      ] do
+    test "killing the caller mid-command reaps #{name}" do
+      pid_file =
+        Path.join(
+          System.tmp_dir!(),
+          "shuttle-runner-orphan-#{System.unique_integer([:positive])}"
+        )
+
+      on_exit(fn -> File.rm(pid_file) end)
+
+      task =
+        Task.async(fn ->
+          Shuttle.Runner.Default.cmd("bash", ["-c", unquote(script)],
+            env: [{"PID_FILE", pid_file}],
+            timeout_ms: 600_000
+          )
+        end)
+
+      pid = await_pid_file(pid_file)
+      assert {_, 0} = System.cmd("kill", ["-0", pid], stderr_to_stdout: true)
+
+      Process.unlink(task.pid)
+      Process.exit(task.pid, :kill)
+
+      assert eventually_dead?(pid), "process #{pid} outlived its killed caller"
+    end
+  end
+
+  defp await_pid_file(path, attempts \\ 1_500) do
+    body = File.read(path)
+
+    cond do
+      match?({:ok, b} when b != "", body) and String.ends_with?(elem(body, 1), "\n") ->
+        body |> elem(1) |> String.trim()
+
+      attempts > 0 ->
+        Process.sleep(20)
+        await_pid_file(path, attempts - 1)
+
+      true ->
+        flunk("child never wrote #{path}")
+    end
+  end
+
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.
   defp eventually_dead?(pid, attempts \\ 1_500) do
