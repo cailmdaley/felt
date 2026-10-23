@@ -106,14 +106,14 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == "tests/api-dispatch"
-    assert body["tmux_session"] == FiberUid.session("tests/api-dispatch")
+    assert FiberUid.launch?(body["tmux_session"], "tests/api-dispatch")
   end
 
   test "dispatch returns 409 for already running fiber" do
     fiber = make_fiber("tests/api-dispatch-2")
     MockRunner.set_fiber("tests/api-dispatch-2", fiber)
     MockRunner.set_shuttle("tests/api-dispatch-2", oneshot_shuttle())
-    MockRunner.add_tmux_session(FiberUid.session("tests/api-dispatch-2"))
+    live_worker!("tests/api-dispatch-2", FiberUid.session("tests/api-dispatch-2"))
 
     conn =
       post(
@@ -176,7 +176,8 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == fiber_id
-    assert body["tmux_session"] == session
+    assert FiberUid.launch?(body["tmux_session"], fiber_id)
+    refute body["tmux_session"] == session
   end
 
   test "dispatch returns 200 for slow successful dispatches past the default call timeout" do
@@ -199,7 +200,7 @@ defmodule ShuttleWeb.APIControllerTest do
     body = Jason.decode!(conn.resp_body)
     assert body["dispatched"] == true
     assert body["fiber_id"] == fiber_id
-    assert body["tmux_session"] == FiberUid.session(fiber_id)
+    assert FiberUid.launch?(body["tmux_session"], fiber_id)
 
     # The request waits on the Poller's dispatch call timeout, which clears
     # GenServer's 5 s default (PollerTest pins that): shrunk below a spawn's
@@ -859,16 +860,16 @@ defmodule ShuttleWeb.APIControllerTest do
     # parallel runtime overlay (which the cutover deleted with the store).
     refute Map.has_key?(body, "runtime")
 
-    expected_session = "state-#{uid}-shuttle"
-
     assert [
              %{
                "fiber_id" => "tests/state",
                "uid" => ^uid,
                "state" => "running",
-               "tmux_session" => ^expected_session
+               "tmux_session" => session
              }
            ] = body["eligible"]
+
+    assert session =~ ~r/^state-[0-9a-f]{8}-#{uid}-shuttle$/
   end
 
   test "state degrades to JSON when the poller is unavailable" do

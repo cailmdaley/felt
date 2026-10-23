@@ -22,18 +22,18 @@ defmodule Shuttle.SessionLedger do
   narrative. That distinction is deliberate: this is not felt-history reborn,
   and nothing here is written for a human to read as prose.
 
-  ## The three moments
+  ## The moments
 
   `kind` names which one:
 
-    * `"dispatch"` — the daemon launched a worker and knows its session UUID.
-      For claude the UUID is pre-specified (`--session-id`) and known at
-      launch; for codex/pi it is scraped from the harness's JSONL afterward, so
-      the line is written by the backfill instead. Either way it is written
-      **after** the UUID is real, never speculatively.
+    * `"dispatch"` — the daemon launched a worker under a session UUID it
+      assigned (`--session-id`), written once the launch has started.
     * `"claim"` — an externally-spawned session registered itself against a
       fiber through `POST /api/v1/claim`.
     * `"resume"` — a worker was relaunched against an existing session UUID.
+    * `"superseded_by_claim"` — the session stopped serving this fiber when
+      its live worker claimed another (`superseded_by`); the claimed fiber's
+      `"claim"` line follows it.
 
   A record with no session UUID is **not written**. An unpaired line would be
   the one thing this file exists to rule out, and `record/1` drops it rather
@@ -58,7 +58,7 @@ defmodule Shuttle.SessionLedger do
   # it carries every hook event; this carries one line per session.
   @max_bytes 8 * 1024 * 1024
 
-  @kinds ~w(dispatch claim resume)
+  @kinds ~w(dispatch claim resume superseded_by_claim)
 
   @typedoc "One ledger line, as written and as served."
   @type record :: %{String.t() => String.t() | integer() | map() | nil}
@@ -81,7 +81,8 @@ defmodule Shuttle.SessionLedger do
   App Server address id; `:session` may name a different transcript id), `:tmux`,
   `:harness`, `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
   own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
-  and `:role` (the launch-time office slug). `:model`
+  `:role` (the launch-time office slug), and `:superseded_by` (the fiber a
+  `superseded_by_claim` line's session moved to). `:model`
   records the configured model passed to a launch command, not a claim about a
   provider's concrete backend checkpoint; callers omit it when no model was
   selected for that session.
@@ -130,6 +131,7 @@ defmodule Shuttle.SessionLedger do
         |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
         |> maybe_put("model", presence(Keyword.get(fields, :model)))
         |> maybe_put("role", presence(Keyword.get(fields, :role)))
+        |> maybe_put("superseded_by", presence(Keyword.get(fields, :superseded_by)))
 
       {:ok, Jason.encode!(line) <> "\n"}
     else

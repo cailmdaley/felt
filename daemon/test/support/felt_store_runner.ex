@@ -51,7 +51,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
         listing_error: nil,
         ids_from_aliases: %{},
         ls_delay_ms: 0,
-        new_session_delay_ms: 0
+        new_session_delay_ms: 0,
+        launched: %{},
+        next_pid: 5000,
+        panes: %{},
+        starts: %{}
       }
     end)
   end
@@ -80,7 +84,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
         listing_error: nil,
         ids_from_aliases: %{},
         ls_delay_ms: 0,
-        new_session_delay_ms: 0
+        new_session_delay_ms: 0,
+        launched: %{},
+        next_pid: 5000,
+        panes: %{},
+        starts: %{}
       }
     end)
   end
@@ -198,7 +206,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # Runtime-key fields nest under `shuttle.runtime`, matching Shuttle's
   # `mark-runtime` writer. Any non-runtime key in `fields` still merges at the
   # top level.
-  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
+  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id pane)
 
   def put_shuttle_fields(id, fields) do
     {runtime_fields, config_fields} = Map.split(fields, @runtime_key_names)
@@ -215,6 +223,41 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
       put_in(state.fibers[id], Map.put(fiber, "shuttle", shuttle))
     end)
+
+    if runtime_fields != %{}, do: write_runtime_file(id)
+  end
+
+  # Mirror the fiber's runtime into its `.md`, as `shuttle mark-runtime`
+  # does, so readers of the document on disk see what the mock serves.
+  defp write_runtime_file(id) do
+    with %{"path" => path} = fiber when is_binary(path) <- fiber(id),
+         {:ok, text} <- File.read(path),
+         ["", frontmatter, body] <- String.split(text, ~r/^---\n/m, parts: 3) do
+      runtime = get_in(fiber, ["shuttle", "runtime"]) || %{}
+
+      kept =
+        frontmatter
+        |> String.split("\n")
+        |> Enum.reduce({[], false}, fn line, {acc, in_runtime} ->
+          cond do
+            line == "  runtime:" -> {acc, true}
+            in_runtime and String.starts_with?(line, "    ") -> {acc, true}
+            true -> {[line | acc], false}
+          end
+        end)
+        |> elem(0)
+        |> Enum.reverse()
+        |> Enum.join("\n")
+        |> String.trim_trailing()
+
+      lines =
+        for {key, value} <- Enum.sort(runtime),
+            value not in [nil, ""],
+            do: "    #{key}: #{inspect(to_string(value))}"
+
+      block = if lines == [], do: "", else: "\n  runtime:\n" <> Enum.join(lines, "\n")
+      File.write!(path, "---\n" <> kept <> block <> "\n---\n" <> body)
+    end
   end
 
   # The full fiber map for `id` (carries `path`), for tests that read back what
@@ -293,13 +336,51 @@ defmodule Shuttle.Test.FeltStoreRunner do
     do: Agent.update(server(), &Map.put(&1, :tmux_ls_timeout, enabled))
 
   # What the process scan (`ps -o pid=,ppid=,args= -U <uid>`,
-  # `Shuttle.WorkerProcess`) answers. Defaults to no processes.
+  # `Shuttle.WorkerProcess`) answers besides the workers this fixture
+  # launched: every `tmux new-session ... bash -l <script>` runs a pane process
+  # (`launched_pid/1`) while its session lives, and `remove_tmux_session/1`
+  # ends it. A failing result (non-zero status) is the whole answer.
   def set_ps_result(result),
     do: Agent.update(server(), &Map.put(&1, :ps_result, result))
 
-  # A worker that outlives `tmux kill-session`: after the next successful kill,
-  # the killed session's run script stays in the process scan for `scans` more
-  # `ps` calls, or — with `:until_signalled` — until a `kill` names its pid.
+  # Extra tmux panes beyond the launched ones: `%{pane_pid => session}`, each
+  # with pane id `%<pid>`.
+  def set_panes(panes), do: Agent.update(server(), &Map.put(&1, :panes, panes))
+
+  # The start token `shuttle process-identity <pid>` reports for a live pid
+  # (default `start-<pid>`), so a test can model a reused pid.
+  def set_process_start(pid, start),
+    do: Agent.update(server(), &put_in(&1, [:starts, pid], start))
+
+  # A live worker in tmux session `session` holding conversation `uuid`: its
+  # pane runs a run script (keyed by `uuid`, or by `:script_key` — an earlier
+  # build keyed it by the session name) whose child is the harness (`:child`,
+  # default `claude --session-id <uuid>`; nil for none). Returns the pane pid.
+  def add_worker(session, uuid, opts \\ []) do
+    key = Keyword.get(opts, :script_key, uuid)
+    child = Keyword.get(opts, :child, "claude --session-id #{uuid}")
+    add_tmux_session(session)
+
+    Agent.get_and_update(server(), fn state ->
+      entry = %{pid: state.next_pid, script: "/tmp/shuttle-run-#{key}.1.sh", child: child}
+
+      {state.next_pid,
+       %{state | launched: Map.put(state.launched, session, entry), next_pid: state.next_pid + 1}}
+    end)
+  end
+
+  # The pane process of a session this fixture launched, or nil.
+  def launched_pid(session),
+    do: Agent.get(server(), &get_in(&1, [:launched, session, :pid]))
+
+  # The run script a launched session's pane runs, or nil.
+  def launched_script(session),
+    do: Agent.get(server(), &get_in(&1, [:launched, session, :script]))
+
+  # A worker that outlives its tmux kill: after the next successful kill, the
+  # killed session's run script stays in the process scan for `scans` more
+  # `ps` calls, or — with `:until_signalled` — until a `kill` names its pid,
+  # or — with `:forever` — through every signal.
   def set_worker_linger(scans),
     do: Agent.update(server(), &Map.put(&1, :worker_linger, scans))
 
@@ -309,7 +390,15 @@ defmodule Shuttle.Test.FeltStoreRunner do
     do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
 
   def remove_tmux_session(session),
-    do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+    do:
+      Agent.update(
+        server(),
+        &%{
+          &1
+          | tmux_sessions: MapSet.delete(&1.tmux_sessions, session),
+            launched: Map.delete(&1.launched, session)
+        }
+      )
 
   def set_new_session_delay(ms),
     do: Agent.update(server(), &Map.put(&1, :new_session_delay_ms, ms))
@@ -625,19 +714,90 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "ps" ->
         Agent.get_and_update(server(), fn state ->
           case Map.get(state, :lingering) do
-            {session, scans} when scans == :until_signalled or scans > 0 ->
-              line = "#{@linger_pid} 1 bash -l /tmp/shuttle-run-#{session}.1.sh\n"
-              left = if is_integer(scans), do: {session, scans - 1}, else: {session, scans}
+            {script, scans} when scans in [:until_signalled, :forever] or scans > 0 ->
+              line = "#{@linger_pid} 1 bash -l #{script}\n"
+              left = if is_integer(scans), do: {script, scans - 1}, else: {script, scans}
               {{line, 0}, Map.put(state, :lingering, left)}
 
             _ ->
-              {Map.get(state, :ps_result, {"", 0}), state}
+              {ps_answer(state), state}
           end
         end)
 
       command == "kill" ->
-        Agent.update(server(), &Map.delete(&1, :lingering))
+        Agent.update(server(), fn state ->
+          if match?({_, :forever}, state[:lingering]),
+            do: state,
+            else: Map.delete(state, :lingering)
+        end)
+
         {"", 0}
+
+      command == "shuttle" and match?(["process-identity", _], args) ->
+        pid = String.to_integer(Enum.at(args, 1))
+
+        Agent.get(server(), fn state ->
+          {output, status} = ps_answer(state)
+          live? = status == 0 and Enum.any?(Shuttle.WorkerProcess.parse(output), &(&1.pid == pid))
+
+          if live?,
+            do:
+              {Jason.encode!(%{
+                 status: "present",
+                 start: Map.get(state.starts, pid, "start-#{pid}")
+               }), 0},
+            else: {~s({"status":"gone"}), 0}
+        end)
+
+      command == "tmux" and hd(args) == "list-panes" and
+          Agent.get(server(), &Map.get(&1, :tmux_server_missing, false)) ->
+        {"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}
+
+      command == "tmux" and hd(args) == "list-panes" ->
+        Agent.get(server(), fn state ->
+          {panes(state)
+           |> Enum.map_join("\n", fn {pid, session} -> "#{pid} %#{pid} #{session}" end), 0}
+        end)
+
+      command == "tmux" and hd(args) == "display-message" ->
+        target = Enum.at(args, 3)
+
+        Agent.get(server(), fn state ->
+          found =
+            Enum.find(panes(state), fn {pid, session} ->
+              target in ["%#{pid}", "=" <> session <> ":", session]
+            end)
+
+          case found do
+            {pid, session} ->
+              {"%#{pid} #{pid} #{session}\n", 0}
+
+            nil ->
+              {"can't find #{if String.starts_with?(target, "%"), do: "pane", else: "session"}: #{target}",
+               1}
+          end
+        end)
+
+      command == "tmux" and hd(args) == "kill-pane" ->
+        "%" <> pid = Enum.at(args, 2)
+        pid = String.to_integer(pid)
+
+        case Agent.get(server(), fn state -> Enum.find(panes(state), &(elem(&1, 0) == pid)) end) do
+          {_pid, session} ->
+            script = launched_script(session)
+            remove_tmux_session(session)
+
+            Agent.update(
+              server(),
+              &Map.update(&1, :panes, %{}, fn panes -> Map.delete(panes, pid) end)
+            )
+
+            linger(script || "/tmp/shuttle-run-#{session}.1.sh")
+            {"", 0}
+
+          nil ->
+            {"can't find pane: %#{pid}", 1}
+        end
 
       command == "tmux" and hd(args) == "has-session" ->
         session = Enum.at(args, 2)
@@ -652,6 +812,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
       command == "tmux" and hd(args) == "new-session" ->
         session = Enum.at(args, 3)
         add_tmux_session(session)
+
+        Agent.update(server(), fn state ->
+          %{
+            state
+            | launched:
+                Map.put(state.launched, session, %{pid: state.next_pid, script: List.last(args)}),
+              next_pid: state.next_pid + 1
+          }
+        end)
+
         delay_ms = Agent.get(server(), &Map.get(&1, :new_session_delay_ms, 0))
         if delay_ms > 0, do: Process.sleep(delay_ms)
         {"", 0}
@@ -666,15 +836,9 @@ defmodule Shuttle.Test.FeltStoreRunner do
             {output, status}
 
           false ->
+            script = launched_script(session)
             remove_tmux_session(session)
-
-            Agent.update(server(), fn state ->
-              case Map.pop(state, :worker_linger) do
-                {nil, state} -> state
-                {scans, state} -> Map.put(state, :lingering, {session, scans})
-              end
-            end)
-
+            linger(script || "/tmp/shuttle-run-#{session}.1.sh")
             {"", 0}
         end
 
@@ -684,7 +848,14 @@ defmodule Shuttle.Test.FeltStoreRunner do
         Agent.update(server(), fn state ->
           if MapSet.member?(state.tmux_sessions, old_name) do
             sessions = state.tmux_sessions |> MapSet.delete(old_name) |> MapSet.put(new_name)
-            %{state | tmux_sessions: sessions}
+
+            launched =
+              case Map.pop(state.launched, old_name) do
+                {nil, launched} -> launched
+                {entry, launched} -> Map.put(launched, new_name, entry)
+              end
+
+            %{state | tmux_sessions: sessions, launched: launched}
           else
             state
           end
@@ -712,24 +883,71 @@ defmodule Shuttle.Test.FeltStoreRunner do
       # a self-heal / conclude write is observable on the next poll.
       command == "shuttle" and match?(["mark-runtime", _id | _], drop_cli_store(args)) ->
         [_mark, id | flags] = drop_cli_store(args)
+        pairs = Enum.chunk_every(flags, 2)
 
         fields =
-          flags
-          |> Enum.chunk_every(2)
-          |> Enum.reduce(%{}, fn
+          Enum.reduce(pairs, %{}, fn
             ["--handed-off-at", ts], acc -> Map.put(acc, "handed_off_at", ts)
             ["--dispatched-at", ts], acc -> Map.put(acc, "dispatched_at", ts)
             ["--session", s], acc -> Map.put(acc, "session_uuid", s)
+            ["--pane", pane], acc -> Map.put(acc, "pane", pane)
             ["--run-id", r], acc -> Map.put(acc, "run_id", r)
             _, acc -> acc
           end)
 
-        if fields != %{}, do: put_shuttle_fields(id, fields)
-        {"", 0}
+        current = get_in(fiber(id) || %{}, ["shuttle", "runtime", "dispatched_at"]) || ""
+
+        case Enum.find(pairs, &match?(["--if-dispatched-at", _], &1)) do
+          ["--if-dispatched-at", expected] when expected != current ->
+            {"mark-runtime: dispatched_at mismatch for #{id}: got #{inspect(current)}, " <>
+               "expected #{inspect(expected)}", 1}
+
+          _ ->
+            if fields != %{}, do: put_shuttle_fields(id, fields)
+            {"", 0}
+        end
 
       true ->
         {"", 0}
     end
+  end
+
+  # The scan's answer: the set result's processes, then each launched pane.
+  defp ps_answer(state) do
+    case Map.get(state, :ps_result, {"", 0}) do
+      {output, 0} ->
+        launched =
+          Enum.map_join(state.launched, fn {_session, %{pid: pid, script: script} = entry} ->
+            child =
+              case Map.get(entry, :child) do
+                nil -> ""
+                child -> "#{pid + 100_000} #{pid} #{child}\n"
+              end
+
+            "#{pid} 1 bash -l #{script}\n" <> child
+          end)
+
+        {output <> launched, 0}
+
+      failure ->
+        failure
+    end
+  end
+
+  defp panes(state) do
+    launched = Map.new(state.launched, fn {session, %{pid: pid}} -> {pid, session} end)
+    Map.merge(launched, Map.get(state, :panes, %{}))
+  end
+
+  # A worker that outlives its kill (`set_worker_linger/1`) keeps its run
+  # script in the scan.
+  defp linger(script) do
+    Agent.update(server(), fn state ->
+      case Map.pop(state, :worker_linger) do
+        {nil, state} -> state
+        {scans, state} -> Map.put(state, :lingering, {script, scans})
+      end
+    end)
   end
 
   defp expand_env(raw),

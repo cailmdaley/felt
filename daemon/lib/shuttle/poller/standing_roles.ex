@@ -18,7 +18,7 @@ defmodule Shuttle.Poller.StandingRoles do
 
   require Logger
 
-  alias Shuttle.{Dispatcher, LifecycleStore, StandingRole}
+  alias Shuttle.{LifecycleStore, StandingRole}
   alias Shuttle.Poller
   alias Shuttle.Poller.State
 
@@ -32,28 +32,25 @@ defmodule Shuttle.Poller.StandingRoles do
   # collapsed into the poll loop).
   #
   # `adopt_orphans` (init) and `reconcile_orphaned_sessions` (per-poll) handle
-  # the *live* analog: a tmux session exists, we just aren't watching it. This
+  # the *live* analog: a worker holds the execution, we just aren't watching it. This
   # pass is the *dead* analog for the kind that must NOT re-fire on its own.
   def reconcile_dead_standing_roles(%State{} = state, candidates, scan) do
     # This pass WRITES to fibers (status:closed/open) on the strength of "no
-    # live session", so it may only act on POSITIVE evidence: `scan` (the
-    # cycle's `Poller.list_shuttle_sessions/1` result) is {:ok, sessions} —
-    # including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
-    # (a wedged `tmux ls`, a timeout) the pass is skipped wholesale —
-    # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
-    # never mass-mark live standing constitutions dead. A truly dead orphan is
-    # simply caught by the next healthy scan.
+    # live worker", so it may only act on POSITIVE evidence: `scan` (the
+    # cycle's `Shuttle.WorkerProcess.scan/1` result) is {:ok, procs}. On
+    # {:error, :unknown} the pass is skipped wholesale — uncertainty counts as
+    # present (see Shuttle.Tmux), and a failed scan must never mass-mark live
+    # standing constitutions dead. A truly dead orphan is simply caught by the
+    # next healthy scan.
     case scan do
-      {:ok, sessions} ->
-        live = MapSet.new(sessions)
-
+      {:ok, procs} ->
         Enum.reduce(candidates, state, fn fiber, acc ->
-          maybe_mark_dead_standing_role(acc, fiber, live)
+          maybe_mark_dead_standing_role(acc, fiber, procs)
         end)
 
       {:error, :unknown} ->
         Logger.warning(
-          "tmux session scan unavailable (unknown state); skipping dead " <>
+          "process scan unavailable (unknown state); skipping dead " <>
             "standing-role reconciliation this tick"
         )
 
@@ -61,7 +58,14 @@ defmodule Shuttle.Poller.StandingRoles do
     end
   end
 
-  defp maybe_mark_dead_standing_role(%State{} = state, fiber, live_sessions) do
+  defp held?(state, fiber, procs) do
+    case Shuttle.Poller.Executions.handle(fiber) do
+      nil -> false
+      handle -> Shuttle.WorkerProcess.find(procs, handle, state.runner) != nil
+    end
+  end
+
+  defp maybe_mark_dead_standing_role(%State{} = state, fiber, procs) do
     fiber_id = Map.get(fiber, "id", "")
     shuttle = Map.get(fiber, "shuttle", %{})
     status = Map.get(fiber, "status", "")
@@ -92,9 +96,10 @@ defmodule Shuttle.Poller.StandingRoles do
       Shuttle.AppWorkers.for_fiber(fiber_id, Map.get(fiber, "uid")) != nil ->
         state
 
-      # A live worker session means the worker is still up —
-      # `reconcile_orphaned_sessions`/`adopt_orphans` will adopt it. Not dead.
-      MapSet.member?(live_sessions, Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))) ->
+      # A process still holding the execution its runtime names means the
+      # worker is still up — `reconcile_orphaned_sessions`/`adopt_orphans`
+      # will adopt it. Not dead.
+      held?(state, fiber, procs) ->
         state
 
       # The marker discriminator: only a role that was actually DISPATCHED but

@@ -12,7 +12,7 @@ defmodule Shuttle.PollerBootTest do
     # Only boot adoption's scan blocks. Every poll cycle's apply runs the same
     # scan on the Poller process, and a block there would wedge the Poller
     # against the test's on_exit stop.
-    def cmd("tmux", ["ls", "-F", _format], _opts) do
+    def cmd("ps", _args, _opts) do
       if Process.put(:boot_scan_blocked, true) do
         {"", 1}
       else

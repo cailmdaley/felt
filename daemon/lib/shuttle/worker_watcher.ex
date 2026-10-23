@@ -2,7 +2,8 @@ defmodule Shuttle.WorkerWatcher do
   @moduledoc """
   Per-worker GenServer that observes a backend's ownership and liveness.
 
-  Terminal workers use tmux liveness; app conversations use their durable
+  A terminal worker is observed by the process holding its execution
+  (`Shuttle.Tmux.worker_status/2`); app conversations use their durable
   ownership record. An idle app conversation remains owned until a handoff or
   explicit stop releases it. The watcher reports confirmed absence to Poller;
   uncertainty never creates a replacement worker.
@@ -25,6 +26,8 @@ defmodule Shuttle.WorkerWatcher do
   Options:
     * `:fiber_id` — required. The fiber being watched.
     * `:session` — required. The terminal session name or durable app worker reference.
+    * `:handle` — the backend handle observed for liveness
+      (`Shuttle.WorkerBackend.handle/1`); defaults to `:session`.
     * `:uid` and `:felt_store` — the captured ownership identity used to recover an unloaded app thread.
     * `:poller` — required. The Poller to notify on exit: its registered name,
       or a pid.
@@ -67,6 +70,7 @@ defmodule Shuttle.WorkerWatcher do
     state = %{
       fiber_id: fiber_id,
       session: session,
+      handle: Keyword.get(opts, :handle, session),
       uid: uid,
       felt_store: felt_store,
       poller: poller,
@@ -157,7 +161,7 @@ defmodule Shuttle.WorkerWatcher do
     end
   end
 
-  defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.session)
+  defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.handle)
 
   defp notify_poller(state, reason) do
     # state.poller is the Poller's registered name (atom) in production —

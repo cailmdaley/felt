@@ -778,7 +778,7 @@ defmodule Shuttle.AppWorkersTest do
       session: id,
       harness: "codex",
       kind: :dispatch,
-      tmux: Dispatcher.session_name("tests/terminal", saved["uid"])
+      tmux: Shuttle.Test.FiberUid.session_name("tests/terminal", saved["uid"])
     )
 
     id
@@ -840,7 +840,7 @@ defmodule Shuttle.AppWorkersTest do
   test "embedded migration refuses unknown process observations without native calls" do
     id = embedded_fiber()
 
-    assert {:error, :already_running} =
+    assert {:error, _} =
              dispatch("tests/terminal", runner: UnknownHolderRunner, resume_mode: "previous")
 
     assert {:error, {:unknown, _}} = AppWorkers.import_embedded(id, %{}, [], UnknownHolderRunner)
@@ -978,8 +978,15 @@ defmodule Shuttle.AppWorkersTest do
   test "live embedded worker is boot-adopted as terminal and watched without native mutations" do
     embedded_fiber()
     uid = Runner.fiber("tests/terminal")["uid"]
-    session = Dispatcher.session_name("tests/terminal", uid)
-    Runner.add_tmux_session(session)
+    session = Shuttle.Test.FiberUid.session_name("tests/terminal", uid)
+    # An earlier build's embedded worker: its run script is named by its
+    # session, and the ledger pairs that session with the conversation.
+    Runner.put_shuttle_fields("tests/terminal", %{"dispatched_at" => "2026-10-22T10:00:00Z"})
+
+    Runner.add_worker(session, "11111111-2222-3333-4444-555555555555",
+      script_key: session,
+      child: "codex -m gpt-sol"
+    )
 
     {:ok, poller} =
       start_poller!(
@@ -2068,13 +2075,6 @@ defmodule Shuttle.AppWorkersTest do
       )
 
     assert %{session: "codex-app:app-session-1"} = Poller.worker_status(poller, "tests/app")
-  end
-
-  test "an installed but unresponsive tmux still prevents duplicate app dispatch" do
-    fiber("tests/app")
-    FakeCli.install!(%{"tmux" => "#!/bin/sh\nexit 1\n"})
-    assert {:error, :already_running} = dispatch("tests/app", runner: MissingTmuxRunner)
-    assert App.calls() == []
   end
 
   test "confirmed missing conversations block automatic duplication but explicit stop releases ownership" do

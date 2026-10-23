@@ -8,9 +8,11 @@ defmodule Shuttle.Continuation do
 
     * `shuttle.runtime.session_uuid` + `shuttle.runtime.dispatched_at`
       (+ `shuttle.runtime.run_id` for standing) — **written by the daemon at
-      dispatch** (`write_dispatch/4`). The daemon holds the session UUID
-      (claude: the `--session-id` it generated; codex/pi: scraped from the
-      JSONL), so nothing is plumbed to the worker.
+      dispatch** (`write_dispatch/4`), before the worker starts: the daemon
+      assigns the conversation UUID the harness is started under
+      (`--session-id`), so nothing is plumbed to the worker. A claim writes
+      the same pair for the fiber it moves a live conversation to, and
+      `shuttle.runtime.pane` when the claimer is known only by its pane.
     * `shuttle.runtime.handed_off_at` — **written by the WORKER at clean exit**
       via `shuttle handoff`, and by a human re-arm: Shuttle's `accept` / `resume`
       in the same write as the status, a force-dispatch
@@ -190,6 +192,52 @@ defmodule Shuttle.Continuation do
     end
   end
 
+  @doc """
+  The live execution a fiber's runtime assigns to it — `%{uuid, pane,
+  generation}` — while its dispatch is unconcluded (no `handed_off_at` at or
+  after `dispatched_at`) and names a conversation or a claimed pane; else
+  `nil`. `generation` is the raw `dispatched_at` stamp, the value a
+  conditional runtime write compares against.
+  """
+  @spec execution(map()) ::
+          %{uuid: String.t() | nil, pane: map() | nil, generation: String.t()} | nil
+  def execution(fiber) do
+    uuid = resumable_session_id(fiber)
+    pane = pane(fiber)
+
+    if (uuid || pane) && not clean_handoff_since_dispatch?(fiber),
+      do: %{uuid: uuid, pane: pane, generation: generation(fiber)}
+  end
+
+  @doc "The raw `shuttle.runtime.dispatched_at` stamp, or `\"\"` when none."
+  @spec generation(map()) :: String.t()
+  def generation(fiber) do
+    case fiber |> shuttle_block() |> runtime_field("dispatched_at") do
+      stamp when is_binary(stamp) -> stamp
+      _ -> ""
+    end
+  end
+
+  @doc """
+  The tmux pane a claim bound, `shuttle.runtime.pane` (`<pid>:<start>`), as
+  `%{"pid" => pid, "start" => start}`, or `nil`.
+  """
+  @spec pane(map()) :: map() | nil
+  def pane(fiber) do
+    with value when is_binary(value) <- fiber |> shuttle_block() |> runtime_field("pane"),
+         [pid, start] when start != "" <- String.split(value, ":", parts: 2),
+         {pid, ""} when pid > 0 <- Integer.parse(pid) do
+      %{"pid" => pid, "start" => start}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc "The runtime encoding of a pane binding."
+  @spec encode_pane(map() | nil) :: String.t()
+  def encode_pane(%{"pid" => pid, "start" => start}), do: "#{pid}:#{start}"
+  def encode_pane(_), do: ""
+
   # Nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
   # no flat fallback (see the moduledoc's "Reading: nested only" section).
   defp runtime_field(shuttle, key) do
@@ -209,10 +257,11 @@ defmodule Shuttle.Continuation do
   resolves it from that store.
 
   `dispatched_at` is set to now (RFC3339 UTC) unless the caller supplied one.
-  `session_uuid` is passed on every dispatch. An unknown fresh UUID clears the
-  predecessor, so no phase or resume identity is borrowed during capture. `run_id` is passed
-  only when present (a plain oneshot omits it), as is `meeting`, the launch id
-  of the meeting a claimed capture scribes.
+  `session_uuid` and `pane` are passed on every dispatch, so an absent value
+  clears the predecessor's. `run_id` is passed only when present (a plain
+  oneshot omits it), as is `meeting`, the launch id of the meeting a claimed
+  capture scribes. `:if_dispatched_at` makes the write conditional on the
+  generation it replaces (`mark_runtime` below).
 
   Best-effort: a non-zero `shuttle` exit is logged, not raised, so it can
   never block dispatch. A missing `felt_store`/`fiber_id` is a no-op (the fiber then
@@ -225,8 +274,10 @@ defmodule Shuttle.Continuation do
     flags =
       [{"--dispatched-at", Map.get(fields, :dispatched_at) || iso_now()}]
       |> Kernel.++([{"--session", Map.get(fields, :session_uuid) || ""}])
+      |> Kernel.++([{"--pane", encode_pane(Map.get(fields, :pane))}])
       |> add_flag("--run-id", Map.get(fields, :run_id))
       |> add_flag("--meeting", Map.get(fields, :meeting))
+      |> if_generation(fields)
 
     mark_runtime(runner, felt_store, fiber_id, flags)
   end
@@ -234,23 +285,32 @@ defmodule Shuttle.Continuation do
   def write_dispatch(_runner, _felt_store, _fiber_id, _fields), do: :ok
 
   @doc """
-  Backfill `shuttle.runtime.session_uuid` into an ALREADY-STAMPED marker,
-  without touching `dispatched_at` (or `run_id`) — the codex/pi path, where
-  `write_dispatch/4` already stamped the dispatch boundary synchronously at
-  launch and the session UUID is only scraped from the harness's JSONL
-  afterward. Shells `shuttle mark-runtime --session <uuid>` with no
+  Rewrite `shuttle.runtime.session_uuid` in an ALREADY-STAMPED marker,
+  without touching `dispatched_at` (or `run_id`) — the conversation a live
+  worker continues as after `/clear` or `/resume`. Shells `shuttle mark-runtime --session <uuid>` with no
   `--dispatched-at` flag; `mark-runtime` only writes fields whose flag is
-  present, so the boundary written at launch is left untouched.
+  present, so the boundary written at launch is left untouched. `:pane`
+  also binds the worker's pane, so the process stays findable when its argv
+  names only the conversation it started as; `:if_dispatched_at` makes the
+  write conditional on its generation.
   """
-  @spec backfill_session_uuid(module(), String.t(), String.t(), String.t()) ::
+  @spec backfill_session_uuid(module(), String.t(), String.t(), String.t(), map()) ::
           :ok | {:error, term()}
-  def backfill_session_uuid(runner, felt_store, fiber_id, uuid)
+  def backfill_session_uuid(runner, felt_store, fiber_id, uuid, fields \\ %{})
+
+  def backfill_session_uuid(runner, felt_store, fiber_id, uuid, fields)
       when is_binary(felt_store) and felt_store != "" and is_binary(fiber_id) and fiber_id != "" and
              is_binary(uuid) do
-    mark_runtime(runner, felt_store, fiber_id, [{"--session", uuid}])
+    flags =
+      case Map.get(fields, :pane) do
+        %{} = pane -> [{"--session", uuid}, {"--pane", encode_pane(pane)}]
+        _ -> [{"--session", uuid}]
+      end
+
+    mark_runtime(runner, felt_store, fiber_id, if_generation(flags, fields))
   end
 
-  def backfill_session_uuid(_runner, _felt_store, _fiber_id, _uuid), do: :ok
+  def backfill_session_uuid(_runner, _felt_store, _fiber_id, _uuid, _fields), do: :ok
 
   @doc """
   Stamp `shuttle.runtime.handed_off_at = now` — the clean-exit / human-re-arm
@@ -259,21 +319,29 @@ defmodule Shuttle.Continuation do
   daemon-side entry point (the `LifecycleStore` conclude after a force-dispatch
   rearm or a self-healed standing constitution, and tests).
   """
-  @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
-  def mark_handed_off(runner, felt_store, fiber_id)
+  @spec mark_handed_off(module(), String.t(), String.t(), map()) :: :ok | {:error, term()}
+  def mark_handed_off(runner, felt_store, fiber_id, fields \\ %{})
+
+  def mark_handed_off(runner, felt_store, fiber_id, fields)
       when is_binary(felt_store) and felt_store != "" and is_binary(fiber_id) and fiber_id != "" do
-    mark_runtime(runner, felt_store, fiber_id, [{"--handed-off-at", iso_now()}])
+    mark_runtime(
+      runner,
+      felt_store,
+      fiber_id,
+      if_generation([{"--handed-off-at", iso_now()}], fields)
+    )
   end
 
-  def mark_handed_off(_runner, _felt_store, _fiber_id), do: :ok
+  def mark_handed_off(_runner, _felt_store, _fiber_id, _fields), do: :ok
 
   # ── internals ────────────────────────────────────────────────────────────────
 
   # Shell `shuttle -C <felt_store> mark-runtime <fiber_id> <flags...>` through
   # the one audited write helper (`Shuttle.CLI`). `flags` is a list of
-  # `{flag, value}` pairs, already filtered to non-empty. Shuttle resolves its
+  # `{flag, value}` pairs; an empty value removes that key. Shuttle resolves its
   # own host from local state, so no `--host` override is passed; see
-  # `Shuttle.CLI`'s moduledoc.
+  # `Shuttle.CLI`'s moduledoc. A conditional write refused because the fiber
+  # moved to another generation is `{:error, :generation_mismatch}`.
   defp mark_runtime(runner, felt_store, fiber_id, flags) do
     args = Enum.flat_map(flags, fn {f, v} -> [f, v] end)
 
@@ -285,9 +353,15 @@ defmodule Shuttle.Continuation do
         :ok
 
       {:command_error, status, output} ->
-        reason = "shuttle mark-runtime exited #{status}: #{String.trim(to_string(output))}"
-        Logger.warning("Continuation: #{reason} (fiber=#{fiber_id}, store=#{felt_store})")
-        {:error, reason}
+        output = String.trim(to_string(output))
+
+        if String.contains?(output, "dispatched_at mismatch") do
+          {:error, :generation_mismatch}
+        else
+          reason = "shuttle mark-runtime exited #{status}: #{output}"
+          Logger.warning("Continuation: #{reason} (fiber=#{fiber_id}, store=#{felt_store})")
+          {:error, reason}
+        end
 
       {:error, reason} ->
         Logger.warning(
@@ -298,6 +372,14 @@ defmodule Shuttle.Continuation do
         {:error, reason}
     end
   end
+
+  # `--if-dispatched-at` when the caller names the generation the write
+  # applies to: Shuttle compares it with the fiber's current `dispatched_at`
+  # under the fiber lock and refuses the write on a mismatch.
+  defp if_generation(flags, %{if_dispatched_at: generation}) when is_binary(generation),
+    do: flags ++ [{"--if-dispatched-at", generation}]
+
+  defp if_generation(flags, _fields), do: flags
 
   # Append a `{flag, value}` pair for an OPTIONAL field: only when the caller
   # supplied a non-nil, non-empty value. Keeps `--session` / `--run-id` off the

@@ -479,6 +479,28 @@ defmodule Shuttle.AppWorkers do
     end
   end
 
+  @doc """
+  Releases thread `id`'s record from the fiber `owner` (its uid, else its
+  id) names, leaving the record active and unowned for the next claim. A
+  record owned by anyone else, or by no one, is left as it is.
+  """
+  def release(id, owner) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      case get(id) do
+        {:ok, record} ->
+          if record["uid"] == owner or record["fiber_id"] == owner,
+            do: put(Map.merge(record, %{"fiber_id" => nil, "uid" => nil, "felt_store" => nil})),
+            else: :ok
+
+        {:error, :not_found} ->
+          :ok
+
+        error ->
+          error
+      end
+    end)
+  end
+
   defp do_claim(id, fiber, store) do
     with {:ok, record} <- get(id),
          :ok <- check_endpoint(record, id),

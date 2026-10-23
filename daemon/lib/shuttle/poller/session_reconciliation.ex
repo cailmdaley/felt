@@ -1,15 +1,21 @@
 defmodule Shuttle.Poller.SessionReconciliation do
   @moduledoc """
-  Orphan adoption / live-session reconciliation for the poller.
+  Adoption of live workers the poller does not track.
 
-  When the daemon restarts, the `*-shuttle` tmux sessions it launched keep
-  running untouched (tmux owns the worker process; Shuttle only owns the
-  watcher). This module re-adopts those live sessions so the daemon resumes
-  supervising them — at boot (`adopt_orphans/1`) and on every poll
-  (`reconcile_orphaned_sessions/3`). Both walk the live `*-shuttle` tmux
-  sessions, map each back to its fiber by its `<leaf>-<uid>-shuttle` name
-  through `candidate_session_lookup/1`, and either start a watcher over the
-  live session, kill a session whose fiber has closed, or skip an unknown one.
+  When the daemon restarts, the workers it launched keep running untouched
+  (tmux owns the worker process; Shuttle only owns the watcher). This module
+  re-adopts them so the daemon resumes supervising them — at boot
+  (`adopt_orphans/1`) and on every poll (`reconcile_orphaned_sessions/3`).
+
+  A terminal worker is adopted by its fiber's assignment, never by a tmux
+  name: each untracked host-owned fiber whose unconcluded runtime names an
+  execution (`Shuttle.Poller.Executions`) is adopted when a process holds that
+  execution, with the holder's current tmux session as its label. A fiber
+  concluded by a claim names nothing, so the worker that claimed it away is
+  never adopted back onto it. An execution two live fibers name is held, not
+  adopted, and reported in the snapshot until it heals. A closed fiber whose
+  execution is still held — a worker that closed its fiber and did not exit —
+  is stamped handed off and its worker stopped.
 
   Functions take the `Shuttle.Poller.State` struct and return updated state;
   the helpers they share with the rest of the poller live in `Shuttle.Poller`.
@@ -17,48 +23,30 @@ defmodule Shuttle.Poller.SessionReconciliation do
 
   require Logger
 
-  alias Shuttle.Dispatcher
-  alias Shuttle.Poller
-  alias Shuttle.Poller.State
+  alias Shuttle.{Poller, WorkerProcess}
+  alias Shuttle.Poller.{Executions, State}
 
-  # Re-adopt every live shuttle tmux session at boot. The daemon was down or
-  # restarting; the workers kept running. Each live session is mapped back to its
-  # fiber and re-watched (or killed if the fiber has since closed).
+  # Re-adopt every live worker at boot. The daemon was down or restarting; the
+  # workers kept running.
   def adopt_orphans(%State{} = state) do
-    state = adopt_app_sessions(state)
-    # An {:error, :unknown} scan (wedged tmux, timeout) means the session list
-    # is UNCERTAIN, not empty — adopting off an empty read would boot the
-    # daemon believing no workers exist. Skip; the per-poll
-    # reconcile_orphaned_sessions adopts them as soon as tmux answers.
-    case Poller.list_shuttle_sessions(state) do
-      {:ok, sessions} ->
-        state = Poller.boot_discover_candidates(state)
-        lookup = candidate_session_lookup(state)
-
-        state =
-          Enum.reduce(sessions, state, fn session, state_acc ->
-            adopt_known_orphan_session(state_acc, lookup, session)
-          end)
-
-        listings_ok? = Enum.all?(state.felt_stores, &Map.has_key?(state.last_full_listings, &1))
-        complete_adoption(state, listings_ok?)
-
-      {:error, :unknown} ->
-        Logger.warning("tmux session scan unavailable (unknown state); skipping boot adoption")
-        state
-    end
+    state = Poller.boot_discover_candidates(state)
+    listings_ok? = Enum.all?(state.felt_stores, &Map.has_key?(state.last_full_listings, &1))
+    reconcile_orphaned_sessions(state, WorkerProcess.scan(state.runner), listings_ok?)
   end
 
-  # Per-poll reconcile: find live tmux sessions that have no watcher and adopt
-  # them. Sessions already covered by a running entry are left alone. `scan` is
-  # the cycle's `Poller.list_shuttle_sessions/1` result; on an :unknown scan
-  # there is nothing safe to reconcile — retry next poll.
+  # Per-poll reconcile: adopt live workers that have no watcher. `scan` is the
+  # cycle's process scan; an unknown scan cannot tell a live worker from a dead
+  # one, so there is nothing safe to reconcile — retry next poll.
   def reconcile_orphaned_sessions(%State{} = state, scan, listings_ok?) do
     state = adopt_app_sessions(state)
 
     case scan do
-      {:ok, sessions} -> state |> adopt_unwatched(sessions) |> complete_adoption(listings_ok?)
-      {:error, :unknown} -> state
+      {:ok, procs} ->
+        state |> adopt_assigned(procs) |> complete_adoption(listings_ok?)
+
+      {:error, :unknown} ->
+        Logger.warning("process scan unavailable; skipping worker adoption this tick")
+        state
     end
   end
 
@@ -74,126 +62,134 @@ defmodule Shuttle.Poller.SessionReconciliation do
     %{state | adopted?: true}
   end
 
-  defp adopt_unwatched(%State{} = state, sessions) do
-    running_sessions = Enum.map(state.running, fn {_, meta} -> meta.session end) |> MapSet.new()
-
-    orphan_sessions = Enum.reject(sessions, &MapSet.member?(running_sessions, &1))
-
-    if orphan_sessions == [] do
+  defp adopt_assigned(%State{} = state, procs) do
+    {state, holds} =
       state
-    else
-      lookup = candidate_session_lookup(state)
-
-      Enum.reduce(orphan_sessions, state, fn session, state_acc ->
-        adopt_known_orphan_session(state_acc, lookup, session)
-      end)
-    end
-  end
-
-  # `session` is the *live* session to adopt. Callers that discovered a live
-  # orphan pass its exact name; the default is the fiber's live worker session,
-  # else its worker name, for callers that only have the fiber identity.
-  def adopt_session(state, fiber_id, session \\ nil) do
-    # Fetch first so the uid for the session name comes straight off the fiber.
-    # The runtime maps key by the fiber's runtime key; felt I/O stays
-    # slug-addressed.
-    case Poller.fetch_fiber_full(fiber_id, state) do
-      {:ok, fiber} ->
-        uid = Map.get(fiber, "uid")
-
-        session =
-          session || Poller.live_session_for_fiber(state, fiber_id, uid) ||
-            Dispatcher.session_name(fiber_id, uid)
-
-        cond do
-          # No uid, so no worker name and nothing to adopt under one.
-          session == nil ->
-            Logger.debug("Skipping adoption for #{fiber_id}: the fiber has no intrinsic id")
-            state
-
-          Map.get(fiber, "status") != "closed" or Shuttle.AppWorkers.app?(session) ->
-            adopt_live_session(state, fiber_id, fiber, uid, session)
-
-          true ->
-            kill_closed_session(state, fiber_id, fiber, session)
+      |> Executions.listed()
+      |> Enum.filter(&(Poller.running_key(state, &1["id"]) == nil))
+      |> Enum.reduce({state, %{}}, fn fiber, {state, holds} ->
+        case Executions.handle(fiber) do
+          nil -> {state, holds}
+          handle -> reconcile_assigned(state, holds, fiber, handle, procs)
         end
+      end)
 
-      {:error, _} ->
-        # Fiber not found — skip, don't kill (could be from another host or test)
-        Logger.debug("Skipping orphan session for unknown fiber: #{inspect(session)}")
-        state
+    %{state | holds: Map.values(holds)}
+  end
+
+  defp reconcile_assigned(state, holds, fiber, handle, procs) do
+    held = WorkerProcess.find(procs, handle, state.runner)
+
+    cond do
+      held == nil or match?({:error, :unknown}, held) ->
+        {state, holds}
+
+      (sharers = Executions.sharers(state, fiber["id"], handle)) != [] ->
+        key = handle.uuid || inspect(handle.pane)
+        {state, Map.put_new(holds, key, hold_row(fiber, handle, sharers))}
+
+      fiber["status"] == "closed" ->
+        {stop_closed(state, fiber, handle), holds}
+
+      true ->
+        {adopt_session(state, fiber["id"], handle, procs), holds}
     end
   end
 
-  defp adopt_live_session(state, fiber_id, fiber, uid, session) do
-    # Label only — Shuttle owns resolution; read its resolved id off the
-    # already-fetched fiber JSON rather than re-resolving.
-    agent_id = Poller.agent_id_from_fiber(fiber)
+  defp hold_row(fiber, handle, sharers) do
+    %{
+      fiber_id: fiber["id"],
+      uid: fiber["uid"],
+      reason:
+        "shared conversation #{handle.uuid || "pane"}: also named by " <>
+          Enum.join(sharers, ", ") <>
+          "; its worker is neither adopted, stopped nor resumed until it exits " <>
+          "or all but one of these fibers hand off"
+    }
+  end
 
-    now = DateTime.utc_now()
+  @doc """
+  Adopts the live worker holding `fiber_id`'s execution, re-reading the fiber
+  first: the adoption stands only if the fresh document still assigns the
+  same execution, no other fiber shares it, and a process holds it. With no
+  handle, the fiber's own execution is looked up (the dispatch path's
+  refuse-and-adopt).
+  """
+  def adopt_session(state, fiber_id, handle \\ nil, procs \\ nil) do
+    with {:ok, fiber} <- Poller.fetch_fiber_full(fiber_id, state),
+         true <- fiber["status"] != "closed",
+         %{} = current <- Executions.handle(fiber),
+         true <- is_nil(handle) or Executions.same?(current, handle),
+         [] <- Executions.sharers(state, fiber_id, current),
+         {:ok, procs} <- if(procs, do: {:ok, procs}, else: WorkerProcess.scan(state.runner)),
+         %{} = holder <- WorkerProcess.find(procs, current, state.runner) do
+      session =
+        Executions.session_of(state.runner, procs, holder) ||
+          Shuttle.Dispatcher.session_name(fiber_id, fiber["uid"], current.uuid || "pane") ||
+          fiber_id
+
+      adopt_live_session(state, fiber_id, fiber, current, session)
+    else
+      _ -> state
+    end
+  end
+
+  defp adopt_live_session(state, fiber_id, fiber, handle, session) do
     runtime_key = Poller.runtime_key_for_fiber(fiber)
 
-    app_record =
-      case Shuttle.AppWorkers.id(session) do
-        nil ->
-          %{}
-
-        id ->
-          case Shuttle.AppWorkers.get(id) do
-            {:ok, record} -> record
-            _ -> %{}
-          end
-      end
-
-    # A re-adopted worker keeps the start it already had: the app record's,
-    # else the fiber's durable dispatch stamp; `now` only when neither exists.
-    started_at =
-      [app_record["started_at"], get_in(fiber, ["shuttle", "runtime", "dispatched_at"])]
-      |> Enum.find_value(now, fn
-        stamp when is_binary(stamp) ->
-          case DateTime.from_iso8601(stamp) do
-            {:ok, timestamp, _} -> timestamp
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end)
+    # A re-adopted worker keeps the start its dispatch stamped; `now` only
+    # when the stamp cannot be read.
+    started_at = parse_time(handle.generation) || DateTime.utc_now()
 
     running_meta = %{
-      state: Map.get(app_record, "launch_state", "running"),
-      launch_error: app_record["last_error"],
+      state: "running",
+      launch_error: nil,
       fiber_id: fiber_id,
       session: session,
-      agent_id: app_record["agent_id"] || agent_id,
+      holder_uuid: handle.uuid,
+      pane: handle.pane,
+      session_uuid: handle.uuid,
+      generation: handle.generation,
+      agent_id: Poller.agent_id_from_fiber(fiber),
       role: get_in(fiber, ["shuttle", "role"]),
-      uid: uid,
-      felt_store:
-        if(Shuttle.AppWorkers.app?(session),
-          do: app_record["felt_store"],
-          else: Poller.owning_store(fiber_id, state)
-        ),
+      uid: Map.get(fiber, "uid"),
+      felt_store: Poller.owning_store(fiber_id, state),
       started_at: started_at,
       last_activity_at: started_at
     }
 
-    # The worker-owned durable receiver survives frontmatter mirror failures.
-    # Restore it before publishing recovery so stale runtime cannot grant a
-    # predecessor even a temporary higher-epoch designation.
-    running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
+    running_meta =
+      Map.put(running_meta, :context_harness, Poller.adopted_harness(state, running_meta, fiber))
 
     case Poller.start_watcher(state, fiber_id, running_meta) do
       {:ok, running_meta} ->
-        Logger.info("Adopted orphan session: #{session}")
+        Logger.info("Adopted live worker #{session} (#{handle.uuid || "pane"}) for #{fiber_id}")
 
-        Poller.put_running(state, runtime_key, running_meta)
+        state
+        |> Poller.put_running(runtime_key, running_meta)
         |> Poller.note_running(runtime_key)
-        |> Poller.acquire_worker_identity(fiber_id, fiber)
 
       {:error, reason} ->
-        Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")
+        Logger.warning("Failed to adopt #{fiber_id}'s worker #{session}: #{inspect(reason)}")
         state
     end
+  end
+
+  # A live worker whose fiber is closed: the worker's deliberate exit (closed
+  # implies handoff), so stamp the clean-exit marker on its generation before
+  # stopping it.
+  defp stop_closed(state, fiber, handle) do
+    Logger.info("Stopping the live worker of closed fiber #{fiber["id"]}")
+
+    Shuttle.Continuation.mark_handed_off(
+      state.runner,
+      Poller.owning_store(fiber["id"], state),
+      fiber["id"],
+      %{if_dispatched_at: handle.generation}
+    )
+
+    _ = Shuttle.WorkerBackend.stop(state.runner, Map.take(handle, [:session, :uuid, :pane]))
+    state
   end
 
   defp adopt_app_sessions(state) do
@@ -212,7 +208,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
           {:ok, fiber} ->
             if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
                  Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
-              adopt_session(acc, fiber["id"], Shuttle.AppWorkers.ref(record["session_uuid"]))
+              adopt_app_session(acc, fiber, record)
             else
               acc
             end
@@ -226,98 +222,49 @@ defmodule Shuttle.Poller.SessionReconciliation do
     end)
   end
 
-  # Maps each candidate's worker session name (`<leaf>-<uid>-shuttle`) back to
-  # its fiber, so orphan adoption recognizes the workers it launched. A uid is
-  # unique to one fiber, so a name claimed by two fibers means a duplicated id
-  # (a copied file): it resolves to `:ambiguous` and is skipped rather than
-  # mis-adopted. A candidate without a uid has no worker name and no entry.
-  defp candidate_session_lookup(%State{} = state) do
-    state.last_known_listings
-    |> Map.values()
-    |> List.flatten()
-    |> Enum.reduce(%{}, fn fiber, acc ->
-      fiber_id = Map.get(fiber, "id")
+  defp adopt_app_session(state, fiber, record) do
+    fiber_id = fiber["id"]
+    session = Shuttle.AppWorkers.ref(record["session_uuid"])
+    runtime_key = Poller.runtime_key_for_fiber(fiber)
 
-      session =
-        if is_binary(fiber_id) and fiber_id != "",
-          do: Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
+    started_at =
+      parse_time(record["started_at"]) ||
+        parse_time(get_in(fiber, ["shuttle", "runtime", "dispatched_at"])) ||
+        DateTime.utc_now()
 
-      if session do
-        bucket = if(Map.get(fiber, "status") == "closed", do: :closed, else: :open)
+    running_meta = %{
+      state: Map.get(record, "launch_state", "running"),
+      launch_error: record["last_error"],
+      fiber_id: fiber_id,
+      session: session,
+      agent_id: record["agent_id"] || Poller.agent_id_from_fiber(fiber),
+      role: get_in(fiber, ["shuttle", "role"]),
+      uid: Map.get(fiber, "uid"),
+      felt_store: record["felt_store"],
+      started_at: started_at,
+      last_activity_at: started_at
+    }
 
-        # Record fiber_id in `bucket` of the session's grouped sets. `Map.update/4`
-        # inserts the default VERBATIM when the key is absent — the function is NOT
-        # applied to it — so the default must already carry fiber_id. Without this,
-        # a session name seen exactly once (every name is unique to one fiber) keeps
-        # empty sets, resolves to nil below, and the live worker is never adopted —
-        # the daemon-restart-drops-all-adoptions bug.
-        add_to_bucket = fn grouped ->
-          Map.update!(grouped, bucket, &MapSet.put(&1, fiber_id))
-        end
-
-        singleton = add_to_bucket.(%{open: MapSet.new(), closed: MapSet.new()})
-        Map.update(acc, session, singleton, add_to_bucket)
-      else
-        acc
-      end
-    end)
-    |> Enum.into(%{}, fn {session, grouped} ->
-      open_ids = Map.get(grouped, :open, MapSet.new()) |> MapSet.to_list()
-      closed_ids = Map.get(grouped, :closed, MapSet.new()) |> MapSet.to_list()
-
-      value =
-        cond do
-          length(open_ids) == 1 -> {:adopt, hd(open_ids)}
-          length(open_ids) > 1 -> :ambiguous
-          length(closed_ids) == 1 -> {:kill_closed, hd(closed_ids)}
-          length(closed_ids) > 1 -> :ambiguous
-          true -> nil
-        end
-
-      {session, value}
-    end)
-    |> Enum.reject(fn {_session, value} -> is_nil(value) end)
-    |> Map.new()
-  end
-
-  defp adopt_known_orphan_session(%State{} = state, lookup, session) do
-    case Map.get(lookup, session) do
-      {:adopt, fiber_id} ->
-        if Poller.running_key(state, fiber_id) != nil do
-          state
-        else
-          adopt_session(state, fiber_id, session)
-        end
-
-      {:kill_closed, fiber_id} ->
-        fiber =
-          case Poller.fetch_fiber_full(fiber_id, state) do
-            {:ok, fiber} -> fiber
-            {:error, _} -> nil
-          end
-
-        kill_closed_session(state, fiber_id, fiber, session)
-
-      :ambiguous ->
-        Logger.warning(
-          "Skipping orphan session whose name two fibers share (a duplicated id): #{session}"
-        )
+    case Poller.start_watcher(state, fiber_id, running_meta) do
+      {:ok, running_meta} ->
+        Logger.info("Adopted app conversation: #{session}")
 
         state
+        |> Poller.put_running(runtime_key, running_meta)
+        |> Poller.note_running(runtime_key)
 
-      nil ->
-        Logger.debug("Skipping orphan session with no matching fiber: #{session}")
+      {:error, reason} ->
+        Logger.warning("Failed to adopt app conversation #{session}: #{inspect(reason)}")
         state
     end
   end
 
-  # A live session whose fiber is closed: the worker's deliberate exit (closed
-  # implies handoff), so stamp the clean-exit marker (when the fiber could be
-  # read) before killing the stale session.
-  defp kill_closed_session(%State{} = state, fiber_id, fiber, session) do
-    if fiber, do: Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-    Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
-    _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
-    state
+  defp parse_time(stamp) when is_binary(stamp) do
+    case DateTime.from_iso8601(stamp) do
+      {:ok, timestamp, _} -> timestamp
+      _ -> nil
+    end
   end
+
+  defp parse_time(_), do: nil
 end

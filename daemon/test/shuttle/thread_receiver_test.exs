@@ -1,20 +1,35 @@
 defmodule Shuttle.ThreadReceiverTest do
   use ExUnit.Case, async: true
-  alias Shuttle.{CLI, Delivery, Dispatcher, FiberDocuments, Poller, Test.Env}
+  alias Shuttle.{CLI, Delivery, FiberDocuments, Poller, Test.Env, WorkerProcess}
   import Shuttle.Test.PollerHelpers
   @moduletag :tmp_dir
   @moduletag skip: is_nil(System.find_executable("tmux"))
 
   defmodule IsolatedRunner do
     @behaviour Shuttle.Runner
-    # The private tmux server is the test's entire worker world, including
-    # process-scan fallback. Never discover workers in the operator's server.
-    def cmd("ps", _args, _opts), do: {"", 0}
+    # The private tmux server is the test's entire worker world: the process
+    # scan sees only what runs under it, never the operator's workers.
+    def cmd("ps", args, opts) do
+      if Shuttle.Env.app(:receiver_scan_unknown, false) do
+        {"scan unavailable", :timeout}
+      else
+        {output, 0} = Shuttle.Runner.Default.cmd("ps", args, opts)
+        socket = Shuttle.Env.app(:receiver_socket)
+        procs = WorkerProcess.parse(output)
+        by_pid = Map.new(procs, &{&1.pid, &1})
+        servers = for p <- procs, String.contains?(p.args, socket), into: MapSet.new(), do: p.pid
 
-    def cmd("tmux", ["ls" | _] = args, opts) do
-      if Shuttle.Env.app(:receiver_scan_unknown, false),
-        do: {"scan unavailable", :timeout},
-        else: Shuttle.Runner.Default.cmd("tmux", args, opts)
+        under? = fn proc ->
+          Stream.unfold(proc, fn
+            nil -> nil
+            p -> {p, Map.get(by_pid, p.ppid)}
+          end)
+          |> Enum.take(32)
+          |> Enum.any?(&MapSet.member?(servers, &1.ppid))
+        end
+
+        {procs |> Enum.filter(under?) |> Enum.map_join(&"#{&1.pid} #{&1.ppid} #{&1.args}\n"), 0}
+      end
     end
 
     def cmd("shuttle", args, opts) do
@@ -55,6 +70,7 @@ defmodule Shuttle.ThreadReceiverTest do
     Env.put_app_env(:felt_runner, IsolatedRunner)
     tmux = Shuttle.Env.find_executable("tmux")
     socket = Path.join(System.tmp_dir!(), "receiver-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:receiver_socket, socket)
 
     File.write!(
       Path.join(bin, "tmux"),
@@ -89,7 +105,34 @@ defmodule Shuttle.ThreadReceiverTest do
      store: dir,
      data: data,
      key: dir <> ":" <> uid,
-     canonical: Dispatcher.session_name("hub", uid)}
+     canonical: Shuttle.Test.FiberUid.session_name("hub", uid)}
+  end
+
+  # An unconcluded dispatch of conversation `uuid` whose worker is the
+  # process of tmux session `session`'s pane.
+  defp assign_pane!(store, session, uuid) do
+    {out, 0} =
+      IsolatedRunner.cmd(
+        "tmux",
+        ["display-message", "-p", "-t", "=" <> session <> ":", "\#{pane_pid}"],
+        []
+      )
+
+    pid = String.trim(out)
+    assert {:ok, identity} = CLI.run(["process-identity", pid])
+    start = Jason.decode!(identity)["start"]
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "mark-runtime",
+               "hub",
+               "--dispatched-at",
+               DateTime.to_iso8601(DateTime.utc_now()),
+               "--session",
+               uuid || "",
+               "--pane",
+               "#{pid}:#{start}"
+             ])
   end
 
   for predecessor <- [nil, "A"] do
@@ -118,7 +161,8 @@ defmodule Shuttle.ThreadReceiverTest do
       assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
       authority = authority!(data)
       assert authority["ID"] == "B"
-      assert authority["identity"] == context.canonical <> ":B"
+      # The claimer keeps its session name; names never change.
+      assert authority["identity"] == "capture-B:B"
       assert :sys.get_state(poller).poll_cycles == cycles
       # No poll, restart or flush may be needed to revoke A.
       refute hook!(store, "A") =~ "Only B can read this"
@@ -138,7 +182,7 @@ defmodule Shuttle.ThreadReceiverTest do
     end
   end
 
-  test "successful claim recovers durable B after runtime persistence fails, then repairs its mirror",
+  test "a claim whose runtime write fails grants nothing, and its retry claims B durably",
        context do
     %{store: store, data: data, key: key} = context
     assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
@@ -146,16 +190,18 @@ defmodule Shuttle.ThreadReceiverTest do
     poller = start_poller_for!(store)
     await_boot_cycle!(poller)
     seed_receiver!(store, key, "old-worker:A", "A")
+    seeded = authority!(data)
     Env.put_app_env(:receiver_runtime_write_fails, true)
-    assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
-    assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
-    committed = authority!(data)
-    assert committed["ID"] == "B"
-    state = :sys.get_state(poller)
-    worker = state.running[Poller.running_key(state, "hub")]
-    assert worker.identity_error =~ "injected runtime write failure"
+    assert {:error, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
+    assert Poller.live_worker(poller, "hub") == nil
+    assert authority!(data) == seeded
     assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
     assert get_in(Jason.decode!(json), ["shuttle", "runtime", "session_uuid"]) == "A"
+
+    Env.put_app_env(:receiver_runtime_write_fails, false)
+    assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
+    committed = authority!(data)
+    assert committed["ID"] == "B"
 
     assert {:ok, _} =
              CLI.run(["context-mailbox", "put", key, "persist-result", "Durable B context"])
@@ -164,20 +210,11 @@ defmodule Shuttle.ThreadReceiverTest do
     GenServer.stop(poller)
     poller = start_poller_for!(store)
     await_boot_cycle!(poller)
-    assert %{session_uuid: "B"} = Poller.live_worker(poller, "hub")
-    assert authority!(data) == committed
+    # Restart adopts B by its runtime: the claimer's pane still holds it.
+    assert %{session: "capture-B", session_uuid: "B"} = Poller.live_worker(poller, "hub")
+    assert authority!(data)["ID"] == "B"
     refute hook!(store, "A") =~ "Durable B context"
     assert [_] = pending(data)
-    # Recovery remains B through repeated failed mirror writes.
-    cycle!(poller)
-    assert authority!(data) == committed
-    Env.put_app_env(:receiver_runtime_write_fails, false)
-    cycle!(poller)
-    assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
-    assert get_in(Jason.decode!(json), ["shuttle", "runtime", "session_uuid"]) == "B"
-    assert authority!(data) == committed
-    state = :sys.get_state(poller)
-    refute Map.has_key?(state.running[Poller.running_key(state, "hub")], :identity_error)
     hook!(store, "B")
     assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
     assert {:ok, _} = Delivery.flush_context(parent)
@@ -201,8 +238,11 @@ defmodule Shuttle.ThreadReceiverTest do
     committed = authority!(data)
     poller = start_poller_for!(store)
     await_boot_cycle!(poller)
-    assert %{session_uuid: nil} = Poller.live_worker(poller, "hub")
-    assert authority!(data) == committed
+    # A live session under the fiber's name is not its worker: no unconcluded
+    # dispatch names one.
+    assert Poller.live_worker(poller, "hub") == nil
+    assert authority!(data)["ID"] in [nil, ""]
+    assert authority!(data)["generation"] >= committed["generation"]
 
     assert {:ok, _} =
              CLI.run([
@@ -220,9 +260,9 @@ defmodule Shuttle.ThreadReceiverTest do
 
   for uuid <- ["B", nil] do
     @tag receiver_uuid: uuid
-    test "unresolved agent recovery preserves durable receiver #{inspect(uuid)} without runtime A fallback",
+    test "an agent that stops resolving keeps the claimed receiver #{inspect(uuid)}",
          context do
-      %{store: store, data: data, key: key, canonical: canonical, receiver_uuid: uuid} = context
+      %{store: store, data: data, key: key, receiver_uuid: uuid} = context
       registry = Path.join(store, "agents.json")
 
       manifest = %{
@@ -243,8 +283,6 @@ defmodule Shuttle.ThreadReceiverTest do
       await_boot_cycle!(poller)
       assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: uuid)
       committed = authority!(data)
-      # A stale mirror must not become a fallback when registry resolution vanishes.
-      assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
       File.write!(registry, Jason.encode!(%{manifest | agents: []}))
       assert {:ok, json} = CLI.run_in_store(store, ["show", "hub", "--json"])
       unresolved = Jason.decode!(json)
@@ -253,24 +291,20 @@ defmodule Shuttle.ThreadReceiverTest do
       cycle!(poller)
       assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
       assert authority!(data) == committed
-      # Retain stale A across restart too, not just the healthy mirror repaired above.
-      assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
       drain_results!(poller)
       GenServer.stop(poller)
       poller = start_poller_for!(store)
       await_boot_cycle!(poller)
       assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
-      assert authority!(data) == committed
       assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
       assert get_in(entry.fiber, ["shuttle", "resolved", "agent"]) == nil
-      assert get_in(entry.fiber, ["shuttle", "agent"]) == "receiver-custom"
 
       assert {:ok, _} =
                CLI.run(["context-mailbox", "put", key, "unresolved-result", "Never authorize A"])
 
       refute hook!(store, "A") =~ "Never authorize A"
       assert [_] = pending(data)
-      # Polling, mirror repair, the snapshot and delivery must all tolerate the missing agent.
+      # Polling, the snapshot and delivery must all tolerate the missing agent.
       cycle!(poller)
       assert is_map(Poller.snapshot(poller))
 
@@ -279,7 +313,6 @@ defmodule Shuttle.ThreadReceiverTest do
       if uuid, do: hook!(store, uuid)
       assert {:ok, _} = Delivery.flush_context(entry)
       assert Process.alive?(poller)
-      assert authority!(data) == committed
       refute hook!(store, "A") =~ "Never authorize A"
 
       if uuid do
@@ -289,34 +322,13 @@ defmodule Shuttle.ThreadReceiverTest do
         assert [_] = pending(data)
       end
 
-      # The other absent shapes of the optional resolved view obey the same contract.
-      state = :sys.get_state(poller)
-      worker = state.running[Poller.running_key(state, "hub")]
-
-      for resolved <- [
-            nil,
-            %{},
-            %{"agent" => nil},
-            %{"agent" => %{}},
-            %{"agent" => %{"cli" => nil}}
-          ] do
-        fiber = put_in(unresolved, ["shuttle", "resolved"], resolved)
-        recovered = Poller.recover_context_receiver(state, worker, fiber)
-        assert recovered.session_uuid == uuid
-        Poller.put_running(state, Poller.running_key(state, "hub"), recovered)
-        assert authority!(data) == committed
-      end
-
       File.write!(registry, Jason.encode!(manifest))
       cycle!(poller)
       assert %{session_uuid: ^uuid, cli: "claude"} = Poller.live_worker(poller, "hub")
-      assert authority!(data) == committed
 
       if uuid == nil do
-        assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
-      end
-
-      if uuid == nil do
+        # The same claimer names its conversation in a retry.
+        assert {:ok, _} = Poller.claim_session(poller, "hub", "capture-B", session_uuid: "B")
         hook!(store, "B")
 
         assert {:ok, %{fibers: [parent]}} =
@@ -337,9 +349,10 @@ defmodule Shuttle.ThreadReceiverTest do
          context do
       %{store: store, data: data, key: key, live?: live?, canonical: canonical} = context
       assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
+      start_tmux!(if live?, do: canonical, else: "anchor")
+      if live?, do: assign_pane!(store, canonical, "A")
       seed_receiver!(store, key, canonical <> ":A", "A")
       initial = authority!(data)
-      start_tmux!(if live?, do: canonical, else: "anchor")
       Env.put_app_env(:receiver_scan_unknown, true)
       poller = start_poller_for!(store)
       await_boot_cycle!(poller)
@@ -361,7 +374,7 @@ defmodule Shuttle.ThreadReceiverTest do
 
       if live? do
         assert %{session_uuid: "A"} = Poller.live_worker(poller, "hub")
-        assert authority!(data) == initial
+        assert authority!(data)["ID"] == "A"
         assert hook!(store, "A") =~ "Recovery context"
         assert pending(data) == []
       else
@@ -383,9 +396,9 @@ defmodule Shuttle.ThreadReceiverTest do
   test "a corrupt receiver record fails closed for its fiber without crashing the Poller",
        context do
     %{store: store, data: data, key: key, canonical: canonical} = context
-    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
     hook!(store, "A")
     start_tmux!(canonical)
+    assign_pane!(store, canonical, "A")
     root = Path.join([data, "mailboxes", "fiber", mailbox_key(key)])
     File.mkdir_p!(root)
     File.write!(Path.join(root, "destination.json"), "{corrupt")
@@ -405,9 +418,9 @@ defmodule Shuttle.ThreadReceiverTest do
     state = :sys.get_state(poller)
     worker = state.running[Poller.running_key(state, "hub")]
     assert worker.session == canonical
+    # An unreadable receiver record grants nothing: no epoch, so nothing is
+    # delivered to the worker until a later transition commits one.
     assert worker.context_epoch == nil
-    # Unknown authority never falls back to the frontmatter predecessor.
-    assert %{session_uuid: nil} = Poller.live_worker(poller, "hub")
     assert {:ok, _} = CLI.run(["context-mailbox", "put", key, "corrupt-result", "Hold for B"])
     assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
     assert {:error, :authority_unknown} = Delivery.flush_context(parent)
@@ -435,74 +448,15 @@ defmodule Shuttle.ThreadReceiverTest do
     drain_results!(poller)
   end
 
-  test "a restart between the claim rename and its publish recovers the successor, never A",
-       context do
-    %{store: store, data: data, key: key, canonical: canonical} = context
-    # Predecessor A held authority in the canonical session, exited, and was
-    # revoked; its runtime mirror still names A.
-    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
-    seed_receiver!(store, key, canonical <> ":A", "A")
-    assert {:ok, _} = CLI.run(["context-mailbox", "receiver", key, "", "-"])
-    revoked = authority!(data)
-    # Claim of B renamed its session to the canonical name, then the daemon
-    # died before put_running published B.
-    start_tmux!(canonical)
-    poller = start_poller_for!(store)
-    await_boot_cycle!(poller)
-    assert %{session: ^canonical, session_uuid: nil} = Poller.live_worker(poller, "hub")
-    recovered = authority!(data)
-    assert recovered["identity"] == canonical <> ":-"
-    assert recovered["ID"] in [nil, ""]
-    assert recovered["generation"] > revoked["generation"]
-
-    assert {:ok, _} =
-             CLI.run(["context-mailbox", "put", key, "window-result", "Successor only"])
-
-    cycle!(poller)
-    refute hook!(store, "A") =~ "Successor only"
-    assert [_] = pending(data)
-    # The retried claim completes the successor's lineage.
-    assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
-    assert authority!(data)["ID"] == "B"
-    hook!(store, "B")
-    assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
-    assert {:ok, _} = Delivery.flush_context(parent)
-    assert hook!(store, "B") =~ "Successor only"
-    refute hook!(store, "A") =~ "Successor only"
-    drain_results!(poller)
-  end
-
   test "adoption keeps the dispatched successor over a surviving predecessor receiver record",
        context do
     %{store: store, data: data, key: key, canonical: canonical} = context
-    # Predecessor A held authority in the canonical session and handed off.
-    # The dispatch of B under the same worker name recorded B in the runtime
-    # mirror, but B's receiver publish failed, so the durable record still
-    # names A.
+    # Predecessor A held authority and handed off. The dispatch of B named B
+    # in the runtime before it launched, but B's receiver publish failed, so
+    # the durable record still names A. The runtime is the assignment.
     seed_receiver!(store, key, canonical <> ":A", "A")
-    assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "B"])
-    now = System.system_time(:millisecond)
-
-    binding =
-      [{"A", 1, now - 60_000}, {"B", 2, now - 1_000}]
-      |> Enum.map(fn {id, pid, at} ->
-        %{
-          "sessionId" => id,
-          "type" => "session_start",
-          "timestamp" => at,
-          "harness" => "claude-code",
-          "receiverPid" => pid,
-          "receiverBirth" => "birth-#{pid}",
-          "tmuxSession" => canonical
-        }
-      end)
-      |> Enum.reduce(
-        Shuttle.SessionBinding.new(),
-        &Shuttle.SessionBinding.apply_event(&2, &1, now)
-      )
-
-    Env.put_app_env(:session_bindings_source, fn -> binding end)
     start_tmux!(canonical)
+    assign_pane!(store, canonical, "B")
     poller = start_poller_for!(store)
     await_boot_cycle!(poller)
     cycle!(poller)

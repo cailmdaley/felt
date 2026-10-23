@@ -7,23 +7,23 @@ defmodule Shuttle.SessionBinding do
   predecessor; hooks from known receivers cannot transfer ownership or switch
   the current session. Missing receiver metadata preserves direct UUID joins.
   Evidence survives session ends and is retained for 48 hours of activity.
-
-  Each session start also records the tmux session it started in, so a
-  worker name reused across a handoff can tell its successor from its
-  predecessor by which of them started there last (`started_in/3`).
   """
 
   @max_age_ms 48 * 60 * 60 * 1000
 
-  def new, do: %{members: %{}, processes: %{}, launches: %{}}
+  def new, do: %{members: %{}, processes: %{}}
+
+  @doc "This host's observed bindings (`Shuttle.EventStream`), or a configured test source."
+  def observed do
+    case Shuttle.Env.app(:session_bindings_source) do
+      fun when is_function(fun, 0) -> fun.()
+      _ -> Shuttle.EventStream.session_bindings()
+    end
+  end
 
   def valid_id?(id), do: is_binary(id) and id not in ["", "unknown"]
 
   def apply_event(state, event, now) do
-    state |> note_launch(event, now) |> apply_receiver_event(event, now)
-  end
-
-  defp apply_receiver_event(state, event, now) do
     id = event["sessionId"]
     pid = event["receiverPid"]
     birth = event["receiverBirth"]
@@ -130,39 +130,10 @@ defmodule Shuttle.SessionBinding do
     end
   end
 
-  @doc """
-  When `id` last started inside tmux session `tmux`, in epoch ms, or nil
-  when the retained evidence shows no such start.
-  """
-  def started_in(state, id, tmux) do
-    case Map.get(Map.get(state, :launches, %{}), id) do
-      %{tmux: ^tmux, at: at} -> at
-      _ -> nil
-    end
-  end
-
   def prune(state, now) do
-    processes = Map.reject(state.processes, fn {_key, p} -> p.at < now - @max_age_ms end)
-
-    launches =
-      Map.reject(Map.get(state, :launches, %{}), fn {_id, l} -> l.at < now - @max_age_ms end)
-
-    processes |> rebuild() |> Map.put(:launches, launches)
-  end
-
-  defp note_launch(state, event, now) do
-    id = event["sessionId"]
-    tmux = event["tmuxSession"]
-    at = event["timestamp"]
-    launches = Map.get(state, :launches, %{})
-
-    if event["type"] == "session_start" and valid_id?(id) and is_binary(tmux) and tmux != "" and
-         is_integer(at) and at >= now - @max_age_ms and
-         not match?(%{at: seen} when seen > at, Map.get(launches, id)) do
-      Map.put(state, :launches, Map.put(launches, id, %{tmux: tmux, at: at}))
-    else
-      Map.put(state, :launches, launches)
-    end
+    state.processes
+    |> Map.reject(fn {_key, p} -> p.at < now - @max_age_ms end)
+    |> rebuild()
   end
 
   defp put(state, key, id, at, members) do

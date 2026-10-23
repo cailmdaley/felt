@@ -53,14 +53,14 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     def start_link(_ \\ []) do
       Agent.start_link(
-        fn -> %{felt_store: "", commands: [], tmux_sessions: MapSet.new()} end,
+        fn -> %{felt_store: "", commands: [], tmux_sessions: MapSet.new(), launched: %{}} end,
         name: __MODULE__
       )
     end
 
     def reset(felt_store) do
       Agent.update(__MODULE__, fn _ ->
-        %{felt_store: felt_store, commands: [], tmux_sessions: MapSet.new()}
+        %{felt_store: felt_store, commands: [], tmux_sessions: MapSet.new(), launched: %{}}
       end)
     end
 
@@ -69,13 +69,21 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     def remove_tmux_session(session),
       do:
-        Agent.update(__MODULE__, &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+        Agent.update(
+          __MODULE__,
+          &%{
+            &1
+            | tmux_sessions: MapSet.delete(&1.tmux_sessions, session),
+              launched: Map.delete(&1.launched, session)
+          }
+        )
 
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
 
     # The process scan's answers, in order; the last one repeats. Defaults to
-    # no processes.
+    # no processes besides each launched session's run script, which runs
+    # while its session lives.
     def set_ps_results(results) when is_list(results) and results != [],
       do: Agent.update(__MODULE__, &Map.put(&1, :ps_results, results))
 
@@ -121,7 +129,8 @@ defmodule Shuttle.DispatchIntegrationTest do
         %{
           s
           | commands: s.commands ++ [{"tmux", args}],
-            tmux_sessions: MapSet.put(s.tmux_sessions, session)
+            tmux_sessions: MapSet.put(s.tmux_sessions, session),
+            launched: Map.put(s.launched, session, List.last(args))
         }
       end)
 
@@ -132,9 +141,20 @@ defmodule Shuttle.DispatchIntegrationTest do
       Agent.get_and_update(__MODULE__, fn s ->
         s = %{s | commands: s.commands ++ [{"ps", args}]}
 
-        case Map.get(s, :ps_results, [{"", 0}]) do
-          [last] -> {last, s}
-          [next | rest] -> {next, Map.put(s, :ps_results, rest)}
+        {answer, s} =
+          case Map.get(s, :ps_results, [{"", 0}]) do
+            [last] -> {last, s}
+            [next | rest] -> {next, Map.put(s, :ps_results, rest)}
+          end
+
+        launched =
+          s.launched
+          |> Enum.with_index(7000)
+          |> Enum.map_join(fn {{_session, script}, pid} -> "#{pid} 1 bash -l #{script}\n" end)
+
+        case answer do
+          {output, 0} -> {{output <> launched, 0}, s}
+          failure -> {failure, s}
         end
       end)
     end
@@ -282,11 +302,13 @@ defmodule Shuttle.DispatchIntegrationTest do
     A fresh oneshot fiber.
     """)
 
-    assert {:ok, FiberUid.session("tests/fresh-oneshot")} ==
+    assert {:ok, session} =
              Dispatcher.dispatch("tests/fresh-oneshot",
                runner: IntegrationRunner,
                felt_store: host
              )
+
+    assert session =~ ~r/^fresh-oneshot-[0-9a-f]{8}-[0-9A-Z]{26}-shuttle$/
 
     script = read_run_script()
 
@@ -312,7 +334,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert ledger["fiber"] == "tests/fresh-oneshot"
     assert ledger["kind"] == "dispatch"
     assert ledger["harness"] == "claude-code"
-    assert ledger["tmux"] == FiberUid.session("tests/fresh-oneshot")
+    assert ledger["tmux"] == session
     assert ledger["host"] == Shuttle.Poller.own_host_id()
     assert is_integer(ledger["at"])
     # The session UUID the dispatch generated, echoed into the run script.
@@ -345,7 +367,8 @@ defmodule Shuttle.DispatchIntegrationTest do
     refute Enum.any?(IntegrationRunner.commands(), fn {cmd, _} -> cmd == "tmux" end)
   end
 
-  # Already-running fiber is refused when its tmux session exists.
+  # A fiber is refused as already running while a process holds the
+  # conversation its unconcluded dispatch names.
   test "already-running fiber is refused with :already_running", %{host: host} do
     write_fiber(host, "tests/running-fiber", """
     ---
@@ -361,8 +384,11 @@ defmodule Shuttle.DispatchIntegrationTest do
     A running fiber.
     """)
 
-    # Pre-seed the tmux session to simulate a live worker.
-    IntegrationRunner.add_tmux_session(FiberUid.session("tests/running-fiber"))
+    write_dispatch_marker(host, "tests/running-fiber", "c1a0e5e0-0000-4000-8000-0000000000aa")
+
+    IntegrationRunner.set_ps_results([
+      {"8699 1 claude --resume c1a0e5e0-0000-4000-8000-0000000000aa\n", 0}
+    ])
 
     assert {:error, :already_running} =
              Dispatcher.dispatch("tests/running-fiber",
@@ -567,7 +593,13 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert ledger["fiber"] == "tests/kanban-resume"
     assert ledger["session"] == "kanban-session-uuid-5678"
     assert ledger["harness"] == "claude-code"
-    assert ledger["tmux"] == FiberUid.session("tests/kanban-resume")
+
+    assert ledger["tmux"] ==
+             Dispatcher.session_name(
+               "tests/kanban-resume",
+               FiberUid.for("tests/kanban-resume"),
+               "kanban-session-uuid-5678"
+             )
 
     # Claude's resume warning dismiss block is present.
     assert script =~ "send-keys"
@@ -644,7 +676,10 @@ defmodule Shuttle.DispatchIntegrationTest do
       A fiber whose worker kept running after its tmux socket was deleted.
       """)
 
+      # The dispatch that named the session is concluded (a claim moved it
+      # to another fiber), so no worker of this fiber holds it.
       write_dispatch_marker(host, "tests/held", "held-session-uuid-0002")
+      :ok = Shuttle.Continuation.mark_handed_off(IntegrationRunner, host, "tests/held")
       :ok
     end
 
@@ -676,9 +711,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     test "is refused when the scan cannot run", %{host: host} do
-      # First scan: the already-running check (tmux: "can't find session")
-      # finds no run script. Second: the transcript check cannot run.
-      IntegrationRunner.set_ps_results([{"", 0}, {"ps: boom", 1}])
+      IntegrationRunner.set_ps_results([{"ps: boom", 1}])
 
       assert {:error, {:transcript_held, message}} = resume_held(host)
       assert message =~ "could not check"

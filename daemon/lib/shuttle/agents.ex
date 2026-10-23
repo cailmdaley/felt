@@ -112,12 +112,11 @@ defmodule Shuttle.Agents do
 
   ## Options
 
-    * `:session_id` — for Claude agents only: pre-specifies the session UUID via
-      `--session-id <uuid>`. Ignored for other harnesses. Allows the Shuttle
-      daemon to know the session UUID before the worker runs, so it can stamp it
-      into the fiber's `shuttle:` block at dispatch (`shuttle.session_uuid`, the
-      durable resume handle read by `Shuttle.Continuation`) rather than via
-      post-hoc capture.
+    * `:session_id` — pre-specifies the conversation UUID via `--session-id
+      <uuid>` for Claude and Pi (Pi 0.84 and later create the session under
+      it when it is missing). Ignored for other harnesses. The daemon knows
+      the UUID before the worker runs, so it names it in the fiber's
+      `shuttle.runtime` before launch and finds the worker by it afterwards.
   """
   @spec build_command(agent_record(), String.t(), keyword()) :: String.t()
   def build_command(agent, prompt, opts \\ []) do
@@ -125,18 +124,19 @@ defmodule Shuttle.Agents do
     flags = render_flags(agent)
 
     # The wrapper is a shell function sourced via bash -l.
-    # For claude: stdin via here-string; --session-id can be pre-specified.
-    # For codex/pi: positional arg.
+    # For claude: stdin via here-string. For codex/pi: positional arg.
+    session_flag =
+      if session_id && agent.cli in ["claude", "pi"],
+        do: "--session-id #{shell_escape(session_id)} ",
+        else: ""
+
     command =
       case agent.cli do
         "claude" ->
-          session_flag =
-            if session_id, do: "--session-id #{shell_escape(session_id)} ", else: ""
-
           "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
 
         _ ->
-          "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
+          "#{agent.wrapper} #{session_flag}#{flags} #{shell_escape(prompt)}"
       end
 
     with_env(command, agent)

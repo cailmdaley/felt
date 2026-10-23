@@ -1,7 +1,27 @@
 defmodule Shuttle.WorkerBackend do
-  @moduledoc "Backend operations for terminal workers and durable app conversations."
+  @moduledoc """
+  Backend operations for terminal workers and durable app conversations.
+
+  A worker is addressed by its handle (`handle/1`): an app reference
+  (`codex-app:<id>`), or a terminal execution's `%{session, uuid, pane}`,
+  which is observed and stopped by the process holding it. A bare session
+  name addresses a terminal by name only.
+  """
 
   alias Shuttle.AppWorkers
+
+  @doc """
+  The backend handle of running metadata `meta`: the app reference, or the
+  terminal execution its conversation UUID (`:holder_uuid`) and bound pane
+  identify, with its session name kept for display.
+  """
+  def handle(%{session: session} = meta) do
+    if AppWorkers.app?(session),
+      do: session,
+      else: %{session: session, uuid: Map.get(meta, :holder_uuid), pane: Map.get(meta, :pane)}
+  end
+
+  def session_status(runner, %{} = handle), do: Shuttle.Tmux.worker_status(runner, handle)
 
   def session_status(runner, session) do
     case AppWorkers.id(session) do
@@ -18,7 +38,11 @@ defmodule Shuttle.WorkerBackend do
   end
 
   @doc "Observe app state without releasing ownership on an idle or uncertain result."
-  def observe(session, expected \\ %{}) do
+  def observe(session, expected \\ %{})
+
+  def observe(%{}, _expected), do: :terminal
+
+  def observe(session, expected) do
     case AppWorkers.id(session) do
       nil ->
         :terminal
@@ -77,6 +101,8 @@ defmodule Shuttle.WorkerBackend do
   end
 
   def present?(runner, session), do: session_status(runner, session) != :gone
+
+  def stop(runner, %{} = handle), do: Shuttle.Tmux.stop_worker(runner, handle)
 
   def stop(runner, session) do
     case AppWorkers.id(session) do

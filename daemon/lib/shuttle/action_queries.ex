@@ -5,12 +5,13 @@ defmodule Shuttle.ActionQueries do
   Action classification itself lives in `Shuttle.Actions`. This module owns the
   read-side composition needed to classify a fiber by id: resolve the felt
   document through the daemon-local document reader, derive live worker state
-  from tmux session names, and call the classifier. It deliberately avoids the
+  from the process holding the execution its runtime names, and call the
+  classifier. It deliberately avoids the
   Poller GenServer so action affordance reads do not wait behind scheduling,
   discovery, or reconciliation work.
   """
 
-  alias Shuttle.{Actions, Dispatcher, FiberDocuments, Runner}
+  alias Shuttle.{Actions, Continuation, FiberDocuments, Runner}
 
   @spec actions_for(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def actions_for(fiber_id, opts \\ []) when is_binary(fiber_id) do
@@ -41,24 +42,16 @@ defmodule Shuttle.ActionQueries do
     end
   end
 
-  defp running?(fiber, opts), do: is_binary(live_session(fiber, opts))
+  # An unobservable holder counts as running, as it does everywhere a worker
+  # might be live.
+  defp running?(fiber, opts) do
+    case Continuation.execution(fiber) do
+      nil ->
+        false
 
-  defp live_session(fiber, opts) do
-    case Dispatcher.session_name(fiber_address(fiber), Map.get(fiber, "uid")) do
-      nil -> nil
-      session -> if session_live?(session, opts), do: session
-    end
-  end
-
-  defp session_live?(session, opts) do
-    runner = Keyword.get(opts, :runner, default_runner())
-    Shuttle.Tmux.present?(runner, session)
-  end
-
-  defp fiber_address(fiber) do
-    case Map.get(fiber, "slug") || Map.get(fiber, "id") do
-      address when is_binary(address) and address != "" -> address
-      _ -> ""
+      execution ->
+        runner = Keyword.get(opts, :runner, default_runner())
+        Shuttle.Tmux.worker_status(runner, Map.put(execution, :session, nil)) != :gone
     end
   end
 

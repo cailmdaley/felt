@@ -2,22 +2,25 @@ defmodule ShuttleWeb.ClaimController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/claim
 
-  First-class worker self-claim: registers an already-live tmux session as
-  the running worker for a fiber, exactly as if the daemon had dispatched it
-  (watcher, exit handling, kanban liveness). The write-and-claim leg of the
-  chat-to-card capture flow — the spawned capture session authors its fiber,
-  then claims itself here.
+  First-class worker self-claim: binds an already-live conversation to a
+  fiber, exactly as if the daemon had dispatched it (watcher, exit handling,
+  kanban liveness). The fiber it served before is concluded and released; its
+  worker keeps running, now for the claimed fiber. The write-and-claim leg of
+  the chat-to-card capture flow — the spawned capture session authors its
+  fiber, then claims itself here.
 
   Owner-routed like the other write verbs: a claim carrying an `origin` for a
   remote-owned fiber forwards to the owning daemon's identical `/claim`
   (origin stripped), since only the owner can see the tmux session and run
   the watcher.
 
-  Body: `fiber_id` (required), `tmux_session` (required), `agent` (optional
-  registry name; defaults to the fiber's shuttle.agent), `session_uuid`
-  (optional harness transcript UUID — written into the dispatch-shaped felt
-  history event so Resume previous works on claimed sessions too), `meeting`
-  (optional launch id of the meeting a capture scribes, stamped on the fiber as
+  Body: `fiber_id` (required), `tmux_session` (required), `tmux_pane`
+  (optional exact pane id, `%N`, of the claimer), `agent` (optional registry
+  name; defaults to the fiber's shuttle.agent), `session_uuid` (the harness
+  conversation UUID: the process holding it is the worker, and the fiber's
+  runtime names it so Resume previous works on claimed sessions too; without
+  one, the claimer's pane is the worker), `meeting` (optional launch id of
+  the meeting a capture scribes, stamped on the fiber as
   `shuttle.runtime.meeting`).
   """
 
@@ -58,6 +61,7 @@ defmodule ShuttleWeb.ClaimController do
                agent: Map.get(params, "agent"),
                surface: Map.get(params, "surface"),
                session_uuid: Map.get(params, "session_uuid"),
+               tmux_pane: Map.get(params, "tmux_pane"),
                meeting: Map.get(params, "meeting")
              ) do
           {:ok, %{session: session, agent_id: agent_id}} ->
@@ -91,7 +95,10 @@ defmodule ShuttleWeb.ClaimController do
   defp error_status(:session_not_found), do: {422, "session_not_found"}
   defp error_status(:native_thread_unverified), do: {422, "native_thread_unverified"}
   defp error_status(:ownership_record_unreadable), do: {409, "ownership_record_unreadable"}
-  defp error_status(:rename_failed), do: {500, "rename_failed"}
+  defp error_status(:session_mismatch), do: {422, "session_mismatch"}
+  defp error_status(:process_scan_failed), do: {503, "process_scan_failed"}
+  defp error_status(:generation_mismatch), do: {409, "generation_mismatch"}
+  defp error_status({:source_not_concluded, _id, _reason}), do: {503, "source_not_concluded"}
   defp error_status(other), do: {500, inspect(other)}
 
   defp claim_failed(name, reason),

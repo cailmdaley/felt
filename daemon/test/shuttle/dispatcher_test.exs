@@ -29,7 +29,9 @@ defmodule Shuttle.DispatcherTest do
       # `:present` (the default — every pre-existing test predates the macOS
       # tmux-server preflight and must be unaffected), `:absent` (tmux's own
       # no-server message) or `:timeout`.
-      tmux_server: :present
+      tmux_server: :present,
+      # What `ps` reports (`Shuttle.WorkerProcess.scan/1`).
+      ps: ""
     }
 
     def start_link(_ \\ []) do
@@ -72,6 +74,8 @@ defmodule Shuttle.DispatcherTest do
     def record(command, args) do
       Agent.update(__MODULE__, fn s -> %{s | commands: s.commands ++ [{command, args}]} end)
     end
+
+    def set_ps(output), do: Agent.update(__MODULE__, &%{&1 | ps: output})
 
     def add_tmux_session(session) do
       Agent.update(__MODULE__, fn state ->
@@ -198,6 +202,32 @@ defmodule Shuttle.DispatcherTest do
         uid: "not-a-ulid",
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
+      # A dispatch still running: its runtime names the conversation a live
+      # process holds (`set_ps/1`).
+      "tests/live" => %{
+        status: "active",
+        tags: ["constitution"],
+        shuttle: %{
+          "resolved" => %{"agent" => @claude_sonnet_resolved},
+          "runtime" => %{
+            "dispatched_at" => "2026-10-22T10:00:00Z",
+            "session_uuid" => "6d688234-9445-4d16-93d3-6bef110ea659"
+          }
+        }
+      },
+      # The same conversation, concluded: a claim moved its worker elsewhere.
+      "tests/claimed-away" => %{
+        status: "active",
+        tags: ["constitution"],
+        shuttle: %{
+          "resolved" => %{"agent" => @claude_sonnet_resolved},
+          "runtime" => %{
+            "dispatched_at" => "2026-10-22T10:00:00Z",
+            "handed_off_at" => "2026-10-22T11:00:00Z",
+            "session_uuid" => "6d688234-9445-4d16-93d3-6bef110ea659"
+          }
+        }
+      },
       "tests/uid-fiber" => %{
         status: "active",
         tags: ["constitution"],
@@ -253,6 +283,9 @@ defmodule Shuttle.DispatcherTest do
           session = Enum.at(args, 3)
           add_tmux_session(session)
           {"", 0}
+
+        command == "ps" ->
+          {Agent.get(__MODULE__, & &1.ps), 0}
 
         true ->
           {"", 0}
@@ -644,18 +677,20 @@ defmodule Shuttle.DispatcherTest do
 
   defp fiber_segment, do: StreamData.string([?a..?z, ?0..?9, ?-], min_length: 1, max_length: 12)
 
-  property "a ULID uid names the worker <leaf>-<uid>-shuttle, the name shuttle_session?/1 recognizes" do
-    # Keyed by uid, the name is rename-safe and collision-free; the leaf keeps
-    # it legible.
+  property "a launch is named <leaf>-<uuid8>-<uid>-shuttle, the name shuttle_session?/1 recognizes" do
+    # The launch's UUID makes the name its own; the uid marks the fiber that
+    # launched it; the leaf keeps it legible.
     check all(
             segments <- StreamData.list_of(fiber_segment(), min_length: 1, max_length: 4),
             trailing <- StreamData.member_of(["", "/"]),
             uid <- ulid(),
+            uuid <-
+              StreamData.map(StreamData.binary(length: 16), &Base.encode16(&1, case: :lower)),
             max_runs: 100
           ) do
-      name = Dispatcher.session_name(Enum.join(segments, "/") <> trailing, uid)
+      name = Dispatcher.session_name(Enum.join(segments, "/") <> trailing, uid, uuid)
 
-      assert name == "#{List.last(segments)}-#{uid}-shuttle"
+      assert name == "#{List.last(segments)}-#{String.slice(uuid, 0, 8)}-#{uid}-shuttle"
       assert Dispatcher.shuttle_session?(name)
       assert Shuttle.ULID.from_tmux(name) == uid
     end
@@ -679,7 +714,10 @@ defmodule Shuttle.DispatcherTest do
       ])
 
     check all(uid <- not_ulid, max_runs: 100) do
-      assert Dispatcher.session_name("tests/haiku", uid) == nil, inspect(uid)
+      assert Dispatcher.session_name("tests/haiku", uid, "6d688234-9445-4d16-93d3-6bef110ea659") ==
+               nil,
+             inspect(uid)
+
       refute Dispatcher.shuttle_session?("haiku-#{uid}-shuttle"), inspect(uid)
     end
 
@@ -691,8 +729,8 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "dispatch creates tmux session for eligible fiber" do
-    result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-    assert result == {:ok, FiberUid.session("tests/haiku")}
+    assert {:ok, session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert FiberUid.launch?(session, "tests/haiku")
 
     commands = MockRunner.commands()
 
@@ -713,8 +751,8 @@ defmodule Shuttle.DispatcherTest do
   # all. These tests pin the preflight that turns that into a loud refusal.
 
   test "dispatch preflights the wrapper in a login bash before spawning tmux" do
-    assert Dispatcher.dispatch("tests/haiku", runner: MockRunner) ==
-             {:ok, FiberUid.session("tests/haiku")}
+    assert {:ok, session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert FiberUid.launch?(session, "tests/haiku")
 
     commands = MockRunner.commands()
 
@@ -742,7 +780,7 @@ defmodule Shuttle.DispatcherTest do
 
     paths = [
       {"dispatch", fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner) end,
-       &(&1 == {:ok, FiberUid.session("tests/haiku")} and spawned?.())},
+       &(match?({:ok, _}, &1) and FiberUid.launch?(elem(&1, 1), "tests/haiku") and spawned?.())},
       {"resume",
        fn -> Dispatcher.dispatch("tests/haiku", runner: MockRunner, resume_mode: "previous") end,
        &(&1 == {:error, :missing_session_id})},
@@ -836,16 +874,37 @@ defmodule Shuttle.DispatcherTest do
     refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
-  test "dispatch launches the worker under the uid-keyed session name" do
+  test "dispatch names the launch's conversation in the fiber before starting the worker under it" do
     uid = "01KTHDNZS287ZSSG8X8V59XKWB"
-    expected = "uid-fiber-#{uid}-shuttle"
-    assert {:ok, ^expected} = Dispatcher.dispatch("tests/uid-fiber", runner: MockRunner)
+    assert {:ok, session} = Dispatcher.dispatch("tests/uid-fiber", runner: MockRunner)
+    assert [_, uuid8] = Regex.run(~r/^uid-fiber-([0-9a-f]{8})-#{uid}-shuttle$/, session)
 
-    # The new-session tmux command targets the uid-keyed name.
-    assert Enum.any?(MockRunner.commands(), fn
-             {"tmux", args} -> hd(args) == "new-session" and expected in args
-             _ -> false
-           end)
+    commands = MockRunner.commands()
+
+    {mark_at, {_, mark}} =
+      commands
+      |> Enum.with_index()
+      |> Enum.find_value(fn {{cmd, args}, i} ->
+        if cmd == "shuttle" and "mark-runtime" in args, do: {i, {cmd, args}}
+      end)
+
+    uuid = Enum.at(mark, Enum.find_index(mark, &(&1 == "--session")) + 1)
+    assert String.starts_with?(uuid, uuid8)
+    # The stamp is conditional on the generation the dispatch replaces.
+    assert ["--if-dispatched-at", ""] == Enum.drop_while(mark, &(&1 != "--if-dispatched-at"))
+
+    {spawn_at, args} =
+      commands
+      |> Enum.with_index()
+      |> Enum.find_value(fn {{cmd, args}, i} ->
+        if cmd == "tmux" and hd(args) == "new-session", do: {i, args}
+      end)
+
+    assert mark_at < spawn_at
+    assert session in args
+    # The run script is keyed by the conversation, and the harness starts under it.
+    assert Path.basename(List.last(args)) =~ ~r/^shuttle-run-#{uuid}\.\d+\.sh$/
+    assert File.read!(List.last(args)) =~ "--session-id '#{uuid}'"
   end
 
   test "dispatch refuses a fiber without an intrinsic id, naming the fix, before touching tmux" do
@@ -1000,33 +1059,44 @@ defmodule Shuttle.DispatcherTest do
            "no worker/tmux session may spawn with no felt store; got #{inspect(commands)}"
   end
 
-  test "dispatch refuses already-running fiber" do
-    # Pre-seed the tmux session
-    MockRunner.add_tmux_session(FiberUid.session("tests/haiku"))
-
-    result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-    assert {:error, :already_running} = result
+  test "dispatch refuses a fiber whose unconcluded dispatch names a held conversation" do
+    MockRunner.set_ps("812 1 claude --resume 6d688234-9445-4d16-93d3-6bef110ea659\n")
+    assert {:error, :already_running} = Dispatcher.dispatch("tests/live", runner: MockRunner)
   end
 
-  test "dispatch does not treat child fiber session as already-running parent" do
-    MockRunner.add_tmux_session(FiberUid.session("tests/haiku/child"))
+  test "a held conversation a claim concluded does not make its old fiber running" do
+    MockRunner.set_ps("812 1 claude --resume 6d688234-9445-4d16-93d3-6bef110ea659\n")
 
-    result = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
-    assert result == {:ok, FiberUid.session("tests/haiku")}
+    assert {:ok, session} = Dispatcher.dispatch("tests/claimed-away", runner: MockRunner)
+    assert FiberUid.launch?(session, "tests/claimed-away")
+    script = File.read!(script_of(session))
+    assert script =~ ~r/claude --session-id '[0-9a-f-]{36}'/
+    refute script =~ "--session-id '6d688234-9445-4d16-93d3-6bef110ea659'"
+    refute script =~ "--resume"
+  end
 
-    assert Enum.any?(MockRunner.commands(), fn
-             {"tmux", ["has-session", "-t", "=" <> session]} ->
-               session == FiberUid.session("tests/haiku")
+  test "a live tmux session named after a fiber does not make it running" do
+    MockRunner.add_tmux_session(FiberUid.session("tests/haiku"))
 
-             _ ->
-               false
-           end)
+    assert {:ok, session} = Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+    assert FiberUid.launch?(session, "tests/haiku")
+  end
+
+  defp script_of(session) do
+    {_, args} =
+      Enum.find(MockRunner.commands(), fn {cmd, args} ->
+        cmd == "tmux" and hd(args) == "new-session" and session in args
+      end)
+
+    List.last(args)
   end
 
   test "dispatch reads Shuttle's resolved pi agent (pi-tagged fiber)" do
     result = Dispatcher.dispatch("tests/pi-tagged", runner: MockRunner)
     assert {:ok, session} = result
-    assert session == FiberUid.session("tests/pi-tagged")
+    assert FiberUid.launch?(session, "tests/pi-tagged")
+    # Pi is started under the conversation UUID the launch assigned.
+    assert File.read!(script_of(session)) =~ ~r/pi --session-id '[0-9a-f-]{36}'/
 
     # Verify the tmux new-session command was issued
     commands = MockRunner.commands()
@@ -1074,17 +1144,17 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "dispatch uses Shuttle's resolved agent (claude-opus) when present" do
-    assert {:ok, _session} = Dispatcher.dispatch("tests/shuttle-agent-block", runner: MockRunner)
-    script = read_run_script_for(FiberUid.session("tests/shuttle-agent-block"))
+    assert {:ok, session} = Dispatcher.dispatch("tests/shuttle-agent-block", runner: MockRunner)
+    script = read_run_script_for(session)
     assert script =~ "agent=claude-opus"
     refute script =~ "agent=claude-sonnet"
   end
 
   test "dispatch: Shuttle's resolved.agent (claude-opus) wins over a free-form tag" do
-    assert {:ok, _session} =
+    assert {:ok, session} =
              Dispatcher.dispatch("tests/shuttle-agent-overrides-tag", runner: MockRunner)
 
-    script = read_run_script_for(FiberUid.session("tests/shuttle-agent-overrides-tag"))
+    script = read_run_script_for(session)
     assert script =~ "agent=claude-opus"
     refute script =~ "agent=pi-deepseek-flash"
   end
@@ -2063,7 +2133,7 @@ defmodule Shuttle.DispatcherTest do
           assert {:ok, spawned} = result, row
 
           case path do
-            "dispatch" -> assert spawned == FiberUid.session("tests/haiku"), row
+            "dispatch" -> assert FiberUid.launch?(spawned, "tests/haiku"), row
             "capture" -> assert spawned.session =~ ~r/\Acapture-/, row
           end
 

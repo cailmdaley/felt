@@ -249,7 +249,11 @@ defmodule Shuttle.Messaging do
 
         if record["host"] == host and is_binary(session) and session != "" and
              is_binary(native) and native != "" and is_binary(fiber) and fiber != "" do
-          entry = session_fiber_entry(record["uid"], fiber, if(native != session, do: session))
+          # A superseded session no longer names this fiber; the claim line
+          # that follows it names the one it serves now.
+          entry =
+            if record["kind"] != "superseded_by_claim",
+              do: session_fiber_entry(record["uid"], fiber, if(native != session, do: session))
 
           Map.update(acc, native, {at, entry}, fn {previous_at, previous_entry} ->
             if at >= previous_at, do: {at, entry}, else: {previous_at, previous_entry}
@@ -258,6 +262,7 @@ defmodule Shuttle.Messaging do
           acc
         end
       end)
+      |> Enum.reject(fn {_native, {_at, entry}} -> is_nil(entry) end)
       |> Map.new(fn {native, {_at, entry}} -> {native, entry} end)
 
     app_index = app_worker_fiber_index()

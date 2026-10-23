@@ -18,25 +18,6 @@ defmodule Shuttle.SessionBindingTest do
   defp fold(events),
     do: Enum.reduce(events, SessionBinding.new(), &SessionBinding.apply_event(&2, &1, @now))
 
-  test "a session start records the tmux session it started in, only from starts and kept by prune" do
-    state =
-      fold([
-        event("predecessor", "session_start", @now - 10),
-        event("successor", "session_start", @now, 2),
-        event("successor", "pre_tool_use", @now + 1, 2) |> Map.put("tmuxSession", "elsewhere"),
-        event("hooks-only", "pre_tool_use", @now + 2, 3)
-      ])
-
-    assert SessionBinding.started_in(state, "predecessor", "same-pane-shuttle") == @now - 10
-    assert SessionBinding.started_in(state, "successor", "same-pane-shuttle") == @now
-    assert SessionBinding.started_in(state, "successor", "elsewhere") == nil
-    assert SessionBinding.started_in(state, "hooks-only", "same-pane-shuttle") == nil
-
-    pruned = SessionBinding.prune(state, @now + 48 * 60 * 60 * 1000 - 5)
-    assert SessionBinding.started_in(pruned, "successor", "same-pane-shuttle") == @now
-    assert SessionBinding.started_in(pruned, "predecessor", "same-pane-shuttle") == nil
-  end
-
   test "known UUID anchors succession; panes and ordinary hooks do not" do
     state =
       fold([

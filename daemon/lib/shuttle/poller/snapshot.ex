@@ -72,7 +72,13 @@ defmodule Shuttle.Poller.Snapshot do
         }
       end)
 
-    blocked = dispatch_blocked ++ loop_blocked
+    # Shared executions (`Shuttle.Poller.Executions`) hold their fibers too.
+    held_blocked =
+      Enum.map(state.holds, fn hold ->
+        Map.merge(hold, %{attempts: 0, attempted_at: now_ms, first_attempted_at: now_ms})
+      end)
+
+    blocked = dispatch_blocked ++ loop_blocked ++ held_blocked
 
     # Autonomous dispatches the boot quarantine (or a contract skew) is
     # withholding — all of them, resumes included. First-class rows, not

@@ -301,12 +301,23 @@ defmodule Shuttle.SentFiles do
       else: path
   end
 
-  # The fiber id an event belongs to: prefer the ULID embedded in the tmux
-  # session name, then the session ledger's claim, then the raw sessionId.
+  # The fiber id an event belongs to: the fiber the session ledger paired its
+  # session with at the time of the send (a claim moves a live session to
+  # another fiber; a send before any pairing belongs to the first), then the
+  # ULID its tmux session's name was launched with, then the raw sessionId.
   defp event_uid(event, session_uids) do
-    case Shuttle.ULID.from_tmux(event.tmux_session) do
-      nil -> Map.get(session_uids, event.session_id, event.session_id)
-      uid -> uid
+    pairings = Map.get(session_uids, event.session_id, [])
+
+    paired =
+      pairings
+      |> Enum.filter(fn {at, _uid} ->
+        not is_integer(event.timestamp) or not is_integer(at) or at <= event.timestamp
+      end)
+      |> List.last() || List.first(pairings)
+
+    case paired do
+      {_at, uid} -> uid
+      nil -> Shuttle.ULID.from_tmux(event.tmux_session) || event.session_id
     end
   end
 
@@ -316,6 +327,8 @@ defmodule Shuttle.SentFiles do
     |> Enum.uniq()
   end
 
+  # session → [{at, uid}] in ledger order. A superseded line ends a pairing
+  # and starts none; the claim line after it names the new fiber.
   defp session_uids(opts) do
     ledger_opts =
       case Keyword.get(opts, :session_ledger_file) do
@@ -325,10 +338,11 @@ defmodule Shuttle.SentFiles do
 
     Shuttle.SessionLedger.read_since(0, ledger_opts)
     |> Enum.reduce(%{}, fn record, acc ->
-      case {record["session"], record["uid"]} do
-        {session, uid}
-        when is_binary(session) and session != "" and is_binary(uid) and uid != "" ->
-          Map.put(acc, session, uid)
+      case {record["session"], record["uid"], record["kind"]} do
+        {session, uid, kind}
+        when is_binary(session) and session != "" and is_binary(uid) and uid != "" and
+               kind != "superseded_by_claim" ->
+          Map.update(acc, session, [{record["at"], uid}], &(&1 ++ [{record["at"], uid}]))
 
         _ ->
           acc

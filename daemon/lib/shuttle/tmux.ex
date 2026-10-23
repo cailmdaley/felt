@@ -163,37 +163,113 @@ defmodule Shuttle.Tmux do
   """
   @spec stop(module(), String.t()) :: {String.t(), integer()}
   def stop(runner, session) do
+    status = fn -> session_status(runner, session) end
+    signal = fn signal -> signal_session(runner, session, signal) end
+
     case runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true) do
       {_output, 0} ->
-        await_gone(runner, session, stop_ladder())
+        await_gone(session, stop_ladder(), status, signal)
 
       {output, _} = failure ->
         if absent?(output),
-          do: await_gone(runner, session, Enum.filter(stop_ladder(), &elem(&1, 0))),
+          do: await_gone(session, signal_steps(), status, signal),
           else: failure
     end
   end
+
+  @doc """
+  Classifies the execution `handle` — `%{session, uuid, pane}` — by the
+  process that holds it (`Shuttle.WorkerProcess.find/3`), never by a tmux
+  name: `:alive` while a process holds its conversation UUID or bound pane,
+  `:gone` when a successful scan shows none, and `:unknown` when the scan or a
+  holder's lifetime cannot be observed. A handle with neither a UUID nor a
+  pane is classified by its session name (`session_status/2`).
+  """
+  @spec worker_status(module(), map()) :: status()
+  def worker_status(runner, %{} = handle) do
+    if identified?(handle) do
+      case WorkerProcess.scan(runner) do
+        {:ok, procs} ->
+          case WorkerProcess.find(procs, handle, runner) do
+            nil -> :gone
+            {:error, :unknown} -> :unknown
+            _proc -> :alive
+          end
+
+        {:error, :unknown} ->
+          :unknown
+      end
+    else
+      session_status(runner, handle.session)
+    end
+  end
+
+  @doc """
+  Stops the execution `handle` and returns once no process holds it.
+
+  The holder is found in the process table, and its tmux pane by ancestry;
+  that exact pane (`%N`) is killed, whatever its session is now called. The
+  ladder then waits, escalating to SIGTERM and SIGKILL on the holder's pane
+  process group. A holder tmux cannot show is signalled directly. When the
+  process table cannot be read, nothing is signalled and the stop fails: an
+  uncertain holder is never a kill target. A handle nothing holds is already
+  stopped.
+  """
+  @spec stop_worker(module(), map()) :: {String.t(), integer()}
+  def stop_worker(runner, %{} = handle) do
+    if identified?(handle) do
+      status = fn -> worker_status(runner, handle) end
+      signal = fn signal -> signal_holder(runner, handle, signal) end
+
+      with {:ok, procs} <- WorkerProcess.scan(runner),
+           %{} = proc <- WorkerProcess.find(procs, handle, runner) do
+        killed? =
+          with {:ok, panes} <- WorkerProcess.panes(runner),
+               %{pane: pane} <- WorkerProcess.pane_of(procs, panes, proc),
+               {_, 0} <- runner.cmd("tmux", ["kill-pane", "-t", pane], stderr_to_stdout: true) do
+            true
+          else
+            _ -> false
+          end
+
+        label = handle.session || handle.uuid
+        await_gone(label, if(killed?, do: stop_ladder(), else: signal_steps()), status, signal)
+      else
+        nil ->
+          {"", 0}
+
+        {:error, :unknown} ->
+          {"the worker's processes could not be observed, so nothing was signalled", 1}
+      end
+    else
+      stop(runner, handle.session)
+    end
+  end
+
+  defp identified?(handle),
+    do: is_binary(Map.get(handle, :uuid)) or is_map(Map.get(handle, :pane))
 
   @stop_ladder [{nil, 3_000}, {"TERM", 2_000}, {"KILL", 1_000}]
   @stop_poll_ms 50
 
   defp stop_ladder, do: Shuttle.Env.app(:worker_stop_ladder, @stop_ladder)
+  defp signal_steps, do: Enum.filter(stop_ladder(), &elem(&1, 0))
 
-  defp await_gone(_runner, session, []),
-    do: {"worker of #{session} is still running after SIGKILL", 1}
+  defp await_gone(label, [], _status, _signal),
+    do: {"worker of #{label} is still running after SIGKILL", 1}
 
-  defp await_gone(runner, session, [{signal, wait_ms} | rest]) do
-    if signal, do: signal_worker(runner, session, signal)
+  defp await_gone(label, [{signal, wait_ms} | rest], status, signal_fun) do
+    if signal, do: signal_fun.(signal)
     deadline = System.monotonic_time(:millisecond) + wait_ms
 
-    if gone_by?(runner, session, deadline),
+    if gone_by?(status, deadline),
       do: {"", 0},
-      else: await_gone(runner, session, rest)
+      else: await_gone(label, rest, status, signal_fun)
   end
 
-  defp gone_by?(runner, session, deadline) do
+  defp gone_by?(status, deadline) do
     cond do
-      session_status(runner, session) == :gone ->
+      status.() == :gone ->
         true
 
       System.monotonic_time(:millisecond) >= deadline ->
@@ -201,21 +277,35 @@ defmodule Shuttle.Tmux do
 
       true ->
         Process.sleep(@stop_poll_ms)
-        gone_by?(runner, session, deadline)
+        gone_by?(status, deadline)
     end
   end
 
   # The run script is the pane's process and so leads its own process group,
   # which holds the harness; the group and the process are both signalled in
   # case it does not lead one.
-  defp signal_worker(runner, session, signal) do
+  defp signal_session(runner, session, signal) do
     with {:ok, procs} <- WorkerProcess.scan(runner),
          %{pid: pid} <- WorkerProcess.session_process(procs, session) do
-      runner.cmd("kill", ["-#{signal}", "--", "-#{pid}", "#{pid}"], stderr_to_stdout: true)
+      kill(runner, signal, pid)
     end
 
     :ok
   end
+
+  # Re-found on every step: only a process that holds the execution now is
+  # signalled, through the outermost process of its pane.
+  defp signal_holder(runner, handle, signal) do
+    with {:ok, procs} <- WorkerProcess.scan(runner),
+         %{} = proc <- WorkerProcess.find(procs, handle, runner) do
+      kill(runner, signal, WorkerProcess.signal_root(procs, proc).pid)
+    end
+
+    :ok
+  end
+
+  defp kill(runner, signal, pid),
+    do: runner.cmd("kill", ["-#{signal}", "--", "-#{pid}", "#{pid}"], stderr_to_stdout: true)
 
   @doc """
   True when `output` is one of tmux's own absence messages ("no server

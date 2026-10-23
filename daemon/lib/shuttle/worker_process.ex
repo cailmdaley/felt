@@ -14,20 +14,28 @@ defmodule Shuttle.WorkerProcess do
   Holder evidence starts with `ps` over the daemon's own uid:
 
     * **The run script.** Every tmux session the daemon starts runs
-      `bash -l <tmp>/shuttle-run-<session>.<n>.sh` (`script_path/1`). The
-      script never `exec`s, so that bash — and the path in its argv — lives as
-      long as the worker does. The process table alone therefore names every
-      session with a live worker, across daemon restarts and with no daemon
-      state (`session_process/2`, `sessions/1`). tmux session names never
-      contain `.` (tmux rewrites it), so `<session>.<n>` parses unambiguously.
+      `bash -l <tmp>/shuttle-run-<uuid>.<n>.sh` (`script_path/1`), keyed by the
+      conversation UUID the launch pre-assigned. The script never `exec`s, so
+      that bash — and the path in its argv — lives as long as the worker does.
+      Run scripts from builds that keyed them by tmux session name still parse
+      (`session_process/2`). Neither `.` nor `/` occurs in a UUID or a tmux
+      session name, so `<key>.<n>` parses unambiguously.
     * **The harness session id.** A worker's harness carries its session
       uuid as an argv token (`claude --session-id <uuid>`, `claude --resume
-      <uuid>`, `codex resume <uuid>`, `pi --session <uuid>`), so
-      `holder/2` finds whichever process holds a transcript open — including a
-      worker whose run script predates the naming above.
-    * **The hook receiver.** A local live receiver registration binds fresh
-      embedded Codex argv to its session only when its start token matches a
-      kernel lifetime observation through `shuttle process-identity`.
+      <uuid>`, `pi --session-id <uuid>`, `pi --session <uuid>`), so
+      `holder/3` finds whichever process holds a transcript open.
+    * **The hook receiver.** A session-start hook binds a UUID to its
+      receiver's pid and kernel birth token (`Shuttle.SessionBinding`), which
+      also follows `/resume` and `/clear`; a local Codex receiver registration
+      binds fresh embedded Codex argv. Either counts only while the live
+      process's start token matches (`shuttle process-identity`), so a reused
+      pid never does.
+    * **The pane.** A claimer with none of the above (a hand-started harness)
+      is bound to its tmux pane's process and start token (`pane_holder/3`).
+
+  A holder maps to the tmux pane that runs it by process ancestry
+  (`pane_of/3`), which is how a stop reaches it by exact pane id whatever its
+  session is called.
 
   A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`,
   and every caller reads uncertainty as "present" — the doctrine of
@@ -44,14 +52,14 @@ defmodule Shuttle.WorkerProcess do
   @session_flags ["--resume", "--session-id", "--session", "resume"]
 
   @doc """
-  A fresh run-script path for tmux session `session`:
-  `<tmp>/shuttle-run-<session>.<n>.sh`.
+  A fresh run-script path keyed by `key` — a launch's conversation UUID, or
+  the tmux session name of a helper session: `<tmp>/shuttle-run-<key>.<n>.sh`.
   """
   @spec script_path(String.t()) :: String.t()
-  def script_path(session) when is_binary(session) do
+  def script_path(key) when is_binary(key) do
     Path.join(
       System.tmp_dir!(),
-      "#{@script_prefix}#{session}.#{System.unique_integer([:positive])}.sh"
+      "#{@script_prefix}#{key}.#{System.unique_integer([:positive])}.sh"
     )
   end
 
@@ -131,23 +139,30 @@ defmodule Shuttle.WorkerProcess do
   def holder(procs, uuid, runner) when is_binary(uuid) and uuid != "" do
     Enum.find(procs, fn %{args: args} = proc ->
       not tmux?(proc) and
-        args
-        |> String.split()
-        |> Enum.chunk_every(2, 1, [nil])
-        |> Enum.any?(fn
-          [flag, ^uuid] when flag in @session_flags -> true
-          [token, _] -> String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
-        end)
+        (script_session_in(args) == uuid or
+           args
+           |> String.split()
+           |> Enum.chunk_every(2, 1, [nil])
+           |> Enum.any?(fn
+             [flag, ^uuid] when flag in @session_flags ->
+               true
+
+             [token, _] ->
+               String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
+           end))
     end) || bound_holder(procs, uuid, runner)
   end
 
   def holder(_procs, _uuid, _runner), do: nil
 
+  # A run script keyed by its tmux session name holds the conversation the
+  # ledger last paired with that session. Only such scripts are looked up,
+  # so the ledger is read only while one runs.
   defp bound_holder(procs, uuid, runner) do
-    row = Shuttle.SessionLedger.latest_for_session(uuid)
-
     script_holder =
-      with %{"host" => host, "tmux" => tmux} when is_binary(tmux) <- row,
+      with [_ | _] <- Enum.filter(procs, &session_keyed_script?/1),
+           %{"host" => host, "tmux" => tmux} when is_binary(tmux) <-
+             Shuttle.SessionLedger.latest_for_session(uuid),
            true <- host == Shuttle.Poller.own_host_id(),
            %{"session" => ^uuid} <- latest_for_tmux(tmux) do
         session_process(procs, tmux)
@@ -155,8 +170,121 @@ defmodule Shuttle.WorkerProcess do
         _ -> nil
       end
 
-    script_holder || hook_holder(procs, uuid, runner)
+    with nil <- script_holder,
+         nil <- hook_holder(procs, uuid, runner) do
+      binding_holder(procs, uuid, runner)
+    end
   end
+
+  # The receiver a session-start hook bound `uuid` to, while that exact
+  # process lifetime is alive.
+  defp binding_holder(procs, uuid, runner) do
+    binding = Shuttle.SessionBinding.observed()
+
+    with {_harness, pid, birth} = key <- Map.get(binding.members, uuid),
+         %{retired: false} <- Map.get(binding.processes, key),
+         %{} = proc <- Enum.find(procs, &(&1.pid == pid)) do
+      receiver_holder(proc, birth, runner)
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The live process bound to a claimed pane, `%{"pid" => pid, "start" =>
+  start}`: the pane's process while its start token still matches, so a
+  reused pid never counts. `{:error, :unknown}` when the lifetime cannot be
+  observed.
+  """
+  @spec pane_holder([proc()], map() | nil, module()) :: proc() | nil | {:error, :unknown}
+  def pane_holder(procs, %{"pid" => pid, "start" => start}, runner)
+      when is_integer(pid) and is_binary(start) do
+    case Enum.find(procs, &(&1.pid == pid)) do
+      nil -> nil
+      proc -> receiver_holder(proc, start, runner)
+    end
+  end
+
+  def pane_holder(_procs, _pane, _runner), do: nil
+
+  @doc """
+  The process holding the execution `handle` (`%{uuid, pane}`): the holder of
+  its conversation UUID, else its bound pane. nil when neither is held.
+  """
+  @spec find([proc()], map(), module()) :: proc() | nil | {:error, :unknown}
+  def find(procs, handle, runner \\ Shuttle.Runner.Default) do
+    case holder(procs, Map.get(handle, :uuid), runner) do
+      nil -> pane_holder(procs, Map.get(handle, :pane), runner)
+      found -> found
+    end
+  end
+
+  @doc """
+  Every tmux pane this daemon's server shows, as `%{pid, pane, session}`
+  (`pane` is the exact pane id, `%N`). `{:error, :unknown}` when tmux cannot
+  answer; a server that is not running has no panes.
+  """
+  @spec panes(module()) :: {:ok, [map()]} | {:error, :unknown}
+  def panes(runner) do
+    case runner.cmd(
+           "tmux",
+           ["list-panes", "-a", "-F", "\#{pane_pid} \#{pane_id} \#{session_name}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        {:ok,
+         output
+         |> to_string()
+         |> String.split("\n", trim: true)
+         |> Enum.flat_map(fn line ->
+           case String.split(String.trim(line), " ", parts: 3) do
+             [pid, "%" <> _ = pane, session] ->
+               case Integer.parse(pid) do
+                 {pid, ""} -> [%{pid: pid, pane: pane, session: session}]
+                 _ -> []
+               end
+
+             _ ->
+               []
+           end
+         end)}
+
+      {output, _} ->
+        if Shuttle.Tmux.absence_message?(output), do: {:ok, []}, else: {:error, :unknown}
+    end
+  end
+
+  @doc """
+  The pane whose process is `proc` or one of its ancestors, or nil when tmux
+  shows none of them (a server whose socket was deleted, or no tmux at all).
+  """
+  @spec pane_of([proc()], [map()], proc()) :: map() | nil
+  def pane_of(procs, panes, proc) do
+    by_pid = Map.new(procs, &{&1.pid, &1})
+    by_pane = Map.new(panes, &{&1.pid, &1})
+    ancestry(by_pid, proc, 32) |> Enum.find_value(&Map.get(by_pane, &1.pid))
+  end
+
+  @doc """
+  The process a stop signals for holder `proc`: its outermost ancestor below
+  the tmux server — the pane's run script or shell, which leads the process
+  group holding the harness — else `proc` itself.
+  """
+  @spec signal_root([proc()], proc()) :: proc()
+  def signal_root(procs, proc) do
+    by_pid = Map.new(procs, &{&1.pid, &1})
+
+    by_pid
+    |> ancestry(proc, 32)
+    |> Enum.take_while(&(not tmux?(&1)))
+    |> List.last(proc)
+  end
+
+  defp ancestry(_by_pid, nil, _depth), do: []
+  defp ancestry(_by_pid, _proc, 0), do: []
+
+  defp ancestry(by_pid, proc, depth),
+    do: [proc | ancestry(by_pid, Map.get(by_pid, proc.ppid), depth - 1)]
 
   defp latest_for_tmux(tmux) do
     Shuttle.SessionLedger.read_since(0)
@@ -188,10 +316,15 @@ defmodule Shuttle.WorkerProcess do
            ),
          {:ok, identity} <- Jason.decode(output) do
       case identity do
-        %{"status" => "present", "start" => ^start} -> proc
-        %{"status" => "present", "start" => actual} when is_binary(actual) and actual != "" -> nil
-        %{"status" => "gone"} -> nil
-        _ -> {:error, :unknown}
+        %{"status" => "present", "start" => actual} when is_binary(actual) and actual != "" ->
+          # A hook birth token carries the Linux boot id before the start.
+          if start == actual or String.ends_with?(start, ":" <> actual), do: proc
+
+        %{"status" => "gone"} ->
+          nil
+
+        _ ->
+          {:error, :unknown}
       end
     else
       _ -> {:error, :unknown}
@@ -304,7 +437,15 @@ defmodule Shuttle.WorkerProcess do
     end
   end
 
-  # The session named by a `…/shuttle-run-<session>.<n>.sh` token in argv.
+  defp session_keyed_script?(proc) do
+    case script_session(proc) do
+      key when is_binary(key) -> Shuttle.Dispatcher.shuttle_session?(key)
+      _ -> false
+    end
+  end
+
+  # The key named by a `…/shuttle-run-<key>.<n>.sh` token in argv: a launch's
+  # conversation UUID, or the session name a helper session's script carries.
   defp script_session(%{args: args} = proc) do
     if tmux?(proc), do: nil, else: script_session_in(args)
   end

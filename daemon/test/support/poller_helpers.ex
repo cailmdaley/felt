@@ -13,6 +13,32 @@ defmodule Shuttle.Test.PollerHelpers do
   def oneshot_shuttle, do: "enabled: true\nkind: oneshot\n"
 
   @doc """
+  A live worker for `fiber_id` the poller has not launched: its runtime names
+  an unconcluded dispatch of conversation `uuid` (derived from the fiber id
+  unless given), and a process in tmux session `session` holds it
+  (`Shuttle.Test.FeltStoreRunner.add_worker/3`, `opts` passed through).
+  Returns the pane pid.
+  """
+  def live_worker!(fiber_id, session, opts \\ []) do
+    uuid = Keyword.get_lazy(opts, :uuid, fn -> uuid_for(fiber_id) end)
+
+    Shuttle.Test.FeltStoreRunner.put_shuttle_fields(fiber_id, %{
+      "dispatched_at" => Keyword.get(opts, :dispatched_at, "2026-10-22T10:00:00Z"),
+      "session_uuid" => uuid
+    })
+
+    Shuttle.Test.FeltStoreRunner.add_worker(session, uuid, Keyword.delete(opts, :uuid))
+  end
+
+  @doc "A stable conversation UUID derived from `fiber_id`."
+  def uuid_for(fiber_id) do
+    <<a::binary-8, b::binary-4, c::binary-4, d::binary-4, e::binary-12, _::binary>> =
+      :crypto.hash(:sha256, fiber_id) |> Base.encode16(case: :lower)
+
+    Enum.join([a, b, c, d, e], "-")
+  end
+
+  @doc """
   A minimal felt fiber map, with `attrs` merged over the defaults. Its `uid` is
   `Shuttle.Test.FiberUid.for(id)`, so its worker session is
   `Shuttle.Test.FiberUid.session(id)`.

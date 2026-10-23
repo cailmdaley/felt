@@ -6,17 +6,13 @@ defmodule Shuttle.Dispatcher do
   - Checks status (refuses closed)
   - Checks for an existing worker
   - Starts the selected terminal or app surface with the dispatch prompt
-  - Records the session identity for continuation
+  - Names the launch's conversation UUID in the fiber's runtime, then starts
+    the harness under it
   """
 
   require Logger
 
   alias Shuttle.Agents
-
-  # Pi mints its session UUID after the process starts. Bound asynchronous
-  # transcript reconciliation by elapsed time rather than scan count.
-  @session_capture_timeout_ms 120_000
-  @session_capture_poll_ms 250
 
   @typedoc """
   Why a forced start could not arm its fiber: `message` is the Shuttle CLI's
@@ -106,9 +102,9 @@ defmodule Shuttle.Dispatcher do
          {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- check_dispatchable(fiber, force),
          :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
-         :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
          {:ok, agent} <- resolve_agent(fiber, fiber_id),
+         :ok <- check_not_running(fiber, agent, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
          :ok <-
@@ -121,7 +117,8 @@ defmodule Shuttle.Dispatcher do
       resume_intent =
         resolve_resume_intent(prompt_context, fiber,
           force: force,
-          resume_mode: Keyword.get(opts, :resume_mode)
+          resume_mode: Keyword.get(opts, :resume_mode),
+          shared_session: Keyword.get(opts, :shared_session, false)
         )
 
       previous_session = previous_session_info(fiber, uid)
@@ -148,6 +145,7 @@ defmodule Shuttle.Dispatcher do
             uid: uid,
             kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
+            generation: Shuttle.Continuation.generation(fiber),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
             developer_instructions: Keyword.get(opts, :developer_instructions),
@@ -219,8 +217,14 @@ defmodule Shuttle.Dispatcher do
   keep their identity in the App Server, so they resume on either surface.
   Otherwise the session's transcript decides — see `continue_or_cold/3`.
 
+  A conversation another live fiber also names (`:shared_session`, which an
+  old build's claim could leave) is never resumed: `"previous"` is refused
+  with `{:error, :shared_session}`, and every other mode starts fresh, naming
+  it as cut off.
+
   Options:
     * `:resume_mode` — as above.
+    * `:shared_session` — true when another live fiber names the same session.
     * `:transcript` — `fn session_id -> %{path, mtime} | nil end`, the
       transcript lookup (default `Shuttle.Continuation.transcript_stat/1`).
     * `:now` — the `DateTime` the transcript's age is measured against.
@@ -230,16 +234,21 @@ defmodule Shuttle.Dispatcher do
           | {:previous, String.t()}
           | {:cold, String.t(), String.t() | nil}
           | {:error, :missing_session_id}
+          | {:error, :shared_session}
 
   @spec check_resume_intent(map(), keyword()) :: continuation()
   def check_resume_intent(fiber, opts \\ []) do
     session_id = Shuttle.Continuation.resumable_session_id(fiber)
+    shared? = Keyword.get(opts, :shared_session, false)
 
     case Keyword.get(opts, :resume_mode) do
+      "previous" when shared? ->
+        {:error, :shared_session}
+
       "previous" ->
         if session_id, do: {:previous, session_id}, else: {:error, :missing_session_id}
 
-      "fresh" ->
+      mode when mode == "fresh" or shared? ->
         # Never a resume (an app conversation's `{:previous, _}` included), but
         # a cut-off terminal session is still named.
         case continuation(fiber, session_id, opts, :fresh_only) do
@@ -270,9 +279,8 @@ defmodule Shuttle.Dispatcher do
 
   # A session that ended without a handoff, judged by its transcript (one
   # resolve + one stat):
-  #   - last written before this dispatch's `dispatched_at` → the id is not
-  #     this dispatch's session (a Pi launch whose own id was never
-  #     scraped leaves its predecessor's in the marker) → plain fresh;
+  #   - last written before this dispatch's `dispatched_at` → this dispatch's
+  #     worker never wrote to it (it died at launch) → plain fresh;
   #   - written within the warm window → resume, while the prompt cache still
   #     holds it (unless the caller only wants fresh);
   #   - older, or not on this host → fresh, naming the cut-off session. Past the
@@ -491,10 +499,9 @@ defmodule Shuttle.Dispatcher do
       else
         session = capture_session_name()
 
-        # Only claude can be handed a session id up front; `build_command/3` and
-        # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
-        # as absent, so the other harnesses need no separate path.
-        session_uuid = if agent.cli == "claude", do: generate_uuid4()
+        # The capture's conversation UUID is assigned up front, so its own
+        # claim names it and its run script is keyed by it.
+        session_uuid = generate_uuid4()
 
         prompt =
           render_capture_prompt(yap,
@@ -519,7 +526,7 @@ defmodule Shuttle.Dispatcher do
 
         Logger.info("Capture session via #{agent.id} → tmux session #{session}")
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
+        case spawn_tmux(session, work_dir, run_script, runner, session_uuid) do
           {:ok, _} -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
           error -> error
         end
@@ -637,26 +644,30 @@ defmodule Shuttle.Dispatcher do
   end
 
   @doc """
-  The tmux session name of a fiber's worker: `<leaf>-<uid>-shuttle`.
+  The tmux session name of one launch of a fiber's worker:
+  `<leaf>-<uuid8>-<uid>-shuttle`.
 
   The human-readable leaf keeps tmux/kitty titles legible from the left edge
-  when truncated, and the uid (the fiber's intrinsic ULID) makes the name
-  collision-free and rename-safe — two fibers sharing a leaf do not collide,
-  and renaming a fiber leaves the running worker's session addressable by the
-  uid that does not change.
+  when truncated; the first eight characters of the launch's conversation
+  UUID make the name unique to that launch, so a fiber launched again while
+  an earlier launch's worker runs on under a claim never collides with it;
+  the uid (the fiber's intrinsic ULID) marks the fiber that launched it. The
+  name is a display label: it is never renamed, and it never decides which
+  fiber a live worker serves (`Shuttle.Continuation.execution/1`).
 
   `nil` when `uid` is not a ULID: such a fiber has no worker name, and
   `dispatch/2` refuses it (`:uid_missing`). The names produced here are exactly
   the names `shuttle_session?/1` recognizes.
   """
-  @spec session_name(String.t(), String.t() | nil) :: String.t() | nil
-  def session_name(fiber_id, uid) do
-    if Shuttle.ULID.valid?(uid), do: fiber_leaf(fiber_id) <> "-" <> uid <> "-shuttle"
+  @spec session_name(String.t(), String.t() | nil, String.t()) :: String.t() | nil
+  def session_name(fiber_id, uid, uuid) when is_binary(uuid) do
+    if Shuttle.ULID.valid?(uid),
+      do: fiber_leaf(fiber_id) <> "-" <> String.slice(uuid, 0, 8) <> "-" <> uid <> "-shuttle"
   end
 
   @doc """
-  Returns true when a tmux session name belongs to a Shuttle worker: it parses
-  as `<leaf>-<ULID>-shuttle` (`Shuttle.ULID.from_tmux/1`).
+  Returns true when a tmux session name belongs to a Shuttle worker launch: it
+  ends `-<ULID>-shuttle` (`Shuttle.ULID.from_tmux/1`).
   """
   @spec shuttle_session?(String.t()) :: boolean()
   def shuttle_session?(session_name), do: Shuttle.ULID.from_tmux(session_name) != nil
@@ -838,15 +849,31 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # A live worker blocks a fresh dispatch OR a resume. `present?` treats an
-  # inconclusive `has-session` as present, so a transient tmux failure can
-  # never let a dispatch (especially a resume) spawn over a still-live worker —
-  # the daemon refuses with :already_running and the caller adopts instead.
-  defp check_not_running(fiber_id, uid, runner, surface) do
-    cond do
-      surface == "app" and Shuttle.Env.find_executable("tmux") == nil -> :ok
-      Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
-      true -> :ok
+  # A live worker blocks a fresh dispatch OR a resume: the execution the
+  # fiber's unconcluded dispatch names is still held by a process. An
+  # unobservable holder counts as held, so a transient scan failure can never
+  # let a dispatch (especially a resume) spawn over a still-live worker — the
+  # daemon refuses with :already_running and the caller adopts instead. A
+  # concluded dispatch names no execution: whatever process still holds its
+  # conversation serves another fiber now.
+  # An app conversation's runtime names its thread, which AppWorkers owns
+  # (`check_app_not_running/2`); a terminal execution the runtime still names
+  # blocks an app launch as much as a terminal one.
+  defp check_not_running(fiber, _agent, runner) do
+    execution = Shuttle.Continuation.execution(fiber)
+
+    app_thread? =
+      is_map(execution) and is_binary(execution.uuid) and
+        Shuttle.AppWorkers.get(execution.uuid) != {:error, :not_found}
+
+    case if(not app_thread?, do: execution) do
+      nil ->
+        :ok
+
+      execution ->
+        if Shuttle.Tmux.worker_status(runner, execution) == :gone,
+          do: :ok,
+          else: {:error, :already_running}
     end
   end
 
@@ -1479,9 +1506,16 @@ defmodule Shuttle.Dispatcher do
     render_capture_entrypoint(yap, Keyword.put(opts, :surface, "app"))
   end
 
+  # A terminal launch pre-assigns its conversation UUID: a resume reuses the
+  # one it resumes, a fresh launch mints one, and the harness is started under
+  # it (`--session-id` for Claude and Pi). The fiber's runtime names that UUID
+  # and the new dispatch generation BEFORE anything is spawned, so a worker
+  # never runs that its fiber does not name; a failed stamp launches nothing.
+  # The run script is keyed by the UUID (`Shuttle.WorkerProcess`), and the
+  # tmux session gets a name of its own that nothing else ever takes or
+  # renames.
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
     resume_intent = effective_resume_intent(resume_intent, agent, opts)
-    session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
 
     prompt_opts =
@@ -1489,203 +1523,96 @@ defmodule Shuttle.Dispatcher do
       |> Keyword.put(:work_dir, work_dir)
       |> Keyword.put(:headless, agent[:headless] == true)
 
-    case resume_intent do
-      {:previous, session_id} ->
-        # Two harness processes on one transcript would interleave it. A
-        # human resume of this very session (a card History row,
-        # `Shuttle.SessionResume`) may be open in `resume-<uuid>`, or a live
-        # process tmux cannot see may still hold it (a worker whose tmux
-        # socket was deleted). Either way the dispatch is refused like any
-        # other preflight — the poller parks the fiber as blocked with the
-        # message — rather than killing a process a person may be typing in.
-        case check_resume_target_free(session_id, runner) do
-          :ok ->
-            # Resume mode: invoke the harness-appropriate resume command and
-            # inject a small prompt as the next user turn so the resumed
-            # worker knows it was deliberately woken (and sees the user's
-            # latest directive if there is one). Without this the worker
-            # would wake blind to the directive that triggered the resume.
-            Logger.info(
-              "Resuming #{fiber_id} session #{session_id} via #{agent.id} → tmux #{session}"
-            )
+    with {:ok, uuid, command, kind, launch_opts} <-
+           terminal_command(resume_intent, fiber_id, agent, runner, prompt_context, prompt_opts) do
+      session = session_name(fiber_id, Keyword.get(opts, :uid), uuid)
+      dispatched_at = DateTime.to_iso8601(DateTime.utc_now())
 
-            resume_prompt = render_resume_prompt(fiber_id, prompt_opts)
-            resume_command = Agents.build_resume_command(agent, session_id, resume_prompt)
+      Logger.info(
+        "#{if kind == :resume, do: "Resuming", else: "Dispatching"} #{fiber_id} " <>
+          "session #{uuid} via #{agent.id} → tmux #{session}"
+      )
 
-            # Failed resumes fall back to a fresh launch. Claude reuses the
-            # requested UUID; Pi chooses a new UUID, whose capture starts
-            # only after the private fallback signal appears. The fallback
-            # prompt omits lineage to a transcript the harness cannot resume.
-            fallback_command =
-              fresh_fallback_command(
-                agent,
-                fiber_id,
-                session_id,
-                prompt_context,
-                Keyword.delete(prompt_opts, :previous_session)
-              )
+      run_script =
+        build_run_script(
+          fiber_id,
+          command,
+          agent.id,
+          Keyword.merge(launch_opts, session: session, fiber_path: Keyword.get(opts, :fiber_path))
+        )
 
-            resumed_at = DateTime.utc_now()
+      stamp =
+        Shuttle.Continuation.write_dispatch(runner, felt_store, fiber_id, %{
+          session_uuid: uuid,
+          run_id: Keyword.get(opts, :run_id),
+          dispatched_at: dispatched_at,
+          if_dispatched_at: Keyword.get(opts, :generation)
+        })
 
-            fallback_signal =
-              if agent.cli == "pi",
-                do: private_fallback_signal(session, resumed_at, session_id),
-                else: nil
-
-            command =
-              if fallback_signal,
-                do:
-                  "#{resume_command} || { touch #{shell_single_quote(fallback_signal)}; #{fallback_command}; }",
-                else: "#{resume_command} || #{fallback_command}"
-
-            # claude --resume shows an interactive "you're about to use a
-            # previous session" warning that only an Enter keypress at the
-            # TTY can dismiss. The heredoc-piped prompt arrives *after* the
-            # warning, so we can't fold it in. Schedule a tmux send-keys to
-            # fire a couple seconds in. Pi doesn't
-            # show this warning — and a headless `-p` resume has no TTY warning
-            # page and no human to attach, so both the dismiss send-keys and the
-            # wait-for-client gate are skipped for it.
-            headless = Keyword.fetch!(prompt_opts, :headless)
-
-            run_script =
-              build_run_script(fiber_id, command, agent.id,
-                dismiss_resume_warning: agent.cli == "claude" and not headless,
-                session: session,
-                headless: headless,
-                fiber_path: Keyword.get(opts, :fiber_path)
-              )
-
-            # Resume stamps a fresh dispatch boundary with the requested UUID.
-            # A Pi fallback clears it and captures its new identity without
-            # moving that boundary.
-            result =
-              spawn_and_record(session, work_dir, run_script, runner, fn ->
-                record_dispatch_session(
-                  fiber_id,
-                  session_id,
-                  runner,
-                  Keyword.merge(opts,
-                    felt_store: felt_store,
-                    run_id: Keyword.get(opts, :run_id),
-                    tmux: session,
-                    harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                    uid: Keyword.get(opts, :uid),
-                    ledger_kind: :resume,
-                    dispatched_at: DateTime.to_iso8601(resumed_at)
-                  )
-                )
-
-                if fallback_signal do
-                  fallback_opts =
-                    Keyword.merge(opts,
-                      felt_store: felt_store,
-                      tmux: session,
-                      harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                      uid: Keyword.get(opts, :uid),
-                      fallback_signal: fallback_signal
-                    )
-
-                  monitor_resume_fallback(
-                    fiber_id,
-                    agent.cli,
-                    work_dir,
-                    resumed_at,
-                    runner,
-                    fallback_signal,
-                    fallback_opts
-                  )
-                end
-              end)
-
-            if fallback_signal != nil and match?({:error, _}, result),
-              do: File.rm_rf(Path.dirname(fallback_signal))
-
-            result
-
-          refused ->
-            refused
-        end
-
-      :fresh ->
-        # Fresh mode: build the full dispatch prompt.
-        {command, session_uuid} =
-          build_fresh_command(agent, fiber_id, prompt_context, prompt_opts)
-
-        Logger.info("Dispatching #{fiber_id} via #{agent.id} → tmux session #{session}")
-
-        run_script =
-          build_run_script(fiber_id, command, agent.id,
-            fiber_path: Keyword.get(opts, :fiber_path)
+      with :ok <- stamp,
+           {:ok, _} = result <- spawn_tmux(session, work_dir, run_script, runner, uuid) do
+        append_session_ledger(
+          fiber_id,
+          uuid,
+          Keyword.merge(opts,
+            tmux: session,
+            harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+            ledger_kind: kind
           )
+        )
 
-        # Store the session UUID in the dispatch marker so "Resume previous"
-        # and the autonomous continuation heuristic can recover it.
-        spawn_and_record(session, work_dir, run_script, runner, fn ->
-          store_session_id(
-            fiber_id,
-            session_uuid,
-            runner,
-            Keyword.merge(opts,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :dispatch
-            )
-          )
-        end)
-    end
-  end
-
-  # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
-  # propagates unchanged — nothing is stamped for a worker that never started.
-  defp spawn_and_record(session, work_dir, run_script, runner, record_fun) do
-    case spawn_tmux(session, work_dir, run_script, runner) do
-      {:ok, _} = result ->
-        record_fun.()
         result
+      else
+        {:error, reason} when not is_binary(reason) ->
+          {:error, "could not stamp #{fiber_id}'s dispatch before launch: #{inspect(reason)}"}
 
-      error ->
-        error
+        error ->
+          error
+      end
     end
   end
 
-  # The fresh launch a resume falls back to when the target session is gone.
-  # Carries the FULL dispatch prompt (the worker is starting a new conversation,
-  # not waking an existing one). For claude it reuses the resume target's id via
-  # `--session-id`, so the new session is created UNDER that id and the next
-  # dispatch can resume it — the fiber self-heals after one fresh run. Other
-  # harnesses get a plain fresh session (no --session-id); they still recover (the
-  # launch succeeds), they just don't reuse the id.
-  defp fresh_fallback_command(agent, fiber_id, session_id, prompt_context, opts) do
-    prompt = render_context_prompt(fiber_id, prompt_context, opts)
-    # `build_command/3` ignores `session_id` for every non-claude harness.
-    Agents.build_command(agent, prompt, session_id: session_id)
+  defp terminal_command({:previous, uuid}, fiber_id, agent, runner, prompt_context, prompt_opts) do
+    # Two harness processes on one transcript would interleave it. A human
+    # resume of this very session (a card History row, `Shuttle.SessionResume`)
+    # may be open in `resume-<uuid>`, or a live process tmux cannot see may
+    # still hold it. Either way the dispatch is refused like any other
+    # preflight — the poller parks the fiber as blocked with the message —
+    # rather than killing a process a person may be typing in.
+    with :ok <- check_resume_target_free(uuid, runner) do
+      # The resume prompt tells the woken worker it was deliberately resumed
+      # (and carries the user's latest directive). A resume that fails falls
+      # back to a fresh launch under the same UUID, whose prompt omits lineage
+      # to the transcript the harness could not open.
+      resume_command =
+        Agents.build_resume_command(agent, uuid, render_resume_prompt(fiber_id, prompt_opts))
+
+      fallback =
+        Agents.build_command(
+          agent,
+          render_context_prompt(
+            fiber_id,
+            prompt_context,
+            Keyword.delete(prompt_opts, :previous_session)
+          ),
+          session_id: uuid
+        )
+
+      # claude --resume shows a "you're about to use a previous session"
+      # warning only an Enter at the TTY dismisses, so the run script sends
+      # one a couple of seconds in. A headless resume has no TTY page and no
+      # human to attach.
+      headless = Keyword.fetch!(prompt_opts, :headless)
+
+      {:ok, uuid, "#{resume_command} || #{fallback}", :resume,
+       [dismiss_resume_warning: agent.cli == "claude" and not headless, headless: headless]}
+    end
   end
 
-  # Build the fresh dispatch command. For Claude we generate and inject a UUID
-  # upfront (--session-id) so we can store it synchronously. Pi's UUID is
-  # captured asynchronously after spawn.
-  defp build_fresh_command(agent, fiber_id, prompt_context, opts) do
-    prompt = render_context_prompt(fiber_id, prompt_context, opts)
-
-    case agent.cli do
-      "claude" ->
-        uuid = generate_uuid4()
-        command = Agents.build_command(agent, prompt, session_id: uuid)
-        {command, {:claude, uuid}}
-
-      "pi" ->
-        command = Agents.build_command(agent, prompt)
-        work_dir = Keyword.get(opts, :work_dir, File.cwd!())
-        {command, {:capture, "pi", work_dir, DateTime.utc_now()}}
-
-      _ ->
-        command = Agents.build_command(agent, prompt)
-        {command, :none}
-    end
+  defp terminal_command(:fresh, fiber_id, agent, _runner, prompt_context, prompt_opts) do
+    uuid = generate_uuid4()
+    prompt = render_context_prompt(fiber_id, prompt_context, prompt_opts)
+    {:ok, uuid, Agents.build_command(agent, prompt, session_id: uuid), :dispatch, []}
   end
 
   # A resume is only meaningful WITHIN one harness: `pi --session <uuid>`
@@ -1714,12 +1641,13 @@ defmodule Shuttle.Dispatcher do
 
   def effective_resume_intent(intent, _agent, _opts), do: intent
 
-  # Spawn a tmux session from a run-script string. The script's path names the
-  # session (`Shuttle.WorkerProcess.script_path/1`) and stays in the pane
-  # bash's argv for the worker's life, so the process table can vouch for a
-  # worker tmux cannot see.
-  def spawn_tmux(session, work_dir, run_script, runner) do
-    tmp_path = Shuttle.WorkerProcess.script_path(session)
+  # Spawn a tmux session from a run-script string. The script's path carries
+  # `key` — the launch's conversation UUID, else the session name
+  # (`Shuttle.WorkerProcess.script_path/1`) — and stays in the pane bash's
+  # argv for the worker's life, so the process table can vouch for a worker
+  # tmux cannot see.
+  def spawn_tmux(session, work_dir, run_script, runner, key \\ nil) do
+    tmp_path = Shuttle.WorkerProcess.script_path(key || session)
 
     File.write!(tmp_path, run_script)
     File.chmod!(tmp_path, 0o755)
@@ -1737,266 +1665,10 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # Stamp the dispatch marker in the fiber's `shuttle:` block right after a
-  # successful fresh dispatch, so "Resume previous" and the autonomous
-  # continuation heuristic can recover it (the block is the only structured
-  # session-id home — the worker never knows its own UUID, the daemon does).
-  # `opts` carries `:fiber_path` (the fiber's `.md`, from `fiber["path"]`) and
-  # `:run_id` (the standing run id, nil for a oneshot).
-  #
-  # `dispatched_at` is the dispatch-boundary ground truth the continuation
-  # heuristic compares `handed_off_at` against — it must exist the moment the
-  # tmux session starts doing work, not some seconds later. So for EVERY
-  # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
-  # `store_session_id` returns (a bounded blocking call: the Runner bounds
-  # every CLI shell-out). Only the piece that
-  # genuinely can't be known yet — Pi's session UUID, scraped from a
-  # JSONL file the harness hasn't necessarily written when tmux launches — is
-  # deferred to an async task, and that task only BACKFILLS `session_uuid`
-  # into the marker already stamped here; it never creates the marker itself.
-  #
-  # - Claude: UUID was pre-specified (`--session-id`) — the sync write already
-  #   carries it, nothing left to backfill.
-  # - Pi: sync write carries `dispatched_at` (+ `run_id`) with no
-  #   `session_uuid` yet; the async task backfills it once scraped.
-  # - None: agent doesn't support session IDs; sync write still stamps
-  #   `dispatched_at` so the continuation heuristic has a real boundary.
-  defp store_session_id(fiber_id, {:claude, uuid}, runner, opts),
-    do: record_dispatch_session(fiber_id, uuid, runner, opts)
-
-  defp store_session_id(
-         fiber_id,
-         {:capture, cli, work_dir, dispatched_after},
-         runner,
-         opts
-       ) do
-    record_dispatch_session(fiber_id, nil, runner, opts)
-
-    # Fire-and-forget: capture the session UUID from the harness's JSONL file
-    # in a background task. `dispatched_at` is already on disk, so the card can
-    # honestly report `identity_pending` while a cold harness starts; the
-    # elapsed-time deadline above leaves ordinary startup latency room without
-    # letting a failed capture task live forever. Supervised (not bare
-    # Task.start) so tests can enumerate and kill stragglers before tearing
-    # down the tmp dirs the backfill writes into.
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
-
-      capture_and_backfill(
-        fiber_id,
-        cli,
-        work_dir,
-        dispatched_after,
-        runner,
-        opts,
-        deadline
-      )
-    end)
-  end
-
-  defp store_session_id(fiber_id, :none, runner, opts),
-    do: record_dispatch_session(fiber_id, nil, runner, opts)
-
-  defp private_fallback_signal(session, dispatched_at, predecessor) do
-    path = fallback_signal_path(session, DateTime.to_iso8601(dispatched_at))
-    File.mkdir_p!(Path.dirname(path))
-    File.chmod!(Path.dirname(path), 0o700)
-    File.write!(Path.join(Path.dirname(path), "predecessor"), predecessor)
-    path
-  end
-
-  defp fallback_signal_path(session, boundary) do
-    key = :crypto.hash(:sha256, session <> "\n" <> boundary) |> Base.encode16(case: :lower)
-    Path.join([Shuttle.data_dir(), "identity-fallbacks", key, "started"])
-  end
-
-  @doc false
-  def pending_resume_fallback(session, boundary) when is_binary(boundary) do
-    path = fallback_signal_path(session, boundary)
-    dir = Path.dirname(path)
-
-    if File.exists?(Path.join(dir, "predecessor")) and
-         not File.exists?(Path.join(dir, "completed")),
-       do: path
-  end
-
-  def pending_resume_fallback(_session, _boundary), do: nil
-
-  @doc false
-  def complete_resume_fallback(nil, _uuid), do: :ok
-
-  def complete_resume_fallback(signal, uuid) do
-    case File.write(Path.join(Path.dirname(signal), "completed"), uuid) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("Could not complete fallback identity acquisition: #{inspect(reason)}")
-    end
-  end
-
-  @doc false
-  def monitor_resume_fallback(fiber_id, cli, work_dir, dispatched_at, runner, signal, opts) do
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      if await_fallback(
-           signal,
-           Keyword.fetch!(opts, :tmux),
-           runner,
-           System.monotonic_time(:millisecond)
-         ) do
-        case Keyword.get(opts, :poller) do
-          nil ->
-            Shuttle.Continuation.backfill_session_uuid(
-              runner,
-              Keyword.fetch!(opts, :felt_store),
-              fiber_id,
-              ""
-            )
-
-          poller ->
-            send(poller, {:fallback_started, fiber_id, Keyword.get(opts, :identity_token), opts})
-        end
-
-        deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
-
-        capture_and_backfill(
-          fiber_id,
-          cli,
-          work_dir,
-          dispatched_at,
-          runner,
-          opts,
-          deadline
-        )
-      end
-    end)
-  end
-
-  defp await_fallback(path, session, runner, next_liveness_check) do
-    now = System.monotonic_time(:millisecond)
-
-    cond do
-      File.exists?(path) ->
-        true
-
-      now >= next_liveness_check ->
-        case runner.cmd("tmux", ["has-session", "-t", session], stderr_to_stdout: true) do
-          {_, 0} ->
-            :timer.sleep(@session_capture_poll_ms)
-            await_fallback(path, session, runner, now + 10_000)
-
-          _ ->
-            false
-        end
-
-      true ->
-        :timer.sleep(@session_capture_poll_ms)
-        await_fallback(path, session, runner, next_liveness_check)
-    end
-  end
-
-  defp capture_and_backfill(
-         fiber_id,
-         cli,
-         work_dir,
-         dispatched_after,
-         runner,
-         opts,
-         deadline
-       ) do
-    case capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
-      {:ok, uuid} ->
-        case Keyword.get(opts, :poller) do
-          nil ->
-            backfill_session_uuid(fiber_id, uuid, runner, opts)
-
-          poller ->
-            send(
-              poller,
-              {:captured_session, fiber_id, Keyword.get(opts, :identity_token), uuid, opts}
-            )
-        end
-
-      {:error, reason} ->
-        if poller = Keyword.get(opts, :poller) do
-          send(
-            poller,
-            {:identity_capture_failed, fiber_id, Keyword.get(opts, :identity_token), reason}
-          )
-        end
-
-        Logger.warning(
-          "Could not capture session UUID for #{fiber_id} (#{cli}): #{reason}. " <>
-            "Resume previous will be unavailable."
-        )
-    end
-  end
-
-  # Stamp `{session_uuid, dispatched_at, run_id}` into the fiber's
-  # `shuttle.runtime` block by shelling `shuttle mark-runtime`. At the next
-  # dispatch the worker's `handed_off_at` is compared against this
-  # `dispatched_at` to decide fresh-vs-resume. `felt_store` + `fiber_id` are the
-  # store/scoped-id pair the dispatch read the fiber with, so Shuttle resolves
-  # it. A missing `:felt_store` skips the write — the fiber then reads as a
-  # fresh dispatch, the safe default. `uuid` may be `nil` (Pi at launch,
-  # or `:none` agents) — the
-  # marker still gets a `dispatched_at` boundary, just no `session_uuid` yet.
-  defp record_dispatch_session(fiber_id, uuid, runner, opts) do
-    write_runtime_marker(fiber_id, uuid, opts, "dispatch marker", fn store ->
-      Shuttle.Continuation.write_dispatch(runner, store, fiber_id, %{
-        session_uuid: uuid,
-        run_id: Keyword.get(opts, :run_id),
-        dispatched_at: Keyword.get(opts, :dispatched_at)
-      })
-    end)
-  end
-
-  # The one runtime-marker writer both entry points share: guard on the felt
-  # store, run the caller's Continuation write, and on success log + append the
-  # structural half to the session ledger. A missing store suppresses the
-  # ledger append too — that is behaviour, not just a skipped write.
-  defp write_runtime_marker(fiber_id, uuid, opts, label, write_fun) do
-    case Keyword.get(opts, :felt_store) do
-      store when is_binary(store) and store != "" ->
-        case write_fun.(store) do
-          :ok ->
-            if is_binary(uuid) and uuid != "" do
-              Logger.info("Recorded session UUID #{uuid} for #{fiber_id} in shuttle.runtime")
-            else
-              Logger.info("Stamped dispatched_at for #{fiber_id} in shuttle.runtime")
-            end
-
-            # `record/1` drops a nil uuid itself, so the Pi launch
-            # (boundary stamped, UUID not yet scraped) contributes no line
-            # here — its line comes from the backfill, once the pairing is
-            # actually known.
-            append_session_ledger(fiber_id, uuid, opts)
-
-            if poller = Keyword.get(opts, :poller) do
-              send(
-                poller,
-                {:dispatched_identity, fiber_id, Keyword.get(opts, :identity_token), uuid}
-              )
-            end
-
-          {:error, reason} ->
-            Logger.warning(
-              "Could not write #{label} for #{fiber_id} (#{store}): #{inspect(reason)}"
-            )
-        end
-
-      _ ->
-        Logger.debug("write_runtime_marker (#{label}): no felt_store for #{fiber_id}; skipping")
-    end
-  rescue
-    e -> Logger.warning("Could not write #{label} for #{fiber_id}: #{inspect(e)}")
-  end
-
   # Append the fiber↔session pairing to this host's session ledger. Carries the
-  # tmux name and harness the dispatch site put in `opts`; the ledger derives
-  # the fiber ULID from the tmux name and stamps host and time itself. Never
-  # raises and never branches the caller — a lost ledger line costs a join row,
-  # not a worker.
+  # tmux name and harness the dispatch site put in `opts`. Never raises and
+  # never branches the caller — a lost ledger line costs a join row, not a
+  # worker.
   defp append_session_ledger(fiber_id, uuid, opts) do
     Shuttle.SessionLedger.record(
       fiber: fiber_id,
@@ -2012,132 +1684,6 @@ defmodule Shuttle.Dispatcher do
       model: Keyword.get(opts, :model),
       role: Keyword.get(opts, :role)
     )
-  end
-
-  # Backfill `session_uuid` into an ALREADY-STAMPED marker — the Pi
-  # async capture path. Deliberately does not touch `dispatched_at`: it shells
-  # `shuttle mark-runtime --session <uuid>` with no `--dispatched-at`
-  # flag, and mark-runtime only writes fields whose flag is present, so the
-  # boundary `record_dispatch_session/4` stamped synchronously at launch is
-  # left exactly as it was.
-  # (The ledger line the shared writer appends is the Pi `dispatch` line:
-  # that pairing becomes known here, not at launch.)
-  defp backfill_session_uuid(fiber_id, uuid, runner, opts) do
-    write_runtime_marker(fiber_id, uuid, opts, "session UUID backfill", fn store ->
-      Shuttle.Continuation.backfill_session_uuid(runner, store, fiber_id, uuid)
-    end)
-  end
-
-  # Poll Pi's session JSONL files until the elapsed-time deadline. A candidate
-  # must match cwd, dispatch time and the fiber prompt, so concurrent workers
-  # sharing a checkout cannot borrow one another's identity.
-  @doc false
-  def retry_session_capture(fiber_id, cli, work_dir, dispatched_after, runner, opts) do
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      deadline = System.monotonic_time(:millisecond) + capture_timeout_ms()
-
-      capture_and_backfill(
-        fiber_id,
-        cli,
-        work_dir,
-        dispatched_after,
-        runner,
-        opts,
-        deadline
-      )
-    end)
-  end
-
-  defp capture_timeout_ms,
-    do: Shuttle.Env.app(:session_capture_timeout_ms, @session_capture_timeout_ms)
-
-  defp capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline) do
-    if System.monotonic_time(:millisecond) >= deadline do
-      {:error, "timed out waiting for session file"}
-    else
-      :timer.sleep(Shuttle.Env.app(:session_capture_poll_ms, @session_capture_poll_ms))
-
-      case find_session_file(cli, work_dir, fiber_id, dispatched_after) do
-        {:ok, path} ->
-          read_uuid_from_jsonl(cli, path)
-
-        {:error, _} ->
-          capture_session_uuid(cli, work_dir, fiber_id, dispatched_after, deadline)
-      end
-    end
-  end
-
-  # Pi candidates are sorted newest first by their ISO-stamped basenames.
-  # The first candidate that
-  # matches cwd, recency AND content is this dispatch's session; a bare
-  # newest-file pick would steal another worker's session whenever two workers
-  # share a cwd.
-  defp candidate_session_files("pi", work_dir, _dispatched_after) do
-    dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
-
-    case File.ls(dir) do
-      {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
-      {:error, _} -> []
-    end
-  end
-
-  defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
-
-  defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
-    cli
-    |> candidate_session_files(work_dir, dispatched_after)
-    |> Enum.find(&session_matches?(cli, &1, work_dir, fiber_id, dispatched_after))
-    |> case do
-      nil -> {:error, :not_found}
-      path -> {:ok, path}
-    end
-  end
-
-  # Pi's first JSONL line carries its id, cwd and timestamp.
-  defp session_header(cli, content) do
-    with [first_line | _] <- String.split(content, "\n", parts: 2),
-         {:ok, event} <- Jason.decode(first_line) do
-      case {cli, event} do
-        {"pi", %{"type" => "session"}} ->
-          {:ok, event}
-
-        _ ->
-          :error
-      end
-    else
-      _ -> :error
-    end
-  end
-
-  # The transcript's session header names its cwd and start time, but the
-  # dispatch prompt's fiber line only appears once the first message lands
-  # (~1s after the header), so the WHOLE file is searched — the retry loop
-  # above re-reads until it matches.
-  defp session_matches?(cli, path, work_dir, fiber_id, dispatched_after) do
-    with {:ok, content} <- File.read(path),
-         {:ok, header} <- session_header(cli, content),
-         cwd when is_binary(cwd) <- Map.get(header, "cwd"),
-         timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
-         {:ok, started_at, _} <- DateTime.from_iso8601(timestamp) do
-      Shuttle.Env.expand(cwd) == Shuttle.Env.expand(work_dir) and
-        DateTime.compare(started_at, DateTime.add(dispatched_after, -5, :second)) != :lt and
-        String.contains?(content, "Fiber: #{fiber_id}")
-    else
-      _ -> false
-    end
-  end
-
-  # No cwd re-check here: the only caller hands us the path
-  # `find_session_file/4` just returned, and `session_matches?/5` already
-  # required the header's cwd to expand to `work_dir` before returning it.
-  defp read_uuid_from_jsonl(cli, path) do
-    with {:ok, content} <- File.read(path),
-         {:ok, header} <- session_header(cli, content),
-         uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id") do
-      {:ok, uuid}
-    else
-      _ -> {:error, "could not parse session UUID from #{path}"}
-    end
   end
 
   # Generates a random UUID v4 using Erlang's :crypto module.

@@ -36,9 +36,12 @@ defmodule Shuttle.Poller do
     LifecycleService,
     LifecycleStore,
     StandingRole,
+    WorkerBackend,
+    WorkerProcess,
     WorkerWatcher
   }
 
+  alias Shuttle.Poller.Executions
   alias Shuttle.Poller.Snapshot
   alias Shuttle.Poller.SessionReconciliation
   alias Shuttle.Poller.StandingRoles
@@ -154,13 +157,18 @@ defmodule Shuttle.Poller do
       poll_cycles: 0,
       # In-memory watcher registry, keyed by intrinsic UID when known; metadata
       # carries :fiber_id as the felt address used for CLI shell-outs and public
-      # API payloads. NOT persisted — tmux is the
-      # source of truth for liveness, so a restart re-derives `running` by
-      # adopting live shuttle sessions (`adopt_orphans`) and every poll
-      # reconciles entries whose tmux session has died.
+      # API payloads, and a terminal worker's execution (`:holder_uuid`,
+      # `:pane`, `:generation`). NOT persisted — fiber runtimes and the process
+      # table are the source of truth, so a restart re-derives `running` by
+      # adopting each fiber's live execution (`adopt_orphans`) and every poll
+      # reconciles entries whose worker has exited.
       running: %{},
       standing_roles: [],
       orphans: [],
+      # Executions two live fibers name, found by this cycle's adoption pass
+      # (`Shuttle.Poller.SessionReconciliation`) and shown as `blocked` rows.
+      # Derived from scratch each cycle, so a hold clears once it heals.
+      holds: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
       # poll cycle. Entries are never evicted.
       fiber_store_cache: %{},
@@ -775,10 +783,10 @@ defmodule Shuttle.Poller do
     # the only evidence that distinguishes a fast bounce from a real gap.
     previous_heartbeat = DaemonHeartbeat.read(state.daemon_heartbeat_file)
 
-    # Daemon state is derived and disposable. Rebuild
-    # `running` from tmux by adopting any live shuttle sessions — a restart
-    # re-scans tmux and is immediately correct, and running work survives because
-    # tmux owns the worker process.
+    # Daemon state is derived and disposable. Rebuild `running` by adopting
+    # each fiber's live execution — a restart re-reads the fibers and the
+    # process table and is immediately correct, and running work survives
+    # because tmux owns the worker process.
     state = SessionReconciliation.adopt_orphans(state)
 
     # Adoption has run, so `state.running` is this daemon's OWN observation of
@@ -924,114 +932,6 @@ defmodule Shuttle.Poller do
   end
 
   @impl true
-  def handle_info({:dispatched_identity, fiber_id, token, uuid}, state) do
-    case running_worker(state, fiber_id) do
-      %{identity_token: ^token} when not is_nil(token) ->
-        key = running_key(state, fiber_id)
-
-        {:noreply, put_running(state, key, Map.put(state.running[key], :session_uuid, uuid))}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
-
-  def handle_info({:fallback_started, fiber_id, token, opts}, state) do
-    worker = running_worker(state, fiber_id)
-    store = Keyword.get(opts, :felt_store)
-
-    if is_binary(store) and store != "" and worker != nil and token != nil and
-         Map.get(worker, :identity_token) == token and
-         not Map.get(worker, :identity_captured, false) do
-      {:noreply, invalidate_fallback_identity(state, fiber_id, store)}
-    else
-      {:noreply, state}
-    end
-  end
-
-  def handle_info({:identity_capture_failed, fiber_id, token, reason}, state) do
-    case running_worker(state, fiber_id) do
-      %{identity_token: ^token, session_uuid: nil} when not is_nil(token) ->
-        key = running_key(state, fiber_id)
-
-        Process.send_after(
-          state.self_ref,
-          {:retry_identity, fiber_id, token},
-          Shuttle.Env.app(:session_capture_retry_ms, 30_000)
-        )
-
-        running =
-          Map.update!(state.running, key, &Map.put(&1, :identity_error, to_string(reason)))
-
-        {:noreply, %{state | running: running}}
-
-      _ ->
-        {:noreply, state}
-    end
-  end
-
-  def handle_info({:retry_identity, fiber_id, token}, state) do
-    case running_worker(state, fiber_id) do
-      %{identity_token: ^token, session_uuid: nil} when not is_nil(token) ->
-        case fetch_fiber_full(fiber_id, state) do
-          {:ok, fiber} ->
-            {:noreply, acquire_worker_identity(state, fiber_id, fiber)}
-
-          {:error, reason} ->
-            send(state.self_ref, {:identity_capture_failed, fiber_id, token, inspect(reason)})
-            {:noreply, state}
-        end
-
-      _ ->
-        {:noreply, state}
-    end
-  end
-
-  def handle_info({:captured_session, fiber_id, token, uuid, opts}, state) do
-    worker = running_worker(state, fiber_id)
-    store = Keyword.get(opts, :felt_store)
-
-    if is_binary(store) and store != "" and worker != nil and
-         Map.get(worker, :identity_token) == token and token != nil and
-         not Map.get(worker, :identity_captured, false) do
-      # A capture initializes identity once. Succession is folded before the
-      # write so a /clear observed while capture was pending is not lost.
-      current = Shuttle.SessionBinding.current(session_bindings(), uuid)
-
-      case Shuttle.Continuation.backfill_session_uuid(
-             state.runner,
-             Keyword.get(opts, :felt_store),
-             fiber_id,
-             current
-           ) do
-        :ok ->
-          Dispatcher.complete_resume_fallback(Keyword.get(opts, :fallback_signal), current)
-
-          Shuttle.SessionLedger.record(
-            Keyword.merge(opts, fiber: fiber_id, session: current, kind: :dispatch)
-          )
-
-          key = running_key(state, fiber_id)
-
-          worker =
-            state.running[key]
-            |> Map.put(:identity_captured, true)
-            |> Map.put(:session_uuid, current)
-            |> Map.delete(:identity_error)
-
-          state = put_running(state, key, worker)
-
-          {:noreply, refresh_worker_document(state, fiber_id)}
-
-        {:error, reason} ->
-          send(state.self_ref, {:identity_capture_failed, fiber_id, token, inspect(reason)})
-          {:noreply, state}
-      end
-    else
-      {:noreply, state}
-    end
-  end
-
   def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
       when is_reference(tick_token) do
     state = %{
@@ -1412,7 +1312,7 @@ defmodule Shuttle.Poller do
                match?({:ok, %{"surface" => "cli"}}, owner) do
             do_claim_app_session(state, slug, uid, Keyword.get(opts, :session_uuid), opts)
           else
-            do_claim_session(state, slug, uid, tmux_session, opts)
+            do_claim_session(state, slug, tmux_session, opts)
           end
       end
 
@@ -1481,6 +1381,12 @@ defmodule Shuttle.Poller do
   def handle_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
+    # A rest concludes the dispatch it stops, so the worker an untracked fiber
+    # is assigned is found before the write.
+    untracked =
+      if verb == :rest and running_key(state, slug) == nil,
+        do: untracked_target(state, fiber_id)
+
     result =
       LifecycleService.write(verb, slug,
         runner: state.runner,
@@ -1494,7 +1400,7 @@ defmodule Shuttle.Poller do
     {result, state} =
       case {verb, result} do
         {:rest, {:ok, output}} ->
-          case stop_tracked_worker(state, slug) do
+          case stop_tracked_worker(state, slug, untracked) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
             {{:error, reason}, state} -> {{:error, reason}, state}
@@ -1767,7 +1673,7 @@ defmodule Shuttle.Poller do
 
     # One tmux + process scan per cycle, shared by orphan adoption and the
     # dead-standing-role pass below.
-    sessions = list_shuttle_sessions(state)
+    scan = Shuttle.WorkerProcess.scan(state.runner)
 
     state = %{
       state
@@ -1779,7 +1685,7 @@ defmodule Shuttle.Poller do
         discovery: discovery
     }
 
-    state = reconcile(state, sessions, listings_ok?)
+    state = reconcile(state, scan, listings_ok?)
 
     standing_roles = StandingRoles.standing_roles_from_candidates(candidates)
     Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, new_store_map))
@@ -1817,7 +1723,7 @@ defmodule Shuttle.Poller do
     # Oneshots need no analog: a status:active oneshot with no live session is
     # simply eligible again on the next tick — retries collapsed into the poll
     # loop.
-    state = StandingRoles.reconcile_dead_standing_roles(state, candidates, sessions)
+    state = StandingRoles.reconcile_dead_standing_roles(state, candidates, scan)
 
     # Parking is dispatch-authority bookkeeping, not capacity accounting: while
     # quarantined, the parked map is rebuilt from the current dispatchable set
@@ -2342,104 +2248,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp session_bindings do
-    case Shuttle.Env.app(:session_bindings_source) do
-      fun when is_function(fun, 0) -> fun.()
-      _ -> Shuttle.EventStream.session_bindings()
-    end
-  end
-
-  defp invalidate_fallback_identity(state, fiber_id, store) do
-    key = running_key(state, fiber_id)
-
-    worker =
-      state.running[key] |> Map.put(:session_uuid, nil) |> Map.put(:identity_captured, false)
-
-    state = put_running(state, key, worker)
-
-    # A failed durable write cannot make the live fresh process its predecessor again.
-    case Shuttle.Continuation.backfill_session_uuid(state.runner, store, fiber_id, "") do
-      :ok ->
-        refresh_worker_document(state, fiber_id)
-
-      {:error, reason} ->
-        running = Map.update!(state.running, key, &Map.put(&1, :identity_error, inspect(reason)))
-        %{state | running: running}
-    end
-  end
-
-  @doc false
-  def acquire_worker_identity(state, fiber_id, fiber) do
-    worker = running_worker(state, fiber_id)
-    cli = get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-    uuid = worker_session_uuid(worker, fiber)
-    boundary = get_in(fiber, ["shuttle", "runtime", "dispatched_at"]) || ""
-    signal = worker && Dispatcher.pending_resume_fallback(worker.session, boundary)
-
-    if worker && Shuttle.AppWorkers.id(worker.session) == nil && (uuid == nil || signal != nil) do
-      token = make_ref()
-      key = running_key(state, fiber_id)
-      worker = worker |> Map.put(:session_uuid, uuid) |> Map.put(:identity_token, token)
-      state = put_running(state, key, worker)
-      store = owning_store(fiber_id, state)
-      work_dir = declared_project_dir(Map.get(fiber, "shuttle")) || store
-
-      opts = [
-        poller: state.self_ref,
-        identity_token: token,
-        felt_store: store,
-        tmux: worker.session,
-        uid: metadata_uid(worker),
-        harness: Shuttle.SessionLedger.harness_for_cli(cli),
-        role: Map.get(worker, :role),
-        fallback_signal: signal
-      ]
-
-      with true <- cli == "pi",
-           {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
-        cond do
-          signal != nil and not File.exists?(signal) ->
-            Dispatcher.monitor_resume_fallback(
-              fiber_id,
-              cli,
-              work_dir,
-              dispatched_at,
-              state.runner,
-              signal,
-              opts
-            )
-
-            state
-
-          true ->
-            state =
-              if signal, do: invalidate_fallback_identity(state, fiber_id, store), else: state
-
-            Dispatcher.retry_session_capture(
-              fiber_id,
-              cli,
-              work_dir,
-              dispatched_at,
-              state.runner,
-              opts
-            )
-
-            state
-        end
-      else
-        _ ->
-          send(
-            state.self_ref,
-            {:identity_capture_failed, fiber_id, token,
-             "Session identity unavailable; claim this worker with its session UUID"}
-          )
-
-          state
-      end
-    else
-      state
-    end
-  end
+  defp session_bindings, do: Shuttle.SessionBinding.observed()
 
   defp persist_session_bindings(state) do
     binding = session_bindings()
@@ -2455,12 +2264,29 @@ defmodule Shuttle.Poller do
       if Shuttle.AppWorkers.id(meta.session) == nil and current != nil and
            (current != anchor or mirror != current) and
            is_binary(Map.get(meta, :felt_store)) and Map.get(meta, :felt_store) != "" do
+        # A successor's argv still names the conversation it started as, so
+        # its pane is bound alongside: that keeps the worker findable once
+        # the hook evidence linking the two has aged out.
+        pane = Map.get(meta, :pane) || if(current != anchor, do: execution_pane(state, meta))
+        fields = %{pane: pane}
+
+        fields =
+          if is_binary(meta[:generation]),
+            do: Map.put(fields, :if_dispatched_at, meta.generation),
+            else: fields
+
         case Shuttle.Continuation.backfill_session_uuid(
                state.runner,
                Map.get(meta, :felt_store),
                fiber_id,
-               current
+               current,
+               fields
              ) do
+          {:error, :generation_mismatch} ->
+            # The fiber has moved to another dispatch; this worker's
+            # conversation is no longer its to name.
+            state
+
           :ok ->
             if current != anchor do
               Shuttle.SessionLedger.record(
@@ -2479,7 +2305,10 @@ defmodule Shuttle.Poller do
             end
 
             worker =
-              state.running[key] |> Map.put(:session_uuid, current) |> Map.delete(:identity_error)
+              state.running[key]
+              |> Map.put(:session_uuid, current)
+              |> Map.put(:pane, pane)
+              |> Map.delete(:identity_error)
 
             state = put_running(state, key, worker)
 
@@ -2493,6 +2322,25 @@ defmodule Shuttle.Poller do
         state
       end
     end)
+  end
+
+  # The pane binding of tracked worker `meta`'s process: its outermost
+  # process below tmux and that process's start token, or nil.
+  defp execution_pane(state, meta) do
+    with {:ok, procs} <- WorkerProcess.scan(state.runner),
+         %{} = holder <- WorkerProcess.find(procs, WorkerBackend.handle(meta), state.runner),
+         root = WorkerProcess.signal_root(procs, holder),
+         {:ok, output} <-
+           Shuttle.CLI.run(["process-identity", Integer.to_string(root.pid)],
+             runner: state.runner,
+             timeout_ms: 2_000
+           ),
+         {:ok, %{"status" => "present", "start" => start}} when is_binary(start) <-
+           Jason.decode(output) do
+      %{"pid" => root.pid, "start" => start}
+    else
+      _ -> nil
+    end
   end
 
   defp refresh_worker_document(state, fiber_id) do
@@ -3245,7 +3093,7 @@ defmodule Shuttle.Poller do
 
     paste_into =
       if Keyword.get(opts, :resume_mode) == "previous" and is_binary(message),
-        do: live_tmux_session(state, fiber_id, uid)
+        do: live_tmux_session(state, fiber_id)
 
     cond do
       current != nil and Shuttle.AppWorkers.app?(current.session) and
@@ -3509,12 +3357,8 @@ defmodule Shuttle.Poller do
   defp spawn_worker(state, fiber, fiber_id, runtime_key, felt_store, work_dir, opts) do
     prompt_context = dispatch_prompt_context(fiber, opts)
 
-    identity_token = make_ref()
-
     case Dispatcher.dispatch(
            fiber_id,
-           poller: state.self_ref,
-           identity_token: identity_token,
            runner: state.runner,
            work_dir: work_dir,
            prompt_context: prompt_context,
@@ -3525,6 +3369,7 @@ defmodule Shuttle.Poller do
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
            resume_mode: Keyword.get(opts, :resume_mode),
+           shared_session: Executions.shared?(state, fiber),
            threads: cached_thread_inputs(state)
          ) do
       {:ok, session} ->
@@ -3532,8 +3377,7 @@ defmodule Shuttle.Poller do
           fiber_id
           |> new_running_meta(fiber, session, agent_id_from_fiber(fiber), felt_store)
           |> Map.merge(running_prompt_metadata(prompt_context))
-          |> Map.put(:identity_token, identity_token)
-          |> Map.put(:session_uuid, nil)
+          |> Map.merge(launched_execution(state, fiber_id, session))
 
         case register_running(state, fiber_id, runtime_key, running_meta) do
           {:ok, state} ->
@@ -3565,6 +3409,20 @@ defmodule Shuttle.Poller do
     end
   end
 
+  # The execution a terminal launch just named in its fiber's runtime (the
+  # dispatcher stamps it before spawning): its conversation UUID and dispatch
+  # generation. An unreadable fiber leaves the watcher on the launch's own
+  # session name, which nothing else takes.
+  defp launched_execution(state, fiber_id, session) do
+    with false <- Shuttle.AppWorkers.app?(session),
+         {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
+         %{uuid: uuid} = execution <- Shuttle.Continuation.execution(fiber) do
+      %{holder_uuid: uuid, session_uuid: uuid, generation: execution.generation}
+    else
+      _ -> %{session_uuid: nil}
+    end
+  end
+
   # What an orchestrator's roster is computed from: the cached constitutions,
   # local and synced, and the running workers' runtime keys.
   defp cached_thread_inputs(state) do
@@ -3583,10 +3441,19 @@ defmodule Shuttle.Poller do
     {entries, live, reachable}
   end
 
+  # A Codex thread keeps its AppWorkers record, whose owner moves in the same
+  # order as a terminal claim's: the fibers it served are concluded and
+  # released first (`release_claim_sources/4`), then the record is claimed for
+  # the target and its runtime names the thread.
   defp do_claim_app_session(state, fiber_id, uid, id, opts) do
     session = if is_binary(id), do: Shuttle.AppWorkers.ref(id)
     running = running_worker(state, fiber_id)
-    other = live_session_for_fiber(state, fiber_id, uid)
+
+    other =
+      case Shuttle.AppWorkers.for_fiber(fiber_id, uid) do
+        %{"session_uuid" => other} -> Shuttle.AppWorkers.ref(other)
+        _ -> nil
+      end
 
     with true <- is_binary(id) and id != "",
          {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
@@ -3595,6 +3462,7 @@ defmodule Shuttle.Poller do
          true <- get_in(fiber, ["shuttle", "host"]) == state.own_host_id,
          true <- is_nil(other) or other == session,
          true <- is_nil(running) or running.session == session,
+         {:ok, state} <- release_claim_sources(state, fiber_id, %{uuid: id, app: id}, opts),
          :ok <-
            Shuttle.AppWorkers.claim_or_adopt(id, fiber, owning_store(fiber_id, state),
              agent_id: explicit_claim_agent(opts)
@@ -3634,6 +3502,7 @@ defmodule Shuttle.Poller do
       end
     else
       false -> {state, {:error, :invalid_app_claim}}
+      {:error, reason, state} -> {state, {:error, reason}}
       {:error, reason} -> {state, {:error, reason}}
     end
   end
@@ -3660,234 +3529,346 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # The claim verb's local branch: validate fiber + live session, rename the
-  # session to the canonical worker name, register it in `running` with a
-  # watcher, log the dispatch-shaped history event, and refresh the document
-  # cache so the board reflects the claim immediately.
-  defp do_claim_session(%State{} = state, fiber_id, uid, tmux_session, opts) do
-    state = reconcile_running_fiber(state, fiber_id)
+  # ── Claim: a live execution moves to another fiber ──
+  #
+  # The terminal claim binds the claimer's execution — the process holding its
+  # conversation UUID, else its tmux pane — to `fiber_id` in one serialized
+  # transition, without renaming or signalling anything:
+  #
+  #   1. every other fiber assigned that execution is concluded:
+  #      `handed_off_at` on its exact dispatch generation, so its next start
+  #      is fresh; a `superseded_by_claim` ledger line; its watcher stopped
+  #      without exit handling and its message receiver revoked;
+  #   2. the target's runtime names the execution under a new generation;
+  #   3. the target is registered with a watcher on the same execution.
+  #
+  # A crash between 1 and 2 leaves the worker assigned to no fiber: nothing
+  # adopts, stops or resumes it, and a retry completes the claim. A retry
+  # after success finds the target already running this execution and
+  # answers as the first claim did.
+  defp do_claim_session(%State{} = state, fiber_id, tmux_session, opts) do
+    with {:ok, fiber} <- claim_target(state, fiber_id),
+         {:ok, execution} <- claimer_execution(state, tmux_session, opts),
+         current = running_worker(state, fiber_id),
+         :ok <- claim_slot(current, execution),
+         {:ok, state} <- release_claim_sources(state, fiber_id, execution, opts) do
+      cond do
+        is_nil(current) ->
+          assign_claim(state, fiber_id, fiber, execution, opts)
 
-    running = running_worker(state, fiber_id)
+        # A retry that names the conversation the first claim could not.
+        is_binary(execution.uuid) and execution.uuid != Map.get(current, :session_uuid) ->
+          stop_watcher(current)
 
-    # Pass the resolved uid so the pre-check sees the fiber's
-    # `<leaf>-<uid>-shuttle` name — a live session under it for a
-    # not-yet-running fiber is then refused with :already_running instead of
-    # degrading to a rename collision.
-    live_session = live_session_for_fiber(state, fiber_id, uid)
+          state
+          |> remove_running(running_key(state, fiber_id))
+          |> assign_claim(fiber_id, fiber, execution, opts)
 
-    cond do
-      # Idempotent retry: the fiber's running worker is this very session —
-      # either by name, or the requested name no longer exists because the
-      # first (successful) claim already renamed it. A lost claim response
-      # must be retryable with the same body.
-      running != nil and
-          (running.session == tmux_session or
-             not already_running_session?(state, tmux_session)) ->
-        repair_claim_identity(state, fiber_id, running, opts)
-
-      running != nil ->
-        {state, {:error, :already_running}}
-
-      # A live canonical-name session that is NOT the claimer means another
-      # worker is already on the fiber. When the claimer *is* the canonical
-      # session (a prior claim renamed it but the watcher failed to start),
-      # fall through — registration is the recovery path.
-      live_session != nil and live_session != tmux_session ->
-        {state, {:error, :already_running}}
-
-      not already_running_session?(state, tmux_session) ->
-        {state, {:error, :session_not_found}}
-
-      true ->
-        case fetch_fiber_full(fiber_id, state) do
-          {:error, _} ->
-            {state, {:error, :not_found}}
-
-          {:ok, fiber} ->
-            cond do
-              Map.get(fiber, "status") == "closed" ->
-                {state, {:error, :closed}}
-
-              # The claim stamps `shuttle.runtime` (dispatched_at, session_uuid)
-              # through `shuttle mark-runtime`, which needs an installed
-              # block to nest under. Claiming an uninstalled fiber would
-              # register a worker whose runtime never lands — no Resume
-              # previous, no meeting-to-card link — so install comes first.
-              not is_map(Map.get(fiber, "shuttle")) ->
-                {state, {:error, :not_installed}}
-
-              # The claimed session is renamed to the worker name, which is
-              # keyed by the fiber's uid; without one there is no name to take.
-              Dispatcher.session_name(fiber_id, Map.get(fiber, "uid")) == nil ->
-                {state, {:error, :uid_missing}}
-
-              true ->
-                register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
-            end
-        end
-    end
-  end
-
-  defp repair_claim_identity(state, fiber_id, worker, opts) do
-    uuid = present_string(Keyword.get(opts, :session_uuid))
-    current = worker_session_uuid(worker, cached_fiber(state, fiber_id))
-    result = {:ok, %{session: worker.session, agent_id: Map.get(worker, :agent_id)}}
-
-    if current == nil and uuid != nil do
-      store = owning_store(fiber_id, state)
-
-      case Shuttle.Continuation.backfill_session_uuid(state.runner, store, fiber_id, uuid) do
-        :ok ->
-          key = running_key(state, fiber_id)
-
-          boundary =
-            get_in(cached_fiber(state, fiber_id) || %{}, ["shuttle", "runtime", "dispatched_at"])
-
-          signal = Dispatcher.pending_resume_fallback(worker.session, boundary)
-          if signal && File.exists?(signal), do: Dispatcher.complete_resume_fallback(signal, uuid)
-
-          worker =
-            worker
-            |> Map.put(:session_uuid, uuid)
-            |> Map.put(:identity_captured, true)
-            |> Map.delete(:identity_error)
-
-          Shuttle.SessionLedger.record(
-            fiber: fiber_id,
-            uid: metadata_uid(worker),
-            session: uuid,
-            tmux: worker.session,
-            kind: :claim,
-            agent: explicit_claim_agent(opts),
-            role: Map.get(worker, :role)
-          )
-
-          state = put_running(state, key, worker)
-          {refresh_worker_document(state, fiber_id), result}
-
-        {:error, reason} ->
-          {state, {:error, reason}}
+        true ->
+          {state, {:ok, %{session: current.session, agent_id: Map.get(current, :agent_id)}}}
       end
     else
-      {state, result}
+      {:error, reason, state} -> {state, {:error, reason}}
+      {:error, reason} -> {state, {:error, reason}}
     end
   end
 
-  defp register_claimed_session(%State{} = state, fiber_id, fiber, tmux_session, opts) do
-    # The session is already live; we only need a label for the running-state
-    # entry. Prefer the claim's explicit `:agent` (the worker names itself),
-    # else Shuttle's resolved id, else the raw name / "unknown" — a best-effort
-    # display label, never a dispatch decision.
-    agent_id = Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
+  # The target is free, or already runs this very execution (a retry).
+  defp claim_slot(nil, _execution), do: :ok
 
-    # Rename to the worker name `<leaf>-<uid>-shuttle` so everything
-    # downstream — restart re-adoption, liveness, the kanban's runtime stamp —
-    # treats the claimed session exactly like a dispatched one.
-    canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
+  defp claim_slot(current, execution) do
+    if Executions.runs?(current, execution),
+      do: :ok,
+      else: {:error, :already_running}
+  end
 
-    rename_result =
-      if tmux_session == canonical do
-        {:ok, canonical}
-      else
-        case state.runner.cmd(
-               "tmux",
-               ["rename-session", "-t", "=" <> tmux_session, canonical],
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            {:ok, canonical}
+  defp claim_target(state, fiber_id) do
+    case fetch_fiber_full(fiber_id, state) do
+      {:error, _} -> {:error, :not_found}
+      {:ok, %{"status" => "closed"}} -> {:error, :closed}
+      # The claim stamps `shuttle.runtime`, which nests under an installed block.
+      {:ok, %{"shuttle" => %{}} = fiber} -> {:ok, fiber}
+      {:ok, _} -> {:error, :not_installed}
+    end
+  end
 
-          {output, _} ->
-            # Fail the claim rather than registering under a non-canonical
-            # name: the restart re-adoption scan and liveness only see
-            # `<leaf>-<uid>-shuttle` names, so a degraded
-            # registration would go invisible on daemon restart and a
-            # duplicate worker would dispatch alongside it.
-            Logger.warning("claim: rename #{tmux_session} → #{canonical} failed: #{output}")
-            {:error, :rename_failed}
+  # The claimer's execution. With a conversation UUID that a process holds,
+  # that holder — which must run in the claimer's pane when tmux can show
+  # both. Otherwise the claimer's pane itself, bound by its process's start
+  # token. An unobservable process table refuses the claim.
+  defp claimer_execution(state, tmux_session, opts) do
+    uuid = present_string(Keyword.get(opts, :session_uuid))
+
+    target =
+      present_string(Keyword.get(opts, :tmux_pane)) ||
+        if(present_string(tmux_session), do: "=" <> tmux_session <> ":")
+
+    with {:ok, procs} <- WorkerProcess.scan(state.runner),
+         holder when not is_tuple(holder) <-
+           uuid && WorkerProcess.holder(procs, uuid, state.runner),
+         {:ok, claimer} <- claimer_pane(state.runner, target) do
+      cond do
+        is_nil(holder) ->
+          pane_execution(state.runner, procs, uuid, claimer)
+
+        claimer_holds?(state.runner, procs, holder, claimer) ->
+          session = Executions.session_of(state.runner, procs, holder)
+          {:ok, %{uuid: uuid, pane: nil, session: session || (claimer && claimer.session)}}
+
+        true ->
+          {:error, :session_mismatch}
+      end
+    else
+      {:error, :unknown} -> {:error, :process_scan_failed}
+      {:error, _} = error -> error
+    end
+  end
+
+  # The pane a claim names: `%{pane, pid, session}`, nil when the claim names
+  # none, `:session_not_found` when tmux says it is not there.
+  defp claimer_pane(_runner, nil), do: {:ok, nil}
+
+  defp claimer_pane(runner, target) do
+    case runner.cmd(
+           "tmux",
+           ["display-message", "-p", "-t", target, "\#{pane_id} \#{pane_pid} \#{session_name}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        with [pane, pid, session] <- String.split(String.trim(output), " ", parts: 3),
+             {pid, ""} <- Integer.parse(pid) do
+          {:ok, %{pane: pane, pid: pid, session: session}}
+        else
+          _ -> {:error, :session_not_found}
         end
+
+      {output, _} ->
+        if Shuttle.Tmux.absence_message?(output),
+          do: {:error, :session_not_found},
+          else: {:ok, nil}
+    end
+  end
+
+  # A holder tmux cannot place, or a claim naming no pane, is not contradicted.
+  defp claimer_holds?(_runner, _procs, _holder, nil), do: true
+
+  defp claimer_holds?(runner, procs, holder, claimer) do
+    with {:ok, panes} <- WorkerProcess.panes(runner),
+         %{pane: pane} <- WorkerProcess.pane_of(procs, panes, holder) do
+      pane == claimer.pane
+    else
+      _ -> true
+    end
+  end
+
+  defp pane_execution(_runner, _procs, _uuid, nil), do: {:error, :session_not_found}
+
+  defp pane_execution(runner, procs, uuid, claimer) do
+    with %{} <- Enum.find(procs, &(&1.pid == claimer.pid)),
+         {:ok, output} <-
+           Shuttle.CLI.run(["process-identity", Integer.to_string(claimer.pid)],
+             runner: runner,
+             timeout_ms: 2_000
+           ),
+         {:ok, %{"status" => "present", "start" => start}} when is_binary(start) and start != "" <-
+           Jason.decode(output) do
+      {:ok,
+       %{uuid: uuid, pane: %{"pid" => claimer.pid, "start" => start}, session: claimer.session}}
+    else
+      _ -> {:error, :session_not_found}
+    end
+  end
+
+  # Step 1 of a claim, for terminal executions and Codex threads alike: every
+  # fiber other than `target_id` that is assigned `execution` — tracked, or
+  # named by its runtime — is concluded on its own generation and released.
+  # Its worker is not signalled. A fiber that has meanwhile moved to another
+  # generation no longer names the execution and is left alone. A conclusion
+  # that cannot be written stops the claim before anything is released, so a
+  # retry starts again from the same place.
+  defp release_claim_sources(state, target_id, execution, _opts) do
+    tracked =
+      for {key, meta} <- state.running,
+          fiber_address(meta) != target_id,
+          same_backend?(meta, execution),
+          do: {key, meta}
+
+    ids =
+      Enum.uniq(
+        Enum.map(tracked, fn {_key, meta} -> fiber_address(meta) end) ++
+          claim_named_sources(state, target_id, execution)
+      )
+
+    concluded =
+      Enum.reduce_while(ids, {:ok, []}, fn id, {:ok, acc} ->
+        case conclude_claim_source(state, id, execution) do
+          {:ok, fiber} -> {:cont, {:ok, [{id, fiber} | acc]}}
+          {:error, reason} -> {:halt, {:error, {:source_not_concluded, id, reason}}}
+        end
+      end)
+
+    with {:ok, concluded} <- concluded,
+         :ok <- release_app_record(execution, concluded) do
+      state =
+        Enum.reduce(tracked, state, fn {key, meta}, state ->
+          stop_watcher(meta)
+          remove_running(state, key)
+        end)
+
+      Enum.each(concluded, fn {id, fiber} ->
+        record_superseded(state, id, fiber, execution, target_id, tracked)
+        Logger.info("Claim released #{id}: its execution now serves #{target_id}")
+      end)
+
+      {:ok,
+       Enum.reduce(concluded, state, fn {id, _}, state -> refresh_document_entry(state, id) end)}
+    else
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  defp same_backend?(meta, %{app: id}), do: meta.session == Shuttle.AppWorkers.ref(id)
+
+  defp same_backend?(meta, execution), do: Executions.runs?(meta, execution)
+
+  # The polled fibers whose runtime names the execution, closed ones included:
+  # a closed fiber still naming it would resume it on reopening. A Codex
+  # thread's record names its owner too.
+  defp claim_named_sources(state, target_id, execution) do
+    listed =
+      for fiber <- Executions.listed(state),
+          fiber["id"] != target_id,
+          Executions.same?(Executions.handle(fiber), execution),
+          do: fiber["id"]
+
+    owner =
+      with %{app: id} <- execution,
+           {:ok, %{"fiber_id" => owner} = record} when is_binary(owner) <-
+             Shuttle.AppWorkers.get(id),
+           false <-
+             owner == target_id or
+               record["uid"] == metadata_uid(cached_fiber(state, target_id) || %{}) do
+        [owner]
+      else
+        _ -> []
       end
 
-    case rename_result do
-      {:error, _} = error ->
-        {state, error}
-
-      {:ok, session} ->
-        register_renamed_session(state, fiber_id, fiber, session, agent_id, opts)
-    end
+    listed ++ owner
   end
 
-  defp register_renamed_session(%State{} = state, fiber_id, fiber, session, agent_id, opts) do
-    running_meta =
-      new_running_meta(fiber_id, fiber, session, agent_id, owning_store(fiber_id, state))
-      # The claim's conversation is authoritative before registration, not
-      # the predecessor's runtime stamp that log_worker_claim replaces.
-      |> Map.put(:session_uuid, present_string(Keyword.get(opts, :session_uuid)))
-
-    case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
-      {:ok, state} ->
-        state =
-          case log_worker_claim(state, fiber_id, opts) do
-            :ok ->
-              state
-
-            {:error, reason} ->
-              # Receiver authority is already durable and owns live recovery.
-              # Expose a failed frontmatter mirror and retry it during polling.
-              Logger.warning(
-                "Claim #{fiber_id}: runtime mirror failed; durable receiver retained: #{inspect(reason)}"
-              )
-
-              key = running_key(state, fiber_id)
-              worker = Map.put(state.running[key], :identity_error, inspect(reason))
-              %{state | running: Map.put(state.running, key, worker)}
+  # Concludes `id`'s dispatch if a fresh read shows it still assigned the
+  # execution; `{:ok, fiber}` either way, the fiber as read.
+  defp conclude_claim_source(state, id, execution) do
+    with {:ok, fiber} <- fetch_fiber_full(id, state) do
+      case Executions.handle(fiber) do
+        %{} = handle ->
+          if Executions.same?(handle, execution) do
+            case Shuttle.Continuation.mark_handed_off(
+                   state.runner,
+                   owning_store(id, state),
+                   id,
+                   %{if_dispatched_at: handle.generation}
+                 ) do
+              :ok -> {:ok, fiber}
+              {:error, :generation_mismatch} -> {:ok, fiber}
+              {:error, _} = error -> error
+            end
+          else
+            {:ok, fiber}
           end
 
-        # The structural half: the claim is the moment this host learns that
-        # this externally-spawned session belongs to this fiber. `record/1`
-        # drops a claim that carried no session UUID — there is no pairing to
-        # record then, only the runtime mirror's run window. Receiver authority
-        # remains durable even when that mirror needs a retry.
-        Shuttle.SessionLedger.record(
-          fiber: fiber_id,
-          uid: Map.get(fiber, "uid"),
-          session: Keyword.get(opts, :session_uuid),
-          tmux: session,
-          harness:
-            Shuttle.SessionLedger.harness_for_cli(
-              get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-            ),
-          kind: :claim,
-          agent: explicit_claim_agent(opts),
-          role: get_in(fiber, ["shuttle", "role"])
-        )
-
-        state = refresh_document_entry(state, fiber_id)
-        Logger.info("Claimed session #{session} for #{fiber_id} (agent=#{agent_id})")
-        {state, {:ok, %{session: session, agent_id: agent_id}}}
-
-      {:error, reason} ->
-        Logger.error("Failed to start watcher for claimed #{fiber_id}: #{inspect(reason)}")
-        {state, {:error, :watcher_start_failed}}
+        nil ->
+          {:ok, fiber}
+      end
     end
   end
 
-  # The claim-time analog of the dispatcher's dispatch write: a self-claimed /
-  # chat-captured session stamps (refreshes) the fiber's `shuttle.runtime`
-  # dispatch fields so the continuation heuristic and "Resume previous" can
-  # recover its session UUID. Routes through `shuttle mark-runtime`. The store/scoped-id pair mirrors the dispatch
-  # path: `store_for_fiber` (the same owning-store the poll enumerated this fiber
-  # from), falling back to the primary configured store. A claim with no captured
-  # session_uuid still stamps `dispatched_at` (the run-window anchor) so a clean
-  # handoff can later be compared against it. A meeting capture's claim also
-  # stamps the meeting's launch id, which is how the meeting finds its fiber.
-  defp log_worker_claim(%State{} = state, fiber_id, opts) do
-    felt_store = owning_store(fiber_id, state)
+  # A Codex thread's record is released by the fibers just concluded, so the
+  # target's claim may take it.
+  defp release_app_record(%{app: id}, concluded) do
+    Enum.reduce_while(concluded, :ok, fn {_id, fiber}, :ok ->
+      case Shuttle.AppWorkers.release(id, fiber["uid"] || fiber["id"]) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
 
-    Shuttle.Continuation.write_dispatch(state.runner, felt_store, fiber_id, %{
-      session_uuid: present_string(Keyword.get(opts, :session_uuid)),
-      meeting: present_string(Keyword.get(opts, :meeting))
-    })
+  defp release_app_record(_execution, _concluded), do: :ok
+
+  defp record_superseded(state, id, fiber, execution, target_id, tracked) do
+    meta = Enum.find_value(tracked, fn {_key, meta} -> fiber_address(meta) == id && meta end)
+
+    Shuttle.SessionLedger.record(
+      fiber: id,
+      uid: fiber["uid"],
+      session: (meta && meta[:session_uuid]) || execution.uuid,
+      thread_id: execution[:app],
+      tmux: meta && meta.session,
+      harness:
+        Shuttle.SessionLedger.harness_for_cli(
+          get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+        ),
+      host: state.own_host_id,
+      kind: :superseded_by_claim,
+      superseded_by: target_id
+    )
+  end
+
+  # Steps 2 and 3: the target's runtime names the execution under a new
+  # generation, then the target is registered on it.
+  defp assign_claim(state, fiber_id, fiber, execution, opts) do
+    generation = DateTime.to_iso8601(DateTime.utc_now())
+    store = owning_store(fiber_id, state)
+    agent_id = Keyword.get(opts, :agent) || agent_id_from_fiber(fiber)
+
+    stamp =
+      Shuttle.Continuation.write_dispatch(state.runner, store, fiber_id, %{
+        session_uuid: execution.uuid,
+        pane: execution.pane,
+        meeting: present_string(Keyword.get(opts, :meeting)),
+        dispatched_at: generation,
+        if_dispatched_at: Shuttle.Continuation.generation(fiber)
+      })
+
+    label = execution.session || "claimed-" <> String.slice(execution.uuid || "pane", 0, 8)
+
+    meta =
+      fiber_id
+      |> new_running_meta(fiber, label, agent_id, store)
+      |> Map.merge(%{
+        holder_uuid: execution.uuid,
+        pane: execution.pane,
+        session_uuid: execution.uuid,
+        generation: generation
+      })
+
+    with :ok <- stamp,
+         {:ok, state} <- register_running(state, fiber_id, runtime_key_for_fiber(fiber), meta) do
+      Shuttle.SessionLedger.record(
+        fiber: fiber_id,
+        uid: Map.get(fiber, "uid"),
+        session: execution.uuid,
+        tmux: label,
+        harness:
+          Shuttle.SessionLedger.harness_for_cli(
+            get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+          ),
+        kind: :claim,
+        agent: explicit_claim_agent(opts),
+        role: get_in(fiber, ["shuttle", "role"])
+      )
+
+      Logger.info(
+        "Claimed #{label} (#{execution.uuid || "pane"}) for #{fiber_id} (agent=#{agent_id})"
+      )
+
+      {refresh_document_entry(state, fiber_id), {:ok, %{session: label, agent_id: agent_id}}}
+    else
+      {:error, reason} ->
+        Logger.warning("Claim of #{fiber_id} not completed: #{inspect(reason)}")
+        {state, {:error, reason}}
+    end
   end
 
   defp present_string(value) when is_binary(value) and value != "", do: value
@@ -3935,16 +3916,17 @@ defmodule Shuttle.Poller do
 
   # ── Reconciliation ──
 
-  # Orphan adoption maps sessions through a FRESH store walk, not this poll's
-  # candidates: the candidates were read before `reconcile_fiber_closures/1`'s
-  # fresh reads, so a worker that closed its fiber mid-poll would still look
-  # active in them, be re-adopted, and be killed during its own final act.
-  # `sessions` is this cycle's `list_shuttle_sessions/1` scan.
-  defp reconcile(%State{} = state, sessions, listings_ok?) do
+  # Orphan adoption re-reads each fiber before adopting it: the candidates
+  # were read before `reconcile_fiber_closures/1`'s fresh reads, so a worker
+  # that closed its fiber mid-poll, or claimed another, would still look
+  # assigned in them. `scan` is this cycle's process scan
+  # (`Shuttle.WorkerProcess.scan/1`): `{:error, :unknown}` means the world is
+  # uncertain, not empty, and every pass that would act on absence skips.
+  defp reconcile(%State{} = state, scan, listings_ok?) do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
-    SessionReconciliation.reconcile_orphaned_sessions(state, sessions, listings_ok?)
+    SessionReconciliation.reconcile_orphaned_sessions(state, scan, listings_ok?)
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do
@@ -4022,7 +4004,14 @@ defmodule Shuttle.Poller do
         (not is_nil(dispatched_at) and DateTime.compare(handed_off_at, dispatched_at) == :lt)
 
     if stale? do
-      Shuttle.Continuation.mark_handed_off(state.runner, owning_store(fiber_id, state), fiber_id)
+      Shuttle.Continuation.mark_handed_off(
+        state.runner,
+        owning_store(fiber_id, state),
+        fiber_id,
+        %{
+          if_dispatched_at: Shuttle.Continuation.generation(fiber)
+        }
+      )
     end
 
     :ok
@@ -4037,7 +4026,7 @@ defmodule Shuttle.Poller do
     Enum.reduce(state.running, state, fn {runtime_key, %{session: session} = meta}, state_acc ->
       fiber_id = fiber_address(meta)
 
-      if already_running_session?(state_acc, session) do
+      if worker_present?(state_acc, meta) do
         state_acc
       else
         Logger.info("Detected missing worker session: #{fiber_id} session=#{session}")
@@ -4131,17 +4120,24 @@ defmodule Shuttle.Poller do
   # nothing, because a lookup by slug alone could reach another fiber's worker
   # (an app record that kept a renamed fiber's old slug). A fiber with no uid
   # was never dispatchable, so nothing of its own can be live.
-  defp stop_untracked_worker(state, identifier) do
+  defp stop_untracked_worker(state, identifier, target) do
+    {_runtime_key, slug} = resolve_identity(state, identifier)
+
+    with {:ok, session} <- target || untracked_target(state, identifier),
+         do: stop_live_session(state, slug, session)
+  end
+
+  # What a stop of an untracked fiber would signal: `{:ok, session_or_handle}`,
+  # `{:ok, nil}` when nothing runs for it, or `{:error, reason}` when that
+  # cannot be established.
+  defp untracked_target(state, identifier) do
     {_runtime_key, slug} = resolve_identity(state, identifier)
 
     case fetch_fiber_full(slug, state) do
       {:ok, fiber} ->
         case Map.get(fiber, "uid") do
-          uid when is_binary(uid) and uid != "" ->
-            stop_live_session(state, slug, untracked_session(state, fiber, slug, uid))
-
-          _ ->
-            {:ok, :no_session}
+          uid when is_binary(uid) and uid != "" -> untracked_session(state, fiber, slug, uid)
+          _ -> {:ok, nil}
         end
 
       _ ->
@@ -4150,28 +4146,36 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp untracked_session(state, fiber, slug, uid) do
+  # The live worker of an untracked fiber, from a fresh read of its document:
+  # its app conversation, or the process holding the execution its unconcluded
+  # runtime names. A concluded fiber names none, so the worker that claimed
+  # it away is never a stop target. A shared or unobservable execution is
+  # refused rather than signalled.
+  defp untracked_session(state, fiber, _slug, uid) do
     case Enum.find(Shuttle.AppWorkers.active(), &(&1["uid"] == uid)) do
       %{"session_uuid" => id} when is_binary(id) ->
-        Shuttle.AppWorkers.ref(id)
+        {:ok, Shuttle.AppWorkers.ref(id)}
 
       _ ->
-        # An app fiber on a host without tmux has no terminal session to
-        # probe: asking tmux there reads as "unknown" and a stop would fail on
-        # the missing binary instead of being the no-op it is (an app-only
-        # host), the guard `live_session_for_fiber/3` keeps too. A terminal
-        # fiber is always probed, even where tmux is not on PATH: its worker
-        # can outlive the daemon that lost tmux, and a stop that cannot reach
-        # it must fail rather than report nothing running.
-        app_without_tmux? =
-          get_in(fiber, ["shuttle", "surface"]) == "app" and
-            Shuttle.Env.find_executable("tmux") == nil
+        case Executions.untracked(state, fiber) do
+          {:ok, handle} ->
+            {:ok, Map.take(handle, [:session, :uuid, :pane])}
 
-        session = Dispatcher.session_name(slug, uid)
+          nil ->
+            {:ok, nil}
 
-        if session && not app_without_tmux? && already_running_session?(state, session),
-          do: session
+          :unknown ->
+            {:error, "its worker's processes could not be observed; nothing was stopped"}
+
+          {:shared, ids} ->
+            {:error, shared_refusal(ids)}
+        end
     end
+  end
+
+  defp shared_refusal(ids) do
+    "its conversation is also named by #{Enum.join(ids, ", ")}, so no single fiber owns " <>
+      "its worker and nothing was stopped; hand off all but one of them first"
   end
 
   defp stop_live_session(_state, _slug, nil), do: {:ok, :no_session}
@@ -4179,7 +4183,7 @@ defmodule Shuttle.Poller do
   defp stop_live_session(state, slug, session) do
     case Shuttle.WorkerBackend.stop(state.runner, session) do
       {_output, 0} ->
-        {:ok, session}
+        {:ok, label(session)}
 
       {output, status} ->
         Logger.error("stopping untracked #{slug}: stop exited #{inspect(status)}: #{output}")
@@ -4190,19 +4194,19 @@ defmodule Shuttle.Poller do
   # Stop a fiber's worker through its backend (tmux, or an app conversation's
   # interrupt) and tear down its runtime entry, tracked or not. Writes no
   # status. Shared by `/kill` and the rest transition.
-  defp stop_tracked_worker(state, fiber_id) do
+  defp stop_tracked_worker(state, fiber_id, untracked \\ nil) do
     case running_key(state, fiber_id) do
       nil ->
-        {stop_untracked_worker(state, fiber_id), state}
+        {stop_untracked_worker(state, fiber_id, untracked), state}
 
       runtime_key ->
         meta = Map.get(state.running, runtime_key)
         session = meta.session
-        # Stop the watcher BEFORE the kill so its has-session poll doesn't also
+        # Stop the watcher BEFORE the kill so its liveness check doesn't also
         # report the exit and double-handle through handle_worker_exit.
         stop_watcher(meta)
 
-        case Shuttle.WorkerBackend.stop(state.runner, session) do
+        case Shuttle.WorkerBackend.stop(state.runner, WorkerBackend.handle(meta)) do
           {_output, 0} ->
             # Pure runtime teardown — drop running entry + claim, no status write.
             state = remove_running(state, runtime_key)
@@ -4413,7 +4417,7 @@ defmodule Shuttle.Poller do
         %{session: session} = meta = Map.fetch!(state.running, runtime_key)
         fiber_id = fiber_address(meta)
 
-        if already_running_session?(state, session) do
+        if worker_present?(state, meta) do
           state
         else
           Logger.info("Clearing stale running worker: #{fiber_id} session=#{session}")
@@ -4452,23 +4456,19 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Is a worker present in this tmux session? `present?` treats an inconclusive
-  # `has-session` as present, so reconcile won't drop a live worker's running
-  # entry (nor free its name for a resume) on a transient tmux failure — only a
-  # confirmed `:gone` does. The reconcile/liveness twin of dispatch's
-  # check_not_running.
-  defp already_running_session?(%State{} = state, session) do
-    Shuttle.WorkerBackend.present?(state.runner, session)
+  # Is the tracked worker `meta` still present? Its backend is asked through
+  # its handle, and an inconclusive answer counts as present, so reconcile
+  # never drops a live worker's running entry (nor frees its fiber for a
+  # resume) on a transient failure — only a confirmed `:gone` does.
+  defp worker_present?(%State{} = state, meta) do
+    WorkerBackend.present?(state.runner, WorkerBackend.handle(meta))
   end
 
-  # The fiber's live tmux worker session, or nil (none, or an app worker).
-  defp live_tmux_session(%State{} = state, fiber_id, uid) do
-    case live_session_for_fiber(state, fiber_id, uid) do
-      session when is_binary(session) ->
-        if Shuttle.AppWorkers.app?(session), do: nil, else: session
-
-      _ ->
-        nil
+  # The fiber's tracked tmux worker session, or nil (none, or an app worker).
+  defp live_tmux_session(%State{} = state, fiber_id) do
+    case running_worker(state, fiber_id) do
+      %{session: session} -> if Shuttle.AppWorkers.app?(session), do: nil, else: session
+      nil -> nil
     end
   end
 
@@ -4479,42 +4479,20 @@ defmodule Shuttle.Poller do
     running_key(state, fiber_id) != nil or Map.has_key?(state.running, runtime_key)
   end
 
-  # A tracked worker, or a live session under the fiber's name that nothing
-  # tracks yet.
+  # A tracked worker, or a live worker its fiber's runtime still assigns that
+  # nothing tracks yet. An unobservable or shared execution counts as open.
   defp open_session?(%State{} = state, fiber_id, runtime_key, uid) do
     tracked?(state, fiber_id, runtime_key) or
-      live_session_for_fiber(state, fiber_id, uid) != nil
+      Shuttle.AppWorkers.for_fiber(fiber_id, uid) != nil or
+      case fetch_fiber_full(fiber_id, state) do
+        {:ok, fiber} -> Executions.untracked(state, fiber) != nil
+        {:error, _} -> false
+      end
   end
 
-  # The fiber's *live* worker session — an app worker's ref, or its tmux
-  # session (`Dispatcher.session_name/2`) when that is live — else nil. `uid`
-  # may be supplied by a caller that already resolved it (the dispatch and adopt
-  # paths); otherwise it's read off a matching running entry. Without a uid the
-  # fiber has no tmux name, so nothing is live under it.
-  @doc false
-  def live_session_for_fiber(%State{} = state, fiber_id, uid \\ nil) do
-    case Shuttle.AppWorkers.for_fiber(fiber_id, uid) do
-      %{"session_uuid" => id} ->
-        Shuttle.AppWorkers.ref(id)
-
-      _ ->
-        app_without_tmux? =
-          Shuttle.Env.find_executable("tmux") == nil and
-            case fetch_fiber_full(fiber_id, state) do
-              {:ok, fiber} -> get_in(fiber, ["shuttle", "surface"]) == "app"
-              _ -> false
-            end
-
-        session =
-          Dispatcher.session_name(
-            fiber_id,
-            uid || metadata_uid(running_worker(state, fiber_id))
-          )
-
-        if not app_without_tmux? and session != nil and already_running_session?(state, session),
-          do: session
-    end
-  end
+  # A stop's report of what it stopped.
+  defp label(%{session: session}), do: session
+  defp label(session), do: session
 
   defp available_slots(%State{} = state) do
     max(state.max_concurrent_workers - map_size(state.running), 0)
@@ -4589,62 +4567,21 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Restores a recovered worker's conversation from its durable receiver. Only
-  # a missing record defers to the frontmatter runtime mirror; a record for
-  # another identity, or one that cannot be read, leaves it unknown.
+  # The harness a re-adopted worker's committed receiver names, when that
+  # receiver is this very conversation on this host: a registry entry that
+  # has since vanished cannot change how a live worker is addressed.
   @doc false
-  def recover_context_receiver(state, meta, fiber) do
-    if Shuttle.AppWorkers.app?(meta.session) do
-      meta
-    else
-      key = context_receiver_key(state, meta, fiber)
+  def adopted_harness(state, meta, fiber) do
+    key = context_receiver_key(state, meta, fiber)
 
-      case receiver_cli(state, meta, ["get", key], &Jason.decode/1) do
-        {:ok, nil} ->
-          meta
+    case receiver_cli(state, meta, ["get", key], &Jason.decode/1) do
+      {:ok, %{"Host" => host, "ID" => id, "Harness" => harness}}
+      when host == state.own_host_id and is_binary(id) and id == meta.session_uuid and
+             is_binary(harness) and harness != "" ->
+        harness
 
-        {:ok, receiver} when is_map(receiver) ->
-          uuid = present_string(receiver["ID"])
-          identity = meta.session <> ":" <> (uuid || "-")
-          # A registry entry describes a launch recipe, not the identity of
-          # this already-live execution. Its disappearance cannot undo the
-          # receiver's durable identity or its address during re-publication.
-          if receiver["Host"] == state.own_host_id and receiver["identity"] == identity do
-            meta
-            |> Map.put(:session_uuid, successor_in_session(meta.session, uuid, fiber))
-            |> Map.put(:context_harness, present_string(receiver["Harness"]))
-          else
-            # A record for another identity (a revoked predecessor, or a
-            # claim whose rename landed before its publish) grants this
-            # session nothing; the runtime mirror may still name that
-            # predecessor and must not be republished at a higher epoch.
-            Map.put(meta, :session_uuid, nil)
-          end
-
-        _ ->
-          Map.put(meta, :session_uuid, nil)
-      end
-    end
-  end
-
-  # A worker name outlives a handoff, so a receiver record that names this
-  # session may still be the predecessor's when the successor's publish
-  # failed. The runtime mirror's UUID replaces it only when hook evidence shows
-  # both starting in this tmux session and the mirror's starting later.
-  defp successor_in_session(session, recorded, fiber) do
-    mirrored =
-      present_string(fiber && get_in(fiber, ["shuttle", "runtime", "session_uuid"]))
-
-    binding = session_bindings()
-
-    with true <- mirrored not in [nil, recorded],
-         recorded_at when is_integer(recorded_at) <-
-           Shuttle.SessionBinding.started_in(binding, recorded, session),
-         mirrored_at when is_integer(mirrored_at) and mirrored_at > recorded_at <-
-           Shuttle.SessionBinding.started_in(binding, mirrored, session) do
-      mirrored
-    else
-      _ -> recorded
+      _ ->
+        nil
     end
   end
 
@@ -4748,34 +4685,40 @@ defmodule Shuttle.Poller do
   defp cut_open_session(%State{} = state, fiber_id, uid) do
     key = running_key(state, fiber_id)
     meta = if key, do: Map.get(state.running, key)
-    session = if meta, do: meta.session, else: live_session_for_fiber(state, fiber_id, uid)
-    app? = Shuttle.AppWorkers.app?(session)
 
-    if not app?,
-      do:
-        Shuttle.Continuation.mark_handed_off(
-          state.runner,
-          owning_store(fiber_id, state),
-          fiber_id
-        )
+    target =
+      cond do
+        meta ->
+          {:ok, WorkerBackend.handle(meta)}
 
-    result = if session, do: Shuttle.WorkerBackend.stop(state.runner, session), else: {"", 0}
+        match?({:ok, _}, fiber = fetch_fiber_full(fiber_id, state)) ->
+          untracked_session(state, elem(fiber, 1), fiber_id, uid)
 
-    case result do
-      {_, 0} ->
-        if app?,
-          do:
-            Shuttle.Continuation.mark_handed_off(
-              state.runner,
-              owning_store(fiber_id, state),
-              fiber_id
-            )
+        true ->
+          {:error, "#{fiber_id} could not be read"}
+      end
 
-        if meta, do: stop_watcher(meta)
-        if key, do: remove_running(state, key), else: state
+    case target do
+      {:ok, session} ->
+        app? = Shuttle.AppWorkers.app?(session)
+        store = owning_store(fiber_id, state)
+        if not app?, do: Shuttle.Continuation.mark_handed_off(state.runner, store, fiber_id)
 
-      {output, _} ->
-        Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
+        result = if session, do: Shuttle.WorkerBackend.stop(state.runner, session), else: {"", 0}
+
+        case result do
+          {_, 0} ->
+            if app?, do: Shuttle.Continuation.mark_handed_off(state.runner, store, fiber_id)
+            if meta, do: stop_watcher(meta)
+            if key, do: remove_running(state, key), else: state
+
+          {output, _} ->
+            Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
+            state
+        end
+
+      {:error, reason} ->
+        Logger.warning("Not cutting #{fiber_id}'s session for a fresh dispatch: #{reason}")
         state
     end
   end
@@ -4825,6 +4768,7 @@ defmodule Shuttle.Poller do
     watcher_opts = [
       fiber_id: fiber_id,
       session: Map.fetch!(metadata, :session),
+      handle: WorkerBackend.handle(metadata),
       poller: state.self_ref,
       runner: state.runner,
       uid: Map.get(metadata, :uid),
@@ -5040,52 +4984,6 @@ defmodule Shuttle.Poller do
 
       {:error, reason} ->
         {:error, "could not run #{tool} #{Enum.join(args, " ")} (#{scope}): #{reason}"}
-    end
-  end
-
-  # Lists live shuttle worker sessions: those tmux lists, united with those
-  # whose run script is still running (`Shuttle.WorkerProcess`), so a worker
-  # whose tmux server lost its socket is still listed. Failure is classified
-  # the same three ways as `Shuttle.Tmux.session_status/2` (see that
-  # moduledoc): "no sessions" is a POSITIVE claim, made only when tmux answers
-  # (exit 0, or its own absence message such as "no server running") AND the
-  # process scan answers. Anything else — the runner's wall-clock `:timeout` (a
-  # wedged tmux), an exec failure, an unrecognized error, or an empty tmux
-  # answer the process scan could not check — returns `{:error, :unknown}`:
-  # the world is UNCERTAIN, not empty. Conflating the two is how a single
-  # wedged `tmux ls` mass-marked every live standing constitution dead
-  # (reconcile_dead_standing_roles writes status flips to their fibers!) and
-  # made boot adoption adopt nothing. Callers whose action on an empty list is
-  # destructive or reconciling MUST skip the pass on `:unknown` — uncertainty
-  # counts as present; the next healthy scan catches up. A listed session tmux
-  # cannot see is adopted like any other; its watcher reads `:unknown` and
-  # holds.
-  @doc false
-  def list_shuttle_sessions(state) do
-    tmux =
-      case state.runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
-        {output, 0} ->
-          {:ok,
-           output
-           |> String.split("\n")
-           |> Enum.map(&String.trim/1)
-           |> Enum.filter(&Dispatcher.shuttle_session?/1)}
-
-        {_output, :timeout} ->
-          {:error, :unknown}
-
-        {output, _status} ->
-          # Genuine no-server exits non-zero WITH tmux's own absence message.
-          # Any other failure is uncertainty.
-          if Shuttle.Tmux.absence_message?(output), do: {:ok, []}, else: {:error, :unknown}
-      end
-
-    with {:ok, listed} <- tmux do
-      case Shuttle.WorkerProcess.scan(state.runner) do
-        {:ok, procs} -> {:ok, Enum.uniq(listed ++ Shuttle.WorkerProcess.sessions(procs))}
-        {:error, :unknown} when listed == [] -> {:error, :unknown}
-        {:error, :unknown} -> {:ok, listed}
-      end
     end
   end
 
