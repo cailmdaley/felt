@@ -29,7 +29,7 @@ func TestTranscriptSearchSessionFilterDoesNotDependOnLedgerAndJSONArraysArePrese
 		t.Fatal(err)
 	}
 	_ = idx.Close()
-	// The closed port makes any accidental ledger request fail the test.
+	// Enrichment failure must not hide hits selected by a local session ID.
 	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
 	out, _, err := executeIn(t, env, t.TempDir(), "transcript", "search", "socket timeout", "--no-index", "--session", session, "--json")
 	if err != nil {

@@ -168,12 +168,12 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 			}
 		}
 		var selected []string
-		var ledger *sessionLedgerResponse
+		ledger, ledgerErr := a.fetchSessionLedger()
+		if ledgerErr != nil {
+			errorsList = append(errorsList, "session ledger unavailable: "+ledgerErr.Error())
+		}
 		if fiber != "" {
-			var e error
-			ledger, e = a.fetchSessionLedger()
-			if e != nil {
-				errorsList = append(errorsList, "fiber filter unavailable: "+e.Error())
+			if ledgerErr != nil {
 				selected = []string{}
 			} else {
 				_, rows, _, resolveErr := a.resolveProvenanceRows(fiber, ledger.Records)
@@ -199,16 +199,6 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 			}
 		} else if len(sessions) > 0 {
 			selected = sessions
-			ledger, err = a.fetchSessionLedger()
-			if err != nil {
-				errorsList = append(errorsList, "session ledger unavailable: "+err.Error())
-			}
-		} else {
-			var e error
-			ledger, e = a.fetchSessionLedger()
-			if e != nil {
-				errorsList = append(errorsList, e.Error())
-			}
 		}
 		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, Since: sinceValue, Project: project, Harness: harness, Limit: limit})
 		if err != nil {
@@ -247,7 +237,14 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 			fmt.Fprintln(a.env.Stderr, "warning:", problem)
 		}
 		for _, hit := range result.Hits {
-			fmt.Fprintf(a.env.Stdout, "%.3f  %s  %-8s  %s  %s  %s\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, filepath.Base(hit.Project), shortSession(hit.Session), strings.Join(fiberNames(hit.Fibers), ","), displaySnippet(a.env.Stdout, hit.Snippet), hit.Path, hit.Line, hit.Session)
+			projectName, fiberLabel := "", ""
+			if hit.Project != "" {
+				projectName = filepath.Base(hit.Project)
+			}
+			if len(hit.Fibers) > 0 {
+				fiberLabel = "[" + strings.Join(fiberNames(hit.Fibers), ", ") + "]"
+			}
+			fmt.Fprintf(a.env.Stdout, "%.4g  %s  %-8s  %s  %s  %s\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, displaySnippet(a.env.Stdout, hit.Snippet), hit.Path, hit.Line, hit.Session)
 		}
 		return nil
 	}}

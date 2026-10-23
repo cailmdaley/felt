@@ -51,6 +51,10 @@ func fenceOverrides(dir, home string) map[string]string {
 		"SHUTTLE_AGENTS_FILE":          filepath.Join(dir, "agents.json"),
 		"SHUTTLE_PROJECTS_FILE":        filepath.Join(dir, "projects.json"),
 		"SHUTTLE_TRANSCRIPT_CACHE_DIR": filepath.Join(dir, "transcripts"),
+		"SHUTTLE_TRANSCRIPT_INDEX":     filepath.Join(dir, "transcript-index.sqlite"),
+		"SHUTTLE_CLAUDE_PROJECTS_DIR":  filepath.Join(dir, "claude-projects"),
+		"SHUTTLE_CODEX_SESSIONS_DIR":   filepath.Join(dir, "codex-sessions"),
+		"SHUTTLE_PI_SESSIONS_DIR":      filepath.Join(dir, "pi-sessions"),
 	}
 }
 
@@ -66,6 +70,7 @@ var fencedEnv = []string{
 	"SHUTTLE_CODEX_SOCKET", "SHUTTLE_CONFER_STATE_DIR", "SHUTTLE_LIFECYCLE_OFFLINE",
 	"SHUTTLE_AGENTS_FILE", "SHUTTLE_REMOTES_FILE", "SHUTTLE_STORES", "SHUTTLE_STORES_FILE",
 	"SHUTTLE_PROJECTS", "SHUTTLE_PROJECTS_FILE", "SHUTTLE_TRANSCRIPT_CACHE_DIR",
+	"SHUTTLE_TRANSCRIPT_INDEX", "SHUTTLE_CLAUDE_PROJECTS_DIR", "SHUTTLE_CODEX_SESSIONS_DIR", "SHUTTLE_PI_SESSIONS_DIR",
 	"SHUTTLE_BRIDGE_READY_FD", "SHUTTLE_BRIDGE_PARENT_PID", "SHUTTLE_BRIDGE_SOCKET",
 	"SHUTTLE_BRIDGE_ENV_FILE", "SHUTTLE_BRIDGE_ARGS_FILE", "SHUTTLE_BRIDGE_ERROR_FILE",
 	"TMUX", "CODEX_THREAD_ID", "CODEX_HOME", "CODEX_APP_TOOLS_PIPE_PATH",
