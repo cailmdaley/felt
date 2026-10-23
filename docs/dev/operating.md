@@ -164,7 +164,14 @@ If a marker or ledger pairing is absent, preserve uncertainty rather than inferr
 
 ## Searching local transcripts
 
-`shuttle transcript index` incrementally indexes complete JSONL records from the configured Claude Code, Codex, and Pi transcript roots into a private, rebuildable SQLite FTS5 cache. Search ranks matching messages with BM25 and applies session, ledger-resolved fiber, age, project-prefix, and harness filters. Indexing is explicit on first use, catches up on subsequent searches, and can be rebuilt with `--rebuild`; SessionEnd hooks schedule only the ended file as an advisory background update. Use `--no-index` when a search must not walk transcript roots. The index contains transcript text, so keep its configured cache path private and treat it as sensitive local data.
+`shuttle transcript index` indexes complete JSONL messages from the configured Claude Code, Codex, and Pi roots into a private, rebuildable SQLite FTS5 cache.
+Search ranks messages with BM25 and applies session, ledger-resolved fiber, age, project-prefix, and harness filters.
+A completed root scan enables automatic catch-up on subsequent searches; `--no-index` skips that walk, and `--rebuild` discards and rebuilds the derived data.
+SessionEnd events carrying a transcript path schedule only that file as an advisory background update.
+Checkpoints track complete-line byte offsets, file identity, size, mtime, and bounded prefix/tail fingerprints; unchanged files need only a stat, while replaced or truncated files are reindexed.
+Native transcripts are append-only: arbitrary edits inside a growing file that preserve both fingerprints require `--rebuild`.
+User and assistant text is indexed in full, tool calls are capped at 2 KiB, and tool results at 4 KiB; images, reasoning, signatures, request mirrors, and bookkeeping are excluded.
+The index contains transcript text, so keep its configured cache path private and treat it as sensitive local data.
 
 ## Inspecting state
 
