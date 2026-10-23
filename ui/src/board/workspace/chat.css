@@ -105,6 +105,11 @@
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker { justify-content: flex-end; }
 /* The bubble already says who spoke; its kicker keeps the time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
+/* A message the worker has not yet read stands after the last turn, faded, until the transcript records it. */
+.ws-chat .ws-transcript-sent { display: flex; flex-direction: column; gap: 10px; padding-block: 18px 6px; }
+.ws-chat .ws-transcript-sent:empty { display: none; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-sending { opacity: .72; }
+.ws-chat .ws-transcript-sending { font-style: italic; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }

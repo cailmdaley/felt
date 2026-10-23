@@ -373,6 +373,9 @@ describe('state-shaped act zone', () => {
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Carry on' })
+    // The chat shows the message at once; the worker's transcript records it only when it reads it.
+    expect(band.el.querySelector('.ws-transcript-msg-sending')?.textContent).toContain('Carry on')
+    expect(message.value).toBe('')
   })
   it('inside a thread the line goes back to the orchestrator and the menu holds the origin', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))

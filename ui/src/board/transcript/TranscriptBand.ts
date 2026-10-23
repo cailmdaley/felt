@@ -423,6 +423,9 @@ export class TranscriptBand {
   private readonly inline: boolean
   private readonly onFile?: (path: string, title?: string) => void
   private readonly inlineWorking: HTMLElement
+  /** Messages sent from the composer that the transcript has not yet recorded, drawn after the last turn. */
+  private readonly sentList = document.createElement('div')
+  private sent: { text: string; at: number; node: HTMLElement }[] = []
   private sessions: HTMLElement | null = null
   private cacheTimer: number | null = null
   private readonly openButton: HTMLButtonElement
@@ -569,8 +572,9 @@ export class TranscriptBand {
     this.inlineWorking.className = 'ws-transcript-working ws-transcript-working-inline'
     this.inlineWorking.textContent = 'working'
     this.inlineWorking.hidden = true
+    this.sentList.className = 'ws-transcript-sent'
     if (this.inline) {
-      this.scroller.append(this.inlineWorking)
+      this.scroller.append(this.sentList, this.inlineWorking)
       this.pane.append(this.scroller)
       this.pane.hidden = false
       this.fullOpen = true
@@ -796,6 +800,42 @@ export class TranscriptBand {
     this.paintWorking()
   }
 
+  /**
+   * Show a message the moment the composer sends it. A busy worker records it
+   * only when it takes the message in, so until a prompt with its words
+   * appears the bubble stands after the last turn, marked as sent.
+   */
+  pend(text: string): void {
+    const words = text.trim()
+    if (!words || !this.inline) return
+    const message = createMessage('you')
+    message.node.classList.add('ws-transcript-msg-sending')
+    message.prose.textContent = words
+    const at = Date.now()
+    setKicker(message.kicker, 'you', 'you', at)
+    const state = document.createElement('span')
+    state.className = 'ws-transcript-sending'
+    state.textContent = 'sent · not yet read'
+    message.kicker.prepend(state)
+    this.sent.push({ text: words, at, node: message.node })
+    this.sentList.append(message.node)
+    this.scroller.scrollTop = this.scroller.scrollHeight
+  }
+
+  /** A sent message is confirmed by a recorded prompt holding its opening words, near or after its send. */
+  private confirmSent(): void {
+    if (!this.sent.length) return
+    const flat = (text: string): string => text.replace(/\s+/g, ' ').trim()
+    // Hosts' clocks differ, so a prompt up to two minutes before the send still counts.
+    const prompts = this.model.turns.slice(-8).map(turn => turn.prompt).filter(prompt => prompt !== null)
+    this.sent = this.sent.filter(sent => {
+      const opening = flat(sent.text).slice(0, 60)
+      const landed = prompts.some(prompt => (prompt.at ?? Infinity) >= sent.at - 120_000 && flat(prompt.text).includes(opening))
+      if (landed) sent.node.remove()
+      return !landed
+    })
+  }
+
   /** The inline column's last line while a live worker is mid-turn. */
   private paintWorking(): void {
     if (!this.inline) return
@@ -1007,6 +1047,7 @@ export class TranscriptBand {
       this.model.append(this.pendingEntries)
       this.pendingEntries = []
       const changes = this.model.takeChanges()
+      this.confirmSent()
       if (changes.reset) this.clearView()
       if (!this.hasInitialRender) {
         this.renderInitialWhenDrained()

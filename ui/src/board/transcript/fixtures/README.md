@@ -36,3 +36,9 @@ The second line is a peer message quoting a thread line, which must stay ordinar
 
 `tool-result-images.jsonl` holds one tool call and its image result per harness, in the shapes read from real local transcripts on 2026-10-23: Claude's `Read` result (`tool_result` content `{type: 'image', source: {type: 'base64', media_type, data}}`, mirrored in `toolUseResult.file`), Pi's `read` `toolResult` (`{type: 'image', data, mimeType}` beside a text block) and Codex's `view_image` `function_call_output` (`[{type: 'input_image', image_url: 'data:…'}]`).
 Paths, identifiers and the images themselves are replaced: every payload is the same 1×1 PNG, and the Pi and Codex calls stand in for the records that preceded the captured results.
+
+# Captured queued messages
+
+`claude-queued-messages.jsonl` holds four `queued_command` attachments from a real Claude Code session on 2026-10-22, the records Claude Code writes when a message arrives while the agent works: a human prompt as a string, a human prompt as blocks with a pasted image, another session's Shuttle message (`origin.kind: 'peer'`, `isMeta`) and a background task's notification.
+Texts are shortened, sockets, ids and the session are replaced, and the image is a 1×1 PNG.
+A message the worker has not yet taken in has no record at all: the chat shows it from the composer until a prompt with its words appears.

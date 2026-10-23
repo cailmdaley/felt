@@ -219,9 +219,20 @@ function claudeAttachment(record: ObjectValue): Entry[] {
     return threadNotices(text, timestamp(record.timestamp))
   }
   if (attachment?.type !== 'queued_command' || (attachment.commandMode ?? 'prompt') !== 'prompt') return []
-  const text = string(attachment.prompt)
-  const classified = text ? classifiedClaudeText(text, false, timestamp(record.timestamp)) : null
-  return classified ? [classified] : []
+  const time = timestamp(record.timestamp)
+  // The prompt is a string, or blocks when the message carried images.
+  const prompt = attachment.prompt
+  const text = typeof prompt === 'string' ? prompt : contentText(prompt)
+  const images = blocks(prompt).filter(block => block.type === 'image').length
+  // Another session's message, injected as the queue's meta turn, is a delivery, never the human's.
+  if (attachment.isMeta === true || object(attachment.origin)?.kind === 'peer') {
+    const detail = /^\[Shuttle message \S+ from ([^;\]]+)/.exec(text)?.[1]
+    return text ? [event('Message', { detail, text: text.replace(/^\[Shuttle message [^\]]*\]\n?/, '') }, time)] : []
+  }
+  const classified = text ? classifiedClaudeText(text, false, time) : null
+  if (classified?.kind === 'prompt') return [{ ...classified, images }]
+  if (classified) return [classified]
+  return images ? [at({ kind: 'prompt' as const, text: '', images, dispatch: false }, time)] : []
 }
 
 function claudeRecord(record: ObjectValue): Entry[] {

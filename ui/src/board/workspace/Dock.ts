@@ -1337,9 +1337,16 @@ export class Dock {
       e.stopPropagation()
       void this.runRequeue(card, send.compose, 'fresh', fresh, err).then((ok) => ok && send.sent())
     })
+    // A message handed to a live worker shows in the chat at once; the transcript records it only when the worker reads it.
+    const landed = (ok: boolean, mode: 'fresh' | 'previous', live: boolean): void => {
+      if (!ok) return
+      if (mode === 'previous' && live && composed) this.transcriptBand?.pend(composed.text)
+      send.sent()
+    }
     resume.addEventListener('click', (e) => {
       e.stopPropagation()
-      void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => ok && send.sent())
+      const live = hasLiveWorker(card)
+      void this.runRequeue(card, send.compose, 'previous', resume, err).then((ok) => landed(ok, 'previous', live))
     })
 
     message.addEventListener('keydown', event => {
@@ -1356,8 +1363,9 @@ export class Dock {
       if (this.meetingArmed()) { this.meetingStart?.(); return }
       // ↵ is the default verb the buttons show, ⌥↵ the secondary.
       const resumable = Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
-      const resumeSession = resumable && (hasLiveWorker(card) ? !event.altKey : event.altKey)
-      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => ok && send.sent())
+      const live = hasLiveWorker(card)
+      const resumeSession = resumable && (live ? !event.altKey : event.altKey)
+      void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => landed(ok, resumeSession ? 'previous' : 'fresh', live))
     })
     box.append(message, strip.el, foot)
     wrap.append(box, imageErr, err)
