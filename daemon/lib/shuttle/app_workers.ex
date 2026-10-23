@@ -13,7 +13,7 @@ defmodule Shuttle.AppWorkers do
   and can subsequently be claimed by exactly one fiber.
 
   `backend_host` and `backend_endpoint` pin the owner on both surfaces. Native
-  Go messaging reads only those two fields from this private JSON projection;
+  Go messaging validates identity and reads those owner fields from this private JSON projection;
   it never writes records. Missing owner evidence requires explicit operator
   repair, never automatic binding to the current host or socket. Shared
   `app_worker_owners.json` fixtures enforce the reader contract.
@@ -23,25 +23,42 @@ defmodule Shuttle.AppWorkers do
 
   @doc "Checks the recorded App Server owner before any native operation on an owned thread."
   def check_endpoint(id) when is_binary(id) do
-    with {:ok, record} <- get(id), do: check_endpoint(record)
+    with :ok <- check_id(id),
+         {:ok, record} <- get(id),
+         do: check_endpoint(record, id)
   end
 
   def check_endpoint(record) when is_map(record),
+    do: check_endpoint(record, record["session_uuid"])
+
+  def check_endpoint(_), do: {:error, :ownership_record_unreadable}
+
+  defp check_endpoint(record, id),
     do:
       check_owner(
         record,
+        id,
         Shuttle.Poller.own_host_id(),
         Shuttle.CodexApp.Transport.default_socket()
       )
 
-  def check_endpoint(_), do: {:error, :ownership_record_unreadable}
-
   @doc "Read-only owner projection shared with native messaging through app_worker_owners.json fixtures."
-  def check_owner(record, host, endpoint) when is_map(record) do
-    with :ok <- check_owner_host(record, host), do: check_owner_endpoint(record, endpoint)
+  def check_owner(record, id, host, endpoint) when is_map(record) do
+    with :ok <- check_id(id),
+         true <- record["session_uuid"] == id and record["thread_id"] == id,
+         :ok <- check_owner_host(record, host) do
+      check_owner_endpoint(record, endpoint)
+    else
+      false -> {:error, :session_owner_mismatch}
+      error -> error
+    end
   end
 
-  def check_owner(_, _, _), do: {:error, :ownership_record_unreadable}
+  def check_owner(_, _, _, _), do: {:error, :ownership_record_unreadable}
+
+  defp check_id(id) do
+    if valid_id?(id), do: :ok, else: {:error, :invalid_session_id}
+  end
 
   defp check_owner_host(record, current_host) do
     case record["backend_host"] do
@@ -66,14 +83,24 @@ defmodule Shuttle.AppWorkers do
   end
 
   def check_known_endpoint(id) do
+    with :ok <- check_id(id), do: check_known_record(id)
+  end
+
+  defp check_known_record(id) do
     case get(id) do
       {:ok, record} ->
-        check_endpoint(record)
+        check_endpoint(record, id)
 
       {:error, :not_found} ->
         case File.lstat(record_path(id)) do
-          {:error, :enoent} -> :ok
-          _ -> {:error, :ownership_record_unreadable}
+          {:error, :enoent} ->
+            case {File.stat(root()), File.lstat(root())} do
+              {{:error, :enoent}, {:ok, _}} -> {:error, :ownership_record_unreadable}
+              _ -> :ok
+            end
+
+          _ ->
+            {:error, :ownership_record_unreadable}
         end
     end
   end
@@ -205,7 +232,7 @@ defmodule Shuttle.AppWorkers do
   def reserve_resume(id, fiber_id, uid, store) do
     :global.trans({{__MODULE__, id}, self()}, fn ->
       with {:ok, record} <- get(id),
-           :ok <- check_endpoint(record),
+           :ok <- check_endpoint(record, id),
            true <- same_fiber?(record, fiber_id, uid) and record["felt_store"] == store,
            false <- record["active"] == true,
            :ok <- put(Map.merge(record, %{"active" => true, "launch_state" => "starting"})) do
@@ -225,7 +252,7 @@ defmodule Shuttle.AppWorkers do
            true <- nonempty?(fiber_id) and nonempty?(store) and valid_optional_uid?(uid),
            {:ok, record} <- get(id),
            true <- owned_by?(record, id, fiber_id, uid, store),
-           :ok <- check_endpoint(record),
+           :ok <- check_endpoint(record, id),
            {:ok, thread} <- native_thread_before_recovery(id),
            result <- reload_if_not_loaded(id, thread) do
         result
@@ -365,7 +392,7 @@ defmodule Shuttle.AppWorkers do
 
   defp do_claim(id, fiber, store) do
     with {:ok, record} <- get(id),
-         :ok <- check_endpoint(record),
+         :ok <- check_endpoint(record, id),
          true <- record["active"] == true,
          true <-
            is_nil(record["fiber_id"]) or

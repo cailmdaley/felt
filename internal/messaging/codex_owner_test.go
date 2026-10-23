@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// AppWorkers owns writes. Native messaging reads only backend_host and
-// backend_endpoint from its private record; these cases match the daemon's
-// read-only owner projection, including records that require explicit repair.
+// AppWorkers owns writes. Native messaging validates the requested identity
+// and owner fields from its private record; these cases match the daemon's
+// read-only projection, including records that require explicit repair.
 func TestCodexOwnerProjectionParity(t *testing.T) {
 	t.Parallel()
 	bytes, err := os.ReadFile(filepath.Join("..", "..", "daemon", "test", "fixtures", "app_worker_owners.json"))
@@ -20,6 +20,7 @@ func TestCodexOwnerProjectionParity(t *testing.T) {
 	var cases []struct {
 		Name, Host, Socket, Expected string
 		Record                       json.RawMessage
+		RequestedID                  string `json:"requested_id"`
 	}
 	if err := json.Unmarshal(bytes, &cases); err != nil {
 		t.Fatal(err)
@@ -35,7 +36,7 @@ func TestCodexOwnerProjectionParity(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "thread-1.json"), tc.Record, 0600); err != nil {
 				t.Fatal(err)
 			}
-			err := checkCodexOwnerEndpoint(env, tc.Host, "thread-1")
+			err := checkCodexOwnerEndpoint(env, tc.Host, tc.RequestedID)
 			got := "ok"
 			if err != nil {
 				got = ErrorCode(err)
@@ -47,9 +48,37 @@ func TestCodexOwnerProjectionParity(t *testing.T) {
 	}
 }
 
+func TestCodexOwnerDanglingPathsFailClosed(t *testing.T) {
+	t.Parallel()
+	for _, rootLink := range []bool{false, true} {
+		t.Run(map[bool]string{false: "record", true: "root"}[rootLink], func(t *testing.T) {
+			env := testEnv(t)
+			root := filepath.Join(dataDir(env), "app-workers")
+			if err := checkCodexOwnerEndpoint(env, "owner", "thread-1"); err != nil {
+				t.Fatalf("absent record: %v", err)
+			}
+			path := root
+			if !rootLink {
+				if err := os.MkdirAll(root, 0700); err != nil {
+					t.Fatal(err)
+				}
+				path = filepath.Join(root, "thread-1.json")
+			} else if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(filepath.Join(t.TempDir(), "missing"), path); err != nil {
+				t.Fatal(err)
+			}
+			if err := checkCodexOwnerEndpoint(env, "owner", "thread-1"); ErrorCode(err) != "ownership_record_unreadable" {
+				t.Fatalf("dangling path accepted: %v", err)
+			}
+		})
+	}
+}
+
 func TestCodexWrongOwnerNeverConnectsOrQueues(t *testing.T) {
 	t.Parallel()
-	for _, reason := range []string{"endpoint", "host", "unrecorded", "malformed"} {
+	for _, reason := range []string{"endpoint", "host", "unrecorded", "malformed", "session", "thread"} {
 		for _, wake := range []bool{false, true} {
 			t.Run(reason+map[bool]string{false: "/context", true: "/wake"}[wake], func(t *testing.T) {
 				env := testEnv(t)
@@ -58,6 +87,10 @@ func TestCodexWrongOwnerNeverConnectsOrQueues(t *testing.T) {
 				env.Set("SHUTTLE_CODEX_SOCKET", socket)
 				record := map[string]any{"session_uuid": "thread-1", "thread_id": "thread-1", "active": true, "backend_host": "owner", "backend_endpoint": socket}
 				switch reason {
+				case "session":
+					record["session_uuid"] = "another-thread"
+				case "thread":
+					record["thread_id"] = "another-thread"
 				case "endpoint":
 					record["backend_endpoint"] = "/another-owner.sock"
 				case "host":

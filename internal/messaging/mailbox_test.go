@@ -206,10 +206,10 @@ func TestMailboxWithdrawAndNoWake(t *testing.T) {
 func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	if err := RegisterMailbox(env, "codex", "thread/1", "owner", "/project", os.Getpid(), true); err != nil {
+	if err := RegisterMailbox(env, "codex", "thread-1", "owner", "/project", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
-	if MailboxAvailable(env, "codex", "thread/1", "other") {
+	if MailboxAvailable(env, "codex", "thread-1", "other") {
 		t.Fatal("mailbox leaked across host ownership")
 	}
 	sessions := mailboxSessions(env, "codex", "owner")
@@ -226,7 +226,7 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 		t.Fatalf("send: %#v %v", receipt, err)
 	}
 	wrongHost := req
-	wrongHost.Address = "shuttle://other/codex/thread%2F1"
+	wrongHost.Address = "shuttle://other/codex/thread-1"
 	if _, err := Send(context.Background(), env, "other", wrongHost); err == nil {
 		t.Fatal("foreign host accepted mailbox message")
 	}

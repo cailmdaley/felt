@@ -903,10 +903,40 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, "not json"} = File.read(path)
   end
 
+  test "dangling owner records are not unmanaged sessions" do
+    assert :ok = AppWorkers.check_known_endpoint("dangling-owner")
+    File.mkdir_p!(AppWorkers.root())
+    path = Path.join(AppWorkers.root(), "dangling-owner.json")
+    File.ln_s!(Path.join(AppWorkers.root(), "missing-target"), path)
+
+    assert {:error, :ownership_record_unreadable} =
+             AppWorkers.check_known_endpoint("dangling-owner")
+  end
+
+  test "native operations reject records naming another thread" do
+    fiber("tests/app")
+    assert {:ok, _} = dispatch("tests/app")
+    before = App.calls()
+
+    for field <- ["session_uuid", "thread_id"] do
+      path = Path.join(AppWorkers.root(), "app-session-1.json")
+      original = File.read!(path)
+      record = Jason.decode!(original) |> Map.put(field, "another-thread")
+      File.write!(path, Jason.encode!(record))
+
+      assert {:error, :session_owner_mismatch} = AppWorkers.check_endpoint("app-session-1")
+      assert {:error, :session_owner_mismatch} = AppWorkers.check_known_endpoint("app-session-1")
+      assert {:error, :session_owner_mismatch} = AppWorkers.call("app-session-1", :interrupt)
+      assert App.calls() == before
+      File.write!(path, original)
+    end
+  end
+
   test "UID is authoritative when a slug is reused" do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "old",
+        "thread_id" => "old",
         "backend_host" => Poller.own_host_id(),
         "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,
@@ -928,6 +958,7 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "store-bound",
+        "thread_id" => "store-bound",
         "backend_host" => Poller.own_host_id(),
         "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,
@@ -1016,6 +1047,7 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "resume-race",
+        "thread_id" => "resume-race",
         "backend_host" => Poller.own_host_id(),
         "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "fiber_id" => "tests/app",
@@ -1586,6 +1618,7 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "race",
+        "thread_id" => "race",
         "backend_host" => Poller.own_host_id(),
         "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,

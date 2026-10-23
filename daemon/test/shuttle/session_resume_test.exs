@@ -366,6 +366,7 @@ defmodule Shuttle.SessionResumeTest do
     assert :ok =
              Shuttle.AppWorkers.put(%{
                "session_uuid" => @codex,
+               "thread_id" => @codex,
                "active" => false,
                "backend_host" => Shuttle.Poller.own_host_id(),
                "backend_endpoint" => "/another-owner.sock"
@@ -391,6 +392,7 @@ defmodule Shuttle.SessionResumeTest do
     :ok =
       Shuttle.AppWorkers.put(%{
         "session_uuid" => @codex,
+        "thread_id" => @codex,
         "active" => false,
         "backend_host" => Shuttle.Poller.own_host_id(),
         "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()

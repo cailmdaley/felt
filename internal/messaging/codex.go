@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -54,18 +55,33 @@ func codexSocket(env *sysenv.Env) string {
 // A durable AppWorkers record pins the native conversation owner. An absent
 // record leaves hook-only sessions unchanged; an unreadable or unpinned record
 // cannot safely inherit whichever endpoint happens to be configured today.
+var codexNativeID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
 func checkCodexOwnerEndpoint(env *sysenv.Env, host, id string) error {
-	path := filepath.Join(dataDir(env), "app-workers", id+".json")
-	bytes, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if !codexNativeID.MatchString(id) {
+		return errCode("invalid_session_id", "invalid Codex native thread ID %q", id)
+	}
+	root := filepath.Join(dataDir(env), "app-workers")
+	path := filepath.Join(root, id+".json")
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		// A dangling root symlink is not an absent ownership store.
+		if _, rootErr := os.Stat(root); os.IsNotExist(rootErr) {
+			if _, linkErr := os.Lstat(root); !os.IsNotExist(linkErr) {
+				return errCode("ownership_record_unreadable", "cannot verify Codex owner store %s", root)
+			}
+		}
 		return nil
 	}
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		return errCode("ownership_record_unreadable", "cannot verify Codex owner record %s: %v", path, err)
 	}
 	var record map[string]any
 	if err := json.Unmarshal(bytes, &record); err != nil || record == nil {
 		return errCode("ownership_record_unreadable", "invalid Codex owner record %s", path)
+	}
+	if record["session_uuid"] != id || record["thread_id"] != id {
+		return errCode("session_owner_mismatch", "Codex owner record %s does not identify thread %q", path, id)
 	}
 	ownerHost, _ := record["backend_host"].(string)
 	if ownerHost == "" {
