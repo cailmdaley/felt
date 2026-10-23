@@ -57,7 +57,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
       // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark and whisper draw.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('summary')!.textContent!.split(' · ')[0] ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
+        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('.ws-thread-group-label')?.textContent ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       // The rail has no Roles group: a seat rests with Resting.
       expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })

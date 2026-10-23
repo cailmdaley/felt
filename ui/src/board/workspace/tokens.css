@@ -146,7 +146,25 @@
   --ws-meta-row: 19px;
   --ws-sidebar-glyph-size: 15px;
   --ws-sidebar-dot-size: 10px;
-  --ws-thread-outcome-size: 13px;
+  /* The thread rail: a thread's outcome under its name, the parent named above it, and a group's heading. */
+  --ws-thread-outcome-size: 14px;
+  --ws-thread-parent-size: 12.5px;
+  --ws-thread-group-size: 13.5px;
+  --ws-thread-bar: 3px;
+  --ws-thread-mark-slot: 16px;
+  /* The marks in that slot: an ask's glyph, and a discard's cross. */
+  --ws-thread-glyph-size: 11.5px;
+  --ws-thread-cross-size: 15px;
+  /* Each thread state's tone, in the sidebar's and the Desk's vocabulary: the
+     human's move in cinnabar (a question) or gold (idle), the worker's in
+     cobalt, a verdict to read in verdigris, and the quiet states in ink. */
+  --ws-state-question: var(--ws-you);
+  --ws-state-idle: var(--kbn-owed-bright);
+  --ws-state-working: var(--kbn-agent);
+  --ws-state-review: var(--kbn-tempered);
+  --ws-state-drafts: var(--kbn-ink-muted);
+  --ws-state-resting: var(--kbn-ink-faint);
+  --ws-state-tempered: color-mix(in srgb, var(--kbn-tempered) 40%, var(--kbn-ink-faint));
   --ws-thread-quiet-glyph-size: 12px;
   --ws-sidebar-outcome-lines: 2;
   --ws-sidebar-outcome-size: 14px;

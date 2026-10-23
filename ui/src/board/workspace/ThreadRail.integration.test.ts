@@ -5,7 +5,7 @@ import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
-it('draws state groups only, each a flat list in tree order with the parent path, the state said once per group, and navigates back through the breadcrumb', () => {
+it('draws state groups only, each a flat list in tree order under a toned heading with its count, the parent named, the state said once per group, and navigates back through the breadcrumb', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
@@ -15,13 +15,14 @@ it('draws state groups only, each a flat list in tree order with the parent path
   const all = [root, rest, child, deep, done], open = vi.fn(), rail = new ThreadRail(open, vi.fn())
   rail.show({ ...root }, new ThreadIndex(all))
   const groups = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')]
-  expect(groups.map(g => g.querySelector('summary')!.textContent)).toEqual(['Waiting · 1', 'Working · 1', 'Resting · 1', 'Tempered · 1'])
+  expect(groups.map(g => g.querySelector('summary')!.getAttribute('aria-label'))).toEqual(['Waiting, 1', 'Working, 1', 'Resting, 1', 'Tempered, 1'])
+  expect(groups.map(g => g.querySelector('.ws-thread-group-label')!.textContent)).toEqual(['Waiting', 'Working', 'Resting', 'Tempered'])
   expect(groups.map(g => g.open)).toEqual([true, true, true, false])
   expect(rail.el.querySelector('.ws-thread-tree ul')).toBeNull()
   const deepRow = groups[0].querySelector('.kbn-thread-row')!
-  expect(deepRow.querySelector('.ws-thread-path')?.textContent).toBe('child')
+  expect(deepRow.querySelector('.ws-thread-parent')?.textContent).toBe('Z working')
   expect(deepRow.querySelector('.ws-thread-mark')?.getAttribute('title')).toBe('question')
-  expect(groups[1].querySelector('.ws-thread-path')).toBeNull()
+  expect(groups[1].querySelector('.ws-thread-parent')).toBeNull()
   expect(groups[1].querySelector('.ws-thread-mark')).toBeNull()
   expect(rail.el.textContent).not.toMatch(/Archived/)
   // A group's state is its heading; no row says it again.
@@ -38,7 +39,7 @@ it('draws state groups only, each a flat list in tree order with the parent path
   rail.breadcrumb.querySelector<HTMLButtonElement>('button')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
   rail.show(root, new ThreadIndex([root, rest]))
-  expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.textContent)).toEqual(['Resting · 1'])
+  expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.getAttribute('aria-label'))).toEqual(['Resting, 1'])
   vi.unstubAllGlobals()
 })
 
@@ -140,5 +141,20 @@ it('resizes from its left edge, remembers the width per viewer and survives unav
     const blocked = new ThreadRail(vi.fn(), vi.fn())
     blocked.el.querySelector<HTMLElement>('.ws-thread-handle')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
     expect(blocked.el.style.getPropertyValue('--ws-thread-rail-width')).toBe('220px')
+  } finally { vi.unstubAllGlobals() }
+})
+
+it('marks a working thread with a live worker, and only that one', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const root = card({ id: 'hub' })
+    const live = card({ id: 'hub/live', orchestrator: root.id, status: 'active', name: 'Live', workerState: 'running' })
+    const quiet = card({ id: 'hub/quiet', orchestrator: root.id, status: 'active', name: 'Quiet' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(root, new ThreadIndex([root, live, quiet]))
+    const rows = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="working"] .kbn-thread-row')]
+    expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.querySelector('.ws-thread-mark')?.getAttribute('data-kind') ?? null]))
+      .toEqual([['Live', expect.stringMatching(/^(live|busy)$/)], ['Quiet', null]])
+    expect(rows[0].getAttribute('aria-label')).toBe('Live, working')
   } finally { vi.unstubAllGlobals() }
 })

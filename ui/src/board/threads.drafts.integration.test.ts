@@ -31,7 +31,7 @@ it('counts unarmed shuttle drafts as threads, separates them from Resting, and e
     expect(host.querySelector('.kbn-thread-subentries')).toBeNull()
     const rail = new ThreadRail(open, vi.fn()); rail.show(root, new ThreadIndex(all))
     expect(rail.el.querySelector('.ws-thread-waiting')).toBeNull()
-    expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.textContent)).toEqual(['Drafts · 1', 'Resting · 1'])
+    expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.getAttribute('aria-label'))).toEqual(['Drafts, 1', 'Resting, 1'])
     expect(rail.el.querySelector('[data-thread-state="drafts"]')?.textContent).toContain('Plan the validation')
     expect(rail.el.querySelector('[data-thread-state="resting"]')?.textContent).toContain('Resting validation')
     rail.el.querySelector<HTMLButtonElement>('[data-thread-state="drafts"]')!.click()

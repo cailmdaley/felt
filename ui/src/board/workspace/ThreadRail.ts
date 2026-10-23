@@ -1,5 +1,5 @@
 import { MOBILE_MEDIA } from '../mobile.js'
-import type { KanbanCard } from '../KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
 import { deskColumn } from '../deskColumn.js'
 import { type ThreadIndex, type ThreadState } from '../threads.js'
@@ -151,19 +151,18 @@ export class ThreadRail {
     const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
     const index = this.index!
     const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    // Containment reads from the muted slugs of the two nearest ancestors below the open constitution, a cut chain led by an ellipsis.
-    const slug = (c: KanbanCard): string => c.id.split('/').pop()!
-    const pathOf = (card: KanbanCard): string => {
-      const root = scope, parent = index.parentOf(card)
-      if (!parent || parent.id === root.id) return ''
-      const grand = index.parentOf(parent)
-      if (!grand || grand.id === root.id) return slug(parent)
-      const above = index.parentOf(grand)
-      return `${above && above.id !== root.id ? '…/' : ''}${slug(grand)}/${slug(parent)}`
+    // Containment reads from the nearest parent below the family's head, named above the thread; its title holds up to three links of the chain.
+    const parentOf = (card: KanbanCard): { name: string; chain: string } | null => {
+      const chain: string[] = []
+      let p = index.parentOf(card)
+      for (; p && p.id !== scope.id && chain.length < 3; p = index.parentOf(p)) chain.unshift(p.name)
+      if (!chain.length) return null
+      return { name: chain[chain.length - 1], chain: `${p && p.id !== scope.id ? '… › ' : ''}${chain.join(' › ')}` }
     }
-    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, or a discarded one among the tempered.
+    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, a live worker under a working one, or a discarded one among the tempered.
     const markOf = (card: KanbanCard, state: ThreadState): { kind: string; title: string } | null => {
       if (state === 'waiting') { const turn = turnOf(card); return { kind: turn.turn, title: turn.word } }
+      if (state === 'working' && hasLiveWorker(card)) return turnOf(card).busy ? { kind: 'busy', title: 'Worker busy' } : { kind: 'live', title: 'Worker live' }
       if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
       return null
     }
@@ -172,10 +171,10 @@ export class ThreadRail {
       const row = item.querySelector<HTMLElement>('.kbn-thread-row')!, state = index.state(card)
       row.querySelector('small')?.remove()
       const head = document.createElement('span'); head.className = 'ws-thread-head'
-      const path = pathOf(card)
-      if (path) {
-        const prefix = document.createElement('span'); prefix.className = 'ws-thread-path'; prefix.textContent = path; prefix.title = path
-        head.append(prefix)
+      const parent = parentOf(card)
+      if (parent) {
+        const lead = document.createElement('span'); lead.className = 'ws-thread-parent'; lead.textContent = parent.name; lead.title = parent.chain
+        head.append(lead)
       }
       head.append(row.querySelector('.kbn-thread-name')!)
       row.prepend(head)
@@ -183,10 +182,10 @@ export class ThreadRail {
       let title = label
       if (mark) {
         const el = document.createElement('span'); el.className = 'ws-thread-mark'; el.dataset.kind = mark.kind
-        el.title = mark.title; el.setAttribute('aria-hidden', 'true'); el.textContent = mark.kind === 'discarded' ? '×' : ''
-        row.prepend(el); title = mark.title
+        el.title = mark.title; el.setAttribute('aria-hidden', 'true')
+        el.textContent = mark.kind === 'discarded' ? '×' : mark.kind === 'question' ? '?' : mark.kind === 'blocked' ? '!' : ''
+        row.prepend(el); if (state !== 'working') title = mark.title
       }
-      row.classList.toggle('ws-thread-marked', mark !== null)
       const here = card.id === current.id && card.originId === current.originId
       row.classList.toggle('ws-thread-current', here)
       if (here) row.setAttribute('aria-current', 'page')
@@ -201,7 +200,9 @@ export class ThreadRail {
       const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
       group.open = open.get(key) ?? key !== 'tempered'
       const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, scope)
-      summary.textContent = `${label} · ${members.length}`
+      const name = document.createElement('span'); name.className = 'ws-thread-group-label'; name.textContent = label
+      const count = document.createElement('span'); count.className = 'ws-thread-group-count'; count.textContent = String(members.length)
+      summary.append(name, count); summary.setAttribute('aria-label', `${label}, ${members.length}`)
       group.append(summary, ...members.map(card => rowFor(card, key, label)))
       this.tree.append(group)
     }
