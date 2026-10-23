@@ -1894,8 +1894,8 @@ export class KanbanSurfaceRenderer {
   buildCardPreview(row: HTMLElement): PreviewContent | null {
     const card = this.previewCard(row)
     if (!card) return null
-    // A family expands in place; the floating preview would cover its thread rows.
-    if (card.threadSummary && card.threadSummary.unfinished + card.threadSummary.archived > 0) return null
+    // An expanded family shows its thread rows in place; the floating preview would cover them.
+    if (this.threadFamilies.isOpen(card)) return null
     const sheet = document.createElement('div')
     sheet.className = 'kbn-preview-sheet'
     let paper = this.buildPreviewPaper(card, row, sheet)

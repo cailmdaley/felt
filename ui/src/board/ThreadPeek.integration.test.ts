@@ -413,3 +413,28 @@ describe('pinned threads', () => {
     expect(openRoot).not.toHaveBeenCalled()
   })
 })
+
+describe('the floating preview of a card with threads', () => {
+  const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root' })
+  const index = new ThreadIndex([root, child])
+  root.threadSummary = index.summary(root)
+  const data = response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] })
+  const draw = () => {
+    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
+      stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {} })
+    document.body.append(renderer.renderNowSection(data.now, {}))
+    return renderer
+  }
+  const row = () => document.querySelector<HTMLElement>('[data-card-uid="root"]')!
+  it('previews while its family is folded and yields while it is expanded', () => {
+    const renderer = draw()
+    const badge = row().querySelector<HTMLButtonElement>('.kbn-thread-badge')!
+    expect(badge.getAttribute('aria-expanded')).toBe('false')
+    expect(renderer.buildCardPreview(row())).not.toBeNull()
+    badge.click()
+    expect(badge.getAttribute('aria-expanded')).toBe('true')
+    expect(renderer.buildCardPreview(row())).toBeNull()
+    badge.click()
+    expect(renderer.buildCardPreview(row())).not.toBeNull()
+  })
+})

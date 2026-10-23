@@ -97,19 +97,7 @@
 .kbn-col-list .kbn-card--meeting .kbn-meeting { flex-basis: 100%; }
 
 /* Verdicts and Rest stand in over the title's end, on a fade of the line's
-   own ground, while the pointer is at the line's right end (the meta and a
-   zone just left of it) or focus is inside them. The rest of the line is
-   always the way into the card: a pointer crossing the middle of a line never
-   finds a verdict under it. */
-.kbn-col-list .kbn-card > .kbn-card-meta::before {
-  content: '';
-  position: absolute;
-  top: -5px;
-  bottom: -5px;
-  right: 100%;
-  width: 2.75rem;
-}
-.kbn-col-list .kbn-card > .kbn-card-meta:empty::before { content: none; }
+   own ground, while the pointer is anywhere on the card or focus is inside it. */
 .kbn-card-hover-actions {
   position: absolute;
   right: 100%;
@@ -124,7 +112,7 @@
   pointer-events: none;
   transition: opacity 120ms ease;
 }
-.kbn-col-list .kbn-card > .kbn-card-meta:is(:hover, :focus-within) .kbn-card-hover-actions {
+.kbn-col-list .kbn-card:is(:hover, :focus-within) > .kbn-card-meta .kbn-card-hover-actions {
   opacity: 1;
   pointer-events: auto;
 }
