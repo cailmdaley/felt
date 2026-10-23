@@ -16,8 +16,8 @@ import (
 	"time"
 )
 
-// TestCodexEmbeddedHolderRefusesNativeWake proves a live embedded CLI remains
-// the owner even when a separate App Server can load its shadow thread.
+// TestCodexEmbeddedHolderRefusesNativeWake checks that a live embedded CLI
+// refuses native wake while a separate App Server is reachable.
 func TestCodexEmbeddedHolderRefusesNativeWake(t *testing.T) {
 	codex, err := exec.LookPath("codex")
 	if err != nil {
@@ -129,9 +129,8 @@ requires_openai_auth=false
 	case <-ctx.Done():
 		t.Fatal("embedded first response did not reach local fixture")
 	}
-	// Start a separate App Server while the embedded process owns the thread.
-	// Codex may itself refuse a competing writer; the wake path must still honor
-	// the registered holder before attempting native thread control.
+	// The separate App Server has no copy of this thread. The holder-specific
+	// refusal distinguishes the guard from a native thread-not-found response.
 	shadowHome := filepath.Join(root, "shadow-home")
 	if err := os.Mkdir(shadowHome, 0700); err != nil {
 		t.Fatal(err)
@@ -171,13 +170,13 @@ requires_openai_auth=false
 	}
 	wake := Request{Address: "shuttle://host/codex/" + id, MessageID: "live-holder-wake", Text: "must not wake shadow", Wake: true}
 	receipt, sendErr := Send(ctx, apiEnv, "host", wake)
-	if sendErr == nil || receipt.Status != StatusRejected || receipt.Transport != "codex-app-server" {
+	if sendErr == nil || receipt.Status != StatusRejected || receipt.Transport != "codex-app-server" || receipt.Detail != codexWakeHint {
 		t.Fatalf("live embedded holder wake was not refused: %#v %v", receipt, sendErr)
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("wake reached model fixture while embedded process alive: calls=%d", calls.Load())
 	}
-	// Context-only delivery must queue rather than mutate the loaded native shadow.
+	// Context-only delivery queues for the embedded process instead of native input.
 	contextReq := wake
 	contextReq.Wake = false
 	contextReq.MessageID = "live-holder-context"
