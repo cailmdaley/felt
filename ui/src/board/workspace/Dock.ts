@@ -431,12 +431,6 @@ export function lifecycleOf(card: KanbanCard): { state: string; label: string } 
   return { state, label: THREAD_LABEL[state] }
 }
 
-/** A thread done or under review, its worker gone: it goes on by resuming, so Resume is the composer's one verb. */
-export function settledResume(card: KanbanCard): boolean {
-  const column = deskColumn(card)
-  return Boolean(card.sessionUuid) && !hasLiveWorker(card) && (column === 'awaitingReview' || column === 'tempered' || column === 'composted')
-}
-
 /** The menu's muted line: agent, office and host, the office only where it is not the name again. */
 export function chatFacts(card: KanbanCard): string {
   const slug = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -495,7 +489,7 @@ export class Dock {
   private composerPaint: (() => void) | null = null
   private actPaint: (() => void) | null = null
   private freshButton: HTMLButtonElement | null = null
-  /** The menu's New session, offered there while Resume is the composer's one way on. */
+  /** The menu's New session, the phone's way to cut a live worker its folded composer does not show. */
   private menuFresh: HTMLButtonElement | null = null
   /** The menu's Meeting, the phone's way to the switch its folded composer does not show. */
   private menuMeeting: HTMLButtonElement | null = null
@@ -929,8 +923,9 @@ export class Dock {
     errorEl.className = 'kbn-detail-error'
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
+    // The band's usage facts feed the composer's Resume (its cache warmth), so the band comes first.
+    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title) => this.openFile?.(path, title), onFacts: () => this.composerPaint?.() })
     const composer = shuttleManaged ? this.buildComposer(card) : null
-    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title) => this.openFile?.(path, title) })
     const meetingPane = this.buildTranscriptPane(card)
 
     const settings = document.createElement('div')
@@ -1091,7 +1086,7 @@ export class Dock {
       if (!sessionsSection.hidden) sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')?.focus({ preventScroll: true })
     })
     const freshItem = this.menuFresh = item('New session', 'ws-chat-fresh', () => { this.freshButton?.click() })
-    freshItem.title = 'Start a new session instead of resuming (⌥↵)'
+    freshItem.title = 'Start a new session, cutting the live worker (⌥↵)'
     const meetingItem = this.menuMeeting = item('Meeting', 'ws-chat-meeting', () => { this.meetingSwitch?.click() })
     meetingItem.hidden = !this.meeting
     // The meter's figures: in the header on the desktop, here on the phone.
@@ -1244,18 +1239,13 @@ export class Dock {
   }
 
   /**
-   * The menu's composer verbs. New session is there whenever the composer
-   * leaves it out: for a settled thread everywhere, and beside a live worker
-   * on the phone, whose folded composer shows one verb. Meeting is the
-   * phone's, and says whether it is on.
+   * The menu's composer verbs, the phone's: its folded composer shows one
+   * verb, so beside a live worker New session waits here. Meeting says
+   * whether it is on.
    */
   private paintMenuVerbs(card: KanbanCard): void {
     const fresh = this.menuFresh, meeting = this.menuMeeting
-    if (fresh) {
-      const settled = settledResume(card), live = Boolean(card.sessionUuid) && hasLiveWorker(card)
-      fresh.hidden = !settled && !live
-      fresh.dataset.when = settled ? 'settled' : 'live'
-    }
+    if (fresh) fresh.hidden = !(card.sessionUuid && hasLiveWorker(card))
     if (meeting) {
       meeting.hidden = !this.meetingSwitch
       meeting.textContent = this.meetingArmed() ? 'Meeting: on' : 'Meeting: off'
@@ -1336,26 +1326,24 @@ export class Dock {
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
-      const draft = deskColumn(card) === 'drafts'
-      const resumable = !draft && Boolean(card.sessionUuid)
+      const resumable = Boolean(card.sessionUuid)
       // A live worker takes the message by default (Send ↵) and a new
-      // session is the secondary verb (⌥↵). Otherwise a fresh session is the
-      // default and a resumable one adds Resume beside it (⌥↵).
+      // session is the secondary verb (⌥↵). Otherwise, in every column, a
+      // fresh session is the default and a previous session adds Resume
+      // beside it (⌥↵), marked while its prompt cache is estimated warm.
       const live = resumable && hasLiveWorker(card)
-      // A settled thread with no worker goes on by resuming: Resume is the one
-      // verb (↵) and New session waits in the menu (⌥↵).
-      const settled = settledResume(card)
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : live ? 'New session' : resumable && !settled ? 'New session ↵' : resumable ? 'New session' : 'Start ↵'
-      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : settled ? 'Resume ↵' : 'Resume'
+      const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
+      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : 'Resume ⌥↵'
       fresh.classList.toggle('kbn-ctl-secondary', live)
-      fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : ''
-      fresh.hidden = settled
-      resume.classList.toggle('kbn-ctl-secondary', resumable && !live && !settled)
-      resume.title = live ? 'Send the message to the live worker (↵)' : settled ? 'Resume the previous session (↵)' : resumable ? 'Resume the previous session (⌥↵)' : ''
+      fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
+      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
+      resume.title = live ? 'Send the message to the live worker (↵)'
+        : resumable ? `Resume the previous session (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
+      if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = !resumable
       this.paintMenuVerbs(card)
-      const lead = live || settled
-      if (lead ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(lead ? [resume, fresh] : [fresh, resume]))
+      if (live ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(live ? [resume, fresh] : [fresh, resume]))
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
@@ -1480,9 +1468,9 @@ export class Dock {
       if (event.repeat || busy) return
       if (this.meetingArmed()) { this.meetingStart?.(); return }
       // ↵ is the default verb the buttons show, ⌥↵ the secondary.
-      const resumable = Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
+      const resumable = Boolean(card.sessionUuid)
       const live = hasLiveWorker(card)
-      const resumeSession = resumable && (live || settledResume(card) ? !event.altKey : event.altKey)
+      const resumeSession = resumable && (live ? !event.altKey : event.altKey)
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => landed(ok, resumeSession ? 'previous' : 'fresh', live))
     })
     box.append(message, strip.el, foot)

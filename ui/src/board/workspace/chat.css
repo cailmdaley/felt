@@ -29,7 +29,7 @@
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-chat .ws-chat-menu-back { display: none; }
 /* The menu's composer verbs that only the phone's folded composer leaves out. */
-.ws-chat .ws-chat-menu :is(.ws-chat-meeting, .ws-chat-fresh[data-when='live']) { display: none; }
+.ws-chat .ws-chat-menu :is(.ws-chat-meeting, .ws-chat-fresh) { display: none; }
 .ws-chat-menu-meter { padding: 0 12px 8px; color: var(--ws-ink-muted); }
 .ws-chat-menu-meter[hidden] { display: none; }
 /* The name takes the line and wraps rather than truncating; the acts keep to its first line. */
@@ -220,7 +220,7 @@
   .ws-chat-state { grid-area: state; align-self: center; margin: 0; }
   .ws-chat-lead[hidden] ~ .ws-chat-state { margin-left: 12px; }
   .ws-chat-ancestry { grid-area: anc; }
-  .ws-chat .ws-chat-menu .ws-chat-meeting:not([hidden]), .ws-chat .ws-chat-menu .ws-chat-fresh[data-when='live']:not([hidden]) { display: flex; }
+  .ws-chat .ws-chat-menu .ws-chat-meeting:not([hidden]), .ws-chat .ws-chat-menu .ws-chat-fresh:not([hidden]) { display: flex; }
   /* Folded, the composer is one row, the field and its one verb; it opens on focus or while a meeting is armed. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; justify-self: end; }

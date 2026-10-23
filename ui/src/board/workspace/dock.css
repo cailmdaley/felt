@@ -98,6 +98,11 @@
 .ws-dock .kbn-ctl-btn:hover:not(:disabled) { background-color: var(--ws-hover); border-color: var(--ws-ink); }
 .ws-dock .kbn-ctl-send { background: var(--ws-fill); }
 .ws-dock .kbn-ctl-resume { border-color: var(--ws-agent); }
+/* Resume while the previous session's prompt cache is estimated warm: a verdigris mark before its word. */
+.ws-dock .kbn-ctl-resume[data-cache='warm']::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; margin-right: 6px;
+  border-radius: 50%; background: var(--ws-cache-warm); vertical-align: 0.1em;
+}
 .ws-dock :is(.kbn-ctl-select, .kbn-ctl-input) {
   min-width: 0;
   border: var(--ws-line-width) solid var(--ws-hairline);

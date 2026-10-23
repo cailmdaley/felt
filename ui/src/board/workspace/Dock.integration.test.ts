@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Dock } from './Dock.js'
+import { TranscriptBand } from '../transcript/TranscriptBand.js'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 
@@ -293,7 +294,7 @@ describe('state-shaped act zone', () => {
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('Launch ↵')
+    expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('New session ↵')
   })
   it('opens settings and sessions from the menu into the drawer, and Escape folds the drawer', () => {
     band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's' }))
@@ -309,10 +310,14 @@ describe('state-shaped act zone', () => {
   })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
-    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['drafts with a session', { status: 'open', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
+    ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['Send ↵', 'New session']],
+    ['in flight with a session and no worker', { status: 'active', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
-    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['Resume ↵']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
+    ['tempered with a session', { status: 'closed', tempered: true, sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
+    ['discarded with a session', { status: 'closed', tempered: false, sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
   ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
     band = dock.bandFor(task(patch as Partial<KanbanCard>))
@@ -354,8 +359,14 @@ describe('state-shaped act zone', () => {
     expect(outer).not.toHaveBeenCalled()
     band.el.remove()
   })
-  it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
-    band = dock.bandFor(task({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resume-me' }))
+  it.each([
+    ['resting', { status: 'open', effectiveHorizon: 'stashed' }],
+    ['awaiting review', { status: 'closed' }],
+    ['tempered', { status: 'closed', tempered: true }],
+    ['discarded', { status: 'closed', tempered: false }],
+    ['drafts', { status: 'open' }],
+  ] as const)('Enter starts a new session and Alt-Enter resumes the named one: %s', async (_name, patch) => {
+    band = dock.bandFor(task({ ...patch as Partial<KanbanCard>, sessionUuid: 'resume-me' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'Restart'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
@@ -366,28 +377,31 @@ describe('state-shaped act zone', () => {
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
   })
-  it('a settled thread goes on by resuming: Enter resumes, Alt-Enter or the menu starts a new session', async () => {
+  it('keeps New session out of the menu while the composer shows it, and holds it there beside a live worker for the phone', () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
     const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-fresh')!
-    expect(item.hidden).toBe(false)
-    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
-    message.value = 'Continue'
-    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
-    message.value = 'Restart'
-    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
-    await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
-    message.value = 'Again'
-    item.click()
-    await flush()
-    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Again' })
-    // Beside a live worker the composer keeps New session as its secondary verb; the menu holds it for the phone alone.
+    expect(item.hidden).toBe(true)
     dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
-    expect([item.hidden, item.dataset.when]).toEqual([false, 'live'])
+    expect(item.hidden).toBe(false)
     dock.bandFor(task({ status: 'active', sessionUuid: 'resume-me' }))
     expect(item.hidden).toBe(true)
+  })
+  it('marks Resume while the previous session\'s cache is estimated warm, and leaves it plain when cold or unknown', () => {
+    const until = new Date(2026, 9, 23, 14, 5).getTime()
+    const warmth = vi.spyOn(TranscriptBand.prototype, 'cacheWarm').mockImplementation(session => session === 'resume-me' ? until : undefined)
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
+    const resume = band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')!
+    expect(resume.dataset.cache).toBe('warm')
+    expect(resume.title).toBe('Resume the previous session (⌥↵) · cache warm until 14:05')
+    expect(resume.textContent).toBe('Resume ⌥↵')
+    warmth.mockReturnValue(undefined)
+    dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
+    expect(resume.dataset.cache).toBeUndefined()
+    expect(resume.title).toBe('Resume the previous session (⌥↵)')
+    // A live worker takes the message: Resume is Send, and the cache is not its business.
+    warmth.mockReturnValue(until)
+    dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
+    expect(resume.dataset.cache).toBeUndefined()
   })
   it('Enter sends to a live worker and Alt-Enter starts a new session', async () => {
     band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }))
