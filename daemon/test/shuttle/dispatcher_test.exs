@@ -192,6 +192,14 @@ defmodule Shuttle.DispatcherTest do
         uid: nil,
         shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
       },
+      # A hand-written draft with no id: the board's launch force-dispatches
+      # it, and the reopen that write performs stamps an id.
+      "tests/no-uid-draft" => %{
+        status: "open",
+        tags: ["constitution"],
+        uid: nil,
+        shuttle: %{"resolved" => %{"agent" => @claude_sonnet_resolved}}
+      },
       "tests/bad-uid" => %{
         status: "active",
         tags: ["constitution"],
@@ -325,6 +333,21 @@ defmodule Shuttle.DispatcherTest do
       end
     end
 
+    # Every fiber write stamps a missing id, so once `shuttle reopen` has run
+    # on the id-less draft its reads carry one.
+    defp fixture_uid("tests/no-uid-draft", fiber) do
+      reopened? =
+        Enum.any?(commands(), fn
+          {"shuttle", args} -> "reopen" in args and "tests/no-uid-draft" in args
+          _ -> false
+        end)
+
+      if reopened?, do: "01KTHDNZS287ZSSG8X8V59XKWC", else: fiber.uid
+    end
+
+    defp fixture_uid(fiber_id, fiber),
+      do: Map.get(fiber, :uid, Shuttle.Test.FiberUid.for(fiber_id))
+
     defp handle_cli(args) do
       fiber_id = Enum.find(args, &Map.has_key?(@test_fibers, &1))
 
@@ -355,7 +378,7 @@ defmodule Shuttle.DispatcherTest do
               "modified_at" => "2026-04-28T00:00:00Z"
             }
             |> maybe_put("shuttle", fiber.shuttle)
-            |> maybe_put("uid", Map.get(fiber, :uid, Shuttle.Test.FiberUid.for(fiber_id)))
+            |> maybe_put("uid", fixture_uid(fiber_id, fiber))
 
           {Jason.encode!(payload), 0}
 
@@ -864,14 +887,21 @@ defmodule Shuttle.DispatcherTest do
              "a refused dispatch must not probe or spawn tmux"
     end
 
-    # A forced dispatch is refused just the same — force overrides status,
-    # not the missing worker name — and never reopens the fiber first.
+    # A forced dispatch of an already-active fiber writes nothing, so it is
+    # refused just the same: force overrides status, not the worker name.
     MockRunner.reset()
 
     assert {:error, {:uid_missing, _}} =
              Dispatcher.dispatch("tests/no-uid", runner: MockRunner, force: true)
 
     refute Enum.any?(MockRunner.commands(), fn {_, args} -> "reopen" in args end)
+  end
+
+  test "force-dispatching an id-less draft launches it under the id its reopen stamped" do
+    expected = "no-uid-draft-01KTHDNZS287ZSSG8X8V59XKWC-shuttle"
+
+    assert {:ok, ^expected} =
+             Dispatcher.dispatch("tests/no-uid-draft", runner: MockRunner, force: true)
   end
 
   test "dispatch refuses closed fiber" do

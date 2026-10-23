@@ -103,9 +103,9 @@ defmodule Shuttle.Dispatcher do
     force = Keyword.get(opts, :force, false)
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
-         {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- check_dispatchable(fiber, force),
-         :ok <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
+         {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
+         {:ok, uid} <- check_uid(fiber_id, fiber),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
          {:ok, agent} <- resolve_agent(fiber, fiber_id),
@@ -732,13 +732,22 @@ defmodule Shuttle.Dispatcher do
   # For a non-closed-but-not-clean fiber (e.g. tempered yet still active) the
   # reopen stays best-effort: the worker has a live mandate regardless, so a
   # failed reopen only risks a sticky kanban column, which we log loudly.
-  defp maybe_reopen_on_force(_fiber_id, _fiber, false, _runner, _felt_store), do: :ok
+  # Force-dispatch reopens a fiber that is not already clean. The reopen is a
+  # fiber write, and every fiber write stamps a missing intrinsic id, so the
+  # fiber is read again afterwards: a hand-written draft launched from the
+  # board gains its id here and passes `check_uid/2`.
+  defp maybe_reopen_on_force(_fiber_id, fiber, false, _runner, _felt_store), do: {:ok, fiber}
 
   defp maybe_reopen_on_force(fiber_id, fiber, true, runner, felt_store) do
     if already_clean?(fiber) do
-      :ok
+      {:ok, fiber}
     else
-      reopen(fiber_id, runner, felt_store, closed?(fiber))
+      with :ok <- reopen(fiber_id, runner, felt_store, closed?(fiber)) do
+        case fetch_fiber(fiber_id, runner, felt_store) do
+          {:ok, reread} -> {:ok, reread}
+          _ -> {:ok, fiber}
+        end
+      end
     end
   end
 
