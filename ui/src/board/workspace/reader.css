@@ -246,8 +246,12 @@
 /* A closing sidebar slides out over the stage that has already taken its room. */
 .ws-sidebar-sliding .ws-stage { overflow: visible; }
 .ws-sidebar-leaving .ws-sidebar { display: flex; position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; }
-/* The left context page stays under the column; only the right edge peeks into the stage. */
+/* A side column hides the neighbour on its side: the left context page stays under the
+   sidebar, the right one under the threads rail. With neither column, the zen state,
+   the neighbours fade out and the page stands alone. */
 .ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
+.ws-with-rail .ws-page.ws-receded.ws-after { clip-path: inset(0 0 0 100%); pointer-events: none; }
+.ws-zen .ws-page.ws-receded { opacity: 0; pointer-events: none; }
 .ws-thumbbar { display: none; }
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 

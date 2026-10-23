@@ -436,6 +436,15 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
+    // The rail stands beside the stage and hides the right neighbour; hiding it leaves the zen state.
+    const reader = document.querySelector<HTMLElement>('.ws-reader')!
+    expect(reader.classList.contains('ws-with-rail')).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
+    expect(reader.classList.contains('ws-with-rail')).toBe(false)
+    expect(reader.classList.contains('ws-zen')).toBe(true)
+    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
+    expect(reader.classList.contains('ws-with-rail')).toBe(true)
+    expect(reader.classList.contains('ws-zen')).toBe(false)
   })
   it('draws one index strip naming each Desk column and its count, marks the open one, and lands a click as J/K would', async () => {
     workspace.dispose()

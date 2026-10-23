@@ -672,12 +672,14 @@ export class Reader {
         this.instantRaf = requestAnimationFrame(() => this.stage.classList.remove('ws-instant'))
       })
     }
+    // Beside the threads rail the chat takes the stage up to it, leaving no gap for a neighbour.
+    const fill = this.railShown
     let x = 0, centre = 0, selectedWidth = 0
     ch.documents.forEach(doc => {
       const f = this.host.get(doc.key)
       if (!f) return
       const sel = doc.key === this.selected
-      const width = sel && this.expanded ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
+      const width = sel && (this.expanded || (fill && doc.kind === 'chat' && this.liveWidth === null)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`
@@ -714,6 +716,7 @@ export class Reader {
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.applySidebarWidth()
     this.renderSidebar()
+    this.paintRail()
     this.layout(false)
     const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
     this.tabs.mark(index, false)
@@ -930,9 +933,19 @@ export class Reader {
     this.paintRail()
     this.layout(false)
   }
+  /** Whether the threads rail stands beside the stage: chosen, with threads to show, off the phone. */
+  private get railShown(): boolean {
+    return !this.phone.matches && this.railChoice && !this.threadRail.el.hidden
+  }
+  /** Zen: on the desktop with neither side column, the page stands alone and its neighbours fade. */
+  private paintZen(): void {
+    this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar') && !this.el.classList.contains('ws-with-rail'))
+  }
   private paintRail(): void {
     const has = !this.threadRail.el.hidden
     this.el.classList.toggle('ws-rail-off', !this.railChoice)
+    this.el.classList.toggle('ws-with-rail', this.railShown)
+    this.paintZen()
     this.railToggle.hidden = !has
     this.railToggle.setAttribute('aria-expanded', String(this.railChoice))
     this.railToggle.setAttribute('aria-label', this.railChoice ? 'Hide threads' : 'Show threads')
@@ -1055,6 +1068,7 @@ export class Reader {
   private renderSidebar(): void {
     const shown = this.sidebarShown
     this.el.classList.toggle('ws-with-sidebar', shown)
+    this.paintZen()
     this.sidebarToggle.setAttribute('aria-expanded', String(shown))
     this.sidebarToggle.setAttribute('aria-label', shown ? 'Hide constitutions' : 'Show constitutions')
     this.sidebar.inert = !shown
