@@ -437,6 +437,19 @@ defmodule Shuttle.WorkerProcess do
     end
   end
 
+  @doc """
+  The conversation UUIDs whose launch run scripts are running, each with its
+  script's process.
+  """
+  @spec launches([proc()]) :: [{String.t(), proc()}]
+  def launches(procs) do
+    for proc <- procs,
+        key = script_session(proc),
+        is_binary(key) and
+          Regex.match?(~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, key),
+        do: {key, proc}
+  end
+
   defp session_keyed_script?(proc) do
     case script_session(proc) do
       key when is_binary(key) -> Shuttle.Dispatcher.shuttle_session?(key)

@@ -166,9 +166,11 @@ defmodule Shuttle.Poller do
       standing_roles: [],
       orphans: [],
       # Executions two live fibers name, found by this cycle's adoption pass
-      # (`Shuttle.Poller.SessionReconciliation`) and shown as `blocked` rows.
-      # Derived from scratch each cycle, so a hold clears once it heals.
+      # (`Shuttle.Poller.SessionReconciliation`) and shown as `blocked` rows,
+      # and launches no fiber is assigned any more, shown as `unowned`.
+      # Derived from scratch each cycle, so either clears once it heals.
       holds: [],
+      unowned: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
       # poll cycle. Entries are never evicted.
       fiber_store_cache: %{},

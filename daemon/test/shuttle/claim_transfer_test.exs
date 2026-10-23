@@ -199,17 +199,22 @@ defmodule Shuttle.ClaimTransferTest do
     assert Poller.worker_status(poller, "tests/a") == nil
     assert Poller.worker_status(poller, "tests/b") == nil
 
-    # Nothing adopts the unowned worker, even across a restart.
+    # Nothing adopts the unowned worker, even across a restart; the snapshot
+    # shows it.
     GenServer.stop(poller)
     poller = start()
     assert Poller.worker_status(poller, "tests/a") == nil
     assert Poller.worker_status(poller, "tests/b") == nil
     assert signals() == []
+    uuid = worker.uuid
+    session = worker.session
+    assert [%{session_uuid: ^uuid, tmux_session: ^session}] = Poller.snapshot(poller).unowned
 
     Runner.set_mark_runtime_failures([])
     assert {:ok, _} = claim(poller, "tests/b", worker)
-    assert %{holder_uuid: uuid} = Poller.worker_status(poller, "tests/b")
-    assert uuid == worker.uuid
+    assert %{holder_uuid: ^uuid} = Poller.worker_status(poller, "tests/b")
+    poll(poller)
+    assert Poller.snapshot(poller).unowned == []
   end
 
   test "a crash after the target is stamped is completed by adoption" do

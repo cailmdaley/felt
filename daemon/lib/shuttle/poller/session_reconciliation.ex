@@ -74,7 +74,30 @@ defmodule Shuttle.Poller.SessionReconciliation do
         end
       end)
 
-    %{state | holds: Map.values(holds)}
+    %{state | holds: Map.values(holds), unowned: unowned(state, procs)}
+  end
+
+  # Launches no fiber is assigned any more — a claim interrupted between its
+  # release and its stamp leaves one — so nothing adopts, stops or resumes
+  # them; the snapshot shows them so a human can.
+  defp unowned(state, procs) do
+    named =
+      for fiber <- Executions.listed(state),
+          %{uuid: uuid} when is_binary(uuid) <- [Executions.handle(fiber)],
+          into: MapSet.new(),
+          do: uuid
+
+    tracked =
+      for {_key, meta} <- state.running,
+          uuid <- [Map.get(meta, :holder_uuid), Map.get(meta, :session_uuid)],
+          is_binary(uuid),
+          into: MapSet.new(),
+          do: uuid
+
+    for {uuid, proc} <- WorkerProcess.launches(procs),
+        not MapSet.member?(named, uuid) and not MapSet.member?(tracked, uuid),
+        uniq: true,
+        do: %{session_uuid: uuid, tmux_session: Executions.session_of(state.runner, procs, proc)}
   end
 
   defp reconcile_assigned(state, holds, fiber, handle, procs) do

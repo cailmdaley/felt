@@ -125,6 +125,8 @@ defmodule Shuttle.Poller.Snapshot do
       contract: Map.take(state.contract_check, [:expected, :observed, :ok, :reason]),
       pending_launch: with_office(pending_launch, state),
       orphans: with_office(state.orphans, state),
+      # Live launches no fiber is assigned (`Shuttle.Poller.SessionReconciliation`).
+      unowned: state.unowned,
       standing_roles:
         state.standing_roles
         |> StandingRoles.standing_role_snapshots(now, state)

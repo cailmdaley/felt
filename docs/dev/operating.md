@@ -285,8 +285,9 @@ inside a worker (or `POST /api/v1/claim`) runs as one Poller transition:
 
 The released fiber stays `active` and its next start is fresh — never a resume
 of the conversation the claimed fiber now holds. A crash between steps 1 and 2
-leaves the worker serving no fiber: nothing adopts, stops or resumes it, and
-the same claim again completes the move. A retry after success answers as the
+leaves the worker serving no fiber: nothing adopts, stops or resumes it, the
+snapshot lists it under `unowned`, and the same claim again completes the
+move. A retry after success answers as the
 first claim did. A Codex thread moves the same way, its AppWorkers record
 released by its old fiber before the claimed fiber takes it.
 
