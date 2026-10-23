@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+func TestExplicitRootScanInitializesEmptyAndHookOnlyIndexes(t *testing.T) {
+	i := testIndex(t)
+	if ready, err := i.Ready(ctx); err != nil || ready {
+		t.Fatalf("fresh index ready=%v: %v", ready, err)
+	}
+	root := Root{"claude", t.TempDir()}
+	if _, err := i.CatchUp(ctx, []Root{root}, false); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := i.Ready(ctx); err != nil || !ready {
+		t.Fatalf("empty scan ready=%v: %v", ready, err)
+	}
+	if stats, err := i.Stats(ctx); err != nil || stats.UpdatedAt == "" || stats.Messages != 0 {
+		t.Fatalf("empty scan stats=%+v: %v", stats, err)
+	}
+	j := testIndex(t)
+	if err := j.IndexFile(ctx, fixture(t, "claude"), "claude"); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := j.Ready(ctx); err != nil || ready {
+		t.Fatalf("hook-only index ready=%v: %v", ready, err)
+	}
+}
+
 func TestSQLiteIncludesWALResetFix(t *testing.T) {
 	i := testIndex(t)
 	var version string

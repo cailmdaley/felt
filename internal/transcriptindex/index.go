@@ -96,6 +96,17 @@ func Open(path string) (*Index, error) {
 }
 func (i *Index) Close() error { return i.db.Close() }
 
+// Ready reports a completed root scan. A hook-created single-file index is
+// useful with --no-index but doesn't authorize an implicit first full build.
+func (i *Index) Ready(ctx context.Context) (bool, error) {
+	var value string
+	err := i.db.QueryRowContext(ctx, "SELECT value FROM state WHERE key='scan_completed'").Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return value == "1", err
+}
+
 func (i *Index) Stats(ctx context.Context) (Stats, error) {
 	s := Stats{Path: i.path}
 	err := i.db.QueryRowContext(ctx, `SELECT count(DISTINCT session), coalesce(sum(messages),0) FROM files WHERE session != ''`).Scan(&s.Sessions, &s.Messages)
@@ -167,6 +178,20 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 			if err := i.pruneMissing(ctx, root, seen); err != nil {
 				return problems, err
 			}
+		}
+	}
+	ready, err := i.Ready(ctx)
+	if err != nil {
+		return problems, err
+	}
+	if !ready {
+		_, err = i.db.ExecContext(ctx, `INSERT INTO state(key,value) VALUES('scan_completed','1') ON CONFLICT(key) DO NOTHING`)
+		if err != nil {
+			return problems, err
+		}
+		_, err = i.db.ExecContext(ctx, `INSERT INTO state(key,value) VALUES('updated_at',?) ON CONFLICT(key) DO NOTHING`, time.Now().UTC().Format(time.RFC3339))
+		if err != nil {
+			return problems, err
 		}
 	}
 	return problems, nil
