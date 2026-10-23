@@ -2,7 +2,7 @@ defmodule Shuttle.Test.StubPostClient do
   @moduledoc """
   POST transport stub for the owner-routed forward leg.
 
-  Records the last (url, body) it was asked to POST and replays a scripted
+  Records POST request history and replays a scripted
   response, so the forward leg is exercised without a real tunnel. It also
   answers the read `get/2` callback for the suites that script one; the rest
   never call it and it stays at `{:error, :not_set}`.
@@ -26,7 +26,7 @@ defmodule Shuttle.Test.StubPostClient do
   def start_link(_ \\ []),
     do:
       Agent.start_link(fn ->
-        %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil}
+        %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil, posts: []}
       end)
 
   def set_response(response), do: Agent.update(server(), &Map.put(&1, :response, response))
@@ -35,6 +35,7 @@ defmodule Shuttle.Test.StubPostClient do
     do: Agent.update(server(), &Map.put(&1, :get_response, response))
 
   def last, do: Agent.get(server(), & &1.last)
+  def posts, do: Agent.get(server(), &Enum.reverse(&1.posts))
   def last_get, do: Agent.get(server(), & &1.last_get)
 
   def get(url, _timeout_ms) do
@@ -43,7 +44,11 @@ defmodule Shuttle.Test.StubPostClient do
   end
 
   def post(url, body, _content_type, _timeout_ms) do
-    Agent.update(server(), &Map.put(&1, :last, %{url: url, body: body}))
+    Agent.update(server(), fn state ->
+      request = %{url: url, body: body}
+      %{state | last: request, posts: [request | state.posts]}
+    end)
+
     Agent.get(server(), & &1.response)
   end
 end

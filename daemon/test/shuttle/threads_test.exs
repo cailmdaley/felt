@@ -238,6 +238,28 @@ defmodule Shuttle.ThreadsTest do
                end)
 
       refute record["wake"]
+      initial = Shuttle.ThreadOutbox.pending("test-host")
+      assert [{rest_id, rest}] = Enum.reject(initial, fn {pending_id, _} -> pending_id == id end)
+      assert rest["text"] == "thread hub/child rested: "
+
+      # Outbox files are ordered by the hash of their ID. Keep another valid
+      # context publication after both lifecycle results, regardless of their UIDs.
+      hash = fn value -> :crypto.hash(:sha256, value) |> Base.encode16(case: :lower) end
+      last_hash = max(hash.(id), hash.(rest_id))
+
+      later_id =
+        Stream.iterate(1, &(&1 + 1))
+        |> Enum.find_value(fn n ->
+          candidate = "other-context-#{n}"
+          if hash.(candidate) > last_hash, do: candidate
+        end)
+
+      assert later_id
+      later = %{record | "text" => "another pending context note"}
+      Shuttle.ThreadOutbox.capture([{later_id, later}])
+      pending_ids = MapSet.new([id, rest_id, later_id])
+      before_retry = length(StubPostClient.posts())
+
       # The wait is cleared and the blocker reopened before the retry.
       assert {:ok, _} = CLI.run_in_store(store, ["resume", "hub/child", "--local"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker", "-s", "open"])
@@ -251,7 +273,16 @@ defmodule Shuttle.ThreadsTest do
 
       assert Shuttle.ThreadOutbox.pending("test-host") == []
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
-      sent = StubPostClient.last().body |> Jason.decode!()
+
+      retried =
+        StubPostClient.posts()
+        |> Enum.drop(before_retry)
+        |> Enum.map(&Jason.decode!(&1.body))
+
+      assert MapSet.new(retried, & &1["message_id"]) == pending_ids
+      assert length(retried) == MapSet.size(pending_ids)
+      assert List.last(retried)["message_id"] == later_id
+      assert [sent] = Enum.filter(retried, &(&1["message_id"] == id))
       assert sent["message_id"] == id
       assert sent["text"] == "thread hub/child unblocked: The mocks land closed"
       assert sent["context_only"] and not sent["wake"]
