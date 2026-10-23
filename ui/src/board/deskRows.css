@@ -179,6 +179,21 @@
     padding: 6px 9px;
   }
   .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
+
+  /* The folio strip gives each leaf the width its full name needs, the rest
+     shared out, so "Awaiting review" is never cut to a word. */
+  .kbn-folio.kbn-folio { grid-template-columns: repeat(3, auto); }
+  .kbn-folio .kbn-folio-seg { padding-inline: 6px; }
+  .kbn-folio .kbn-folio-name { overflow: visible; text-overflow: clip; letter-spacing: 0.03em; }
+
+  /* The cycle chip in the bottom bar is a compact label that fits its slot:
+     its name, ellipsized if it must be. The dates and the count stay on the
+     desktop chip and in its title. */
+  .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
+  .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+  .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }
+  .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; letter-spacing: 0.05em; }
+  .kbn-viewtabs .kbn-lens-chip .kbn-cyclechip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* ── The preview ───────────────────────────────────────────────────────────

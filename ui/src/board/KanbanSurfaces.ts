@@ -1,3 +1,4 @@
+import { untilLine, untilOf } from './blockedOn.js'
 import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
 import { LastReplies } from './threadReply.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
@@ -289,9 +290,10 @@ export class KanbanSurfaceRenderer {
    *  DIFFERENT elements — the horizon strip scrolls sideways while a column
    *  scrolls down — and can be live at the same time. */
   private readonly vScroll: AxisScroll = { frame: null, velocity: 0, target: null }
-  /** Which leaf of the mobile Now pager the reader is on. Held across renders
-   *  so a poll-driven rebuild doesn't turn the page back to Drafts. */
-  private folioIndex = 0
+  /** Which leaf of the mobile Now pager the reader is on. A fresh visit opens
+   *  on In flight, whose Your turn band leads; the leaf is held across renders
+   *  so a poll-driven rebuild doesn't turn the page somewhere else. */
+  private folioIndex = NOW_COLUMN_ORDER.indexOf('inFlight')
   /** The horizon's aim readout — the fixed spot that names, in words, the
    *  target under the cursor. Rebuilt with the horizon on every drag. */
   private aimReadoutEl: HTMLElement | null = null
@@ -424,11 +426,9 @@ export class KanbanSurfaceRenderer {
     strip.setAttribute('aria-label', 'Now — which column is showing')
 
     NOW_COLUMN_ORDER.forEach((kind, i) => {
+      // The leaf's full name: "Awaiting review" says what is awaited. The
+      // strip sizes its segments to their names (see deskRows.css).
       const title = COLUMN_TITLES[kind]
-      // "Awaiting review" does not fit a third of a phone and ellipsizing it
-      // to "Awaiting …" is worse than naming the leaf and letting the column
-      // head below say it in full. The accessible name stays complete.
-      const short = kind === 'awaitingReview' ? 'Awaiting' : title
       // A div, not a button: on a phone the column's own action glyph moves
       // into this segment (see `adoptColumnActions`), and a real <button>
       // inside a <button> is invalid HTML that browsers un-nest on parse.
@@ -444,7 +444,7 @@ export class KanbanSurfaceRenderer {
       // set theirs; repeating the letter read as a typo on the phone.
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
-      appendCappedText(name, short)
+      appendCappedText(name, title)
 
       const count = document.createElement('span')
       count.className = 'kbn-folio-count'
@@ -1248,6 +1248,9 @@ export class KanbanSurfaceRenderer {
       wakes.title = `Resting until ${formatDue(card.due)} — it returns to the desk that day`
       el.append(wakes)
       el.title = `${card.name} — resting until ${formatDue(card.due)}`
+    } else {
+      const until = untilOf(card, threadIndexFor(this.o.getLastResponse()))
+      if (until) el.append(untilLine(until, this.o.openDetail))
     }
 
     const mark = threadMark(card)
