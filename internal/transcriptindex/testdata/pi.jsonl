@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"33333333-3333-4333-8333-333333333333","timestamp":"2026-10-03T12:00:00.123Z","cwd":"/work/fleet"}
+{"type":"message","id":"a1","parentId":null,"timestamp":"2026-10-03T12:00:01.123Z","message":{"role":"user","content":[{"type":"text","text":"BM25 BM25 BM25"}],"timestamp":1791028801000}}
+{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-10-03T12:00:02.123Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hiddenreasoning","thinkingSignature":"hiddensignature"},{"type":"text","text":"VMPZ convention is documented."},{"type":"toolCall","id":"call_1","name":"read","arguments":{"path":"src/sky_map.go"}}]}}
+{"type":"message","id":"a3","parentId":"a2","timestamp":"2026-10-03T12:00:03.123Z","message":{"role":"toolResult","toolName":"read","toolCallId":"call_1","content":[{"type":"text","text":"func snake_case() {}"},{"type":"image","data":"hiddenbinary","mimeType":"image/png"}],"details":{"notsearchable":"metadata"}}}
+{"type":"compaction","summary":"notsearchable summary","firstKeptEntryId":"a2"}
+{"type":"custom_message","customType":"felt-context","content":"notsearchable injected context"}
