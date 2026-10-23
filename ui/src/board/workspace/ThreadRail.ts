@@ -1,8 +1,9 @@
 import { MOBILE_MEDIA } from '../mobile.js'
 import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
+import { untilLine, untilOf } from '../blockedOn.js'
 import { deskColumn } from '../deskColumn.js'
-import { type ThreadIndex, type ThreadState } from '../threads.js'
+import { threadKey, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
 import './thread-rail.css'
 
@@ -128,7 +129,7 @@ export class ThreadRail {
       this.paintBreadcrumb(ancestors)
       return
     }
-    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags])])
+    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
     this.el.hidden = !descendants.length
@@ -151,7 +152,25 @@ export class ThreadRail {
     const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
     const index = this.index!
     const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    // Containment reads from the nearest parent below the family's head, named above the thread; its title holds up to three links of the chain.
+    // A row whose parent stands in the same group sits indented beneath it; any other names its nearest parent below the family's head, its title holding up to three links of the chain.
+    const depthIn = (card: KanbanCard, members: ReadonlySet<string>, memo: Map<string, number>): number => {
+      const key = threadKey(card), known = memo.get(key)
+      if (known !== undefined) return known
+      // Walk up only to the nearest ancestor already measured, so a deep chain costs its length once.
+      const chain: KanbanCard[] = []
+      let p = index.parentOf(card), base = 0
+      for (; p && p.id !== scope.id; p = index.parentOf(p)) {
+        const seen = memo.get(threadKey(p))
+        if (seen !== undefined) { base = seen + (members.has(threadKey(p)) ? 1 : 0); break }
+        chain.push(p)
+      }
+      for (let i = chain.length - 1; i >= 0; i--) {
+        memo.set(threadKey(chain[i]), base)
+        if (members.has(threadKey(chain[i]))) base++
+      }
+      memo.set(key, base)
+      return base
+    }
     const parentOf = (card: KanbanCard): { name: string; chain: string } | null => {
       const chain: string[] = []
       let p = index.parentOf(card)
@@ -166,18 +185,22 @@ export class ThreadRail {
       if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
       return null
     }
-    const rowFor = (card: KanbanCard, group: string, label: string): HTMLElement => {
+    const rowFor = (card: KanbanCard, group: string, label: string, members: ReadonlySet<string>, memo: Map<string, number>): HTMLElement => {
       const item = threadItem(card, index, this.open, focusOf(group, card))
       const row = item.querySelector<HTMLElement>('.kbn-thread-row')!, state = index.state(card)
       row.querySelector('small')?.remove()
       const head = document.createElement('span'); head.className = 'ws-thread-head'
-      const parent = parentOf(card)
+      const depth = depthIn(card, members, memo)
+      if (depth) { item.dataset.depth = String(depth); item.style.setProperty('--ws-thread-depth', String(depth)) }
+      const parent = depth ? null : parentOf(card)
       if (parent) {
         const lead = document.createElement('span'); lead.className = 'ws-thread-parent'; lead.textContent = parent.name; lead.title = parent.chain
         head.append(lead)
       }
       head.append(row.querySelector('.kbn-thread-name')!)
       row.prepend(head)
+      const until = untilOf(card, index)
+      if (until) head.after(untilLine(until, this.open))
       const mark = markOf(card, state)
       let title = label
       if (mark) {
@@ -203,7 +226,8 @@ export class ThreadRail {
       const name = document.createElement('span'); name.className = 'ws-thread-group-label'; name.textContent = label
       const count = document.createElement('span'); count.className = 'ws-thread-group-count'; count.textContent = String(members.length)
       summary.append(name, count); summary.setAttribute('aria-label', `${label}, ${members.length}`)
-      group.append(summary, ...members.map(card => rowFor(card, key, label)))
+      const keys = new Set(members.map(threadKey)), memo = new Map<string, number>()
+      group.append(summary, ...members.map(card => rowFor(card, key, label, keys, memo)))
       this.tree.append(group)
     }
     this.layout()

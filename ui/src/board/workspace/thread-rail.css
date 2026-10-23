@@ -71,7 +71,10 @@
 /* A draft has not begun: its bar is drawn hollow, as the Desk rings an unbegun thread. */
 .ws-thread-group[data-thread-details='drafts'] .kbn-thread-row::before { background: transparent; box-shadow: inset 0 0 0 1px var(--tone); }
 .ws-thread-head { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; min-width: 0; }
-.ws-thread-head .kbn-thread-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.ws-thread-head .kbn-thread-name {
+  min-width: 0; overflow: hidden; white-space: normal; font-weight: 500;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 .ws-thread-parent {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 1px;
   font-size: var(--ws-thread-parent-size); font-style: italic; line-height: 1.25; color: var(--ws-ink-muted);
@@ -79,7 +82,15 @@
 .ws-thread-parent::after { content: ' ›'; font-style: normal; color: color-mix(in srgb, var(--tone) 70%, var(--kbn-ink-muted)); }
 .ws-thread-tree .kbn-thread-outcome {
   grid-column: 2; margin-top: 3px; font-size: var(--ws-thread-outcome-size); line-height: 1.4; color: var(--ws-ink-muted);
-  white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  white-space: normal; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+}
+/* The outcome opens to two lines under the pointer, the focus or the open thread. */
+.ws-thread-tree .kbn-thread-row:is(:hover, :focus-visible, .ws-thread-current) .kbn-thread-outcome { -webkit-line-clamp: 2; }
+/* A thread under a parent in its own group is indented beneath it, a hairline in the group's tone marking the step. */
+.ws-thread-tree .kbn-thread-item[data-depth] .kbn-thread-row { padding-left: calc(var(--ws-thread-bar) + 5px + var(--ws-thread-depth) * var(--ws-thread-indent)); }
+.ws-thread-tree .kbn-thread-item[data-depth] .kbn-thread-row::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--ws-thread-bar) + 5px + (var(--ws-thread-depth) - 1) * var(--ws-thread-indent) + var(--ws-thread-mark-slot) / 2);
+  width: 1px; background: color-mix(in srgb, var(--tone) 30%, transparent);
 }
 .ws-thread-group:is([data-thread-details='resting'], [data-thread-details='tempered']) .kbn-thread-name { color: var(--kbn-ink-soft); }
 .ws-thread-tree .kbn-thread-row[data-thread-state='waiting'] { background: color-mix(in srgb, var(--tone) 6%, transparent); }

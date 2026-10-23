@@ -141,6 +141,7 @@
   --ws-thread-group-size: 13.5px;
   --ws-thread-bar: 3px;
   --ws-thread-mark-slot: 16px;
+  --ws-thread-indent: 14px;
   /* The marks in that slot: an ask's glyph, and a discard's cross. */
   --ws-thread-glyph-size: 11.5px;
   --ws-thread-cross-size: 15px;

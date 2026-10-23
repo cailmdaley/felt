@@ -158,3 +158,23 @@ it('marks a working thread with a live worker, and only that one', () => {
     expect(rows[0].getAttribute('aria-label')).toBe('Live, working')
   } finally { vi.unstubAllGlobals() }
 })
+
+it('indents a thread beneath a parent in its own group and names the parent only across groups', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const root = card({ id: 'hub' })
+    const branch = card({ id: 'hub/branch', orchestrator: root.id, status: 'active', name: 'Branch' })
+    const leaf = card({ id: 'hub/branch/leaf', orchestrator: branch.id, status: 'active', name: 'Leaf' })
+    const twig = card({ id: 'hub/branch/leaf/twig', orchestrator: leaf.id, status: 'active', name: 'Twig' })
+    const draft = card({ id: 'hub/branch/draft', orchestrator: branch.id, status: 'open', name: 'Draft' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(root, new ThreadIndex([root, branch, leaf, twig, draft]))
+    const working = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="working"] .kbn-thread-item')]
+    expect(working.map(item => [item.querySelector('.kbn-thread-name')!.textContent, item.dataset.depth ?? '0', item.querySelector('.ws-thread-parent')?.textContent ?? ''])).toEqual([
+      ['Branch', '0', ''], ['Leaf', '1', ''], ['Twig', '2', ''],
+    ])
+    const drafted = rail.el.querySelector('details[data-thread-details="drafts"] .kbn-thread-item') as HTMLElement
+    expect(drafted.dataset.depth).toBeUndefined()
+    expect(drafted.querySelector('.ws-thread-parent')?.textContent).toBe('Branch')
+  } finally { vi.unstubAllGlobals() }
+})
