@@ -50,3 +50,13 @@ describe('pigment on the Desk is state', () => {
     expect(deskRows).not.toMatch(/\.kbn-col-list[^{]*\.kbn-card-glyph-(agent|human)/)
   })
 })
+
+describe('Drafts recede behind the live columns', () => {
+  it('sets a draft title in regular weight and softer ink, with no box of its own', () => {
+    const live = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')
+    const draft = rule(deskRows, '.kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name')
+    expect(Number(draft['font-weight'])).toBeLessThan(Number(live['font-weight']))
+    expect(draft.color).toBe('var(--kbn-ink-soft)')
+    expect(rule(deskRows, '.kbn-col-list .kbn-card.kbn-card-drafts')['border-color']).toBe('transparent')
+  })
+})

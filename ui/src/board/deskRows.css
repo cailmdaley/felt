@@ -30,7 +30,19 @@
   padding: 5px 6px 5px 8px;
   background-color: var(--kbn-row-ground);
 }
-.kbn-col-list .kbn-card.kbn-card-drafts { --kbn-row-ground: var(--kbn-recess); }
+/* Drafts are not yet anyone's work: their lines sit in the recess without a
+   box of their own, a hairline between them, the title in regular weight and
+   softer ink. The weight belongs to the live columns. */
+.kbn-col-list .kbn-card.kbn-card-drafts {
+  --kbn-row-ground: transparent;
+  border-color: transparent;
+  border-bottom-color: color-mix(in srgb, var(--kbn-ink) 9%, transparent);
+  border-radius: 0;
+  box-shadow: none;
+}
+.kbn-col-list .kbn-card.kbn-card-drafts:hover,
+.kbn-col-list .kbn-card.kbn-card-drafts.kbn-key-selected { --kbn-row-ground: color-mix(in srgb, var(--kbn-paper) 60%, transparent); }
+.kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name { font-weight: 400; color: var(--kbn-ink-soft); }
 /* A line brightens under the pointer; it does not lift. Twenty lines rising
    one by one as the pointer runs down a column would read as the column
    shivering. */
