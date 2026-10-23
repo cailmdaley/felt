@@ -1,9 +1,11 @@
-/* A thread's ancestry: muted serif links divided by slashes, each truncating before the line wraps. */
-.ws-ancestry { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; min-width: 0; color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); }
+/* A thread's ancestry: muted serif links divided by slashes on one line, each truncating as room runs out. */
+.ws-ancestry { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 0 6px; overflow: hidden; min-width: 0; color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); }
 .ws-ancestry[hidden] { display: none; }
 .ws-ancestry .ws-ancestry-link {
-  min-width: 0; max-width: 22em; padding: 0; border: 0 !important; background: transparent; color: inherit; cursor: pointer;
+  flex: 0 1 auto; min-width: 2.5em; max-width: 22em; padding: 0; border: 0 !important; background: transparent; color: inherit; cursor: pointer;
   font: inherit !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-ancestry .ws-ancestry-link:hover { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 2px; }
-.ws-ancestry-sep { color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+.ws-ancestry-sep { flex: none; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+/* Every link above the nearest parent keeps its (bounded) name; the nearest parent takes what room is left. */
+.ws-ancestry .ws-ancestry-link:not(:last-child) { flex-shrink: 0; max-width: 12em; }
