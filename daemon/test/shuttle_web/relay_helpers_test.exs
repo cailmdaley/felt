@@ -4,10 +4,13 @@ defmodule ShuttleWeb.RelayHelpersTest do
   test "names the managed socket and its recovery without suggesting an embedded fallback" do
     message = ShuttleWeb.RelayHelpers.app_server_unavailable_message()
 
-    assert message =~ "Codex App Server socket"
-    assert message =~ "codex app-server daemon start"
-    assert message =~ "SHUTTLE_CODEX_SOCKET"
-    assert message =~ "Both Codex surfaces require it"
+    assert message =~ "selected Codex App Server on this host is unavailable"
+    assert message =~ "Shuttle reconciles the dependency without replacing live servers"
+    assert message =~ "codex_backend in /api/v1/version"
+    assert message =~ "Restore the recorded endpoint"
+    assert message =~ "Both Codex surfaces wait"
+    assert message =~ "no embedded fallback is used"
+    refute message =~ "codex app-server daemon start"
     refute message =~ "ChatGPT"
   end
 end

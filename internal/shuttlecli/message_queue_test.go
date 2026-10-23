@@ -123,7 +123,7 @@ func TestMessageToLiveFiberSendsToItsWorker(t *testing.T) {
 		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
 	})
 	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
-	deliver, _ := dormantDeliverStub(http.StatusConflict, `{"delivery":"context","queued":false,"live":true}`)
+	deliver, requests := dormantDeliverStub(http.StatusConflict, `{"delivery":"context","queued":false,"live":true}`)
 	var posted messaging.Request
 	daemonStub(t, env, map[string]http.HandlerFunc{
 		"/api/v1/deliver":     deliver,
@@ -135,9 +135,18 @@ func TestMessageToLiveFiberSendsToItsWorker(t *testing.T) {
 		},
 	})
 
-	stdout, _, err := runMessage(t, newApp(env), "work/worker", "steer now")
+	app := newApp(env)
+	app.dir = store
+	stdout, _, err := runMessage(t, app, "work/worker", "steer now")
 	if err != nil {
 		t.Fatal(err)
+	}
+	got := requests()
+	if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["unless_live"] != true {
+		t.Fatalf("live-check requests = %v, want one conditional queue request for the private fiber", got)
+	}
+	if posted.Text != "steer now" || posted.MessageID != "msg-next-worker" {
+		t.Fatalf("direct message = %+v", posted)
 	}
 	if want := "shuttle://worker-node/claude/" + messageTargetSession; posted.Address != want {
 		t.Fatalf("posted to %q, want the live worker %q", posted.Address, want)

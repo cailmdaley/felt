@@ -22,7 +22,7 @@ defmodule Shuttle.CodexEndpoint do
   end
 
   def resolve(override, _uid, _hostname) when is_binary(override) and override != "" do
-    if Path.type(override) == :absolute and Path.expand(override) == override and
+    if Path.type(override) == :absolute and Path.expand(override, "/") == override and
          byte_size(override) <= 100 and not String.contains?(override, ["\0", "\n", "\r"]) do
       {:ok, override}
     else
