@@ -230,13 +230,89 @@ defmodule Shuttle.AppWorkers do
     end
   end
 
+  @doc "Loads an ownerless embedded conversation only with host-local execution evidence and no live holder."
+  def import_embedded(id, attributes, backend_opts, runner) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      case get(id) do
+        {:ok, record} ->
+          with :ok <- check_endpoint(record), do: {:ok, nil}
+
+        {:error, :not_found} ->
+          with :ok <- check_known_endpoint(id),
+               :ok <- embedded_provenance(id, attributes),
+               :ok <- Shuttle.WorkerProcess.check_free(runner, id),
+               :ok <- Shuttle.CodexBackend.require_ready(),
+               {:ok, thread} <- load_embedded(id, backend_opts),
+               :ok <-
+                 put(
+                   Map.merge(attributes, %{
+                     "session_uuid" => id,
+                     "thread_id" => id,
+                     "transcript_session_uuid" => thread["sessionId"] || id,
+                     "project_id" => thread["projectId"],
+                     "backend_host" => Shuttle.Poller.own_host_id(),
+                     "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
+                     "active" => false,
+                     "launch_state" => "idle"
+                   })
+                 ) do
+            {:ok, thread}
+          end
+
+        {:error, _} = error ->
+          error
+      end
+    end)
+  end
+
+  defp embedded_provenance(id, attributes) do
+    case Shuttle.SessionLedger.latest_for_session(id) do
+      %{"host" => host, "harness" => "codex"} = row ->
+        cond do
+          host != Shuttle.Poller.own_host_id() or not is_nil(row["thread_id"]) ->
+            {:error, :embedded_origin_unverified}
+
+          attributes["fiber_id"] &&
+              not same_fiber?(
+                Map.put(row, "fiber_id", row["fiber"]),
+                attributes["fiber_id"],
+                attributes["uid"]
+              ) ->
+            {:error, :session_owner_mismatch}
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        {:error, :embedded_origin_unverified}
+    end
+  end
+
+  defp load_embedded(id, opts) do
+    case client().resume_thread(id, opts) do
+      {:ok, %{"id" => ^id}} = result -> result
+      {:error, _} = error -> error
+      _ -> {:error, :resume_identity_mismatch}
+    end
+  end
+
   def reserve_resume(id, fiber_id, uid, store) do
     :global.trans({{__MODULE__, id}, self()}, fn ->
       with {:ok, record} <- get(id),
            :ok <- check_endpoint(record, id),
-           true <- same_fiber?(record, fiber_id, uid) and record["felt_store"] == store,
+           true <- resume_assignment_matches?(record, id, fiber_id, uid, store),
            false <- record["active"] == true,
-           :ok <- put(Map.merge(record, %{"active" => true, "launch_state" => "starting"})) do
+           :ok <-
+             put(
+               Map.merge(record, %{
+                 "fiber_id" => fiber_id,
+                 "uid" => uid,
+                 "felt_store" => store,
+                 "active" => true,
+                 "launch_state" => "starting"
+               })
+             ) do
         :ok
       else
         true -> {:error, :already_running}
@@ -244,6 +320,12 @@ defmodule Shuttle.AppWorkers do
         error -> error
       end
     end)
+  end
+
+  defp resume_assignment_matches?(record, id, fiber_id, uid, store) do
+    (same_fiber?(record, fiber_id, uid) and record["felt_store"] == store) or
+      (is_nil(record["fiber_id"]) and is_nil(record["uid"]) and is_nil(record["felt_store"]) and
+         embedded_provenance(id, %{"fiber_id" => fiber_id, "uid" => uid}) == :ok)
   end
 
   @doc "Reloads a durably owned app thread only when the native server confirms it is not loaded."

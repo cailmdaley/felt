@@ -130,10 +130,44 @@ defmodule Shuttle.WorkerProcess do
           [flag, ^uuid] when flag in @session_flags -> true
           [token, _] -> String.starts_with?(token, "--") and String.ends_with?(token, "=" <> uuid)
         end)
-    end)
+    end) || bound_holder(procs, uuid)
   end
 
   def holder(_procs, _uuid), do: nil
+
+  defp bound_holder(procs, uuid) do
+    row = Shuttle.SessionLedger.latest_for_session(uuid)
+
+    script_holder =
+      with %{"host" => host, "tmux" => tmux} when is_binary(tmux) <- row,
+           true <- host == Shuttle.Poller.own_host_id(),
+           %{"session" => ^uuid} <- latest_for_tmux(tmux) do
+        session_process(procs, tmux)
+      else
+        _ -> nil
+      end
+
+    script_holder || hook_holder(procs, uuid)
+  end
+
+  defp latest_for_tmux(tmux) do
+    Shuttle.SessionLedger.read_since(0)
+    |> Enum.filter(&(&1["tmux"] == tmux and &1["host"] == Shuttle.Poller.own_host_id()))
+    |> Enum.max_by(& &1["at"], fn -> nil end)
+  end
+
+  defp hook_holder(procs, uuid) do
+    key = :crypto.hash(:sha256, uuid) |> Base.encode16(case: :lower)
+    path = Path.join([Shuttle.data_dir(), "mailboxes", "codex", key, "receiver.json"])
+
+    with {:ok, bytes} <- File.read(path),
+         {:ok, %{"id" => ^uuid, "host" => host, "pid" => pid} = reg} <- Jason.decode(bytes),
+         true <- host == Shuttle.Poller.own_host_id() and reg["ended"] != true do
+      Enum.find(procs, &(&1.pid == pid))
+    else
+      _ -> nil
+    end
+  end
 
   @doc """
   `:ok` when no process of this uid holds harness session `uuid`; otherwise a

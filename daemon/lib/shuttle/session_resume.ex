@@ -88,6 +88,7 @@ defmodule Shuttle.SessionResume do
            harness: harness,
            agent: agent.id,
            cwd: cwd,
+           wrapper: agent.wrapper,
            backend_opts:
              if(harness == "codex",
                do: Dispatcher.codex_options(agent, cwd, developer_instructions: nil),
@@ -152,7 +153,7 @@ defmodule Shuttle.SessionResume do
             {:ok, %{tmux_session: plan.tmux, created: false}}
           else
             with :ok <- resume_identity_free(plan, runner),
-                 :ok <- prepare_backend(plan),
+                 :ok <- prepare_backend(plan, runner),
                  do: start(plan, runner)
           end
         end
@@ -174,11 +175,20 @@ defmodule Shuttle.SessionResume do
 
   defp resume_identity_free(plan, runner), do: not_held(plan.session, runner)
 
-  defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts}) do
+  defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts} = plan, runner) do
+    attributes = %{
+      "cwd" => plan.cwd,
+      "agent_id" => plan.agent,
+      "surface" => "cli",
+      "terminal_wrapper" => plan.wrapper,
+      "terminal_tmux" => plan.tmux
+    }
+
     result =
-      with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
-           :ok <- Shuttle.CodexBackend.require_ready(),
-           do: Shuttle.AppWorkers.client().resume_thread(id, opts)
+      with {:ok, loaded} <- Shuttle.AppWorkers.import_embedded(id, attributes, opts, runner),
+           :ok <- Shuttle.CodexBackend.require_ready() do
+        if loaded, do: {:ok, loaded}, else: Shuttle.AppWorkers.call(id, :resume_thread, [opts])
+      end
 
     case result do
       {:ok, %{"id" => ^id}} ->
@@ -193,7 +203,7 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  defp prepare_backend(_plan), do: :ok
+  defp prepare_backend(_plan, _runner), do: :ok
 
   defp not_the_worker(session, live) do
     if session in live,

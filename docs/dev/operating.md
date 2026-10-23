@@ -91,7 +91,8 @@ The agent wrapper launches only the terminal viewer; it doesn't supply the envir
 Managed conversation records pin the owning host and endpoint for both surfaces.
 A changed default or override, another host with the same socket pathname, or an unrecorded owner blocks backend operations without releasing the assignment.
 Restore the recorded backend, then retry; shared rollout files don't authorize changing the owner.
-Records without ownership metadata require deliberate operator reconciliation, not inferred migration.
+An existing record without ownership metadata requires deliberate operator reconciliation, not inferred migration.
+A missing record is handled separately for an embedded CLI conversation, as described below.
 
 `shuttle attach <fiber>` opens or recreates a terminal viewer of the existing owned thread, without starting a turn.
 Closing that viewer leaves the conversation and its task assignment alive.
@@ -99,7 +100,27 @@ An idle conversation can be woken, and a running turn can be steered, through `s
 The TUI displays external messages and replies when showing that thread; a message does not force a user's terminal to switch from another selected thread.
 `--context-only` adds context for the next model request without creating a visible user turn.
 
-A hand-started embedded Codex session remains hook-only: `--context-only` can queue to its hooks, but a plain wake is rejected.
+Embedded Codex conversations have three migration cases:
+
+- A live managed embedded CLI worker stays in its existing tmux session and is adopted and watched until its process exits.
+  Deploying doesn't load a second copy into the App Server.
+  Its live hooks accept `--context-only`; a plain wake is rejected rather than pasted into its terminal or delivered to an App Server copy of the same ID.
+  A hook-only conversation without a discovered native ID remains hook-only; Shuttle doesn't invent an ID.
+- A stopped embedded conversation resumes automatically on the selected App Server when its exact native ID has a local Codex session-ledger row without an App Server `thread_id`.
+  Both the current and rotated ledger files count.
+  Before any native read or load, Shuttle checks for a live holder, including a UUID in argv, a worker-script binding for a fresh CLI whose argv has no UUID, and a registered hook receiver process.
+  A failed process scan blocks the resume.
+  The exact resumed ID receives a durable host-and-endpoint owner record; errors and mismatched acknowledgments never start a fresh conversation.
+  Ordinary resume keeps the persisted developer instructions.
+- The board's **Resume previous** and a History row's **Resume** use that same migration boundary.
+  Resume previous sends the managed worker's continuation prompt; History opens a human terminal viewer without a model turn.
+  A clean handoff followed by an ordinary re-arm starts a fresh conversation by design; explicitly choosing Resume previous still selects the saved ID.
+
+A runtime marker records an ID and timestamps, not the host that wrote them.
+If the execution ledger is lost and only a marker and shared-HOME rollout remain, Shuttle cannot distinguish local embedded work from another host's conversation and refuses automatic ownership (`embedded_origin_unverified`).
+An ended hook proves a local hook ran, but doesn't distinguish an embedded CLI from an App Server; it alone doesn't authorize migration.
+A ledger row carrying an App Server `thread_id`, a corrupt owner record, or a record naming another host or endpoint also requires reconciliation rather than automatic rebinding.
+
 To use the shared backend by hand, launch `codex --remote unix://PATH`, or `codex --remote unix://PATH resume THREAD_ID` for a saved conversation.
 The explicit endpoint reports errors rather than silently launching embedded.
 Shuttle does not paste into terminals or infer the reader from a pane's foreground process.

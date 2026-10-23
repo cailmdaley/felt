@@ -195,6 +195,7 @@ defmodule Shuttle.AppWorkersTest do
     root = Path.join(System.tmp_dir!(), "app-workers-test-#{System.unique_integer([:positive])}")
     Env.put_app_env(:app_workers_dir, root)
     Env.put_app_env(:codex_app_client, App)
+    Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(root, "sessions.jsonl"))
 
     on_exit(fn -> File.rm_rf!(root) end)
 
@@ -762,8 +763,148 @@ defmodule Shuttle.AppWorkersTest do
     assert :gone = WorkerBackend.session_status(Runner, ref)
   end
 
-  test "unknown legacy Codex identity cannot migrate while an embedded process holds it" do
+  defp embedded_fiber(id \\ "11111111-2222-3333-4444-555555555555") do
     terminal_fiber("tests/terminal")
+    saved = Runner.fiber("tests/terminal")
+
+    Runner.set_fiber(
+      "tests/terminal",
+      put_in(saved, ["shuttle", "runtime"], %{"session_uuid" => id})
+    )
+
+    Shuttle.SessionLedger.record(
+      fiber: "tests/terminal",
+      uid: saved["uid"],
+      session: id,
+      harness: "codex",
+      kind: :dispatch,
+      tmux: Dispatcher.session_name("tests/terminal", saved["uid"])
+    )
+
+    id
+  end
+
+  defmodule UnknownHolderRunner do
+    def cmd("ps", _args, _opts), do: {"scan unavailable", 1}
+    def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+  end
+
+  test "stopped embedded runtime migrates the exact ID with persisted ownership and no context override" do
+    id = embedded_fiber()
+    assert {:ok, ref} = dispatch("tests/terminal", runner: ContextRunner, resume_mode: "previous")
+    assert ref == AppWorkers.ref(id)
+
+    assert [{:resume, ^id, opts}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] =
+             App.calls()
+
+    assert opts[:developer_instructions] == nil
+    assert {:ok, record} = AppWorkers.get(id)
+    assert record["active"]
+    assert record["backend_host"] == Poller.own_host_id()
+    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+    assert record["terminal_tmux"] == Shuttle.CodexTerminal.tmux_name(id)
+  end
+
+  test "History import can be reassigned only to its recorded fiber without rebinding the backend" do
+    id = embedded_fiber()
+    assert {:ok, %{"id" => ^id}} = AppWorkers.import_embedded(id, %{}, [], Runner)
+    uid = Runner.fiber("tests/terminal")["uid"]
+
+    assert {:error, :session_owner_mismatch} =
+             AppWorkers.reserve_resume(id, "tests/copied", "OTHER", Runner.felt_root())
+
+    assert :ok = AppWorkers.reserve_resume(id, "tests/terminal", uid, Runner.felt_root())
+    assert {:ok, record} = AppWorkers.get(id)
+    assert record["uid"] == uid
+    assert record["felt_store"] == Runner.felt_root()
+    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+    assert [{:resume, ^id, []}] = App.calls()
+  end
+
+  test "embedded migration refuses unknown process observations without native calls" do
+    id = embedded_fiber()
+
+    assert {:error, :already_running} =
+             dispatch("tests/terminal", runner: UnknownHolderRunner, resume_mode: "previous")
+
+    assert {:error, {:unknown, _}} = AppWorkers.import_embedded(id, %{}, [], UnknownHolderRunner)
+
+    assert [] = App.calls()
+  end
+
+  test "embedded migration rejects remote or App Server ledger provenance without native calls" do
+    id = embedded_fiber()
+    row = Shuttle.SessionLedger.latest_for_session(id)
+
+    for patch <- [%{"host" => "other-host"}, %{"thread_id" => id}, %{"host" => nil}] do
+      File.write!(
+        Shuttle.SessionLedger.default_path(),
+        Jason.encode!(Map.merge(row, patch)) <> "\n"
+      )
+
+      assert {:error, :embedded_origin_unverified} =
+               dispatch("tests/terminal", resume_mode: "previous")
+
+      assert [] = App.calls()
+    end
+  end
+
+  test "embedded migration refuses malformed native acknowledgments and never creates a fresh thread" do
+    id = embedded_fiber()
+
+    for result <- [{:ok, %{"id" => "other"}}, {:ok, nil}, {:error, :not_found}] do
+      App.set(:resume_result, result)
+      assert {:error, _} = dispatch("tests/terminal", resume_mode: "previous")
+      assert {:error, :not_found} = AppWorkers.get(id)
+      refute Enum.any?(App.calls(), &match?({:start, _}, &1))
+    end
+  end
+
+  test "clean handoff remains fresh while explicit previous resumes the embedded identity" do
+    embedded_fiber()
+    saved = Runner.fiber("tests/terminal")
+    saved = put_in(saved, ["shuttle", "runtime", "dispatched_at"], "2026-01-01T00:00:00Z")
+    saved = put_in(saved, ["shuttle", "runtime", "handed_off_at"], "2026-01-01T00:01:00Z")
+    assert :fresh = Dispatcher.check_resume_intent(saved)
+    assert {:previous, _} = Dispatcher.check_resume_intent(saved, resume_mode: "previous")
+    Runner.set_fiber("tests/terminal", saved)
+    assert {:ok, _} = dispatch("tests/terminal")
+
+    assert [
+             {:start, _},
+             {:turn, "app-session-1", _, _},
+             {:read, "app-session-1"},
+             {:resume, "app-session-1", []}
+           ] = App.calls()
+  end
+
+  test "live embedded worker is boot-adopted as terminal and watched without native mutations" do
+    embedded_fiber()
+    uid = Runner.fiber("tests/terminal")["uid"]
+    session = Dispatcher.session_name("tests/terminal", uid)
+    Runner.add_tmux_session(session)
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    assert %{session: ^session, pid: watcher} = :sys.get_state(poller).running[uid]
+    assert Process.alive?(watcher)
+    assert [] = App.calls()
+    assert [] = AppWorkers.active()
+    Runner.remove_tmux_session(session)
+    send(poller, :run_poll_cycle)
+    assert eventually(fn -> not Process.alive?(watcher) end)
+    assert [] = App.calls()
+  end
+
+  test "unknown embedded Codex identity cannot migrate while an embedded process holds it" do
+    embedded_fiber()
 
     Runner.set_shuttle(
       "tests/terminal",

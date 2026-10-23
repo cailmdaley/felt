@@ -1288,7 +1288,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp resume_app_thread(id, fiber_id, agent, work_dir, opts) do
-    with :ok <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
+    with {:ok, loaded} <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
          :ok <-
            Shuttle.AppWorkers.reserve_resume(
              id,
@@ -1296,7 +1296,13 @@ defmodule Shuttle.Dispatcher do
              Keyword.get(opts, :uid),
              Keyword.get(opts, :felt_store)
            ) do
-      case Shuttle.AppWorkers.call(id, :resume_thread, [codex_options(agent, work_dir, opts)]) do
+      result =
+        if loaded,
+          do: {:ok, loaded},
+          else:
+            Shuttle.AppWorkers.call(id, :resume_thread, [codex_options(agent, work_dir, opts)])
+
+      case result do
         {:ok, %{"id" => ^id}} = result ->
           result
 
@@ -1411,35 +1417,39 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  # A bare historical Codex identity may be attached to the managed endpoint,
-  # but only after that endpoint verifies the exact thread. No fresh fallback.
   defp reserve_app_resume(id, fiber_id, agent, work_dir, opts) do
+    attributes = %{
+      "fiber_id" => fiber_id,
+      "uid" => Keyword.get(opts, :uid),
+      "felt_store" => Keyword.get(opts, :felt_store),
+      "cwd" => work_dir,
+      "agent_id" => agent.id,
+      "surface" => Keyword.get(opts, :surface) || "cli",
+      "terminal_wrapper" => agent.wrapper,
+      "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id)
+    }
+
+    with :ok <-
+           check_unowned_resume_viewer(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)) do
+      case Shuttle.AppWorkers.import_embedded(
+             id,
+             attributes,
+             codex_options(agent, work_dir, opts),
+             Keyword.get(opts, :runner, Shuttle.Runner.Default)
+           ) do
+        {:error, {tag, message}} when tag in [:held, :unknown] ->
+          dispatch_refused(:transcript_held, message)
+
+        result ->
+          result
+      end
+    end
+  end
+
+  defp check_unowned_resume_viewer(id, runner) do
     case Shuttle.AppWorkers.get(id) do
-      {:ok, record} ->
-        Shuttle.AppWorkers.check_endpoint(record)
-
-      {:error, :not_found} ->
-        with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
-             :ok <-
-               check_resume_target_free(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)),
-             {:ok, %{"id" => ^id} = thread} <-
-               Shuttle.AppWorkers.client().resume_thread(id, codex_options(agent, work_dir, opts)),
-             :ok <-
-               put_app_worker(
-                 thread,
-                 agent,
-                 work_dir,
-                 %{
-                   "fiber_id" => fiber_id,
-                   "uid" => Keyword.get(opts, :uid),
-                   "felt_store" => Keyword.get(opts, :felt_store)
-                 },
-                 opts
-               ),
-             do: Shuttle.AppWorkers.deactivate(id)
-
-      {:error, _} = error ->
-        error
+      {:error, :not_found} -> check_no_human_resume(id, runner)
+      _ -> :ok
     end
   end
 

@@ -162,7 +162,14 @@ defmodule Shuttle.SessionResumeTest do
           %{"session" => @pi, "harness" => "pi", "at" => 3}
         ],
         "",
-        &(Jason.encode!(Map.merge(&1, %{"fiber" => "f", "uid" => "U", "kind" => "dispatch"})) <>
+        &(Jason.encode!(
+            Map.merge(&1, %{
+              "fiber" => "f",
+              "uid" => "U",
+              "kind" => "dispatch",
+              "host" => Shuttle.Poller.own_host_id()
+            })
+          ) <>
             "\n")
       )
     )
@@ -367,6 +374,51 @@ defmodule Shuttle.SessionResumeTest do
       assert plan.command =~ "--remote 'unix://"
       refute plan.command =~ preset
     end
+  end
+
+  test "History imports a stopped embedded conversation with its exact ID and durable endpoint" do
+    assert {:ok, %{tmux_session: "resume-" <> @codex}} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert_received {:native_resume, @codex}
+    refute_received {:native_resume, _}
+    assert {:ok, record} = Shuttle.AppWorkers.get(@codex)
+    assert record["backend_host"] == Shuttle.Poller.own_host_id()
+    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+    assert record["thread_id"] == @codex
+    assert record["active"] == false
+  end
+
+  test "History rejects a shared rollout without host execution provenance" do
+    File.rm!(Shuttle.SessionLedger.default_path())
+
+    assert {:error, message} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert message =~ "embedded_origin_unverified"
+    refute_received {:native_resume, _}
+    assert {:error, :not_found} = Shuttle.AppWorkers.get(@codex)
+  end
+
+  test "History accepts an old embedded ledger row in the rotated file" do
+    ledger = Shuttle.SessionLedger.default_path()
+    File.rename!(ledger, ledger <> ".1")
+    File.write!(ledger, "")
+
+    assert {:ok, %{created: true}} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert_received {:native_resume, @codex}
+  end
+
+  test "History refuses unknown holder scans before any native call" do
+    Runner.set_ps({"scan failed", 1})
+
+    assert {:error, message} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    assert message =~ "could not check"
+    refute_received {:native_resume, _}
   end
 
   test "historical Codex refuses malformed ownership before native resume" do

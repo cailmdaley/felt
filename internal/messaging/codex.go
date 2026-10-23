@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -277,6 +279,12 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 	if err := checkCodexOwnerEndpoint(env, a.Host, a.ID); err != nil {
 		return rejected(req, "codex-app-server", err.Error()), errCode("preflight_failed", "%v", err)
 	}
+	if codexHookOwnsInput(ctx, env, a) {
+		if !req.Wake {
+			return queueMailbox(env, a, req)
+		}
+		return rejected(req, "codex-app-server", codexWakeHint), errCode("session_unavailable", "%s", codexWakeHint)
+	}
 	r, err := dialCodex(ctx, env)
 	if err != nil {
 		if !req.Wake {
@@ -370,6 +378,40 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 		return rejected(req, "codex-app-server", "thread cannot accept input in state "+t.Status.Type), errCode("session_unavailable", "thread cannot accept input")
 	}
 	return codexMutationFailure(req, err)
+}
+
+// A live hook receiver must explicitly use this endpoint before native input
+// can bypass its hooks. A loaded copy of an embedded thread is not its owner.
+func codexHookOwnsInput(ctx context.Context, env *sysenv.Env, a Address) bool {
+	reg, err := mailboxRegistrationFor(env, "codex", a.ID)
+	if err != nil || reg.ID != a.ID || reg.Host != a.Host || !reg.live() {
+		return false
+	}
+	probe, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := env.CommandContext(probe, "ps", "-ww", "-p", strconv.Itoa(reg.PID), "-o", "args=").Output()
+	if err != nil {
+		return true
+	}
+	return !codexExplicitEndpoint(strings.Fields(string(out)), "unix://"+codexSocket(env))
+}
+
+func codexExplicitEndpoint(args []string, endpoint string) bool {
+	if len(args) < 3 || filepath.Base(args[0]) != "codex" {
+		return false
+	}
+	for i := 1; i < len(args); i++ {
+		if args[i] == "resume" || args[i] == "exec" {
+			break
+		}
+		if args[i] == "--remote="+endpoint || (args[i] == "--remote" && i+1 < len(args) && args[i+1] == endpoint) {
+			return true
+		}
+		if args[i] == "app-server" && i+2 < len(args) && args[i+1] == "--listen" && args[i+2] == endpoint {
+			return true
+		}
+	}
+	return false
 }
 
 // An explicit remote endpoint keeps a TUI on the same conversation owner as

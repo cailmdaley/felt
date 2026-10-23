@@ -57,6 +57,54 @@ defmodule Shuttle.WorkerProcessTest do
     assert WorkerProcess.holder(procs(), "bbbbbbbb-0000-0000-0000-000000000000") == nil
   end
 
+  @tag :tmp_dir
+  test "fresh embedded argv is held by its local worker binding, not a predecessor or remote binding",
+       %{tmp_dir: root} do
+    alias Shuttle.Test.Env
+    ledger = Path.join(root, "sessions.jsonl")
+    Env.put_env("SHUTTLE_SESSIONS_FILE", ledger)
+    tmux = "leaf-01KTHDNZS287ZSSG8X8V59XKW2-shuttle"
+
+    table =
+      WorkerProcess.parse(
+        "812 700 bash -l /tmp/shuttle-run-#{tmux}.42.sh\n813 812 codex -m gpt-sol\n"
+      )
+
+    row = %{"session" => @uuid, "tmux" => tmux, "host" => Shuttle.Poller.own_host_id(), "at" => 1}
+    File.write!(ledger, Jason.encode!(row) <> "\n")
+    assert %{pid: 812} = WorkerProcess.holder(table, @uuid)
+    File.write!(ledger, Jason.encode!(Map.put(row, "host", "other-host")) <> "\n")
+    assert nil == WorkerProcess.holder(table, @uuid)
+
+    File.write!(
+      ledger,
+      Jason.encode!(row) <>
+        "\n" <> Jason.encode!(%{row | "session" => "another-session", "at" => 2}) <> "\n"
+    )
+
+    assert nil == WorkerProcess.holder(table, @uuid)
+  end
+
+  @tag :tmp_dir
+  test "hook receiver binds an idle or detached embedded process without a UUID in argv", %{
+    tmp_dir: root
+  } do
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
+    key = :crypto.hash(:sha256, @uuid) |> Base.encode16(case: :lower)
+    dir = Path.join([root, "mailboxes", "codex", key])
+    File.mkdir_p!(dir)
+
+    File.write!(
+      Path.join(dir, "receiver.json"),
+      Jason.encode!(%{"id" => @uuid, "host" => Shuttle.Poller.own_host_id(), "pid" => 813})
+    )
+
+    assert %{pid: 813} =
+             WorkerProcess.holder(WorkerProcess.parse("813 1 codex -m gpt-sol\n"), @uuid)
+
+    assert nil == WorkerProcess.holder([], @uuid)
+  end
+
   test "tmux_server climbs the ppid chain to the tmux process" do
     assert WorkerProcess.tmux_server(procs(), WorkerProcess.holder(procs(), @uuid)) == 700
 
