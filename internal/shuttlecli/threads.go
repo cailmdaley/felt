@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/cailmdaley/felt/internal/felt"
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
@@ -19,7 +21,8 @@ var threadStates = []string{"Waiting", "Working", "Armed", "To review", "Draft",
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
 // threads to every depth. HostUnreachable marks an Armed thread whose host the
-// daemon's fleet view cannot currently see.
+// daemon's fleet view cannot currently see. BlockedOn is what a resting thread
+// waits for (a fiber uid or text) and Until the name it reads as.
 type ThreadNode struct {
 	ID              string       `json:"id"`
 	UID             string       `json:"uid,omitempty"`
@@ -29,6 +32,8 @@ type ThreadNode struct {
 	State           string       `json:"state"`
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Outcome         string       `json:"outcome,omitempty"`
+	BlockedOn       string       `json:"blocked_on,omitempty"`
+	Until           string       `json:"until,omitempty"`
 	Threads         []ThreadNode `json:"threads"`
 }
 
@@ -52,6 +57,8 @@ type threadRow struct {
 	State           string      `json:"state"`
 	HostUnreachable bool        `json:"host_unreachable,omitempty"`
 	Outcome         string      `json:"outcome,omitempty"`
+	BlockedOn       string      `json:"blocked_on,omitempty"`
+	Until           string      `json:"until,omitempty"`
 	Unfinished      int         `json:"unfinished"`
 	Threads         []threadRow `json:"threads,omitempty"`
 }
@@ -65,7 +72,8 @@ func (a *app) threadsCmd() *cobra.Command {
 the orchestrator's launch prompt and the board's thread rail see them. Direct
 threads are grouped Waiting, Working, Armed, To review, Draft, Resting; each row gives
 the thread's id, state, name and the first sentence of its outcome, and the
-number of unfinished threads below it. Archived threads (a tempered or
+number of unfinished threads below it. A thread resting until something
+(shuttle rest --until) reads "⏸ until <name>". Archived threads (a tempered or
 discarded verdict) are a count.
 
 --all adds the archived threads as their own group and every deeper level,
@@ -83,6 +91,9 @@ with its board column.`,
 			tree, err := a.fetchThreads(a.threadsQuery(args[0]))
 			if err != nil {
 				return err
+			}
+			if root, err := felt.ProjectRoot(a.env, a.dir); err == nil {
+				nameBlockers(felt.NewStorage(root), tree.Threads)
 			}
 			rows, archived := threadRows(tree.Threads, all)
 			if a.json {
@@ -180,13 +191,24 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, Unfinished: unfinishedThreads(n.Threads)}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads)}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
 		}
 	}
 	return row
+}
+
+// nameBlockers names, from this host's store, what each thread waits for when
+// the daemon did not.
+func nameBlockers(st *felt.Storage, nodes []ThreadNode) {
+	for i := range nodes {
+		if nodes[i].BlockedOn != "" && nodes[i].Until == "" {
+			nodes[i].Until = blockerName(st, nodes[i].BlockedOn)
+		}
+		nameBlockers(st, nodes[i].Threads)
+	}
 }
 
 // unfinishedThreads is the board badge's count: every non-archived thread below.
@@ -238,8 +260,11 @@ func printThreadRow(a *app, row threadRow, depth int) {
 // stateLabel is the row's state as the launch roster writes it
 // (Shuttle.Threads.state_label/1).
 func (row threadRow) stateLabel() string {
-	if row.HostUnreachable {
+	switch {
+	case row.HostUnreachable:
 		return "Armed · host unreachable"
+	case row.BlockedOn != "":
+		return row.State + " · ⏸ until " + row.Until
 	}
 	return row.State
 }

@@ -189,8 +189,18 @@ A thread's orchestrator hears of its rest as context, unless the orchestrator's
 own session rested it.
 It works on a constitution in any state, including one with a verdict. A future due: is kept, so the card wakes on that day; a due
 that is today or already past is cleared, because it would put the card
-straight back on the desk. --until YYYY-MM-DD sets a return date;
---until '' clears the date for an undated rest.
+straight back on the desk.
+
+--until names what the rest lasts until, replacing any earlier answer:
+  --until YYYY-MM-DD     a return day (due:), when the card wakes
+  --until <fiber|text>   what it waits for (shuttle.blocked_on): a fiber this
+                         store resolves, stored by uid, or free text. When that
+                         fiber closes, the thread's orchestrator hears of it as
+                         context; nothing is armed.
+  --until ''             an undated rest that waits for nothing
+On a constitution already at rest, --until changes only that answer: the rest
+is not stamped again and its orchestrator hears nothing new. resume and close
+clear what it waits for.
 
 Routes to the owning daemon, which writes it with --local inside its Poller,
 serialized with dispatch, and then stops the worker through its backend — a
@@ -201,12 +211,12 @@ this host is killed.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fields := map[string]any{}
-			if cmd.Flags().Changed("until") {
-				if until != "" {
-					if _, err := time.Parse("2006-01-02", until); err != nil {
-						return fmt.Errorf("invalid --until: use YYYY-MM-DD")
-					}
-				}
+			untilSet := cmd.Flags().Changed("until")
+			restFor, err := parseRestUntil(until)
+			if err != nil {
+				return err
+			}
+			if untilSet {
 				fields["until"] = until
 			}
 			actor := a.actorSession(restActor)
@@ -233,22 +243,53 @@ this host is killed.`,
 				return err
 			}
 
+			var blocker *felt.Felt
+			if untilSet {
+				wait := ""
+				if restFor.wait != "" {
+					if wait, blocker, err = resolveBlocker(st, f, restFor.wait); err != nil {
+						return err
+					}
+				}
+				f.Due = restFor.date
+				if err := shuttle.SetNodeField(f, blockedOnKey, nilIfEmpty(wait)); err != nil {
+					return err
+				}
+			}
+			untilLine := func() {
+				switch {
+				case blocker != nil:
+					fmt.Fprintf(a.env.Stdout, "  until: %s (%s)\n", shuttleNonEmpty(blocker.Name, blocker.ID), blocker.ID)
+					if blocker.Status == felt.StatusClosed {
+						fmt.Fprintf(a.env.Stdout, "  note: %s is already closed\n", blocker.ID)
+					}
+				case restFor.wait != "":
+					fmt.Fprintf(a.env.Stdout, "  until: %s\n", restFor.wait)
+				case restFor.date != nil:
+					fmt.Fprintf(a.env.Stdout, "  until: %s\n", restFor.date.Format("2006-01-02"))
+				default:
+					fmt.Fprintln(a.env.Stdout, "  until: (undated; waits for nothing)")
+				}
+			}
+
 			statusBefore := f.Status
+			if untilSet && statusBefore == felt.StatusOpen && horizonStashed(f) {
+				// Already at rest: only what it lasts until changes.
+				if err := st.Write(f); err != nil {
+					return fmt.Errorf("writing fiber: %w", err)
+				}
+				fmt.Fprintf(a.env.Stdout, "rest of %s%s updated\n", args[0], ref.Location())
+				untilLine()
+				return nil
+			}
 			if err := unclose(f, felt.StatusOpen); err != nil {
 				return err
 			}
 			if err := f.SetExtraField("horizon", "stashed"); err != nil {
 				return fmt.Errorf("setting horizon: %w", err)
 			}
-			if cmd.Flags().Changed("until") {
-				f.Due = nil
-				if until != "" {
-					date, _ := time.Parse("2006-01-02", until)
-					f.Due = &date
-				}
-			}
 			clearedDue := ""
-			if !cmd.Flags().Changed("until") && f.Due != nil && f.Due.Format("2006-01-02") <= time.Now().Format("2006-01-02") {
+			if !untilSet && f.Due != nil && f.Due.Format("2006-01-02") <= time.Now().Format("2006-01-02") {
 				clearedDue = f.Due.Format("2006-01-02")
 				f.Due = nil
 			}
@@ -272,6 +313,9 @@ this host is killed.`,
 			if clearedDue != "" {
 				fmt.Fprintf(a.env.Stdout, "  cleared: due %s (already arrived)\n", clearedDue)
 			}
+			if untilSet {
+				untilLine()
+			}
 
 			if restLocal {
 				return nil
@@ -288,7 +332,7 @@ this host is killed.`,
 		},
 	}
 	restCmd.Flags().BoolVar(&restLocal, "local", false, localFlagUsage)
-	restCmd.Flags().StringVar(&until, "until", "", "Return date (YYYY-MM-DD); empty clears the date")
+	restCmd.Flags().StringVar(&until, "until", "", "What the rest lasts until: a return date (YYYY-MM-DD), a fiber or free text; empty for neither")
 	restCmd.Flags().StringVar(&restActor, "actor", "", actorFlagUsage)
 	_ = restCmd.Flags().MarkHidden("actor")
 	return restCmd
@@ -374,6 +418,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return nil
 			}
 
+			if err := clearBlockedOn(f); err != nil {
+				return err
+			}
 			if standingAwaiting(f, block) {
 				if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 					return err
@@ -610,6 +657,9 @@ fiber leaves your session running.`,
 			if err := setTempered(f, tempered); err != nil {
 				return err
 			}
+			if err := clearBlockedOn(f); err != nil {
+				return err
+			}
 			setClosedAtIfMissing(f)
 			// Bind quiet to this publication stamp; an ordinary close clears it.
 			quietStamp := ""
@@ -753,6 +803,9 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 				return err
 			}
 			if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+				return err
+			}
+			if err := clearBlockedOn(f); err != nil {
 				return err
 			}
 			if err := st.Write(f); err != nil {

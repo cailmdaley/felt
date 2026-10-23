@@ -131,7 +131,7 @@ Then choose by asking in order:
 1. **Is the desired state realized?** Close: `shuttle close <id>` on your own fiber ends your tmux session itself, so make it the last thing you run. Substantive work — code, configs, the product, not the fiber's own surfaces — needs fresh eyes first: have a subagent review the diff against the constitution and close once it comes back clean, or hand off so the next worker reviews it.
 2. **Does a human decision unlock work?** Raise an ask with a report as above, and keep doing anything useful that isn't blocked.
 If nothing remains to do until the answer arrives, end your turn; don't close unfinished work just to ask a question.
-3. **Did the human drive this session, and is it over with nothing to review?** Rest: make `shuttle rest <id>` your final action. The card goes back to Resting with your outcome as the session's report.
+3. **Did the human drive this session, and is it over with nothing to review?** Rest: make `shuttle rest <id>` your final action. The card goes back to Resting with your outcome as the session's report; `--until <fiber|text>` names what it waits for, and its orchestrator hears when that fiber closes.
 4. **Does the next slice need a fresh worker?** Hand off: make `shuttle handoff <id>` your final action. In an app conversation, run `env -u TMUX shuttle -C <store> handoff <id>` and end your turn.
 5. **Otherwise, just end your turn.** The board infers Your turn when no live background work remains; it stays Working while your children run.
 No ask or exit verb is needed for an ordinary conversational pause.

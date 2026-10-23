@@ -229,7 +229,7 @@ func (a *app) psCmd() *cobra.Command {
 // and if not, what moves it. Read-only, and it never locks: a fiber can be
 // inspected while a worker holds it.
 func (a *app) runStatusOneFiber(query string) error {
-	f, _, err := a.shuttleResolveFiber(query, false)
+	f, st, err := a.shuttleResolveFiber(query, false)
 	if err != nil {
 		return err
 	}
@@ -245,6 +245,7 @@ func (a *app) runStatusOneFiber(query string) error {
 	armed := statusNow == felt.StatusActive
 	session, running := a.liveWorkerSession(f)
 	column := shuttle.Column(f, block, running, time.Now())
+	until := blockerName(st, block.BlockedOn)
 
 	if a.json {
 		out := map[string]any{
@@ -254,7 +255,7 @@ func (a *app) runStatusOneFiber(query string) error {
 			"status":   statusNow,
 			"armed":    armed,
 			"running":  running,
-			"dispatch": a.dispatchAssessment(f, block, column),
+			"dispatch": a.dispatchAssessment(f, block, column, until),
 			// The board's Desk column and the review verdict (null when none).
 			"column":  column,
 			"verdict": nil,
@@ -274,16 +275,23 @@ func (a *app) runStatusOneFiber(query string) error {
 		if running {
 			out["session"] = session
 		}
+		if block.BlockedOn != "" {
+			out["blocked_on"] = block.BlockedOn
+			out["until"] = until
+		}
 		return a.outputJSON(out)
 	}
 
 	fmt.Fprintf(a.env.Stdout, "shuttle: fiber %s\n\n", f.ID)
 	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
+	if block.BlockedOn != "" {
+		fmt.Fprintf(a.env.Stdout, "  until:       %s\n", until)
+	}
 	if running {
 		fmt.Fprintf(a.env.Stdout, "  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Fprintln(a.env.Stdout, "")
-	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f, block, column))
+	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f, block, column, until))
 	return nil
 }
 
@@ -295,7 +303,7 @@ func (a *app) runStatusOneFiber(query string) error {
 // without a project_dir still dispatches — its worker starts in the felt
 // store — but no verb arms it again until it has one, so every call named
 // here carries the --project-dir it would need.
-func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column string) string {
+func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column, until string) string {
 	noProjectDir := strings.TrimSpace(block.ProjectDir) == ""
 	arm := func(verb string) string {
 		if noProjectDir {
@@ -316,7 +324,10 @@ func (a *app) dispatchAssessment(f *felt.Felt, block *shuttle.Block, column stri
 	case felt.StatusOpen:
 		switch column {
 		case "resting":
-			return fmt.Sprintf("→ Resting — put down (status: open, horizon: stashed); daemon will NOT dispatch. Use `%s` to pick it back up and arm it.", arm("resume"))
+			if until != "" {
+				until = " until " + until
+			}
+			return fmt.Sprintf("→ Resting%s — put down (status: open, horizon: stashed); daemon will NOT dispatch. Use `%s` to pick it back up and arm it.", until, arm("resume"))
 		case "roles":
 			return fmt.Sprintf("→ Seat at rest (role %s, status: open); daemon will NOT dispatch. Use `%s` to arm it.", block.Role, arm("resume"))
 		case "in_flight":

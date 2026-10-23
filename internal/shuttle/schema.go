@@ -45,6 +45,9 @@ type Block struct {
 	// Seat places a resting constitution in the board's Roles band.
 	// A seat requires a role and does not change the lifecycle.
 	Seat bool `json:"seat,omitempty" yaml:"seat,omitempty"`
+	// BlockedOn names what a resting constitution waits for: a fiber's uid, or
+	// free text. It orders nothing; its orchestrator hears when that fiber closes.
+	BlockedOn string `json:"blocked_on,omitempty" yaml:"blocked_on,omitempty"`
 }
 
 // Ask is a worker's outstanding question to the human.
@@ -147,6 +150,10 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		if _, err := time.Parse(time.RFC3339Nano, b.Ask.At); err != nil {
 			add("ask.at", "must be an RFC3339 timestamp")
 		}
+	}
+
+	if strings.ContainsAny(b.BlockedOn, "\r\n") {
+		add("blocked_on", "must be a single line")
 	}
 
 	if !slices.Contains(ValidKinds, NormalizeKind(b.Kind)) {
