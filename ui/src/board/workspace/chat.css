@@ -76,6 +76,13 @@
 /* The conversation. */
 .ws-chat-log { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .ws-chat-log > .kbn-detail-app-guide { flex: none; margin: 8px var(--ws-chat-gutter) 0; }
+/* Where the work stands: the fiber's outcome, muted, two lines at most, above the conversation. */
+.ws-chat-outcome {
+  flex: none; margin: 10px var(--ws-chat-gutter) 0; padding-left: 10px; border-left: 2px solid var(--ws-hairline);
+  color: var(--ws-ink-muted); font: var(--ws-label-size)/1.45 var(--ws-serif);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ws-chat-outcome[hidden] { display: none; }
 .ws-chat-empty {
   display: none; margin: auto var(--ws-chat-gutter); text-align: center;
   color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.5 var(--ws-serif);
@@ -108,6 +115,10 @@
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
 /* The bubble already says who spoke; the line under it keeps the time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
+/* The session's brief is not your turn: a quiet line at the column's left, opening into plain text. */
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you.ws-transcript-msg-brief { align-self: stretch; align-items: flex-start; max-width: none; }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-brief > .ws-transcript-kicker { order: 0; justify-content: flex-start; margin: 0; font: var(--ws-label-size)/1.4 var(--ws-serif); }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-brief .ws-transcript-prompt-text { background: none; padding: 0 0 0 10px; border-left: 2px solid var(--ws-hairline); color: var(--ws-ink-soft); font-size: var(--ws-label-size); }
 /* A message the worker has not yet read stands after the last turn, faded, until the transcript records it. */
 .ws-chat .ws-transcript-sent { display: flex; flex-direction: column; gap: 10px; padding-block: 18px 6px; }
 .ws-chat .ws-transcript-sent:empty { display: none; }

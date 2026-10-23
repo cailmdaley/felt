@@ -321,13 +321,43 @@ function promptHtml(source: string): string {
   }).join('')
 }
 
-/** A prompt clamps to a few lines until it is clicked open: a dispatch carries the whole constitution. */
+/** The word a dispatch's kicker shows: the machine-written brief, folded behind one line. */
+export const SESSION_BRIEF = 'Session brief'
+
+/**
+ * A prompt clamps to a few lines until it is clicked open. A dispatch is the
+ * machine-written brief that started the session: it folds whole behind one
+ * quiet line, its kicker, which opens and closes it.
+ */
 function paintPrompt(message: Message, prompt: Prompt): void {
   const speaker: Speaker = prompt.dispatch ? 'dispatch' : 'you'
   const identity = `${speaker}|${prompt.at ?? ''}`
   if (message.identity !== identity) {
-    setKicker(message.kicker, speaker, speaker, prompt.at)
+    setKicker(message.kicker, prompt.dispatch ? SESSION_BRIEF : speaker, speaker, prompt.at)
     message.identity = identity
+  }
+  const kicker = message.kicker
+  message.node.classList.toggle('ws-transcript-msg-brief', prompt.dispatch)
+  if (prompt.dispatch && !kicker.dataset.toggle) {
+    kicker.dataset.toggle = '1'
+    const toggle = (event: Event): void => {
+      if (!message.node.classList.contains('ws-transcript-msg-brief')) return
+      event.stopPropagation()
+      message.unclamped = !message.unclamped
+      paintBrief(message)
+    }
+    kicker.addEventListener('click', toggle)
+    kicker.addEventListener('keydown', (event) => {
+      if ((event.key === 'Enter' || event.key === ' ') && message.node.classList.contains('ws-transcript-msg-brief')) { event.preventDefault(); toggle(event) }
+    })
+  }
+  if (prompt.dispatch) {
+    kicker.tabIndex = 0
+    kicker.setAttribute('role', 'button')
+    paintBrief(message)
+  } else if (kicker.dataset.toggle) {
+    for (const name of ['aria-expanded', 'role', 'tabindex']) kicker.removeAttribute(name)
+    message.node.classList.remove('ws-transcript-brief-open')
   }
   const text = message.prose
   if (message.source !== prompt.text) {
@@ -365,6 +395,12 @@ function paintPrompt(message: Message, prompt: Prompt): void {
   }
   message.images.textContent = Array.from({ length: prompt.images }, () => '[image]').join(' ')
   message.images.hidden = prompt.images === 0
+}
+
+function paintBrief(message: Message): void {
+  message.node.classList.toggle('ws-transcript-brief-open', message.unclamped)
+  message.prose.classList.toggle('ws-transcript-unclamped', message.unclamped)
+  message.kicker.setAttribute('aria-expanded', String(message.unclamped))
 }
 
 function measureClamp(text: HTMLElement, unclamped: boolean): void {
@@ -894,7 +930,8 @@ export class TranscriptBand {
     }
     const hit = stats.cacheHit
     this.hitFact.hidden = hit === undefined
-    this.hitFact.textContent = hit === undefined ? '' : `${Math.round(hit * 100)}% cached`
+    // The share alone; its title says what it is a share of.
+    this.hitFact.textContent = hit === undefined ? '' : `${Math.round(hit * 100)}%`
     this.hitFact.title = hit === undefined ? '' : `The last turn read ${Math.round(hit * 100)}% of its context from the prompt cache`
     const context = stats.context
     this.contextFact.hidden = context === undefined

@@ -377,6 +377,17 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('.ws-transcript-msg-sending')?.textContent).toContain('Carry on')
     expect(message.value).toBe('')
   })
+  it("opens the conversation on the fiber's outcome, kept current and hidden when there is none", () => {
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees with its original posterior.' }))
+    const strip = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-chat-outcome')!
+    expect(strip.hidden).toBe(false)
+    expect(strip.textContent).toBe('Seed 3000 agrees with its original posterior.')
+    expect(strip.nextElementSibling?.classList.contains('ws-transcript')).toBe(true)
+    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Mechanism found.' }))
+    expect(strip.textContent).toBe('Mechanism found.')
+    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: '' }))
+    expect(strip.hidden).toBe(true)
+  })
   it('inside a thread the header traces the ancestry beneath the name and the menu holds the origin', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))
     const origin = vi.fn(), chair = vi.fn()

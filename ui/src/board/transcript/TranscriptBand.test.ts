@@ -369,7 +369,18 @@ describe('TranscriptBand', () => {
     expect(dialog.querySelectorAll('.ws-transcript-turn')).toHaveLength(2)
     const last = dialog.querySelectorAll<HTMLElement>('.ws-transcript-turn')[1]
     expect(last.querySelector('.ws-transcript-prompt-text')?.textContent).toContain('You are a Shuttle worker')
-    expect(last.querySelector('.ws-transcript-kicker')?.textContent).toContain('dispatch')
+    // The dispatch folds behind one line that opens and closes it.
+    const brief = last.querySelector<HTMLElement>('.ws-transcript-msg-brief')!
+    const kicker = brief.querySelector<HTMLElement>('.ws-transcript-kicker')!
+    expect(kicker.textContent).toContain('Session brief')
+    expect(kicker.getAttribute('role')).toBe('button')
+    expect(kicker.getAttribute('aria-expanded')).toBe('false')
+    expect(brief.classList.contains('ws-transcript-brief-open')).toBe(false)
+    kicker.click()
+    expect(kicker.getAttribute('aria-expanded')).toBe('true')
+    expect(brief.classList.contains('ws-transcript-brief-open')).toBe(true)
+    kicker.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(brief.classList.contains('ws-transcript-brief-open')).toBe(false)
     const prose = last.querySelector('.ws-transcript-msg-agent')!
     expect(prose.textContent).toContain('Calibration')
     expect(prose.innerHTML).not.toContain('<img')

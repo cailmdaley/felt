@@ -857,7 +857,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -1120,7 +1120,12 @@ export class Dock {
     const empty = document.createElement('p')
     empty.className = 'ws-chat-empty'
     empty.textContent = 'No conversation yet. Write below to start a worker.'
+    // Where the work stands, from the fiber's outcome: a resumed session opens on it, not on an empty column.
+    const standing = document.createElement('p')
+    standing.className = 'ws-chat-outcome'
+    standing.dataset.part = 'chat-outcome'
     if (this.guidance) log.append(this.guidance)
+    log.append(standing)
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
@@ -1133,6 +1138,9 @@ export class Dock {
       this.head.dataset.column = column
       title.textContent = card.name
       title.title = card.name
+      standing.textContent = card.outcome?.trim() ?? ''
+      standing.title = standing.textContent
+      standing.hidden = !standing.textContent
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent
       const reachable = verdictReachable(card)
