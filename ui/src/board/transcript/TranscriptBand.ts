@@ -29,6 +29,8 @@ export interface TranscriptBandOptions {
   inline?: boolean
   /** Open a file the worker touched in the reader's file viewer. */
   onFile?: (path: string, title?: string) => void
+  /** Called whenever the usage facts are repainted: new usage, another session, or the cache estimate running out. */
+  onFacts?: () => void
 }
 
 type Prompt = Extract<Entry, { kind: 'prompt' }>
@@ -462,6 +464,7 @@ export class TranscriptBand {
   readonly meter: HTMLElement
   private readonly inline: boolean
   private readonly onFile?: (path: string, title?: string) => void
+  private readonly onFacts?: () => void
   private readonly inlineWorking: HTMLElement
   /** Messages sent from the composer that the transcript has not yet recorded, drawn after the last turn. */
   private readonly sentList = document.createElement('div')
@@ -520,6 +523,7 @@ export class TranscriptBand {
     this.fetcher = opts.fetch
     this.inline = opts.inline ?? false
     this.onFile = opts.onFile
+    this.onFacts = opts.onFacts
     this.folded = this.inline ? false : this.readFolded()
     this.el = document.createElement('section')
     this.el.className = this.inline ? 'ws-transcript ws-transcript-inline' : 'ws-transcript'
@@ -904,10 +908,11 @@ export class TranscriptBand {
   }
 
   /**
-   * The session's two usage facts, as words in the head line. Context is its
-   * token count, tinted from verdigris toward red as it fills the window. The
-   * cache is a verdigris dot draining as the entry ages, an alarm-red ring once
-   * cold.
+   * The session's usage facts, as words in the head line, each saying what it
+   * is. Context is its token count, tinted from verdigris toward red as it
+   * fills the window, then that share of the window (`66% ctx`). The cache is
+   * a verdigris dot draining as the entry ages, an alarm-red ring once cold,
+   * then the share of the session's context tokens read from it (`91% cached`).
    */
   private paintFacts(): void {
     this.clearCacheTimer()
@@ -928,34 +933,36 @@ export class TranscriptBand {
         if (!this.disposed) this.paintFacts()
       }, Math.min(until! - now, CACHE_REPAINT_MS))
     }
-    const hit = stats.cacheHit
+    const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
+    const cache = stats.sessionCache
+    const hit = cache ? Math.round(Math.min(1, cache.cached / cache.context) * 100) : undefined
     this.hitFact.hidden = hit === undefined
-    // The share alone; its title says what it is a share of.
-    this.hitFact.textContent = hit === undefined ? '' : `${Math.round(hit * 100)}%`
-    this.hitFact.title = hit === undefined ? '' : `The last turn read ${Math.round(hit * 100)}% of its context from the prompt cache`
+    this.hitFact.textContent = cache ? `${hit}% cached` : ''
+    this.hitFact.title = cache ? `This session read ${hit}% of its context tokens from the prompt cache (${count(cache.cached)} of ${count(cache.context)})` : ''
     const context = stats.context
     this.contextFact.hidden = context === undefined
     this.shareFact.hidden = true
-    this.meter.hidden = context === undefined && until === undefined && hit === undefined
-    if (context === undefined) {
-      this.contextFact.textContent = ''
-      this.contextFact.title = ''
-      this.contextFact.style.removeProperty('color')
-      return
-    }
-    const window_ = contextWindow(stats.window, stats.model ?? this.target?.agent)
-    const count = (n: number): string => new Intl.NumberFormat('en-US').format(n)
-    this.contextFact.textContent = tokenLabel(context)
-    this.contextFact.title = `Context: ${count(context)} tokens${window_ ? ` of a ${count(window_)}-token window` : ''}`
-    if (window_) {
+    this.meter.hidden = context === undefined && until === undefined && cache === undefined
+    const window_ = context === undefined ? undefined : contextWindow(stats.window, stats.model ?? this.target?.agent)
+    this.contextFact.textContent = context === undefined ? '' : tokenLabel(context)
+    this.contextFact.title = context === undefined ? '' : `Context: ${count(context)} tokens${window_ ? ` of a ${count(window_)}-token window` : ''}`
+    if (context !== undefined && window_) {
       const share = Math.round(Math.min(1, context / window_) * 100)
       this.contextFact.style.color = `color-mix(in oklch, var(--kbn-alarm) ${share}%, var(--kbn-tempered))`
       this.shareFact.hidden = false
-      this.shareFact.textContent = `${share}%`
+      this.shareFact.textContent = `${share}% ctx`
       this.shareFact.title = this.contextFact.title
     } else {
       this.contextFact.style.removeProperty('color')
     }
+    this.onFacts?.()
+  }
+
+  /** When the cache of `session` stays warm until, while it is the session shown and the estimate says it is still warm. */
+  cacheWarm(session: string): number | undefined {
+    if (this.target?.session !== session) return undefined
+    const until = this.model.stats().cacheUntil
+    return until !== undefined && until > Date.now() ? until : undefined
   }
 
   private agentName(): string {

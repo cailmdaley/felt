@@ -229,6 +229,12 @@ describe('TranscriptBand', () => {
     expect(context.textContent).toBe('53.3k')
     expect(context.title).toContain('1,000,000-token window')
     expect(context.style.color).toContain('5%')
+    // Each figure says what it is: the window's share and the session's cache share.
+    const share = band.el.querySelector<HTMLElement>('.ws-transcript-share')!
+    expect([share.hidden, share.textContent]).toEqual([false, '5% ctx'])
+    const hit = band.el.querySelector<HTMLElement>('.ws-transcript-hit')!
+    expect([hit.hidden, hit.textContent]).toEqual([false, '49% cached'])
+    expect(hit.title).toBe('This session read 49% of its context tokens from the prompt cache (26,331 of 53,327)')
     vi.advanceTimersByTime(60_000)
     expect(Number(cache.style.getPropertyValue('--ws-cache-left'))).toBeLessThan(left)
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!.click()
@@ -237,6 +243,26 @@ describe('TranscriptBand', () => {
     expect(cache.dataset.cache).toBe('cold')
     expect(cache.style.getPropertyValue('--ws-cache-left')).toBe('0')
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('tells its owner when the facts change and says how long the shown session\'s cache stays warm', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    vi.setSystemTime(new Date('2026-10-09T13:52:00Z'))
+    const onFacts = vi.fn()
+    const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fixtureFetch({ [latestId]: [captured(claudeUsage)[0]] }), onFacts })
+    bands.push(band); document.body.append(band.el)
+    expect(band.cacheWarm(latestId)).toBeUndefined()
+    band.follow(target(latestId))
+    await settle()
+    expect(onFacts).toHaveBeenCalled()
+    const until = band.cacheWarm(latestId)!
+    expect(until).toBeGreaterThan(Date.now())
+    // Another session's warmth is not this one's.
+    expect(band.cacheWarm(earlierId)).toBeUndefined()
+    onFacts.mockClear()
+    vi.advanceTimersByTime(until - Date.now() + 1)
+    expect(onFacts).toHaveBeenCalled()
+    expect(band.cacheWarm(latestId)).toBeUndefined()
   })
 
   it('shows already cold cache, resets facts on target change and clears expiry on dispose', async () => {

@@ -33,8 +33,8 @@ export interface TranscriptStats {
   cacheUntil?: number
   /** The lifetime of the cache entry that sets cacheUntil: an hour or five minutes. */
   cacheTtl?: number
-  /** The share of the last turn's context read from the prompt cache, 0–1, where the harness records it. */
-  cacheHit?: number
+  /** The context tokens read from the prompt cache over every turn of the session that records them, and those turns' context tokens. */
+  sessionCache?: { cached: number; context: number }
 }
 
 interface ToolReference {
@@ -55,7 +55,7 @@ export class TranscriptModel {
   private readonly notices = new Set<string>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
-  private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil' | 'cacheTtl' | 'cacheHit'> = {}
+  private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil' | 'cacheTtl' | 'sessionCache'> = {}
 
   private hourCacheUntil: number | undefined
   private shortCacheUntil: number | undefined
@@ -74,7 +74,10 @@ export class TranscriptModel {
         if (entry.model) this.facts.model = entry.model
         this.facts.context = entry.context
         this.facts.window = entry.window
-        this.facts.cacheHit = entry.cached !== undefined && entry.context ? Math.min(1, entry.cached / entry.context) : undefined
+        if (entry.cached !== undefined && entry.context) {
+          const sum = this.facts.sessionCache ?? { cached: 0, context: 0 }
+          this.facts.sessionCache = { cached: sum.cached + Math.min(entry.cached, entry.context), context: sum.context + entry.context }
+        }
         const cache = entry.cache
         if (cache && entry.at !== undefined && (cache.read > 0 || cache.write > 0)) {
           const hourRead = cache.read > 0 && this.hourCacheUntil !== undefined && this.hourCacheUntil > entry.at
@@ -87,7 +90,7 @@ export class TranscriptModel {
       }
       if (entry.kind === 'event' && entry.contextReset) {
         this.facts.context = entry.context
-        this.facts.cacheUntil = this.facts.cacheTtl = this.facts.cacheHit = undefined
+        this.facts.cacheUntil = this.facts.cacheTtl = undefined
         this.hourCacheUntil = this.shortCacheUntil = undefined
       }
       if (entry.kind === 'result') {

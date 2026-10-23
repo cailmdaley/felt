@@ -100,17 +100,34 @@ describe('native transcript head facts', () => {
   })
 })
 
-describe('the last turn\'s cache hit', () => {
-  it('is the share of the context read from cache, for each harness that records it', () => {
-    expect(modelFor(claude[0]).stats().cacheHit).toBeCloseTo(26331 / 53327)
+describe('the session\'s cache share', () => {
+  it('counts the context tokens read from the prompt cache, for each harness that records it', () => {
+    expect(modelFor(claude[0]).stats().sessionCache).toEqual({ cached: 26331, context: 53327 })
     const last = codex[0].payload.info.last_token_usage
-    expect(modelFor(codex[0]).stats().cacheHit).toBeCloseTo(last.cached_input_tokens / last.input_tokens)
-    expect(modelFor(pi[0]).stats().cacheHit).toBe(0)
+    expect(modelFor(codex[0]).stats().sessionCache).toEqual({ cached: last.cached_input_tokens, context: last.input_tokens })
+    expect(modelFor(pi[0]).stats().sessionCache).toEqual({ cached: 0, context: 16767 })
   })
-  it('clears when the context resets', () => {
+  it('sums every turn since the session began, not the last turn alone', () => {
+    const model = new TranscriptModel()
+    model.append([
+      { kind: 'usage', context: 1000, cached: 0 },
+      { kind: 'usage', context: 2000, cached: 1800 },
+      { kind: 'usage', context: 3000 },
+      { kind: 'usage', context: 4000, cached: 3900 },
+    ])
+    expect(model.stats().sessionCache).toEqual({ cached: 5700, context: 7000 })
+  })
+  it('outlasts a context reset and clears with the session', () => {
     const model = modelFor(claude[0])
     model.append([{ kind: 'event', label: 'Compacted', contextReset: true }])
-    expect(model.stats().cacheHit).toBeUndefined()
+    expect(model.stats().sessionCache).toEqual({ cached: 26331, context: 53327 })
+    model.reset()
+    expect(model.stats().sessionCache).toBeUndefined()
+  })
+  it('is absent where no turn records its cached tokens', () => {
+    const model = new TranscriptModel()
+    model.append([{ kind: 'usage', context: 1000 }])
+    expect(model.stats().sessionCache).toBeUndefined()
   })
 })
 
