@@ -107,7 +107,7 @@
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
-  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: 11px; color: var(--ws-ink-muted);
+  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--ws-small-size); color: var(--ws-ink-muted);
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
 /* The bubble already says who spoke; the line under it keeps the time. */
