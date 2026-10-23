@@ -383,8 +383,10 @@ describe('state-shaped act zone', () => {
     item.click()
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Again' })
-    // With a live worker the menu offers no New session; the composer's own secondary verb does.
+    // Beside a live worker the composer keeps New session as its secondary verb; the menu holds it for the phone alone.
     dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
+    expect([item.hidden, item.dataset.when]).toEqual([false, 'live'])
+    dock.bandFor(task({ status: 'active', sessionUuid: 'resume-me' }))
     expect(item.hidden).toBe(true)
   })
   it('Enter sends to a live worker and Alt-Enter starts a new session', async () => {

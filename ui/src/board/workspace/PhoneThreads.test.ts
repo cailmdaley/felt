@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ThreadIndex } from '../threads.js'
-import { phoneThreads } from './PhoneThreads.js'
+import { familyCounts, familyLabel, phoneThreads } from './PhoneThreads.js'
 
 const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
   card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', path: `${over.id}.md`, ...over })
@@ -30,5 +30,23 @@ describe('the phone thread page', () => {
 
   it('draws nothing for a constitution with no family', () => {
     expect(phoneThreads(feed[3], index, vi.fn())).toBeNull()
+  })
+})
+
+describe("the phone's threads control", () => {
+  it('counts the whole family from its root, live threads, reviews and those waiting, and says it in words', () => {
+    const feed = [
+      thread({ id: 'hub', status: 'active' }),
+      thread({ id: 'hub/a', orchestrator: 'hub', status: 'active', ask: { text: 'Which?', at: '2026-07-02T12:00:00Z' } }),
+      thread({ id: 'hub/b', orchestrator: 'hub', status: 'closed' }),
+      thread({ id: 'hub/b/c', orchestrator: 'hub-b', status: 'active' }),
+      thread({ id: 'hub/d', orchestrator: 'hub', status: 'closed', tempered: true }),
+    ]
+    const index = new ThreadIndex(feed)
+    const counts = familyCounts(feed[3], index)
+    expect(counts).toEqual({ threads: 3, reviews: 1, waiting: 1 })
+    expect(familyLabel(counts)).toBe('3 threads · 1 review')
+    expect(familyLabel({ threads: 1, reviews: 0 })).toBe('1 thread')
+    expect(familyCounts(thread({ id: 'alone' }), new ThreadIndex([thread({ id: 'alone' })]))).toEqual({ threads: 0, reviews: 0, waiting: 0 })
   })
 })

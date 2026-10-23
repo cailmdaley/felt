@@ -27,7 +27,7 @@ import { markVerdictHost, type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
-import { phoneThreads } from './PhoneThreads.js'
+import { familyCounts, familyLabel, phoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
@@ -244,7 +244,7 @@ export class Reader {
     pages.title = 'Threads and pages'
     pages.setAttribute('aria-haspopup', 'dialog')
     pages.setAttribute('aria-expanded', 'false')
-    pages.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>'
+    this.paintPages(null)
     const pageMeta = element('span', 'ws-thumb-meta')
     pageMeta.append(this.position, this.arrivalSummary)
     pageChoice.append(this.pageTitle, pageMeta)
@@ -358,7 +358,9 @@ export class Reader {
     this.channel = channel
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()))
+    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
+    if (this.currentCard) this.threadRail.show(this.currentCard, index)
+    this.paintPages(this.currentCard && familyCounts(this.currentCard, index))
     this.paintRail()
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
@@ -457,6 +459,28 @@ export class Reader {
       if (landing) el.classList.add('ws-run-landing')
     }
     if (!settled) this.pageSheet.hide()
+  }
+  /**
+   * The phone's way to the threads page: with a family, it says what is in it
+   * (`24 threads · 3 reviews`, a dot while any waits on the reader); without
+   * one, it is the pages glyph alone.
+   */
+  private paintPages(counts: { threads: number; reviews: number; waiting: number } | null): void {
+    const pages = this.pagesButton
+    const signature = JSON.stringify(counts?.threads ? counts : null)
+    if (pages.dataset.counts === signature) return
+    pages.dataset.counts = signature
+    pages.classList.toggle('ws-chat-pages-family', !!counts?.threads)
+    if (!counts?.threads) {
+      pages.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>'
+      pages.setAttribute('aria-label', 'Threads and pages')
+      return
+    }
+    const words = familyLabel(counts)
+    const dot = element('span', 'ws-chat-pages-dot')
+    dot.setAttribute('aria-hidden', 'true'); dot.hidden = !counts.waiting
+    pages.replaceChildren(dot, document.createTextNode(words))
+    pages.setAttribute('aria-label', `${words}${counts.waiting ? `, ${counts.waiting} waiting` : ''}: threads and pages`)
   }
   /** The phone's page of threads (the family from its root) and the run's pages. */
   private openPhonePage(): void {

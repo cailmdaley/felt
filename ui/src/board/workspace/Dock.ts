@@ -14,7 +14,7 @@ import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
 import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
-import { coarsePointer, isMobileViewport } from '../mobile.js'
+import { coarsePointer, isMobileViewport, MOBILE_MEDIA } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
@@ -497,6 +497,9 @@ export class Dock {
   private freshButton: HTMLButtonElement | null = null
   /** The menu's New session, offered there while Resume is the composer's one way on. */
   private menuFresh: HTMLButtonElement | null = null
+  /** The menu's Meeting, the phone's way to the switch its folded composer does not show. */
+  private menuMeeting: HTMLButtonElement | null = null
+  private meetingSwitch: HTMLInputElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
   private savesPending = 0
@@ -677,7 +680,8 @@ export class Dock {
     this.composerSend = null
     this.composerError = null
     this.composerPaint = this.actPaint = null
-    this.freshButton = this.menuFresh = null
+    this.freshButton = this.menuFresh = this.menuMeeting = null
+    this.meetingSwitch = null
     this.settingsSync = null
     this.historySync = null
     this.settingStep = null
@@ -1088,6 +1092,10 @@ export class Dock {
     })
     const freshItem = this.menuFresh = item('New session', 'ws-chat-fresh', () => { this.freshButton?.click() })
     freshItem.title = 'Start a new session instead of resuming (⌥↵)'
+    const meetingItem = this.menuMeeting = item('Meeting', 'ws-chat-meeting', () => { this.meetingSwitch?.click() })
+    meetingItem.hidden = !this.meeting
+    // The meter's figures: in the header on the desktop, here on the phone.
+    const meterSlot = document.createElement('div'); meterSlot.className = 'ws-chat-menu-meter'; meterSlot.hidden = true
     const consoleItem = item('Console', 'ws-chat-console', () => { this.openConversation(card) })
     consoleItem.title = 'Open the worker’s own conversation'
     this.drawerClose = () => {
@@ -1102,7 +1110,7 @@ export class Dock {
     facts.className = 'ws-chat-menu-facts'
     const backSlot = this.menuBack = document.createElement('div'); backSlot.className = 'ws-chat-menu-back'; backSlot.hidden = true
     backSlot.addEventListener('click', () => { menu.open = false })
-    choices.append(facts, verdict, rule, freshItem, settingsItem, sessionsItem, consoleItem, backSlot)
+    choices.append(facts, meterSlot, verdict, rule, freshItem, meetingItem, settingsItem, sessionsItem, consoleItem, backSlot)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.
@@ -1119,6 +1127,16 @@ export class Dock {
     this.verdictMenu = menu
     const meter = this.transcriptBand?.meter ?? null
     this.head.replaceChildren(worker, ...(meter ? [meter] : []), menu)
+    if (meter && typeof window.matchMedia === 'function') {
+      const phone = window.matchMedia(MOBILE_MEDIA)
+      const seat = (): void => {
+        if (phone.matches) meterSlot.append(meter); else this.head.insertBefore(meter, menu)
+        meterSlot.hidden = !phone.matches
+      }
+      seat()
+      phone.addEventListener('change', seat)
+      this.composerDisposers.push(() => phone.removeEventListener('change', seat))
+    }
 
     const header = this.header = document.createElement('header')
     header.className = 'ws-chat-head'
@@ -1178,7 +1196,7 @@ export class Dock {
       temper.hidden = discard.hidden = !reachable
       review.hidden = !reviewable
       consoleItem.hidden = !this.workerPillFor(card)
-      freshItem.hidden = !settledResume(card)
+      this.paintMenuVerbs(card)
       sessionsItem.hidden = !card.uid
       this.paintHeadWorker(card, worker)
     }
@@ -1222,6 +1240,26 @@ export class Dock {
         measure()
         requestAnimationFrame(measure)
       },
+    }
+  }
+
+  /**
+   * The menu's composer verbs. New session is there whenever the composer
+   * leaves it out: for a settled thread everywhere, and beside a live worker
+   * on the phone, whose folded composer shows one verb. Meeting is the
+   * phone's, and says whether it is on.
+   */
+  private paintMenuVerbs(card: KanbanCard): void {
+    const fresh = this.menuFresh, meeting = this.menuMeeting
+    if (fresh) {
+      const settled = settledResume(card), live = Boolean(card.sessionUuid) && hasLiveWorker(card)
+      fresh.hidden = !settled && !live
+      fresh.dataset.when = settled ? 'settled' : 'live'
+    }
+    if (meeting) {
+      meeting.hidden = !this.meetingSwitch
+      meeting.textContent = this.meetingArmed() ? 'Meeting: on' : 'Meeting: off'
+      if (this.meetingSwitch) meeting.toggleAttribute('aria-disabled', this.meetingSwitch.disabled)
     }
   }
 
@@ -1315,7 +1353,7 @@ export class Dock {
       resume.classList.toggle('kbn-ctl-secondary', resumable && !live && !settled)
       resume.title = live ? 'Send the message to the live worker (↵)' : settled ? 'Resume the previous session (↵)' : resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
-      if (this.menuFresh) this.menuFresh.hidden = !settled
+      this.paintMenuVerbs(card)
       const lead = live || settled
       if (lead ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(lead ? [resume, fresh] : [fresh, resume]))
       // A live worker is resumed only to hand it a message; attaching to it
@@ -1484,6 +1522,7 @@ export class Dock {
     const input = document.createElement('input')
     input.type = 'checkbox'
     input.setAttribute('role', 'switch')
+    this.meetingSwitch = input
     const track = document.createElement('span')
     track.className = 'kbn-ctl-meet-track'
     track.setAttribute('aria-hidden', 'true')

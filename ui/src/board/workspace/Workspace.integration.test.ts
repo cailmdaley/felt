@@ -417,6 +417,9 @@ describe('workspace reader integration', () => {
     const title = (): string | null | undefined => document.querySelector('.ws-page.ws-selected .ws-chat-title')?.textContent
     workspace.open(feed[0], 'Desk'); await flush()
     expect(title()).toBe('hub')
+    // The phone's way to the threads page says what the family holds.
+    const pages = document.querySelector<HTMLButtonElement>('.ws-chat-pages')!
+    expect([pages.classList.contains('ws-chat-pages-family'), pages.textContent]).toEqual([true, '2 threads'])
     // A root has no orchestrator: no way back on its line, and b does nothing.
     expect(document.querySelector<HTMLElement>('.ws-page.ws-selected .ws-chat-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))

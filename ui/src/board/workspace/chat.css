@@ -28,6 +28,10 @@
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-chat .ws-chat-menu-back { display: none; }
+/* The menu's composer verbs that only the phone's folded composer leaves out. */
+.ws-chat .ws-chat-menu :is(.ws-chat-meeting, .ws-chat-fresh[data-when='live']) { display: none; }
+.ws-chat-menu-meter { padding: 0 12px 8px; color: var(--ws-ink-muted); }
+.ws-chat-menu-meter[hidden] { display: none; }
 /* The name takes the line and wraps rather than truncating; the acts keep to its first line. */
 .ws-chat-title {
   flex: 1 1 0; min-width: 0; margin: 0; padding-block: 3px;
@@ -203,10 +207,35 @@
   .ws-chat-acts { gap: 6px; }
   .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
   .ws-chat-acts .ws-fiber-worker .kbn-card-worker { min-width: 28px; min-height: var(--ws-phone-target); justify-content: center; padding: 0; border: 0; background: transparent; }
-  .ws-chat .ws-transcript-meter :is(.ws-transcript-share, .ws-transcript-hit) { display: none; }
+  /* The header: the name and the menu on the first line; the lifecycle and the family's control beneath. */
+  .ws-chat-head {
+    display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; padding-bottom: 6px;
+    grid-template-areas: 'lead title title acts trail' '. state . . .' '. anc anc anc anc';
+  }
+  .ws-chat-head:has(.ws-chat-pages-family) { grid-template-areas: 'lead title title acts acts' '. state trail trail trail' '. anc anc anc anc'; }
+  .ws-chat-lead { grid-area: lead; }
+  .ws-chat-title { grid-area: title; }
+  .ws-chat-acts { grid-area: acts; }
+  .ws-chat-trail { grid-area: trail; justify-self: start; }
+  .ws-chat-state { grid-area: state; align-self: center; margin: 0; }
+  .ws-chat-lead[hidden] ~ .ws-chat-state { margin-left: 12px; }
+  .ws-chat-ancestry { grid-area: anc; }
+  .ws-chat .ws-chat-menu .ws-chat-meeting:not([hidden]), .ws-chat .ws-chat-menu .ws-chat-fresh[data-when='live']:not([hidden]) { display: flex; }
+  /* Folded, the composer is one row, the field and its one verb; it opens on focus or while a meeting is armed. */
+  .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }
+  .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; justify-self: end; }
+  .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) :is(.kbn-ctl-meet, .kbn-ctl-sends > .kbn-ctl-secondary) { display: none; }
   .ws-chat .ws-chat-menu summary { min-width: var(--ws-phone-target); min-height: var(--ws-phone-target); }
   .ws-chat-trail { display: inline-flex; flex: none; }
   .ws-reader .ws-chat-pages { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; color: var(--ws-ink); }
+  /* With a family the control says what is in it, a dot while any thread waits on the reader. */
+  .ws-reader .ws-chat-pages.ws-chat-pages-family {
+    display: inline-flex; align-items: center; gap: 6px; width: auto; height: 26px; padding: 0 10px; border-radius: 999px;
+    border: var(--ws-line-width) solid var(--ws-hairline) !important; background: var(--ws-fill); color: var(--ws-ink-soft);
+    font: var(--ws-small-size)/1 var(--ws-serif); white-space: nowrap;
+  }
+  .ws-chat-pages-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ws-state-question); }
+  .ws-chat-pages-dot[hidden] { display: none; }
   .ws-chat-pages svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
   .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding-inline: 16px; }
   .ws-chat-compose { padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
