@@ -379,6 +379,10 @@ defmodule Shuttle.CodexApp.TransportTest do
         assert params["approvalPolicy"] == "on-request"
         assert params["approvalsReviewer"] == "auto_review"
         assert params["sandbox"] == "workspace-write"
+
+        assert params["developerInstructions"] ==
+                 "WAKE_MARKER\n\nFELT_MARKER\n\nAGENT_MARKER\n\nDISPATCH_MARKER"
+
         send_result(socket, start_id, %{"thread" => %{"id" => "thread-1"}})
 
         assert %{
@@ -400,11 +404,41 @@ defmodule Shuttle.CodexApp.TransportTest do
                effort: "high",
                approval_policy: "on-request",
                approvals_reviewer: "auto_review",
-               sandbox: "workspace-write"
+               sandbox: "workspace-write",
+               developer_instructions:
+                 "WAKE_MARKER\n\nFELT_MARKER\n\nAGENT_MARKER\n\nDISPATCH_MARKER"
              )
 
     assert :ok = CodexApp.name_thread("thread-1", "Friendly fiber")
 
+    await_peer(peer)
+  end
+
+  test "resume sends explicit developer instructions and omits absent overrides" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        for instructions <- ["PRESERVED_CONTEXT_MARKER", nil] do
+          assert %{"id" => id, "method" => "thread/resume", "params" => params} =
+                   recv_json(socket)
+
+          assert params["threadId"] == "thread-1"
+
+          if instructions,
+            do: assert(params["developerInstructions"] == instructions),
+            else: refute(Map.has_key?(params, "developerInstructions"))
+
+          send_result(socket, id, %{"thread" => %{"id" => "thread-1"}})
+        end
+      end)
+
+    configure_adapter(path)
+
+    assert {:ok, _} =
+             CodexApp.resume_thread("thread-1",
+               developer_instructions: "PRESERVED_CONTEXT_MARKER"
+             )
+
+    assert {:ok, _} = CodexApp.resume_thread("thread-1")
     await_peer(peer)
   end
 

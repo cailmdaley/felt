@@ -86,6 +86,10 @@ defmodule Shuttle.Dispatcher do
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
+    * `:developer_instructions` — optional Codex developer text, appended after
+      WAKE, felt session context and the agent record's instructions at thread
+      creation. On resume, an explicit value requests a native context override;
+      absence preserves the thread's existing developer instructions.
     * `:threads` — `{entries, live}`: the poller's cached constitutions and its
       running workers' runtime keys, from which an orchestrator's launch prompt
       renders its `## Threads` roster (`Shuttle.Threads.roster/4`).
@@ -146,6 +150,8 @@ defmodule Shuttle.Dispatcher do
             fiber_path: Map.get(fiber, "path"),
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
+            developer_instructions: Keyword.get(opts, :developer_instructions),
+            runner: runner,
             previous_session: previous_session,
             threads: Keyword.get(opts, :threads),
             role: get_in(fiber, ["shuttle", "role"]),
@@ -1130,7 +1136,7 @@ defmodule Shuttle.Dispatcher do
       ] ->
         {:error,
          {:invalid_axes,
-          "Managed Codex supports configured model, effort and approval presets, not arbitrary extra_flags."}}
+          "Managed Codex supports structured model, effort, developer_instructions and approval presets, not arbitrary extra_flags (including --resume, --session, --model and -c/--config). Put developer instructions in the agent record's developer_instructions field or the dispatch option."}}
 
       true ->
         :ok
@@ -1176,7 +1182,9 @@ defmodule Shuttle.Dispatcher do
       effort: agent.effort,
       approval_policy: codex_permissions(agent)[:approval_policy],
       approvals_reviewer: codex_permissions(agent)[:approvals_reviewer],
-      sandbox: codex_permissions(agent)[:sandbox]
+      sandbox: codex_permissions(agent)[:sandbox],
+      developer_instructions:
+        Keyword.get(opts, :developer_instructions, agent[:developer_instructions])
     ]
 
   defp codex_permissions(agent) do
@@ -1201,18 +1209,26 @@ defmodule Shuttle.Dispatcher do
     client = Shuttle.AppWorkers.client()
 
     start =
-      case intent do
-        :fresh ->
-          client.start_thread(codex_options(agent, work_dir, opts))
+      with {:ok, context_opts} <-
+             Shuttle.CodexContext.prepare(
+               agent,
+               work_dir,
+               opts,
+               if(intent == :fresh, do: :fresh, else: :resume)
+             ) do
+        case intent do
+          :fresh ->
+            client.start_thread(codex_options(agent, work_dir, context_opts))
 
-        {:previous, id} ->
-          resume_app_thread(
-            id,
-            fiber_id,
-            agent,
-            work_dir,
-            Keyword.put(opts, :runner, runner)
-          )
+          {:previous, id} ->
+            resume_app_thread(
+              id,
+              fiber_id,
+              agent,
+              work_dir,
+              Keyword.put(context_opts, :runner, runner)
+            )
+        end
       end
 
     with {:ok, %{"id" => id} = thread} <- start,
@@ -1303,10 +1319,12 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp capture_app(yap, agent, work_dir, felt_store, opts) do
+    opts = Keyword.put(opts, :felt_store, felt_store)
     client = Shuttle.AppWorkers.client()
 
-    with {:ok, %{"id" => id} = thread} <-
-           client.start_thread(codex_options(agent, work_dir, opts)),
+    with {:ok, context_opts} <- Shuttle.CodexContext.prepare(agent, work_dir, opts, :fresh),
+         {:ok, %{"id" => id} = thread} <-
+           client.start_thread(codex_options(agent, work_dir, context_opts)),
          :ok <-
            put_app_worker(
              thread,

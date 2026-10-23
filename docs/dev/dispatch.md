@@ -165,6 +165,47 @@ Per-worker agent `env` and unsupported arbitrary `extra_flags` are refused; supp
 The worker prompt identifies the App Server backend even with terminal presentation, so worker tools do not mistake the viewer's tmux context for their own execution environment.
 See [operating](operating.md#terminal-codex-workers) for starting the dependency and handling hook-only sessions.
 
+## Managed Codex context and registry compatibility
+
+Managed Codex creates conversations with native `thread/start.developerInstructions` on both `cli` and `app` surfaces.
+It does not depend on a terminal wrapper forwarding CLI config or on a worker inheriting the daemon's session identity.
+The developer instruction text joins these producers, in this order, separated by blank lines:
+
+1. The daemon user's optional `~/.codex/WAKE.md`.
+2. `felt session` run in the worker's project directory.
+   This is the read-only plaintext producer behind `felt hook session`'s `hookSpecificOutput.additionalContext` envelope; the JSON envelope itself is not an instruction.
+3. The resolved agent record's optional `developer_instructions` string.
+4. The optional `developer_instructions` dispatch/capture keyword option.
+
+The context command runs directly, without a login shell, with a 15-second deadline and inherited `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `TMUX`, `TMUX_PANE`, `SHUTTLE_FIBER_PATH`, and `SHUTTLE_SESSION_ID` unset.
+Its cwd selects the project's felt view; the launch prompt separately names the owning felt store and the felt/shuttle skills.
+It neither runs a session-registration hook nor starts a model turn to retrieve instructions.
+A missing WAKE file is allowed; an unreadable WAKE file or failed context command refuses launch instead of silently losing context.
+
+This combined text **replaces**, rather than appends to, config-level `developer_instructions`, matching a wrapper's explicit `--config developer_instructions=...` override.
+Agent and dispatch text are both retained, with dispatch text last; Shuttle does not interpret or resolve contradictory prose.
+Project `AGENTS.md`, server configuration other than this explicit override, and native server requirements still load through Codex.
+On resume without an explicit dispatch instruction, Shuttle omits `developerInstructions` so Codex retains the conversation's persisted native context, including its original agent and dispatch instructions.
+An explicit dispatch instruction on resume rebuilds the same four-part context with the current agent record and supplies it through `thread/resume.developerInstructions`.
+Codex applies resume overrides when loading a thread; for a loaded thread with subscribers or a running turn, Codex preserves its existing native context and can ignore these overrides.
+Shuttle does not unload or replace an observed conversation to force a context change.
+A view-only TUI attach supplies no context override.
+
+The Go registry owns `developer_instructions` on base agent records and projects it through both `shuttle agents resolve --json` and `shuttle show --json`; the daemon consumes that resolved field.
+For example, a custom record can carry `"developer_instructions": "Keep the verification evidence."` alongside `"extra_flags": "--approve-for-me"`.
+The shipped `codex-sol`, `codex-luna`, and `codex-astra` records use models `gpt-sol`, `gpt-luna`, and `gpt-astra`, default efforts `low`, `max`, and `medium`, and `--approve-for-me`.
+Model families resolve through the Go CLI's model catalog; effort overrides remain registry-owned.
+The managed renderer maps `--approve-for-me` and `--not-so-yolo` to `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, and `sandbox: workspace-write`.
+It maps `--dangerously-bypass-approvals-and-sandbox` to `approvalPolicy: never` and `sandbox: danger-full-access`.
+An absent preset leaves the server's permission configuration untouched.
+
+Arbitrary `extra_flags` are **refused before creating or resuming a thread**, not silently ignored or executed through a shell.
+Only an empty value or one complete approval preset above is accepted.
+Examples refused include `--resume <id>`, `--session <id>`, `--model other`, `-c model=other`, and `--config developer_instructions=...`, including any of these appended to an approval preset.
+A custom record containing `--approve-for-me -c developer_instructions=...` must move its instruction text to `developer_instructions`; Shuttle does not parse shell quoting, interpolate variables, or translate arbitrary CLI config.
+Use the structured `model`, `effort`, and `developer_instructions` fields instead.
+Per-worker agent `env` is also refused because tools execute in the shared server's environment; configure that environment on the server itself.
+
 ## tmux server ownership (macOS)
 
 - **The daemon never roots the tmux server on macOS.** A worker's tmux session

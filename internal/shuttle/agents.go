@@ -17,14 +17,15 @@ import (
 // constraint metadata) or an *alias* record (carries AliasOf and optional Axes
 // and Env overlays). An alias resolves to its base agent's harness configuration.
 type AgentRecord struct {
-	ID            string   `json:"id"`
-	CLI           string   `json:"cli,omitempty"`
-	Wrapper       string   `json:"wrapper,omitempty"`
-	Provider      string   `json:"provider,omitempty"`
-	Model         string   `json:"model,omitempty"`
-	ExtraFlags    string   `json:"extra_flags,omitempty"`
-	Env           AgentEnv `json:"env,omitempty"`
-	RequiresModel bool     `json:"requires_model,omitempty"`
+	ID                    string   `json:"id"`
+	CLI                   string   `json:"cli,omitempty"`
+	Wrapper               string   `json:"wrapper,omitempty"`
+	Provider              string   `json:"provider,omitempty"`
+	Model                 string   `json:"model,omitempty"`
+	ExtraFlags            string   `json:"extra_flags,omitempty"`
+	DeveloperInstructions string   `json:"developer_instructions,omitempty"`
+	Env                   AgentEnv `json:"env,omitempty"`
+	RequiresModel         bool     `json:"requires_model,omitempty"`
 	// Axis constraint metadata (base agents only). EffortLevels is the literal
 	// set of effort tokens this harness/model accepts — rendered through to the
 	// CLI verbatim, so each harness/model's native vocabulary lives here (Claude:

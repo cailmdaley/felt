@@ -113,6 +113,38 @@ defmodule Shuttle.AppWorkersTest do
     def state(_), do: Agent.get(__MODULE__, & &1.state)
   end
 
+  defmodule ContextRunner do
+    def cmd("felt", ["session"], opts) do
+      send(Shuttle.Env.app(:context_test_pid), {:context_command, opts})
+      {"# Felt Workflow Context\nFELT_CONTEXT_MARKER\n", 0}
+    end
+
+    def cmd("shuttle", args, opts) do
+      {output, status} = Runner.cmd("shuttle", args, opts)
+
+      if "--json" in args and ("show" in args or "resolve" in args) and status == 0 do
+        data = Jason.decode!(output)
+        agent = if "show" in args, do: get_in(data, ["shuttle", "resolved", "agent"]), else: data
+
+        agent =
+          agent
+          |> Map.put("developer_instructions", "AGENT_CONTEXT_MARKER")
+          |> Map.put("extra_flags", Shuttle.Env.app(:context_extra_flags, agent["extra_flags"]))
+
+        data =
+          if "show" in args,
+            do: put_in(data, ["shuttle", "resolved", "agent"], agent),
+            else: agent
+
+        {Jason.encode!(data), 0}
+      else
+        {output, status}
+      end
+    end
+
+    def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
+  end
+
   defmodule MarkerFailureRunner do
     def cmd("shuttle", args, opts) do
       if mark_runtime?(args), do: {"write failed", 1}, else: Runner.cmd("shuttle", args, opts)
@@ -251,6 +283,131 @@ defmodule Shuttle.AppWorkersTest do
 
     assert [] = App.calls()
     assert [] = AppWorkers.active()
+  end
+
+  for surface <- ["cli", "app"], operation <- [:dispatch, :capture] do
+    @tag surface: surface, operation: operation
+    test "#{surface} #{operation} passes composed developer instructions to the backend",
+         context do
+      home = Path.join(Runner.felt_root(), "home")
+      File.mkdir_p!(Path.join(home, ".codex"))
+      File.write!(Path.join(home, ".codex/WAKE.md"), "SHUTTLE_WAKE_CONTEXT_MARKER")
+      Env.put_env("HOME", home)
+      Env.put_app_env(:context_test_pid, self())
+
+      for key <- ~w(CODEX_THREAD_ID TMUX SHUTTLE_FIBER_PATH),
+          do: Env.put_env(key, "parent-identity")
+
+      if context.operation == :dispatch do
+        fiber("tests/context")
+        Runner.put_shuttle_fields("tests/context", %{"surface" => context.surface})
+
+        assert {:ok, _} =
+                 dispatch("tests/context",
+                   runner: ContextRunner,
+                   developer_instructions: "DISPATCH_CONTEXT_MARKER"
+                 )
+      else
+        assert {:ok, _} =
+                 Dispatcher.capture("Discuss context",
+                   runner: ContextRunner,
+                   work_dir: "/tmp",
+                   felt_store: Runner.felt_root(),
+                   agent: "codex",
+                   surface: context.surface,
+                   developer_instructions: "DISPATCH_CONTEXT_MARKER"
+                 )
+      end
+
+      assert {:start, start_opts} = hd(App.calls())
+
+      assert start_opts[:developer_instructions] ==
+               "SHUTTLE_WAKE_CONTEXT_MARKER\n\n# Felt Workflow Context\nFELT_CONTEXT_MARKER\n\nAGENT_CONTEXT_MARKER\n\nDISPATCH_CONTEXT_MARKER"
+
+      assert_receive {:context_command, command_opts}
+      assert command_opts[:cd] == "/tmp"
+      assert command_opts[:timeout_ms] == 15_000
+
+      for key <- ~w(CODEX_THREAD_ID TMUX SHUTTLE_FIBER_PATH) do
+        assert {^key, nil} = List.keyfind(command_opts[:env], key, 0)
+      end
+
+      assert {:turn, _, prompt, _} = Enum.find(App.calls(), &match?({:turn, _, _, _}, &1))
+      assert prompt =~ "Activate the felt and shuttle skills"
+      assert prompt =~ Runner.felt_root()
+    end
+  end
+
+  for surface <- ["cli", "app"], operation <- [:dispatch, :capture] do
+    @tag surface: surface, operation: operation
+    test "#{surface} #{operation} refuses CLI developer config before creating a conversation",
+         context do
+      Env.put_app_env(:context_test_pid, self())
+
+      Env.put_app_env(
+        :context_extra_flags,
+        ~s(--approve-for-me -c developer_instructions="CUSTOM_MARKER")
+      )
+
+      result =
+        if context.operation == :dispatch do
+          fiber("tests/refused-context")
+          Runner.put_shuttle_fields("tests/refused-context", %{"surface" => context.surface})
+          dispatch("tests/refused-context", runner: ContextRunner)
+        else
+          Dispatcher.capture("Discuss",
+            runner: ContextRunner,
+            work_dir: "/tmp",
+            felt_store: Runner.felt_root(),
+            agent: "codex",
+            surface: context.surface
+          )
+        end
+
+      assert {:error, {:invalid_axes, message}} = result
+      assert message =~ "developer_instructions field or the dispatch option"
+      assert App.calls() == []
+      refute_receive {:context_command, _}
+    end
+  end
+
+  test "managed resume retains native context unless dispatch explicitly supplies a replacement" do
+    fiber("tests/context-resume")
+    Env.put_app_env(:context_test_pid, self())
+
+    assert {:ok, _} =
+             dispatch("tests/context-resume",
+               runner: ContextRunner,
+               developer_instructions: "ORIGINAL_DISPATCH_MARKER"
+             )
+
+    assert_receive {:context_command, _}
+    assert :ok = AppWorkers.deactivate("app-session-1")
+    App.set(:calls, [])
+
+    assert {:ok, _} =
+             dispatch("tests/context-resume", runner: ContextRunner, resume_mode: "previous")
+
+    assert {:resume, "app-session-1", opts} = Enum.find(App.calls(), &match?({:resume, _, _}, &1))
+    assert is_nil(opts[:developer_instructions])
+    refute_receive {:context_command, _}
+
+    assert :ok = AppWorkers.deactivate("app-session-1")
+    App.set(:calls, [])
+
+    assert {:ok, _} =
+             dispatch("tests/context-resume",
+               runner: ContextRunner,
+               resume_mode: "previous",
+               developer_instructions: "NEW_DISPATCH_MARKER"
+             )
+
+    assert {:resume, "app-session-1", opts} = Enum.find(App.calls(), &match?({:resume, _, _}, &1))
+
+    assert opts[:developer_instructions] =~
+             "FELT_CONTEXT_MARKER\n\nAGENT_CONTEXT_MARKER\n\nNEW_DISPATCH_MARKER"
+
+    assert_receive {:context_command, _}
   end
 
   test "terminal dispatch owns the same backend and presents only the exact thread" do

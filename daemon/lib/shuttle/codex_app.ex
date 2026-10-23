@@ -254,6 +254,7 @@ defmodule Shuttle.CodexApp do
     |> maybe_put("approvalPolicy", opts[:approval_policy])
     |> maybe_put("approvalsReviewer", opts[:approvals_reviewer])
     |> maybe_put("sandbox", opts[:sandbox])
+    |> maybe_put("developerInstructions", opts[:developer_instructions])
     |> maybe_put("config", if(opts[:effort], do: %{"model_reasoning_effort" => opts[:effort]}))
   end
 
