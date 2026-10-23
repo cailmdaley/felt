@@ -137,8 +137,15 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
 
 ## Codex conversation ownership and terminal viewers
 
-Both Codex presentations use the App Server selected by `SHUTTLE_CODEX_SOCKET`, or the default socket under `CODEX_HOME`.
-The server must already be available; dispatch does not start another backend on failure.
+Both Codex presentations use the App Server selected by `SHUTTLE_CODEX_SOCKET`, or `/tmp/shuttle-codex-<euid>-<host-hash>/control.sock`, with the first 16 lowercase SHA-256 hexadecimal characters of the actual OS hostname.
+`CODEX_HOME` stays persistent and doesn't select this control path.
+`Shuttle.CodexBackend` ensures the dependency asynchronously, even under worker boot quarantine, and adopts a healthy existing server without changing it.
+It never creates a project, thread, or model turn merely to establish readiness.
+Dispatch and capture preflight the cached health before creating a conversation; a non-ready backend returns retryable `backend_not_ready` waiting responses.
+The Poller shows the wait with zero failed attempts and retries on the ordinary poll, without the five-minute preflight cooldown.
+An explicit request isn't queued for an unbounded future launch, and a capture must be repeated after readiness.
+The backend's endpoint-specific tmux session survives Shuttle restarts; owned dead panes and healthy process observations authorize native locked stale recovery, never live-server replacement.
+`GET /api/v1/version` exposes its independent `codex_backend` health.
 Terminal dispatch preflights its wrapper and tmux before creating a conversation.
 The backend owns the thread, configured model and effort, initial turn, and task assignment.
 A terminal viewer only renders and accepts human input for that conversation.

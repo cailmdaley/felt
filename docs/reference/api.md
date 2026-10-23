@@ -109,8 +109,11 @@ can't report yet, counts as started (`state: "starting"`).
 Existing-fiber dispatch reads the persisted `shuttle.surface`; omission selects terminal presentation.
 Both Codex surfaces use the owning host's selected App Server and report an error if it cannot be reached.
 Model and effort remain agent-registry choices.
-An unavailable managed server returns HTTP 503 with `reason: "app_server_unavailable"` and guidance to restore the selected backend.
-Shuttle does not start an independent runtime, launch embedded, or silently change the selected endpoint.
+The daemon ensures the selected backend asynchronously, without creating a project, thread, or model turn during dependency startup.
+Before readiness, dispatch and capture return HTTP 503 with `reason: "backend_not_ready"`, `waiting: true`, and `retryable: true`, without creating a conversation or queuing a launch request.
+An armed fiber retries on the ordinary poll without a preflight cooldown; a capture must be repeated after readiness.
+A server that becomes unavailable during a native operation can still return HTTP 503 with `reason: "app_server_unavailable"`; a known conversation identity remains owned and must not be replaced.
+Shuttle never launches embedded, replaces a live server, or silently changes the selected endpoint.
 
 Successful app capture, dispatch, and claim responses carry `surface: "app"`,
 `project_id`, `thread_id`, `session_uuid`, `transcript_session_uuid`, and
@@ -643,11 +646,17 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
+| `GET /version` | Daemon build stamp and liveness probe, including `ready`, independent `codex_backend` health, and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
 | `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+
+`codex_backend` is a cached, bounded-read health object with `state` (`starting`, `ready`, or `waiting`), `endpoint`, `error`, and `next_attempt_at` (UTC timestamp or null).
+Its reconciliation runs off the request path and independently of worker boot quarantine.
+`ready: true` at the top level means the daemon has initialized, not that Codex can accept work.
+Use `codex_backend.state == "ready"` to check the selected App Server; native `codex app-server daemon version` checks Codex's separate `CODEX_HOME` endpoint.
+The default selected endpoint uses literal `/tmp`, effective uid, and the actual OS hostname hash; `SHUTTLE_CODEX_SOCKET` overrides it without migrating durable conversation records.
 
 The endpoint binds before synchronous store resolution, orphan adoption,
 event-stream seeding, and Tailnet bridge reconciliation finish. Until every

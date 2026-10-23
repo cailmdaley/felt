@@ -330,20 +330,41 @@ window, and that is already a no-op off macOS (`activate/1` in
 
 Windows is unsupported.
 
-### Explicit Codex endpoint
+### Managed Codex dependency and endpoint
 
-`SHUTTLE_CODEX_SOCKET` selects the same Unix WebSocket endpoint for both Codex dispatch presentations, terminal attachment, and native session messaging. Set it in the Shuttle daemon's environment when
-using an explicitly shared Desktop backend. Without it, both clients use
-`$CODEX_HOME/app-server-control/app-server-control.sock`, with `CODEX_HOME`
-defaulting to `~/.codex`. An empty override uses that default. An unavailable
-explicit endpoint is an error; clients do not switch to another conversation
-owner or start a replacement backend.
-The App Server is an operator-managed dependency; Shuttle does not bootstrap, restart, or replace it during dispatch.
-Its tools use the environment inherited when that server started, not the terminal viewer's environment.
+Shuttle ensures that the selected Codex App Server is running, independently of dispatch and boot quarantine.
+`Shuttle.CodexBackend` reconciles asynchronously with bounded observations and exponential launch backoff, from 2 seconds to 300 seconds.
+It initializes a connection without creating a project, thread, or model turn.
+`GET /api/v1/version` reports its independent `codex_backend` health; daemon `ready` does not imply backend readiness.
+Dispatch and capture return a retryable wait before creating a conversation when the backend isn't ready.
+The autonomous poll retries without the five-minute preflight cooldown.
+
+`SHUTTLE_CODEX_SOCKET` is authoritative for daemon transport, native Go messaging, and remote terminal viewers.
+An empty or absent override selects `/tmp/shuttle-codex-<euid>-<host-hash>/control.sock`.
+`host-hash` is the first 16 lowercase hexadecimal characters of SHA-256 over the actual OS hostname, not Shuttle's logical host ID.
+The literal `/tmp` base is independent of `HOME`, `CODEX_HOME`, `TMPDIR`, and `XDG_RUNTIME_DIR`, so separate login environments and network-mounted homes agree on a host-local endpoint.
+Explicit overrides must be clean absolute Unix socket paths of at most 100 bytes.
+The endpoint root must be a real directory owned by the effective uid with mode `0700`; insecure precreated roots and user-controlled symlink components are refused, not repaired.
+The root-controlled macOS `/tmp` alias is accepted.
+Codex 0.162.1's exact protected rendezvous alias is accepted after its target root, ownership, type, and permissions are verified; arbitrary leaf symlinks are refused.
+The socket remains same-user IPC, with filesystem permissions and Codex's peer-UID checks, not cross-host authentication.
+
+The manager starts `command codex app-server --listen unix://PATH` in an endpoint-specific tmux session, after the macOS `TmuxServer.ensure_available` guard.
+It scrubs worker identity, fiber, run, and tmux variables before starting the backend; it doesn't depend on an interactive Codex wrapper.
+The private endpoint root holds exclusively created launch scripts, while tmux owns the backend process across manager and Shuttle restarts.
+A healthy existing server is adopted untouched.
+A retained owned dead pane, a successful process scan with no server holder, and a refused or missing socket authorize recovery through Codex's native per-endpoint startup lock and stale-socket checks.
+Remote TUI clients don't count as server holders.
+Unowned unresponsive sockets, missing sockets with live server holders, failed observations, and another manager still starting remain uncertain and never authorize replacement.
+Shuttle never kills a live backend, unlinks its socket, or restarts it for a config change.
+After reboot, reconciliation starts an absent dependency without releasing worker quarantine.
+
+`CODEX_HOME` stays persistent, defaulting to `~/.codex`; authentication, configuration, and rollouts aren't moved to `/tmp` or copied into another home.
+Codex's native `app-server daemon start` and `daemon version` manage and describe its own `CODEX_HOME` endpoint, not Shuttle's custom listener.
+Plain App Server startup briefly takes Codex's `CODEX_HOME` startup lock, but persistent Shuttle process ownership, death evidence, and endpoint-specific lifecycle state remain host-local.
+Backend tools use the server's environment, not the terminal viewer's environment.
 Managed Codex refuses per-agent environment overrides and unsupported arbitrary CLI flags rather than silently ignoring them.
 
-Codex 0.162.1 derives its managed socket, pidfile, lifecycle locks, and recovery state from `CODEX_HOME`, without a host component.
-Unix sockets remain host-local even when their path lives on a network filesystem.
-Use a host-local `CODEX_HOME` on multi-host clusters, or an explicitly configured host-local backend and socket.
-The socket is same-user local IPC, guarded by filesystem permissions and peer-UID checks; it is not cross-host authentication.
-Codex's detached daemon and updater do not persist through reboot without another start.
+Durable conversation records pin their host and endpoint.
+Changing the default or an override doesn't rewrite old records or authorize connecting an old thread to a different server.
+Restore the recorded endpoint or deliberately reconcile ownership; shared rollout files aren't evidence of live conversation ownership.
