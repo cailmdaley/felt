@@ -184,6 +184,8 @@ export interface KanbanCard {
    * standing constitution's like any other.
    */
   shuttleSeat?: boolean
+  /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
+  shuttleBlockedOn?: string
   /** `shuttle.role` — the single office's slug (`roles/<slug>`). */
   shuttleRole?: string
   /**

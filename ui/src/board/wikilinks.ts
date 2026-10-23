@@ -27,6 +27,7 @@ import { inLane } from './requestLanes.js'
 export interface FiberIndexEntry {
   id: string
   name: string
+  uid?: string
 }
 
 /** One in-flight/settled index fetch per daemon base, shared by every panel.

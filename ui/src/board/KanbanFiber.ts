@@ -49,6 +49,8 @@ export interface Fiber {
   shuttleRole?: string;
   /** `shuttle.seat` — an office seat, drawn among the Roles when at rest. */
   shuttleSeat?: boolean;
+  /** `shuttle.blocked_on` — what a resting constitution waits for: a fiber uid, or text. */
+  shuttleBlockedOn?: string;
   /** `shuttle.runtime.session_uuid` — the harness session UUID of the worker the
    * daemon most recently launched for this fiber. Machine-managed, and the ONLY
    * value on the row that changes when a fresh dispatch replaces one session with
@@ -147,6 +149,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleKind: 'oneshot' | 'standing' | undefined;
   let shuttleRole: string | undefined;
   let shuttleSeat: boolean | undefined;
+  let shuttleBlockedOn: string | undefined;
   let shuttleSessionUuid: string | undefined;
   let shuttleDispatchedAt: string | undefined;
   let shuttleHandedOffAt: string | undefined;
@@ -173,6 +176,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     if (typeof s.host === 'string' && s.host.trim()) shuttleHost = s.host.trim();
     if (typeof s.role === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s.role)) shuttleRole = s.role;
     if (typeof s.seat === 'boolean') shuttleSeat = s.seat;
+    if (typeof s.blocked_on === 'string' && s.blocked_on.trim()) shuttleBlockedOn = s.blocked_on.trim();
 
 
     // shuttle.runtime — the machine-managed nested block (session_uuid,
@@ -245,6 +249,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleKind,
     shuttleRole,
     shuttleSeat,
+    shuttleBlockedOn,
     shuttleSessionUuid,
     shuttleDispatchedAt,
     shuttleHandedOffAt,

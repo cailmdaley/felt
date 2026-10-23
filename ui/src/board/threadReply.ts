@@ -1,3 +1,4 @@
+import { nameRef, untilWords, type Until } from './blockedOn.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { normalizeRecord } from './transcript/records.js'
 import { THREAD_LABEL, type ThreadState } from './threads.js'
@@ -107,11 +108,11 @@ export class ThreadWhisper {
   constructor(replies?: LastReplies) { this.replies = replies }
 
   /** Show for `line` after a breath (the pointer passing over shows nothing), or at once. */
-  show(line: HTMLElement, card: KanbanCard, state: ThreadState, delay: number): void {
+  show(line: HTMLElement, card: KanbanCard, state: ThreadState, delay: number, until?: Until | null): void {
     clearTimeout(this.timer)
     this.for = line
-    if (delay <= 0) { this.draw(line, card, state); return }
-    this.timer = window.setTimeout(() => { if (this.for === line && line.isConnected) this.draw(line, card, state) }, delay)
+    if (delay <= 0) { this.draw(line, card, state, until); return }
+    this.timer = window.setTimeout(() => { if (this.for === line && line.isConnected) this.draw(line, card, state, until) }, delay)
   }
 
   hide(line?: HTMLElement): void {
@@ -121,12 +122,17 @@ export class ThreadWhisper {
     if (this.el) this.el.hidden = true
   }
 
-  private draw(line: HTMLElement, card: KanbanCard, state: ThreadState): void {
+  private draw(line: HTMLElement, card: KanbanCard, state: ThreadState, until?: Until | null): void {
     const el = this.element()
     const head = el.querySelector<HTMLElement>('.kbn-thread-whisper-head')!
     const body = el.querySelector<HTMLElement>('.kbn-thread-whisper-body')!
     const moved = movedAt(card)
-    head.textContent = [THREAD_LABEL[state], moved !== undefined ? humanizeIdleAge(Date.now() - moved) : ''].filter(Boolean).join(' · ')
+    const stateLine = (name?: string): string =>
+      [THREAD_LABEL[state], until ? untilWords(name ? { text: name } : until) : '', moved !== undefined ? humanizeIdleAge(Date.now() - moved) : ''].filter(Boolean).join(' · ')
+    head.textContent = stateLine()
+    if (until?.ref && !until.card) {
+      void nameRef(until.ref).then(name => { if (name && this.for === line && !el.hidden) head.textContent = stateLine(name) })
+    }
     el.dataset.threadState = state
     const fallback = card.ask?.text ?? card.outcome ?? ''
     body.textContent = plainReply(fallback)

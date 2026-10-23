@@ -17,13 +17,13 @@ export interface FiberSearchResult {
  */
 export async function fetchFiberIndex(
   shuttleBase: string,
-): Promise<Array<{ id: string; name: string }>> {
+): Promise<Array<{ id: string; name: string; uid?: string }>> {
   const res = await fetch(`${shuttleBase}/api/v1/fibers?fields=index`)
   if (!res.ok) throw new Error(`${res.status}`)
   const body = (await res.json()) as {
-    fibers?: Array<{ fiber?: { id?: unknown; slug?: unknown; name?: unknown } }>
+    fibers?: Array<{ fiber?: { id?: unknown; uid?: unknown; slug?: unknown; name?: unknown } }>
   }
-  const out: Array<{ id: string; name: string }> = []
+  const out: Array<{ id: string; name: string; uid?: string }> = []
   const seen = new Set<string>()
   for (const row of body.fibers ?? []) {
     // Same id rule as `mapFeltJsonToFiber`: felt's wire `id` may be the
@@ -36,7 +36,9 @@ export async function fetchFiberIndex(
     if (!id || seen.has(id)) continue
     seen.add(id)
     const name = typeof row.fiber?.name === 'string' && row.fiber.name ? row.fiber.name : id
-    out.push({ id, name })
+    // The wire `id` is the uid when a `slug` carries the path.
+    const uid = typeof row.fiber?.uid === 'string' && row.fiber.uid ? row.fiber.uid : slug ? wireId : undefined
+    out.push(uid ? { id, name, uid } : { id, name })
   }
   return out
 }

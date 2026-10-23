@@ -145,6 +145,11 @@ export class ThreadIndex {
     }
   }
 
+  /** The card for a fiber named by uid, or by id when felt gave it none. */
+  fiber(ref: string): KanbanCard | undefined {
+    const key = this.firstOf.get(ref) ?? this.firstOf.get(ref.toUpperCase())
+    return key === undefined ? undefined : this.cards.get(key)
+  }
   /** The index's own copy of a card, which may be fresher than a caller's. */
   card(card: KanbanCard): KanbanCard { return this.cards.get(threadKey(card)) ?? this.cards.get(this.key(card)) ?? card }
   parentOf(card: KanbanCard): KanbanCard | undefined { return this.parents.get(this.key(card)) }
