@@ -229,15 +229,15 @@ func TestToolCapsAndUnicode(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(m) != 2 || len(m[0].Text) > ToolCallCap || len(m[1].Text) != len(text) {
-		t.Fatalf("caps/full text: %d %+v", len(m), m)
+	if len(m) != 2 || len(m[0].Text) > 2048 || len(m[1].Text) != len(text) {
+		t.Fatalf("tool cap or full assistant text violated (%d units)", len(m))
 	}
 	line = `{"type":"message","message":{"role":"toolResult","content":[{"type":"text","text":"` + text + `"}]}}`
 	m, e = parseLine("pi", []byte(line), &metadata{})
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(m) != 1 || len(m[0].Text) != ToolResultCap {
+	if len(m) != 1 || len(m[0].Text) != 4096 {
 		t.Fatal("tool result cap")
 	}
 }

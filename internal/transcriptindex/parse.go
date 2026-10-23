@@ -69,6 +69,15 @@ func parseLine(harness string, line []byte, meta *metadata) ([]message, error) {
 			return nil, nil
 		}
 	case "codex":
+		// Early native rollouts use an untyped session header and unwrapped
+		// conversation items. Their messages have no per-message timestamp.
+		if e.Type == "" && e.ID != "" {
+			meta.Session = e.ID
+			if e.CWD != "" {
+				meta.Project = e.CWD
+			}
+			return nil, nil
+		}
 		if e.Type == "session_meta" {
 			var p struct {
 				ID      string `json:"id"`
@@ -95,10 +104,14 @@ func parseLine(harness string, line []byte, meta *metadata) ([]message, error) {
 			}
 			return nil, nil
 		}
-		if e.Type != "response_item" {
+		switch e.Type {
+		case "response_item":
+			raw = e.Payload
+		case "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output":
+			raw = line
+		default:
 			return nil, nil
 		}
-		raw = e.Payload
 	default:
 		return nil, nil
 	}
@@ -204,6 +217,17 @@ func argumentText(raw json.RawMessage) string {
 	var v any
 	if json.Unmarshal(raw, &v) != nil {
 		return ""
+	}
+	// Codex stores function arguments as JSON inside a JSON string.
+	// Decode that structured value before scrubbing binary/signature fields.
+	if s, ok := v.(string); ok {
+		var inner any
+		if json.Unmarshal([]byte(s), &inner) == nil {
+			switch inner.(type) {
+			case map[string]any, []any:
+				v = inner
+			}
+		}
 	}
 	var clean func(any) any
 	clean = func(v any) any {

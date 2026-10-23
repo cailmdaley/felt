@@ -63,7 +63,16 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = f.Chmod(0o600); err != nil {
+		f.Close()
+		return nil, err
+	}
 	_ = f.Close()
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if err = os.Chmod(path+suffix, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
@@ -120,11 +129,14 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 	}
 	problems := []string{}
 	for _, root := range roots {
+		complete := true
+		seen := map[string]bool{}
 		err := filepath.WalkDir(root.Path, func(path string, d fs.DirEntry, err error) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			if err != nil {
+				complete = false
 				if !errors.Is(err, os.ErrNotExist) {
 					problems = append(problems, fmt.Sprintf("%s: %v", path, err))
 				}
@@ -139,6 +151,7 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 			if root.Harness == "codex" && !strings.HasPrefix(d.Name(), "rollout-") {
 				return nil
 			}
+			seen[path] = true
 			if err := i.IndexFile(ctx, path, root.Harness); err != nil {
 				if ctx.Err() != nil {
 					return ctx.Err()
@@ -149,6 +162,11 @@ func (i *Index) CatchUp(ctx context.Context, roots []Root, rebuild bool) ([]stri
 		})
 		if err != nil {
 			return problems, err
+		}
+		if complete {
+			if err := i.pruneMissing(ctx, root, seen); err != nil {
+				return problems, err
+			}
 		}
 	}
 	return problems, nil
@@ -183,8 +201,16 @@ func tailHash(f *os.File, offset int64) (string, error) {
 	if _, err := f.ReadAt(b, offset-n); err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
+	// A bounded fingerprint detects prefix and checkpoint-tail rewrites without
+	// rereading append-only history. Arbitrary in-place edits to the middle of
+	// a growing file require --rebuild; native harnesses append their records.
+	h := sha256.New()
+	_, _ = h.Write(b)
+	if _, err := f.ReadAt(b, 0); err != nil {
+		return "", err
+	}
+	_, _ = h.Write(b)
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // IndexFile checkpoints messages and the complete-line byte offset atomically.
