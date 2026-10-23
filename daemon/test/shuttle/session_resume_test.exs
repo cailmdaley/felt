@@ -303,6 +303,21 @@ defmodule Shuttle.SessionResumeTest do
     end
   end
 
+  test "historical owned Codex refuses another endpoint before native resume" do
+    assert :ok =
+             Shuttle.AppWorkers.put(%{
+               "session_uuid" => @codex,
+               "active" => false,
+               "backend_host" => Shuttle.Poller.own_host_id(),
+               "backend_endpoint" => "/another-owner.sock"
+             })
+
+    assert {:error, :app_endpoint_changed} =
+             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
+
+    refute_received {:native_resume, _}
+  end
+
   test "historical Codex refuses an embedded holder before native resume" do
     Runner.set_ps({"1234 1 codex resume #{@codex}\n", 0})
 
@@ -314,7 +329,14 @@ defmodule Shuttle.SessionResumeTest do
   end
 
   test "durably owned historical Codex does not confuse an App Server identity with an embedded holder" do
-    :ok = Shuttle.AppWorkers.put(%{"session_uuid" => @codex, "active" => false})
+    :ok =
+      Shuttle.AppWorkers.put(%{
+        "session_uuid" => @codex,
+        "active" => false,
+        "backend_host" => Shuttle.Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+      })
+
     Runner.set_ps({"1234 1 codex --remote unix:///control.sock resume #{@codex}\n", 0})
 
     assert {:ok, %{tmux_session: "resume-" <> @codex, created: true}} =

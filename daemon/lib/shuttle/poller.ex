@@ -3941,7 +3941,7 @@ defmodule Shuttle.Poller do
 
           idle? =
             app? and (handed_off? or Map.get(fiber, "status") == "closed") and
-              Shuttle.AppWorkers.client().state(Shuttle.AppWorkers.id(meta.session)) == :idle
+              Shuttle.AppWorkers.state(Shuttle.AppWorkers.id(meta.session)) == :idle
 
           cond do
             handed_off? and idle? ->
@@ -4415,7 +4415,7 @@ defmodule Shuttle.Poller do
   # Start a turn carrying `text` in a live Codex app conversation and mark the
   # app worker running again.
   defp start_app_turn("codex-app:" <> id = session, text) do
-    case Shuttle.AppWorkers.client().start_turn(id, text, []) do
+    case Shuttle.AppWorkers.call(id, :start_turn, [text, []]) do
       {:ok, turn} ->
         :ok =
           Shuttle.AppWorkers.update(id, %{

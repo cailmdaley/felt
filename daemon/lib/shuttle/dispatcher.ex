@@ -1194,7 +1194,6 @@ defmodule Shuttle.Dispatcher do
 
         {:previous, id} ->
           resume_app_thread(
-            client,
             id,
             fiber_id,
             agent,
@@ -1217,7 +1216,7 @@ defmodule Shuttle.Dispatcher do
              opts
            ) do
       # Identity is durable before naming, turning, or adopting the conversation.
-      if intent == :fresh, do: name_app_thread(client, id, Path.basename(fiber_id))
+      if intent == :fresh, do: name_app_thread(id, Path.basename(fiber_id))
 
       marker =
         Shuttle.Continuation.write_dispatch(runner, Keyword.get(opts, :felt_store), fiber_id, %{
@@ -1259,7 +1258,7 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
-  defp resume_app_thread(client, id, fiber_id, agent, work_dir, opts) do
+  defp resume_app_thread(id, fiber_id, agent, work_dir, opts) do
     with :ok <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
          :ok <-
            Shuttle.AppWorkers.reserve_resume(
@@ -1268,7 +1267,7 @@ defmodule Shuttle.Dispatcher do
              Keyword.get(opts, :uid),
              Keyword.get(opts, :felt_store)
            ) do
-      case client.resume_thread(id, app_opts(agent, work_dir, opts)) do
+      case Shuttle.AppWorkers.call(id, :resume_thread, [app_opts(agent, work_dir, opts)]) do
         {:ok, %{"id" => ^id}} = result ->
           result
 
@@ -1306,7 +1305,7 @@ defmodule Shuttle.Dispatcher do
              },
              opts
            ),
-         :ok <- name_app_thread(client, id, yap),
+         :ok <- name_app_thread(id, yap),
          {:ok, _} <-
            Shuttle.AppWorkers.start_turn(
              id,
@@ -1338,23 +1337,26 @@ defmodule Shuttle.Dispatcher do
   # The durable record of a just-started app conversation; `fiber` carries its
   # `fiber_id`, `uid` and `felt_store` (nil fiber and uid for a capture).
   defp put_app_worker(%{"id" => id} = thread, agent, work_dir, fiber, opts) do
-    Shuttle.AppWorkers.put(
-      Map.merge(fiber, %{
-        "session_uuid" => id,
-        "thread_id" => id,
-        "transcript_session_uuid" => app_transcript_id(thread),
-        "project_id" => thread["projectId"],
-        "cwd" => work_dir,
-        "agent_id" => agent.id,
-        "surface" => Keyword.get(opts, :surface) || "cli",
-        "terminal_wrapper" => agent.wrapper,
-        "terminal_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
-        "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id),
-        "active" => true,
-        "launch_state" => "starting",
-        "started_at" => DateTime.to_iso8601(DateTime.utc_now())
-      })
-    )
+    with :ok <- Shuttle.AppWorkers.check_known_endpoint(id) do
+      Shuttle.AppWorkers.put(
+        Map.merge(fiber, %{
+          "session_uuid" => id,
+          "thread_id" => id,
+          "transcript_session_uuid" => app_transcript_id(thread),
+          "project_id" => thread["projectId"],
+          "cwd" => work_dir,
+          "agent_id" => agent.id,
+          "surface" => Keyword.get(opts, :surface) || "cli",
+          "terminal_wrapper" => agent.wrapper,
+          "backend_host" => Shuttle.Poller.own_host_id(),
+          "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
+          "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id),
+          "active" => true,
+          "launch_state" => "starting",
+          "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+        })
+      )
+    end
   end
 
   defp finish_app_launch(id, runner) do
@@ -1378,11 +1380,12 @@ defmodule Shuttle.Dispatcher do
   # but only after that endpoint verifies the exact thread. No fresh fallback.
   defp reserve_app_resume(id, fiber_id, agent, work_dir, opts) do
     case Shuttle.AppWorkers.get(id) do
-      {:ok, _} ->
-        :ok
+      {:ok, record} ->
+        Shuttle.AppWorkers.check_endpoint(record)
 
       {:error, :not_found} ->
-        with :ok <-
+        with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
+             :ok <-
                check_resume_target_free(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)),
              {:ok, %{"id" => ^id} = thread} <-
                Shuttle.AppWorkers.client().resume_thread(id, app_opts(agent, work_dir, opts)),
@@ -1405,7 +1408,7 @@ defmodule Shuttle.Dispatcher do
   defp app_transcript_id(%{"id" => id} = thread),
     do: thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id)
 
-  defp name_app_thread(client, id, title) do
+  defp name_app_thread(id, title) do
     label =
       title
       |> String.split(~r/\R/, trim: true)
@@ -1416,7 +1419,7 @@ defmodule Shuttle.Dispatcher do
       |> String.slice(0, 80)
 
     # Naming is cosmetic; a rejected rename must not block the durable worker.
-    _ = client.name_thread(id, "Shuttle — " <> label)
+    _ = Shuttle.AppWorkers.call(id, :name_thread, ["Shuttle — " <> label])
     :ok
   rescue
     _ -> :ok

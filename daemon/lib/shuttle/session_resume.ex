@@ -142,7 +142,7 @@ defmodule Shuttle.SessionResume do
 
   defp resume_identity_free(%{harness: "codex", session: id}, runner) do
     case Shuttle.AppWorkers.get(id) do
-      {:ok, _} -> :ok
+      {:ok, record} -> Shuttle.AppWorkers.check_endpoint(record)
       _ -> not_held(id, runner)
     end
   end
@@ -150,7 +150,11 @@ defmodule Shuttle.SessionResume do
   defp resume_identity_free(plan, runner), do: not_held(plan.session, runner)
 
   defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts}) do
-    case Shuttle.AppWorkers.client().resume_thread(id, opts) do
+    result =
+      with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
+           do: Shuttle.AppWorkers.client().resume_thread(id, opts)
+
+    case result do
       {:ok, %{"id" => ^id}} ->
         :ok
 

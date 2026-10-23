@@ -223,14 +223,27 @@ defmodule Shuttle.CodexApp do
         opts = Shuttle.Env.app(:codex_app_transport_opts, [])
 
         case Transport.start_link(Keyword.put(opts, :name, @client)) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:ok, pid} -> matching_client(pid)
+          {:error, {:already_started, pid}} -> matching_client(pid)
           {:error, _reason} -> {:error, :app_server_unavailable}
         end
 
       pid ->
-        {:ok, pid}
+        matching_client(pid)
     end
+  end
+
+  defp matching_client(pid) do
+    endpoint =
+      Keyword.get(
+        Shuttle.Env.app(:codex_app_transport_opts, []),
+        :socket_path,
+        Transport.default_socket()
+      )
+
+    if Transport.endpoint(pid) == endpoint, do: {:ok, pid}, else: {:error, :app_endpoint_changed}
+  catch
+    :exit, _ -> {:error, :app_server_unavailable}
   end
 
   defp thread_options(opts) do

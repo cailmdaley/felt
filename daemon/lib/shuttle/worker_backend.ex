@@ -24,7 +24,7 @@ defmodule Shuttle.WorkerBackend do
         :terminal
 
       id ->
-        %{state: remote, phase: phase} = AppWorkers.client().status(id)
+        %{state: remote, phase: phase} = AppWorkers.status(id)
 
         {remote, phase} =
           if remote == :not_loaded do
@@ -35,7 +35,7 @@ defmodule Shuttle.WorkerBackend do
                    Map.get(expected, :felt_store)
                  ) do
               :ok ->
-                %{state: recovered, phase: recovered_phase} = AppWorkers.client().status(id)
+                %{state: recovered, phase: recovered_phase} = AppWorkers.status(id)
                 {recovered, recovered_phase}
 
               {:error, _} ->
@@ -92,9 +92,11 @@ defmodule Shuttle.WorkerBackend do
 
   defp stop_app(runner, session, id) do
     result =
-      if AppWorkers.client().state(id) == :missing,
-        do: :ok,
-        else: AppWorkers.client().interrupt(id)
+      with :ok <- AppWorkers.check_endpoint(id) do
+        if AppWorkers.state(id) == :missing,
+          do: :ok,
+          else: AppWorkers.call(id, :interrupt)
+      end
 
     case result do
       stopped when stopped in [:ok, {:error, :thread_missing}] ->
@@ -140,7 +142,8 @@ defmodule Shuttle.WorkerBackend do
           transcript_session_uuid: AppWorkers.transcript_id(id),
           desktop_link: Shuttle.SessionLink.desktop_url(id),
           project_id: record["project_id"],
-          terminal_error: record["terminal_error"]
+          terminal_error: record["terminal_error"],
+          backend_error: record["backend_error"]
         }
     end
   end

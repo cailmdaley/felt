@@ -325,6 +325,7 @@ defmodule Shuttle.Poller.Snapshot do
       state: Map.get(meta, :state, "running"),
       launch_error: Map.get(meta, :launch_error),
       terminal_error: Map.get(Shuttle.WorkerBackend.wire(meta.session), :terminal_error),
+      backend_error: Map.get(Shuttle.WorkerBackend.wire(meta.session), :backend_error),
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }

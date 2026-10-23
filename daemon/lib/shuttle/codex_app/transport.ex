@@ -22,6 +22,8 @@ defmodule Shuttle.CodexApp.Transport do
     :exit, _ -> {:error, :disconnected}
   end
 
+  def endpoint(server), do: GenServer.call(server, :endpoint, 1_000)
+
   def close(server) do
     GenServer.stop(server, :normal)
   catch
@@ -46,7 +48,14 @@ defmodule Shuttle.CodexApp.Transport do
          {:ok, rest} <- upgrade(socket, deadline),
          {:ok, rest, fragments} <- initialize(socket, rest, deadline),
          :ok <- :inet.setopts(socket, active: true) do
-      state = %{socket: socket, buffer: <<>>, fragments: fragments, next_id: 1, pending: %{}}
+      state = %{
+        socket: socket,
+        socket_path: socket_path,
+        buffer: <<>>,
+        fragments: fragments,
+        next_id: 1,
+        pending: %{}
+      }
 
       case consume_frames(rest, state) do
         {:ok, buffer, state} -> {:ok, %{state | buffer: buffer}}
@@ -58,6 +67,8 @@ defmodule Shuttle.CodexApp.Transport do
   end
 
   @impl true
+  def handle_call(:endpoint, _from, state), do: {:reply, state.socket_path, state}
+
   def handle_call({:request, method, params, timeout}, from, state) do
     id = state.next_id
     message = Jason.encode!(%{"id" => id, "method" => method, "params" => params})

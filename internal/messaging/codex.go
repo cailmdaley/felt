@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync/atomic"
@@ -48,6 +49,39 @@ func codexSocket(env *sysenv.Env) string {
 		home = filepath.Join(h, ".codex")
 	}
 	return filepath.Join(home, "app-server-control", "app-server-control.sock")
+}
+
+// A durable AppWorkers record pins the native conversation owner. An absent
+// record leaves hook-only sessions unchanged; an unreadable or unpinned record
+// cannot safely inherit whichever endpoint happens to be configured today.
+func checkCodexOwnerEndpoint(env *sysenv.Env, host, id string) error {
+	path := filepath.Join(dataDir(env), "app-workers", id+".json")
+	bytes, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return errCode("ownership_record_unreadable", "cannot verify Codex owner record %s: %v", path, err)
+	}
+	var record map[string]any
+	if err := json.Unmarshal(bytes, &record); err != nil || record == nil {
+		return errCode("ownership_record_unreadable", "invalid Codex owner record %s", path)
+	}
+	ownerHost, _ := record["backend_host"].(string)
+	if ownerHost == "" {
+		return errCode("app_host_unrecorded", "Codex owner host is unrecorded in %s; explicitly repair the ownership record before messaging", path)
+	}
+	if ownerHost != host {
+		return errCode("app_host_changed", "Codex conversation belongs to host %q, not %q; restore its recorded owner", ownerHost, host)
+	}
+	endpoint, _ := record["backend_endpoint"].(string)
+	if endpoint == "" {
+		return errCode("app_endpoint_unrecorded", "Codex owner endpoint is unrecorded in %s; explicitly repair the ownership record before messaging", path)
+	}
+	if endpoint != codexSocket(env) {
+		return errCode("app_endpoint_changed", "Codex owner endpoint %q differs from configured socket %q; restore the recorded endpoint instead of changing conversation owner", endpoint, codexSocket(env))
+	}
+	return nil
 }
 
 func dialCodex(ctx context.Context, env *sysenv.Env) (*rpcClient, error) {
@@ -219,6 +253,9 @@ func validObjectResult(raw json.RawMessage) bool {
 }
 
 func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Request) (Receipt, error) {
+	if err := checkCodexOwnerEndpoint(env, a.Host, a.ID); err != nil {
+		return rejected(req, "codex-app-server", err.Error()), errCode("preflight_failed", "%v", err)
+	}
 	r, err := dialCodex(ctx, env)
 	if err != nil {
 		if !req.Wake {

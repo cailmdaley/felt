@@ -1,7 +1,7 @@
 defmodule Shuttle.CodexTerminal do
   @moduledoc "Replaceable terminal viewers of durably owned App Server threads."
 
-  alias Shuttle.{AppWorkers, CodexApp, Dispatcher, Tmux}
+  alias Shuttle.{AppWorkers, Dispatcher, Tmux}
 
   def tmux_name(id), do: "codex-terminal-" <> id
 
@@ -12,9 +12,7 @@ defmodule Shuttle.CodexTerminal do
       :global.trans({{__MODULE__, id}, self()}, fn ->
         with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
              true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
-             true <-
-               record["terminal_endpoint"] == CodexApp.Transport.default_socket() ||
-                 {:error, :terminal_endpoint_changed},
+             :ok <- AppWorkers.check_endpoint(record),
              :ok <- verified_thread(id) do
           tmux = record["terminal_tmux"] || tmux_name(id)
 
@@ -40,7 +38,7 @@ defmodule Shuttle.CodexTerminal do
   end
 
   defp verified_thread(id) do
-    case AppWorkers.client().read_thread(id) do
+    case AppWorkers.call(id, :read_thread) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
       when type in ["active", "idle", "notLoaded"] ->
         :ok
@@ -74,7 +72,7 @@ defmodule Shuttle.CodexTerminal do
   # Confirm the exact resume before spawning the TUI; an empty or lost initial
   # turn must never turn into a viewer of a fresh conversation.
   defp resume_exact(id, retries) do
-    case AppWorkers.client().resume_thread(id, []) do
+    case AppWorkers.call(id, :resume_thread, [[]]) do
       {:ok, %{"id" => ^id}} ->
         :ok
 
@@ -93,7 +91,7 @@ defmodule Shuttle.CodexTerminal do
   end
 
   defp script(id, record, tmux) do
-    endpoint = "unix://" <> record["terminal_endpoint"]
+    endpoint = "unix://" <> record["backend_endpoint"]
 
     """
     #!/bin/bash

@@ -11,9 +11,95 @@ defmodule Shuttle.AppWorkers do
   remains active while it waits for a phone reply; only an explicit stop or
   completed handoff releases it. Captures are recorded before their first turn
   and can subsequently be claimed by exactly one fiber.
+
+  `backend_host` and `backend_endpoint` pin the owner on both surfaces. Native
+  Go messaging reads only those two fields from this private JSON projection;
+  it never writes records. Missing owner evidence requires explicit operator
+  repair, never automatic binding to the current host or socket. Shared
+  `app_worker_owners.json` fixtures enforce the reader contract.
   """
 
   def client, do: Shuttle.Env.app(:codex_app_client, Shuttle.CodexApp)
+
+  @doc "Checks the recorded App Server owner before any native operation on an owned thread."
+  def check_endpoint(id) when is_binary(id) do
+    with {:ok, record} <- get(id), do: check_endpoint(record)
+  end
+
+  def check_endpoint(record) when is_map(record),
+    do:
+      check_owner(
+        record,
+        Shuttle.Poller.own_host_id(),
+        Shuttle.CodexApp.Transport.default_socket()
+      )
+
+  def check_endpoint(_), do: {:error, :ownership_record_unreadable}
+
+  @doc "Read-only owner projection shared with native messaging through app_worker_owners.json fixtures."
+  def check_owner(record, host, endpoint) when is_map(record) do
+    with :ok <- check_owner_host(record, host), do: check_owner_endpoint(record, endpoint)
+  end
+
+  def check_owner(_, _, _), do: {:error, :ownership_record_unreadable}
+
+  defp check_owner_host(record, current_host) do
+    case record["backend_host"] do
+      host when is_binary(host) and host != "" ->
+        if host == current_host, do: :ok, else: {:error, :app_host_changed}
+
+      _ ->
+        {:error, :app_host_unrecorded}
+    end
+  end
+
+  defp check_owner_endpoint(record, current_endpoint) do
+    case record["backend_endpoint"] do
+      endpoint when is_binary(endpoint) and endpoint != "" ->
+        if endpoint == current_endpoint, do: :ok, else: {:error, :app_endpoint_changed}
+
+      _ ->
+        # No endpoint means no evidence of the conversation owner. Keep the
+        # record and assignment; an operator must repair it explicitly.
+        {:error, :app_endpoint_unrecorded}
+    end
+  end
+
+  def check_known_endpoint(id) do
+    case get(id) do
+      {:ok, record} ->
+        check_endpoint(record)
+
+      {:error, :not_found} ->
+        case File.lstat(record_path(id)) do
+          {:error, :enoent} -> :ok
+          _ -> {:error, :ownership_record_unreadable}
+        end
+    end
+  end
+
+  def call(id, operation, args \\ []) do
+    with :ok <- check_endpoint(id), do: apply(client(), operation, [id | args])
+  end
+
+  def status(id) do
+    case call(id, :status) do
+      %{state: _, phase: _} = status ->
+        status
+
+      {:error, reason} ->
+        update(id, %{"backend_error" => inspect(reason)})
+        %{state: :unknown, phase: nil}
+    end
+  end
+
+  def state(id) do
+    case call(id, :state) do
+      {:error, _} -> :unknown
+      state -> state
+    end
+  end
+
   def ref(id), do: "codex-app:" <> id
   def id("codex-app:" <> id), do: id
   def id(_), do: nil
@@ -91,9 +177,10 @@ defmodule Shuttle.AppWorkers do
   end
 
   def start_turn(id, prompt, opts) do
-    with :ok <- update(id, %{"launch_state" => "starting", "pending_prompt" => prompt}) do
+    with :ok <- check_endpoint(id),
+         :ok <- update(id, %{"launch_state" => "starting", "pending_prompt" => prompt}) do
       result =
-        with {:ok, turn} <- client().start_turn(id, prompt, opts),
+        with {:ok, turn} <- call(id, :start_turn, [prompt, opts]),
              do: Shuttle.CodexApp.validate_started_turn(turn)
 
       case result do
@@ -118,6 +205,7 @@ defmodule Shuttle.AppWorkers do
   def reserve_resume(id, fiber_id, uid, store) do
     :global.trans({{__MODULE__, id}, self()}, fn ->
       with {:ok, record} <- get(id),
+           :ok <- check_endpoint(record),
            true <- same_fiber?(record, fiber_id, uid) and record["felt_store"] == store,
            false <- record["active"] == true,
            :ok <- put(Map.merge(record, %{"active" => true, "launch_state" => "starting"})) do
@@ -137,6 +225,7 @@ defmodule Shuttle.AppWorkers do
            true <- nonempty?(fiber_id) and nonempty?(store) and valid_optional_uid?(uid),
            {:ok, record} <- get(id),
            true <- owned_by?(record, id, fiber_id, uid, store),
+           :ok <- check_endpoint(record),
            {:ok, thread} <- native_thread_before_recovery(id),
            result <- reload_if_not_loaded(id, thread) do
         result
@@ -158,7 +247,7 @@ defmodule Shuttle.AppWorkers do
   defp owned_by?(_record, _id, _fiber_id, _uid, _store), do: false
 
   defp native_thread_before_recovery(id) do
-    case client().read_thread(id) do
+    case call(id, :read_thread) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}} = thread}
       when type in ["active", "idle", "notLoaded"] ->
         {:ok, thread}
@@ -182,7 +271,7 @@ defmodule Shuttle.AppWorkers do
        do: :ok
 
   defp reload_if_not_loaded(id, %{"status" => %{"type" => "notLoaded"}}) do
-    case client().resume_thread(id, []) do
+    case call(id, :resume_thread, [[]]) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
       when type in ["active", "idle"] ->
         :ok
@@ -251,6 +340,8 @@ defmodule Shuttle.AppWorkers do
                   "thread_id" => id,
                   "transcript_session_uuid" => thread["sessionId"] || id,
                   "project_id" => thread["projectId"],
+                  "backend_host" => Shuttle.Poller.own_host_id(),
+                  "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
                   "cwd" => thread["cwd"],
                   "fiber_id" => fiber["id"],
                   "uid" => fiber["uid"],
@@ -274,6 +365,7 @@ defmodule Shuttle.AppWorkers do
 
   defp do_claim(id, fiber, store) do
     with {:ok, record} <- get(id),
+         :ok <- check_endpoint(record),
          true <- record["active"] == true,
          true <-
            is_nil(record["fiber_id"]) or

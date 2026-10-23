@@ -204,7 +204,8 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, record} = AppWorkers.get("app-session-1")
     assert record["surface"] == "cli"
     assert record["terminal_tmux"] == "codex-terminal-app-session-1"
-    assert record["terminal_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
+    assert record["backend_host"] == Poller.own_host_id()
 
     assert [
              {:start, _},
@@ -231,7 +232,7 @@ defmodule Shuttle.AppWorkersTest do
     script = File.read!(List.last(args))
 
     assert script =~
-             "--remote 'unix://#{record["terminal_endpoint"]}' -C '/tmp' resume 'app-session-1'"
+             "--remote 'unix://#{record["backend_endpoint"]}' -C '/tmp' resume 'app-session-1'"
 
     refute script =~ "||"
     refute script =~ "model_reasoning_effort"
@@ -347,14 +348,14 @@ defmodule Shuttle.AppWorkersTest do
     terminal_fiber("tests/terminal")
     assert {:ok, ref} = dispatch("tests/terminal")
     Runner.remove_tmux_session(WorkerBackend.tmux(ref))
-    assert :ok = AppWorkers.update("app-session-1", %{"terminal_endpoint" => "/different/socket"})
+    assert :ok = AppWorkers.update("app-session-1", %{"backend_endpoint" => "/different/socket"})
 
-    assert {:error, :terminal_endpoint_changed} =
+    assert {:error, :app_endpoint_changed} =
              Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
 
     assert :ok =
              AppWorkers.update("app-session-1", %{
-               "terminal_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+               "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
              })
 
     App.set(:read_result, {:ok, %{"id" => "other", "status" => %{"type" => "active"}}})
@@ -563,6 +564,80 @@ defmodule Shuttle.AppWorkersTest do
     assert message =~ "1234"
     assert [] = App.calls()
     assert [] = AppWorkers.active()
+  end
+
+  for surface <- ["cli", "app"] do
+    test "#{surface} owner host and endpoint fence every managed native operation and resume" do
+      id = "tests/owner-fence"
+      terminal_fiber(id)
+
+      Runner.set_shuttle(
+        id,
+        "kind: oneshot\nagent: codex\nsurface: #{unquote(surface)}\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
+        "active"
+      )
+
+      assert {:ok, session} = dispatch(id)
+      assert {:ok, record} = AppWorkers.get("app-session-1")
+      App.set(:calls, [])
+      App.set(:state, :not_loaded)
+
+      for {key, value, expected} <- [
+            {"backend_endpoint", "/another-owner.sock", :app_endpoint_changed},
+            {"backend_host", "another-host", :app_host_changed}
+          ] do
+        assert :ok = AppWorkers.put(Map.put(record, key, value))
+
+        assert {:error, ^expected} =
+                 AppWorkers.recover("app-session-1", id, record["uid"], Runner.felt_root())
+
+        assert {:error, ^expected} = AppWorkers.start_turn("app-session-1", "do not start", [])
+
+        assert :unknown =
+                 WorkerBackend.observe(session, %{
+                   fiber_id: id,
+                   uid: record["uid"],
+                   felt_store: Runner.felt_root()
+                 })
+
+        assert {reason, 1} = WorkerBackend.stop(Runner, session)
+        assert reason =~ Atom.to_string(expected)
+        assert :alive = WorkerBackend.session_status(Runner, session)
+        assert :ok = AppWorkers.deactivate("app-session-1")
+        assert {:error, ^expected} = dispatch(id, resume_mode: "previous")
+        assert {:ok, retained} = AppWorkers.get("app-session-1")
+        assert retained[key] == value
+        assert [] = App.calls()
+      end
+    end
+  end
+
+  test "unrecorded ownership refuses native operations without guessing a migration" do
+    fiber("tests/unrecorded")
+    assert {:ok, session} = dispatch("tests/unrecorded")
+    assert {:ok, record} = AppWorkers.get("app-session-1")
+    App.set(:calls, [])
+
+    for {key, expected} <- [
+          {"backend_host", :app_host_unrecorded},
+          {"backend_endpoint", :app_endpoint_unrecorded}
+        ] do
+      assert :ok = AppWorkers.put(Map.delete(record, key))
+
+      assert {:error, ^expected} =
+               AppWorkers.recover(
+                 "app-session-1",
+                 "tests/unrecorded",
+                 record["uid"],
+                 Runner.felt_root()
+               )
+
+      assert {:error, ^expected} = AppWorkers.start_turn("app-session-1", "do not start", [])
+      assert {_, 1} = WorkerBackend.stop(Runner, session)
+      assert [] = App.calls()
+      assert {:ok, retained} = AppWorkers.get("app-session-1")
+      refute Map.has_key?(retained, key)
+    end
   end
 
   test "dispatch records exact app identity before its first turn and never launches tmux" do
@@ -832,6 +907,8 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "old",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,
         "fiber_id" => "tests/same",
         "uid" => "old-uid"
@@ -851,6 +928,8 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "store-bound",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,
         "fiber_id" => "tests/store-bound",
         "uid" => "store-uid",
@@ -937,6 +1016,8 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "resume-race",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "fiber_id" => "tests/app",
         "uid" => "original-uid",
         "felt_store" => Runner.felt_root(),
@@ -973,6 +1054,8 @@ defmodule Shuttle.AppWorkersTest do
         "thread_id" => id,
         "fiber_id" => fiber_id,
         "uid" => "recover-uid",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "felt_store" => Runner.felt_root(),
         "active" => true
       })
@@ -1004,6 +1087,8 @@ defmodule Shuttle.AppWorkersTest do
         "thread_id" => id,
         "fiber_id" => fiber_id,
         "uid" => "watcher-recover-uid",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "felt_store" => Runner.felt_root(),
         "active" => true
       })
@@ -1036,6 +1121,8 @@ defmodule Shuttle.AppWorkersTest do
         "thread_id" => id,
         "fiber_id" => "tests/race",
         "uid" => "race-uid",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "felt_store" => Runner.felt_root(),
         "active" => true
       })
@@ -1064,6 +1151,8 @@ defmodule Shuttle.AppWorkersTest do
         "thread_id" => id,
         "fiber_id" => "tests/owner",
         "uid" => "owner-uid",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "felt_store" => Runner.felt_root(),
         "active" => true
       })
@@ -1099,6 +1188,8 @@ defmodule Shuttle.AppWorkersTest do
         "thread_id" => id,
         "fiber_id" => "tests/verify",
         "uid" => "verify-uid",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "felt_store" => Runner.felt_root(),
         "active" => true
       })
@@ -1155,6 +1246,8 @@ defmodule Shuttle.AppWorkersTest do
         "session_uuid" => id,
         "thread_id" => id,
         "fiber_id" => "tests/loaded",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "uid" => nil,
         "felt_store" => Runner.felt_root(),
         "active" => true
@@ -1493,6 +1586,8 @@ defmodule Shuttle.AppWorkersTest do
     :ok =
       AppWorkers.put(%{
         "session_uuid" => "race",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
         "active" => true,
         "fiber_id" => nil,
         "uid" => nil
