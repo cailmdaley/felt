@@ -200,18 +200,20 @@ describe('Reader channel sidebar', () => {
     dot.click()
     expect(open).toHaveBeenCalledTimes(2)
   })
-  it('binds retained sidebar roots only while active and visible, through revisions, filtering and hide/show', () => {
+  it('binds the reader alone, leaving every sidebar row unthemed in the sidebar\'s own ink', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const bound = new Map<HTMLElement, KanbanCard>()
     const bind = vi.fn((el: HTMLElement, card: KanbanCard) => bound.set(el, card))
     const unbind = vi.fn((el: HTMLElement) => bound.delete(el))
     const themes = { bind, unbind, isPlain: () => false, togglePlain: vi.fn() } as unknown as ChannelThemes
-    const reader = makeReader(alpha, themes)
-    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    expect(bound.get(row)).toBe(alpha)
+    const reader = makeReader(beta, themes)
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!
     expect(row.dataset.part).toBe('sidebar-card')
     expect(row.hasAttribute('data-ws-theme-boundary')).toBe(true)
     expect(reader.el.hasAttribute('data-ws-theme-boundary')).toBe(true)
+    // A dark-themed constitution's row takes no theme, so its ink cannot leak onto the sidebar's ground.
+    expect([...bound.keys()]).toEqual([reader.el])
+    expect(bind.mock.calls.every(([el]) => el === reader.el)).toBe(true)
     // The running head sits on the veil: there are no chrome plates to theme.
     expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
     for (const part of ['page-band', 'tab-strip', 'tab', 'tab-tip', 'page-sheet', 'page-sheet-panel']) {
@@ -221,26 +223,9 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
     expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
     expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
-    const revised = { ...alpha, outcome: 'A new result' }
-    listedCards = [revised, beta]
-    reader.refreshChannels()
-    expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
-    expect(bound.get(row)).toBe(revised)
-    expect([...bound.keys()]).toEqual(expect.arrayContaining([reader.el, row]))
-    const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
-    toggle.click()
-    expect(bound.size).toBe(1)
-    toggle.click()
-    expect(bound.get(row)).toBe(revised)
-    const find = reader.el.querySelector<HTMLInputElement>('.ws-sidebar input')!
-    find.value = 'Beta'; find.dispatchEvent(new Event('input'))
-    expect(bound.has(row)).toBe(false)
     reader.hide()
     expect(bound.size).toBe(0)
-    reader.show(channel(beta), fiberKey(beta), 'Board', beta)
-    expect(bound.size).toBe(2)
     disposeReader(reader)
-    expect(bound.size).toBe(0)
   })
 
   it('keeps a foreign sidebar flight themed after its retained row unbinds, then releases the stylesheet', async () => {

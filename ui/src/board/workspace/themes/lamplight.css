@@ -160,10 +160,6 @@
 }
 .ws-thumbnail [data-part="thumbnail-face"] .ws-thumbnail-kind { color: var(--ws-accent); }
 
-/* The reader's sidebar row: plain type in the theme's ink. */
-:scope[data-part="sidebar-card"] :is(.kbn-card-name, .kbn-card-outcome) { color: var(--ws-ink-soft); }
-:scope[data-part="sidebar-card"] .kbn-card-name { color: var(--ws-ink); font-variant-caps: small-caps; }
-:scope[data-part="sidebar-card"] .ws-channel-owner { color: var(--ws-ink-muted); }
 
 :scope[data-part="since-row"] {
   color: var(--ws-ink);

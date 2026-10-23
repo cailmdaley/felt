@@ -269,11 +269,10 @@ export class Reader {
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
       revision: sidebarRevision,
       onRow: (el, card) => {
+        // A row is plain type in the sidebar's own ink: only the travelling copy of a card takes its theme.
         this.sidebarRows.set(el, card)
-        if (this.active && this.sidebarShown) this.opts.themes?.bind(el, card)
-        else this.opts.themes?.unbind(el)
       },
-      onRemove: el => { this.sidebarRows.delete(el); this.opts.themes?.unbind(el) },
+      onRemove: el => { this.sidebarRows.delete(el) },
       onRefresh: () => this.renderIndex(),
     })
     this.sidebarFlight = new SidebarFlight(this.el, this.sidebar)

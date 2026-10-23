@@ -23,6 +23,11 @@ describe('workspace style contracts', () => {
       }
     }
   })
+  it('leaves the reader sidebar rows to the sidebar: no theme styles them', () => {
+    const themes = readdirSync(new URL('../src/board/workspace/themes/', import.meta.url)).filter(name => name.endsWith('.css'))
+    expect(themes.length).toBeGreaterThan(0)
+    for (const theme of themes) expect(read(`themes/${theme}`), theme).not.toContain('sidebar-card')
+  })
   it('defines every workspace token that its reader uses', () => {
     const declarations = new Set([...`${tokens}\n${css}`.matchAll(/(--ws-[\w-]+)\s*:/g)].map(m => m[1]))
     for (const token of [...css.matchAll(/var\((--ws-[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
