@@ -119,6 +119,10 @@ export function badgeWords(threads: number, reviews: number): HTMLElement[] {
   return [count, part(' · ', 'sep'), review]
 }
 
+/** How a branch ranks in an opened tree, by its most urgent thread: the rail's order. */
+const BRANCH_RANK: Partial<Record<ThreadState, number>> = { waiting: 0, 'to-review': 1 }
+const BRANCH_RANK_REST = 2
+
 /** The word an opened tree's line carries at its end, for the states that are the reader's to act on. */
 const STATE_TAGS: Partial<Record<ThreadState, string>> = { waiting: 'waiting', 'to-review': 'review' }
 
@@ -273,9 +277,20 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     }
     return shown
   }
+  // A branch ranks by the most urgent thread anywhere in it, so the tree reads in the rail's order: waiting, then to review, then the rest.
+  const urgency = new Map<KanbanCard, number>()
+  const branchUrgency = (c: KanbanCard): number => {
+    let rank = urgency.get(c)
+    if (rank === undefined) {
+      rank = Math.min(BRANCH_RANK[index.state(c)] ?? BRANCH_RANK_REST, ...liveChildren(c).map(branchUrgency))
+      urgency.set(c, rank)
+    }
+    return rank
+  }
   let lineCount = 0
   const grow = (parent: KanbanCard, above: readonly TreeGuide[]): void => {
-    const lines = liveChildren(parent).filter(isDrawn)
+    // A stable sort: within a rank, siblings keep their tree order.
+    const lines = liveChildren(parent).filter(isDrawn).sort((a, b) => branchUrgency(a) - branchUrgency(b))
     lines.forEach((line, n) => {
       const last = n === lines.length - 1
       body.append(treeLine(line, index, open, focusId('thread', threadKey(line)), [...above, last ? 'elbow' : 'tee'], whisper, true))

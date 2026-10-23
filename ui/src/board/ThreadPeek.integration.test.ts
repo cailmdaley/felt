@@ -178,6 +178,28 @@ describe('a large family stays a peek, not a column', () => {
     expect(host.querySelector<HTMLElement>('.kbn-thread-tree-foot')!.hidden).toBe(true)
   })
 })
+describe('an opened family reads in the rail order', () => {
+  it('lifts a branch by its most urgent thread: a waiting grandchild puts its branch above a working sibling, review branches next', () => {
+    saveWaitingThreadEntries(false)
+    const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
+    const root = card({ id: 'root' })
+    const busy = card({ id: 'root/busy', name: 'busy', orchestrator: 'root', status: 'active' })
+    const quiet = card({ id: 'root/quiet', name: 'quiet', orchestrator: 'root', status: 'active' })
+    const parent = card({ id: 'root/parent', name: 'parent', orchestrator: 'root', status: 'active' })
+    const middle = card({ id: 'root/parent/middle', name: 'middle', orchestrator: 'root/parent', status: 'active' })
+    const asking = card({ id: 'root/parent/middle/ask', name: 'asking', orchestrator: 'root/parent/middle', status: 'active', ask })
+    const reviewer = card({ id: 'root/reviewer', name: 'reviewer', orchestrator: 'root', status: 'active' })
+    const done = card({ id: 'root/reviewer/done', name: 'done', orchestrator: 'root/reviewer', status: 'closed' })
+    const host = document.createElement('div'); document.body.append(host)
+    installThreadPeek(host, host, root, new ThreadIndex([root, busy, quiet, parent, middle, asking, reviewer, done]), vi.fn())
+    const names = [...host.querySelectorAll('.kbn-thread-peek .kbn-thread-name')].map(n => n.textContent)
+    // The asking grandchild lifts parent (and middle) first; the review branch next; the working-only siblings keep their tree order last.
+    expect(names.slice(0, 5)).toEqual(['parent', 'middle', 'asking', 'reviewer', 'done'])
+    expect(names.slice(5).sort()).toEqual(['busy', 'quiet'])
+    const plain = [...new ThreadIndex([root, busy, quiet]).children(root)].sort(new ThreadIndex([root, busy, quiet]).compare).map(c => c.name)
+    expect(names.slice(5)).toEqual(plain)
+  })
+})
 describe('an opened family focuses on live work', () => {
   const ask = { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }
   const root = card({ id: 'root' })
@@ -195,20 +217,20 @@ describe('an opened family focuses on live work', () => {
     const host = document.createElement('div'); document.body.append(host)
     installThreadPeek(host, host, root, index, vi.fn(), families)
     host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
-    expect(names(host)).toEqual(['busy', 'holder', 'asking'])
+    expect(names(host)).toEqual(['holder', 'asking', 'busy'])
     const folds = () => [...host.querySelectorAll<HTMLButtonElement>('.kbn-thread-fold')]
     expect(folds().map(f => [f.textContent, f.getAttribute('aria-expanded')])).toEqual([['2 drafts', 'false'], ['2 resting', 'false']])
     expect(host.querySelector('.kbn-thread-tree-more')!.textContent).toBe('More: 2 drafts · 2 resting')
     folds()[0].click()
-    expect(names(host)).toEqual(['busy', 'a plan', 'holder', 'asking'])
+    expect(names(host)).toEqual(['holder', 'asking', 'busy', 'a plan'])
     expect(document.activeElement).toBe(folds()[0])
     expect(folds()[0].getAttribute('aria-expanded')).toBe('true')
     // The unfolding holds through a repaint, which rebuilds the card.
     const again = document.createElement('div'); document.body.append(again)
     installThreadPeek(again, again, root, index, vi.fn(), families)
-    expect(names(again)).toEqual(['busy', 'a plan', 'holder', 'asking'])
+    expect(names(again)).toEqual(['holder', 'asking', 'busy', 'a plan'])
     folds()[0].click()
-    expect(names(host)).toEqual(['busy', 'holder', 'asking'])
+    expect(names(host)).toEqual(['holder', 'asking', 'busy'])
   })
 })
 describe('a mouse on a family', () => {
