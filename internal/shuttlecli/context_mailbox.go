@@ -19,6 +19,20 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	put.Flags().StringVar(&from, "from", "shuttle", "Sender label the receiving worker sees")
 	cmd.AddCommand(put)
+	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		// One JSON object, key => count. A key whose mailbox cannot be read
+		// names itself on stderr and is left out, so the others still count.
+		counts := make(map[string]int, len(args))
+		for _, key := range args {
+			n, err := messaging.PendingFiberContext(a.env, key)
+			if err != nil {
+				fmt.Fprintf(a.env.Stderr, "%s: %v\n", key, err)
+				continue
+			}
+			counts[key] = n
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(counts)
+	}})
 	cmd.AddCommand(&cobra.Command{Use: "get <fiber-key>", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		receiver, err := messaging.ReadFiberReceiver(a.env, args[0])
 		if err != nil {

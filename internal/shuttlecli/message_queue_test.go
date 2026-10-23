@@ -170,3 +170,28 @@ func TestMessageToFiberWithoutShuttleBlockIsStillAnError(t *testing.T) {
 		t.Fatal("a fiber with no shuttle block must not queue")
 	}
 }
+
+func TestContextMailboxPendingCountsEachFiber(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_DATA_DIR", t.TempDir())
+	for _, id := range []string{"a", "b"} {
+		if err := messaging.QueueFiberContext(env, "store:WAITING", messaging.Request{MessageID: id, Text: "x"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var stdout bytes.Buffer
+	env.Stdout = &stdout
+	cmd := newApp(env).contextMailboxCmd()
+	cmd.SetArgs([]string{"pending", "store:WAITING", "store:EMPTY"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]int
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("%q: %v", stdout.String(), err)
+	}
+	if len(got) != 2 || got["store:WAITING"] != 2 || got["store:EMPTY"] != 0 {
+		t.Fatalf("pending = %v", got)
+	}
+}

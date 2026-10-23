@@ -1,5 +1,5 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { THREAD_LABEL, threadKey, type ThreadIndex, type ThreadState } from './threads.js'
+import { THREAD_LABEL, threadKey, waitingWords, type ThreadIndex, type ThreadState } from './threads.js'
 import { waitingThreadEntries } from './threadPreferences.js'
 import { LastReplies, ThreadWhisper } from './threadReply.js'
 import { untilOf } from './blockedOn.js'
@@ -18,10 +18,21 @@ export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: Kan
   const outcome = document.createElement('span'); outcome.className = 'kbn-thread-outcome'
   outcome.textContent = card.ask?.text ?? card.outcome ?? ''
   row.append(name, label, outcome)
+  const waiting = waitingNote(card); if (waiting) name.after(waiting)
   row.classList.toggle('kbn-thread-pinned', isPinned(card))
   row.addEventListener('click', event => { event.stopPropagation(); open(card) })
   row.addEventListener('pointerdown', event => event.stopPropagation())
   return row
+}
+
+/** What waits for a constitution's next worker, muted beside its name; null when nothing does. */
+export function waitingNote(card: Pick<KanbanCard, 'pendingResults'>): HTMLElement | null {
+  const n = card.pendingResults ?? 0
+  if (n <= 0) return null
+  const el = document.createElement('span'); el.className = 'kbn-waiting'
+  el.textContent = `${n} waiting`
+  el.title = waitingWords(n)
+  return el
 }
 
 /** The tag that keeps a thread drawn under its root card on the Desk, on every device. */
@@ -128,6 +139,7 @@ export function treeLine(card: KanbanCard, index: ThreadIndex, open: (card: Kanb
   row.setAttribute('aria-label', `${card.name}, ${THREAD_LABEL[state].toLowerCase()}`)
   const name = document.createElement('span'); name.className = 'kbn-thread-name'; name.textContent = card.name
   row.append(mark(markOf(card, state)), name)
+  const waiting = waitingNote(card); if (waiting) row.append(waiting)
   // The two states that ask something of the reader say so in a word at the line's end; the rest keep their mark alone.
   const tag = tagged ? STATE_TAGS[state] : undefined
   if (tag) { const el = document.createElement('span'); el.className = 'kbn-tree-tag'; el.dataset.tag = state; el.textContent = tag; el.setAttribute('aria-hidden', 'true'); row.append(el) }

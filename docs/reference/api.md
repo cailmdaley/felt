@@ -229,6 +229,10 @@ Each constitution entry in the owner's Desk feed has `orchestrator`: the wire id
 The relation skips intervening ordinary fibers and retains ancestors owned by another host, even though those ancestors do not appear in this owner's rows.
 Containment uses canonical slugs within each felt store; existing fiber, path, report and runtime fields remain unchanged.
 
+An owned constitution entry with no live worker carries `pending_results` while something waits for its next worker: the number of thread results and messages in its context mailbox, plus results addressed to it still in the owner's outbox. The field is absent when nothing waits or a worker is live.
+The owner counts after each poll's delivery pass, so a count trails a new arrival by up to one poll; the composite carries each remote owner's count unchanged.
+`GET /threads/*id` carries the same count on the orchestrator (`pending_results`) and on each thread this host owns.
+
 The owner feed's live-worker `runtime` carries `tasks` beside its existing `phase` and session fields.
 Each task has `{id, subject, status, activeForm}`; `activeForm` is null when the harness supplies none.
 The asynchronous daemon poll reads Claude Code's session task directory in numeric id order and follows Codex's native transcript for the latest valid `update_plan`.

@@ -32,7 +32,7 @@ import (
 // shelled write at a time. Bumped in lockstep with
 // daemon/lib/shuttle/contract.ex's @expected_level, whose @level_surfaces
 // names what each level adds so a skew reports the missing verb.
-const ShuttleContractLevel = 17
+const ShuttleContractLevel = 18
 
 func (a *app) shuttleContractCmd() *cobra.Command {
 	shuttleContractCmd := &cobra.Command{

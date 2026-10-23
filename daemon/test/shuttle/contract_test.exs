@@ -17,6 +17,17 @@ defmodule Shuttle.ContractTest do
     assert result.reason =~ "context-mailbox put --from"
   end
 
+  defmodule Level17Runner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["contract"], _opts), do: {"17\n", 0}
+  end
+
+  test "a CLI at level 17 cannot count what waits for a fiber's next worker" do
+    result = Shuttle.Contract.check(Level17Runner)
+    refute result.ok
+    assert result.reason =~ "context-mailbox pending"
+  end
+
   test "the expected level covers the receiver-authority verbs" do
     assert Shuttle.Contract.expected_level() >= 15
   end

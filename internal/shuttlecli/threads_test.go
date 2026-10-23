@@ -152,3 +152,46 @@ func TestFirstSentence(t *testing.T) {
 		}
 	}
 }
+
+func TestThreadsCountWhatWaitsForANextWorker(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, _ := newStore(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"fiber_id":"hub","uid":"01HUB","name":"Hub","pending_results":3,"threads":[
+ {"id":"hub/m","name":"M","column":"drafts","state":"Draft","pending_results":2,"threads":[
+   {"id":"hub/m/x","name":"X","column":"drafts","state":"Draft","threads":[]}]},
+ {"id":"hub/n","name":"N","column":"drafts","state":"Draft","pending_results":0,"threads":[]}]}`))
+	}))
+	t.Cleanup(server.Close)
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+
+	out, err := runIn(t, env, dir, "threads", "hub")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	want := `hub  Hub  (3 waiting for its next worker)
+
+Draft
+  hub/m  Draft  M (1 thread; 2 waiting for its next worker)
+  hub/n  Draft  N
+`
+	if out != want {
+		t.Fatalf("got\n%s\nwant\n%s", out, want)
+	}
+
+	out, err = runIn(t, env, dir, "threads", "hub", "--json")
+	if err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	var got struct {
+		PendingResults int         `json:"pending_results"`
+		Threads        []threadRow `json:"threads"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PendingResults != 3 || got.Threads[0].PendingResults != 2 || got.Threads[1].PendingResults != 0 {
+		t.Fatalf("unexpected %s", out)
+	}
+}

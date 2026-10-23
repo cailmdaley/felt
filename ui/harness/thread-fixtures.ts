@@ -20,6 +20,8 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
     example.feed.fibers.push({
       origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${id}/${slug.split('/').at(-1)}.md`,
       orchestrator: parent ? `thread-${parent}` : WORKSPACE_UID,
+      // A thread with no worker holds results and messages for its next one.
+      pending_results: slug === 'review' ? 2 : undefined,
       fiber: { id, uid: `thread-${slug}`, name, status, tags: slug === 'review' ? ['pinned'] : undefined, horizon: slug === 'rest' ? 'stashed' : undefined, created_at: new Date(now - 3600000).toISOString(),
         closed_at: status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
         tempered: slug === 'archive' ? true : slug === 'discard' ? false : undefined,

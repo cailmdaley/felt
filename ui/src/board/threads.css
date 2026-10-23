@@ -81,6 +81,8 @@
 .kbn-thread-tree .kbn-thread-more:focus { outline: none; }
 .kbn-thread-tree .kbn-thread-more:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: 1px; }
 .kbn-tree-archived { font-size: inherit; }
+/* What waits for a constitution's next worker: a count in the faint ink, never a badge. */
+.kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: calc(11px * var(--kbn-type-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The pin waits at the line's end, out of sight until the line is pointed at or focused. */
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-pin { position: static; align-self: center; margin-left: -20px; width: 16px; height: 16px; }
 

@@ -260,6 +260,32 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  test "a fiber's waiting count is its mailbox's undelivered context and its outbox's pending results",
+       %{store: store} do
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    hub = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    uid = hub.fiber["uid"]
+
+    assert Threads.pending_results(entries, "test-host") == %{}
+
+    for {id, text} <- [{"m-1", "one"}, {"m-2", "two"}, {"m-2", "two"}],
+        do: assert({:ok, :queued} = Shuttle.Delivery.context(hub, text, id))
+
+    Shuttle.ThreadOutbox.capture([
+      {"thread-unsent",
+       %{
+         "owner" => "test-host",
+         "store" => store,
+         "parent_uid" => uid,
+         "text" => "t",
+         "wake" => false
+       }}
+    ])
+
+    assert Threads.pending_results(entries, "test-host") == %{uid => 3}
+    assert Threads.pending_results(entries, "another-host") == %{}
+  end
+
   test "failed close and ask publications survive cleared stamps and publisher restart", %{
     store: store
   } do
@@ -1227,6 +1253,27 @@ defmodule Shuttle.ThreadsTest do
                },
                %{"id" => "hub/notes/z", "state" => "Armed", "host_unreachable" => false}
              ] = Shuttle.Threads.tree("hub", "/s", entries, MapSet.new())
+    end
+
+    test "a thread with no live worker counts what waits for its next worker" do
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/mr7", %{"status" => "open"}) |> Map.put(:pending_results, 2),
+        thread("hub/live", %{"status" => "active"}) |> Map.put(:pending_results, 1),
+        thread("hub/live/deep", %{"status" => "active"}),
+        thread("hub/none", %{"status" => "open"})
+      ]
+
+      live = MapSet.new(["u-hub/live"])
+
+      assert Threads.tree("hub", "/s", entries, live)
+             |> Map.new(&{&1["id"], &1["pending_results"]}) ==
+               %{"hub/mr7" => 2, "hub/live" => 0, "hub/none" => 0}
+
+      roster = Threads.roster("hub", "/s", entries, live)
+      assert roster =~ "- hub/mr7 — Draft — (no outcome yet)\n  (2 waiting for its next worker)\n"
+      assert roster =~ "- hub/live — Working — (no outcome yet)\n  (1 thread)\n"
+      assert roster =~ "- hub/none — Draft — (no outcome yet)\nResults"
     end
 
     test "a hub's launch prompt lists its threads by state; a leaf gets no block" do

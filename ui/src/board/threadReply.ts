@@ -1,7 +1,7 @@
 import { nameRef, untilWords, type Until } from './blockedOn.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { normalizeRecord } from './transcript/records.js'
-import { THREAD_LABEL, type ThreadState } from './threads.js'
+import { THREAD_LABEL, waitingWords, type ThreadState } from './threads.js'
 import { turnOf } from './turn.js'
 import { humanizeIdleAge } from './utils.js'
 
@@ -128,7 +128,7 @@ export class ThreadWhisper {
     const body = el.querySelector<HTMLElement>('.kbn-thread-whisper-body')!
     const moved = movedAt(card)
     const stateLine = (name?: string): string =>
-      [THREAD_LABEL[state], until ? untilWords(name ? { text: name } : until) : '', moved !== undefined ? humanizeIdleAge(Date.now() - moved) : ''].filter(Boolean).join(' · ')
+      [THREAD_LABEL[state], until ? untilWords(name ? { text: name } : until) : '', card.pendingResults ? waitingWords(card.pendingResults) : '', moved !== undefined ? humanizeIdleAge(Date.now() - moved) : ''].filter(Boolean).join(' · ')
     head.textContent = stateLine()
     if (until?.ref && !until.card) {
       void nameRef(until.ref).then(name => { if (name && this.for === line && !el.hidden) head.textContent = stateLine(name) })

@@ -136,3 +136,34 @@ func TestFiberContextWakeUsesNativeTurnAndDoesNotReplay(t *testing.T) {
 		t.Fatalf("native turns = %d", sent.Load())
 	}
 }
+
+func TestPendingFiberContextCountsWhatNoWorkerHasTaken(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
+		t.Fatalf("a fiber with no mailbox holds %d (%v), want 0", n, err)
+	}
+	for _, id := range []string{"one", "two", "two"} {
+		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: "context " + id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 2 {
+		t.Fatalf("pending = %d (%v), want 2", n, err)
+	}
+	if err := RegisterMailbox(env, "claude", "A", "host", t.TempDir(), os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	a := "shuttle://host/claude/A"
+	generation := transition(t, env, "execution-A:A", a)
+	if err := DeliverFiberContext(context.Background(), env, "fiber", "host", a, generation); err != nil {
+		t.Fatal(err)
+	}
+	// A hook-ready receiver takes context on its next hook, not at delivery.
+	if err := OfferMailbox(env, "claude", "A", "host", func([]Request) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
+		t.Fatalf("after its worker took them, pending = %d (%v), want 0", n, err)
+	}
+}

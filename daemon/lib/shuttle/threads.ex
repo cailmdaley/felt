@@ -134,7 +134,8 @@ defmodule Shuttle.Threads do
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: its direct
   threads, Waiting first, each with the count of unfinished threads below it
-  (the board's thread badge), and the archived ones as a count. Empty when it
+  (the board's thread badge) and of what waits for its next worker, and the
+  archived ones as a count. Empty when it
   has none. `live` and `reachable` are as `tree/5` takes them.
   """
   def roster(fiber_id, felt_store, entries, live, reachable \\ nil) do
@@ -155,12 +156,8 @@ defmodule Shuttle.Threads do
           rows
           |> Enum.take(@roster_cap)
           |> Enum.map(fn row ->
-            n = unfinished(row["threads"])
-
-            count =
-              if n > 0, do: "\n  (#{n} #{if n == 1, do: "thread", else: "threads"})", else: ""
-
-            "- #{row["id"]} — #{state_label(row)} — #{first_sentence(row["outcome"])}#{count}"
+            "- #{row["id"]} — #{state_label(row)} — #{first_sentence(row["outcome"])}" <>
+              counts(row)
           end)
 
         more =
@@ -195,6 +192,24 @@ defmodule Shuttle.Threads do
 
   def state_label(%{"state" => state}), do: state
 
+  # A roster row's counts: the thread badge's, then what waits for its next
+  # worker.
+  defp counts(row) do
+    n = unfinished(row["threads"])
+    waiting = row["pending_results"] || 0
+
+    case Enum.reject(
+           [
+             n > 0 && "#{n} #{if n == 1, do: "thread", else: "threads"}",
+             waiting > 0 && "#{waiting} waiting for its next worker"
+           ],
+           &(&1 == false)
+         ) do
+      [] -> ""
+      parts -> "\n  (#{Enum.join(parts, "; ")})"
+    end
+  end
+
   # The thread badge's count: unfinished threads anywhere below.
   defp unfinished(threads),
     do:
@@ -207,8 +222,8 @@ defmodule Shuttle.Threads do
   An orchestrator's threads to every depth, in containment order: one map per
   thread with its `id`, `uid`, `name`, `host`, board `column`, roster `state`,
   `host_unreachable`, full `outcome`, what it rests until (`blocked_on` as
-  stored and the `until` name it reads as, both nil when it waits for nothing)
-  and its own `threads`. `entries` are the
+  stored and the `until` name it reads as, both nil when it waits for nothing),
+  `pending_results` (`waiting/2`) and its own `threads`. `entries` are the
   poller's cached constitutions; `live` holds the running workers' runtime keys
   (uid, else id) across the fleet; `reachable` is the set of hosts whose
   workers `live` covers (`with_fleet/4`), or nil when the fleet is unknown. An
@@ -253,10 +268,18 @@ defmodule Shuttle.Threads do
         "outcome" => fiber["outcome"],
         "blocked_on" => blocked,
         "until" => blocked && blocker_name(blocked, entry.felt_store, by_uid),
+        "pending_results" => waiting(entry, live?),
         "threads" => grow(children, {entry.felt_store, address(fiber)}, seen)
       }
     end)
   end
+
+  @doc """
+  What waits for a constitution's next worker: the `pending_results` count the
+  poller stamps on its cached entry (`pending_results/2`), or 0 while a worker
+  is live, whose mailbox drains at its next hook.
+  """
+  def waiting(entry, live?), do: if(live?, do: 0, else: Map.get(entry, :pending_results, 0))
 
   @doc "What a constitution rests until (`shuttle.blocked_on`), or nil."
   def blocked_on(fiber) do
@@ -524,6 +547,41 @@ defmodule Shuttle.Threads do
     end
 
     :ok
+  end
+
+  @doc """
+  What waits for each constitution this host owns, `%{uid_or_id => count}` with
+  zero counts left out: the context its mailbox holds that no worker has taken
+  (thread results and messages queued for its next worker), plus the results
+  addressed to it still in this host's outbox. One `shuttle context-mailbox
+  pending` call answers every mailbox; a failed call counts the outbox alone.
+  """
+  def pending_results(entries, own_host) do
+    owned =
+      for entry <- entries,
+          is_map(entry.fiber["shuttle"]),
+          get_in(entry.fiber, ["shuttle", "host"]) == own_host,
+          do: {Delivery.context_key(entry), entry.fiber["uid"] || entry.fiber["id"]}
+
+    mailbox =
+      with [_ | _] <- owned,
+           {:ok, output} <-
+             Shuttle.CLI.run(["context-mailbox", "pending" | Enum.map(owned, &elem(&1, 0))],
+               stderr_to_stdout: false
+             ),
+           {:ok, counts} when is_map(counts) <- Jason.decode(output) do
+        for {key, id} <- owned, n = counts[key], is_integer(n), n > 0, into: %{}, do: {id, n}
+      else
+        _ -> %{}
+      end
+
+    ids = MapSet.new(owned, &elem(&1, 1))
+
+    ThreadOutbox.pending(own_host)
+    |> Enum.map(fn {_id, record} -> record["parent_uid"] end)
+    |> Enum.filter(&MapSet.member?(ids, &1))
+    |> Enum.frequencies()
+    |> Map.merge(mailbox, fn _id, outbox, queued -> outbox + queued end)
   end
 
   defp acknowledged?({:ok, :queued}), do: true

@@ -513,6 +513,7 @@ function toCard(
   return {
     id: f.id,
     orchestrator: entry.orchestrator,
+    pendingResults: entry.pendingResults,
     uid: f.uid,
     name: f.name,
     path: entry.path,

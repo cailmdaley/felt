@@ -16,6 +16,8 @@ export interface InheritedProjectDir {
 export interface KanbanCard {
   /** Nearest ancestor constitution; absent on older feeds and plain notes. */
   orchestrator?: string | null
+  /** Thread results and messages waiting for its next worker while it has none. */
+  pendingResults?: number
   threadSummary?: { unfinished: number; waiting: number; working: number; toReview: number; drafts: number; archived: number }
   /** A settled or resting root drawn on the Desk because its threads still hold work. */
   threadPromoted?: boolean

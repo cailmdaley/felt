@@ -4,6 +4,9 @@ import { turnOf } from './turn.js'
 
 export type ThreadState = 'waiting' | 'to-review' | 'working' | 'drafts' | 'roles' | 'resting' | 'archived'
 export type ThreadSummary = NonNullable<KanbanCard['threadSummary']>
+/** What waits for a constitution's next worker, in full, as the launch roster and `shuttle threads` say it. */
+export const waitingWords = (n: number): string => `${n} waiting for its next worker`
+
 export const THREAD_LABEL: Record<ThreadState, string> = {
   waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }

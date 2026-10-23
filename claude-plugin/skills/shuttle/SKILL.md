@@ -89,6 +89,7 @@ Give the ask a lede and a checkable Desired State before arming it ([references/
 Every thread has a role: inherit the parent's unless it doesn't fit.
 Your launch prompt's `## Threads` lists your threads as they stood then; `shuttle threads <your-id>` lists them now (`--all` for archived threads and deeper levels).
 Armed means a thread is armed with no worker running; `Armed · host unreachable` means its host is out of your daemon's sight, so it may be running there or stuck.
+`N waiting for its next worker` on a thread counts results and messages queued while it has no worker; arming it releases them.
 When a result arrives, read its outcome and evidence against Desired State, decide what it changes, and act.
 You may temper or discard threads at any level; review and report before tempering one the human asked for, messaged, or expressed curiosity about, while threads you initiate may be tempered on your own judgment.
 Keep outcomes, reports and thread chips easy to inspect: give the human the high-level overview, with the detail one click down.

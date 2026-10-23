@@ -365,7 +365,43 @@ defmodule ShuttleWeb.DeliverControllerTest do
 
     # The same message id queues once.
     assert %{"queued" => true} =
-             "tests/deliver-dormant" |> queue_for_next_worker("msg-dormant-1") |> json_response(202)
+             "tests/deliver-dormant"
+             |> queue_for_next_worker("msg-dormant-1")
+             |> json_response(202)
+  end
+
+  test "the owner feed counts what waits for a dormant fiber's next worker" do
+    # An unarmed constitution: the poll leaves it without a worker.
+    MockRunner.set_fiber(
+      "tests/deliver-waiting",
+      make_fiber("tests/deliver-waiting", %{"status" => "open"})
+    )
+
+    MockRunner.set_shuttle("tests/deliver-waiting", oneshot_shuttle(), "open")
+    Env.put_app_env(:felt_runner, MockRunner)
+
+    for id <- ["msg-waiting-1", "msg-waiting-2"] do
+      assert %{"queued" => true} =
+               "tests/deliver-waiting" |> queue_for_next_worker(id) |> json_response(202)
+    end
+
+    Poller.refresh_document("tests/deliver-waiting")
+    poller = GenServer.whereis(Shuttle.Env.server(Poller))
+    send(poller, :run_poll_cycle)
+    assert waiting(poller, "tests/deliver-waiting", 2) == 2
+  end
+
+  defp waiting(poller, fiber_id, want, attempts \\ 500) do
+    {:ok, %{fibers: rows}} = Poller.cached_fiber_documents(poller)
+    row = Enum.find(rows, &(&1.fiber["slug"] == fiber_id or &1.fiber["id"] == fiber_id))
+    got = row && Map.get(row, :pending_results)
+
+    if got == want or attempts == 0 do
+      got
+    else
+      Process.sleep(20)
+      waiting(poller, fiber_id, want, attempts - 1)
+    end
   end
 
   test "a message to a fiber with a live worker is the sender's to deliver, not queued" do

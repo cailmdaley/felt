@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -44,6 +45,27 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 		}
 	}
 	return enqueueMailbox(root, r)
+}
+
+// PendingFiberContext counts the context a fiber's mailbox holds that no
+// worker has taken yet: thread results and messages queued for its next
+// worker. A fiber without a mailbox holds none. It reads only the directory
+// listing, so it never contends with a delivery holding the mailbox lock.
+func PendingFiberContext(env *sysenv.Env, fiber string) (int, error) {
+	entries, err := os.ReadDir(filepath.Join(mailboxDir(env, "fiber", fiber), "pending"))
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, entry := range entries {
+		if name := entry.Name(); !entry.IsDir() && !strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".json") {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // Worker transitions alone publish authority. Delivery and hook subscriptions

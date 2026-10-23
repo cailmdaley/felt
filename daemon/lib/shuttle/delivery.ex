@@ -152,6 +152,7 @@ defmodule Shuttle.Delivery do
       do: Poller.live_worker(Shuttle.Threads.address(entry.fiber))
   end
 
-  defp context_key(entry),
+  @doc "The key of a fiber's context mailbox: its store and durable identity."
+  def context_key(entry),
     do: entry.felt_store <> ":" <> (entry.fiber["uid"] || entry.fiber["id"])
 end

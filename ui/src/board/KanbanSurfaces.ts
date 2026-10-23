@@ -1,5 +1,5 @@
 import { untilLine, untilOf } from './blockedOn.js'
-import { installThreadPeek, ThreadFamilies, threadMark } from './ThreadPeek.js'
+import { installThreadPeek, ThreadFamilies, threadMark, waitingNote } from './ThreadPeek.js'
 import { LastReplies } from './threadReply.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { ownColumn } from './deskColumn.js'
@@ -1253,6 +1253,8 @@ export class KanbanSurfaceRenderer {
 
     const mark = threadMark(card)
     if (mark) el.append(mark)
+    const waiting = waitingNote(card)
+    if (waiting) el.append(waiting)
     installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
 
     // Temper / Discard at the line's right end, over the title's end, revealed
@@ -1770,6 +1772,8 @@ export class KanbanSurfaceRenderer {
     if (turnChip) meta.append(turnChip)
     const mark = threadMark(card)
     if (mark) meta.append(mark)
+    const waiting = waitingNote(card)
+    if (waiting) meta.append(waiting)
 
     el.append(meta)
     installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)

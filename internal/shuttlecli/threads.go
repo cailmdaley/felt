@@ -34,20 +34,26 @@ type ThreadNode struct {
 	Outcome         string       `json:"outcome,omitempty"`
 	BlockedOn       string       `json:"blocked_on,omitempty"`
 	Until           string       `json:"until,omitempty"`
+	PendingResults  int          `json:"pending_results,omitempty"`
 	Threads         []ThreadNode `json:"threads"`
 }
 
 // threadTree is the endpoint's response: the orchestrator and its threads.
+// PendingResults counts what waits in the orchestrator's own mailbox while it
+// has no live worker.
 type threadTree struct {
-	FiberID   string       `json:"fiber_id"`
-	UID       string       `json:"uid,omitempty"`
-	Name      string       `json:"name,omitempty"`
-	FeltStore string       `json:"felt_store,omitempty"`
-	Threads   []ThreadNode `json:"threads"`
+	FiberID        string       `json:"fiber_id"`
+	UID            string       `json:"uid,omitempty"`
+	Name           string       `json:"name,omitempty"`
+	FeltStore      string       `json:"felt_store,omitempty"`
+	PendingResults int          `json:"pending_results,omitempty"`
+	Threads        []ThreadNode `json:"threads"`
 }
 
 // threadRow is one thread in `shuttle threads --json`: the node with the count
-// of unfinished threads below it, and those threads themselves under --all.
+// of unfinished threads below it, the count of thread results and messages
+// waiting for its next worker (zero while one is live), and those threads
+// themselves under --all.
 type threadRow struct {
 	ID              string      `json:"id"`
 	UID             string      `json:"uid,omitempty"`
@@ -60,6 +66,7 @@ type threadRow struct {
 	BlockedOn       string      `json:"blocked_on,omitempty"`
 	Until           string      `json:"until,omitempty"`
 	Unfinished      int         `json:"unfinished"`
+	PendingResults  int         `json:"pending_results"`
 	Threads         []threadRow `json:"threads,omitempty"`
 }
 
@@ -84,8 +91,11 @@ classifies threads by the board's rules over its cached constitutions. A
 thread is Working when its worker runs on this host or on a remote the daemon
 polls fresh, and Armed when it is active with no worker running; "Armed · host
 unreachable" means the daemon cannot currently see its host, so whether a
-worker runs there is unknown. --json prints the orchestrator and its rows, each
-with its board column.`,
+worker runs there is unknown. "N waiting for its next worker" counts the
+thread results and messages queued for a constitution with no live worker,
+on the orchestrator's header line and on each thread this host owns; arming
+it releases them. --json prints the orchestrator and its rows, each with its
+board column and pending_results.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			tree, err := a.fetchThreads(a.threadsQuery(args[0]))
@@ -98,11 +108,12 @@ with its board column.`,
 			rows, archived := threadRows(tree.Threads, all)
 			if a.json {
 				return a.outputJSON(map[string]any{
-					"fiber_id": tree.FiberID,
-					"uid":      tree.UID,
-					"name":     tree.Name,
-					"threads":  rows,
-					"archived": archived,
+					"fiber_id":        tree.FiberID,
+					"uid":             tree.UID,
+					"name":            tree.Name,
+					"pending_results": tree.PendingResults,
+					"threads":         rows,
+					"archived":        archived,
 				})
 			}
 			a.printThreads(tree, rows, archived, all)
@@ -191,7 +202,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads)}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -225,7 +236,11 @@ func unfinishedThreads(nodes []ThreadNode) int {
 
 func (a *app) printThreads(tree *threadTree, rows []threadRow, archived int, all bool) {
 	out := a.env.Stdout
-	fmt.Fprintf(out, "%s  %s\n", tree.FiberID, tree.Name)
+	header := fmt.Sprintf("%s  %s", tree.FiberID, tree.Name)
+	if tree.PendingResults > 0 {
+		header += fmt.Sprintf("  (%s)", waitingLabel(tree.PendingResults))
+	}
+	fmt.Fprintln(out, header)
 	if len(rows) == 0 && archived == 0 {
 		fmt.Fprintln(out, "\nno threads")
 		return
@@ -248,8 +263,15 @@ func printThreadRow(a *app, row threadRow, depth int) {
 	if sentence := firstSentence(row.Outcome); sentence != "" {
 		line += ": " + sentence
 	}
+	var counts []string
 	if row.Unfinished > 0 {
-		line += fmt.Sprintf(" (%d %s)", row.Unfinished, plural(row.Unfinished, "thread", "threads"))
+		counts = append(counts, fmt.Sprintf("%d %s", row.Unfinished, plural(row.Unfinished, "thread", "threads")))
+	}
+	if row.PendingResults > 0 {
+		counts = append(counts, waitingLabel(row.PendingResults))
+	}
+	if len(counts) > 0 {
+		line += " (" + strings.Join(counts, "; ") + ")"
 	}
 	fmt.Fprintln(a.env.Stdout, line)
 	for _, child := range row.Threads {
@@ -267,6 +289,12 @@ func (row threadRow) stateLabel() string {
 		return row.State + " · ⏸ until " + row.Until
 	}
 	return row.State
+}
+
+// waitingLabel names what waits for a fiber's next worker, as the launch
+// roster writes it (Shuttle.Threads.roster/5).
+func waitingLabel(n int) string {
+	return fmt.Sprintf("%d waiting for its next worker", n)
 }
 
 func plural(n int, one, many string) string {

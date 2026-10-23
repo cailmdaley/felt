@@ -86,6 +86,9 @@ export interface CompositeEntry {
   origin: string;
   /** Nearest ancestor constitution, owner-resolved; null is a root. */
   orchestrator?: string | null;
+  /** Thread results and messages waiting for this constitution's next worker
+   * (the owner's `pending_results`); 0 while a worker is live. */
+  pendingResults?: number;
   /** Owning felt store path on the owning host. */
   feltStore: string;
   /** Fiber path relative to the owning `.felt/` root. */
@@ -165,7 +168,8 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const reportPath = typeof item.report_path === 'string' ? item.report_path : undefined;
 
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
-    entries.push({ origin, orchestrator, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
+    const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
+    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};

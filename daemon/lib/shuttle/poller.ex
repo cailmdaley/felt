@@ -185,6 +185,11 @@ defmodule Shuttle.Poller do
       # tell a worker on another host from none without calling a registry
       # whose polls hold its mailbox. nil until its first report.
       fleet: nil,
+      # %{uid_or_id => count} of what waits for each owned constitution's next
+      # worker (`Shuttle.Threads.pending_results/2`), reported by each poll's
+      # delivery task. The owner feed and the thread roster draw it on a
+      # constitution with no live worker. Empty until the first report.
+      pending_results: %{},
       # Memoized owner-feed filter+sort: `{document_cache_it_was_built_from,
       # base_rows}`, `nil` until first computed. `owner_feed_base/1` recomputes
       # iff `state.document_cache` is no longer the SAME term this was built
@@ -1245,6 +1250,9 @@ defmodule Shuttle.Poller do
     end
   end
 
+  def handle_info({:pending_results, counts}, state) when is_map(counts),
+    do: {:noreply, %{state | pending_results: counts}}
+
   def handle_info({:fleet, fleet}, state) when is_map(fleet),
     do: {:noreply, %{state | fleet: fleet}}
 
@@ -1300,7 +1308,10 @@ defmodule Shuttle.Poller do
     {entries, state} =
       if state.document_cache_ready do
         {base, state} = owner_feed_base(state)
-        {stamp_runtime(base, state.running, state.task_reads), state}
+
+        {base
+         |> stamp_runtime(state.running, state.task_reads)
+         |> stamp_pending_results(state), state}
       else
         # Log once per cold period, not once per (5s-cadence) request.
         state =
@@ -2270,6 +2281,33 @@ defmodule Shuttle.Poller do
   # join keys by `uid` (rename-safe) — `state.running` is keyed by the fiber's
   # runtime_key (uid when present), and we also index by the meta's address so a
   # uid-less fiber still matches. A row with no live worker carries no `:runtime`.
+  # An owned row's `pending_results`, present only while something waits for
+  # its next worker and none is live. A number on the wire; the board draws it
+  # muted, and every other row is served exactly as cached.
+  defp stamp_pending_results(entries, %State{pending_results: pending})
+       when map_size(pending) == 0,
+       do: entries
+
+  defp stamp_pending_results(entries, %State{pending_results: pending, running: running}) do
+    Enum.map(entries, fn entry ->
+      key = entry.fiber["uid"] || entry.fiber["id"]
+      live? = Map.has_key?(running, key) or Map.has_key?(running, entry.fiber["slug"])
+
+      case Shuttle.Threads.waiting(pending_entry(entry, pending), live?) do
+        0 -> entry
+        n -> Map.put(entry, :pending_results, n)
+      end
+    end)
+  end
+
+  defp pending_entry(entry, pending),
+    do:
+      Map.put(
+        entry,
+        :pending_results,
+        Map.get(pending, entry.fiber["uid"] || entry.fiber["id"], 0)
+      )
+
   defp stamp_runtime(entries, running, _tasks) when map_size(running) == 0, do: entries
 
   defp stamp_runtime(entries, running, tasks) do
@@ -2503,10 +2541,13 @@ defmodule Shuttle.Poller do
     # Commit observed lifecycle signals before scheduling fallible delivery.
     Shuttle.Threads.capture_results(entries, own_host)
     callers = Shuttle.Env.callers()
+    poller = self()
 
     Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
       Shuttle.Env.adopt_callers(callers)
       Shuttle.Threads.deliver_results(entries, own_host)
+      # Counted after delivery, so what a live worker just took is not.
+      send(poller, {:pending_results, Shuttle.Threads.pending_results(entries, own_host)})
     end)
 
     state
@@ -3520,7 +3561,12 @@ defmodule Shuttle.Poller do
         state.fleet
       )
 
-    {Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end), live, reachable}
+    entries =
+      Enum.map(state.document_cache, fn {_key, cached} ->
+        pending_entry(cached.entry, state.pending_results)
+      end)
+
+    {entries, live, reachable}
   end
 
   defp do_claim_app_session(state, fiber_id, uid, id, opts) do

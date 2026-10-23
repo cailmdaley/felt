@@ -198,6 +198,7 @@ export class ThreadRail {
         head.append(lead)
       }
       head.append(row.querySelector('.kbn-thread-name')!)
+      const waiting = row.querySelector('.kbn-waiting'); if (waiting) head.append(waiting)
       row.prepend(head)
       const until = untilOf(card, index)
       if (until) head.after(untilLine(until, this.open))

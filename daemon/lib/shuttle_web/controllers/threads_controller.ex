@@ -8,7 +8,11 @@ defmodule ShuttleWeb.ThreadsController do
   ones. `id` is a uid or a fiber address;
   `shuttle threads` renders the response.
 
-  Returns: 200  %{fiber_id, uid, name, felt_store, threads: [...]}
+  `pending_results` counts what waits for the orchestrator's own next worker
+  (0 while one is live); each thread carries its own. Counts cover the
+  constitutions this host owns.
+
+  Returns: 200  %{fiber_id, uid, name, felt_store, pending_results, threads: [...]}
            404  %{error: "not_found"} when no cached constitution has that id
            503  %{error: "cold" | "poller_unavailable"} before the first poll
                 warms the cache, or when no Poller runs
@@ -22,12 +26,17 @@ defmodule ShuttleWeb.ThreadsController do
     id = segments |> List.wrap() |> Enum.join("/")
 
     with {:ok, {entries, live, reachable}} <- inputs(),
-         %{fiber: fiber, felt_store: store} <- Enum.find(entries, &names?(&1.fiber, id)) do
+         %{fiber: fiber, felt_store: store} = entry <- Enum.find(entries, &names?(&1.fiber, id)) do
+      live? =
+        MapSet.member?(live, fiber["uid"] || fiber["id"]) or
+          MapSet.member?(live, Threads.address(fiber))
+
       json(conn, %{
         fiber_id: Threads.address(fiber),
         uid: fiber["uid"],
         name: fiber["name"],
         felt_store: store,
+        pending_results: Threads.waiting(entry, live?),
         threads: Threads.tree(Threads.address(fiber), store, entries, live, reachable)
       })
     else
