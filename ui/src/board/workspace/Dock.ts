@@ -431,6 +431,12 @@ export function lifecycleOf(card: KanbanCard): { state: string; label: string } 
   return { state, label: THREAD_LABEL[state] }
 }
 
+/** A thread done or under review, its worker gone: it goes on by resuming, so Resume is the composer's one verb. */
+export function settledResume(card: KanbanCard): boolean {
+  const column = deskColumn(card)
+  return Boolean(card.sessionUuid) && !hasLiveWorker(card) && (column === 'awaitingReview' || column === 'tempered' || column === 'composted')
+}
+
 /** The menu's muted line: agent, office and host, the office only where it is not the name again. */
 export function chatFacts(card: KanbanCard): string {
   const slug = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
@@ -489,6 +495,8 @@ export class Dock {
   private composerPaint: (() => void) | null = null
   private actPaint: (() => void) | null = null
   private freshButton: HTMLButtonElement | null = null
+  /** The menu's New session, offered there while Resume is the composer's one way on. */
+  private menuFresh: HTMLButtonElement | null = null
   private settingsSync: ((view: KanbanCard) => void) | null = null
   private historySync: (() => void) | null = null
   private savesPending = 0
@@ -669,7 +677,7 @@ export class Dock {
     this.composerSend = null
     this.composerError = null
     this.composerPaint = this.actPaint = null
-    this.freshButton = null
+    this.freshButton = this.menuFresh = null
     this.settingsSync = null
     this.historySync = null
     this.settingStep = null
@@ -1078,6 +1086,8 @@ export class Dock {
       if (!sessionsSection.hidden && unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
       if (!sessionsSection.hidden) sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')?.focus({ preventScroll: true })
     })
+    const freshItem = this.menuFresh = item('New session', 'ws-chat-fresh', () => { this.freshButton?.click() })
+    freshItem.title = 'Start a new session instead of resuming (⌥↵)'
     const consoleItem = item('Console', 'ws-chat-console', () => { this.openConversation(card) })
     consoleItem.title = 'Open the worker’s own conversation'
     this.drawerClose = () => {
@@ -1092,7 +1102,7 @@ export class Dock {
     facts.className = 'ws-chat-menu-facts'
     const backSlot = this.menuBack = document.createElement('div'); backSlot.className = 'ws-chat-menu-back'; backSlot.hidden = true
     backSlot.addEventListener('click', () => { menu.open = false })
-    choices.append(facts, verdict, rule, settingsItem, sessionsItem, consoleItem, backSlot)
+    choices.append(facts, verdict, rule, freshItem, settingsItem, sessionsItem, consoleItem, backSlot)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.
@@ -1168,6 +1178,7 @@ export class Dock {
       temper.hidden = discard.hidden = !reachable
       review.hidden = !reviewable
       consoleItem.hidden = !this.workerPillFor(card)
+      freshItem.hidden = !settledResume(card)
       sessionsItem.hidden = !card.uid
       this.paintHeadWorker(card, worker)
     }
@@ -1293,14 +1304,20 @@ export class Dock {
       // session is the secondary verb (⌥↵). Otherwise a fresh session is the
       // default and a resumable one adds Resume beside it (⌥↵).
       const live = resumable && hasLiveWorker(card)
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : live ? 'New session' : resumable ? 'New session ↵' : 'Start ↵'
-      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : 'Resume'
+      // A settled thread with no worker goes on by resuming: Resume is the one
+      // verb (↵) and New session waits in the menu (⌥↵).
+      const settled = settledResume(card)
+      if (!this.blockedDispatches.has(fresh)) fresh.textContent = draft ? 'Launch ↵' : live ? 'New session' : resumable && !settled ? 'New session ↵' : resumable ? 'New session' : 'Start ↵'
+      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : settled ? 'Resume ↵' : 'Resume'
       fresh.classList.toggle('kbn-ctl-secondary', live)
       fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : ''
-      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
-      resume.title = live ? 'Send the message to the live worker (↵)' : resumable ? 'Resume the previous session (⌥↵)' : ''
+      fresh.hidden = settled
+      resume.classList.toggle('kbn-ctl-secondary', resumable && !live && !settled)
+      resume.title = live ? 'Send the message to the live worker (↵)' : settled ? 'Resume the previous session (↵)' : resumable ? 'Resume the previous session (⌥↵)' : ''
       resume.hidden = !resumable
-      if (live ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(live ? [resume, fresh] : [fresh, resume]))
+      if (this.menuFresh) this.menuFresh.hidden = !settled
+      const lead = live || settled
+      if (lead ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(lead ? [resume, fresh] : [fresh, resume]))
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
@@ -1427,7 +1444,7 @@ export class Dock {
       // ↵ is the default verb the buttons show, ⌥↵ the secondary.
       const resumable = Boolean(card.sessionUuid) && deskColumn(card) !== 'drafts'
       const live = hasLiveWorker(card)
-      const resumeSession = resumable && (live ? !event.altKey : event.altKey)
+      const resumeSession = resumable && (live || settledResume(card) ? !event.altKey : event.altKey)
       void this.runRequeue(card, send.compose, resumeSession ? 'previous' : 'fresh', resumeSession ? resume : fresh, err).then(ok => landed(ok, resumeSession ? 'previous' : 'fresh', live))
     })
     box.append(message, strip.el, foot)

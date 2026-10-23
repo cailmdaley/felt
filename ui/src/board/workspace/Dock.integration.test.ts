@@ -312,7 +312,7 @@ describe('state-shaped act zone', () => {
     ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
     ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['Send ↵', 'New session']],
     ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
-    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume']],
+    ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['Resume ↵']],
     ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
   ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
     band = dock.bandFor(task(patch as Partial<KanbanCard>))
@@ -355,7 +355,7 @@ describe('state-shaped act zone', () => {
     band.el.remove()
   })
   it('Enter starts a new session and Alt-Enter resumes the named one', async () => {
-    band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
+    band = dock.bandFor(task({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resume-me' }))
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'Restart'
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
@@ -365,6 +365,27 @@ describe('state-shaped act zone', () => {
     message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
+  })
+  it('a settled thread goes on by resuming: Enter resumes, Alt-Enter or the menu starts a new session', async () => {
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
+    const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-fresh')!
+    expect(item.hidden).toBe(false)
+    const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    message.value = 'Continue'
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
+    message.value = 'Restart'
+    message.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }))
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Restart' })
+    message.value = 'Again'
+    item.click()
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'fresh', user_message: 'Again' })
+    // With a live worker the menu offers no New session; the composer's own secondary verb does.
+    dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
+    expect(item.hidden).toBe(true)
   })
   it('Enter sends to a live worker and Alt-Enter starts a new session', async () => {
     band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }))
