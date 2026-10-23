@@ -15,7 +15,58 @@ defmodule Shuttle.RemoteControlTmuxTest do
       )
     end
 
+    def cmd("ps", ["-ww", "-o", "pid=,ppid=,args=", "-U", _uid] = args, opts) do
+      {output, status} = Shuttle.Runner.Default.cmd("ps", args, opts)
+      output = IO.iodata_to_binary(output)
+      receipt = Shuttle.Env.get("RC_RECEIPT")
+      socket = Shuttle.Env.get("RC_TEST_SOCKET")
+      test_root = Path.dirname(receipt)
+      filtered = isolated_process_table(output, test_root, socket)
+
+      {filtered, status}
+    end
+
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+
+    def isolated_process_table(output, test_root, socket) do
+      procs = Shuttle.WorkerProcess.parse(output)
+
+      anchors =
+        Enum.filter(
+          procs,
+          &(String.contains?(&1.args, test_root) or String.contains?(&1.args, socket))
+        )
+
+      keep_pids = descendant_pids(procs, MapSet.new(anchors, & &1.pid))
+
+      procs
+      |> Enum.filter(&MapSet.member?(keep_pids, &1.pid))
+      |> Enum.map_join("\n", &"#{&1.pid} #{&1.ppid} #{&1.args}")
+    end
+
+    defp descendant_pids(procs, pids) do
+      expanded =
+        Enum.reduce(procs, pids, fn proc, acc ->
+          if MapSet.member?(acc, proc.ppid), do: MapSet.put(acc, proc.pid), else: acc
+        end)
+
+      if MapSet.size(expanded) == MapSet.size(pids),
+        do: pids,
+        else: descendant_pids(procs, expanded)
+    end
+  end
+
+  test "process scan isolation excludes ambient workers but keeps test descendants" do
+    table = """
+    10 1 tmux -S /tmp/test.sock
+    11 10 bash -l /tmp/shuttle-run-shuttle-remote-control.1.sh
+    20 1 bash -l /tmp/shuttle-run-shuttle-remote-control.2.sh
+    """
+
+    isolated = Runner.isolated_process_table(table, "/tmp/test", "/tmp/test.sock")
+    assert isolated =~ "10 1 tmux"
+    assert isolated =~ "11 10 bash"
+    refute isolated =~ "20 1 bash"
   end
 
   # Negative controls: remove `command` from the script, or set remain-on-exit
