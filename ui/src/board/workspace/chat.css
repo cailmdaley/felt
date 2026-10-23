@@ -90,15 +90,29 @@
 /* The conversation. */
 .ws-chat-log { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .ws-chat-log > .kbn-detail-app-guide { flex: none; margin: 8px var(--ws-chat-gutter) 0; }
-/* Where the work stands: the fiber's outcome, muted, two lines at most, above the conversation. */
+/* Where the work stands: the fiber's outcome in a region of its own, a rule beneath and
+   clear room before the conversation, so its last line never reads as the chat's first. */
 .ws-chat-outcome {
-  /* The space below is a transparent border, outside the clip, so a clamped third line never shows in it. */
-  flex: none; margin: 0; padding: 8px var(--ws-chat-gutter) 0; border-bottom: 9px solid transparent;
-  box-shadow: 0 var(--ws-line-width) 0 var(--ws-hairline-soft);
-  color: var(--ws-ink-muted); font: var(--ws-label-size)/1.45 var(--ws-serif); font-style: italic;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  flex: none; margin: 0 0 12px; padding: 9px var(--ws-chat-gutter) 10px;
+  background: color-mix(in srgb, var(--ws-ink) 3%, var(--ws-paper));
+  border-bottom: var(--ws-line-width) solid var(--ws-hairline);
 }
 .ws-chat-outcome[hidden] { display: none; }
+.ws-chat-outcome-text {
+  margin: 0; color: var(--ws-ink-soft); font: var(--ws-label-size)/1.45 var(--ws-serif);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere;
+}
+/* Opened, the whole outcome shows in place, scrolling on its own past a third of the page. */
+.ws-chat-outcome-open .ws-chat-outcome-text { display: block; max-height: 33vh; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ws-chat-outcome-label {
+  margin-right: 8px; color: var(--ws-ink-muted); font-variant: small-caps; letter-spacing: .05em; font-weight: 500;
+}
+.ws-chat .ws-chat-outcome-more {
+  display: inline-block; margin: 3px 0 0; padding: 0; border: 0 !important; background: none; cursor: pointer;
+  color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-serif) !important;
+}
+.ws-chat .ws-chat-outcome-more:hover { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 2px; }
+.ws-chat .ws-chat-outcome-more[hidden] { display: none; }
 .ws-chat-empty {
   display: none; margin: auto var(--ws-chat-gutter); text-align: center;
   color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.5 var(--ws-serif);

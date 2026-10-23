@@ -1137,11 +1137,9 @@ export class Dock {
     empty.className = 'ws-chat-empty'
     empty.textContent = 'No conversation yet. Write below to start a worker.'
     // Where the work stands, from the fiber's outcome: a resumed session opens on it, not on an empty column.
-    const standing = document.createElement('p')
-    standing.className = 'ws-chat-outcome'
-    standing.dataset.part = 'chat-outcome'
+    const standing = this.buildOutcome()
     if (this.guidance) log.append(this.guidance)
-    log.append(standing)
+    log.append(standing.el)
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
@@ -1158,9 +1156,7 @@ export class Dock {
       lifecycle.textContent = stage.label
       lifecycle.dataset.state = stage.state
       lifecycle.hidden = !shuttleManaged
-      standing.textContent = card.outcome?.trim() ?? ''
-      standing.title = standing.textContent
-      standing.hidden = !standing.textContent
+      standing.paint(card.outcome?.trim() ?? '')
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent
       const reachable = verdictReachable(card)
@@ -1176,6 +1172,46 @@ export class Dock {
       this.paintHeadWorker(card, worker)
     }
     this.actPaint()
+  }
+
+  /**
+   * Where the work stands, from the fiber's outcome, in a region of its own
+   * above the conversation: a quiet label run into two lines of text, and,
+   * when there is more, a control that opens the whole outcome in place.
+   */
+  private buildOutcome(): { el: HTMLElement; paint(text: string): void } {
+    const el = document.createElement('section')
+    el.className = 'ws-chat-outcome'
+    el.dataset.part = 'chat-outcome'
+    el.setAttribute('aria-label', 'Outcome')
+    const text = document.createElement('p'); text.className = 'ws-chat-outcome-text'
+    const label = document.createElement('span'); label.className = 'ws-chat-outcome-label'; label.textContent = 'Outcome'
+    const words = document.createElement('span')
+    text.append(label, words)
+    const more = document.createElement('button'); more.type = 'button'; more.className = 'ws-chat-outcome-more'
+    el.append(text, more)
+    let open = false
+    const measure = (): void => {
+      el.classList.toggle('ws-chat-outcome-open', open)
+      more.textContent = open ? 'Show less ▴' : 'Read full outcome ▸'
+      more.setAttribute('aria-expanded', String(open))
+      more.hidden = !open && text.scrollHeight <= text.clientHeight + 1
+    }
+    more.addEventListener('click', () => { open = !open; measure() })
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => measure())
+      observer.observe(text)
+      this.composerDisposers.push(() => observer.disconnect())
+    }
+    return {
+      el,
+      paint: (value: string) => {
+        if (words.textContent !== value) { words.textContent = value; open = false }
+        el.hidden = !value
+        measure()
+        requestAnimationFrame(measure)
+      },
+    }
   }
 
   private buildComposer(card: KanbanCard): HTMLElement {

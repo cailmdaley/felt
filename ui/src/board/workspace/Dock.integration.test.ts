@@ -388,16 +388,30 @@ describe('state-shaped act zone', () => {
     dock.bandFor(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
     expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
   })
-  it("opens the conversation on the fiber's outcome, kept current and hidden when there is none", () => {
+  it("opens the conversation on the fiber's outcome under a quiet label, kept current, opening in place when it runs long", () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees with its original posterior.' }))
-    const strip = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-chat-outcome')!
-    expect(strip.hidden).toBe(false)
-    expect(strip.textContent).toBe('Seed 3000 agrees with its original posterior.')
-    expect(strip.nextElementSibling?.classList.contains('ws-transcript')).toBe(true)
-    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Mechanism found.' }))
-    expect(strip.textContent).toBe('Mechanism found.')
+    const region = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-chat-outcome')!
+    const text = region.querySelector<HTMLElement>('.ws-chat-outcome-text')!
+    const more = region.querySelector<HTMLButtonElement>('.ws-chat-outcome-more')!
+    expect(region.hidden).toBe(false)
+    expect(text.querySelector('.ws-chat-outcome-label')?.textContent).toBe('Outcome')
+    expect(text.textContent).toBe('OutcomeSeed 3000 agrees with its original posterior.')
+    expect(region.nextElementSibling?.classList.contains('ws-transcript')).toBe(true)
+    // Short enough to show whole: no control.
+    expect(more.hidden).toBe(true)
+    // Clamped: the control offers the rest and opens it in place.
+    Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 120 })
+    Object.defineProperty(text, 'clientHeight', { configurable: true, value: 40 })
+    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Mechanism found, at length.' }))
+    expect(text.textContent).toBe('OutcomeMechanism found, at length.')
+    expect([more.hidden, more.textContent]).toEqual([false, 'Read full outcome ▸'])
+    more.click()
+    expect(region.classList.contains('ws-chat-outcome-open')).toBe(true)
+    expect([more.textContent, more.getAttribute('aria-expanded')]).toEqual(['Show less ▴', 'true'])
+    more.click()
+    expect(region.classList.contains('ws-chat-outcome-open')).toBe(false)
     dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: '' }))
-    expect(strip.hidden).toBe(true)
+    expect(region.hidden).toBe(true)
   })
   it('inside a thread the header traces the ancestry beneath the name and the menu holds the origin', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))
