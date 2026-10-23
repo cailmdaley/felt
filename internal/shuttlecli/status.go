@@ -16,7 +16,9 @@ import (
 // The local-read verbs — status and ps. They list in-process:
 // felt.NewStorage(store).ListMetadataHavingFrontmatterFields over each store the
 // daemon would poll (shuttleStores), keeping only fibers that carry a
-// well-formed shuttle: facet. Liveness comes from tmux.
+// well-formed shuttle: facet. Which worker serves which fiber comes from the
+// daemon, and from the uid a live tmux session was launched with when no
+// daemon answers.
 //
 // The cross-host arm (--all / --remote, which queries the daemon's
 // /api/v1/state/composite) lives in shuttle_status_cross_host.go; this is the
@@ -64,7 +66,8 @@ func (a *app) statusCmd() *cobra.Command {
 		Short: "Status overview, or a detailed report for one fiber",
 		Long: `With no argument, prints a table of every fiber with a shuttle: block in the
 stores this machine dispatches (-C when set, else SHUTTLE_STORES, else the
-~/.config/shuttle/stores.json registry). State is running (read from tmux), idle,
+~/.config/shuttle/stores.json registry). State is running (the daemon's live
+worker, else a live tmux session launched for it), idle,
 scheduled (a standing constitution), paused (a draft), or closed. next_due_at comes
 from the daemon, so only the cross-host table (--all, --remote) fills it.
 
@@ -108,14 +111,16 @@ The daemon's boot quarantine can still hold an eligible fiber until
 			}
 
 			live := a.liveTmuxSessions()
-			owners := sessionOwnerMap(entries)
+			assigned, answered := a.workerAssignments()
 			reg := a.statusAgentRegistry()
 
 			rows := make([]FiberStatus, 0, len(entries))
 			seenSessions := map[string]bool{}
 			for _, entry := range entries {
-				session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-				running := session != "" && live[session] && owners[session] == entry.FiberID
+				session, running := assigned[entry.UID], assigned[entry.UID] != ""
+				if !answered && entry.Status != felt.StatusClosed {
+					session, running = launchedSession(live, entry.UID)
+				}
 				if running {
 					seenSessions[session] = true
 				}
@@ -178,6 +183,12 @@ func (a *app) psCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			live := a.liveTmuxSessions()
+			// A claimed worker keeps whatever name its session had.
+			if assigned, answered := a.workerAssignments(); answered {
+				for _, session := range assigned {
+					live[session] = true
+				}
+			}
 			if len(live) == 0 {
 				if a.json {
 					return a.outputJSON([]map[string]string{})
@@ -186,12 +197,14 @@ func (a *app) psCmd() *cobra.Command {
 				return nil
 			}
 
-			// Best-effort owner attribution: a listing failure leaves sessions
-			// unattributed rather than failing ps (the live set is the point).
+			// Best-effort owner attribution: the daemon's assignment, else the
+			// fiber whose uid launched the session. A listing failure leaves
+			// sessions unattributed rather than failing ps (the live set is the
+			// point).
 			owners := map[string]string{}
 			if stores, err := a.shuttleStores(); err == nil {
 				if entries, err := a.listShuttleFibersAcrossStores(stores); err == nil {
-					owners = sessionOwnerMap(entries)
+					owners = a.sessionOwners(entries, live)
 				}
 			}
 
@@ -419,16 +432,6 @@ func columnTitle(column string) string {
 	return column
 }
 
-// liveWorkerSession reports the tmux session holding this fiber's worker, if
-// one is live. A fiber without a uid has no session name and so no worker.
-func (a *app) liveWorkerSession(f *felt.Felt) (string, bool) {
-	session := shuttleTmuxSessionName(f.ID, f.UID)
-	if session != "" && a.tmuxSessionExists(session) {
-		return session, true
-	}
-	return "", false
-}
-
 // writeBlockSummary writes the human-readable "Current block:" report. Dispatch
 // eligibility is the felt-native status alone (status:active = armed).
 func writeBlockSummary(out io.Writer, b *shuttle.Block, statusNow string, armed bool, column string) {
@@ -541,24 +544,37 @@ func (a *app) listShuttleFibers(store string) ([]shuttleEntry, error) {
 	return entries, nil
 }
 
-// sessionOwnerMap maps each open fiber's worker session name back to its fiber
-// id. Closed fibers (no live worker to attribute) and fibers without a uid (no
-// session name) are excluded. Two fibers carrying the same uid — a copied file —
-// drop out of the map rather than mis-attributing a live worker.
-func sessionOwnerMap(entries []shuttleEntry) map[string]string {
-	owners := map[string]string{}
+// sessionOwners maps each live worker session to the fiber it serves: the
+// daemon's assignment when one answers, else the open fiber whose uid the
+// session was launched with. Two fibers carrying the same uid — a copied file
+// — drop out rather than mis-attributing a live worker.
+func (a *app) sessionOwners(entries []shuttleEntry, live map[string]bool) map[string]string {
+	byUID := map[string]string{}
 	collisions := map[string]bool{}
 	for _, entry := range entries {
-		session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
-		if entry.Status == felt.StatusClosed || session == "" || collisions[session] {
+		if entry.Status == felt.StatusClosed || entry.UID == "" || collisions[entry.UID] {
 			continue
 		}
-		if existing, ok := owners[session]; ok && existing != entry.FiberID {
-			delete(owners, session)
-			collisions[session] = true
+		if existing, ok := byUID[entry.UID]; ok && existing != entry.FiberID {
+			delete(byUID, entry.UID)
+			collisions[entry.UID] = true
 			continue
 		}
-		owners[session] = entry.FiberID
+		byUID[entry.UID] = entry.FiberID
+	}
+	owners := map[string]string{}
+	if assigned, answered := a.workerAssignments(); answered {
+		for uid, session := range assigned {
+			if fiber := byUID[uid]; fiber != "" {
+				owners[session] = fiber
+			}
+		}
+		return owners
+	}
+	for session := range live {
+		if fiber := byUID[fiberUIDFromTmuxSession(session)]; fiber != "" {
+			owners[session] = fiber
+		}
 	}
 	return owners
 }

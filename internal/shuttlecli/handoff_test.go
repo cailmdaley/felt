@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -104,6 +105,52 @@ func TestShuttleHandoff_RenamedFiber(t *testing.T) {
 	data, err = os.ReadFile(kills)
 	if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
 		t.Fatalf("kills = %q (%v)", data, err)
+	}
+}
+
+// A worker that claimed another fiber keeps its launch name and dispatch path,
+// but its earlier fiber is not its own any more: handing that one off leaves
+// it running, and handing off the claimed fiber ends it.
+func TestShuttleHandoff_ClaimedAwayWorkerExitsOnlyForTheClaimedFiber(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	seedShuttleRole(t, storage, "chair", felt.StatusActive, oneshot(), nil)
+	seedShuttleRole(t, storage, "meeting", felt.StatusActive, oneshot(), nil)
+	chair, meeting := mustRead(t, storage, "chair"), mustRead(t, storage, "meeting")
+	const uuid = "de3e1096-8500-4eec-bfd9-6e6f01b24fda"
+	for _, f := range []*felt.Felt{chair, meeting} {
+		if err := shuttle.SetRuntimeField(f, "session_uuid", uuid); err != nil {
+			t.Fatal(err)
+		}
+		if err := storage.Write(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Fiber: "chair", UID: chair.UID, Session: uuid, Host: "test-host", Kind: "dispatch", At: 1},
+		{Fiber: "chair", UID: chair.UID, Session: uuid, Host: "test-host", Kind: "superseded_by_claim", At: 2},
+		{Fiber: "meeting", UID: meeting.UID, Session: uuid, Host: "test-host", Kind: "claim", At: 3},
+	})
+	env.Set("CLAUDE_CODE_SESSION_ID", uuid)
+	env.Set("SHUTTLE_FIBER_PATH", storage.Path("chair"))
+	session := shuttleTmuxSessionName(chair.ID, chair.UID)
+
+	kills, _ := stubWorkerExitTmux(t, env, session, storage.Path("chair"))
+	if out, err := runIn(t, env, dir, "handoff", "chair"); err != nil {
+		t.Fatalf("handoff chair: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(kills); !os.IsNotExist(err) {
+		t.Fatalf("the claimer must survive its earlier fiber's handoff: %v", err)
+	}
+
+	kills, _ = stubWorkerExitTmux(t, env, session, storage.Path("meeting"))
+	if out, err := runIn(t, env, dir, "handoff", "meeting"); err != nil {
+		t.Fatalf("handoff meeting: %v\n%s", err, out)
+	}
+	if data, err := os.ReadFile(kills); err != nil || !strings.Contains(string(data), "kill-session") {
+		t.Fatalf("the claimed fiber's handoff must end the worker: %q (%v)", data, err)
 	}
 }
 

@@ -165,6 +165,7 @@ defmodule Shuttle.Poller.Snapshot do
 
         %{
           runtime_key: runtime_key,
+          uid: Poller.metadata_uid(meta),
           fiber_id: fiber_id,
           pid: inspect(meta.pid),
           session: meta.session,

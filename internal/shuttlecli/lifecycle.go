@@ -104,16 +104,33 @@ func (a *app) pauseCmd() *cobra.Command {
 	var pauseNoKill bool
 	pauseCmd := &cobra.Command{
 		Use:   "pause <fiber>",
-		Short: "Pause dispatch, kill any live worker, and park a fiber in drafts",
+		Short: "Pause dispatch, stop any live worker, and park a fiber in drafts",
 		Long: `Sets the felt-native status to "open" (the draft / paused state — the daemon
-never dispatches an open fiber) while preserving the schedule, then kills the
-worker tmux session if one is running. Clears tempered / closed-at so the card
-lands in Drafts rather than Awaiting review.
+never dispatches an open fiber) while preserving the schedule, then stops the
+fiber's live worker. Clears tempered / closed-at so the card lands in Drafts
+rather than Awaiting review.
+
+Routes to the owning daemon, which writes the pause with --local and then stops
+the worker it runs for the fiber: only it knows which worker that is, since a
+claim can move a worker to another fiber without renaming its tmux session.
+--local writes here and stops nothing; a daemon that cannot be reached is
+bypassed the same way, and the worker is left running.
 
 Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status is the fiber's only dispatch switch; there is no enabled flag.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Route before locking: the daemon shells --local and needs the lock.
+			if !localOnly(cmd) {
+				fields := map[string]any{}
+				if pauseNoKill {
+					fields["no_kill"] = true
+				}
+				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
+				if routed, err := a.routeLifecycle("pause", args[0], anyBlock, fields); routed {
+					return err
+				}
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err
@@ -150,22 +167,24 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 				fmt.Fprintln(a.env.Stdout, "  worker: left running (--no-kill)")
 				return nil
 			}
-
-			session, _ := a.liveWorkerSession(f)
-			if session == "" {
-				fmt.Fprintf(a.env.Stdout, "  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
-				return nil
+			if !localOnly(cmd) {
+				a.noteUnstoppedWorker(f)
 			}
-			if err := a.killTmuxSession(session); err != nil {
-				return fmt.Errorf("killing tmux session %q: %w", session, err)
-			}
-			fmt.Fprintf(a.env.Stdout, "  worker: killed %s\n", session)
 			return nil
 		},
 	}
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
 	pauseCmd.Flags().Bool("local", false, localFlagUsage)
 	return pauseCmd
+}
+
+// noteUnstoppedWorker tells a human whose pause or rest reached no daemon that
+// a session launched for the fiber still runs: only the daemon knows whether
+// its worker still serves this fiber, so nothing here signals it.
+func (a *app) noteUnstoppedWorker(f *felt.Felt) {
+	if session, ok := launchedSession(a.liveTmuxSessions(), f.UID); ok {
+		fmt.Fprintf(a.env.Stdout, "  worker: not stopped (no daemon answered); %s still runs — stop it from the board once the daemon runs\n", session)
+	}
 }
 
 // ---- rest ------------------------------------------------------------------
@@ -206,8 +225,8 @@ Routes to the owning daemon, which writes it with --local inside its Poller,
 serialized with dispatch, and then stops the worker through its backend — a
 tmux session, or an app conversation's interrupt. --local writes here and
 stops nothing: the daemon that shells it does the stop. A daemon that cannot
-be reached is bypassed: the document is written here and a tmux worker on
-this host is killed.`,
+be reached is bypassed: the document is written here and no worker is
+stopped, since only the daemon knows which worker serves the fiber.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fields := map[string]any{}
@@ -317,17 +336,9 @@ this host is killed.`,
 				untilLine()
 			}
 
-			if restLocal {
-				return nil
+			if !restLocal {
+				a.noteUnstoppedWorker(f)
 			}
-			session, _ := a.liveWorkerSession(f)
-			if session == "" {
-				return nil
-			}
-			if err := a.killTmuxSession(session); err != nil {
-				return fmt.Errorf("killing tmux session %q: %w", session, err)
-			}
-			fmt.Fprintf(a.env.Stdout, "  worker: stopped %s\n", session)
 			return nil
 		},
 	}

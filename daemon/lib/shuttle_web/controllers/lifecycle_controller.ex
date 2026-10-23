@@ -92,8 +92,18 @@ defmodule ShuttleWeb.LifecycleController do
     end
   end
 
+  # The document is paused by Shuttle; the worker serving the fiber is
+  # stopped by the Poller, which alone knows which one that is.
+  defp execute("pause", %{"fiber" => fiber} = params) do
+    with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber),
+         {:ok, output} <-
+           run(add_bool_flag(["pause", fiber_id], "--no-kill", params["no_kill"]), felt_store) do
+      if params["no_kill"] == true, do: {:ok, output}, else: stop_paused(output, fiber_id)
+    end
+  end
+
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
+       when action in ~w(install repeat reshape close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
@@ -102,6 +112,21 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp execute(action, _params), do: {:error, "missing required fields for #{action}"}
+
+  defp stop_paused(output, fiber_id) do
+    case Shuttle.Poller.kill_session(fiber_id) do
+      {:ok, :no_session} ->
+        {:ok, output}
+
+      {:ok, session} ->
+        {:ok, output <> "  worker: stopped #{session}\n"}
+
+      {:error, reason} ->
+        {:error, "paused #{fiber_id}, but its worker was not stopped: #{reason}"}
+    end
+  catch
+    :exit, _ -> {:ok, output <> "  worker: not stopped (the poller did not answer)\n"}
+  end
 
   defp refresh_card(%{"fiber" => fiber}) do
     case resolve_fiber(fiber) do
@@ -124,10 +149,6 @@ defmodule ShuttleWeb.LifecycleController do
     args = add_string_flag(args, "--project-dir", params["project_dir"])
     args = add_bool_flag(args, "--disabled", params["disabled"])
     {:ok, args}
-  end
-
-  defp args_for("pause", %{"fiber" => fiber} = params) do
-    {:ok, ["pause", fiber] |> add_bool_flag("--no-kill", params["no_kill"])}
   end
 
   defp args_for("close", %{"fiber" => fiber} = params) do

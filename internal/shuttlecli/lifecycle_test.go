@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,6 +30,15 @@ func withStubbedTmux(t *testing.T, env *sysenv.Env, live map[string]bool) (*app,
 	a := newApp(env)
 	killed := &[]string{}
 	a.tmuxSessionExists = func(name string) bool { return live[name] }
+	a.liveTmuxSessions = func() map[string]bool {
+		sessions := map[string]bool{}
+		for name, ok := range live {
+			if ok && isShuttleTmuxSessionName(name) {
+				sessions[name] = true
+			}
+		}
+		return sessions
+	}
 	a.killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
 	return a, killed
 }
@@ -255,7 +265,10 @@ func TestShuttleClose_FromResting(t *testing.T) {
 
 // ---- pause -----------------------------------------------------------------
 
-func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
+// Only the daemon knows which worker serves a fiber: a session launched for it
+// may have claimed another since. A pause no daemon answers parks the fiber,
+// signals nothing, and names the session it left running.
+func TestShuttlePause_OfflineParksAndStopsNothing(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
@@ -264,15 +277,47 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 	live := shuttleTmuxSessionName(f0.ID, f0.UID)
 	a, killed := withStubbedTmux(t, env, map[string]bool{live: true})
 
-	if out, _, err := executeApp(t, a, dir, "pause", "proj/task"); err != nil {
+	out, _, err := executeApp(t, a, dir, "pause", "proj/task")
+	if err != nil {
 		t.Fatalf("pause: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "proj/task")
 	if f.Status != felt.StatusOpen {
 		t.Fatalf("status = %q, want open", f.Status)
 	}
-	if len(*killed) != 1 || (*killed)[0] != live {
-		t.Fatalf("expected to kill %q, killed %v", live, *killed)
+	if len(*killed) != 0 {
+		t.Fatalf("an offline pause must signal nothing, killed %v", *killed)
+	}
+	if !strings.Contains(out, "not stopped") || !strings.Contains(out, live) {
+		t.Fatalf("pause should name the session it left running:\n%s", out)
+	}
+}
+
+// A routed pause leaves the stop to the daemon that answers it.
+func TestShuttlePause_RoutesToTheDaemon(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/lifecycle" {
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.Write([]byte("paused task\n  worker: stopped task-abc-shuttle\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	a, killed := withStubbedTmux(t, env, map[string]bool{})
+
+	out, _, err := executeApp(t, a, dir, "pause", "task")
+	if err != nil {
+		t.Fatalf("pause: %v\n%s", err, out)
+	}
+	if body["action"] != "pause" || !strings.Contains(out, "worker: stopped") || len(*killed) != 0 {
+		t.Fatalf("routed pause: body %v out %q killed %v", body, out, *killed)
 	}
 }
 

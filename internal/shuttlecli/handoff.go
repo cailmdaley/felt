@@ -23,21 +23,44 @@ dead transcript.
 
 A worker calls this as its FINAL action, after rewriting the constitution's
 '## Status' block: it stamps the field and then ends its own tmux session — so
-the exit is one command, no separate 'kill $PPID'. For its own fiber the file
-stamped is the resolved path when the tmux session's fiber UID matches, so
-renames during a run are safe. Otherwise SHUTTLE_FIBER_PATH, exported at
-dispatch, identifies its own fiber. Outside a daemon-launched worker the
-<fiber> argument is resolved instead, and the current tmux session (if any)
-still ends. An exact id
-or UID naming a different fiber stamps that fiber and leaves the caller's
-session running.`,
+the exit is one command, no separate 'kill $PPID'. The caller's own fiber is
+the one whose runtime names the caller's conversation (CLAUDE_CODE_SESSION_ID,
+PI_SESSION_ID); a worker that claimed another fiber, as this host's session
+ledger records, exits only on that fiber's handoff. Without a conversation
+match, the uid of its tmux session's launch, else SHUTTLE_FIBER_PATH,
+identifies it. The
+fiber lock is held from the read through the exit, so a claim cannot land in
+between. An exact id or UID naming a different fiber stamps that fiber and
+leaves the caller's session running. Outside any worker — no conversation
+id, no SHUTTLE_FIBER_PATH, a tmux session not launched by Shuttle — the
+<fiber> argument is resolved and the current tmux session (if any) still
+ends.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path, self, err := a.resolveHandoffPath(args[0])
 			if err != nil {
 				return err
 			}
-			at, err := stampHandedOff(path, a.successorAgentKnown)
+			unlock, err := felt.LockFiberFile(path)
+			if err != nil {
+				return err
+			}
+			defer unlock()
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			f, err := felt.Parse(idFromPath(path), data)
+			if err != nil {
+				return err
+			}
+			f.Path = path
+			// A claim that landed first moved the caller to another fiber; it
+			// stays alive.
+			if _, id := a.harnessSessionFromEnv(); id != "" && a.claimedAway(f, id) {
+				self = false
+			}
+			at, err := stampHandedOffLocked(path, a.successorAgentKnown)
 			if err != nil {
 				return err
 			}
@@ -55,10 +78,21 @@ session running.`,
 	return shuttleHandoffCmd
 }
 
-// isOwnFiber identifies the caller by the stable UID in its tmux session name,
-// then falls back to the dispatch path. Without either identity, ownership is
-// unknown and close must leave the caller alive.
+// isOwnFiber reports whether the caller is f's live worker. A worker that has
+// claimed another fiber is not its earlier fiber's worker any more, whatever
+// its tmux session is called or its dispatch environment says. Otherwise the
+// caller's conversation id decides when f's runtime names it; else the uid its
+// tmux session was launched with, then the dispatch path. Without any of
+// these, ownership is unknown and an exit verb leaves the caller alive.
 func (a *app) isOwnFiber(f *felt.Felt) bool {
+	if _, id := a.harnessSessionFromEnv(); id != "" {
+		if a.claimedAway(f, id) {
+			return false
+		}
+		if runtimeScalar(f, "session_uuid") == id {
+			return true
+		}
+	}
 	session, _ := a.tmuxCurrentSession()
 	uid := fiberUIDFromTmuxSession(session)
 	if uid != "" && uid == f.UID {
@@ -70,8 +104,33 @@ func (a *app) isOwnFiber(f *felt.Felt) bool {
 	return false
 }
 
+// claimedAway reports that this host's session ledger last paired
+// conversation id with a fiber other than f: a claim moved its worker there.
+func (a *app) claimedAway(f *felt.Felt, id string) bool {
+	host, err := a.resolveOwnHost("")
+	if err != nil || f.UID == "" {
+		return false
+	}
+	paired := ""
+	for _, row := range a.localMessageLedger() {
+		if row.Session == id && row.Host == host && row.Kind != "superseded_by_claim" && row.UID != "" {
+			paired = row.UID
+		}
+	}
+	return paired != "" && paired != f.UID
+}
+
+// runtimeScalar is the scalar shuttle.runtime.<key> of f, or "".
+func runtimeScalar(f *felt.Felt, key string) string {
+	runtime := felt.MappingValueNode(f.ExtraFields["shuttle"], "runtime")
+	if node := felt.MappingValueNode(runtime, key); node != nil {
+		return node.Value
+	}
+	return ""
+}
+
 // resolveHandoffPath returns the stamp path and whether the caller is exiting.
-// A matching worker UID selects the resolved path, including after a rename.
+// The caller's own fiber selects the resolved path, including after a rename.
 // Otherwise the dispatch path wins on lookup failure or fuzzy ambiguity; an
 // exact id or UID naming a different fiber always selects that fiber without
 // ending the caller's session.
@@ -94,7 +153,8 @@ func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
 		// Manual handoff ends the current session; a recognized worker naming
 		// another fiber must stay alive even without its dispatch environment.
 		session, _ := a.tmuxCurrentSession()
-		return f.Path, fiberUIDFromTmuxSession(session) == "", nil
+		_, id := a.harnessSessionFromEnv()
+		return f.Path, fiberUIDFromTmuxSession(session) == "" && id == "", nil
 	}
 	if fiber == f.ID || fiber == f.UID {
 		return f.Path, false, nil
@@ -170,7 +230,12 @@ func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 		return "", err
 	}
 	defer unlock()
+	return stampHandedOffLocked(path, check)
+}
 
+// stampHandedOffLocked requires the caller to hold path's fiber lock through
+// the write and any self-exit that follows it.
+func stampHandedOffLocked(path string, check func(*felt.Felt) error) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

@@ -2,6 +2,8 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -224,23 +226,42 @@ func TestShuttlePs_Empty(t *testing.T) {
 
 // ---- session-name ----------------------------------------------------------
 
+// The session of a fiber's worker comes from the daemon: a claimed worker
+// keeps whatever name its session had.
 func TestShuttleSessionName(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
 	seedFiber(t, storage, "proj/task", "01KTHDNZS287ZSSG8X8V59XKW3", felt.StatusActive, oneshot(), nil)
-	f := mustRead(t, storage, "proj/task")
-	want := shuttleTmuxSessionName(f.ID, f.UID)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"running_detail":[{"uid":"01KTHDNZS287ZSSG8X8V59XKW3","runtime_key":"01KTHDNZS287ZSSG8X8V59XKW3","fiber_id":"proj/task","session":"capture-1a2b"}]}`))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 
 	out, err := runIn(t, env, dir, "session-name", "proj/task")
 	if err != nil {
 		t.Fatalf("session-name: %v\n%s", err, out)
 	}
-	if strings.TrimSpace(out) != want {
-		t.Fatalf("session-name = %q, want %q", strings.TrimSpace(out), want)
+	if strings.TrimSpace(out) != "capture-1a2b" {
+		t.Fatalf("session-name = %q, want the daemon's assignment", strings.TrimSpace(out))
 	}
-	if !strings.Contains(want, "01KTHDNZS287ZSSG8X8V59XKW3") {
-		t.Fatalf("uid-keyed name expected, got %q", want)
+}
+
+// Without a daemon no session is confirmed, whatever tmux shows under the
+// fiber's name.
+func TestShuttleSessionName_OfflineConfirmsNothing(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedFiber(t, storage, "proj/task", "01KTHDNZS287ZSSG8X8V59XKW3", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, storage, "proj/task")
+	a, _ := withStubbedTmux(t, env, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
+
+	out, _, err := executeApp(t, a, dir, "session-name", "proj/task")
+	if err == nil || !strings.Contains(err.Error(), "no daemon answered") {
+		t.Fatalf("offline session-name must confirm nothing: %v\n%s", err, out)
 	}
 }
 

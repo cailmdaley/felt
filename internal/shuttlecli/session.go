@@ -13,8 +13,8 @@ import (
 )
 
 // The single-fiber address verbs — session-name and attach. Both resolve a fiber
-// to its canonical id + intrinsic uid (shuttleAddressFiber) and derive the
-// worker's tmux session name.
+// exactly (shuttleAddressFiber) and ask the daemon for its live worker's
+// session.
 
 // addressFiberLookup keeps exact matches, rejected guesses and ambiguous slugs
 // separate so a caller never turns a storage hint into a recipient choice.
@@ -140,25 +140,25 @@ func (a *app) shuttleAddressFiber(query string) (*felt.Felt, error) {
 func (a *app) sessionNameCmd() *cobra.Command {
 	sessionNameCmd := &cobra.Command{
 		Use:   "session-name <fiber>",
-		Short: "Print the canonical tmux session name for a fiber",
-		Long: `Resolves the fiber and prints the tmux session name shuttle uses for its
-worker: <leaf>-<uid>-shuttle, keyed by the fiber's intrinsic id. A fiber
-without an id has no session name and the command fails. It searches the
--C / --store when set, otherwise every configured store, so it
-works from any directory.`,
+		Short: "Print the tmux session of a fiber's live worker",
+		Long: `Resolves the fiber and prints the tmux session of the worker the daemon runs
+for it. A session keeps the name it was launched with, and a claim can move
+its worker to another fiber, so only the daemon can say which session serves
+which fiber; the command fails when none is confirmed. A fiber without an id
+has no worker. It searches the -C / --store when set, otherwise every
+configured store, so it works from any directory.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := a.shuttleAddressFiber(args[0])
 			if err != nil {
 				return err
 			}
-			session := shuttleTmuxSessionName(f.ID, f.UID)
-			if session == "" {
-				return errFiberWithoutUID(f.ID)
+			session, err := a.confirmedWorkerSession(f)
+			if err != nil {
+				return err
 			}
 			if a.json {
-				// Emit the dispatch-canonical id (matches the daemon);
-				// the session name itself is leaf+uid keyed, so prefix-independent.
+				// Emit the dispatch-canonical id (matches the daemon).
 				id := f.ID
 				if canonical, err := a.canonicalFiberID(f.Path); err == nil && canonical != "" {
 					id = canonical
@@ -170,6 +170,22 @@ works from any directory.`,
 		},
 	}
 	return sessionNameCmd
+}
+
+// confirmedWorkerSession is the tmux session of the worker the daemon runs
+// for f, or an error saying why none is confirmed.
+func (a *app) confirmedWorkerSession(f *felt.Felt) (string, error) {
+	if shuttleTmuxSessionName(f.ID, f.UID) == "" {
+		return "", errFiberWithoutUID(f.ID)
+	}
+	session, ok, answered := a.assignedWorkerSession(f)
+	switch {
+	case !answered:
+		return "", fmt.Errorf("no daemon answered, so no live worker of %s can be confirmed (`tmux ls` lists sessions; a session's name is not proof of which fiber its worker serves)", f.ID)
+	case !ok:
+		return "", fmt.Errorf("fiber %s has no live worker confirmed by the daemon\n(run 'shuttle ps' to list active workers)", f.ID)
+	}
+	return session, nil
 }
 
 func (a *app) prepareWorkerTerminal(f *felt.Felt) (string, error) {
@@ -201,9 +217,10 @@ func (a *app) attachCmd() *cobra.Command {
 	attachCmd := &cobra.Command{
 		Use:   "attach <fiber>",
 		Short: "Attach to a running worker's tmux session",
-		Long: `Resolves the fiber to its worker's tmux session name and execs
-'tmux attach'. Resolves the fiber from any directory, like session-name.
-Exits with a clear error if no session is live.`,
+		Long: `Resolves the fiber to the tmux session of the worker the daemon runs for it
+and execs 'tmux attach'. Resolves the fiber from any directory, like
+session-name. A managed Codex conversation gets its terminal view prepared
+first. Exits with a clear error if no live worker is confirmed.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := a.shuttleAddressFiber(args[0])
@@ -211,17 +228,13 @@ Exits with a clear error if no session is live.`,
 				return err
 			}
 
-			want := shuttleTmuxSessionName(f.ID, f.UID)
-			if want == "" {
-				return errFiberWithoutUID(f.ID)
-			}
-			session, _ := a.liveWorkerSession(f)
-			if session == "" {
+			session, err := a.confirmedWorkerSession(f)
+			if err != nil {
 				// A managed Codex terminal is a replaceable viewer, not the
 				// conversation owner. Preparing it never starts a model turn.
-				session, err = a.prepareWorkerTerminal(f)
-				if err != nil {
-					return fmt.Errorf("no live worker terminal %q — cannot attach fiber %s: %w", want, args[0], err)
+				var prepareErr error
+				if session, prepareErr = a.prepareWorkerTerminal(f); prepareErr != nil {
+					return fmt.Errorf("no live worker terminal for fiber %s: %w", args[0], err)
 				}
 			}
 
@@ -229,8 +242,8 @@ Exits with a clear error if no session is live.`,
 			if err != nil {
 				return fmt.Errorf("tmux not found: %w", err)
 			}
-			// Replace this process with tmux attach.
-			return syscall.Exec(tmux, []string{"tmux", "attach", "-t", session}, a.env.Environ())
+			// Replace this process with tmux attach; `=` matches the name exactly.
+			return syscall.Exec(tmux, []string{"tmux", "attach", "-t", "=" + session}, a.env.Environ())
 		},
 	}
 	return attachCmd

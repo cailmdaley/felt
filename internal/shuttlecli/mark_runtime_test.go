@@ -1,9 +1,14 @@
 package shuttlecli
 
 import (
+	"bytes"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // Lock-in for the exact argv the Elixir daemon shells against
@@ -116,6 +121,122 @@ func TestShuttleMarkRuntime_ClaimMeetingArgv(t *testing.T) {
 	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
 	if got, _ := rt["meeting"].(string); got != "launch-xyz" {
 		t.Fatalf("shuttle.runtime.meeting = %q, want %q", got, "launch-xyz")
+	}
+}
+
+// A dispatch guard compares wire stamps exactly, including an absent stamp.
+func TestShuttleMarkRuntime_IfDispatchedAt(t *testing.T) {
+	t.Parallel()
+	for _, current := range []string{"", "2026-10-23T02:35:11.000Z"} {
+		for _, expected := range []string{"", "2026-10-23T02:35:11.000Z", "2026-10-23T02:35:11Z"} {
+			t.Run(current+"/"+expected, func(t *testing.T) {
+				t.Parallel()
+				env := testEnv(t)
+				dir, st := newStore(t)
+				seedShuttleRole(t, st, "source", felt.StatusActive, oneshot(), nil)
+				f := mustRead(t, st, "source")
+				if current != "" {
+					if err := shuttle.SetRuntimeField(f, "dispatched_at", current); err != nil {
+						t.Fatal(err)
+					}
+					if err := st.Write(f); err != nil {
+						t.Fatal(err)
+					}
+				}
+				before, err := os.ReadFile(f.Path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = runIn(t, env, dir, "mark-runtime", f.UID, "--handed-off-at", "2026-10-23T03:00:00Z", "--if-dispatched-at", expected)
+				if current == expected {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if shuttleRuntimeMap(t, mustRead(t, st, "source"))["handed_off_at"] != "2026-10-23T03:00:00Z" {
+						t.Fatal("guarded handoff not stamped")
+					}
+				} else {
+					if err == nil || !strings.Contains(err.Error(), "dispatched_at mismatch") {
+						t.Fatalf("mismatch error: %v", err)
+					}
+					after, err := os.ReadFile(f.Path)
+					if err != nil || !bytes.Equal(before, after) {
+						t.Fatalf("mismatch changed document: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestShuttleMarkRuntime_GuardReloadsUnderWriteLock(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "source", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, st, "source")
+	if err := shuttle.SetRuntimeField(f, "dispatched_at", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := st.LockFiber("source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := runIn(t, env, dir, "mark-runtime", f.UID, "--handed-off-at", "exit", "--if-dispatched-at", "old")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("guarded write bypassed held lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := shuttle.SetRuntimeField(f, "dispatched_at", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := unlock(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "dispatched_at mismatch") {
+			t.Fatalf("stale guard: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("guarded write did not finish")
+	}
+	runtime := shuttleRuntimeMap(t, mustRead(t, st, "source"))
+	if runtime["dispatched_at"] != "new" || runtime["handed_off_at"] != nil {
+		t.Fatalf("guard overwrote concurrent dispatch: %+v", runtime)
+	}
+}
+
+// The claimed pane binding is one more runtime field; an empty value clears it.
+func TestShuttleMarkRuntime_Pane(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "claimed", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, st, "claimed")
+	if _, err := runIn(t, env, dir, "mark-runtime", f.UID, "--pane", "4242:1700000000.12"); err != nil {
+		t.Fatal(err)
+	}
+	if got := shuttleRuntimeMap(t, mustRead(t, st, "claimed"))["pane"]; got != "4242:1700000000.12" {
+		t.Fatalf("pane = %v", got)
+	}
+	if _, err := runIn(t, env, dir, "mark-runtime", f.UID, "--pane", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := shuttleRuntimeMap(t, mustRead(t, st, "claimed"))["pane"]; ok {
+		t.Fatalf("empty --pane must clear the binding, got %v", got)
 	}
 }
 

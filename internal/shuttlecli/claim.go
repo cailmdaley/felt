@@ -42,9 +42,11 @@ func (a *app) claimCmd() *cobra.Command {
 		Long: `Claim an installed task for the existing conversation on this host.
 App claims use --session or CODEX_THREAD_ID and require a verified native App
 Server conversation. Terminal claims use --tmux-session or the current tmux
-pane; --session supplies the native transcript ID. No worker is launched and
-no task is activated. Only after a successful claim, run shuttle resume.
-If your session cannot be identified, leave the task as an open draft.`,
+pane; --session supplies the native transcript ID. The fiber this conversation
+served before is concluded and released, and its worker keeps running for the
+claimed task. No worker is launched and no task is activated. Only after a
+successful claim, run shuttle resume. If your session cannot be identified,
+leave the task as an open draft.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fiber, err := a.shuttleAddressFiber(args[0])
@@ -103,7 +105,13 @@ If your session cannot be identified, leave the task as an open draft.`,
 			if err != nil {
 				return err
 			}
-			body, err := json.Marshal(map[string]any{"fiber_id": id, "surface": surface, "tmux_session": tmux, "session_uuid": session, "agent": block.Agent})
+			payload := map[string]any{"fiber_id": id, "surface": surface, "tmux_session": tmux, "session_uuid": session, "agent": block.Agent}
+			// The claimer's exact pane, when it claims from inside it: the daemon
+			// binds a worker it cannot find by its conversation to this pane.
+			if pane := strings.TrimSpace(a.env.Getenv("TMUX_PANE")); surface == "cli" && pane != "" && a.env.Getenv("TMUX") != "" {
+				payload["tmux_pane"] = pane
+			}
+			body, err := json.Marshal(payload)
 			if err != nil {
 				return err
 			}

@@ -54,7 +54,7 @@ func TestClaimTerminalInferenceRejectionAndUnsupportedIdentity(t *testing.T) {
 		calls = append(calls, r.URL.Path)
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		if body["tmux_session"] != "exact-session" || body["session_uuid"] != "claude-session" {
+		if body["tmux_session"] != "exact-session" || body["session_uuid"] != "claude-session" || body["tmux_pane"] != "%7" {
 			t.Errorf("wrong identity %v", body)
 		}
 		w.WriteHeader(422)
@@ -63,6 +63,8 @@ func TestClaimTerminalInferenceRejectionAndUnsupportedIdentity(t *testing.T) {
 	defer server.Close()
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	env.Set("CLAUDE_CODE_SESSION_ID", "claude-session")
+	env.Set("TMUX", "/tmp/socket,1,0")
+	env.Set("TMUX_PANE", "%7")
 	inTmux := newApp(env)
 	inTmux.claimTmuxSession = func() (string, error) { return "exact-session", nil }
 	_, _, err := executeApp(t, inTmux, dir, "-C", dir, "claim", "setup")
