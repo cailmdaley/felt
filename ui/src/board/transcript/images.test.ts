@@ -30,7 +30,7 @@ describe('images a tool returned', () => {
     const fetcher = vi.fn<typeof fetch>(async () => new Response(bytes, { status: 200, headers: { 'x-transcript-offset': '0', 'x-transcript-byte-count': String(bytes.byteLength) } }))
     const band = new TranscriptBand({ shuttleBase: '', fetch: fetcher, inline: true, onFile })
     document.body.append(band.el)
-    band.follow({ session, host: 'candide', agent: 'claude-opus', live: false, at: Date.parse('2026-10-02T23:10:00Z') })
+    band.follow({ session, host: 'host-a', agent: 'claude-opus', live: false, at: Date.parse('2026-10-02T23:10:00Z') })
     for (let i = 0; i < 12; i++) await Promise.resolve()
     await new Promise(resolve => requestAnimationFrame(() => resolve(null)))
 

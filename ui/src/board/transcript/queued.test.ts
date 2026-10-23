@@ -11,7 +11,7 @@ describe('messages queued while the worker worked', () => {
     const [plain, pictured, peer, task] = lines.map(normalizeRecord)
     expect(plain).toMatchObject([{ kind: 'prompt', text: 'remind me about blocked on?', images: 0, dispatch: false }])
     expect(pictured).toMatchObject([{ kind: 'prompt', text: '[Image #11] this is ugly', images: 1 }])
-    expect(peer).toMatchObject([{ kind: 'event', label: 'Message', detail: 'shuttle://cineca/claude/chair-session', text: 'The chair\'s tree is clean.' }])
+    expect(peer).toMatchObject([{ kind: 'event', label: 'Message', detail: 'shuttle://host-b/claude/chair-session', text: 'The chair\'s tree is clean.' }])
     expect(task).toEqual([])
   })
 })
@@ -29,7 +29,7 @@ describe('a message sent from the composer', () => {
     const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fetcher, inline: true })
     document.body.append(band.el)
     const settle = async (): Promise<void> => { for (let i = 0; i < 12; i++) await Promise.resolve(); await new Promise(resolve => requestAnimationFrame(() => resolve(null))) }
-    band.follow({ session, host: 'candide', agent: 'claude-opus', live: false, at: Date.now() })
+    band.follow({ session, host: 'host-a', agent: 'claude-opus', live: false, at: Date.now() })
     await settle()
 
     band.pend('merge and rerun is priority,\nthen the worktrees')
