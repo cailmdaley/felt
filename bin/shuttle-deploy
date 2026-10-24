@@ -923,6 +923,17 @@ deploy_local() {
   return 0
 }
 
+remote_host_cycle() { # $1 = host, $2 = deployed checkout
+  local host="$1" checkout="$2" supervisor=""
+  supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
+  run_on "$host" "$(daemon_kill)"
+  if [ "$supervisor" = 1 ]; then
+    return 0
+  fi
+  run_on "$host" "$(respawn_launcher_restart_cmd "$checkout" "$supervisor")" \
+    || { bad "could not install and restart the respawn loop on $host"; return 1; }
+}
+
 deploy_remote() {
   local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" previous="" skip_ui=0
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
@@ -963,17 +974,7 @@ deploy_remote() {
   # Cycle through the installed supervisor, or replace the tmux loop when no
   # launchd/systemd unit owns this host.
   check_listen "$host" || return 1
-  local supervisor=""
-  supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
-  if [ "$supervisor" = 1 ]; then
-    run_on "$host" "$(daemon_kill)"
-  else
-    # A listener outside the loop's tmux session would keep the port and make
-    # the new loop stand down, so stop it before the loop is replaced.
-    run_on "$host" "$(daemon_kill)"
-    run_on "$host" "$(respawn_launcher_restart_cmd "$dir" "$supervisor")" \
-      || { bad "could not install and restart the respawn loop on $host"; return 1; }
-  fi
+  remote_host_cycle "$host" "$dir" || return 1
   verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \
     || { bad "deployment did not complete successfully on $host"; return 1; }
   return 0
