@@ -276,6 +276,7 @@ export class KanbanModal {
   private pollTimer: number | null = null
   private readonly pollIntervalMs = 15_000
   private lastFetchStartedAt: number | null = null
+  private compositeEtag: string | null = null
   private meetingStatus: MeetingStatus = { available: false, modes: [], recorder: null, meeting: null }
   private meetingRecorder: string | null = null
   private meetingStartUncertain = false
@@ -1740,8 +1741,15 @@ export class KanbanModal {
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
-      const res = await daemonFetch(`${this.shuttleBase}/api/v1/fibers/composite`)
+      const headers = new Headers()
+      if (this.compositeEtag) headers.set('If-None-Match', this.compositeEtag)
+      const res = await daemonFetch(`${this.shuttleBase}/api/v1/fibers/composite`, { headers })
       if (token !== this.inflightFetchToken) return
+      if (res.status === 304) {
+        this.lastFetchFailed = false
+        this.daemonBooting = false
+        return
+      }
       if (!res.ok) {
         this.markFetchFailed(`Server returned ${res.status}`)
         return
@@ -1750,6 +1758,7 @@ export class KanbanModal {
       // frontend-side — the sole classifier. `parseCompositeFeed` validates
       // the wire shape; `buildKanbanResponseFromComposite` collects → classifies
       // → assembles the exact `KanbanResponse` the renderer already consumes.
+      this.compositeEtag = res.headers.get('ETag')
       const feed = parseCompositeFeed(await res.json())
       const data = buildKanbanResponseFromComposite(feed)
       if (token !== this.inflightFetchToken) return

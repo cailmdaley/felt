@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { daemonErrorMessage, daemonFetch, DaemonBootingError } from './daemonApi.js'
+import { KanbanModal } from './KanbanModal.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -18,6 +19,52 @@ describe('daemonFetch boot handling', () => {
     vi.stubGlobal('fetch', vi.fn(async () => response))
 
     await expect(daemonFetch('/api/v1/state')).resolves.toBe(response)
+  })
+})
+
+describe('daemonFetch conditional responses', () => {
+  it('lets the Desk poll return on 304 without parsing the feed', async () => {
+    Object.defineProperty(globalThis, 'window', {
+      configurable: true,
+      value: { location: { hostname: 'localhost' }, setTimeout: vi.fn() },
+    })
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as {
+      fetchAndRender(): Promise<void>
+      fetchMeetingStatus(): Promise<void>
+      compositeEtag: string | null
+      lastFetchFailed: boolean
+      daemonBooting: boolean
+    }
+    board.compositeEtag = 'W/"feed"'
+    board.fetchMeetingStatus = async () => {}
+    const response = new Response(null, { status: 304, headers: { ETag: 'W/"feed"' } })
+    const json = vi.spyOn(response, 'json')
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    await board.fetchAndRender()
+
+    expect(json).not.toHaveBeenCalled()
+    expect(board.lastFetchFailed).toBe(false)
+    expect(board.daemonBooting).toBe(false)
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(expect.stringContaining('/api/v1/fibers/composite'), {
+      headers: new Headers({ 'If-None-Match': 'W/"feed"' }),
+    })
+  })
+
+  it('returns a 304 untouched without reading or parsing a body', async () => {
+    const response = new Response(null, { status: 304, headers: { ETag: 'W/"feed"' } })
+    const json = vi.spyOn(response, 'json')
+    vi.stubGlobal('fetch', vi.fn(async () => response))
+
+    const result = await daemonFetch('/api/v1/fibers/composite', {
+      headers: { 'If-None-Match': 'W/"feed"' },
+    })
+
+    expect(result.status).toBe(304)
+    expect(json).not.toHaveBeenCalled()
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith('/api/v1/fibers/composite', {
+      headers: { 'If-None-Match': 'W/"feed"' },
+    })
   })
 })
 
