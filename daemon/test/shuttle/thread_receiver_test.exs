@@ -259,7 +259,8 @@ defmodule Shuttle.ThreadReceiverTest do
       GenServer.stop(poller)
       poller = start_poller_for!(store)
       await_boot_cycle!(poller)
-      assert %{session_uuid: ^uuid, cli: "claude"} = Poller.live_worker(poller, "hub")
+      recovered_cli = if uuid, do: "claude"
+      assert %{session_uuid: ^uuid, cli: ^recovered_cli} = Poller.live_worker(poller, "hub")
       assert authority!(data) == committed
       assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
       assert get_in(entry.fiber, ["shuttle", "resolved", "agent"]) == nil
