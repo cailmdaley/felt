@@ -996,8 +996,13 @@ defmodule Shuttle.AppWorkersTest do
     assert [] = App.calls()
     assert [] = AppWorkers.active()
     Runner.remove_tmux_session(session)
-    send(poller, :run_poll_cycle)
-    assert eventually(fn -> not Process.alive?(watcher) end)
+    monitor = Process.monitor(watcher)
+
+    # Exercise the adopted terminal watcher, not the poller's separate
+    # recovery path, which may dispatch a still-active fiber after its exit.
+    for _ <- 1..3, do: send(watcher, :heartbeat)
+    assert_receive {:DOWN, ^monitor, :process, ^watcher, :normal}, 30_000
+    assert eventually(fn -> not Map.has_key?(:sys.get_state(poller).running, uid) end)
     assert [] = App.calls()
   end
 
