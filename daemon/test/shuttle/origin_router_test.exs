@@ -20,15 +20,15 @@ defmodule Shuttle.OriginRouterTest do
                OriginRouter.route("candide", own_host_id: "laptop", remotes: @remotes)
     end
 
-    test "C6: an unknown, remote-shaped origin still degrades to :local (never a silent wrong-host write) but logs a warning" do
-      log =
-        capture_log(fn ->
-          assert OriginRouter.route("stale-remote", own_host_id: "laptop", remotes: @remotes) ==
-                   :local
-        end)
+    test "an explicit unknown origin is refused instead of selecting a local mirror" do
+      assert {:error, {:unknown_origin, "stale-remote"}} =
+               OriginRouter.route("stale-remote", own_host_id: "laptop", remotes: @remotes)
 
-      assert log =~ "stale-remote"
-      assert log =~ "OriginRouter"
+      assert OriginRouter.unknown_origin_message("stale-remote",
+               own_host_id: "laptop",
+               remotes: @remotes
+             ) =~
+               ~s(unknown origin "stale-remote": not in this daemon's fleet)
     end
 
     test "a matching local/known-remote origin never logs" do

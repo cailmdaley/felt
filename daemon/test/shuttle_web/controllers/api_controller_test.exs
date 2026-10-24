@@ -799,12 +799,10 @@ defmodule ShuttleWeb.APIControllerTest do
     assert conn.resp_body =~ "forward to candide failed"
   end
 
-  test "an unknown origin falls through to local — no forward, local arbitrates" do
+  test "an unknown edit origin is refused before local fiber resolution" do
     stub_forward("candide", "http://localhost:4001", {:ok, 200, "should-not-be-used"})
 
-    # origin "ghost" matches no configured remote → :local. The fiber isn't in
-    # the local store, so the local branch returns a clean not-found rather than
-    # forwarding anywhere.
+    # An unknown destination is refused before fiber lookup or forwarding.
     conn =
       post(
         api_conn(),
@@ -813,7 +811,7 @@ defmodule ShuttleWeb.APIControllerTest do
       )
 
     assert conn.status == 400
-    assert conn.resp_body =~ "fiber not found"
+    assert Jason.decode!(conn.resp_body)["error"] =~ ~s(unknown origin "ghost")
     # The forwarder was never touched — no silent mis-route to the wrong host.
     assert StubPostClient.last() == nil
   end

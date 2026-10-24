@@ -53,6 +53,9 @@ defmodule ShuttleWeb.DeliverController do
 
       true ->
         case OriginRouter.route(origin) do
+          {:error, {:unknown_origin, name}} ->
+            {400, %{delivered: false, error: OriginRouter.unknown_origin_message(name)}}
+
           {:remote, remote} ->
             payload =
               %{"fiber_id" => fiber_id, "text" => text}

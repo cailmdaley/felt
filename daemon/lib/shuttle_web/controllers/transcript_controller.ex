@@ -176,9 +176,10 @@ defmodule ShuttleWeb.TranscriptController do
         {:remote, remote}
 
       :local ->
-        if name in [nil, "", "local", Poller.own_host_id()],
-          do: :local,
-          else: {:unreachable, name}
+        :local
+
+      {:error, {:unknown_origin, name}} ->
+        {:unreachable, name}
     end
   end
 

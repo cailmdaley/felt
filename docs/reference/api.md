@@ -19,8 +19,8 @@ behaviour on a multi-host setup.
 
 | Pattern | Meaning |
 |---|---|
-| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. An origin matching nothing degrades to local, where the fiber lookup is the arbiter. |
-| **host-addressed** | Owner-routed, but an origin this daemon cannot place is **refused** rather than degraded. The subject is a host rather than a fiber — a config file, a store list, a tunnel job, a quarantine — and every host has one, so degrading would not fail: it would succeed on the wrong machine. |
+| **owner-routed** | The request carries an `origin`; the daemon runs it locally or forwards it to the daemon that *owns* the fiber. A fiber's files live on its owner's disk. An explicit unknown origin returns 400 naming the origin before any local lookup, read or write. An absent origin means local. |
+| **host-addressed** | Uses the same fail-closed origin rule as owner-routed requests. The subject is a host rather than a fiber — a config file, a store list, a tunnel job, a quarantine — and every host has one, so degrading would not fail: it would succeed on the wrong machine. |
 | **host-scoped** | The route answers for *this* machine only, because what it reads (a transcript, an event stream, a ledger) lives on the machine that wrote it. |
 | **fan-in** | A `/composite` sibling that merges this host's live read with each configured remote's cached read, reporting per-origin freshness. |
 

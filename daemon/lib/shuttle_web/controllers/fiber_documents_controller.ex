@@ -184,6 +184,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
     routed? = Map.get(params, "routed") in ["1", "true", true]
 
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_bytes(conn, forward_show(remote, id, with_body?))
 
@@ -249,9 +252,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
   #
   # nil covers every case where this daemon IS the right answer: an already-
   # routed request, a fiber we own, an ownerless one, a miss, and a `host:`
-  # naming no configured remote (`OriginRouter.route/1`'s documented degrade —
-  # an orphaned host is better served by the mirror than by nothing, since no
-  # daemon in the fleet claims it).
+  # naming no configured remote when inferred from a local document without
+  # an explicit origin. This read-only mirror fallback never overrides an
+  # explicit origin: show/2 refuses an unknown one before reading here.
   defp owning_remote(_body, true), do: nil
 
   defp owning_remote(%{fibers: [entry | _]}, _routed?), do: entry_owner(entry)

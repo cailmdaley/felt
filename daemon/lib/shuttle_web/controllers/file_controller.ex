@@ -76,6 +76,9 @@ defmodule ShuttleWeb.FileController do
 
   def show(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_file_bytes(
           conn,
@@ -121,6 +124,9 @@ defmodule ShuttleWeb.FileController do
   """
   def info(conn, %{"path" => path} = params) when is_binary(path) and path != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_bytes(
           conn,

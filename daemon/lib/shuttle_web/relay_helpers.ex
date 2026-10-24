@@ -16,6 +16,13 @@ defmodule ShuttleWeb.RelayHelpers do
 
   alias Shuttle.FeltStores
 
+  @doc "Reject an explicit origin before any host-local operation."
+  def unknown_origin(conn, origin) do
+    conn
+    |> put_status(400)
+    |> json(%{error: Shuttle.OriginRouter.unknown_origin_message(origin)})
+  end
+
   @doc "Recovery guidance for an unavailable managed Codex App Server."
   def app_server_unavailable_message do
     "The selected Codex App Server on this host is unavailable. " <>

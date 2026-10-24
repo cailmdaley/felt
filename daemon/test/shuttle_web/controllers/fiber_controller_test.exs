@@ -210,14 +210,10 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert forwarded["frontmatter"]["shuttle"]["project_dir"] == tmp
   end
 
-  test "POST /api/v1/fiber/create with an unknown origin falls through to a local write", %{
+  test "POST /api/v1/fiber/create refuses an unknown origin without a local write", %{
     tmp: tmp
   } do
-    # An origin matching no configured remote degrades to :local, where the
-    # endpoint's own resolution arbitrates — never a silent wrong-host write.
-    # A remote IS configured here, so the test proves the fall-through
-    # discriminates: "ghost" doesn't match "candide", so it stays local and the
-    # forward plane is never touched.
+    # A configured fleet must not substitute this host for a different origin.
     StubPostClient.start!()
     Env.put_app_env(:remotes, [%{name: "candide", url: "http://localhost:4001"}])
     Env.put_app_env(:write_forward_client, StubPostClient)
@@ -234,10 +230,9 @@ defmodule ShuttleWeb.FiberControllerTest do
         })
       )
 
-    assert conn.status == 200
-    assert %{"id" => "tests/ghost-origin"} = Jason.decode!(conn.resp_body)
-    assert File.exists?(Path.join([tmp, ".felt", "tests", "ghost-origin", "ghost-origin.md"]))
-    # Wrote locally, never forwarded — the unknown origin did not reach the tunnel.
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ ~s(unknown origin "ghost")
+    refute File.exists?(Path.join([tmp, ".felt", "tests", "ghost-origin", "ghost-origin.md"]))
     assert StubPostClient.last() == nil
   end
 

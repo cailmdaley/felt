@@ -34,6 +34,9 @@ defmodule ShuttleWeb.FiberController do
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_json(
           conn,

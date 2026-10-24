@@ -31,6 +31,9 @@ defmodule ShuttleWeb.LifecycleController do
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/lifecycle", conn.body_params)
         # The forwarded verb (rest/uninstall/…) mutated the remote's loom mirror;

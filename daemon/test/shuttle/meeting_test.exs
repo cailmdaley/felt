@@ -188,7 +188,7 @@ defmodule Shuttle.MeetingTest do
   test "meeting GET refuses unknown hosts and surfaces forward failures" do
     conn = get(api_conn(), "/api/v1/meeting?origin=unknown-host")
     assert conn.status == 400
-    assert Jason.decode!(conn.resp_body)["error"] =~ "unknown host"
+    assert Jason.decode!(conn.resp_body)["error"] =~ "unknown origin"
     assert Shuttle.Test.MeetingRunner.calls() == []
 
     Shuttle.Test.ForwardStub.stub_forward(
@@ -1277,7 +1277,7 @@ defmodule Shuttle.MeetingTest do
         )
 
       assert conn.status == 422
-      assert Jason.decode!(conn.resp_body)["error"] =~ "unknown host \"absent-owner\""
+      assert Jason.decode!(conn.resp_body)["error"] =~ "unknown origin \"absent-owner\""
       assert Shuttle.Test.MeetingRunner.calls() == []
       refute File.exists?(Path.join(hark_dir, "meetings"))
     end
@@ -1285,7 +1285,7 @@ defmodule Shuttle.MeetingTest do
     assert {:error, {:validation, message}} =
              Meeting.meeting_paths("missing-owner", "absent-owner")
 
-    assert message =~ "unknown host"
+    assert message =~ "unknown origin"
   end
 
   test "addressed stale stop cannot signal or dismiss a newer launch", %{hark_dir: hark_dir} do

@@ -30,6 +30,9 @@ defmodule ShuttleWeb.FeltNestController do
 
   def create(conn, %{"fiber_id" => fiber_id} = params) when is_binary(fiber_id) do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_text(conn, OriginRouter.forward(remote, "/api/v1/felt-nest", conn.body_params))
 

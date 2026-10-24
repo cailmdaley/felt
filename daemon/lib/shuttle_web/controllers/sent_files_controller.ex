@@ -64,6 +64,9 @@ defmodule ShuttleWeb.SentFilesController do
 
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
 

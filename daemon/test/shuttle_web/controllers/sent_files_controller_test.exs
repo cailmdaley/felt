@@ -454,7 +454,7 @@ defmodule ShuttleWeb.SentFilesControllerTest do
         )
 
       assert %{"ok" => false, "error" => error} = json_response(conn, 400)
-      assert error =~ "unknown host"
+      assert error =~ "unknown origin"
     end
 
     test "reports a writer refusal without claiming success" do

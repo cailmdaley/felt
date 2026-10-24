@@ -24,23 +24,13 @@ defmodule Shuttle.OriginRouter do
   only serves a fiber in its owner feed when it already owns the store, so the
   store is configured by construction by the time the kanban can route to it.
 
-  **Safety, and its limit.** An `origin` that matches no configured remote falls
-  through to `:local`, where the endpoint's own resolution is the final arbiter
-  — a mis-stamped origin degrades to a clean local "fiber not found" /
-  availability error, never a silent wrong-host write.
-
-  That argument holds for a **fiber-addressed** write and only for one. A fiber
-  lives on exactly one host, so a local daemon asked for one it does not own
-  answers "not found" and nothing happens. A **host-addressed** write — a
-  config file, a store list, a tunnel job — has no such arbiter: every host has
-  a `~/.config/shuttle/stores.json`, so degrading finds a perfectly good local file
-  and writes it, under a UI header naming a different machine. Those endpoints
-  use `route_host/2`, which refuses instead.
+  Explicit origins are authoritative: an unknown origin is refused before any
+  local lookup, read or write. Git mirrors and host-local paths can exist on
+  multiple hosts, so local resolution cannot establish the intended destination.
+  An absent origin means this daemon. `route_host/2` shares the same decision.
   """
 
   alias Shuttle.{Poller, RegistryCommon, Remote}
-
-  require Logger
 
   # A forwarded write waits for the owner's longest Poller call plus transit, so
   # the owner always answers (even "still busy") before this hop gives up.
@@ -54,77 +44,28 @@ defmodule Shuttle.OriginRouter do
   Where a write should execute: `:local` runs the endpoint's own handler here;
   `{:remote, remote}` forwards to the owning daemon.
   """
-  @type route_decision :: :local | {:remote, Remote.t()}
+  @type route_decision :: :local | {:remote, Remote.t()} | {:error, {:unknown_origin, String.t()}}
 
   @typedoc """
-  `route_host/2`'s answer: the two above, plus the refusal a host-addressed
-  endpoint needs when the named host is not one this daemon can reach.
+  Host-addressed requests use the same fail-closed decision as fiber requests.
   """
-  @type host_route_decision :: route_decision() | {:error, {:unknown_origin, String.t()}}
+  @type host_route_decision :: route_decision()
 
   @doc """
   Decide whether a write for a fiber stamped with `origin` runs locally or
   forwards to a remote owner.
 
-  `nil` / `""` / `"local"` / this daemon's own host id → `:local`. An origin
-  matching a configured remote → `{:remote, remote}`. Any other (unknown)
-  origin → `:local` (the endpoint's own resolution is the final arbiter — see
-  the moduledoc's Safety note), but LOUDLY: a non-empty origin that
-  reached here without matching local OR any configured remote is
-  "remote-shaped" — the composite board only ever stamps an origin that is
-  either this daemon or a name from `:remotes` — so this is either a stale
-  remote list (a remote was renamed/removed since the board cached it) or a
-  genuine misconfiguration, either of which deserves a log, not a silent
-  degrade. `Logger.warning` rather than raising: silently falling to `:local`
-  was already deliberately safe (never a wrong-host write), only the silence
-  itself was the gap.
+  `nil` / `""` / `"local"` / this daemon's own host id → `:local`.
+  A configured remote → `{:remote, remote}`.
+  Every other explicit origin → `{:error, {:unknown_origin, origin}}`.
 
   Opts (for tests / explicit wiring): `:own_host_id`, `:remotes`.
   """
   @spec route(String.t() | nil, keyword()) :: route_decision()
-  def route(origin, opts \\ []) do
-    own = Keyword.get(opts, :own_host_id) || Poller.own_host_id()
-
-    cond do
-      origin in [nil, "", "local", own] ->
-        :local
-
-      true ->
-        # Origin routing resolves the fleet through the ONE chokepoint
-        # (`RegistryCommon.configured_remotes/1`) that the registries and the
-        # felt-stores controller also use — so a remote this daemon polls for
-        # visibility and a remote it routes writes to are guaranteed to agree,
-        # both in where the list comes from and in how it parses.
-        remotes = RegistryCommon.configured_remotes(opts)
-
-        case Enum.find(remotes, &(&1.name == origin)) do
-          %Remote{} = remote ->
-            {:remote, remote}
-
-          nil ->
-            Logger.warning(
-              "OriginRouter: origin #{inspect(origin)} matches neither this daemon " <>
-                "(#{inspect(own)}) nor any configured remote " <>
-                "(#{inspect(Enum.map(remotes, & &1.name))}) " <>
-                "— degrading to :local; the endpoint's own resolution is the final arbiter."
-            )
-
-            :local
-        end
-    end
-  end
+  def route(origin, opts \\ []), do: route_host(origin, opts)
 
   @doc """
-  Route a **host-addressed** request, refusing an origin this daemon cannot
-  place instead of degrading to local.
-
-  The difference from `route/2` is one branch and it is the whole point. A
-  fiber-addressed write can degrade safely, because the local daemon will not
-  find a fiber it does not own. A host-addressed write cannot: every host has
-  the files these endpoints touch, so a degraded origin does not fail — it
-  succeeds, on the wrong machine, and answers 200. The realistic way to get
-  there needs no exotic input at all: a settings page open on one host while
-  the fleet file changes underneath, and the next save lands here.
+  Route a host-addressed request, refusing an origin outside this daemon's fleet.
 
   `{:error, {:unknown_origin, name}}` for a non-empty origin that is neither
   this daemon nor a configured remote. `nil` / `""` / `"local"` / this host's
@@ -154,8 +95,8 @@ defmodule Shuttle.OriginRouter do
     own = Keyword.get(opts, :own_host_id) || Poller.own_host_id()
     known = [own | Enum.map(RegistryCommon.configured_remotes(opts), & &1.name)]
 
-    "unknown host #{inspect(origin)} — this daemon knows #{Enum.map_join(known, ", ", &inspect/1)}. " <>
-      "Refusing rather than writing this host's own files under that name."
+    "unknown origin #{inspect(origin)}: not in this daemon's fleet " <>
+      "(known hosts: #{Enum.map_join(known, ", ", &inspect/1)})."
   end
 
   @doc """

@@ -1198,7 +1198,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert %{"error" => error} =
              api_conn() |> post("/api/v1/messages", Jason.encode!(base)) |> json_response(400)
 
-    assert error =~ "unknown host"
+    assert error =~ "unknown origin"
 
     assert api_conn()
            |> post("/api/v1/messages", Jason.encode!(Map.put(base, "wake", "true")))

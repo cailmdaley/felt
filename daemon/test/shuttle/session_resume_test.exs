@@ -536,7 +536,7 @@ defmodule Shuttle.SessionResumeTest do
                )
                |> json_response(422)
 
-      assert reason =~ "unknown host \"nowhere\""
+      assert reason =~ "unknown origin \"nowhere\""
       assert StubKitty.opened() == []
     end
 

@@ -68,6 +68,7 @@ defmodule Shuttle.Transition do
   @spec transition(String.t(), String.t(), String.t() | nil, keyword()) :: result()
   def transition(fiber_id, target, origin, opts \\ []) do
     case OriginRouter.route(origin, opts) do
+      {:error, _} = error -> error
       :local -> transition_local(fiber_id, target)
       {:remote, %Remote{} = remote} -> forward(remote, fiber_id, target, origin, opts)
     end
@@ -212,6 +213,9 @@ defmodule Shuttle.Transition do
   The single place the write-plane's error vocabulary becomes HTTP.
   """
   @spec http_error(term()) :: {non_neg_integer(), String.t()}
+  def http_error({:unknown_origin, origin}),
+    do: {400, OriginRouter.unknown_origin_message(origin)}
+
   def http_error(:unknown_target), do: {400, "unknown_target"}
   def http_error(:already_running), do: {409, "already_running"}
   def http_error(:not_found), do: {404, "not_found"}

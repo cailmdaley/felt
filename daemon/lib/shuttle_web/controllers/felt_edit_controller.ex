@@ -66,6 +66,9 @@ defmodule ShuttleWeb.FeltEditController do
 
   defp route_edit(conn, fiber_id, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
+      {:error, {:unknown_origin, origin}} ->
+        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/felt-edit", conn.body_params)
         # The forwarded edit mutated the remote's loom mirror; invalidate the

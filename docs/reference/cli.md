@@ -163,6 +163,7 @@ the daemon speaks directly, see the [HTTP API](api.md).
 
 Owner routing uses the local document's `shuttle.host`, not the local daemon's snapshot.
 The owner need not have polled the fiber yet.
+The daemon refuses an explicit origin outside its own fleet with 400 naming that origin; it never substitutes a local Git mirror or local file for an unknown destination.
 On a missing lifecycle, dispatch or single-fiber read, the owning daemon attempts `felt sync` on its configured stores and retries.
 Concurrent requests share each pull, attempted at most once per store every 30 seconds, including failures.
 The network fetch has a five-second deadline; the local merge runs to completion without a hard kill so it can release Git's index lock on slow filesystems.
