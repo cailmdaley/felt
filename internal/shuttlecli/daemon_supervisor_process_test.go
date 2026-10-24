@@ -70,11 +70,15 @@ type ownerHelper struct {
 }
 
 func startOwnerHelper(t *testing.T, home, mode, path string) ownerHelper {
+	return startOwnerHelperAt(t, home, mode, path, "127.0.0.1:49999")
+}
+
+func startOwnerHelperAt(t *testing.T, home, mode, path, address string) ownerHelper {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDaemonOwnerHelper$")
-	cmd.Env = append(os.Environ(), "SHUTTLE_TEST_OWNER_HOME="+home, "SHUTTLE_TEST_OWNER_HELPER="+mode)
+	cmd.Env = append(os.Environ(), "SHUTTLE_TEST_OWNER_HOME="+home, "SHUTTLE_TEST_OWNER_HELPER="+mode, "SHUTTLE_TEST_OWNER_ADDRESS="+address)
 	if path != "" {
 		cmd.Env = append(cmd.Env, "PATH="+path)
 	}
@@ -135,6 +139,27 @@ func TestDaemonOwnerConcurrentProcessesAndExecLifetime(t *testing.T) {
 	fmt.Fprintln(d.in, "GO")
 	if line := ownerLine(t, d); line != "EXECUTED" {
 		t.Fatalf("dead claim recovery: %s", line)
+	}
+}
+
+func TestDaemonOwnerClaimsAreScopedToEndpointProcesses(t *testing.T) {
+	home := t.TempDir()
+	primary := startOwnerHelperAt(t, home, "service", "", "127.0.0.1:4401")
+	fmt.Fprintln(primary.in, "GO")
+	if line := ownerLine(t, primary); line != "CLAIMED" {
+		t.Fatalf("primary endpoint claim: %s", line)
+	}
+	// A real installer process may claim 4402 while the 4401 owner stays live.
+	secondary := startOwnerHelperAt(t, home, "install", "", "127.0.0.1:4402")
+	fmt.Fprintln(secondary.in, "GO")
+	if line := ownerLine(t, secondary); line != "CLAIMED" {
+		t.Fatalf("secondary endpoint install claim was blocked: %s", line)
+	}
+	// Repeating the install against 4401 must see the live process claim.
+	same := startOwnerHelperAt(t, home, "install", "", "127.0.0.1:4401")
+	fmt.Fprintln(same.in, "GO")
+	if line := ownerLine(t, same); !strings.HasPrefix(line, "REFUSED:") {
+		t.Fatalf("same endpoint install was not rejected: %s", line)
 	}
 }
 
