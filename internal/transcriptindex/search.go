@@ -54,7 +54,12 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	if opts.Limit < 0 {
 		return nil, fmt.Errorf("limit must be positive")
 	}
-	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,m.role,-bm25(search),snippet(search,0,'«','»','…',40)
+	// BM25 scores are negative; negate before applying the conversational-role
+	// boost. A tool match can still win if its raw relevance is >1.5 times
+	// that of a user/assistant match. Apply this before LIMIT, not to a shortlist.
+	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,m.role,
+ -bm25(search) * CASE WHEN m.role IN ('user','assistant') THEN 1.5 ELSE 1.0 END AS score,
+ snippet(search,0,'«','»','…',40)
  FROM search JOIN messages m ON m.id=search.rowid JOIN files f ON f.id=m.file_id WHERE search MATCH ?`
 	args := []any{match}
 	if opts.Sessions != nil {
@@ -81,7 +86,7 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 		sql += " AND f.harness=?"
 		args = append(args, opts.Harness)
 	}
-	sql += " ORDER BY bm25(search),m.id LIMIT ?"
+	sql += " ORDER BY score DESC,m.id LIMIT ?"
 	args = append(args, opts.Limit)
 	rows, err := i.db.QueryContext(ctx, sql, args...)
 	if err != nil {

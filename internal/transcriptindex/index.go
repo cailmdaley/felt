@@ -96,8 +96,8 @@ func Open(path string) (*Index, error) {
 }
 func (i *Index) Close() error { return i.db.Close() }
 
-// Ready reports a completed root scan. A hook-created single-file index is
-// useful with --no-index but doesn't authorize an implicit first full build.
+// Ready reports a completed root scan. A single-file index is useful with
+// --no-index but doesn't authorize an implicit first full build.
 func (i *Index) Ready(ctx context.Context) (bool, error) {
 	var value string
 	err := i.db.QueryRowContext(ctx, "SELECT value FROM state WHERE key='scan_completed'").Scan(&value)

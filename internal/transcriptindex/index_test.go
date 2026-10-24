@@ -267,6 +267,51 @@ func TestCatchUpAndRebuild(t *testing.T) {
 		t.Fatal("ignored cancellation")
 	}
 }
+
+// Identical texts isolate role weighting from BM25 length/frequency effects.
+// Tools are inserted first so ties or weighting after LIMIT cannot pass.
+func TestSearchConversationalRolesBoostBeforeLimit(t *testing.T) {
+	i := testIndex(t)
+	if _, err := i.db.Exec(`INSERT INTO files(id,path,harness,identity,size,mtime,offset,line,tail,session,project)
+ VALUES(1,'/fixture','claude','fixture',0,0,0,0,'','session','/work')`); err != nil {
+		t.Fatal(err)
+	}
+	for n, role := range []string{"tool_call", "tool_result", "user", "assistant"} {
+		if _, err := i.db.Exec(`INSERT INTO messages(file_id,line,timestamp,role,text) VALUES(1,?,'2026-10-01T00:00:00Z',?,?)`, n+1, role, "equal relevance needle"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits := search(t, i, "needle", Options{Limit: 1})
+	if len(hits) != 1 || hits[0].Role != "user" {
+		t.Fatalf("role weighting must precede limit: %+v", hits)
+	}
+	hits = search(t, i, "needle", Options{Limit: 4})
+	for n, role := range []string{"user", "assistant", "tool_call", "tool_result"} {
+		if len(hits) != 4 || hits[n].Role != role {
+			t.Fatalf("conversation-first stable ordering: %+v", hits)
+		}
+	}
+	if ratio := hits[0].Score / hits[2].Score; ratio < 1.4999 || ratio > 1.5001 {
+		t.Fatalf("positive score multiplier=%g want 1.5", ratio)
+	}
+	// A much stronger tool match must beat a weak conversational match, and
+	// a query found only in a tool must remain discoverable.
+	for _, row := range []struct{ role, text string }{
+		{"assistant", "strongneedle " + strings.Repeat("padding ", 500)},
+		{"tool_result", "strongneedle toolonlyneedle"},
+	} {
+		if _, err := i.db.Exec(`INSERT INTO messages(file_id,line,timestamp,role,text) VALUES(1,10,'2026-10-01T00:00:00Z',?,?)`, row.role, row.text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := search(t, i, "strongneedle", Options{Limit: 1}); len(got) != 1 || got[0].Role != "tool_result" {
+		t.Fatalf("role boost overwhelmed much stronger tool relevance: %+v", got)
+	}
+	if got := search(t, i, "toolonlyneedle", Options{}); len(got) != 1 || got[0].Role != "tool_result" {
+		t.Fatalf("lost tool-only match: %+v", got)
+	}
+}
+
 func TestPathsRespectScopedEnvironment(t *testing.T) {
 	env := sysenv.New("/work", []string{"HOME=/home/test", "XDG_CACHE_HOME=/cache", "SHUTTLE_PI_SESSIONS_DIR=/pi"})
 	p, e := DefaultPath(env)
