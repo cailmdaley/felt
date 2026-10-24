@@ -76,6 +76,35 @@ defmodule Shuttle.WorkerBackend do
     end
   end
 
+  @doc "Release a finished assignment without ending or reloading its conversation."
+  def retire_assignment(session, fiber, started_at) do
+    with id when is_binary(id) <- AppWorkers.id(session),
+         true <- assignment_ended?(fiber, started_at),
+         state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
+         :ok <- AppWorkers.deactivate(id) do
+      :retired
+    else
+      _ -> :retained
+    end
+  end
+
+  @doc "Completion evidence must belong to this assignment, not an earlier run."
+  def assignment_ended?(%{"status" => "closed"}, _started_at), do: true
+
+  def assignment_ended?(fiber, started_at) do
+    boundaries =
+      [started_at, Shuttle.Continuation.dispatched_at(fiber)]
+      |> Enum.filter(&match?(%DateTime{}, &1))
+
+    case Shuttle.Continuation.handed_off_at(fiber) do
+      %DateTime{} = handoff when boundaries != [] ->
+        Enum.all?(boundaries, &(DateTime.compare(handoff, &1) != :lt))
+
+      _ ->
+        false
+    end
+  end
+
   def present?(runner, session), do: session_status(runner, session) != :gone
 
   def stop(runner, session) do

@@ -101,14 +101,15 @@ func lockAndReloadFiber(st *felt.Storage, f *felt.Felt) (*felt.Felt, func() erro
 // ---- pause -----------------------------------------------------------------
 
 func (a *app) pauseCmd() *cobra.Command {
-	var pauseNoKill bool
+	var pauseNoKill, pauseLocal bool
 	pauseCmd := &cobra.Command{
 		Use:   "pause <fiber>",
 		Short: "Pause dispatch, kill any live worker, and park a fiber in drafts",
 		Long: `Sets the felt-native status to "open" (the draft / paused state — the daemon
 never dispatches an open fiber) while preserving the schedule, then kills the
-worker tmux session if one is running. Clears tempered / closed-at so the card
-lands in Drafts rather than Awaiting review.
+worker through its owning daemon's backend. Clears tempered / closed-at so the
+card lands in Drafts rather than Awaiting review. --local writes only; without
+a daemon, only terminal workers can be stopped here.
 
 Use --no-kill to stop scheduling only and let a live worker finish naturally.
 status is the fiber's only dispatch switch; there is no enabled flag.`,
@@ -151,6 +152,10 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 				return nil
 			}
 
+			// The owning Poller stops the backend after its serialized local write.
+			if pauseLocal {
+				return nil
+			}
 			session, _ := a.liveWorkerSession(f)
 			if session == "" {
 				fmt.Fprintf(a.env.Stdout, "  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
@@ -164,7 +169,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 		},
 	}
 	pauseCmd.Flags().BoolVar(&pauseNoKill, "no-kill", false, "Only disable future dispatch; leave any live worker tmux session running")
-	pauseCmd.Flags().Bool("local", false, localFlagUsage)
+	pauseCmd.Flags().BoolVar(&pauseLocal, "local", false, localFlagUsage)
 	return pauseCmd
 }
 

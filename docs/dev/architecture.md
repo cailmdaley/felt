@@ -139,8 +139,13 @@ conversation identity and task assignment durably on the owning host. Capture
 creates an unassigned conversation that can claim a fiber; an ordinary
 dispatch assigns the conversation immediately. Both use the same execution
 backend. A completed turn can wait for a reply without releasing its task or
-starting another conversation. An explicit stop or completed handoff releases
-ownership.
+starting another conversation.
+An explicit stop releases the assignment through the backend's interrupt operation.
+A handoff belonging to the current assignment, or a closed fiber, releases the assignment once the backend confirms the thread is idle, not loaded, or missing.
+This completion path does not interrupt or reload the conversation.
+Boot adoption applies the same rule as polling.
+The durable conversation identity and endpoint survive assignment retirement, while the next dispatch selects the fiber's current agent.
+An unavailable backend leaves the assignment supervised until its state can be established.
 
 The durable record pins the backend's host and endpoint, independently of presentation.
 Recovery, resume, stop, attachment, and native messaging check that owner before native operations; matching a thread ID in another server's rollout store is insufficient.

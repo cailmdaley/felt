@@ -311,6 +311,7 @@ defmodule Shuttle.AppWorkers do
                  "uid" => uid,
                  "felt_store" => store,
                  "active" => true,
+                 "started_at" => DateTime.to_iso8601(DateTime.utc_now()),
                  "launch_state" => "starting"
                })
              ) do

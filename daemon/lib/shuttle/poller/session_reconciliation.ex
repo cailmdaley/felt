@@ -177,10 +177,30 @@ defmodule Shuttle.Poller.SessionReconciliation do
       last_activity_at: started_at
     }
 
-    # The worker-owned durable receiver survives frontmatter mirror failures.
-    # Restore it before publishing recovery so stale runtime cannot grant a
-    # predecessor even a temporary higher-epoch designation.
-    running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
+    case Shuttle.WorkerBackend.retire_assignment(session, fiber, started_at) do
+      :retired ->
+        cond do
+          fiber["status"] == "closed" ->
+            Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
+
+          get_in(fiber, ["shuttle", "kind"]) == "standing" ->
+            Shuttle.Poller.StandingRoles.mark_standing_awaiting(fiber_id)
+
+          true ->
+            :ok
+        end
+
+        state
+
+      :retained ->
+        # Restore the owned receiver only for an assignment we still supervise.
+        running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
+        watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta)
+    end
+  end
+
+  defp watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta) do
+    session = running_meta.session
 
     case Poller.start_watcher(state, fiber_id, running_meta) do
       {:ok, running_meta} ->

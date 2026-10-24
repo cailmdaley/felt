@@ -216,7 +216,7 @@ defmodule Shuttle.SessionResumeTest do
       assert plan.cwd == project
 
       assert plan.command ==
-               "codex --remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}' -C '#{project}' resume '#{@codex}'"
+               "env -u TMUX -u TMUX_PANE codex --remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}' -C '#{project}' resume '#{@codex}'"
     end
 
     test "pi with no ledgered agent resumes with the bare CLI, in its header's cwd", %{

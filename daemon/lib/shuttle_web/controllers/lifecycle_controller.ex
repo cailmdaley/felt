@@ -85,15 +85,15 @@ defmodule ShuttleWeb.LifecycleController do
     |> clean_result()
   end
 
-  defp execute(action, %{"fiber" => fiber} = params) when action in ["role", "seat"] do
+  defp execute(action, %{"fiber" => fiber} = params) when action in ["role", "seat", "pause"] do
     with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
-      verb = if action == "role", do: :role, else: :seat
+      verb = %{"role" => :role, "seat" => :seat, "pause" => :pause}[action]
       verb |> LifecycleService.transition(fiber, args) |> clean_result()
     end
   end
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install repeat reshape pause close reopen set-model set-agent set-outcome uninstall) do
+       when action in ~w(install repeat reshape close reopen set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})

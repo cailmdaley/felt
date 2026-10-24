@@ -1492,8 +1492,8 @@ defmodule Shuttle.Poller do
     # stop), then stops the worker, so its exit cannot be read as a reason to
     # relaunch. A failed stop is reported; the document is already at rest.
     {result, state} =
-      case {verb, result} do
-        {:rest, {:ok, output}} ->
+      case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
+        {true, {:ok, output}} ->
           case stop_tracked_worker(state, slug) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
@@ -3958,39 +3958,26 @@ defmodule Shuttle.Poller do
       case fetch_fiber_full(fiber_id, state_acc) do
         {:ok, fiber} ->
           app? = Shuttle.AppWorkers.app?(meta.session)
-          handed_off? = app? and Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
 
-          idle? =
-            app? and (handed_off? or Map.get(fiber, "status") == "closed") and
-              Shuttle.AppWorkers.state(Shuttle.AppWorkers.id(meta.session)) == :idle
+          retired? =
+            app? and
+              Shuttle.WorkerBackend.retire_assignment(meta.session, fiber, meta.started_at) ==
+                :retired
 
           cond do
-            handed_off? and idle? ->
-              case Shuttle.WorkerBackend.stop(state_acc.runner, meta.session) do
-                {_, 0} ->
-                  stop_watcher(meta)
-                  handle_worker_exit(state_acc, fiber_id)
+            retired? ->
+              stop_watcher(meta)
 
-                _ ->
-                  state_acc
-              end
+              if fiber["status"] == "closed",
+                do: stamp_handoff_if_stale(state_acc, fiber_id, fiber)
+
+              handle_worker_exit(state_acc, fiber_id)
 
             Map.get(fiber, "status") == "closed" and not app? ->
               stamp_handoff_if_stale(state_acc, fiber_id, fiber)
               Logger.info("Fiber closed externally: #{fiber_id}; stopping watcher")
               stop_watcher(meta)
               remove_running(state_acc, runtime_key)
-
-            Map.get(fiber, "status") == "closed" and idle? ->
-              case Shuttle.WorkerBackend.stop(state_acc.runner, meta.session) do
-                {_, 0} ->
-                  stamp_handoff_if_stale(state_acc, fiber_id, fiber)
-                  stop_watcher(meta)
-                  remove_running(state_acc, runtime_key)
-
-                _ ->
-                  state_acc
-              end
 
             true ->
               state_acc

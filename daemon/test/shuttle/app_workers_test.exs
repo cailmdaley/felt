@@ -1980,7 +1980,10 @@ defmodule Shuttle.AppWorkersTest do
     fiber("tests/app")
     assert {:ok, session} = dispatch("tests/app")
     assert {"", 0} = WorkerBackend.stop(Runner, session)
+    :ok = AppWorkers.update("app-session-1", %{"started_at" => "2026-01-01T00:00:00Z"})
     assert {:ok, ^session} = dispatch("tests/app", resume_mode: "previous")
+    assert {:ok, %{"started_at" => started_at}} = AppWorkers.get("app-session-1")
+    assert started_at != "2026-01-01T00:00:00Z"
     assert Enum.any?(App.calls(), &match?({:resume, "app-session-1", _}, &1))
     assert App.names() == [{"app-session-1", "Shuttle — app"}]
   end
@@ -2049,6 +2052,131 @@ defmodule Shuttle.AppWorkersTest do
     assert Poller.worker_status(poller, "tests/app") == nil
     assert WorkerBackend.session_status(Runner, session) == :gone
     assert Enum.count(App.calls(), &match?({:start, _}, &1)) == 1
+  end
+
+  test "completion evidence is scoped to the owned assignment, including a missing dispatch mirror" do
+    start = ~U[2026-10-20 12:00:00Z]
+
+    build = fn dispatch, handoff ->
+      %{"shuttle" => %{"runtime" => %{"dispatched_at" => dispatch, "handed_off_at" => handoff}}}
+    end
+
+    refute WorkerBackend.assignment_ended?(%{}, start)
+    refute WorkerBackend.assignment_ended?(build.(nil, "2026-10-20T11:59:59Z"), start)
+
+    refute WorkerBackend.assignment_ended?(
+             build.("2026-10-20T12:00:01Z", "2026-10-20T12:00:00Z"),
+             start
+           )
+
+    assert WorkerBackend.assignment_ended?(build.(nil, "2026-10-20T12:00:00Z"), start)
+    assert WorkerBackend.assignment_ended?(%{"status" => "closed"}, start)
+  end
+
+  for remote <- [:idle, :not_loaded, :missing, :running, :unknown], boot? <- [true, false] do
+    test "handoff with backend #{remote} at boot=#{boot?} separates assignment from conversation" do
+      remote = unquote(remote)
+      boot? = unquote(boot?)
+      fiber("tests/app")
+      {:ok, session} = dispatch("tests/app")
+      App.set(:state, remote)
+      # Do not let a watcher recover the unloaded thread before reconciliation.
+      App.set(:read_result, {:error, :disconnected})
+      App.set(:interrupt_result, {:error, :disconnected})
+
+      if boot?, do: end_assignment()
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Runner,
+          name: nil,
+          felt_stores: [Runner.felt_root()],
+          poll_interval_ms: 60_000
+        )
+
+      await_boot_cycle!(poller)
+
+      unless boot? do
+        assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+        end_assignment()
+        before = :sys.get_state(poller).poll_cycles
+        send(poller, :run_poll_cycle)
+        eventually(fn -> :sys.get_state(poller).poll_cycles > before end)
+      end
+
+      if remote in [:idle, :not_loaded, :missing] do
+        assert nil == Poller.worker_status(poller, "tests/app")
+
+        assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
+                 AppWorkers.get("app-session-1")
+
+        # Next-launch configuration replaces the assignment, never the old identity.
+        Runner.set_shuttle(
+          "tests/app",
+          "kind: oneshot\nagent: claude-sonnet\nsurface: cli\nproject_dir: /tmp\n",
+          "active"
+        )
+
+        assert {:ok, next} = Poller.dispatch_fiber(poller, "tests/app", force: true)
+        assert next != session
+        assert %{agent_id: "claude-sonnet"} = Poller.worker_status(poller, "tests/app")
+      else
+        assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+        assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
+      end
+
+      refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+    end
+  end
+
+  test "stale handoff cannot retire a newer owned assignment at boot" do
+    fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    end_assignment()
+    future = DateTime.add(DateTime.utc_now(), 60, :second)
+    :ok = AppWorkers.update("app-session-1", %{"started_at" => DateTime.to_iso8601(future)})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    assert %{session: ^session, started_at: ^future} = Poller.worker_status(poller, "tests/app")
+    assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
+  end
+
+  test "pause stops the Codex backend after disarming, while no-kill preserves it" do
+    fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    assert {:ok, _} = Poller.lifecycle_transition(poller, :pause, "tests/app", ["--no-kill"])
+    assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+    refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+    assert {:ok, _} = Poller.lifecycle_transition(poller, :pause, "tests/app", [])
+    assert nil == Poller.worker_status(poller, "tests/app")
+    assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
+    assert {:interrupt, "app-session-1"} in App.calls()
+  end
+
+  defp end_assignment do
+    Runner.put_shuttle_fields("tests/app", %{
+      "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
+    })
+
+    Runner.set_fiber("tests/app", Map.put(Runner.fiber("tests/app"), "status", "open"))
   end
 
   test "app workers can launch without a tmux executable" do

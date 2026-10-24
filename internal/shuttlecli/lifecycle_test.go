@@ -276,22 +276,25 @@ func TestShuttlePause_KillsWorkerAndParks(t *testing.T) {
 	}
 }
 
-func TestShuttlePause_NoKillLeavesWorker(t *testing.T) {
+func TestShuttlePause_WriteOnlyLeavesBackendStopToCaller(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	dir, storage := newStore(t)
-	seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
-	f := mustRead(t, storage, "task")
-	a, killed := withStubbedTmux(t, env, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
-
-	if out, _, err := executeApp(t, a, dir, "pause", "task", "--no-kill"); err != nil {
-		t.Fatalf("pause --no-kill: %v\n%s", err, out)
-	}
-	if len(*killed) != 0 {
-		t.Fatalf("--no-kill must not kill, killed %v", *killed)
-	}
-	if mustRead(t, storage, "task").Status != felt.StatusOpen {
-		t.Fatal("status should still be open")
+	for _, flag := range []string{"--no-kill", "--local"} {
+		t.Run(flag, func(t *testing.T) {
+			env := testEnv(t)
+			dir, storage := newStore(t)
+			seedShuttleRole(t, storage, "task", felt.StatusActive, oneshot(), nil)
+			f := mustRead(t, storage, "task")
+			a, killed := withStubbedTmux(t, env, map[string]bool{shuttleTmuxSessionName(f.ID, f.UID): true})
+			if out, _, err := executeApp(t, a, dir, "pause", "task", flag); err != nil {
+				t.Fatalf("pause %s: %v\n%s", flag, err, out)
+			}
+			if len(*killed) != 0 {
+				t.Fatalf("%s must not kill, killed %v", flag, *killed)
+			}
+			if mustRead(t, storage, "task").Status != felt.StatusOpen {
+				t.Fatal("status should still be open")
+			}
+		})
 	}
 }
 

@@ -61,6 +61,7 @@ defmodule Shuttle.CodexBackendRealTest do
     pid = backend_pid(endpoint)
     assert pid > 0
     IO.puts("REAL_CODEX first_pid=#{pid} endpoint=#{endpoint}")
+    probe_assignment_and_viewer(root, endpoint, codex)
     assert %{state: :ready} = CodexBackend.check(endpoint: {:ok, endpoint}, runner: Runner)
     assert backend_pid(endpoint) == pid
     GenServer.stop(manager)
@@ -109,6 +110,82 @@ defmodule Shuttle.CodexBackendRealTest do
     IO.puts("REAL_CODEX missing_alias_live_holder=held pid=#{new_pid}")
   end
 
+  defp probe_assignment_and_viewer(root, endpoint, _codex) do
+    alias Shuttle.{AppWorkers, CodexApp, CodexTerminal, WorkerBackend}
+    Env.put_app_env(:codex_app_client, CodexApp)
+    Env.put_app_env(:app_workers_dir, Path.join(root, "assignments"))
+    Env.put_app_env(:codex_app_transport_opts, socket_path: endpoint)
+    {:ok, thread} = CodexApp.start_thread(cwd: root)
+    id = thread["id"]
+    started = DateTime.utc_now()
+    assert :idle = CodexApp.state(id)
+
+    assert :ok =
+             AppWorkers.put(%{
+               "session_uuid" => id,
+               "thread_id" => id,
+               "active" => true,
+               "backend_endpoint" => endpoint,
+               "backend_host" => Shuttle.Poller.own_host_id(),
+               "started_at" => DateTime.to_iso8601(started)
+             })
+
+    session = AppWorkers.ref(id)
+    assert :retained = WorkerBackend.retire_assignment(session, %{}, started)
+
+    fiber = %{
+      "shuttle" => %{
+        "runtime" => %{
+          "handed_off_at" => DateTime.to_iso8601(started)
+        }
+      }
+    }
+
+    assert :retired = WorkerBackend.retire_assignment(session, fiber, started)
+    assert {:ok, %{"id" => ^id}} = CodexApp.read_thread(id)
+    assert :idle = CodexApp.state(id)
+    IO.puts("REAL_CODEX completed_assignment=#{id} conversation_still_loaded=true")
+
+    # A real tmux child gets TMUX/TMUX_PANE from its server even when the
+    # launching daemon has neither. Exercise the exact viewer command builder.
+    probe = Path.join(root, "viewer-probe")
+    result = Path.join(root, "viewer-env")
+
+    File.write!(
+      probe,
+      "#!/bin/sh\nprintf '%s|%s' \"${TMUX-unset}\" \"${TMUX_PANE-unset}\" > '#{result}'\n"
+    )
+
+    File.chmod!(probe, 0o700)
+    command = CodexTerminal.command(probe, root, id, "unix://" <> endpoint)
+
+    assert {_, 0} =
+             Runner.cmd("tmux", ["new-session", "-d", "-s", "viewer-probe", command],
+               stderr_to_stdout: true
+             )
+
+    assert "unset|unset" = await_viewer_env(result, System.monotonic_time(:millisecond) + 5_000)
+    IO.puts("REAL_TMUX viewer_inherited_identity=unset")
+
+    if client = Process.whereis(Shuttle.CodexApp.Client),
+      do: Shuttle.CodexApp.Transport.close(client)
+  end
+
+  defp await_viewer_env(path, deadline) do
+    case File.read(path) do
+      {:ok, value} when value != "" ->
+        value
+
+      _ ->
+        assert System.monotonic_time(:millisecond) < deadline
+
+        receive do
+        after
+          10 -> await_viewer_env(path, deadline)
+        end
+    end
+  end
+
   defp backend_pid(endpoint) do
     {:ok, processes} = Shuttle.WorkerProcess.scan(Runner)
 
@@ -149,7 +226,11 @@ defmodule Shuttle.CodexBackendRealTest do
             "-a",
             "-F",
             "\#{session_name}|\#{pane_dead}|\#{pane_dead_status}|\#{pane_start_command}"
-          ], stderr_to_stdout: true), label: "panes")
+          ],
+          stderr_to_stdout: true
+        ),
+        label: "panes"
+      )
 
       if health.endpoint do
         IO.inspect(
@@ -157,7 +238,9 @@ defmodule Shuttle.CodexBackendRealTest do
             "tmux",
             ["capture-pane", "-p", "-t", "=" <> CodexBackend.session(health.endpoint) <> ":"],
             stderr_to_stdout: true
-          ), label: "screen")
+          ),
+          label: "screen"
+        )
       end
 
       flunk(inspect(health))

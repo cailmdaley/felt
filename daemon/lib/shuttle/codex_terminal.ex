@@ -103,7 +103,7 @@ defmodule Shuttle.CodexTerminal do
   end
 
   def command(wrapper, cwd, id, endpoint) do
-    "#{wrapper} --remote #{quote_word(endpoint)} -C #{quote_word(cwd)} resume #{quote_word(id)}"
+    "env -u TMUX -u TMUX_PANE #{wrapper} --remote #{quote_word(endpoint)} -C #{quote_word(cwd)} resume #{quote_word(id)}"
   end
 
   defp quote_word(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
