@@ -177,25 +177,75 @@ defmodule Shuttle.Migration do
     end
   end
 
-  def move_backend(_state, %{backend: {:app, old, new}}) do
-    case AppWorkers.put(new) do
-      :ok -> {:ok, fn -> AppWorkers.put(old) end}
+  @doc "Idempotently reconcile a journal's backend assignment in its durable direction."
+  def reconcile_backend(state, %{"backend" => %{"type" => "app"} = backend} = entry) do
+    old = backend["before"]
+    target = backend[if(entry["direction"] == "forward", do: "after", else: "before")]
+    fiber = entry[if(entry["direction"] == "forward", do: "to", else: "from")]
+    target = Map.put(target, "fiber_path", fiber["path"])
+
+    with {:ok, current} <- AppWorkers.get(entry["uuid"]),
+         :ok <-
+           AppWorkers.check_owner(
+             current,
+             entry["uuid"],
+             state.own_host_id,
+             Shuttle.CodexApp.Transport.default_socket()
+           ),
+         true <- current["uid"] in [old["uid"], backend["after"]["uid"]] do
+      # Assignment fields change; contemporaneous backend state is retained.
+      AppWorkers.put(Map.merge(current, Map.take(target, ~w(fiber_id uid felt_store fiber_path))))
+    else
+      false -> {:error, :backend_assignment_conflict}
       error -> error
     end
   end
 
-  def move_backend(state, %{backend: {:tmux, old, new, aliases}}) do
-    with :ok <- WorkerProcess.write_migration_aliases(aliases),
-         :ok <- rename(state.runner, old, new) do
-      {:ok,
-       fn ->
-         with :ok <- rename(state.runner, new, old),
-              do: WorkerProcess.restore_migration_aliases(aliases)
-       end}
+  def reconcile_backend(state, %{"backend" => %{"type" => "tmux"} = backend} = entry) do
+    forward? = entry["direction"] == "forward"
+    from = backend[if(forward?, do: "before", else: "after")]
+    to = backend[if(forward?, do: "after", else: "before")]
+
+    aliases =
+      Enum.map(backend["aliases"], fn alias ->
+        previous = if alias["before"], do: {:ok, alias["before"]}, else: {:error, :enoent}
+        {alias["path"], previous, alias["after"]}
+      end)
+
+    # Query tmux directly here: script aliases themselves are being reconciled.
+    with {:ok, source?} <- tmux_exists(state.runner, from),
+         {:ok, dest?} <- tmux_exists(state.runner, to),
+         :ok <- reconcile_name(state.runner, from, to, source?, dest?) do
+      if forward?,
+        do: WorkerProcess.write_migration_aliases(aliases),
+        else: WorkerProcess.restore_migration_aliases(aliases)
+    end
+  end
+
+  defp tmux_exists(runner, name) do
+    case runner.cmd("tmux", ["has-session", "-t", "=" <> name], stderr_to_stdout: true) do
+      {_, 0} ->
+        {:ok, true}
+
+      {out, _} ->
+        if Shuttle.Tmux.absence_message?(out),
+          do: {:ok, false},
+          else: {:error, :backend_unobservable}
+    end
+  end
+
+  defp reconcile_name(_, _, _, true, true), do: {:error, :backend_assignment_conflict}
+  defp reconcile_name(runner, from, to, true, false), do: rename(runner, from, to)
+  defp reconcile_name(_, _, _, false, true), do: :ok
+
+  defp reconcile_name(runner, from, to, false, false) do
+    # A completed conversation can be absent, but a failed scan cannot prove it.
+    with {:ok, procs} <- WorkerProcess.scan(runner),
+         nil <- WorkerProcess.session_process(procs, from),
+         nil <- WorkerProcess.session_process(procs, to) do
+      :ok
     else
-      error ->
-        WorkerProcess.restore_migration_aliases(aliases)
-        error
+      _ -> {:error, :backend_unobservable}
     end
   end
 

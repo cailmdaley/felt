@@ -89,59 +89,85 @@ defmodule Shuttle.LifecycleStore do
 
   @doc "Prepare reversible migration writes without touching either document."
   def prepare_migration(from_path, to_path, uuid, opts) do
-    with {:ok, _, from_raw, from_fm, from_body} <- FiberDoc.read_path(from_path),
-         {:ok, _, to_raw, to_fm, to_body} <- FiberDoc.read_path(to_path),
+    with {:ok, _, _, from_fm, _} <- FiberDoc.read_path(from_path),
+         {:ok, _, _, to_fm, _} <- FiberDoc.read_path(to_path),
          {:ok, _} <- shuttle_block(from_fm),
          {:ok, _} <- shuttle_block(to_fm) do
       now = DateTime.to_iso8601(DateTime.utc_now())
       status = if opts[:rest] == true or opts[:disabled] == true, do: "open", else: "active"
 
-      source_ops =
-        [
-          {:put, "status", status},
-          {:delete, "closed-at"},
-          {:delete, "tempered"},
-          {:delete_nested, "shuttle", "runtime"}
-        ] ++ if(opts[:rest], do: [{:put, "horizon", "stashed"}], else: [{:delete, "horizon"}])
+      source_runtime = without_identity(get_in(from_fm, ["shuttle", "runtime"]) || %{})
+      dest_runtime = without_identity(get_in(to_fm, ["shuttle", "runtime"]) || %{}) || %{}
 
-      runtime = %{"session_uuid" => uuid, "dispatched_at" => now}
+      source = %{
+        "status" => status,
+        "closed-at" => nil,
+        "tempered" => nil,
+        "horizon" => if(opts[:rest], do: "stashed"),
+        "shuttle.runtime" => source_runtime
+      }
 
-      dest_ops = [
-        {:put, "status", "active"},
-        {:delete, "closed-at"},
-        {:delete, "tempered"},
-        {:delete, "horizon"},
-        {:delete, "ask"},
-        {:put_nested, "shuttle", "runtime", runtime}
-      ]
+      dest = %{
+        "status" => "active",
+        "closed-at" => nil,
+        "tempered" => nil,
+        "horizon" => nil,
+        "ask" => nil,
+        "shuttle.runtime" =>
+          Map.merge(dest_runtime, %{"session_uuid" => uuid, "dispatched_at" => now})
+      }
 
-      {:ok,
-       [
-         {from_path, from_raw, from_body, source_ops},
-         {to_path, to_raw, to_body, dest_ops}
-       ]}
+      {:ok, [document_patch(from_path, from_fm, source), document_patch(to_path, to_fm, dest)]}
     end
   end
 
-  @doc "Write both migration documents; restore both snapshots on a write failure."
-  def commit_migration(documents) do
-    writer = Shuttle.Env.app(:migration_document_writer, &FiberDoc.write!/4)
-    Enum.each(documents, fn {path, raw, body, ops} -> writer.(path, raw, body, ops) end)
-    :ok
-  rescue
-    error ->
-      case rollback_migration(documents) do
-        :ok -> {:error, {:write_failed, Exception.message(error)}}
-        {:error, reason} -> {:error, {:rollback_failed, reason}}
-      end
+  defp without_identity(runtime) do
+    case Map.drop(runtime, ~w(session_uuid dispatched_at handed_off_at run_id)) do
+      empty when map_size(empty) == 0 -> nil
+      rest -> rest
+    end
   end
 
-  @doc "Restore the document snapshots retained by a migration transaction."
-  def rollback_migration(documents) do
-    Enum.each(documents, fn {path, raw, body, _} -> FiberDoc.write!(path, raw, body, []) end)
-    :ok
-  rescue
-    error -> {:error, Exception.message(error)}
+  defp document_patch(path, fm, after_fields) do
+    before =
+      Map.new(after_fields, fn
+        {"shuttle.runtime", _} -> {"shuttle.runtime", get_in(fm, ["shuttle", "runtime"])}
+        {"ask", _} -> {"ask", get_in(fm, ["shuttle", "ask"])}
+        {key, _} -> {key, fm[key]}
+      end)
+
+    %{
+      "path" => path,
+      "uid" => fm["id"],
+      "host" => get_in(fm, ["shuttle", "host"]),
+      "before" => before,
+      "after" => after_fields
+    }
+  end
+
+  @doc "Patch only assignment/lifecycle fields under both felt advisory locks, preserving current bodies."
+  def apply_migration(documents, mode, runner) when mode in ["check", "forward", "reverse"] do
+    request = Jason.encode!(%{"mode" => mode, "documents" => documents})
+
+    case Shuttle.CLI.run(["migrate-documents", "--request-json", request], runner: runner) do
+      {:ok, output} ->
+        case Jason.decode(output) do
+          {:ok, %{"ok" => true}} -> :ok
+          _ -> {:error, :migration_documents_invalid_reply}
+        end
+
+      {:command_error, _, output} ->
+        case output
+             |> String.split("\n")
+             |> Enum.find("", &String.starts_with?(&1, "{"))
+             |> Jason.decode() do
+          {:ok, %{"reason" => reason}} -> {:error, {:migration_documents, reason}}
+          _ -> {:error, {:migration_documents, output}}
+        end
+
+      error ->
+        {:error, {:migration_documents, error}}
+    end
   end
 
   defp shuttle_block(%{"shuttle" => shuttle}) when is_map(shuttle), do: {:ok, shuttle}

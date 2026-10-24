@@ -233,19 +233,28 @@ defmodule Shuttle.FrontmatterEdit do
   end
 
   defp apply_op(entries, {:put_nested, parent, child, value}) do
-    child_lines =
-      render_field(child, value, 2) |> String.trim_trailing("\n") |> String.split("\n")
+    child_lines = fn indent ->
+      render_field(child, value, indent) |> String.trim_trailing("\n") |> String.split("\n")
+    end
 
     if Enum.any?(entries, &(&1.key == parent)) do
       Enum.map(entries, fn
         %{key: ^parent, lines: lines} = e ->
-          %{e | lines: drop_nested_key(lines, child) ++ child_lines}
+          indentation =
+            lines
+            |> tl()
+            |> Enum.reject(&blank?/1)
+            |> Enum.map(&indent_of/1)
+            |> Enum.filter(&(&1 > 0))
+            |> Enum.min(fn -> 2 end)
+
+          %{e | lines: drop_nested_key(lines, child) ++ child_lines.(indentation)}
 
         other ->
           other
       end)
     else
-      entries ++ [%{key: parent, lines: [parent <> ":" | child_lines]}]
+      entries ++ [%{key: parent, lines: [parent <> ":" | child_lines.(2)]}]
     end
   end
 

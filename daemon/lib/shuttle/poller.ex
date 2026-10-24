@@ -142,6 +142,7 @@ defmodule Shuttle.Poller do
       # manual overrides — respect them).
       :auto_discover_felt_stores,
       :runner,
+      reconciliation_hold: nil,
       poll_check_in_progress: false,
       poll_stalls: 0,
       last_poll_stalled_at: nil,
@@ -784,7 +785,10 @@ defmodule Shuttle.Poller do
     # `running` from tmux by adopting any live shuttle sessions — a restart
     # re-scans tmux and is immediately correct, and running work survives because
     # tmux owns the worker process.
-    state = SessionReconciliation.adopt_orphans(state)
+    state = recover_migrations(state)
+
+    state =
+      if state.reconciliation_hold, do: state, else: SessionReconciliation.adopt_orphans(state)
 
     # Adoption has run, so `state.running` is this daemon's OWN observation of
     # what is live — which is what the continuity condition is checked against.
@@ -829,6 +833,9 @@ defmodule Shuttle.Poller do
     Logger.info("boot quarantine held: boot adoption has not established the live workers")
     state
   end
+
+  defp maybe_auto_release_boot_quarantine(%State{reconciliation_hold: hold} = state, _hb)
+       when not is_nil(hold), do: state
 
   defp maybe_auto_release_boot_quarantine(%State{contract_check: %{ok: false}} = state, _hb) do
     Logger.info("boot quarantine held: contract skew is not auto-releasable")
@@ -1060,6 +1067,21 @@ defmodule Shuttle.Poller do
     {:noreply, write_daemon_heartbeat(state)}
   end
 
+  def handle_info(:run_poll_cycle, %{reconciliation_hold: hold} = state) when not is_nil(hold) do
+    # A reconciliation hold is stronger than boot quarantine. No discovery,
+    # adoption, cron, was-running exemption or force launch runs through it.
+    state = recover_migrations(state)
+
+    if state.reconciliation_hold do
+      {:noreply, schedule_tick(state, state.poll_interval_ms)}
+    else
+      Enum.each(state.running, fn {_, meta} -> stop_watcher(meta) end)
+      state = SessionReconciliation.adopt_orphans(%{state | running: %{}})
+      send(self(), :run_poll_cycle)
+      {:noreply, state}
+    end
+  end
+
   def handle_info(:run_poll_cycle, %{poll_check_in_progress: true} = state), do: {:noreply, state}
 
   def handle_info(:run_poll_cycle, state) do
@@ -1228,6 +1250,9 @@ defmodule Shuttle.Poller do
   def handle_info({:poll_stalled, _poll_token, _phase_ref}, state), do: {:noreply, state}
   def handle_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
 
+  def handle_info({:worker_exited, _, _, _, _}, %{reconciliation_hold: hold} = state)
+      when not is_nil(hold), do: {:noreply, state}
+
   def handle_info({:worker_exited, fiber_id, watcher, session, _reason}, state) do
     case running_worker(state, fiber_id) do
       %{pid: ^watcher, session: ^session} -> {:noreply, handle_worker_exit(state, fiber_id)}
@@ -1388,7 +1413,7 @@ defmodule Shuttle.Poller do
           %{
             session: worker.session,
             session_uuid: worker_session_uuid(worker, fiber),
-            cli: fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+            cli: worker_cli(worker, fiber)
           }
       end
 
@@ -1399,6 +1424,10 @@ defmodule Shuttle.Poller do
     # `running_worker` resolves a uid or slug input through `running_key`'s scan.
     {:reply, running_worker(state, fiber_id), state}
   end
+
+  def handle_call({:migrate, _, _, _}, _from, %{reconciliation_hold: hold} = state)
+      when not is_nil(hold),
+      do: {:reply, {:error, :reconciliation_required}, state}
 
   def handle_call({:migrate, from_id, to_id, opts}, _from, state) do
     case Shuttle.Migration.prepare(state, from_id, to_id, opts) do
@@ -1422,6 +1451,10 @@ defmodule Shuttle.Poller do
         {:reply, result, schedule_tick(state, state.poll_interval_ms)}
     end
   end
+
+  def handle_call({:claim_session, _, _, _}, _from, %{reconciliation_hold: hold} = state)
+      when not is_nil(hold),
+      do: {:reply, {:error, :reconciliation_required}, state}
 
   def handle_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
@@ -1451,6 +1484,10 @@ defmodule Shuttle.Poller do
     {reply, state} = stop_tracked_worker(state, fiber_id)
     {:reply, reply, state}
   end
+
+  def handle_call({:capture, _, _}, _from, %{reconciliation_hold: hold} = state)
+      when not is_nil(hold),
+      do: {:reply, {:error, :reconciliation_required}, state}
 
   def handle_call({:capture, yap, opts}, _from, state) do
     felt_store = Keyword.get(opts, :felt_store) || List.first(state.felt_stores)
@@ -1483,6 +1520,10 @@ defmodule Shuttle.Poller do
         {:reply, result, state}
     end
   end
+
+  def handle_call({:dispatch, _, _}, _from, %{reconciliation_hold: hold} = state)
+      when not is_nil(hold),
+      do: {:reply, {:error, :reconciliation_required}, state}
 
   def handle_call({:dispatch, fiber_id, opts}, _from, state) do
     {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
@@ -1669,6 +1710,14 @@ defmodule Shuttle.Poller do
 
   # An app worker is addressed by its conversation id; any other worker by the
   # harness session the daemon stamped on the fiber.
+  defp worker_cli(worker, fiber) do
+    cond do
+      worker && Shuttle.AppWorkers.app?(worker.session) -> "codex"
+      worker && present_string(worker[:context_harness]) -> worker.context_harness
+      true -> fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+    end
+  end
+
   defp worker_session_uuid(worker, fiber) do
     cond do
       worker && Shuttle.AppWorkers.id(worker.session) ->
@@ -2399,7 +2448,7 @@ defmodule Shuttle.Poller do
   @doc false
   def acquire_worker_identity(state, fiber_id, fiber) do
     worker = running_worker(state, fiber_id)
-    cli = get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+    cli = worker_cli(worker, fiber)
     uuid = worker_session_uuid(worker, fiber)
     boundary = get_in(fiber, ["shuttle", "runtime", "dispatched_at"]) || ""
     signal = worker && Dispatcher.pending_resume_fallback(worker.session, boundary)
@@ -2496,10 +2545,7 @@ defmodule Shuttle.Poller do
                 uid: metadata_uid(meta),
                 session: current,
                 tmux: meta.session,
-                harness:
-                  Shuttle.SessionLedger.harness_for_cli(
-                    fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
-                  ),
+                harness: Shuttle.SessionLedger.harness_for_cli(worker_cli(meta, fiber)),
                 kind: :resume,
                 agent: Map.get(meta, :agent_id),
                 role: Map.get(meta, :role)
@@ -2555,7 +2601,7 @@ defmodule Shuttle.Poller do
 
     Enum.reduce(state.running, %{}, fn {_key, meta}, reads ->
       fiber = cached_fiber(state, fiber_address(meta))
-      cli = fiber && get_in(fiber, ["shuttle", "resolved", "agent", "cli"])
+      cli = worker_cli(meta, fiber)
 
       session =
         case Shuttle.AppWorkers.id(meta.session) do
@@ -4818,116 +4864,145 @@ defmodule Shuttle.Poller do
   # `running` is an in-memory watcher registry, not persisted — tmux is the
   # source of truth; a restart re-adopts live sessions.
   defp migrate_worker(state, plan) do
-    case Shuttle.Migration.move_backend(state, plan) do
-      {:ok, undo_backend} ->
-        migrate_documents(state, plan, undo_backend)
+    plan = put_in(plan.worker[:context_harness], worker_cli(plan.worker, plan.from))
 
-      {:error, _} = error ->
-        {error, state}
+    with :ok <- Shuttle.LifecycleStore.apply_migration(plan.documents, "check", state.runner),
+         {:ok, entry} <- Shuttle.MigrationJournal.create(plan, state.own_host_id) do
+      case complete_migration(state, entry, plan.worker) do
+        {:ok, new} ->
+          state = publish_migration(state, plan, new) |> refresh_migration_documents(plan)
+          {{:ok, Shuttle.Migration.reply(plan.from, plan.to, plan.uuid)}, state}
+
+        error ->
+          reverse_migration(state, plan, entry, error)
+      end
+    else
+      {:error, _} = error -> {error, state}
     end
   end
 
-  defp migrate_documents(state, plan, undo_backend) do
-    old = plan.worker
-
-    new =
-      old
-      |> Map.merge(%{
-        fiber_id: plan.to["id"],
-        uid: plan.to["uid"],
-        felt_store: plan.to["store"],
-        session: plan.session,
-        session_uuid: plan.uuid,
-        identity_captured: true,
-        started_at: DateTime.utc_now()
-      })
-      |> Map.delete(:identity_token)
-      |> Map.delete(:identity_error)
-
+  defp reverse_migration(state, plan, entry, cause) do
+    # Direction is durable before the first compensating operation. A crash
+    # during rollback resumes rollback, never the abandoned forward operation.
     result =
-      with :ok <- Shuttle.LifecycleStore.commit_migration(plan.documents),
-           {:ok, _, _, _} <- persist_context_receiver(state, old, nil),
-           {:ok, epoch, harness, address} <- persist_context_receiver(state, new, new),
-           :ok <- rebind_migration_watcher(new),
-           :ok <- record_migration(state, plan, new, harness) do
-        {:ok,
-         Map.merge(new, %{
-           context_epoch: epoch,
-           context_harness: harness,
-           context_address: address
-         })}
+      with {:ok, reverse} <- Shuttle.MigrationJournal.reverse(entry),
+           {:ok, restored} <- complete_migration(state, reverse, plan.worker),
+           do: {:ok, restored}
+
+    case result do
+      {:ok, restored} ->
+        state = publish_migration(state, plan, restored) |> refresh_migration_documents(plan)
+        {{:error, {:migration_failed, cause}}, state}
+
+      failure ->
+        {{:error, {:rollback_failed, failure}}, %{state | reconciliation_hold: inspect(failure)}}
+    end
+  end
+
+  defp publish_migration(state, plan, worker) do
+    keys = [runtime_key_for_fiber(plan.from), runtime_key_for_fiber(plan.to)]
+    key = worker.uid || worker.fiber_id
+
+    %{
+      state
+      | running: state.running |> Map.drop(keys) |> Map.put(key, worker),
+        dispatch_failures: Map.drop(state.dispatch_failures, keys),
+        resume_loop: Map.drop(state.resume_loop, keys)
+    }
+    |> note_running(key)
+  end
+
+  defp migration_metadata(entry, fiber, session) do
+    captured =
+      Map.new(~w(context_harness agent_id role)a, &{&1, entry["worker"][Atom.to_string(&1)]})
+
+    Map.merge(captured, %{
+      fiber_id: fiber["id"],
+      uid: fiber["uid"],
+      felt_store: fiber["store"],
+      session: session,
+      session_uuid: entry["uuid"],
+      identity_captured: true,
+      started_at: DateTime.utc_now(),
+      last_activity_at: DateTime.utc_now()
+    })
+  end
+
+  defp complete_migration(state, entry, live_worker \\ nil) do
+    forward? = entry["direction"] == "forward"
+
+    {vacated, target, vacated_session, target_session} =
+      if forward? do
+        {entry["from"], entry["to"], entry["worker"]["session"], entry["session"]}
+      else
+        {entry["to"], entry["from"], entry["session"], entry["worker"]["session"]}
+      end
+
+    old = migration_metadata(entry, vacated, vacated_session)
+    new = migration_metadata(entry, target, target_session)
+    new = if live_worker, do: Map.put(new, :pid, live_worker.pid), else: new
+
+    with true <- entry["host"] == state.own_host_id,
+         :ok <- Shuttle.Migration.reconcile_backend(state, entry),
+         :ok <-
+           Shuttle.LifecycleStore.apply_migration(
+             entry["documents"],
+             entry["direction"],
+             state.runner
+           ),
+         {:ok, _, _, _} <- persist_context_receiver(state, old, nil),
+         {:ok, epoch, harness, address} <- persist_context_receiver(state, new, new),
+         :ok <- rebind_migration_watcher(new),
+         :ok <-
+           Shuttle.SessionLedger.record_checked(
+             fiber: new.fiber_id,
+             uid: new.uid,
+             session: entry["uuid"],
+             fiber_path: target["path"],
+             tmux: new.session,
+             kind: if(forward?, do: :migrate, else: :resume),
+             host: state.own_host_id,
+             harness: harness,
+             agent: new[:agent_id],
+             thread_id: Shuttle.AppWorkers.id(new.session),
+             role: new[:role]
+           ),
+         :ok <- Shuttle.MigrationJournal.clear(entry) do
+      {:ok,
+       Map.merge(new, %{context_epoch: epoch, context_harness: harness, context_address: address})}
+    else
+      false -> {:error, :journal_other_host}
+      error -> {:error, {:reconciliation_required, error}}
+    end
+  end
+
+  defp rebind_migration_watcher(%{pid: pid} = meta) when is_pid(pid) do
+    WorkerWatcher.migrate(pid, meta.fiber_id, meta.session, meta.uid, meta.felt_store)
+  catch
+    :exit, _ -> {:error, :watcher_unavailable}
+  end
+
+  defp rebind_migration_watcher(_), do: :ok
+
+  defp recover_migrations(state) do
+    result =
+      with {:ok, entries} <- Shuttle.MigrationJournal.pending() do
+        Enum.reduce_while(entries, :ok, fn entry, :ok ->
+          case complete_migration(state, entry) do
+            {:ok, _} -> {:cont, :ok}
+            error -> {:halt, error}
+          end
+        end)
       end
 
     case result do
-      {:ok, new} ->
-        from_key = running_key(state, plan.from["id"])
-        to_key = runtime_key_for_fiber(plan.to)
-
-        state =
-          %{
-            state
-            | running: state.running |> Map.delete(from_key) |> Map.put(to_key, new),
-              dispatch_failures: Map.drop(state.dispatch_failures, [from_key, to_key]),
-              resume_loop: Map.drop(state.resume_loop, [from_key, to_key])
-          }
-          |> note_running(to_key)
-
-        state = refresh_migration_documents(state, plan)
-        {{:ok, Shuttle.Migration.reply(plan.from, plan.to, plan.uuid)}, state}
+      :ok ->
+        %{state | reconciliation_hold: nil}
 
       error ->
-        # Attempt every repair even when one failed. In particular a lost
-        # watcher-call response may already have changed the observer's key.
-        repairs = [
-          Shuttle.LifecycleStore.rollback_migration(plan.documents),
-          undo_backend.(),
-          persist_context_receiver(state, new, nil),
-          persist_context_receiver(state, old, old),
-          rebind_migration_watcher(old)
-        ]
-
-        failures =
-          Enum.reject(repairs, fn
-            :ok -> true
-            {:ok, _, _, _} -> true
-            _ -> false
-          end)
-
-        if failures == [] do
-          # Receiver publication advances its epoch during rollback too.
-          state = put_running(state, running_key(state, old.fiber_id), old)
-          {{:error, {:migration_failed, error}}, state}
-        else
-          # Uncertain repairs are not dispatch authority. Hold all autonomous
-          # launches until the operator reconciles and restarts this daemon.
-          contract = %{state.contract_check | ok: false, reason: "migration rollback incomplete"}
-
-          {{:error, {:rollback_failed, failures}},
-           %{state | contract_check: contract, boot_quarantine: true}}
-        end
+        Logger.error("Migration reconciliation holds every launch: #{inspect(error)}")
+        %{state | reconciliation_hold: inspect(error)}
     end
-  end
-
-  defp record_migration(state, plan, new, harness) do
-    Shuttle.SessionLedger.record_checked(
-      fiber: plan.to["id"],
-      uid: plan.to["uid"],
-      session: plan.uuid,
-      fiber_path: plan.to["path"],
-      tmux: plan.session,
-      kind: :migrate,
-      host: state.own_host_id,
-      harness: harness,
-      agent: new[:agent_id],
-      thread_id: Shuttle.AppWorkers.id(plan.session),
-      role: new[:role]
-    )
-  end
-
-  defp rebind_migration_watcher(meta) do
-    WorkerWatcher.migrate(meta.pid, meta.fiber_id, meta.session, meta.uid, meta.felt_store)
-  catch
-    :exit, _ -> {:error, :watcher_unavailable}
   end
 
   defp refresh_migration_documents(state, plan) do
@@ -5311,7 +5386,12 @@ defmodule Shuttle.Poller do
 
   defp add_poll_health(snapshot, %State{} = state) do
     Map.put(snapshot, :poll_health, %{
-      state: if(state.poll_check_in_progress, do: "reading", else: "idle"),
+      state:
+        if(state.reconciliation_hold,
+          do: "reconciliation_required",
+          else: if(state.poll_check_in_progress, do: "reading", else: "idle")
+        ),
+      reconciliation_hold: state.reconciliation_hold,
       stall_timeout_ms: state.stall_timeout_ms,
       full_scan_budget_ms: state.full_scan_budget_ms,
       discovery: discovery_snapshot(state),

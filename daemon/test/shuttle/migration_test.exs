@@ -21,8 +21,26 @@ defmodule Shuttle.MigrationTest do
         command == "ps" and is_binary(Shuttle.Env.app(:migration_tmux_socket)) ->
           Shuttle.Env.cmd(command, args, Keyword.delete(opts, :timeout_ms))
 
+        command == "shuttle" and "migrate-documents" in args ->
+          request = Jason.decode!(List.last(args))
+
+          run = fn request ->
+            Shuttle.Env.cmd(
+              "shuttle",
+              ["migrate-documents", "--request-json", Jason.encode!(request)],
+              stderr_to_stdout: true
+            )
+          end
+
+          case Shuttle.Env.app(:migration_documents_hook) do
+            hook when is_function(hook, 2) -> hook.(request, run)
+            _ -> run.(request)
+          end
+
         command == "tmux" and hd(args) == "rename-session" and
-            Shuttle.Env.app(:migration_rename_failure, false) ->
+            (Shuttle.Env.app(:migration_rename_failure, false) or
+               (Shuttle.Env.app(:migration_reverse_rename_failure, false) and
+                  List.last(args) == FiberUid.session("source"))) ->
           {"collision", 1}
 
         command == "tmux" and hd(args) == "display-message" ->
@@ -65,6 +83,22 @@ defmodule Shuttle.MigrationTest do
     end
   end
 
+  defmodule MessageRunner do
+    def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
+      frame = Jason.decode!(String.trim(opts[:input]))
+      send(Shuttle.Env.app(:migration_message_pid), {:native_message, frame})
+
+      {Jason.encode!(%{
+         message_id: frame["message_id"],
+         address: frame["address"],
+         status: "accepted",
+         transport: "fixture"
+       }), 0}
+    end
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
   setup do
     FeltStoreRunner.start!()
     root = FeltStoreRunner.felt_root()
@@ -97,6 +131,13 @@ defmodule Shuttle.MigrationTest do
                session_uuid: "native-session",
                agent: "claude-sonnet"
              )
+
+    {:ok, _, raw, _, body} = FiberDoc.read_path(FeltStoreRunner.fiber("source")["path"])
+
+    FiberDoc.write!(FeltStoreRunner.fiber("source")["path"], raw, body, [
+      {:put_nested, "shuttle", "runtime",
+       %{"session_uuid" => "native-session", "dispatched_at" => "2026-10-24T12:00:00Z"}}
+    ])
 
     Env.put_app_env(:migration_pane_session, FiberUid.session("source"))
     %{poller: poller, root: root}
@@ -189,9 +230,12 @@ defmodule Shuttle.MigrationTest do
     before = bytes()
     old = Poller.worker_status(poller, "source")
     Env.put_app_env(:migration_rename_failure, true)
-    assert {:error, :rename_failed} = Poller.migrate(poller, "source", "dest", [])
+    assert {:error, {:migration_failed, _}} = Poller.migrate(poller, "source", "dest", [])
     assert bytes() == before
-    assert Poller.worker_status(poller, "source") == old
+    restored = Poller.worker_status(poller, "source")
+    assert restored.session == old.session
+    assert restored.session_uuid == old.session_uuid
+    assert restored.pid == old.pid
     assert Poller.worker_status(poller, "dest") == nil
   end
 
@@ -214,18 +258,18 @@ defmodule Shuttle.MigrationTest do
     end)
 
     test_pid = self()
-    source_path = FeltStoreRunner.fiber("source")["path"]
 
-    Env.put_app_env(:migration_document_writer, fn path, raw, body, ops ->
-      FiberDoc.write!(path, raw, body, ops)
-
-      if path == source_path do
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(source_only(request))
         send(test_pid, {:between_writes, self()})
 
         receive do
           :continue_write -> :ok
         end
       end
+
+      run.(request)
     end)
 
     migration = Task.async(fn -> Poller.migrate(poller, "source", "dest", rest: true) end)
@@ -344,16 +388,19 @@ defmodule Shuttle.MigrationTest do
   test "failed second document write restores both files, rename and source receiver", %{
     poller: poller
   } do
-    before = bytes()
-    dest_path = FeltStoreRunner.fiber("dest")["path"]
+    before = semantic_docs()
 
-    Env.put_app_env(:migration_document_writer, fn path, raw, body, ops ->
-      if path == dest_path, do: raise("fixture write failure")
-      FiberDoc.write!(path, raw, body, ops)
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(source_only(request))
+        {Jason.encode!(%{ok: false, reason: "write_failed"}), 1}
+      else
+        run.(request)
+      end
     end)
 
     assert {:error, {:migration_failed, _}} = Poller.migrate(poller, "source", "dest", [])
-    assert bytes() == before
+    assert semantic_docs() == before
     assert Poller.worker_status(poller, "source").session == FiberUid.session("source")
     assert Poller.worker_status(poller, "dest") == nil
     assert {:ok, "shuttle://test-host/claude/native-session", _} = receiver(poller, "source")
@@ -401,16 +448,15 @@ defmodule Shuttle.MigrationTest do
 
   test "ledger failure rolls back files, backend, watcher and receiver before returning an error",
        %{poller: poller, root: root} do
-    before = bytes()
+    before = semantic_docs()
     old = Poller.worker_status(poller, "source")
     ledger_dir = Path.join(root, "unwritable-ledger")
     File.mkdir_p!(ledger_dir)
     Env.put_env("SHUTTLE_SESSIONS_FILE", ledger_dir)
 
-    assert {:error, {:migration_failed, {:error, {:ledger_write_failed, _}}}} =
-             Poller.migrate(poller, "source", "dest", [])
+    assert {:error, {:rollback_failed, _}} = Poller.migrate(poller, "source", "dest", [])
 
-    assert bytes() == before
+    assert semantic_docs() == before
     assert Poller.worker_status(poller, "source").session == old.session
     assert :sys.get_state(old.pid).fiber_id == "source"
     assert :sys.get_state(old.pid).session == old.session
@@ -461,6 +507,8 @@ defmodule Shuttle.MigrationTest do
     assert Shuttle.AppWorkers.for_fiber("dest", FiberUid.for("dest")) == moved
     assert Poller.worker_status(poller, "dest").session == ref
     assert :sys.get_state(old.pid).session == ref
+    assert Poller.live_worker(poller, "dest").cli == "codex"
+    assert_native_delivery("dest", "codex")
   end
 
   test "live destination and unknown native identity are refused before writes", %{poller: poller} do
@@ -489,6 +537,326 @@ defmodule Shuttle.MigrationTest do
     FeltStoreRunner.remove_tmux_session(FiberUid.session("dest"))
     assert {:error, :surface_unsupported} = Poller.migrate(poller, "source", "dest", [])
     assert bytes() == before
+  end
+
+  test "crash after source replacement completes durable intent before startup adoption", %{
+    poller: poller,
+    root: root
+  } do
+    test_pid = self()
+
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(source_only(request))
+        send(test_pid, {:partial_migration, self()})
+
+        receive do
+          :never -> :ok
+        end
+      else
+        run.(request)
+      end
+    end)
+
+    old = Poller.worker_status(poller, "source")
+
+    call =
+      Task.async(fn ->
+        try do
+          Poller.migrate(poller, "source", "dest", rest: true)
+        catch
+          :exit, reason -> {:caller_lost, reason}
+        end
+      end)
+
+    assert_receive {:partial_migration, ^poller}
+    assert {:ok, [%{"direction" => "forward"} = entry]} = Shuttle.MigrationJournal.pending()
+    refute Jason.encode!(entry) =~ "body"
+    path = FeltStoreRunner.fiber("dest")["path"]
+
+    File.write!(
+      path,
+      File.read!(path) <> "\n## Status\nThe worker saved this while migration was pending.\n"
+    )
+
+    monitor = Process.monitor(poller)
+    Process.exit(poller, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^poller, :killed}
+    assert {:caller_lost, _} = Task.await(call)
+    if Process.alive?(old.pid), do: Shuttle.WorkerWatcher.stop(old.pid)
+    Env.put_app_env(:migration_documents_hook, nil)
+    {:ok, restarted} = restart(root)
+    await_boot_cycle!(restarted)
+    assert :sys.get_state(restarted).reconciliation_hold == nil
+    assert Poller.session_uuid(restarted, "dest") == "native-session"
+    assert {:ok, "shuttle://test-host/claude/native-session", _} = receiver(restarted, "dest")
+    assert Poller.worker_status(restarted, "source") == nil
+    assert fm("source")["horizon"] == "stashed"
+    assert Shuttle.SessionLedger.latest_for_session("native-session")["fiber"] == "dest"
+    assert File.read!(path) =~ "The worker saved this while migration was pending."
+    assert {:ok, []} = Shuttle.MigrationJournal.pending()
+    assert {:ok, _} = Poller.migrate(restarted, "source", "dest", session_id: "native-session")
+  end
+
+  test "failed reversal hard-holds was-running, cron, force and restart until reconciliation", %{
+    poller: poller,
+    root: root
+  } do
+    Env.put_app_env(:migration_reverse_rename_failure, true)
+
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(source_only(request))
+        {Jason.encode!(%{ok: false, reason: "write_failed"}), 1}
+      else
+        run.(request)
+      end
+    end)
+
+    assert {:error, {:rollback_failed, _}} = Poller.migrate(poller, "source", "dest", [])
+    assert :sys.get_state(poller).reconciliation_hold != nil
+    assert {:ok, [%{"direction" => "reverse"}]} = Shuttle.MigrationJournal.pending()
+
+    assert {:error, :reconciliation_required} =
+             Poller.dispatch_fiber(poller, "source", force: true)
+
+    assert {:error, :reconciliation_required} = Poller.capture(poller, "capture", work_dir: root)
+
+    assert {:error, :reconciliation_required} =
+             Poller.claim_session(poller, "source", "whatever", [])
+
+    assert :ok = Poller.release_boot_quarantine(poller)
+    # Both was_running and a due standing recipe must remain powerless.
+    FeltStoreRunner.set_shuttle(
+      "dest",
+      "kind: standing\nagent: claude-sonnet\nschedule:\n  expr: '* * * * *'\n  tz: UTC\n",
+      "active"
+    )
+
+    send(poller, :run_poll_cycle)
+    assert :sys.get_state(poller).reconciliation_hold != nil
+
+    refute Enum.any?(FeltStoreRunner.commands(), fn {cmd, args} ->
+             cmd == "tmux" and hd(args) == "new-session"
+           end)
+
+    GenServer.stop(poller)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold != nil
+    assert :sys.get_state(restarted).running == %{}
+
+    assert {:error, :reconciliation_required} =
+             Poller.dispatch_fiber(restarted, "source", force: true)
+
+    # Restore the externally changed lifecycle fields to the journal's expected
+    # side before retrying; unrelated recipe changes are left intact.
+    {:ok, [entry]} = Shuttle.MigrationJournal.pending()
+    restore_fields(entry["documents"])
+    Env.put_app_env(:migration_reverse_rename_failure, false)
+    Env.put_app_env(:migration_documents_hook, nil)
+    send(restarted, :run_poll_cycle)
+    wait_recovered(restarted)
+    assert {:ok, []} = Shuttle.MigrationJournal.pending()
+    assert Poller.session_uuid(restarted, "source") == "native-session"
+  end
+
+  test "freshest authored bodies survive successful migration and reverse compensation", %{
+    poller: poller
+  } do
+    path = FeltStoreRunner.fiber("dest")["path"]
+
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(source_only(request))
+        File.write!(path, File.read!(path) <> "\n## Status\nConcurrent authored progress.\n")
+      end
+
+      run.(request)
+    end)
+
+    assert {:ok, _} = Poller.migrate(poller, "source", "dest", rest: true)
+    assert File.read!(path) =~ "Concurrent authored progress."
+  end
+
+  test "rollback and restart restore an outstanding destination ask without replacing fresh Status",
+       %{poller: poller, root: root} do
+    path = FeltStoreRunner.fiber("dest")["path"]
+    ask = %{"question" => "Which option?", "choices" => ["one", "two"]}
+    {:ok, _, raw, _, body} = FiberDoc.read_path(path)
+    FiberDoc.write!(path, raw, body, [{:put_nested, "shuttle", "ask", ask}])
+    Env.put_app_env(:migration_reverse_rename_failure, true)
+
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        assert {_, 0} = run.(request)
+
+        File.write!(
+          path,
+          File.read!(path) <> "\n## Status\nAuthored after the assignment patch.\n"
+        )
+
+        {Jason.encode!(%{ok: false, reason: "write_failed"}), 1}
+      else
+        run.(request)
+      end
+    end)
+
+    assert {:error, {:rollback_failed, _}} = Poller.migrate(poller, "source", "dest", [])
+    refute get_in(fm("dest"), ["shuttle", "ask"])
+    GenServer.stop(poller)
+    Env.put_app_env(:migration_reverse_rename_failure, false)
+    Env.put_app_env(:migration_documents_hook, nil)
+    {:ok, restarted} = restart(root)
+    await_boot_cycle!(restarted)
+    assert get_in(fm("dest"), ["shuttle", "ask"]) == ask
+    assert File.read!(path) =~ "Authored after the assignment patch."
+    assert Poller.session_uuid(restarted, "source") == "native-session"
+    assert {:ok, []} = Shuttle.MigrationJournal.pending()
+  end
+
+  test "changed lifecycle expectation conflicts without overwriting authored changes", %{
+    poller: poller
+  } do
+    path = FeltStoreRunner.fiber("dest")["path"]
+
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      if request["mode"] == "forward" do
+        {:ok, _, raw, _, body} = FiberDoc.read_path(path)
+
+        FiberDoc.write!(path, raw, body <> "\n## Status\nSaved concurrently.\n", [
+          {:put, "status", "closed"}
+        ])
+      end
+
+      run.(request)
+    end)
+
+    assert {:error, {:rollback_failed, _}} = Poller.migrate(poller, "source", "dest", [])
+    assert fm("dest")["status"] == "closed"
+    assert File.read!(path) =~ "Saved concurrently."
+    assert {:ok, [_]} = Shuttle.MigrationJournal.pending()
+    assert :sys.get_state(poller).reconciliation_hold != nil
+  end
+
+  test "Claude resource moving onto Codex recipe keeps Claude native messaging across restart", %{
+    poller: poller,
+    root: root
+  } do
+    FeltStoreRunner.set_shuttle("dest", "kind: oneshot\nagent: codex\n", "open")
+    assert {:ok, _} = Poller.migrate(poller, "source", "dest", rest: true)
+    assert Poller.live_worker(poller, "dest").cli == "claude"
+    assert_native_delivery("dest", "claude")
+    GenServer.stop(poller)
+    {:ok, restarted} = restart(root)
+    await_boot_cycle!(restarted)
+    assert Poller.live_worker(restarted, "dest").cli == "claude"
+    assert_native_delivery("dest", "claude")
+  end
+
+  test "runtime transfer preserves unrelated metadata on both constitutions", %{poller: poller} do
+    for {id, runtime} <- [
+          {"source",
+           %{
+             "session_uuid" => "native-session",
+             "dispatched_at" => "2026-10-24T12:00:00Z",
+             "meeting" => "source-meeting",
+             "extension" => 7
+           }},
+          {"dest", %{"meeting" => "dest-meeting", "custom" => true}}
+        ] do
+      path = FeltStoreRunner.fiber(id)["path"]
+      {:ok, _, raw, _, body} = FiberDoc.read_path(path)
+      FiberDoc.write!(path, raw, body, [{:put_nested, "shuttle", "runtime", runtime}])
+    end
+
+    assert {:ok, _} = Poller.migrate(poller, "source", "dest", [])
+
+    assert get_in(fm("source"), ["shuttle", "runtime"]) == %{
+             "meeting" => "source-meeting",
+             "extension" => 7
+           }
+
+    assert get_in(fm("dest"), ["shuttle", "runtime", "meeting"]) == "dest-meeting"
+    assert get_in(fm("dest"), ["shuttle", "runtime", "custom"]) == true
+  end
+
+  test "symlinked felt view sends physical canonical paths to the locked helper", %{
+    poller: poller,
+    root: root
+  } do
+    view = Path.join(root, "view")
+    File.mkdir_p!(view)
+    File.ln_s!(Path.join(root, ".felt"), Path.join(view, ".felt"))
+    :sys.replace_state(poller, fn state -> %{state | felt_stores: [view]} end)
+    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(poller), "source", "dest", [])
+
+    for doc <- plan.documents do
+      assert {:ok, physical} = Shuttle.Realpath.resolve(doc["path"])
+      assert doc["path"] == physical
+      refute String.contains?(doc["path"], "/view/")
+    end
+
+    assert {:ok, _} = Poller.migrate(poller, "source", "dest", [])
+  end
+
+  defp assert_native_delivery(fiber, harness) do
+    Env.put_app_env(:felt_runner, MessageRunner)
+    Env.put_app_env(:migration_message_pid, self())
+    assert {:message, 200, _} = Shuttle.Delivery.deliver(fiber, "hello")
+    assert_receive {:native_message, frame}
+    assert frame["address"] =~ "/#{harness}/native-session"
+  end
+
+  defp restart(root),
+    do:
+      start_poller!(
+        runner: Runner,
+        own_host_id: "test-host",
+        felt_stores: [root],
+        poll_interval_ms: 600_000,
+        heartbeat_interval_ms: 600_000
+      )
+
+  defp wait_recovered(poller, attempts \\ 1000) do
+    cond do
+      is_nil(:sys.get_state(poller).reconciliation_hold) ->
+        :ok
+
+      attempts == 0 ->
+        flunk("journal remained held")
+
+      true ->
+        Process.sleep(10)
+        wait_recovered(poller, attempts - 1)
+    end
+  end
+
+  defp restore_fields(documents) do
+    Enum.each(documents, fn doc ->
+      {:ok, _, raw, _, body} = FiberDoc.read_path(doc["path"])
+
+      ops =
+        Enum.map(doc["before"], fn
+          {"shuttle.runtime", nil} -> {:delete_nested, "shuttle", "runtime"}
+          {"shuttle.runtime", value} -> {:put_nested, "shuttle", "runtime", value}
+          {key, nil} -> {:delete, key}
+          {key, value} -> {:put, key, value}
+        end)
+
+      FiberDoc.write!(doc["path"], raw, body, ops)
+    end)
+  end
+
+  defp semantic_docs do
+    Enum.map(["source", "dest"], fn id ->
+      {:ok, _, _, fm, body} = FiberDoc.read_path(FeltStoreRunner.fiber(id)["path"])
+      {fm, body}
+    end)
+  end
+
+  defp source_only(request) do
+    [source, dest] = request["documents"]
+    Map.put(request, "documents", [source, Map.put(dest, "after", dest["before"])])
   end
 
   defp fm(id) do
