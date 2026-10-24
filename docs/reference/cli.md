@@ -89,25 +89,36 @@ shuttle transcript search "worker launch" --fiber constitutions/worker-threads
 shuttle transcript search "retry" --session <uuid> --harness codex -n 5
 ```
 
-Run `shuttle transcript index` once before searching; the first search asks for this rather than silently starting a full build.
+The daemon builds and refreshes the transcript index in the background.
+If the index isn't ready, search reports that it needs a completed build; without a running daemon, run `shuttle transcript index` manually.
+Search doesn't silently start a first full build.
 Subsequent searches catch up changed transcripts unless `--no-index` is supplied.
-A populated, hook-only index can be searched with `--no-index`, but automatic catch-up requires a completed root scan.
+A populated index built from individual files can be searched with `--no-index`, but automatic catch-up requires a completed root scan.
 The index is private, rebuildable cache data at `$XDG_CACHE_HOME/felt/transcript-index.sqlite`, defaulting to `~/.cache/felt/transcript-index.sqlite`; `SHUTTLE_TRANSCRIPT_INDEX` selects another file.
 Transcript roots can be overridden with `SHUTTLE_CLAUDE_PROJECTS_DIR`, `SHUTTLE_CODEX_SESSIONS_DIR`, and `SHUTTLE_PI_SESSIONS_DIR`.
+
+Results rank by SQLite FTS5 BM25 relevance, with user and assistant message scores multiplied by 1.5 and tool scores unchanged.
+For example, raw relevance 10 becomes 15 for conversational text; a tool match scoring 16 still wins, while a tool match scoring 12 doesn't.
+This favors conversations over similarly relevant tool echoes without removing tool-only matches.
+The role multiplier applies before the result limit, and returned scores include it (higher is better).
 
 Whitespace-separated query terms are literal keywords combined with AND; FTS operators are not evaluated.
 Punctuation within a term separates adjacent tokens, so `daemon/lib/shuttle/harness_paths.ex` matches that sequence of path fragments rather than scattered words.
 Underscores stay inside tokens, preserving exact identifiers such as `handed_off_at`; searching `handed` alone does not match that identifier.
 Repeat `--session <uuid>` to select several sessions, or use `--fiber`, `--since 30d|YYYY-MM-DD`, `--project <path-prefix>`, and `--harness claude|codex|pi` to narrow the results.
-`-n, --limit` defaults to 20.
+Search excludes the calling harness session by default, using Codex's `CODEX_THREAD_ID`, Claude Code's `CLAUDE_CODE_SESSION_ID` (or wrapper-provided `CLAUDE_SESSION_ID`), or Pi's `PI_SESSION_ID`.
+Pi's `AI_AGENT=pi` selects its own session ahead of inherited parent-harness variables.
+Outside a harness there is no automatic exclusion; board searches have no caller.
+`--include-self` disables only automatic exclusion, including when `--session` selects the caller explicitly.
+Repeat `--exclude-session <uuid>` to exclude additional sessions; these exclusions still apply with `--include-self` and intersect all other filters.
+`-n, --limit` defaults to 20 message hits; several hits can come from the same session.
 A fiber filter resolves through the session ledger and never broadens on ledger failure.
 Ledger enrichment adds linked fibers to hits; an unavailable ledger is reported in `errors` without discarding otherwise valid search results.
 `--json` returns `{query,index,hits,errors}` with non-null arrays; each hit includes its source location, timestamp, role, higher-is-better score, marked snippet, and fiber links.
 Human output shows the project basename and an `open: <path>:<line>` hint for the native transcript.
 Matches are bold on a terminal and wrapped in `«»` in JSON or non-terminal output.
 
-SessionEnd events carrying a transcript path start a detached, best-effort single-file update with a two-minute indexing deadline.
-The hook does not wait for indexing or propagate its failures.
+SessionEnd hooks record session lifecycle events without launching transcript index processes.
 
 ## Shuttle hooks
 
