@@ -54,6 +54,7 @@ type fakeCodex struct {
 	mutation          string
 	mutationReply     any
 	dropMutationReply bool
+	dropReadReply     bool
 	collideRequest    bool
 	emptyActiveTurnID bool
 	activeFlags       []string
@@ -109,6 +110,9 @@ func (f *fakeCodex) serve(w http.ResponseWriter, r *http.Request) {
 		case "thread/loaded/list":
 			result = map[string]any{"data": []string{"thread-1"}}
 		case "thread/read":
+			if f.dropReadReply {
+				return
+			}
 			result = map[string]any{"thread": map[string]any{"id": "thread-1", "sessionId": "transcript-1", "status": map[string]any{"type": f.state, "activeFlags": f.activeFlags}, "canAcceptDirectInput": true}}
 		case "thread/turns/list":
 			turnID := "turn-1"
@@ -149,6 +153,19 @@ func (f *fakeCodex) methodCount(method string) int {
 		}
 	}
 	return n
+}
+
+func TestCodexReadFailureReceiptPreservesTransportCause(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	fake := &fakeCodex{t: t, state: "active", dropReadReply: true}
+	env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, fake))
+	receipt, err := Send(context.Background(), env, "h", Request{
+		Address: "shuttle://h/codex/thread-1", Text: "hello", MessageID: "read-failed", Wake: true,
+	})
+	if err == nil || receipt.Status != StatusRejected || !strings.Contains(receipt.Detail, "Codex thread lookup failed: websocket:") {
+		t.Fatalf("transport cause missing from receipt: %#v %v", receipt, err)
+	}
 }
 
 func TestCodexHeadersHaveExactSenderAndFiberReplyTarget(t *testing.T) {

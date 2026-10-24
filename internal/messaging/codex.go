@@ -311,7 +311,8 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 		if !req.Wake {
 			return queueMailbox(env, a, req)
 		}
-		return rejected(req, "codex-app-server", "Codex thread lookup failed"), errCode("preflight_failed", "Codex thread lookup failed: %v", err)
+		detail := fmt.Sprintf("Codex thread lookup failed: %v", err)
+		return rejected(req, "codex-app-server", detail), errCode("preflight_failed", "%s", detail)
 	}
 	t := read.Thread
 	if t.ID != a.ID {
