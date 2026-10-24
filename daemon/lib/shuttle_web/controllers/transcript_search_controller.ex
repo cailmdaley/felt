@@ -5,7 +5,7 @@ defmodule ShuttleWeb.TranscriptSearchController do
 
   Full-text search over every Claude Code, Codex and Pi transcript on this
   host. The index and the ranking live in the CLI; this route runs
-  `shuttle transcript search <q> --json --no-index` and relays its document unchanged:
+  `shuttle transcript search <q> --json --no-index --include-self` and relays its document unchanged:
   `{query, index, hits, errors}`.
 
   `session` is repeatable and `fiber` is a single id, `since` is `30d` or a date, `harness` is `claude|codex|pi`,
@@ -22,6 +22,8 @@ defmodule ShuttleWeb.TranscriptSearchController do
   contract, 504 when it outlives the bound. Indexing belongs to the background
   `Shuttle.TranscriptIndexer`; searches never start a corpus scan. The CLI's
   actionable missing-index message is preserved in the error detail.
+  Board searches have no harness caller, so `--include-self` prevents inherited
+  daemon session environment from silently excluding a transcript.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -43,7 +45,8 @@ defmodule ShuttleWeb.TranscriptSearchController do
   end
 
   defp run(conn, query, flags) do
-    args = ["transcript", "search", "--json", "--no-index"] ++ flags ++ ["--", query]
+    args =
+      ["transcript", "search", "--json", "--no-index", "--include-self"] ++ flags ++ ["--", query]
 
     case Shuttle.CLI.run(args, timeout_ms: @timeout_ms) do
       {:ok, output} ->

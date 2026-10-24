@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.TranscriptSearchControllerTest do
   @moduledoc """
-  `GET /api/v1/transcripts/search` — shells `shuttle transcript search --json`
+  `GET /api/v1/transcripts/search` — shells `shuttle transcript search --json --no-index --include-self`
   through the `:felt_runner` seam; the stub records its argv and answers per query.
   """
 
@@ -87,6 +87,7 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
              "search",
              "--json",
              "--no-index",
+             "--include-self",
              "--session=s1",
              "--session=s2",
              "--fiber=a/b",
@@ -98,6 +99,17 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
              "--",
              "vmpz convention"
            ]
+  end
+
+  test "board searches include every session despite inherited harness identity" do
+    # A daemon launched from a harness has no search caller of its own.
+    Shuttle.Test.Env.put_env("CLAUDE_SESSION_ID", "inherited-claude-session")
+    Shuttle.Test.Env.put_env("CODEX_THREAD_ID", "inherited-codex-session")
+    Shuttle.Test.Env.put_env("PI_SESSION_ID", "inherited-pi-session")
+
+    api_conn() |> get("/api/v1/transcripts/search", %{"q" => "vmpz"}) |> json_response(200)
+    assert_received {:argv, argv}
+    assert "--include-self" in Enum.take_while(argv, &(&1 != "--"))
   end
 
   test "a query that begins with a dash follows the -- separator" do

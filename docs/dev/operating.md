@@ -173,7 +173,8 @@ Task crashes, command failures, timeouts, malformed receipts, and partial-scan e
 If the indexer restarts or the daemon stops, its in-flight task is killed and the command runner reaps the subprocess.
 
 Indexing never holds daemon readiness, polling, dispatch, or the boot quarantine.
-The board's search route uses `--no-index`, so a request doesn't initiate a corpus scan.
+The board's search route uses `--no-index --include-self`, so a request doesn't initiate a corpus scan or exclude a transcript because the daemon inherited harness session environment.
+Board searches have no harness caller whose session should be hidden.
 While the first index is being built, the route preserves the CLI's actionable missing-index message in its JSON `detail`, which the board displays with the error.
 For an offline or immediate build, run `shuttle transcript index` explicitly; add `--rebuild` to discard and rebuild the derived data.
 
