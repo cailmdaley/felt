@@ -19,6 +19,7 @@ const syncGitTimeout = 2 * time.Minute
 
 func (a *app) syncCmd() *cobra.Command {
 	var syncPush bool
+	var fetchTimeout time.Duration
 	command := &cobra.Command{
 		Use:   "sync",
 		Short: "Merge the store's Git upstream; --push publishes committed work",
@@ -32,11 +33,16 @@ staged changes, unresolved conflicts, or a merge, rebase, cherry-pick, revert,
 or bisect in progress. Unstaged and untracked files stay put unless the merge
 would overwrite them, in which case Git stops it. A merge that conflicts is
 left for you to resolve and commit. --push then pushes the branch to its
-tracking branch.`,
+tracking branch. --fetch-timeout bounds the network fetch only; the local merge
+runs to completion without a hard deadline, so a slow filesystem cannot leave a
+killed merge holding the Git index lock.`,
 		Example: `  felt sync          before substantive work
   felt sync --push   after committing`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if fetchTimeout <= 0 {
+				return fmt.Errorf("--fetch-timeout must be positive")
+			}
 			storage, _, err := felt.RequireStore(a.env, a.dir)
 			if err != nil {
 				return err
@@ -45,19 +51,29 @@ tracking branch.`,
 			if err != nil {
 				return fmt.Errorf("resolving felt store path %s: %w", storage.Root(), err)
 			}
-			return a.syncStore(cmd.Context(), storeRoot, syncPush, a.env.Stdout)
+			return a.syncStore(cmd.Context(), storeRoot, syncPush, fetchTimeout, a.env.Stdout)
 		},
 	}
 	command.GroupID = groupStore
 	command.Flags().BoolVar(&syncPush, "push", false, "Push the branch to its tracking branch after a successful merge")
+	command.Flags().DurationVar(&fetchTimeout, "fetch-timeout", syncGitTimeout, "Deadline for the network fetch only; local merge has no hard deadline")
 	return command
 }
 
-func (a *app) syncStore(parent context.Context, storeRoot string, push bool, output io.Writer) error {
+func (a *app) syncStore(parent context.Context, storeRoot string, push bool, fetchTimeout time.Duration, output io.Writer) error {
 	if parent == nil {
 		parent = context.Background()
 	}
-	git := func(args ...string) (string, error) { return a.runSyncGit(parent, storeRoot, args...) }
+	git := func(args ...string) (string, error) {
+		timeout := syncGitTimeout
+		switch args[0] {
+		case "fetch":
+			timeout = fetchTimeout
+		case "merge":
+			timeout = 0 // Never cancel a local Git mutation while it holds index.lock.
+		}
+		return a.runSyncGit(parent, storeRoot, timeout, args...)
+	}
 
 	if _, err := git("rev-parse", "--show-toplevel"); err != nil {
 		return fmt.Errorf("finding the felt store's Git root: %w", err)
@@ -162,17 +178,25 @@ func hasUnmergedIndex(git func(...string) (string, error)) bool {
 	return err == nil && strings.TrimSpace(files) != ""
 }
 
-func (a *app) runSyncGit(parent context.Context, dir string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(parent, syncGitTimeout)
-	defer cancel()
-	fullArgs := append([]string{"-C", dir}, args...)
+func (a *app) runSyncGit(parent context.Context, dir string, timeout time.Duration, args ...string) (string, error) {
+	ctx := context.WithoutCancel(parent)
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parent, timeout)
+		defer cancel()
+	}
+	fullArgs := append([]string{"--no-optional-locks", "-C", dir}, args...)
 	cmd := a.env.CommandContext(ctx, "git", fullArgs...)
+	if args[0] == "fetch" || args[0] == "push" {
+		cancelSyncNetworkTree(cmd)
+		cmd.WaitDelay = time.Second
+	}
 	var output bytes.Buffer
 	cmd.Stdout = &output
 	cmd.Stderr = &output
 	err := cmd.Run()
 	if ctx.Err() != nil {
-		return output.String(), fmt.Errorf("git %s timed out after %s", strings.Join(args, " "), syncGitTimeout)
+		return output.String(), fmt.Errorf("git %s timed out after %s", strings.Join(args, " "), timeout)
 	}
 	if err != nil {
 		return output.String(), fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(output.String()))

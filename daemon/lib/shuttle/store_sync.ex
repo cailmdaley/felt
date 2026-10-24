@@ -1,6 +1,6 @@
 defmodule Shuttle.StoreSync do
   @moduledoc """
-  Bounded pull-on-miss recovery, shared across fibers and requests.
+  Pull-on-miss recovery with bounded network I/O, shared across fibers and requests.
 
   Each store is attempted at most once per 30 seconds, including failed attempts.
   Concurrent requests share the attempt. The Poller serializes Git changes with
@@ -33,7 +33,9 @@ defmodule Shuttle.StoreSync do
         result
 
       :miss ->
-        result = Shuttle.Felt.run(["-C", store, "sync"], timeout_ms: 5_000)
+        result =
+          Shuttle.Felt.run(["-C", store, "sync", "--fetch-timeout", "5s"], timeout_ms: :infinity)
+
         GenServer.call(server, {:remember, key, result})
         result
     end

@@ -2,7 +2,7 @@ defmodule Shuttle.StoreSyncTest do
   use ExUnit.Case, async: true
 
   defmodule Runner do
-    def cmd("felt", ["-C", store, "sync"], opts) do
+    def cmd("felt", ["-C", store, "sync", "--fetch-timeout", "5s"], opts) do
       send(Shuttle.Env.app(:sync_test_owner), {:sync_started, self(), store, opts[:timeout_ms]})
 
       receive do
@@ -36,7 +36,7 @@ defmodule Shuttle.StoreSyncTest do
     assert_receive {:at_sync_boundary, boundary}
     refute_receive {:sync_started, _, _, _}
     send(boundary, :continue)
-    assert_receive {:sync_started, worker, "/store", 5_000}
+    assert_receive {:sync_started, worker, "/store", :infinity}
     send(worker, {:finish, {"pulled", 0}})
     assert [] = Task.await(task)
   end
@@ -46,7 +46,7 @@ defmodule Shuttle.StoreSyncTest do
     Shuttle.Test.Env.put_app_env(:sync_test_owner, self())
     Shuttle.Test.Env.start_scoped!({Shuttle.StoreSync, name: nil})
     first = Task.async(fn -> Shuttle.StoreSync.sync(["/store"]) end)
-    assert_receive {:sync_started, worker, "/store", 5_000}
+    assert_receive {:sync_started, worker, "/store", :infinity}
     second = Task.async(fn -> Shuttle.StoreSync.sync(["/store"]) end)
     send(worker, {:finish, {"network unavailable", 1}})
     assert [{"/store", {:command_error, 1, "network unavailable"}}] = Task.await(first)
@@ -58,7 +58,7 @@ defmodule Shuttle.StoreSyncTest do
     refute_receive {:sync_started, _, _, _}
     # Another store has an independent recovery attempt.
     other = Task.async(fn -> Shuttle.StoreSync.sync(["/other-store"]) end)
-    assert_receive {:sync_started, worker, "/other-store", 5_000}
+    assert_receive {:sync_started, worker, "/other-store", :infinity}
     send(worker, {:finish, {"pulled", 0}})
     assert [] = Task.await(other)
   end

@@ -12,6 +12,10 @@ defmodule Shuttle.Runner do
   caller forever. Callers that must distinguish "the world said no" from "the
   world didn't answer" match `:timeout` explicitly (a timeout is never
   evidence of absence — see `Shuttle.FeltStores`).
+
+  `timeout_ms: :infinity` is for completion-owned local mutations: neither a
+  deadline nor caller death SIGKILLs them, so they can release filesystem locks.
+  Their network phases must carry their own deadlines.
   """
 
   @callback cmd(String.t(), [String.t()], keyword()) ::
@@ -87,9 +91,17 @@ defmodule Shuttle.Runner do
       # Whoever owns the command must reap it: the Poller's stall watchdog
       # `:kill`s a poll task mid-command, which skips `collect/7`'s own timeout
       # kill, and closing the port only closes the child's stdin.
-      guard = if os_pid, do: spawn_guard(self(), Shuttle.Env.callers(), os_pid)
+      # Completion-owned mutations opt out of both deadline and owner-death
+      # killing. Their subprocess owns releasing filesystem locks even if its
+      # caller exits; closing a Port alone does not SIGKILL the subprocess.
+      guard =
+        if os_pid && timeout_ms != :infinity,
+          do: spawn_guard(self(), Shuttle.Env.callers(), os_pid)
 
-      deadline = System.monotonic_time(:millisecond) + timeout_ms
+      deadline =
+        if timeout_ms == :infinity,
+          do: :infinity,
+          else: System.monotonic_time(:millisecond) + timeout_ms
 
       try do
         collect(port, os_pid, command, args, timeout_ms, deadline, [])
@@ -114,7 +126,10 @@ defmodule Shuttle.Runner do
     end
 
     defp collect(port, os_pid, command, args, timeout_ms, deadline, acc) do
-      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+      remaining =
+        if deadline == :infinity,
+          do: :infinity,
+          else: max(deadline - System.monotonic_time(:millisecond), 0)
 
       receive do
         {^port, {:data, data}} ->

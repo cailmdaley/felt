@@ -161,7 +161,7 @@ func runFixtureSync(t *testing.T, f syncFixture, push bool) (string, error) {
 	t.Helper()
 	env, _ := testEnv(t)
 	var out bytes.Buffer
-	err := testApp(t, env).syncStore(context.Background(), f.clone, push, &out)
+	err := testApp(t, env).syncStore(context.Background(), f.clone, push, syncGitTimeout, &out)
 	return out.String(), err
 }
 

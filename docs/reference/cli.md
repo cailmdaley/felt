@@ -26,7 +26,7 @@ running daemon's version when reachable, otherwise the local Mix release version
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
 | `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store) |
 | `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are. Refuses a guessed id (one resolving only by its last segment or as a prefix completion) and names the fiber it would have reached |
-| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and never stages, stashes, or force-pushes; a diverged upstream makes a merge commit |
+| `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and never stages, stashes, or force-pushes; a diverged upstream makes a merge commit. `--fetch-timeout <duration>` bounds the network fetch (default: 2m); local merge has no hard deadline |
 
 ## Search and reading
 
@@ -164,7 +164,8 @@ the daemon speaks directly, see the [HTTP API](api.md).
 Owner routing uses the local document's `shuttle.host`, not the local daemon's snapshot.
 The owner need not have polled the fiber yet.
 On a missing lifecycle, dispatch or single-fiber read, the owning daemon attempts `felt sync` on its configured stores and retries.
-Pulls are bounded to five seconds per store, shared across concurrent requests, and attempted at most once per store every 30 seconds, including failures.
+Concurrent requests share each pull, attempted at most once per store every 30 seconds, including failures.
+The network fetch has a five-second deadline; the local merge runs to completion without a hard kill so it can release Git's index lock on slow filesystems.
 A successful pull that still cannot find the fiber returns 404 naming the host; a failed pull returns 503 rather than claiming absence.
 
 ### Install / reshape the contract

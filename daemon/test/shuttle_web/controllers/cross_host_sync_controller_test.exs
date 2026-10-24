@@ -6,7 +6,7 @@ defmodule ShuttleWeb.CrossHostSyncControllerTest do
   @moduletag :tmp_dir
 
   defmodule CountingRunner do
-    def cmd("felt", ["-C", _store, "sync"] = args, opts) do
+    def cmd("felt", ["-C", _store, "sync", "--fetch-timeout", "5s"] = args, opts) do
       Agent.update(Shuttle.Env.app(:sync_counter), &(&1 + 1))
       Shuttle.Runner.Default.cmd("felt", args, opts)
     end

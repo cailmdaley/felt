@@ -142,6 +142,43 @@ defmodule Shuttle.RunnerTest do
     end
   end
 
+  @tag :tmp_dir
+  test "completion-owned mutations release their index lock even when the caller dies", %{
+    tmp_dir: root
+  } do
+    pid_file = Path.join(root, "pid")
+    lock = Path.join(root, "index.lock")
+    release = Path.join(root, "release")
+    done = Path.join(root, "done")
+    Shuttle.Test.Env.put_app_env(:cmd_timeout_ms, 1)
+    on_exit(fn -> File.write(release, "release") end)
+
+    task =
+      Task.async(fn ->
+        Shuttle.Runner.Default.cmd(
+          "bash",
+          [
+            "-c",
+            ": > \"$LOCK\"; echo $$ > \"$PID_FILE\"; while [ ! -e \"$RELEASE\" ]; do sleep 0.01; done; rm \"$LOCK\"; echo done > \"$DONE\""
+          ],
+          env: [{"PID_FILE", pid_file}, {"LOCK", lock}, {"RELEASE", release}, {"DONE", done}],
+          timeout_ms: :infinity
+        )
+      end)
+
+    pid = await_pid_file(pid_file)
+    assert File.exists?(lock)
+    Process.unlink(task.pid)
+    Process.exit(task.pid, :kill)
+    ref = task.ref
+    assert_receive {:DOWN, ^ref, :process, _, :killed}
+    assert {_, 0} = System.cmd("kill", ["-0", pid], stderr_to_stdout: true)
+    File.write!(release, "release")
+    assert eventually_dead?(pid)
+    assert File.read!(done) == "done\n"
+    refute File.exists?(lock)
+  end
+
   test "a missing executable still maps to exit 127" do
     assert {message, 127} =
              Shuttle.Runner.Default.cmd("definitely-not-a-command-xyz", [], timeout_ms: 1_000)
