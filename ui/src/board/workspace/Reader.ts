@@ -178,6 +178,8 @@ export class Reader {
   private railChoice = true
   /** This view's own answer for a quiet rail, set by its toggle and kept until another thread opens; the stored choice stays untouched. */
   private railPeek: { thread: string; open: boolean } | null = null
+  private railForcedForVisit = false
+  private phoneRailPending = false
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
@@ -350,7 +352,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
+    if (switching) { this.railForcedForVisit = false; this.phoneRailPending = false; this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
     const arrivals = this.receipts.observe(channel, ready)
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -363,6 +365,7 @@ export class Reader {
     if (this.railPeek && (!this.currentCard || threadKey(this.currentCard) !== this.railPeek.thread)) this.railPeek = null
     this.paintPages(this.currentCard && familyCounts(this.currentCard, index))
     this.paintRail()
+    if (this.phoneRailPending && this.phone.matches && settled) { this.phoneRailPending = false; this.openPhonePage() }
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
     const arriving = !this.active
     this.active = true
@@ -403,6 +406,8 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
+    this.railForcedForVisit = false
+    this.phoneRailPending = false
     window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
     this.cancelResize?.()
@@ -949,6 +954,7 @@ export class Reader {
    */
   private toggleRail(): void {
     const open = !this.railOpen
+    this.railForcedForVisit = false
     if (this.threadRail.quiet && this.currentCard) this.railPeek = { thread: threadKey(this.currentCard), open }
     else {
       this.railPeek = null
@@ -958,9 +964,21 @@ export class Reader {
     this.paintRail()
     this.layout(false)
   }
-  /** Whether the rail is wanted: this view's answer, else folded for a quiet family, else the remembered choice. */
+  /** An explicit Desk count opens the family for this visit without changing the saved choice. */
+  forceThreadRail(): void {
+    if (!this.currentCard) return
+    this.railForcedForVisit = true
+    this.paintRail()
+    if (this.phone.matches) {
+      this.phoneRailPending = !this.runSettled
+      if (!this.phoneRailPending) this.openPhonePage()
+    }
+    this.layout(false)
+  }
+
+  /** Whether the rail is wanted: this visit's explicit opening, else the viewer's choice. */
   private get railOpen(): boolean {
-    return this.railPeek?.open ?? (this.threadRail.quiet ? false : this.railChoice)
+    return this.railForcedForVisit || (this.railPeek?.open ?? (this.threadRail.quiet ? false : this.railChoice))
   }
   /** Whether the threads rail stands beside the stage: wanted, with threads to show, off the phone. */
   private get railShown(): boolean {

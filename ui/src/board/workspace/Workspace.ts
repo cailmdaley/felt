@@ -1,4 +1,4 @@
-import { familyColumn, ThreadIndex } from '../threads.js'
+import { ThreadIndex } from '../threads.js'
 import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
@@ -272,9 +272,11 @@ export class Workspace {
    * Awaiting review, Roles, then Resting, each in the Desk's own order. j/k
    * walk it as one flow; J/K and the index strip step its columns.
    */
+  forceThreadRail(): void { this.reader.forceThreadRail() }
+
   private sidebarCards(): KanbanCard[] {
-    // Threads list under their roots; an orphaned thread is a root of its own.
-    const cards = this.opts.cards().filter(card => !card.orchestrator || card.threadOrphaned)
+    // The sidebar uses the same frontier rows as the Desk.
+    const cards = (this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())).frontier()
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => this.sidebarPlace(card) === column)
     const flight = inColumn('inFlight')
     return [
@@ -285,18 +287,20 @@ export class Workspace {
       ...inColumn('resting'),
     ]
   }
-  /** The card the Desk draws for `card`: the root of its family, or itself. */
+  /** An awake ancestor holds a folded thread's place in the Desk order. */
   private sidebarRoot(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
     if (!index) return card
     let root = index.card(card)
-    for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) root = parent
+    for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) {
+      if (index.awake(parent)) root = parent
+    }
     return root
   }
-  /** Where the Desk draws a card: a thread with its root, a root promoted for its threads in the column they ask for. */
+  /** A frontier card earns its own column; a folded thread follows its awake ancestor. */
   private sidebarPlace(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
-    return (root.threadPromoted && familyColumn(root.threadSummary)) || deskColumn(root)
+    return deskColumn(root)
   }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {

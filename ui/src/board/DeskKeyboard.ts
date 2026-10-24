@@ -1,7 +1,6 @@
 import { DESK_REGION_SELECTORS, type KeyIntent } from './keymap.js'
 import { isMobileViewport } from './mobile.js'
 import { folioScrollTarget } from './deskMobile.js'
-import { revealThreadFamily } from './ThreadPeek.js'
 
 export interface DeskAddress { uid: string; origin: string }
 const identity = (el: HTMLElement): DeskAddress => ({ uid: el.dataset.cardUid!, origin: el.dataset.cardOrigin! })
@@ -24,7 +23,7 @@ export class DeskKeyboard {
   /** The row drawn for the selection, when one is on the Desk. */
   get selectedRow(): HTMLElement | null { return this.node() ?? null }
 
-  /** The reader's column is exactly the Desk's navigable order, including expanded thread families. */
+  /** The reader's column is exactly the Desk's navigable order, without hidden family rows. */
   columnFor(address: DeskAddress): HTMLElement[] {
     return this.regions().find(region => region.some(el => matches(el, address))) ?? []
   }
@@ -63,7 +62,6 @@ export class DeskKeyboard {
     const el = candidates.find(node => !node.closest('[hidden]')) ?? candidates[0]
     if (!el) return
     if (el.matches('.kbn-cluster-item[hidden]')) el.parentElement?.querySelector<HTMLButtonElement>('.kbn-cluster-more')?.click()
-    revealThreadFamily(el)
     el.classList.add('kbn-key-selected')
     el.setAttribute('aria-current', 'true')
     if (scroll) this.reveal(el)
@@ -98,8 +96,7 @@ export class DeskKeyboard {
 
   private readonly onClick = (event: MouseEvent): void => {
     const target = event.target as HTMLElement
-    // A thread's pin sits beside its row, not inside it; a click on it selects the thread.
-    const el = target.closest('.kbn-thread-pin')?.parentElement?.querySelector<HTMLElement>(':scope > [data-card-uid]') ?? target.closest<HTMLElement>('[data-card-uid]')
+    const el = target.closest<HTMLElement>('[data-card-uid]')
     if (el && this.root.contains(el)) this.select(identity(el), false)
   }
 

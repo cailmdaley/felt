@@ -1,4 +1,4 @@
-import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
+import { hasLiveWorker, type KanbanCard, type KanbanResponse } from './KanbanTypes.js'
 import { deskColumn } from './deskColumn.js'
 import { turnOf } from './turn.js'
 
@@ -16,8 +16,7 @@ const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 
  * In flight split by `turnOf` into Waiting (the human's move) and Working
  * (the worker's, including an armed thread whose worker has not started).
  * A verdict archives; a standing thread asleep on its cron rests; a seat at
- * rest is among the Roles. Every thread surface (rail, peek, sub-entries,
- * mention chips) reads this.
+ * rest is among the Roles. The rail and mention chips read this.
  */
 export function threadState(card: KanbanCard): ThreadState {
   switch (deskColumn(card)) {
@@ -29,18 +28,6 @@ export function threadState(card: KanbanCard): ThreadState {
     default: return 'resting'
   }
 }
-/**
- * The Desk column a family's most urgent thread asks for; undefined when
- * nothing in it is work. Drafts are ideas, not work: they count on the badge
- * but never pull a root onto the Desk.
- */
-export function familyColumn(summary: KanbanCard['threadSummary']): 'inFlight' | 'awaitingReview' | undefined {
-  if (!summary) return undefined
-  if (summary.waiting || summary.working) return 'inFlight'
-  if (summary.toReview) return 'awaitingReview'
-  return undefined
-}
-
 /** A thread's identity: a wire edge names a path, and the same path can live on several hosts. */
 export const threadKey = (card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id'>): string =>
   `${card.originId}\u0000${card.feltStore ?? ''}\u0000${card.id}`
@@ -61,7 +48,8 @@ export class ThreadIndex {
   private readonly kids = new Map<string, KanbanCard[]>()
   private readonly states = new Map<string, ThreadState>()
   private readonly sums = new Map<string, ThreadSummary>()
-  /** A fiber id is a ULID, one fiber on every host: each id's first copy stands for its others. */
+  private readonly awakeSums = new Map<string, { awakeDescendants: number; waitingDescendants: number }>()
+  /** A UID proves mirrored identity; without it, host/store/path stays distinct. */
   private readonly firstOf = new Map<string, string>()
 
   constructor(cards: readonly KanbanCard[]) {
@@ -72,7 +60,8 @@ export class ThreadIndex {
       if (this.cards.has(key)) continue
       this.cards.set(key, card)
       const fid = card.uid ?? card.id
-      if (!this.firstOf.has(fid)) this.firstOf.set(fid, key)
+      const identity = card.uid ?? key
+      if (!this.firstOf.has(identity)) this.firstOf.set(identity, key)
       if (!card.isCycle) byId.set(fid, [...(byId.get(fid) ?? []), card])
     }
     // The graph has one node per fiber, its first copy; every copy reads it.
@@ -130,7 +119,11 @@ export class ThreadIndex {
       const children = this.kids.get(key)
       if (!children) continue
       const sum = { ...EMPTY }
+      const awakeSum = { awakeDescendants: 0, waitingDescendants: 0 }
       for (const child of children) {
+        const belowAwake = this.awakeCounts(child)
+        awakeSum.awakeDescendants += belowAwake.awakeDescendants + Number(this.awake(child))
+        awakeSum.waitingDescendants += belowAwake.waitingDescendants + Number(this.awake(child) && turnOf(child).yours)
         const childKey = this.key(child), below = this.sums.get(childKey) ?? EMPTY
         sum.unfinished += below.unfinished; sum.waiting += below.waiting; sum.working += below.working
         sum.toReview += below.toReview; sum.drafts += below.drafts; sum.archived += below.archived
@@ -145,19 +138,20 @@ export class ThreadIndex {
         }
       }
       this.sums.set(key, sum)
+      this.awakeSums.set(key, awakeSum)
     }
   }
 
   /** The card for a fiber named by uid, or by id when felt gave it none. */
   fiber(ref: string): KanbanCard | undefined {
     const key = this.firstOf.get(ref) ?? this.firstOf.get(ref.toUpperCase())
-    return key === undefined ? undefined : this.cards.get(key)
+    return key === undefined ? [...this.cards.values()].find(card => card.id === ref) : this.cards.get(key)
   }
   /** The index's own copy of a card, which may be fresher than a caller's. */
   card(card: KanbanCard): KanbanCard { return this.cards.get(threadKey(card)) ?? this.cards.get(this.key(card)) ?? card }
   parentOf(card: KanbanCard): KanbanCard | undefined { return this.parents.get(this.key(card)) }
   /** The fiber's node, whichever host's copy asks. */
-  private key(card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id' | 'uid'>): string { return this.firstOf.get(card.uid ?? card.id) ?? threadKey(card) }
+  private key(card: Pick<KanbanCard, 'originId' | 'feltStore' | 'id' | 'uid'>): string { return this.firstOf.get(card.uid ?? threadKey(card)) ?? threadKey(card) }
   /** A thread whose orchestrator is named but not on the board. */
   isOrphan(card: KanbanCard): boolean { return !!card.orchestrator && !this.parents.has(this.key(card)) }
   /** Direct threads, in feed order. */
@@ -175,6 +169,32 @@ export class ThreadIndex {
     return result
   }
   summary(card: KanbanCard): ThreadSummary { return this.sums.get(this.key(card)) ?? EMPTY }
+  /** Awake is an observed worker, a human turn, or a pending verdict; armed alone isn't awake. */
+  awake(card: KanbanCard): boolean {
+    return hasLiveWorker(card) || turnOf(card).yours || this.state(card) === 'to-review'
+  }
+  /** Topmost awake nodes, or the root alone when the entire tree is quiet. */
+  frontier(): KanbanCard[] {
+    const rows: KanbanCard[] = []
+    const pending = [...this.states.keys()].filter(key => !this.parents.has(key)).map(key => this.cards.get(key)!).reverse()
+    while (pending.length) {
+      const card = pending.pop()!
+      if (this.awake(card) || (!this.parentOf(card) && !this.awakeCounts(card).awakeDescendants)) rows.push(card)
+      else for (const child of [...this.children(card)].reverse()) pending.push(child)
+    }
+    return rows
+  }
+  awakeCounts(card: KanbanCard): { awakeDescendants: number; waitingDescendants: number } {
+    return this.awakeSums.get(this.key(card)) ?? { awakeDescendants: 0, waitingDescendants: 0 }
+  }
+  /** Known ancestry is navigable; missing ancestry is only a path, never a guessed identity. */
+  ancestry(card: KanbanCard): Array<{ name: string; card?: KanbanCard }> {
+    const ancestors: KanbanCard[] = []
+    for (let parent = this.parentOf(card); parent; parent = this.parentOf(parent)) ancestors.unshift(parent)
+    const first = ancestors[0] ?? card
+    const missing = this.isOrphan(first) ? first.id.split('/').slice(0, -1).map(name => ({ name })) : []
+    return [...missing, ...ancestors.map(card => ({ name: card.name, card }))]
+  }
   /** Descendants, archived included. */
   size(card: KanbanCard): number { const s = this.summary(card); return s.unfinished + s.archived }
   state(card: KanbanCard): ThreadState { return this.states.get(this.key(card)) ?? threadState(card) }

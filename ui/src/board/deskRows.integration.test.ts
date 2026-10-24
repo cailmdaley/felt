@@ -4,8 +4,6 @@ import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import type { FiberSend } from './fiberSends.js'
 import { card, response } from './testFixtures.js'
-import { DocumentSeen } from './workspace/DocumentSeen.js'
-import type { Channel } from './workspace/documents.js'
 
 function options(data: KanbanResponse, reports: Record<string, FiberSend> = {}) {
   return {
@@ -31,22 +29,7 @@ describe('a Desk row is a line, not a card', () => {
     const root = draw()
     expect(root.querySelector('[data-fiber-id="work/run"] .kbn-card-name')?.textContent).toBe(review.name)
     for (const heavy of ['.kbn-card-outcome', '.kbn-card-id', '.kbn-card-question', '.kbn-card-actor', '.kbn-card-due', '.ws-thumbnail']) expect(root.querySelector(heavy), heavy).toBeNull()
-    const mark = root.querySelector<HTMLElement>('[data-fiber-id="work/run"] .kbn-card-report')!
-    expect(mark.dataset.kind).toBe('html')
-    expect(mark.title).toMatch(/^report\.html — sent 3h ago$/)
-    expect(root.querySelector('[data-fiber-id="draft"] .kbn-card-report')).toBeNull()
-  })
-
-  it('dots a report sent since the reader last showed it, until the reader shows it', () => {
-    const mark = () => draw().querySelector<HTMLElement>('[data-fiber-id="work/run"] .kbn-card-report')!
-    expect(mark().dataset.unseen).toBeUndefined()
-    localStorage.setItem('shuttle.workspace.document-seen-baseline', String(REPORT.timestamp - 60_000))
-    expect(mark().dataset.unseen).toBe('')
-    expect(mark().getAttribute('aria-label')).toBe('New report: report.html')
-    expect(mark().title).toMatch(/^report\.html — new, sent 3h ago$/)
-    const channel = { owner: 'local', uid: 'work/run', documents: [{ key: REPORT.key, provenance: [{ kind: 'sent', time: REPORT.timestamp }] }] } as unknown as Channel
-    new DocumentSeen().observe(channel, REPORT.key)
-    expect(mark().dataset.unseen).toBeUndefined()
+    expect(root.querySelector('.kbn-card-report')).toBeNull()
   })
 
   it('keeps the verdict undo host at the row’s right end', () => {
@@ -75,7 +58,7 @@ describe('a Resting line takes its verdicts', () => {
     expect(labels('todo')).toEqual([])
     expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
   })
-  it('keeps a Resting family’s menu on its title line, ahead of full-width subentries and tree', () => {
+  it('keeps a Resting menu on its title line without pinned subentries or a tree', () => {
     const root = resting({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
     const child = card({ id: 'family/child', orchestrator: 'family', tags: ['pinned'], status: 'active' })
     const data = response({ stash: [root], threads: [child] })
@@ -83,8 +66,8 @@ describe('a Resting line takes its verdicts', () => {
     const row = surfaces.renderStashSection(data.stash, {}).querySelector<HTMLElement>('[data-fiber-id="family"]')!
     const end = row.querySelector<HTMLElement>('.kbn-cluster-item-verdicts')!
     const trees = [...row.querySelectorAll<HTMLElement>(':scope > .kbn-thread-tree')]
-    expect(trees).toHaveLength(2)
-    for (const tree of trees) expect(end.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(trees).toHaveLength(0)
+    expect(row.querySelector('.kbn-thread-subentries, .kbn-thread-pin')).toBeNull()
     expect(end.dataset.verdictKey).toBeTruthy()
   })
   it('sends the verdict through the board transition, without opening the card', () => {

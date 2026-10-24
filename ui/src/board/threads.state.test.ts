@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
 import { THREAD_LABEL, ThreadIndex, threadState, type ThreadState } from './threads.js'
-import { installThreadPeek } from './ThreadPeek.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { ThreadRail } from './workspace/ThreadRail.js'
 import { deskColumn } from './deskColumn.js'
@@ -49,25 +48,17 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       expect(constitutionMentions([c])[0].state).toBe(label)
     }
   })
-  it('the rail, the peek and the sub-entries all draw that label', () => {
+  it('the rail draws each state label', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false }))
     try {
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
       const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
-      const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
       // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark draws.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('.ws-thread-group-label')?.textContent ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       // The rail has no Roles group: a seat rests with Resting.
       expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })
-      // The waiting thread is a sub-entry.
-      expect(labels(host, '.kbn-thread-subentries')).toEqual({ [asking.name]: 'Waiting' })
-      // Opened, the tree draws the live work; each quiet state unfolds from its own line.
-      let fold: HTMLButtonElement | null
-      while ((fold = host.querySelector<HTMLButtonElement>('.kbn-thread-fold[aria-expanded="false"]'))) fold.click()
-      expect(labels(host, '.kbn-thread-peek')).toEqual(want)
-      expect(host.querySelector('.kbn-thread-badge-waiting')).not.toBeNull()
     } finally { vi.unstubAllGlobals() }
   })
 })

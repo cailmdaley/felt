@@ -47,7 +47,6 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
     bind(['g'], 'first', 'First card in column'), bind(['G'], 'last', 'Last card in column'),
     ...constitutionBindings('the selected card'),
-    bind(['p'], 'pin', 'Pin or unpin the selected thread under its card'),
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [

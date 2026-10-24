@@ -114,7 +114,7 @@ describe('Desk action menu keyboard controls', () => {
     expect(inside.workspace.isActive).toBe(false)
     press('z')
   })
-  it('offers family expansion and folding without opening the reader', () => {
+  it('never offers family expansion or folding in the card menu', () => {
     const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
     const child = card({ id: 'family/child', orchestrator: 'family', status: 'active' })
     draw(response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] }))
@@ -122,16 +122,9 @@ describe('Desk action menu keyboard controls', () => {
     const button = row.querySelector<HTMLButtonElement>('.kbn-card-menu')!
     press('j')
     expect(selected()).toBe('family')
-    const choose = (text: string) => {
-      activate(button, 'Enter')
-      const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === text)!
-      expect(action).toBeDefined()
-      activate(action, ' ')
-    }
-    choose('Expand family')
-    expect(row.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(false)
-    choose('Fold family')
-    expect(row.querySelector<HTMLElement>('.kbn-thread-peek')!.hidden).toBe(true)
+    activate(button, 'Enter')
+    expect(document.querySelector('[role="menu"]')?.textContent ?? '').not.toMatch(/Expand family|Fold family/)
+    expect(row.querySelector('.kbn-thread-peek')).toBeNull()
     expect(inside.workspace.isActive).toBe(false)
   })
   it('Tab dismisses the menu and a repaint removes its portal', () => {

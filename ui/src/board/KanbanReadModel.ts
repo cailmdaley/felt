@@ -36,7 +36,8 @@ import type {
 import { hasLiveWorker } from './KanbanTypes.js';
 import { ascByKey, descByKey, dueCivilDay, dueSortMs, instantMs } from './civilDay.js';
 import { turnOf } from './turn.js';
-import { adoptThreadIndex, familyColumn, ThreadIndex } from './threads.js';
+import { adoptThreadIndex, ThreadIndex, threadKey } from './threads.js';
+import { deskColumn } from './deskColumn.js';
 
 export interface BuildKanbanResponseOptions {
   /** Reference instant for due-drift, standing-role placement, and the response
@@ -70,6 +71,24 @@ export interface BuildKanbanResponseOptions {
 export function shouldIncludeInKanban(fiber: Fiber): boolean {
   if (fiber.hasShuttleBlock === true) return true;
   return isCycleFiber(fiber);
+}
+
+/** Reproject optimistic lifecycle edits through the same frontier as a fresh feed. */
+export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {
+  const candidates = [...response.now.drafts, ...response.now.inFlight, ...response.now.awaitingReview,
+    ...response.stash, ...response.roles, ...response.timeline.futureDated, ...response.timeline.past, ...(response.threads ?? [])];
+  const seen = new Set<string>();
+  const cards = candidates.filter(card => { const key = threadKey(card); if (seen.has(key)) return false; seen.add(key); return true });
+  const index = new ThreadIndex(cards);
+  const visible = new Set(index.frontier());
+  const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, ...index.awakeCounts(card), threadSummary: index.summary(card) }));
+  const at = (column: string) => rows.filter(card => deskColumn(card) === column);
+  const now = { drafts: at('drafts').sort(byCreatedAtDesc), inFlight: at('inFlight').sort(byInFlightBand), awaitingReview: at('awaitingReview').sort(byClosedAtDesc) };
+  const stash = at('resting'), roles = at('roles');
+  const timeline = { ...response.timeline, futureDated: at('scheduled').sort(byDueAtAsc), past: [...at('tempered'), ...at('composted')].sort(byClosedAtDesc) };
+  const result = { ...response, now, stash, roles, timeline, threads: cards.filter(card => !visible.has(card)), totals: surfaceTotals({ now, stash, roles, timeline }) };
+  adoptThreadIndex(result, index);
+  return result;
 }
 
 /**
@@ -260,19 +279,17 @@ function assembleSurfaces(
       column: classifyFiber(entry.fiber, { liveWorker: hasLiveWorker(card) }),
     };
   });
-  // THREADS. A card whose orchestrator resolves is drawn through its root, never
-  // on its own; one whose orchestrator is not on the board is its own card,
-  // marked orphaned, so its work stays reachable.
   const allCards = classified.map(row => row.card);
   const threadIndex = new ThreadIndex(allCards);
-  const parented = new Set(allCards.filter(card => threadIndex.parentOf(card)));
+  const frontier = new Set(threadIndex.frontier());
   for (const card of allCards) {
-    if (threadIndex.isOrphan(card)) card.threadOrphaned = true;
     card.threadSummary = threadIndex.summary(card);
+    Object.assign(card, threadIndex.awakeCounts(card));
   }
-  const threads = allCards.filter(card => parented.has(card));
+  // Keep every non-row available to the constitution view and its rail.
+  const threads = allCards.filter(card => !frontier.has(card));
   for (const { card, column } of classified) {
-    if (!parented.has(card)) buckets[column].push(card);
+    if (frontier.has(card)) buckets[column].push(card);
   }
 
   scheduled.sort(byCreatedAtDesc);
@@ -294,24 +311,6 @@ function assembleSurfaces(
   const nowDrafts: KanbanCard[] = [];
   for (const card of drafts) routeOpenCardByPlanningSurface(card, nowDrafts, stash);
 
-  // A root off the Desk (resting, scheduled, settled) whose threads still hold
-  // work comes back to Now, in the column its most urgent thread asks for:
-  // the Desk draws only roots, so a root that stays away hides its threads.
-  const deskColumns = { inFlight, awaitingReview };
-  const promote = (list: KanbanCard[]): KanbanCard[] => list.filter((card) => {
-    const target = familyColumn(card.threadSummary);
-    if (!target) return true;
-    card.threadPromoted = true;
-    deskColumns[target].push(card);
-    return false;
-  });
-  const restingRoots = promote(stash);
-  stash.splice(0, stash.length, ...restingRoots);
-  const scheduledRoots = promote(scheduled);
-  const settledTempered = promote(tempered);
-  const settledComposted = promote(composted);
-  inFlight.sort(byInFlightBand);
-  awaitingReview.sort(byClosedAtDesc);
 
   // Awaiting-review cards are closed and pending a human verdict — actionable,
   // so they stay in the Now awaitingReview column. They must NOT be
@@ -322,8 +321,8 @@ function assembleSurfaces(
   // "disappeared from everywhere." See gotcha-awaiting-review-stale-horizon.
   const nowAwaitingReview = awaitingReview;
 
-  const past = mergeByClosedAtDesc(settledTempered, settledComposted);
-  const futureDated = scheduledRoots.sort(byDueAtAsc);
+  const past = mergeByClosedAtDesc(tempered, composted);
+  const futureDated = scheduled.sort(byDueAtAsc);
 
   // Cycles are the calendar's backdrop, so they read left to right: earliest
   // band first, with identity ties and absent dates last.
@@ -725,14 +724,13 @@ export function isQuestion(card: KanbanCard): boolean {
 }
 
 /**
- * Whose move it is, read from the card's one turn derivation (`turnOf`). A
- * root whose threads wait on the human is the human's move too: the Desk draws
- * only roots, so the band says what the family needs, not the root alone. A
- * launch the daemon holds in boot quarantine is nobody's work yet: it sits in
+ * Whose move it is, read from the card's own turn derivation (`turnOf`).
+ * Descendants contribute counts, never a borrowed band. A launch the daemon
+ * holds in boot quarantine is nobody's work yet: it sits in
  * Held, after Working, until it is released.
  */
 export function inFlightBand(card: KanbanCard): InFlightBand {
-  if (turnOf(card).yours || (card.threadSummary?.waiting ?? 0) > 0) return 'yourTurn';
+  if (turnOf(card).yours) return 'yourTurn';
   return card.held ? 'held' : 'working';
 }
 

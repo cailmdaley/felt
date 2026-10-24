@@ -1,15 +1,12 @@
 import { untilLine, untilOf } from './blockedOn.js'
-import { installThreadPeek, ThreadFamilies, threadMark, waitingNote } from './ThreadPeek.js'
+import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
-import { ownColumn } from './deskColumn.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
-import { documentKind } from './workspace/documents.js'
-import { unseenSince } from './workspace/DocumentSeen.js'
 import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
-import { humanizeIdleAge, renderMarkdown } from './utils.js'
+import { renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilWeekday,
@@ -101,30 +98,6 @@ export function buildCardPaper(card: KanbanCard): HTMLElement {
   return el
 }
 
-const REPORT_GLYPH: Record<ReturnType<typeof documentKind>, string> = {
-  fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□',
-}
-
-/**
- * A row's mark for its newest report: a small leaf with the document's kind on
- * it, in the thumbnail's own glyph vocabulary. The workspace reads the report;
- * a live thumbnail at a row's height would be a smudge. A report
- * sent since the reader last showed it carries a gold dot on the leaf's corner
- * (`data-unseen`), cleared by opening it.
- */
-function reportMark(report: FiberSend): HTMLElement {
-  const mark = document.createElement('span')
-  mark.className = 'kbn-card-report'
-  mark.dataset.kind = documentKind(report.fullPath)
-  mark.textContent = REPORT_GLYPH[documentKind(report.fullPath)]
-  const unseen = unseenSince(report.key, report.timestamp)
-  if (unseen) mark.dataset.unseen = ''
-  const age = `sent ${humanizeIdleAge(Date.now() - report.timestamp)} ago`
-  mark.title = `${report.basename} — ${unseen ? `new, ${age}` : age}`
-  mark.setAttribute('aria-label', `${unseen ? 'New report' : 'Latest report'}: ${report.basename}`)
-  return mark
-}
-
 type VerdictTarget = 'tempered' | 'composted'
 
 /**
@@ -135,13 +108,6 @@ type VerdictTarget = 'tempered' | 'composted'
  * Drafts take none, and only Shuttle-managed fibers have a verdict to take.
  */
 export function verdictTargets(card: KanbanCard, place: NowColumnKind | 'resting'): VerdictTarget[] {
-  // A root drawn on the Desk for its threads is judged where it is on its own
-  // account: a settled one has had its verdict, a resting one takes Resting's.
-  if (card.threadPromoted) {
-    const own = ownColumn(card)
-    if (own === 'tempered' || own === 'composted') return []
-    place = own ?? 'resting'
-  }
   if (place === 'awaitingReview' || place === 'inFlight') return ['tempered', 'composted']
   if (place !== 'resting' || !isAgentCard(card) || card.shuttleSeat === true) return []
   return card.shuttleKind === 'standing' ? ['composted'] : ['tempered', 'composted']
@@ -232,7 +198,7 @@ interface KanbanSurfaceRendererOptions {
   ) => void | Promise<void>
   /** Make this constitution a seat, choosing an office when it has none. */
   makeSeat?: (card: KanbanCard, anchor: HTMLElement) => void | Promise<void>
-  openDetail: (card: KanbanCard) => void
+  openDetail: (card: KanbanCard, forceRail?: boolean) => void
   /** The newest report a card sent — the row's mark. */
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Opens the Rest popover on the card's own Rest affordance. */
@@ -267,7 +233,6 @@ interface KanbanSurfaceRendererOptions {
 
 export class KanbanSurfaceRenderer {
   /** Open thread families, carried across the Desk's rebuilds. */
-  readonly threadFamilies: ThreadFamilies
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
    *  from the body's vertical drag scroll so the two can run concurrently. */
@@ -297,7 +262,6 @@ export class KanbanSurfaceRenderer {
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
-    this.threadFamilies = new ThreadFamilies()
   }
 
   private agentName(card: KanbanCard): string | null {
@@ -781,24 +745,12 @@ export class KanbanSurfaceRenderer {
     return section
   }
 
-  /** One seat in the Roles band: its chip, and — when threads hang off it —
-   *  the thread badge and peek beside it. The badge sits OUTSIDE the chip,
-   *  which is a button and cannot hold the peek list's own buttons. */
+  /** A quiet seat is a single chip in the Roles band. */
   private renderRoleSeat(
     card: KanbanCard,
     originStaleness: KanbanOriginStaleness | undefined,
   ): HTMLElement {
-    const chip = this.renderRoleChip(card, originStaleness)
-    if (!card.threadSummary?.unfinished) return chip
-    chip.removeAttribute('role')
-    const threads = document.createElement('div')
-    threads.className = 'kbn-role-threads'
-    const seat = document.createElement('div')
-    seat.className = 'kbn-role-seat'
-    seat.setAttribute('role', 'listitem')
-    seat.append(chip, threads)
-    installThreadPeek(seat, threads, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
-    return seat
+    return this.renderRoleChip(card, originStaleness)
   }
 
   private renderRoleChip(
@@ -1235,19 +1187,14 @@ export class KanbanSurfaceRenderer {
       if (until) el.append(untilLine(until, this.o.openDetail))
     }
 
-    const mark = threadMark(card)
-    if (mark) el.append(mark)
-    const waiting = waitingNote(card)
-    if (waiting) el.append(waiting)
-    installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
 
     // A verdict waits out its undo window at the line's right end.
     const end = document.createElement('span')
     end.className = 'kbn-cluster-item-verdicts'
     markVerdictHost(end, card)
-    end.append(this.cardMenu(card, 'resting', el, isStale))
-    // Full-width thread children begin the next line; actions stay with the title.
-    el.insertBefore(end, el.querySelector(':scope > .kbn-thread-tree'))
+    end.append(this.cardMenu(card, 'resting', isStale))
+    el.append(end)
+    installFrontierDetails(el, end, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
@@ -1651,8 +1598,8 @@ export class KanbanSurfaceRenderer {
    * Render one Desk row — a line in a thread list, not a slip of paper.
    *
    * At a glance a row carries only what decides where to look next: whose
-   * hand it is in (the glyph), the title, a mark for its
-   * newest report, and the turn chip. The document workspace holds the
+   * hand it is in (the glyph), the title, the awake-descendant count,
+   * and the turn chip. The document workspace holds the
    * outcome, question, path, agent, due, warnings and the report itself.
    *
    * Clicking the row opens the document workspace reader; the turn chip opens
@@ -1719,19 +1666,11 @@ export class KanbanSurfaceRenderer {
       meta.append(stale)
     }
 
-    const report = this.o.getLatestReport?.(card)
-    if (report) meta.append(reportMark(report))
-
     const turnChip = this.renderTurnChip(card, kind)
     if (turnChip) meta.append(turnChip)
-    const mark = threadMark(card)
-    if (mark) meta.append(mark)
-    const waiting = waitingNote(card)
-    if (waiting) meta.append(waiting)
-
     el.append(meta)
-    installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
-    meta.append(this.cardMenu(card, kind, el, isStale))
+    installFrontierDetails(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
+    meta.append(this.cardMenu(card, kind, isStale))
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
@@ -1742,7 +1681,7 @@ export class KanbanSurfaceRenderer {
   }
 
   /** The same quiet action control ends every Desk line, including Resting. */
-  private cardMenu(card: KanbanCard, place: NowColumnKind | 'resting', row: HTMLElement, stale: boolean): HTMLButtonElement {
+  private cardMenu(card: KanbanCard, place: NowColumnKind | 'resting', stale: boolean): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'kbn-card-menu'
@@ -1762,8 +1701,6 @@ export class KanbanSurfaceRenderer {
       if (place !== 'resting' && !stale && isAgentCard(card) && this.o.onRest) {
         actions.push({ label: 'Rest', run: () => this.o.onRest?.(card) })
       }
-      const badge = row.querySelector<HTMLButtonElement>('.kbn-thread-badge')
-      if (badge) actions.push({ label: badge.getAttribute('aria-expanded') === 'true' ? 'Fold family' : 'Expand family', run: () => badge.click() })
       this.dismissCardMenu = openActionMenu(button, actions, `Actions for ${card.name}`)
     })
     return button
@@ -2265,8 +2202,7 @@ export function findCardColumn(resp: KanbanResponse | null, id: string): ColumnK
   if (!resp) return null
   for (const kind of NOW_COLUMN_ORDER) {
     const card = resp.now[kind].find((c) => c.id === id)
-    // A root drawn here for its threads holds its own column underneath.
-    if (card) return card.threadPromoted ? ownColumn(card) : kind
+    if (card) return kind
   }
   for (const c of resp.timeline.past) {
     if (c.id === id) return c.tempered === false ? 'composted' : 'tempered'
@@ -2319,8 +2255,7 @@ export function findCardById(resp: KanbanResponse | null, id: string): KanbanCar
     resp.timeline.futureDated,
     resp.stash,
     resp.roles,
-    // Threads are not drawn as cards of their own, but each is a row in its
-    // root's peek and rail, and opens through this lookup.
+    // Folded threads and quiet ancestors stay reachable through the rail and breadcrumbs.
     resp.threads ?? [],
   ]) {
     const hit = list.find((c) => c.id === id)

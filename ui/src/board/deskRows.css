@@ -7,8 +7,8 @@
 .kbn-col-list .kbn-card {
   --kbn-row-ground: var(--kbn-paper);
   flex: 0 0 auto;
-  flex-direction: row;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 7px;
   row-gap: 0;
@@ -41,16 +41,15 @@
   font-size: calc(14.5px * var(--kbn-type-scale, 1));
   font-weight: 500;
   line-height: 1.25;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  display: block;
+  white-space: nowrap;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
 }
 .kbn-now-board .kbn-col-title { font-size: calc(32px * var(--kbn-type-scale, 1)); }
 .kbn-col-list .kbn-card > .kbn-card-meta { position: relative; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; margin: 0; }
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
-.kbn-col-list .kbn-card--meeting .kbn-meeting { flex-basis: 100%; }
+.kbn-col-list .kbn-card--meeting .kbn-meeting { grid-column: 1 / -1; }
 
 /* A native button at the same right edge in every column, never a reveal. */
 .kbn-card-menu {
@@ -103,17 +102,14 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-col-list .kbn-card { min-height: 44px; padding: 6px 9px; }
-  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; flex: 1 1 calc(100% - 24px); }
+  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
   .kbn-folio .kbn-folio-name { font-size: 14px; font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
   .kbn-folio .kbn-folio-count { font-family: inherit; font-size: 14px; color: var(--kbn-ink-muted); }
-  .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { flex: 1 0 100%; justify-content: flex-start; gap: 8px; padding: 4px 0 1px 19px; }
+  .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { gap: 5px; padding: 0; }
   .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
   .kbn-card-menu { min-width: 28px; min-height: 28px; }
-  .kbn-role-seat { position: relative; box-sizing: border-box; align-items: center; gap: 0; background: var(--kbn-paper); border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent); border-radius: 3px; }
-  .kbn-role-seat > .kbn-role-chip { margin: -1px 0 -1px -1px; border-color: transparent; background: transparent; }
-  .kbn-role-seat .kbn-thread-badge { margin-right: 8px; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }

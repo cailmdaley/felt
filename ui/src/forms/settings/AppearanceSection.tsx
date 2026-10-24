@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { waitingThreadEntries, saveWaitingThreadEntries } from '../../board/threadPreferences'
 import {
   APPEARANCE_CHANGED, DARK_THEMES, DARK_THEME_LABELS, appearance, saveAppearance, systemScheme, watchAppearance,
   type AppearanceMode, type DarkTheme,
@@ -19,7 +18,6 @@ export function AppearanceSection(): JSX.Element {
   const [choice, setChoice] = useState(appearance)
   const [system, setSystem] = useState(systemScheme)
   const [error, setError] = useState(false)
-  const [threadEntries, setThreadEntries] = useState(waitingThreadEntries)
   useEffect(() => {
     watchAppearance()
     const refresh = (): void => { setChoice(appearance()); setSystem(systemScheme()) }
@@ -59,15 +57,6 @@ export function AppearanceSection(): JSX.Element {
             <span><strong>{DARK_THEME_LABELS[id]}</strong><span className="set-opening-note">{DARK_NOTES[id].note}</span></span>
           </label>
         ))}
-      </fieldset>
-      <fieldset className="set-opening-options">
-        <legend className="set-section-label">Desk threads</legend>
-        <label className="set-opening-choice">
-          <input type="checkbox" checked={threadEntries} onChange={event => {
-            setThreadEntries(event.target.checked); saveWaitingThreadEntries(event.target.checked)
-          }} />
-          <span><strong>Show waiting threads under cards</strong><span className="set-opening-note">Show up to two waiting threads per card without hovering. On by default.</span></span>
-        </label>
       </fieldset>
       {error && <div className="set-error" role="alert">This browser cannot save preferences, so this choice lasts until the page reloads.</div>}
       <p className="set-row-note">Saved in this browser only.</p>

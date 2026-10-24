@@ -58,7 +58,7 @@ import type {
 } from './KanbanTypes.js'
 import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
-import { collapseThreadFamily, expandThreadFamily, PINNED_TAG, restoreThreadFocus, THREAD_PIN, type ThreadPinRequest, threadFamilyCard, threadFamilyTab, threadFocusIn } from './ThreadPeek.js'
+import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
@@ -66,8 +66,8 @@ import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, byClosedAtDesc, byInFlightBand, deriveCycleLens, isQuestion, restingCards, surfaceTotals } from './KanbanReadModel.js'
-import { familyColumn, threadKey } from './threads.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, restingCards, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
+import { threadKey } from './threads.js'
 import {
   dueBouncesFromResting,
   nextStandingLaunch,
@@ -400,7 +400,7 @@ export class KanbanModal {
       transition: (card, target) => this.transition(card, target),
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       makeSeat: (card, anchor) => this.makeSeat(card, anchor),
-      openDetail: (card) => this.openDocumentChannel(card),
+      openDetail: (card, forceRail) => { this.openDocumentChannel(card); if (forceRail) this.workspace?.forceThreadRail() },
       onRest: card => this.openRestPopover(card),
       getFleetDefaultAgent: (origin) => this.fleetDefaultAgents.get(origin) ?? FALLBACK_DEFAULT_AGENT,
       onCardLongPress: (card, anchor) => this.openMoveMenuFor(card, anchor),
@@ -570,7 +570,6 @@ export class KanbanModal {
     document.addEventListener('keydown', this.handleDocumentKeyDown, true)
     document.addEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.addEventListener('resize', this.handleResize)
-    window.addEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.addEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     document.addEventListener(THREAD_PIN, this.handleThreadPin)
     this.startPolling()
@@ -602,7 +601,6 @@ export class KanbanModal {
     document.removeEventListener('keydown', this.handleDocumentKeyDown, true)
     document.removeEventListener('visibilitychange', this.handleMeetingVisibilityChange)
     window.removeEventListener('resize', this.handleResize)
-    window.removeEventListener('shuttle-thread-preferences-changed', this.handleConversationOpening)
     window.removeEventListener('shuttle-conversation-opening-changed', this.handleConversationOpening)
     document.removeEventListener(THREAD_PIN, this.handleThreadPin)
     this.stopMobileWatch?.()
@@ -1192,8 +1190,7 @@ export class KanbanModal {
     target: ColumnKind,
     /**
      * For a gesture that has ALREADY painted its destination and is now
-     * delegating the lifecycle half here (the peek-list row dropped on a
-     * column). Two things have to be said, and both are about the same trap:
+     * delegating the lifecycle half here (a row dropped on a column). Two things have to be said, and both are about the same trap:
      *
      *  • `basis` — the response as it was BEFORE that paint. Every question
      *    this method asks ("which column is it in now?", "does it need parking
@@ -1923,7 +1920,6 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const threadFocus = threadFocusIn(this.deskEl)
     const { now, staleness } = data
 
     this.deskEl.innerHTML = ''
@@ -1960,8 +1956,6 @@ export class KanbanModal {
     // A redraw repaints the selection in place: the Desk scrolls only when the
     // selection moves, never under a pointer on its way to another card.
     this.deskKeyboard?.refresh()
-    // Focus on a thread control lands on the same control, rebuilt.
-    restoreThreadFocus(this.deskEl, threadFocus)
     void this.fiberSends?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
@@ -2246,30 +2240,7 @@ export class KanbanModal {
     if (!this.body) return
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
-    const deskKey = this.activeViewId === 'desk' && !e.isComposing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !(e.target instanceof HTMLElement && isTypingTarget(e.target))
     const nativeControl = (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
-    // Enter or → on a card whose thread family is folded opens the family;
-    // open, Enter opens the constitution and → moves on, as on any card.
-    if (deskKey && !nativeControl && (e.key === 'Enter' || e.key === 'ArrowRight') && !e.repeat && expandThreadFamily(this.deskKeyboard?.selectedRow ?? null)) {
-      e.preventDefault()
-      e.stopPropagation()
-      return
-    }
-    // Escape or ← folds an expanded thread family first — the nearest thing open —
-    // and the selection, if it was on one of its rows, returns to the family's card.
-    if (deskKey && (e.key === 'Escape' || e.key === 'ArrowLeft')) {
-      const selectedRow = this.deskKeyboard?.selectedRow ?? null
-      const family = collapseThreadFamily(document.activeElement) ?? collapseThreadFamily(selectedRow)
-      if (family) {
-        e.preventDefault()
-        e.stopPropagation()
-        const own = threadFamilyCard(family)
-        if (own && selectedRow && selectedRow !== own && family.contains(selectedRow)) {
-          this.deskKeyboard?.select({ uid: own.dataset.cardUid!, origin: own.dataset.cardOrigin! }, false)
-        }
-        return
-      }
-    }
     // Escape releases an engaged lens and goes no further — "back out of what
     // I'm looking at", and the lens is the nearest thing being looked through.
     // A field takes its own Escape (the bar's Find puts itself away) before the lens is released.
@@ -2308,12 +2279,6 @@ export class KanbanModal {
         e.preventDefault(); e.stopPropagation()
         return
       }
-      if (intent === 'pin') {
-        const row = this.deskKeyboard?.selectedRow
-        const pin = row?.matches('.kbn-thread-row') ? row.parentElement?.querySelector<HTMLButtonElement>(':scope > .kbn-thread-pin') : null
-        if (pin) { pin.click(); e.preventDefault(); e.stopPropagation() }
-        return
-      }
       const nativeActivation = e.key === 'Enter' && nativeControl
       if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
         e.preventDefault()
@@ -2326,19 +2291,13 @@ export class KanbanModal {
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
 
     const active = document.activeElement as HTMLElement | null
-    // A selected line offers its action menu before column navigation resumes.
-    if (active?.matches('.kbn-card, .kbn-cluster-item') && !active.closest('.kbn-thread-family') && !e.shiftKey) {
-      const menu = active.querySelector<HTMLButtonElement>('.kbn-card-menu')
-      if (menu) { e.preventDefault(); e.stopPropagation(); menu.focus(); return }
-    }
-    // Inside a thread family, Tab steps through its card, badge and drawn rows
-    // before the column order takes over.
-    const familyStop = active ? threadFamilyTab(active, e.shiftKey) : null
-    if (familyStop) {
-      e.preventDefault()
-      e.stopPropagation()
-      familyStop.focus({ preventScroll: true })
-      return
+    // A card's explicit controls are reachable before column navigation resumes.
+    const row = active?.closest<HTMLElement>('.kbn-card, .kbn-cluster-item')
+    if (row && active) {
+      const stops = [row, ...row.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]')]
+      const at = stops.indexOf(active)
+      const next = at >= 0 ? stops[at + (e.shiftKey ? -1 : 1)] : undefined
+      if (next) { e.preventDefault(); e.stopPropagation(); next.focus({ preventScroll: true }); return }
     }
     const heads = Array.from(this.body.querySelectorAll<HTMLElement>('.kbn-col-head'))
       .filter(head => head.offsetParent !== null)
@@ -2572,7 +2531,7 @@ function liftCardFromSurfaces(resp: KanbanResponse, cardId: string): {
     },
     stash: drop(resp.stash),
     roles: drop(resp.roles),
-    card,
+    card: card ?? resp.threads?.find(c => c.id === cardId) ?? null,
   }
 }
 
@@ -2590,14 +2549,14 @@ function withSurfaces(
   },
 ): KanbanResponse {
   const roles = s.roles ?? resp.roles
-  return {
+  return projectDeskFrontier({
     ...resp,
     now: s.now,
     timeline: s.timeline,
     stash: s.stash,
     roles,
     totals: surfaceTotals({ ...s, roles }),
-  }
+  })
 }
 
 /**
@@ -2651,7 +2610,7 @@ export function applyOptimisticTransition(
   const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
 
-  const moved: KanbanCard = { ...card, threadPromoted: undefined }
+  const moved: KanbanCard = { ...card }
   // Any UNTEMPERED non-draft state counts, not just awaiting (status:closed):
   // Temper can land while the run is still status:active (worker alive or just
   // killed, exit writer not yet run) and the daemon resolves it to accept
@@ -2682,7 +2641,7 @@ export function applyOptimisticTransition(
     )
     // A standing seat re-armed between runs rests among the Roles.
     if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-    if (!keptByThreads(moved, now)) timeline.futureDated = [...timeline.futureDated, moved]
+    timeline.futureDated = [...timeline.futureDated, moved]
     return withSurfaces(resp, { now, timeline, stash, roles })
   }
   if (target === 'tempered' || target === 'composted') {
@@ -2691,7 +2650,7 @@ export function applyOptimisticTransition(
     moved.workerState = undefined           // closing the fiber stops its worker
     moved.tmuxSession = undefined
     moved.closedAt = card.closedAt ?? nowIso  // past lane skips cards with no closedAt day-column
-    if (!keptByThreads(moved, now)) timeline.past = [moved, ...timeline.past] // past renders recency-desc — freshest first
+    timeline.past = [moved, ...timeline.past]
   } else {
     // Patch the fields the destination's own rendering + the next classify
     // read, mirroring the committed verbs: drafts = reopen-as-draft/pause +
@@ -2728,21 +2687,6 @@ export function applyOptimisticTransition(
   }
 
   return withSurfaces(resp, { now, timeline, stash, roles })
-}
-
-/**
- * The read model's promotion, applied to a card an optimistic gesture is
- * putting off the Desk (Resting, the timeline, the past): a root whose threads
- * still hold work stays in the column they ask for, marked, with its new
- * lifecycle fields, which is where the next refresh draws it. True when it
- * stayed, placed in `now`.
- */
-function keptByThreads(moved: KanbanCard, now: KanbanResponse['now']): boolean {
-  const column = familyColumn(moved.threadSummary)
-  if (!column) return false
-  moved.threadPromoted = true
-  now[column] = [...now[column], moved].sort(column === 'inFlight' ? byInFlightBand : byClosedAtDesc)
-  return true
 }
 
 /** Optimistically mark the seat without changing a running or closed lifecycle. */
@@ -2818,9 +2762,8 @@ function placeOptimistically(
   if (!resp) return null
   const { card, now, timeline, stash, roles } = liftCardFromSurfaces(resp, cardId)
   if (!card) return null
-  const moved: KanbanCard = { ...card, ...patch(card), threadPromoted: undefined }
+  const moved: KanbanCard = { ...card, ...patch(card) }
   // Resting a seat keeps it a seat: it comes to rest among the Roles.
   if (moved.shuttleSeat === true && moved.shuttleRole) return withSurfaces(resp, { now, timeline, stash, roles: withSeat(roles, moved) })
-  if (keptByThreads(moved, now)) return withSurfaces(resp, { now, timeline, stash, roles })
   return withSurfaces(resp, { now, timeline, stash: [moved, ...stash], roles })
 }

@@ -36,7 +36,7 @@
  * harness-board-dist/index.html via file://. The page ships with the bundle,
  * so the output directory is self-sufficient — nothing to copy in by hand.
  */
-import { addThreadFixtures } from './thread-fixtures.js'
+import { addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
@@ -66,8 +66,9 @@ const search = new URLSearchParams(window.location.search)
 const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
-const workspaceFixture = example === 'workspace' || example === 'music' || example === 'threads' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+const workspaceFixture = example === 'workspace' || example === 'music' || example === 'threads' || example === 'frontier' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
+if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()

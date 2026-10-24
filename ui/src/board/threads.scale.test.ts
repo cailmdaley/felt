@@ -62,7 +62,8 @@ describe('thread read model at fleet scale', () => {
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
-      expect(desk.querySelectorAll('.kbn-thread-family').length).toBeGreaterThan(0)
+      expect(desk.querySelectorAll('.kbn-thread-count').length).toBeGreaterThan(0)
+      expect(desk.querySelector('.kbn-thread-tree')).toBeNull()
       expect(threadIndexFor(board)).toBe(threadIndexFor(board))
       expect(threadIndexBuilds()).toBe(before + 1)
     })
@@ -73,6 +74,15 @@ describe('thread read model at fleet scale', () => {
       const cards = boardCards(buildKanbanResponseFromComposite(feed(chain(size))))
       return counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => { new ThreadIndex(cards) })
     }
+    expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
+  })
+  it('projects and counts the frontier in linear work for a deep chain', () => {
+    const work = (size: number) => counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => {
+      const board = buildKanbanResponseFromComposite(feed(chain(size)))
+      const index = threadIndexFor(board)
+      index.frontier()
+      for (const card of boardCards(board)) index.awakeCounts(card)
+    })
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })
   it('draws the rail for a deep chain in work linear in the subtree, from the response\'s own index', () => {

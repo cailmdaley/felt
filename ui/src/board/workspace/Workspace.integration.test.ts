@@ -374,7 +374,7 @@ describe('workspace reader integration', () => {
     await press('J'); expect(current()).toBe('alpha')
     await press('K'); expect(current()).toBe('n1')
   })
-  it('files a promoted root where the Desk draws it, and an open thread under its root, leaving the strip in order', async () => {
+  it('files frontier rows where their own state places them, with an open folded thread under its awake root', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
@@ -390,16 +390,15 @@ describe('workspace reader integration', () => {
       thread({ id: 'review', status: 'closed' }),
     ]
     const index = new ThreadIndex(raw)
-    const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c), threadPromoted: c.id === 'settled' || c.id === 'resting' ? true : undefined }))
+    const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
     workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const rows = (): (string | undefined)[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)
     const strip = (): (string | null)[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label'))
     workspace.open(feed[0], 'Desk'); await flush()
-    // The settled root waits on its thread's question; the resting root awaits review with its thread.
-    expect(rows()).toEqual(['draft', 'settled', 'hub', 'resting', 'review'])
+    expect(rows()).toEqual(['draft', 'settled-ask', 'hub', 'resting-done', 'review'])
     expect(strip()).toEqual(['Drafts, 1', 'In flight, 2', 'Awaiting review, 2'])
     workspace.open(feed[2], 'Desk'); await flush()
-    expect(rows()).toEqual(['draft', 'settled', 'hub', 'hub-sub', 'resting', 'review'])
+    expect(rows()).toEqual(['draft', 'settled-ask', 'hub', 'hub-sub', 'resting-done', 'review'])
     expect(strip()).toEqual(['Drafts, 1', 'In flight, 3', 'Awaiting review, 2'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review'])
   })
