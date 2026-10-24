@@ -74,10 +74,12 @@ defmodule Shuttle.MigrationJournal do
       |> Enum.sort()
       |> Enum.reduce_while({:ok, []}, fn path, {:ok, entries} ->
         with {:ok, bytes} <- File.read(path),
-             {:ok, %{"version" => 1, "id" => id, "host" => owner} = entry} <- Jason.decode(bytes),
-             true <- is_binary(id) and Path.basename(path) == id <> ".json" do
+             {:ok, %{"host" => owner} = entry} <- Jason.decode(bytes),
+             true <- is_binary(owner) and owner != "" do
           if owner == host do
-            with :ok <- relocate(entry, path) do
+            with :ok <- validate(entry),
+                 true <- Path.basename(path) == entry["id"] <> ".json",
+                 :ok <- relocate(entry, path) do
               {:cont, {:ok, entries ++ [entry]}}
             else
               error -> {:halt, {:error, {:journal_unreadable, path, error}}}
@@ -97,9 +99,125 @@ defmodule Shuttle.MigrationJournal do
     if previous == path(entry) do
       :ok
     else
-      with :ok <- put(entry), do: File.rm(previous)
+      case File.read(path(entry)) do
+        {:error, :enoent} ->
+          with :ok <- put(entry), do: File.rm(previous)
+
+        {:ok, bytes} ->
+          if Jason.decode(bytes) == {:ok, entry},
+            do: File.rm(previous),
+            else: {:error, :journal_namespace_conflict}
+
+        error ->
+          error
+      end
     end
   end
+
+  @doc "Validate every value consumed by recovery before any backend or document operation."
+  def validate(%{
+        "version" => 1,
+        "id" => id,
+        "host" => host,
+        "direction" => direction,
+        "from" => from,
+        "to" => to,
+        "uuid" => uuid,
+        "session" => session,
+        "worker" => worker,
+        "documents" => documents,
+        "backend" => backend
+      }) do
+    checks = [
+      {"id", token?(id)},
+      {"host", text?(host)},
+      {"direction", direction in ["forward", "reverse"]},
+      {"uuid", token?(uuid)},
+      {"session", text?(session)},
+      {"from", fiber?(from)},
+      {"to", fiber?(to)},
+      {"worker", worker?(worker)},
+      {"documents", documents?(documents, from, to, host)},
+      {"backend", backend?(backend, uuid, from, to, host)}
+    ]
+
+    case Enum.find(checks, fn {_, valid?} -> not valid? end) do
+      nil -> :ok
+      {field, _} -> {:error, {:invalid_journal_schema, field}}
+    end
+  end
+
+  def validate(_), do: {:error, {:invalid_journal_schema, "required fields or version"}}
+
+  defp text?(value), do: is_binary(value) and String.trim(value) != ""
+  defp token?(value), do: text?(value) and Regex.match?(~r/^[A-Za-z0-9_-]+$/, value)
+  defp optional_text?(value), do: is_nil(value) or is_binary(value)
+  defp absolute?(value), do: text?(value) and Path.type(value) == :absolute
+
+  defp fiber?(%{"id" => id, "uid" => uid, "path" => path, "store" => store}),
+    do: text?(id) and token?(uid) and absolute?(path) and absolute?(store)
+
+  defp fiber?(_), do: false
+
+  defp worker?(%{"session" => session} = worker) do
+    text?(session) and
+      Enum.all?(~w(fiber_id uid felt_store session_uuid context_harness agent_id role),
+        &optional_text?(worker[&1]))
+  end
+
+  defp worker?(_), do: false
+
+  defp documents?([source, dest], from, to, host) do
+    fiber?(from) and fiber?(to) and from["uid"] != to["uid"] and
+      document?(source, from, host, false) and document?(dest, to, host, true)
+  end
+
+  defp documents?(_, _, _, _), do: false
+
+  defp document?(%{"path" => path, "uid" => uid, "host" => host,
+                   "before" => before, "after" => target}, fiber, host, dest?) do
+    uid == fiber["uid"] and absolute?(path) and
+      fields?(before, dest?) and fields?(target, dest?)
+  end
+
+  defp document?(_, _, _, _), do: false
+
+  defp fields?(fields, dest?) when is_map(fields) do
+    keys = ~w(status closed-at tempered horizon shuttle.runtime) ++ if(dest?, do: ["ask"], else: [])
+    Enum.sort(Map.keys(fields)) == Enum.sort(keys) and
+      fields["status"] in [nil, "open", "active", "closed"] and
+      optional_text?(fields["closed-at"]) and optional_text?(fields["horizon"]) and
+      fields["tempered"] in [nil, true, false] and
+      (is_nil(fields["shuttle.runtime"]) or is_map(fields["shuttle.runtime"]))
+  end
+
+  defp fields?(_, _), do: false
+
+  defp backend?(%{"type" => "tmux", "before" => before, "after" => target,
+                 "aliases" => aliases}, _, _, _, _) do
+    text?(before) and text?(target) and before != target and is_list(aliases) and
+      Enum.all?(aliases, fn
+        %{"path" => path, "before" => previous, "after" => next} ->
+          absolute?(path) and optional_text?(previous) and text?(next)
+        _ -> false
+      end)
+  end
+
+  defp backend?(%{"type" => "app", "before" => before, "after" => target}, uuid, from, to, host) do
+    fiber?(from) and fiber?(to) and
+      app_record?(before, uuid, from, host) and app_record?(target, uuid, to, host)
+  end
+
+  defp backend?(_, _, _, _, _), do: false
+
+  defp app_record?(record, uuid, fiber, host) when is_map(record) do
+    record["session_uuid"] == uuid and record["thread_id"] == uuid and
+      record["backend_host"] == host and text?(record["backend_endpoint"]) and
+      record["fiber_id"] == fiber["id"] and record["uid"] == fiber["uid"] and
+      record["felt_store"] == fiber["store"]
+  end
+
+  defp app_record?(_, _, _, _), do: false
 
   def clear(entry), do: File.rm(path(entry))
 

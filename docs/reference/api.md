@@ -100,6 +100,16 @@ Do not rename a namespace or edit a journal's host to adopt it; backend ownershi
 Fiber changes use both documents' advisory locks and preserve their current bodies and untouched fields; the journal never stores historical bodies.
 An unresolved migration holds every launch, including force-dispatch, cron and previously observed workers.
 Restore the recorded backend or reconcile conflicting fiber fields, then restart the daemon to retry recovery; keep the journal and surviving worker intact.
+Recovery validates the complete journal schema before executing any pending move.
+Invalid JSON, unsupported versions and incomplete or wrongly typed records hold launches without crashing startup; the hold names the file and invalid field.
+`GET /api/v1/version` exposes `reconciliation_hold`, and `shuttle doctor` reports it even when the CLI contract matches.
+`shuttle daemon release` cannot clear a reconciliation hold.
+
+To clear an invalid journal, stop the daemon and back up the named file outside the migrations directory.
+Inspect both fibers, the session ledger and the native backend to determine which fiber owns the surviving conversation; repair its assignment and runtime fields consistently without stopping that conversation.
+Restore a valid journal from backup to let recovery finish, or, only after manually reconciling those resources, move the invalid file outside the migrations directory.
+Restart the daemon, confirm that `shuttle doctor` no longer reports the hold, then release the boot quarantine.
+Removing a journal alone is not recovery: it discards the evidence that prevents duplicate launches.
 
 Success returns `{ok: true, from, to, session_uuid}`.
 A retry identifying the same session and destination succeeds without moving it again.

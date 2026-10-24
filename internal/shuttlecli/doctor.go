@@ -33,20 +33,21 @@ type DoctorReceipt struct {
 }
 
 type ReceiptDaemon struct {
-	URL               string              `json:"url"`
-	Status            receiptStatus       `json:"status"`
-	Repair            string              `json:"repair,omitempty"`
-	Expected          any                 `json:"expected,omitempty"`
-	Observed          any                 `json:"observed,omitempty"`
-	Contract          bool                `json:"contract_ok"`
-	Ready             *bool               `json:"ready,omitempty"`
-	Listen            string              `json:"listen,omitempty"`
-	HostClass         string              `json:"host_class,omitempty"`
-	PeerGate          string              `json:"peer_gate,omitempty"`
-	PeerGateUID       *int                `json:"peer_gate_uid,omitempty"`
-	PeerGateUIDSource string              `json:"peer_gate_uid_source,omitempty"`
-	TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
-	Discovery         *daemonDiscovery    `json:"discovery,omitempty"`
+	URL                string              `json:"url"`
+	Status             receiptStatus       `json:"status"`
+	Repair             string              `json:"repair,omitempty"`
+	Expected           any                 `json:"expected,omitempty"`
+	Observed           any                 `json:"observed,omitempty"`
+	Contract           bool                `json:"contract_ok"`
+	ReconciliationHold string              `json:"reconciliation_hold,omitempty"`
+	Ready              *bool               `json:"ready,omitempty"`
+	Listen             string              `json:"listen,omitempty"`
+	HostClass          string              `json:"host_class,omitempty"`
+	PeerGate           string              `json:"peer_gate,omitempty"`
+	PeerGateUID        *int                `json:"peer_gate_uid,omitempty"`
+	PeerGateUIDSource  string              `json:"peer_gate_uid_source,omitempty"`
+	TailnetDial        *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
+	Discovery          *daemonDiscovery    `json:"discovery,omitempty"`
 }
 
 type ReceiptTailnetDial struct {
@@ -294,15 +295,16 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 		return daemonReceiptOnTransportError(d, err)
 	}
 	var response struct {
-		Listen            string              `json:"listen"`
-		HostClass         string              `json:"host_class"`
-		PeerGate          string              `json:"peer_gate"`
-		PeerGateUID       *int                `json:"peer_gate_uid"`
-		PeerGateUIDSource string              `json:"peer_gate_uid_source"`
-		TailnetDial       *ReceiptTailnetDial `json:"tailnet_dial"`
-		Discovery         *daemonDiscovery    `json:"discovery"`
-		Ready             *bool               `json:"ready"`
-		Contract          struct {
+		Listen             string              `json:"listen"`
+		HostClass          string              `json:"host_class"`
+		PeerGate           string              `json:"peer_gate"`
+		PeerGateUID        *int                `json:"peer_gate_uid"`
+		PeerGateUIDSource  string              `json:"peer_gate_uid_source"`
+		TailnetDial        *ReceiptTailnetDial `json:"tailnet_dial"`
+		Discovery          *daemonDiscovery    `json:"discovery"`
+		Ready              *bool               `json:"ready"`
+		ReconciliationHold string              `json:"reconciliation_hold"`
+		Contract           struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
 			OK       *bool           `json:"ok"`
@@ -313,6 +315,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	d.PeerGateUID, d.PeerGateUIDSource = response.PeerGateUID, response.PeerGateUIDSource
 	d.TailnetDial, d.Ready = response.TailnetDial, response.Ready
 	d.Discovery = response.Discovery
+	d.ReconciliationHold = response.ReconciliationHold
 	if decodeErr != nil {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
 		return d
@@ -333,6 +336,10 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 		d.Status, d.Repair = receiptHealthy, ""
 	} else {
 		d.Status, d.Repair = receiptMismatch, "restart or upgrade the daemon and shuttle together so their contract levels match"
+	}
+	if d.ReconciliationHold != "" {
+		d.Status = receiptMismatch
+		d.Repair = "migration recovery holds every launch: " + d.ReconciliationHold + "; inspect the named journal and follow docs/reference/api.md worker migration recovery; daemon release cannot clear this hold"
 	}
 	return d
 }

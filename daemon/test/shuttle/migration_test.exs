@@ -194,6 +194,58 @@ defmodule Shuttle.MigrationTest do
     assert :sys.get_state(restarted).reconciliation_hold == nil
   end
 
+  test "invalid v1 journals hold without crashing startup", %{poller: p, root: root} do
+    File.mkdir_p!(Shuttle.MigrationJournal.root())
+    File.write!(Path.join(Shuttle.MigrationJournal.root(), "broken.json"),
+      Jason.encode!(%{"version" => 1, "id" => "broken", "host" => "test-host"}))
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold != nil
+  end
+
+  test "journal schema rejects missing and wrongly typed recovery fields", %{poller: p} do
+    alias Shuttle.MigrationJournal
+    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(p), "source", "dest", [])
+    {:ok, entry} = MigrationJournal.create(plan, "test-host")
+    assert :ok = MigrationJournal.validate(entry)
+
+    for key <- ~w(version id host direction from to uuid session worker documents backend) do
+      assert {:error, {:invalid_journal_schema, _}} = MigrationJournal.validate(Map.delete(entry, key))
+
+      for value <- [nil, 7, [], %{}] do
+        assert {:error, {:invalid_journal_schema, _}} = MigrationJournal.validate(Map.put(entry, key, value))
+      end
+    end
+
+    for corrupt <- [
+          put_in(entry, ["worker", "session"], %{}),
+          put_in(entry, ["worker", "context_harness"], []),
+          put_in(entry, ["backend", "aliases"], [nil]),
+          put_in(entry, ["backend", "aliases"], [%{"path" => 7, "before" => nil, "after" => "x"}]),
+          Map.put(entry, "documents", [nil, nil]),
+          Map.put(entry, "documents", Enum.map(entry["documents"], &Map.put(&1, "before", [])))
+        ] do
+      assert {:error, {:invalid_journal_schema, _}} = MigrationJournal.validate(corrupt)
+    end
+  end
+
+  test "all journals validate before recovery and the API exposes the held filename", %{poller: p, root: root} do
+    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(p), "source", "dest", [])
+    {:ok, _} = Shuttle.MigrationJournal.create(plan, "test-host")
+    path = Path.join(Shuttle.MigrationJournal.root("test-host"), "zz-broken.json")
+    File.write!(path, Jason.encode!(%{"version" => 1, "id" => "zz-broken", "host" => "test-host"}))
+    before = bytes()
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    hold = :sys.get_state(restarted).reconciliation_hold
+    assert hold =~ path
+    assert hold =~ "invalid_journal_schema"
+    assert bytes() == before
+    assert {_, 0} = Runner.cmd("tmux", ["has-session", "-t", "=" <> FiberUid.session("source")], [])
+    conn = get(api_conn(), "/api/v1/version")
+    assert Jason.decode!(conn.resp_body)["reconciliation_hold"] == hold
+  end
+
   test "public migration rekeys runtime, watcher, ledger and mailbox ownership; retries and late events are inert",
        %{poller: poller} do
     old = Poller.worker_status(poller, "source")

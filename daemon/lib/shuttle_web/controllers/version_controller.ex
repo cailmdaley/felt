@@ -14,13 +14,14 @@ defmodule ShuttleWeb.VersionController do
 
   def show(conn, _params) do
     readiness = Shuttle.Readiness.status()
+    health = poller_health(readiness.ready)
 
     json(
       conn,
       Shuttle.BuildStamp.stamp()
       |> Map.put(:ready, readiness.ready)
       |> Map.put(:boot_duration_ms, readiness.duration_ms)
-      |> Map.put(:contract, contract_check(readiness.ready))
+      |> Map.merge(health)
       |> Map.put(:host, Shuttle.Poller.daemon_host_id())
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
@@ -33,27 +34,26 @@ defmodule ShuttleWeb.VersionController do
     )
   end
 
-  defp contract_check(false) do
+  defp poller_health(false), do: unavailable_health("booting")
+
+  defp poller_health(true) do
+    snapshot = Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 1_500)
+
     %{
-      expected: Shuttle.Contract.expected_level(),
-      observed: nil,
-      ok: nil,
-      reason: "booting"
+      contract: Map.put(snapshot[:contract] || %{}, :expected, Shuttle.Contract.expected_level()),
+      reconciliation_hold: get_in(snapshot, [:poll_health, :reconciliation_hold])
     }
+  catch
+    :exit, _ -> unavailable_health("poller_unavailable")
   end
 
-  defp contract_check(true) do
-    Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 1_500)
-    |> Map.get(:contract, %{})
-    |> Map.put(:expected, Shuttle.Contract.expected_level())
-  catch
-    :exit, _ ->
-      %{
-        expected: Shuttle.Contract.expected_level(),
-        observed: nil,
-        ok: nil,
-        reason: "poller_unavailable"
-      }
+  defp unavailable_health(reason) do
+    %{
+      contract: %{
+        expected: Shuttle.Contract.expected_level(), observed: nil, ok: nil, reason: reason
+      },
+      reconciliation_hold: nil
+    }
   end
 
   defp tailnet_dial_status(false),

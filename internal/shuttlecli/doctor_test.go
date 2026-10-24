@@ -162,6 +162,10 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}}},
 			"contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
 		}, receiptHealthy},
+		{"migration hold", map[string]any{
+			"ready": true, "contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
+			"reconciliation_hold": "journal_unreadable /state/migrations/broken.json: invalid schema",
+		}, receiptMismatch},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
 		{"booting ignores incomplete contract and listener evidence", map[string]any{
 			"ready": false, "listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user",
@@ -179,6 +183,9 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			got := newApp(env).collectDaemonReceipt()
 			if got.Status != tc.want {
 				t.Fatalf("daemon receipt = %#v, want status %q", got, tc.want)
+			}
+			if tc.name == "migration hold" && (!got.Contract || got.ReconciliationHold != tc.body["reconciliation_hold"] || !strings.Contains(got.Repair, "/state/migrations/broken.json") || !strings.Contains(got.Repair, "daemon release cannot clear")) {
+				t.Fatalf("migration hold must remain visible with a matching contract: %+v", got)
 			}
 			if tc.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
