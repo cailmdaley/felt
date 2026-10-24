@@ -1988,6 +1988,25 @@ defmodule Shuttle.AppWorkersTest do
     assert App.names() == [{"app-session-1", "Shuttle — app"}]
   end
 
+  test "resume reservation refreshes the assignment boundary before backend I/O" do
+    fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    assert {"", 0} = WorkerBackend.stop(Runner, session)
+    assert :ok = AppWorkers.update("app-session-1", %{"started_at" => "2026-01-01T00:00:00Z"})
+    assert {:ok, record} = AppWorkers.get("app-session-1")
+
+    assert :ok =
+             AppWorkers.reserve_resume(
+               "app-session-1",
+               record["fiber_id"],
+               record["uid"],
+               record["felt_store"]
+             )
+
+    assert {:ok, %{"active" => true, "started_at" => started}} = AppWorkers.get("app-session-1")
+    assert started != "2026-01-01T00:00:00Z"
+  end
+
   test "marker failure cannot start a turn or mint another conversation" do
     fiber("tests/app")
 
@@ -2104,7 +2123,7 @@ defmodule Shuttle.AppWorkersTest do
         eventually(fn -> :sys.get_state(poller).poll_cycles > before end)
       end
 
-      if remote in [:idle, :not_loaded, :missing] do
+      if unquote(remote in [:idle, :not_loaded, :missing]) do
         assert nil == Poller.worker_status(poller, "tests/app")
 
         assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
