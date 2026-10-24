@@ -1072,8 +1072,9 @@ refresh_harnesses() { :; }
 check_listen() { :; }
 supervisor_probe_cmd() { :; }
 daemon_kill() { :; }
+respawn_launcher_restart_cmd() { :; }
 verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "remote_host_cycle") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
 			cmd := exec.Command("bash", "-c", harness)
 			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
 			if out, err := cmd.CombinedOutput(); err != nil {
