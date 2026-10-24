@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	osuser "os/user"
 	"path/filepath"
@@ -17,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -149,17 +149,37 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	if err := validateSupervisorOptions(options); err != nil {
 		return err
 	}
+	var installSettings hostSettings
 	if !options.Print {
 		if daemonRespawnLoopPresent(a.env) {
 			return errors.New("the shuttle-daemon tmux respawn loop is active; stop it before installing a service supervisor")
 		}
-		settings, err := a.resolveHostSettings()
+		settings, err := a.supervisorHostSettings(options)
 		if err != nil {
 			return err
 		}
-		if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", 2*time.Second); err == nil {
-			return errors.New("a daemon is already answering; stop its current supervisor before installing another")
+		installSettings = settings
+		if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
+			return fmt.Errorf("refusing to install after the daemon owner check failed: %w", err)
 		}
+		// The HTTP transport must resolve the service's socket and class too,
+		// rather than re-reading a caller-only endpoint override while dialing.
+		probe := *a
+		probe.env = a.env.Clone()
+		probe.env.Set("SHUTTLE_LISTEN", settings.Listen)
+		probe.env.Set("SHUTTLE_HOST_CONFIG_FILE", settings.File)
+		replacePID := 0
+		if _, err := probe.daemonLifecycleGet(settings, "/api/v1/version", 2*time.Second); err == nil {
+			replacePID = a.supervisorListenerPID(options, settings)
+			if replacePID == 0 {
+				return errors.New("a daemon is already answering outside the target supervisor; stop its current supervisor before installing another")
+			}
+		}
+		releaseClaim, err := a.claimDaemonOwner(settings, replacePID, &options)
+		if err != nil {
+			return err
+		}
+		defer releaseClaim()
 	}
 	if err := a.resolveSupervisorCodex(&options); err != nil {
 		return err
@@ -228,36 +248,75 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	if err := os.MkdirAll(filepath.Dir(options.Log), 0o755); err != nil {
 		return fmt.Errorf("creating daemon log directory: %w", err)
 	}
-	if options.OS == "Darwin" {
-		return a.installLaunchAgent(options, release, rendered)
+	if err := touchDaemonStopMarker(filepath.Join(installSettings.DataDir, "heartbeat.stopped")); err != nil {
+		return fmt.Errorf("marking the target service stop: %w", err)
 	}
-	return a.installSystemdUserUnit(options, release, rendered)
+	if options.OS == "Darwin" {
+		err = a.installLaunchAgent(options, rendered)
+	} else {
+		err = a.installSystemdUserUnit(options, release, rendered)
+	}
+	if err != nil {
+		return err
+	}
+	return a.awaitDaemonOwnerHandoff(installSettings, options, 30*time.Second)
 }
 
-func daemonRespawnLoopPresent(env *sysenv.Env) bool {
-	tmux, err := env.LookPath("tmux")
-	if err != nil {
-		return false
-	}
-	cmd := env.Command(tmux, "list-panes", "-t", "shuttle-daemon", "-F", "#{pane_pid}")
-	pids, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	ps, err := env.LookPath("ps")
-	if err != nil {
-		return false
-	}
-	for _, pid := range strings.Fields(string(pids)) {
-		if _, err := strconv.Atoi(pid); err != nil {
-			continue
+// supervisorMainPID requires a reachable manager and a live main process;
+// enabled units and installed files alone do not establish ownership.
+func (a *app) supervisorMainPID(options supervisorOptions) int {
+	var pid string
+	if options.OS == "Linux" {
+		if err := a.env.Command("systemctl", "--user", "show-environment").Run(); err != nil {
+			return 0
 		}
-		output, err := env.Command(ps, "eww", "-p", pid, "-o", "command=").Output()
-		if err == nil && strings.Contains(string(output), "SHUTTLE_RESPAWN_LOOP=1") {
-			return true
+		out, err := a.env.Command("systemctl", "--user", "show", systemdUnitName(options.Label), "--property=MainPID", "--value").Output()
+		if err != nil {
+			return 0
+		}
+		pid = strings.TrimSpace(string(out))
+	} else {
+		out, err := a.env.Command("launchctl", "print", fmt.Sprintf("gui/%d/%s", os.Getuid(), options.Label)).Output()
+		if err != nil {
+			return 0
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if fields := strings.Fields(line); len(fields) == 3 && fields[0] == "pid" && fields[1] == "=" {
+				pid = fields[2]
+			}
 		}
 	}
-	return false
+	n, _ := strconv.Atoi(pid)
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// supervisorListenerPID ties the target manager's main process to the actual
+// endpoint before permitting a controlled refresh. Missing tools fail closed.
+func (a *app) supervisorListenerPID(options supervisorOptions, settings hostSettings) int {
+	n := a.supervisorMainPID(options)
+	if n == 0 {
+		return 0
+	}
+	pid := strconv.Itoa(n)
+	args := []string{"-nP", "-t", "-a", "-p", pid}
+	if settings.listen.Network == "unix" {
+		args = append(args, "-U", "--", settings.listen.Address)
+	} else {
+		_, port, err := net.SplitHostPort(settings.listen.Address)
+		if err != nil {
+			return 0
+		}
+		args = append(args, "-iTCP:"+port, "-sTCP:LISTEN")
+	}
+	out, err := a.env.Command("lsof", args...).Output()
+	if err == nil && strings.TrimSpace(string(out)) == pid {
+		n, _ := strconv.Atoi(pid)
+		return n
+	}
+	return 0
 }
 
 func validateSupervisorOptions(options supervisorOptions) error {
@@ -810,12 +869,7 @@ func (a *app) warnProtectedSupervisorPaths(options supervisorOptions, releaseDir
 	}
 }
 
-func (a *app) installLaunchAgent(options supervisorOptions, release daemonRelease, rendered string) error {
-	if supervisorInstallStopsDaemon(options.Label) {
-		if err := a.stopDaemonRelease(release); err != nil {
-			return err
-		}
-	}
+func (a *app) installLaunchAgent(options supervisorOptions, rendered string) error {
 	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
@@ -849,20 +903,6 @@ func (a *app) installSystemdUserUnit(options supervisorOptions, release daemonRe
 	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
-	}
-	if supervisorInstallStopsDaemon(options.Label) {
-		marker, err := a.daemonStopMarkerPath()
-		if err != nil {
-			return err
-		}
-		if err := touchDaemonStopMarker(marker); err != nil {
-			return fmt.Errorf("marking the requested daemon stop: %w", err)
-		}
-		_ = a.env.Command("tmux", "-S", filepath.Join(home, ".shuttle", "tmux.sock"), "kill-session", "-t", "shuttle-daemon").Run()
-		_ = a.env.Command("tmux", "kill-session", "-t", "shuttle-daemon").Run()
-		if err := a.stopDaemonRelease(release); err != nil {
-			return err
-		}
 	}
 	unitName := systemdUnitName(options.Label)
 	unitPath := filepath.Join(home, ".config", "systemd", "user", unitName)
@@ -917,10 +957,6 @@ func systemdUnitName(label string) string {
 		return "shuttle-daemon.service"
 	}
 	return filepath.Base(label[strings.LastIndex(label, ".")+1:]) + ".service"
-}
-
-func supervisorInstallStopsDaemon(label string) bool {
-	return label == defaultDaemonLabel
 }
 
 func defaultPort(port string) string {

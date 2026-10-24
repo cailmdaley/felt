@@ -159,11 +159,28 @@ Push the verified revision, then deploy it on each host:
    its hooks and skills match the felt just built, and check that `felt setup
    receipt` passes (see [harness plugins](#harness-plugins)).
 4. Cycle the daemon through its supervisor or respawn loop.
+   A verified live tmux loop takes precedence over service files.
+   The helper carries that choice into the restart, disabling a reachable competing systemd unit or unloading a loaded launchd agent before recreating the loop.
 5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
    and `ready` is `true` (up to 15 minutes by default; set
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
 6. Check the changed behavior through the live API or board.
 7. Run `shuttle daemon release` to release the boot quarantine.
+
+Refreshing an answering daemon is allowed only when the target service manager reports the PID that holds its listener.
+The check needs `lsof`; an unreachable manager, missing inspection tool, stale unit file, or different owner refuses the refresh without stopping the listener.
+Installation resolves the service's endpoint from the manager's environment, the host configuration, and the rendered port, not a caller-only `SHUTTLE_LISTEN` override.
+Systemd drop-ins are refused because they can change that environment; move their settings into supported install options or `host.json` before refreshing.
+A live tmux loop must be stopped before installing a service instead.
+Refresh writes the stop marker in the service's resolved data directory and cycles only the target manager's service, never every process using the same release.
+
+`shuttle daemon start` and `install` share an atomic endpoint claim that covers the pre-listen window.
+The claim follows the foreground process across `exec` until it dies; installation hands its claim only to the target manager's verified new main process.
+The installer waits up to 30 seconds for that handoff, even if the manager's restart command returns first.
+On timeout it stops the pending service before releasing its reservation; an unconfirmed stop is reported as unresolved ownership.
+This prevents concurrent cooperating starts and start/install races from launching competing daemon processes.
+It does not serialize creation of external supervisor definitions or protect direct execution of the release launcher.
+Two supervisors created concurrently can still exist, but their CLI starts cannot own the same endpoint concurrently; remove the unwanted supervisor rather than leaving it to retry.
 
 The helper builds both CLIs, the daemon, and — on every host that is not marked
 `"build_ui": false` — the UI, on that host.

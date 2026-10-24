@@ -8,10 +8,10 @@
 # installed copy over SSH to revive a dead remote daemon.
 #
 # Modes:
-#   shuttle-launch          (re)create tmux session "shuttle-daemon" running
-#                           `shuttle-launch --loop`; on a host with an installed
-#                           systemd/launchd supervisor, restart through it
-#                           instead
+#   shuttle-launch          preserve a verified live tmux loop; otherwise use
+#                           an enabled/active service, or create tmux session
+#                           "shuttle-daemon" running `shuttle-launch --loop`
+#   shuttle-launch --tmux   select tmux explicitly, disabling a competing service
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
 # Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
@@ -25,9 +25,9 @@
 # lived >= 60s resets it to 2s, so repeated crashes back off without slowing
 # recovery after a healthy run.
 #
-# `--force` is load-bearing: bare `start` probes :4000 and halt(1)s if a
-# daemon answers, which would busy-respawn during the documented
-# "kill the :4000 listener to cycle" procedure. See scripts/bootstrap.sh.
+# `--force` is a compatibility spelling: start always checks live listeners
+# and atomically claims the endpoint before exec. The loop waits while another
+# daemon answers instead of repeatedly attempting to bind its endpoint.
 
 set -u
 
@@ -110,9 +110,9 @@ if [ "${1:-}" = "--loop" ]; then
     # a manually started release, or a tmux session that outlived this loop's
     # own. `shuttle daemon status` probes the daemon's listen address (a unix
     # socket on a shared host, loopback TCP otherwise) and treats a
-    # bound-but-booting version response as alive. `--force` skips the start
-    # health check, so without this probe the loop would crash into :eaddrinuse
-    # every iteration. A booting listener is re-probed after five seconds; a
+    # bound-but-booting version response as alive. Start also refuses live
+    # listeners; this probe keeps the loop quiet while it stands down.
+    # A booting listener is re-probed after five seconds; a
     # ready daemon is re-probed every 30 seconds, inside the daemon's 60-second
     # heartbeat grace, so a daemon killed while this loop stands down is back
     # soon enough to count as a fast bounce rather than re-arming the boot
@@ -142,11 +142,32 @@ if [ "${1:-}" = "--loop" ]; then
   done
 fi
 
+# Normal revival and deploy use the same verified live-loop preference.
+if [ -z "${1:-}" ] && shuttle daemon loop-present >/dev/null 2>&1; then
+  set -- --tmux
+fi
+
+# Deploy carries its verified owner selection through the restart. A live tmux
+# loop must not silently switch to an enabled service and leave both owners.
+if [ "${1:-}" = "--tmux" ]; then
+  if command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user show-environment >/dev/null 2>&1 \
+    && { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null \
+      || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
+    systemctl --user disable --now shuttle-daemon.service || exit 1
+  fi
+  if command -v launchctl >/dev/null 2>&1 \
+    && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
+    launchctl bootout "gui/$(id -u)/io.shuttle.daemon" || exit 1
+  fi
+fi
+
 # A host whose daemon is owned by an installed supervisor (`shuttle daemon
 # install`: a systemd user unit or a launchd agent) is revived through that
 # supervisor. A respawn loop beside it would be a second supervisor started
 # with a different environment than the unit's.
-if command -v systemctl >/dev/null 2>&1 \
+if [ "${1:-}" != "--tmux" ] && command -v systemctl >/dev/null 2>&1 \
+  && systemctl --user show-environment >/dev/null 2>&1 \
   && { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null \
     || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
   systemctl --user restart shuttle-daemon.service \
@@ -154,7 +175,7 @@ if command -v systemctl >/dev/null 2>&1 \
   echo "shuttle-launch: restarted the daemon through its systemd user unit"
   exit 0
 fi
-if command -v launchctl >/dev/null 2>&1 \
+if [ "${1:-}" != "--tmux" ] && command -v launchctl >/dev/null 2>&1 \
   && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
   launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" \
     || { echo "shuttle-launch: launchctl kickstart io.shuttle.daemon failed" >&2; exit 1; }
@@ -194,6 +215,6 @@ touch "${data_dir:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/de
 tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t "$SESSION" 2>/dev/null
 tmux kill-session -t "$SESSION" 2>/dev/null
 tmux new-session -d -s "$SESSION" \
-  "SHUTTLE_DIR='$REPO' '$SELF' --loop" \
+  "exec env SHUTTLE_RESPAWN_LOOP=1 SHUTTLE_DIR='$REPO' '$SELF' --loop" \
   || { echo "shuttle-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }
 echo "shuttle-launch: respawn loop running in tmux session '$SESSION' (repo: $REPO)"

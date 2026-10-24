@@ -377,16 +377,6 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 	}
 }
 
-func TestSupervisorInstallStopsOnlyTheIndistinguishableDefaultDaemon(t *testing.T) {
-	t.Parallel()
-	if !supervisorInstallStopsDaemon(defaultDaemonLabel) {
-		t.Fatal("replacing the default supervisor must stop its daemon")
-	}
-	if supervisorInstallStopsDaemon("io.shuttle.second") {
-		t.Fatal("installing a second supervisor would stop the primary daemon")
-	}
-}
-
 func TestSupervisorTemplateSourceCheckoutFallbackIsScopedToBinRel(t *testing.T) {
 	t.Parallel()
 	repo := t.TempDir()

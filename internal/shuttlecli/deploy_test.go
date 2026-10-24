@@ -53,7 +53,7 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 // user directory, runs deploy's supervisor migration against a fake shuttle,
 // and returns each `shuttle daemon install` call as SHUTTLE_STORES_FILE plus
 // its argv.
-func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map[string][]byte) [][]string {
+func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map[string][]byte, loopPresent ...bool) [][]string {
 	t.Helper()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -80,6 +80,7 @@ func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map
 		t.Fatal(err)
 	}
 	fakeShuttle := `#!/bin/sh
+if [ "$1 $2" = "daemon loop-present" ]; then [ "$SHUTTLE_TEST_LIVE_LOOP" = 1 ]; exit $?; fi
 [ "$1 $2" = "daemon install" ] || exit 2
 {
   printf 'CALL\n'
@@ -97,7 +98,12 @@ func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map
 config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
 `
 	cmd := exec.Command("/bin/bash", "-c", harness)
+	liveLoop := "0"
+	if len(loopPresent) > 0 && loopPresent[0] {
+		liveLoop = "1"
+	}
 	cmd.Env = append(os.Environ(),
+		"SHUTTLE_TEST_LIVE_LOOP="+liveLoop,
 		"HOME="+home,
 		"PATH="+localBin+":/usr/bin:/bin",
 		"SHUTTLE_RELEASE="+release.Dir,
@@ -133,6 +139,19 @@ func installFlag(t *testing.T, call []string, name string) string {
 	}
 	t.Fatalf("install call %v lacks %s", call, name)
 	return ""
+}
+
+func TestDeployMigrationSkipsServiceRefreshForLiveTmuxOwner(t *testing.T) {
+	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	// A reachable enabled systemd unit would otherwise trigger daemon install.
+	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": legacy}, true)
+	if len(calls) != 0 {
+		t.Fatalf("live tmux owner refreshed a competing systemd service: %v", calls)
+	}
 }
 
 func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
@@ -302,7 +321,7 @@ func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
 // runLauncherRestart runs deploy's respawn-launcher restart against fake tmux,
 // systemctl and launchctl, so no test can reach a real supervisor. supervisor
 // names the one the fakes report installed: "", "systemd" or "launchd".
-func runLauncherRestart(t *testing.T, supervisor string) (home string, freshLauncher []byte, tmuxCalls string, supervisorCalls string) {
+func runLauncherRestart(t *testing.T, supervisor string, selectedOwner ...string) (home string, freshLauncher []byte, tmuxCalls string, supervisorCalls string) {
 	t.Helper()
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
@@ -329,7 +348,7 @@ func runLauncherRestart(t *testing.T, supervisor string) (home string, freshLaun
 	if err := os.WriteFile(filepath.Join(checkout, "bin", "shuttle-launch"), freshLauncher, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "shuttle"), []byte("#!/bin/sh\nprintf '{\"data_dir\":\"%s\"}\\n' \"$SHUTTLE_TEST_DATA_DIR\"\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "shuttle"), []byte("#!/bin/sh\ncase \"$*\" in 'daemon loop-present') [ \"$SHUTTLE_TEST_OWNER\" = live-tmux ]; exit $?;; 'host --json') printf '{\"data_dir\":\"%s\"}\\n' \"$SHUTTLE_TEST_DATA_DIR\";; *) exit 1;; esac\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	calls := filepath.Join(root, "tmux-calls")
@@ -340,7 +359,7 @@ func runLauncherRestart(t *testing.T, supervisor string) (home string, freshLaun
 	}
 	supervisorLog := filepath.Join(root, "supervisor-calls")
 	fakes := map[string]string{
-		"systemctl": "#!/bin/sh\ncase \"$*\" in *is-enabled*|*is-active*) [ \"$SHUTTLE_TEST_SUPERVISOR\" = systemd ]; exit $? ;; esac\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
+		"systemctl": "#!/bin/sh\ncase \"$*\" in *show-environment*|*is-enabled*|*is-active*) [ \"$SHUTTLE_TEST_SUPERVISOR\" = systemd ]; exit $? ;; esac\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\ncase \"$*\" in *disable*) echo disabled-before-loop >> \"$SHUTTLE_TEST_CALLS\";; esac\n",
 		"launchctl": "#!/bin/sh\ncase \"$1\" in print) [ \"$SHUTTLE_TEST_SUPERVISOR\" = launchd ]; exit $? ;; esac\nprintf 'launchctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
 	}
 	for name, source := range fakes {
@@ -350,10 +369,15 @@ func runLauncherRestart(t *testing.T, supervisor string) (home string, freshLaun
 	}
 	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 ` + helper + `
-respawn_launcher_restart_cmd "$CHECKOUT" | /bin/bash
+respawn_launcher_restart_cmd "$CHECKOUT" "${SHUTTLE_TEST_OWNER:-}" | /bin/bash
 `
 	cmd := exec.Command("/bin/bash", "-c", harness)
+	owner := ""
+	if len(selectedOwner) > 0 {
+		owner = selectedOwner[0]
+	}
 	cmd.Env = append(os.Environ(),
+		"SHUTTLE_TEST_OWNER="+owner,
 		"HOME="+home,
 		"PATH="+fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin",
 		"CHECKOUT="+checkout,
@@ -479,25 +503,34 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 	}
 	write("systemctl", "exit 1\n")
 	write("tmux", "[ \"$1\" = list-panes ] && { echo 12345; exit 0; }; exit 1\n")
-	write("ps", "printf '%s\\n' \"$SHUTTLE_TEST_PS\"\n")
-	run := func(ps string) string {
+	localBin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(localBin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte("#!/bin/sh\n[ \"$SHUTTLE_TEST_LOOP\" = 1 ]\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(loop string) string {
 		t.Helper()
 		cmd := exec.Command("/bin/bash", "-c", probe+"supervisor_probe_cmd | /bin/bash")
-		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "SHUTTLE_TEST_PS="+ps)
+		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "SHUTTLE_TEST_LOOP="+loop)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("probe: %v: %s", err, out)
 		}
 		return strings.TrimSpace(string(out))
 	}
-	if got := run("/bin/sh -c unrelated"); got != "0" {
+	if got := run("0"); got != "0" {
 		t.Fatalf("unreachable manager or unverified pane probe=%q", got)
 	}
-	if got := run("/bin/sh /home/user/bin/shuttle-launch --loop SHUTTLE_RESPAWN_LOOP=1"); got != "0" {
+	if got := run("1"); got != "tmux" {
 		t.Fatalf("verified tmux loop should take precedence: %q", got)
 	}
 	write("systemctl", "exit 0\n")
-	if got := run("/bin/sh -c unrelated"); got != "1" {
+	if got := run("1"); got != "tmux" {
+		t.Fatalf("live tmux lost to enabled reachable systemd: %q", got)
+	}
+	if got := run("0"); got != "1" {
 		t.Fatalf("reachable systemd service probe=%q", got)
 	}
 }

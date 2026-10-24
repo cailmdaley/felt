@@ -32,6 +32,7 @@ func (a *app) shuttleDaemonCmd() *cobra.Command {
 		a.shuttleDaemonResetCmd(),
 		a.newShuttleDaemonInstallCommand(),
 		a.newShuttleDaemonUninstallCommand(),
+		a.daemonLoopPresentCmd(),
 	)
 	return shuttleDaemonCmd
 }
@@ -50,6 +51,11 @@ func (a *app) shuttleDaemonStartCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			releaseClaim, err := a.claimDaemonOwner(settings, 0, nil)
+			if err != nil {
+				return err
+			}
+			defer releaseClaim()
 			if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
 				return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
 			}

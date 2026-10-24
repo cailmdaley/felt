@@ -53,12 +53,9 @@ done
 supervisor_probe_cmd() {
   cat <<'SH'
 # A live respawn loop is the selected owner even if a stale unit file exists.
-if command -v tmux >/dev/null 2>&1; then
-  pane_pid=$(tmux list-panes -t shuttle-daemon -F '#{pane_pid}' 2>/dev/null | head -n 1)
-  if [ -n "$pane_pid" ] && ps eww -p "$pane_pid" -o command= 2>/dev/null | grep -F 'SHUTTLE_RESPAWN_LOOP=1' >/dev/null; then
-    echo 0
-    exit 0
-  fi
+if "$HOME/.local/bin/shuttle" daemon loop-present >/dev/null 2>&1; then
+  echo tmux
+  exit 0
 fi
 for candidate in "$HOME"/Library/LaunchAgents/*.plist; do
   [ -f "$candidate" ] || continue
@@ -75,7 +72,8 @@ SH
 }
 
 respawn_launcher_restart_cmd() {
-  local checkout="$1"
+  local checkout="$1" owner="${2:-}" mode=""
+  [ "$owner" != tmux ] || mode="--tmux"
   cat <<SH
 set -eu
 mkdir -p "\$HOME/.shuttle" "\$HOME/.local/bin"
@@ -83,7 +81,7 @@ printf '%s\\n' $(shell_quote "$checkout") > "\$HOME/.shuttle/repo"
 install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") "\$HOME/.local/bin/shuttle-launch"
 PATH="\$HOME/.local/bin:\$PATH"
 export PATH
-SHUTTLE_DIR=$(shell_quote "$checkout") "\$HOME/.local/bin/shuttle-launch"
+SHUTTLE_DIR=$(shell_quote "$checkout") "\$HOME/.local/bin/shuttle-launch" $mode
 SH
 }
 
@@ -913,7 +911,7 @@ deploy_local() {
     # A listener outside the loop's tmux session would keep the port and make
     # the new loop stand down, so stop it before the loop is replaced.
     run_on "" "$(daemon_kill)"
-    run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")" \
+    run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO" "$supervisor")" \
       || { bad "could not install and restart the local respawn loop"; return 1; }
   fi
   verify_and_finish "" "$REPO" "$harness_failed" "$PREVIOUS_LOCAL" || {
@@ -971,7 +969,7 @@ deploy_remote() {
     # A listener outside the loop's tmux session would keep the port and make
     # the new loop stand down, so stop it before the loop is replaced.
     run_on "$host" "$(daemon_kill)"
-    run_on "$host" "$(respawn_launcher_restart_cmd "$dir")" \
+    run_on "$host" "$(respawn_launcher_restart_cmd "$dir" "$supervisor")" \
       || { bad "could not install and restart the respawn loop on $host"; return 1; }
   fi
   verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \

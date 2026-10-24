@@ -676,14 +676,24 @@ SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch               # checkout
 
 Run the same command after an upgrade to pick up a new `shuttle-launch`: it
 kills the tmux session and recreates it from the refreshed script.
+The default launcher preserves a verified live tmux loop.
+Without one, if a reachable service manager owns an enabled or active service, the launcher restarts through that service instead.
+`shuttle-launch --tmux` explicitly selects tmux, disabling the competing systemd unit or unloading the loaded launchd agent before creating the loop.
+Deployment uses that mode when it has verified a live tmux loop, so owner selection cannot silently change during the restart.
+The loop marker is set when tmux creates the launcher process, making it visible to Linux process inspection.
+Detection checks the exact known launcher path and `--loop` arguments; it also recognizes installed launchers whose marker is only exported inside their shell.
 
 Unlike the supervisor install, the loop bakes nothing in — it hands the daemon the
 environment you start it in. Give it stores through `SHUTTLE_STORES`, or persist
 them once in `~/.config/shuttle/stores.json` (see [Configuring
 stores](#configuring-stores)).
 
-The loop runs `shuttle daemon start --force` and backs off exponentially. The start command probes the live daemon endpoint even with `--force`; the loop's status probe stands down while the daemon answers, so `--force` does not bypass duplicate protection. A
-daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
+The loop runs `shuttle daemon start --force` and backs off exponentially.
+The start command probes the live daemon endpoint even with `--force`; the loop's status probe stands down while the daemon answers.
+Start and install also share an atomic endpoint claim, so a second cooperating start or installer is refused before the first daemon has bound its listener.
+The claim survives the CLI's `exec` into the foreground release and becomes reclaimable when that process dies.
+Direct release launches bypass this guard, and creating external supervisor definitions is not serialized; see [deployment ownership](../dev/build-and-deploy.md).
+A daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
 One that survives 60 seconds resets it. This exists because a wedged login node
 once drove a fixed 2-second loop to roughly 35,000 restarts.
 
