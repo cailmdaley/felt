@@ -64,7 +64,7 @@ done
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   for candidate in "$HOME"/.config/systemd/user/*.service; do
     [ -f "$candidate" ] || continue
-    if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then echo 1; exit 0; fi
+    if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; } && systemctl --user is-active --quiet "$(basename "$candidate" .service)" 2>/dev/null; then echo 1; exit 0; fi
   done
 fi
 echo 0

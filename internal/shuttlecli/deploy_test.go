@@ -491,7 +491,11 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), []byte("ExecStart=shuttle daemon start\nEnvironment=SHUTTLE_RELEASE=/release"), 0o600); err != nil {
+	unit, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), unit, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
@@ -512,7 +516,7 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 	}
 	run := func(loop string) string {
 		t.Helper()
-		cmd := exec.Command("/bin/bash", "-c", probe+"supervisor_probe_cmd | /bin/bash")
+		cmd := exec.Command("/bin/dash", "-c", probe+"supervisor_probe_cmd | /bin/dash")
 		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "SHUTTLE_TEST_LOOP="+loop)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -526,7 +530,11 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 	if got := run("1"); got != "tmux" {
 		t.Fatalf("verified tmux loop should take precedence: %q", got)
 	}
-	write("systemctl", "exit 0\n")
+	write("systemctl", "case \"$*\" in *is-active*) exit 3;; *) exit 0;; esac\n")
+	if got := run("0"); got != "0" {
+		t.Fatalf("inactive matching unit counted as owner: %q", got)
+	}
+	write("systemctl", "case \"$*\" in *is-active*) exit 0;; *) exit 0;; esac\n")
 	if got := run("1"); got != "tmux" {
 		t.Fatalf("live tmux lost to enabled reachable systemd: %q", got)
 	}
