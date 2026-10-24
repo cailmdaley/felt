@@ -1526,25 +1526,14 @@ defmodule Shuttle.Poller do
       do: {:reply, {:error, :reconciliation_required}, state}
 
   def handle_call({:dispatch, fiber_id, opts}, _from, state) do
-    {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
-    state = reconcile_running_fiber(state, fiber_id)
-    uid = resolved_uid(state, fiber_id, runtime_key)
-
-    # Every check, and the fiber's arm, before any session is cut.
-    case prepare_forced_start(state, fiber_id, runtime_key, uid, opts) do
-      {:ok, state} ->
-        case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
-          {:reply, {:ok, _} = result, state} ->
-            {_, state} = write_lifecycle(state, :clear_ask, fiber_id)
-            {:reply, result, state}
-
-          other ->
-            other
-        end
-
-      {:error, reason, state} ->
-        {:reply, {:error, reason}, state}
+    case fetch_request_fiber(fiber_id, state) do
+      {:ok, _} -> dispatch_request(state, fiber_id, opts)
+      {:error, reason} -> {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call({:sync_missing_stores, stores}, _from, state) do
+    {:reply, Shuttle.StoreSync.sync(stores), state}
   end
 
   def handle_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
@@ -3306,6 +3295,27 @@ defmodule Shuttle.Poller do
 
   # The dispatch once a forced start is prepared: a fresh start cuts any open
   # session, then the worker launches (or a live app turn resumes).
+  defp dispatch_request(state, fiber_id, opts) do
+    {runtime_key, fiber_id} = resolve_identity(state, fiber_id)
+    state = reconcile_running_fiber(state, fiber_id)
+    uid = resolved_uid(state, fiber_id, runtime_key)
+
+    case prepare_forced_start(state, fiber_id, runtime_key, uid, opts) do
+      {:ok, state} ->
+        case dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
+          {:reply, {:ok, _} = result, state} ->
+            {_, state} = write_lifecycle(state, :clear_ask, fiber_id)
+            {:reply, result, state}
+
+          other ->
+            other
+        end
+
+      {:error, reason, state} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
   defp dispatch_prepared(state, fiber_id, runtime_key, uid, opts) do
     # "New session" on an OPEN session is a CUT, not a refusal: a forced fresh
     # dispatch (force + resume_mode:"fresh" — the kanban New-session button and
@@ -5101,24 +5111,51 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Fetch a fiber's full JSON representation via shuttle so runtime decisions
-  # see resolved Shuttle fields. Routes to the owning store via owning_store/2.
+  @doc "Pull missing documents through the Poller's lifecycle serialization boundary."
+  def sync_missing_stores(stores) do
+    server = GenServer.whereis(Shuttle.Env.server(__MODULE__))
+
+    if is_nil(server) or server == self() do
+      Shuttle.StoreSync.sync(stores)
+    else
+      GenServer.call(server, {:sync_missing_stores, stores}, :infinity)
+    end
+  end
+
+  # Runtime reads stay local; only interactive requests pull a missing fiber.
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
 
-    case run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
-      {:ok, output} ->
-        case Jason.decode(output) do
-          {:ok, fiber} -> {:ok, fiber}
-          {:error, _} -> {:error, :invalid_json}
-        end
+    with {:ok, output} <- run_shuttle(host, state.runner, ["show", fiber_id, "--json"]) do
+      case Jason.decode(output) do
+        {:ok, fiber} -> {:ok, fiber}
+        {:error, _} -> {:error, :invalid_json}
+      end
+    end
+  end
 
-      # run_shuttle reports the executable, command, store directory, and CLI
-      # output. A common error is a store path that exists only on another host;
-      # naming it makes that actionable instead of returning a blank 500.
+  defp fetch_request_fiber(fiber_id, state) do
+    case fetch_fiber_full(fiber_id, state) do
+      {:ok, fiber} ->
+        {:ok, fiber}
+
       {:error, reason} ->
-        {:error, reason}
+        case Shuttle.FeltStores.resolve_with_sync(fiber_id, state.felt_stores) do
+          {:ok, %{store: store, fiber_id: address}} ->
+            with {:ok, output} <- run_shuttle(store, state.runner, ["show", address, "--json"]),
+                 {:ok, fiber} <- Jason.decode(output),
+                 do: {:ok, fiber}
+
+          {:error, :not_found} ->
+            {:error, {:fiber_not_found, Shuttle.FeltStores.missing_after_sync(fiber_id)}}
+
+          {:error, :sync_failed, errors} ->
+            {:error, {:store_sync_failed, errors}}
+
+          _ ->
+            {:error, reason}
+        end
     end
   end
 

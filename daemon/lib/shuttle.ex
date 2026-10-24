@@ -181,6 +181,7 @@ defmodule Shuttle.Application do
       # Shares one felt read among concurrent board requests for the same
       # fiber, and among concurrent misses for a store's listing.
       Shuttle.SingleFlight,
+      Shuttle.StoreSync,
       Shuttle.FiberIndex,
       # Owns the ETS tables of fiber addresses, polled and learned, so a read
       # by UID goes through a known `{store, id}` instead of a store walk.

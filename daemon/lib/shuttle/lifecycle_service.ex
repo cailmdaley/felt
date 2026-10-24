@@ -38,7 +38,7 @@ defmodule Shuttle.LifecycleService do
       when verb in [:accept, :resume, :pause, :rest, :role, :seat, :clear_ask] and
              is_binary(identifier) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <-
-           FeltStores.resolve_fiber_or_error(identifier) do
+           FeltStores.resolve_request(identifier) do
       if is_pid(GenServer.whereis(Shuttle.Env.server(Poller))) do
         Poller.lifecycle_transition(Shuttle.Env.server(Poller), verb, fiber_id, args)
       else

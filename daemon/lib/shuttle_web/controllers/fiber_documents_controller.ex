@@ -155,9 +155,9 @@ defmodule ShuttleWeb.FiberDocumentsController do
   `GET /api/v1/fibers/:id` — resolve one fiber by canonical id. The id is a
   wildcard splat so nested ids (`ai-futures/portolan/foo`) arrive as path
   segments; rejoin with `/`. Returns the same envelope shape as `index/2` with
-  zero or one fiber, so the client reuses the list-response parser. A missing
-  fiber is a 200 with `fibers: []`, not a 404 — the caller treats an empty list
-  as "not here", same as scanning the full list would.
+  one fiber, so the client reuses the list-response parser. A missing fiber
+  triggers one bounded, rate-limited store sync and a retry, then returns 404
+  naming this host. A failed sync with no match returns 503.
 
   **Owner-routed via `Shuttle.OriginRouter`, exactly like `/file`.** Only the
   daemon that owns a fiber's host can read its body off that host's filesystem.
@@ -202,10 +202,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # it, a direct felt read instead of a walk of the store (`Shuttle.FiberAddresses`).
   defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
-           Shuttle.FiberDocuments.get(id,
-             with_body: with_body?,
-             address: Shuttle.FiberAddresses.lookup(id)
-           )
+           get_after_sync(id, with_body?)
          end) do
       {:ok, body} ->
         case owning_remote(body, routed?) do
@@ -213,10 +210,31 @@ defmodule ShuttleWeb.FiberDocumentsController do
           remote -> relay_bytes(conn, forward_show(remote, id, with_body?))
         end
 
+      {:error, :not_found} ->
+        conn |> put_status(404) |> json(%{error: Shuttle.FeltStores.missing_after_sync(id)})
+
       {:error, errors} ->
         conn
         |> put_status(:service_unavailable)
         |> json(%{error: "felt_show_failed", stores: errors})
+    end
+  end
+
+  defp get_after_sync(id, with_body?) do
+    opts = [with_body: with_body?, address: Shuttle.FiberAddresses.lookup(id)]
+
+    case Shuttle.FiberDocuments.get(id, opts) do
+      {:ok, %{fibers: []}} ->
+        errors = Shuttle.Poller.sync_missing_stores(Shuttle.FeltStores.configured_stores())
+
+        case Shuttle.FiberDocuments.get(id, opts) do
+          {:ok, %{fibers: []}} when errors == [] -> {:error, :not_found}
+          {:ok, %{fibers: []}} -> {:error, inspect(errors)}
+          result -> result
+        end
+
+      result ->
+        result
     end
   end
 

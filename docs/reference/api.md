@@ -47,6 +47,7 @@ is not enough.
 | `POST /felt-edit` | owner-routed | Shell `felt edit` on the owning host — felt keeps the validation |
 | `POST /felt-nest` | owner-routed | Shell `felt nest` on the owning host |
 | `POST /fiber/create` | owner-routed | Create a fiber |
+| `POST /project-dir/resolve` | host-addressed | Validate `{path, origin?}` on the named host with `shuttle resolve-dir`; return `{path}` with the expanded absolute directory, or 422 for an invalid directory. Does not create or arm a fiber |
 | `POST /felt-stores` | host-addressed | Persist a daemon's registered felt stores (whole list; takes `expected_digest`) |
 | `POST /projects` | host-addressed | Register a picker project and initialize its `.felt/` when needed, or set the whole list with `projects: [...]` (which takes `expected_digest`) |
 | `POST /config/:id` | host-addressed | Replace one operator file's text, validated first by whoever owns its grammar |
@@ -79,6 +80,14 @@ the new one, whose status and `handed_off_at` land in one atomic write. The
 outcome is always kept. A success is 200 with the Shuttle CLI's output as
 text. A Shuttle refusal is 422 with `shuttle exited <status>: <message>`; an
 unknown action or a missing field is 400.
+
+Lifecycle requests, dispatch requests (including remote `reopen`), and `GET /fibers/*id` retry a missing fiber after `felt sync` on the owning daemon's configured stores.
+Each pull has a five-second deadline per store and runs through the Poller so Git changes serialize with lifecycle writes.
+Concurrent misses share the pull; a store is attempted at most once per 30 seconds, including failed attempts.
+Requests retry the local lookup even when sharing a recent attempt.
+If the fiber remains absent after a successful pull, the response is 404 with `fiber not found on <host> after sync: <id>`.
+A failed pull with no matching fiber returns 503; read errors and timeouts are not proof of absence.
+The sync only pulls published commits; it cannot fetch an uncommitted or unpushed fiber from another host.
 
 ### Worker migration
 

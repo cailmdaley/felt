@@ -132,6 +132,10 @@ defmodule ShuttleWeb.RelayHelpers do
     conn |> put_resp_content_type("text/plain") |> send_resp(200, output)
   end
 
+  def send_cli_result(conn, _tool, {:error, :not_found, reason}) do
+    conn |> put_resp_content_type("text/plain") |> send_resp(404, reason)
+  end
+
   def send_cli_result(conn, _tool, {:error, reason}) when is_binary(reason) do
     conn |> put_resp_content_type("text/plain") |> send_resp(400, reason)
   end

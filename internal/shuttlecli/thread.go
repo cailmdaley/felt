@@ -23,8 +23,9 @@ parent unless explicitly overridden. Threads are armed (status: active) unless -
 
 Changing --host requires an explicit --project-dir, even for a draft: paths on
 different machines are not interchangeable. Inherited paths are kept verbatim;
-explicit paths use install's local directory validation (run on the destination
-host when its path is not available here). Runtime, schedule and seat do not
+explicit paths are validated by the owning daemon for remote threads, never
+against this machine. If that daemon cannot be reached, creation keeps the path
+verbatim and prints a warning. Runtime, schedule and seat do not
 inherit. An absent parent surface means CLI. Inherited app execution falls back
 to CLI when the selected agent is not Codex. --surface cli|app overrides inheritance;
 app requires a Codex agent. Invalid selections never create or arm a child.
@@ -34,7 +35,9 @@ its owning daemon. The source is armed for a fresh worker. If migration fails,
 the child stays created but disabled. --take cannot be combined with --disabled
 or a host different from the caller's.
 
---json prints an object with the new id. Without --take no daemon is needed.`,
+--json prints an object with the new id. Creation writes locally; publish the
+fiber with felt sync --push so its owner can dispatch it. Remote path validation
+uses a daemon when reachable; without --take creation can work offline.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if take && disabled {
@@ -95,7 +98,7 @@ or a host different from the caller's.
 				block.Role = role
 			}
 			if cmd.Flags().Changed("project-dir") {
-				block.ProjectDir, err = a.resolveProjectDirFlag(projectDir)
+				block.ProjectDir, err = a.resolveThreadProjectDir(cmd, args, block.Host, projectDir)
 				if err != nil {
 					return err
 				}

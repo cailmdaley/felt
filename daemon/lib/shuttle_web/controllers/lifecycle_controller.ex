@@ -112,7 +112,7 @@ defmodule ShuttleWeb.LifecycleController do
 
   defp refresh_card(_), do: :ok
 
-  defp resolve_fiber(identifier), do: FeltStores.resolve_fiber_or_error(identifier)
+  defp resolve_fiber(identifier), do: FeltStores.resolve_request(identifier)
 
   defp run_elem({:ok, args}, felt_store), do: run(args, felt_store)
   defp run_elem(error, _felt_store), do: error

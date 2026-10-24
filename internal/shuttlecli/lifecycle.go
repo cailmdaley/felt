@@ -234,7 +234,7 @@ this host is killed.` + workerExitIdentityHelp,
 			}
 			if !restLocal {
 				anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
-				if routed, err := a.routeLifecycle("rest", args[0], anyBlock, fields); routed {
+				if routed, err := a.routeLifecycle(cmd, "rest", args[0], anyBlock, fields); routed {
 					return err
 				}
 			}
@@ -376,13 +376,13 @@ oneshot awaiting review, or any accepted or discarded close — is refused; use
 
 Arming needs what an armed install needs: an agent the registry resolves and a
 project_dir. A draft installed without one is refused; --project-dir sets it
-(an existing directory on this machine, stored absolute) and arms in one step.`,
+(an existing directory on the owning host, stored absolute) and arms in one step.`,
 		Example: `  shuttle resume analysis/scratch
   shuttle resume analysis/scratch --project-dir "$PWD"   # a draft installed without one`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !resumeLocal && !cmd.Flags().Changed("project-dir") {
-				if routed, err := a.routeLifecycle("resume", args[0], standingAwaiting); routed {
+				if routed, err := a.routeLifecycle(cmd, "resume", args[0], standingAwaiting); routed {
 					return err
 				}
 			}
@@ -471,7 +471,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			return nil
 		},
 	}
-	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); writes here, without the daemon hop")
+	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); remote paths are validated on the owner")
 	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
 	return resumeCmd
 }
@@ -506,17 +506,40 @@ func rearmStanding(f *felt.Felt) error {
 // --local serialized with its Poller's state changes, so its document cache
 // sees the write at once. The lookup takes no fiber lock — the daemon's writer
 // needs it. routed is false when the fiber does not qualify (or cannot be
-// read) or no connection to the daemon could be made; the caller then writes
-// locally, where every refusal is reported. A daemon refusal, an owner-check
+// read) or no connection to the local owner's daemon could be made; the caller
+// then writes locally, where every refusal is reported. Remote owners always
+// route, regardless of qualifies, and never fall back to a mirror write. A daemon refusal, an owner-check
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there.
-func (a *app) routeLifecycle(verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
+func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
 	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
 	block, ok, err := shuttle.BlockOf(f)
-	if err != nil || !ok || !qualifies(f, block) || a.ensureOwnedHere(f, query) != nil {
+	if err != nil || !ok {
+		return false, nil
+	}
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, block.Host)
+	if err != nil {
+		return true, err
+	}
+	// Resolve ownership before the local fast path's qualification. A remote
+	// request always carries origin and never consults the hub's snapshot.
+	if owner != "" {
+		payload := map[string]any{}
+		for _, extra := range fields {
+			for key, value := range extra {
+				payload[key] = value
+			}
+		}
+		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, payload)
+		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
+			fmt.Fprintf(a.env.Stdout, "  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
+		}
+		return routed, err
+	}
+	if !qualifies(f, block) {
 		return false, nil
 	}
 	output, err := a.postLifecycle(verb, f.ID, fields...)
@@ -942,7 +965,7 @@ bypassed: the accept may still apply there.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !acceptLocal {
-				if routed, err := a.routeLifecycle("accept", args[0], standingBlock); routed {
+				if routed, err := a.routeLifecycle(cmd, "accept", args[0], standingBlock); routed {
 					return err
 				}
 			}

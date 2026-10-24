@@ -67,6 +67,7 @@ defmodule ShuttleWeb.Router do
     # A constitution's threads, for `shuttle threads`.
     get("/threads/*id", ThreadsController, :show)
     post("/lifecycle", LifecycleController, :create)
+    post("/project-dir/resolve", ProjectDirController, :resolve)
     post("/felt-edit", FeltEditController, :create)
     post("/felt-nest", FeltNestController, :create)
     # Body search across the record, for the Chronicle's search bar. The board

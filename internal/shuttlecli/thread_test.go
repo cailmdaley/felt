@@ -123,6 +123,7 @@ func TestThreadRefusesBeforeWriting(t *testing.T) {
 	for _, flags := range [][]string{{"--host", "other"}, {"--agent", "not-an-agent"}, {"--slug", "../escape"}, {"--project-dir", "/does-not-exist"}} {
 		t.Run(strings.Join(flags, " "), func(t *testing.T) {
 			env := testEnv(t)
+			ownHost(t, env, "testhost")
 			dir, st := newStore(t)
 			seedPlainFiber(t, st, "hub", "")
 			if out, err := runIn(t, env, dir, "install", "hub", "--disabled", "--host", "testhost"); err != nil {
