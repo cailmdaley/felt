@@ -175,8 +175,10 @@ defmodule Shuttle.RemoteControlTmuxTest do
     assert %{state: :waiting, restarts: 0, last_exit: %{status: 7}} = RemoteControl.status(fourth)
   end
 
-  # tmux marks a pane dead before it fills in pane_dead_time, so a check of
-  # pane_dead alone can let reconcile read the half-written metadata.
+  # A dead PTY is observable before the child is reaped. With libutempter,
+  # tmux can also lose SIGCHLD and leave the exit metadata empty indefinitely
+  # (tmux/tmux#4559). Wake this isolated server's reaper in that state; the
+  # daemon correctly holds incomplete metadata rather than inventing an exit.
   defp pane_settled_dead? do
     case Runner.cmd(
            "tmux",
@@ -185,12 +187,27 @@ defmodule Shuttle.RemoteControlTmuxTest do
              "-p",
              "-t",
              "=shuttle-remote-control:",
-             "\#{pane_dead}|\#{pane_dead_time}"
+             "\#{pane_dead}|\#{pane_dead_status}|\#{pane_dead_time}|\#{pid}"
            ],
            []
          ) do
-      {"1|" <> time, 0} -> String.trim(time) != ""
-      _ -> false
+      {"1|" <> metadata, 0} ->
+        case String.split(String.trim(metadata), "|") do
+          [status, time, _server] when status != "" and time != "" ->
+            true
+
+          ["", "", server] ->
+            {pid, ""} = Integer.parse(server)
+            assert pid > 1
+            assert {_, 0} = Runner.cmd("kill", ["-s", "CHLD", server], [])
+            false
+
+          _ ->
+            false
+        end
+
+      _ ->
+        false
     end
   end
 
