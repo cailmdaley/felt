@@ -5,7 +5,7 @@ import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
-it('draws state groups only, each a flat list in tree order under a toned heading with its count, the parent named, the state said once per group, and navigates back through the breadcrumb', () => {
+it('draws one-line state groups with parent-chain tooltips and navigates through dots and the breadcrumb', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
@@ -20,7 +20,10 @@ it('draws state groups only, each a flat list in tree order under a toned headin
   expect(groups.map(g => g.open)).toEqual([true, true, true, false])
   expect(rail.el.querySelector('.ws-thread-tree ul')).toBeNull()
   const deepRow = groups[0].querySelector('.kbn-thread-row')!
-  expect(deepRow.querySelector('.ws-thread-parent')?.textContent).toBe('Z working')
+  expect(deepRow.querySelector('.ws-thread-parent, .kbn-thread-outcome, .kbn-until, .kbn-row-elapsed')).toBeNull()
+  expect(deepRow.getAttribute('title')).toBe('hub › Z working')
+  deepRow.querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
+  expect(open).toHaveBeenLastCalledWith(deep)
   expect(deepRow.querySelector('.ws-thread-mark')?.getAttribute('title')).toBe('question')
   expect(groups[1].querySelector('.ws-thread-parent')).toBeNull()
   expect(groups[1].querySelector('.ws-thread-mark')).toBeNull()
@@ -72,7 +75,11 @@ it('preserves focused rows and open groups across live repaints without stealing
     const refreshed = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
     expect(refreshed.open).toBe(true)
     expect(document.activeElement).toBe(refreshed.querySelector('.kbn-thread-row'))
-    expect(document.activeElement?.textContent).toContain('New evidence')
+    expect(document.activeElement?.textContent).toBe('Old')
+    expect(refreshed.querySelector('.kbn-thread-outcome')).toBeNull()
+    refreshed.querySelector<HTMLButtonElement>('.constitution-state-dot')!.focus()
+    rail.show(root, new ThreadIndex([root, branch, draft, { ...old, name: 'Renamed' }]))
+    expect(document.activeElement).toBe(rail.el.querySelector('details[data-thread-details="tempered"] .constitution-state-dot'))
     outside.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, outcome: 'Another update' }]))
     expect(document.activeElement).toBe(outside)
@@ -96,7 +103,7 @@ it('draws no thread tree on the phone, keeping only the breadcrumb back to the o
   } finally { vi.unstubAllGlobals() }
 })
 
-it('every rail row carries a pin that asks the board to toggle it, and a repaint follows the tag', () => {
+it('shows pins only on pinned or current rows and a repaint follows the tag', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' }), branch = card({ id: 'hub/branch', name: 'Branch', orchestrator: root.id, status: 'active' })
   const rail = new ThreadRail(vi.fn(), vi.fn()); document.body.append(rail.el)
@@ -105,10 +112,14 @@ it('every rail row carries a pin that asks the board to toggle it, and a repaint
   rail.show(root, new ThreadIndex([root, branch]))
   const pin = () => rail.el.querySelector<HTMLButtonElement>('.ws-thread-tree .kbn-thread-pin')!
   expect(pin().getAttribute('aria-pressed')).toBe('false')
+  expect(pin().hidden).toBe(true)
+  rail.show(branch, new ThreadIndex([root, branch]))
+  expect(pin().hidden).toBe(false)
   pin().click()
   expect(asked.mock.results[0].value).toEqual({ card: branch, pinned: true })
   rail.show(root, new ThreadIndex([root, { ...branch, tags: ['pinned'] }]))
   expect(pin().getAttribute('aria-pressed')).toBe('true')
+  expect(pin().hidden).toBe(false)
   document.removeEventListener(THREAD_PIN, asked)
   rail.el.remove()
   vi.unstubAllGlobals()
@@ -148,18 +159,19 @@ it('marks a working thread with a live worker, and only that one', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   try {
     const root = card({ id: 'hub' })
-    const live = card({ id: 'hub/live', orchestrator: root.id, status: 'active', name: 'Live', workerState: 'running' })
+    const live = card({ id: 'hub/live', orchestrator: root.id, status: 'active', name: 'Live', workerState: 'running', runtimePhase: 'working' })
     const quiet = card({ id: 'hub/quiet', orchestrator: root.id, status: 'active', name: 'Quiet' })
     const rail = new ThreadRail(vi.fn(), vi.fn())
     rail.show(root, new ThreadIndex([root, live, quiet]))
     const rows = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="working"] .kbn-thread-row')]
-    expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.querySelector('.ws-thread-mark')?.getAttribute('data-kind') ?? null]))
-      .toEqual([['Live', expect.stringMatching(/^(live|busy)$/)], ['Quiet', null]])
+    expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.querySelector('.constitution-state-dot')?.getAttribute('data-turn')]))
+      .toEqual([['Live', 'working'], ['Quiet', 'none']])
+    expect(rail.el.querySelector('.ws-thread-mark')).toBeNull()
     expect(rows[0].getAttribute('aria-label')).toBe('Live, working')
   } finally { vi.unstubAllGlobals() }
 })
 
-it('indents a thread beneath a parent in its own group and names the parent only across groups', () => {
+it('indents same-group descendants and keeps cross-group parents only in the tooltip', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   try {
     const root = card({ id: 'hub' })
@@ -175,7 +187,8 @@ it('indents a thread beneath a parent in its own group and names the parent only
     ])
     const drafted = rail.el.querySelector('details[data-thread-details="drafts"] .kbn-thread-item') as HTMLElement
     expect(drafted.dataset.depth).toBeUndefined()
-    expect(drafted.querySelector('.ws-thread-parent')?.textContent).toBe('Branch')
+    expect(drafted.querySelector('.ws-thread-parent')).toBeNull()
+    expect(drafted.querySelector('.kbn-thread-row')?.getAttribute('title')).toBe('hub › Branch')
   } finally { vi.unstubAllGlobals() }
 })
 

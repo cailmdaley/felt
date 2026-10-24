@@ -39,13 +39,12 @@ describe('the Desk reads at the board label size', () => {
 })
 
 describe('pigment on the Desk is state', () => {
-  it('draws the leading glyph in faint ink, whoever drives the card', () => {
-    const glyph = rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-glyph')
-    expect(glyph.color).toBe('var(--kbn-ink)')
-    expect(Number(glyph.opacity)).toBeLessThanOrEqual(0.4)
-    const resting = rule(deskRows, '.kbn-cluster-item[data-card-uid] .kbn-cluster-item-glyph')
-    expect(resting.color).toBe('var(--kbn-ink)')
-    expect(deskRows).not.toMatch(/\.kbn-col-list[^{]*\.kbn-card-glyph-(agent|human)/)
+  it('uses gold for human turns, blue for work, muted for starting, and paper for quiet dots', () => {
+    const dots = sheet('stateDot.css')
+    expect(rule(dots, '.constitution-state-dot')['--state-dot']).toBe('var(--kbn-paper)')
+    expect(rule(dots, ".constitution-state-dot[data-turn='working']")['--state-dot']).toBe('var(--kbn-agent)')
+    expect(rule(dots, ".constitution-state-dot:is([data-turn='idle'], [data-turn='question'])")['--state-dot']).toBe('var(--kbn-owed-bright)')
+    expect(rule(dots, ".constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked'])")['--state-dot']).toBe('var(--kbn-ink-muted)')
   })
 })
 

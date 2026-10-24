@@ -4,7 +4,7 @@ import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { sidebarRevision } from './sidebarRevision.js'
-import { constitutionAction, onDesk } from './fiberPageState.js'
+import { constitutionAction } from './fiberPageState.js'
 import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
@@ -17,13 +17,12 @@ import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
 import type { ChannelThemes } from './ChannelThemes.js'
-import { buildCardPaper } from '../KanbanSurfaces.js'
 import { cardIdentity, SidebarFlight, type SidebarEntry } from './SidebarFlight.js'
 import { groupJump, groupStops, stopLanding } from './groupJump.js'
 import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from './measures.js'
 import { workerPlate } from './workerPlate.js'
-import { TURN_WORD } from '../turn.js'
-import { markVerdictHost, type Verdict } from './Verdicts.js'
+import { stateDot } from '../stateDot.js'
+import { type Verdict } from './Verdicts.js'
 import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
@@ -72,9 +71,8 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   return el
 }
 /** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
-/** What a row's marks mean, said by the index strip's tooltip: the lifecycle glyph, then the worker's dot by turn. */
-const TURN_DOT: Record<'working' | 'question' | 'idle', string> = { working: 'blue', question: 'red', idle: 'yellow' }
-const ROW_MARKS = `Row marks: ◐ agent · ✓ you · dot ${(['working', 'question', 'idle'] as const).map(turn => `${TURN_DOT[turn]} ${TURN_WORD[turn]}`).join(', ')}`
+/** The index strip explains the single state mark shared by constitution rows. */
+const ROW_MARKS = 'State dot: gold your turn · blue working · muted starting · paper no live worker'
 const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
@@ -899,24 +897,14 @@ export class Reader {
   }
   /** The source column is captured before the live Desk starts receding. */
   captureSidebar(entries: SidebarEntry[]): void { this.sidebarFlight.capture(entries) }
-  /** One line per constitution: its lifecycle glyph, its name and its worker's dot; the host, outcome and question are the page's to show. */
+  /** One state dot and the name; details belong to the open page. */
   private sidebarCard(card: KanbanCard): HTMLElement {
-    const face = buildCardPaper(card)
-    // A note or role has no lifecycle, so it carries no lifecycle glyph.
-    if (!onDesk(card)) face.querySelector('.kbn-card-glyph')?.remove()
-    for (const extra of face.querySelectorAll('.kbn-card-id, .kbn-card-outcome')) extra.remove()
-    face.classList.add('ws-constitution-card', 'ws-constitution-row')
+    const face = element('div', 'kbn-card ws-constitution-card ws-constitution-row')
+    const header = element('div', 'kbn-card-header')
+    header.append(stateDot(card, c => this.opts.onChannel(c)), element('span', 'kbn-card-name ws-channel-name', card.name))
+    face.append(header)
     face.dataset.part = 'sidebar-card'
     face.dataset.wsThemeBoundary = ''
-    face.querySelector('.kbn-card-name')?.classList.add('ws-channel-name')
-    const meta = element('div', 'kbn-card-meta')
-    markVerdictHost(meta, card)
-    const pill = this.opts.workerPill?.(card)
-    if (pill) {
-      pill.dataset.part = 'act'; pill.dataset.act = 'worker'
-      meta.append(workerPlate(card, pill))
-    }
-    face.append(meta)
     return face
   }
   /** Re-list the channel rows after the overview's order changes. */

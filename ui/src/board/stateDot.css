@@ -1,0 +1,13 @@
+.constitution-state-dot {
+  --state-dot: var(--kbn-paper);
+  display: inline-grid; place-items: center; flex: none; width: 20px; height: 24px;
+  padding: 0; border: 0; background: transparent; color: var(--state-dot); cursor: pointer;
+}
+.constitution-state-dot::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent);
+}
+.constitution-state-dot[data-turn='working'] { --state-dot: var(--kbn-agent); }
+.constitution-state-dot:is([data-turn='idle'], [data-turn='question']) { --state-dot: var(--kbn-owed-bright); }
+.constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) { --state-dot: var(--kbn-ink-muted); }
+.constitution-state-dot:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: -1px; }

@@ -1,4 +1,4 @@
-/* The Desk is an index of lines: glyph, title, glance facts and actions.
+/* The Desk is an index of lines: state dot, title, counts and actions.
    Reading a card or its report opens the document workspace. */
 .kbn-col-list { gap: 3px; padding: 6px; }
 .kbn-flight-band-list { gap: 3px; }
@@ -8,7 +8,7 @@
   --kbn-row-ground: var(--kbn-paper);
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 7px;
   row-gap: 0;
@@ -33,8 +33,6 @@
   --kbn-row-ground: var(--kbn-paper-bright);
   border-color: color-mix(in srgb, var(--kbn-ink) 34%, transparent);
 }
-.kbn-col-list .kbn-card .kbn-card-glyph { width: 12px; font-size: calc(10px * var(--kbn-type-scale, 1)); color: var(--kbn-ink); opacity: .32; }
-.kbn-cluster-item[data-card-uid] .kbn-cluster-item-glyph { color: var(--kbn-ink); opacity: .32; }
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
   min-width: 0;

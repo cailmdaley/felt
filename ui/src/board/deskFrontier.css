@@ -3,4 +3,5 @@
 .kbn-card-ancestry button:hover { color: var(--kbn-ink); }
 .kbn-thread-count { flex: none; font: inherit; font-size: calc(12px * var(--kbn-type-scale, 1)); white-space: nowrap; color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 0 3px; cursor: pointer; }
 .kbn-thread-count-waiting { color: var(--kbn-owed-ink); font-weight: 700; }
+.kbn-row-elapsed { flex: none; font: 400 calc(10.5px * var(--kbn-type-scale, 1))/1 var(--font-mono, 'JetBrains Mono', monospace); font-variant-numeric: oldstyle-nums tabular-nums; text-transform: uppercase; color: var(--kbn-ink-muted); white-space: nowrap; }
 .kbn-thread-count:focus-visible, .kbn-card-ancestry button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }

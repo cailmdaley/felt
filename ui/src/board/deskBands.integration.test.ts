@@ -6,7 +6,7 @@ import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import type { KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 
-function renderer(data: KanbanResponse, openDetail = vi.fn()): KanbanSurfaceRenderer {
+function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn()): KanbanSurfaceRenderer {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null,
     setDragSourceId: () => {},
@@ -15,6 +15,7 @@ function renderer(data: KanbanResponse, openDetail = vi.fn()): KanbanSurfaceRend
     transition: () => {},
     setSurface: () => {},
     openDetail,
+    openWorker,
     onRefresh: () => {},
   })
 }
@@ -84,17 +85,31 @@ describe('cycle members at rest', () => {
 })
 
 describe('In flight bands', () => {
+  it('keeps the terminal in the action menu with the owning host, never on the row', () => {
+    const data = workerFeed(['working']), openWorker = vi.fn()
+    const worker = data.now.inFlight[0]
+    const root = renderer(data, vi.fn(), openWorker).renderNowSection(data.now, {})
+    document.body.append(root)
+    root.querySelector<HTMLButtonElement>('.kbn-card-menu')!.click()
+    const terminal = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Open terminal')!
+    expect(terminal).toBeDefined()
+    terminal.click()
+    expect(openWorker).toHaveBeenCalledExactlyOnceWith(worker.tmuxSession, worker.shuttleHost)
+    expect(root.querySelector('.kbn-card-worker')).toBeNull()
+    root.remove()
+  })
   it.each([
     ['identity_pending', 'working', 'Working', 'starting'],
     ['identity_failed', 'yourTurn', 'Your turn', 'blocked'],
-  ])('names %s on the pill: a pending identity is the worker\'s move, a failed one needs repair', (phase, band, caption, label) => {
+  ])('marks %s with a dot: a pending identity is the worker\'s move, a failed one needs repair', (phase, band, caption, label) => {
     const data = workerFeed([phase])
     const surfaces = renderer(data)
     const root = surfaces.renderNowSection(data.now, {})
     expect(flightOrder(root)).toEqual([
       { band, caption, label: caption, ids: ['worker-0'] },
     ])
-    expect(root.querySelector('.ws-worker-state')?.textContent).toBe(label)
+    expect(root.querySelector('.constitution-state-dot')?.getAttribute('data-turn')).toBe(label)
+    expect(root.querySelector('.kbn-card-worker, .kbn-card-phase, .kbn-card-glyph')).toBeNull()
   })
   it('ranks asks and harness prompts first in Your turn, both drawn and named as questions', () => {
     const feed = parseCompositeFeed({
@@ -127,7 +142,7 @@ describe('In flight bands', () => {
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual(flightOrder(root))
     question.ask = undefined
     const attention = renderer(data).renderNowSection(data.now, {})
-    expect(attention.querySelector('[data-fiber-id="question"] .ws-worker-state')?.textContent).toBe('question')
+    expect(attention.querySelector('[data-fiber-id="question"] .constitution-state-dot')?.getAttribute('data-turn')).toBe('question')
   })
 
   it('draws a launch held in boot quarantine in its own Held band after Working, never as a running worker', () => {

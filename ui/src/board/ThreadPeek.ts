@@ -1,23 +1,24 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { THREAD_LABEL, waitingWords, type ThreadIndex } from './threads.js'
+import { waitingWords, type ThreadIndex } from './threads.js'
+import { stateDot } from './stateDot.js'
 import './threads.css'
 
 /** A constitution-view rail row; pinning stays local to the rail. */
-export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLButtonElement {
+export function threadRow(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLDivElement {
   const state = index.state(card)
-  const row = document.createElement('button')
-  row.type = 'button'; row.className = 'kbn-thread-row'; row.dataset.threadState = state
+  const row = document.createElement('div')
+  row.className = 'kbn-thread-row'; row.dataset.threadState = state
+  row.tabIndex = 0; row.setAttribute('role', 'link')
   row.dataset.cardUid = card.uid ?? card.id; row.dataset.cardOrigin = card.originId
-  row.title = card.ask?.text ?? card.outcome ?? card.id
+  row.title = index.ancestryTitle(card) || card.name
   const name = document.createElement('span'); name.className = 'kbn-thread-name'; name.textContent = card.name
-  const label = document.createElement('small'); label.textContent = THREAD_LABEL[state]
-  const outcome = document.createElement('span'); outcome.className = 'kbn-thread-outcome'
-  outcome.textContent = card.ask?.text ?? card.outcome ?? ''
-  row.append(name, label, outcome)
-  const waiting = waitingNote(card); if (waiting) name.after(waiting)
+  row.append(stateDot(card, open), name)
   row.classList.toggle('kbn-thread-pinned', isPinned(card))
   row.addEventListener('click', event => { event.stopPropagation(); open(card) })
   row.addEventListener('pointerdown', event => event.stopPropagation())
+  row.addEventListener('keydown', event => {
+    if (event.target === row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open(card) }
+  })
   return row
 }
 
@@ -42,6 +43,7 @@ const PIN_PATH = 'M9.5 1.5 14.5 6.5 12.6 7.1 10.4 9.3 10.6 12.6 9.4 13.8 6.6 11 
 export function threadItem(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, focus: string): HTMLElement {
   const item = document.createElement('div'); item.className = 'kbn-thread-item'
   const row = threadRow(card, index, open); row.dataset.threadFocus = focus
+  row.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.threadFocus = JSON.stringify([focus, 'dot'])
   const pinned = isPinned(card)
   const pin = document.createElement('button'); pin.type = 'button'; pin.className = 'kbn-thread-pin'
   pin.dataset.threadFocus = JSON.stringify([focus, 'pin'])

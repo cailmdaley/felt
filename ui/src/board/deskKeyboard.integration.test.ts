@@ -84,6 +84,8 @@ describe('Desk action menu keyboard controls', () => {
     const row = document.querySelector<HTMLElement>('.kbn-key-selected')!
     row.focus()
     expect(press('Tab', {}, row).defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(row.querySelector('.constitution-state-dot'))
+    press('Tab', {}, document.activeElement!)
     expect(document.activeElement).toBe(trigger())
     expect(trigger().textContent).toBe('•••')
     activate(trigger(), key)

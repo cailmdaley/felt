@@ -1,12 +1,9 @@
-import { untilLine, untilOf } from './blockedOn.js'
 import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
-import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
-import { workerPlate } from './workspace/workerPlate.js'
+import { stateDot } from './stateDot.js'
 import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
-import { renderMarkdown } from './utils.js'
 import {
   ascByKey,
   civilWeekday,
@@ -18,7 +15,6 @@ import {
   instantMs,
   isoDayLocal,
   shiftCivilDay,
-  TIME_OF_DAY,
   type Zone,
 } from './civilDay.js'
 import type {
@@ -28,7 +24,6 @@ import type {
   KanbanOriginStaleness,
   KanbanResponse,
 } from './KanbanTypes.js'
-import { hasLiveWorker } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 import { isAgentCard } from './KanbanModalShared.js'
 import {
@@ -73,31 +68,6 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
 /** The phone's tab for each Now column: one plain word. */
 const FOLIO_LABELS: Record<NowColumnKind, string> = { drafts: 'Drafts', inFlight: 'Live', awaitingReview: 'Review' }
 
-/** The same paper face in a Desk column, a folio, or a compact constitution card. */
-export function buildCardPaper(card: KanbanCard): HTMLElement {
-  const el = document.createElement('div')
-  el.className = 'kbn-card'
-  const header = document.createElement('div'); header.className = 'kbn-card-header'
-  const glyph = document.createElement('span')
-  glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
-  glyph.textContent = isAgentCard(card) ? '◐' : '✓'
-  const name = document.createElement('span'); name.className = 'kbn-card-name'; name.textContent = card.name
-  header.append(glyph, name)
-  const id = document.createElement('div'); id.className = 'kbn-card-id'; id.textContent = card.id
-  el.append(header, id)
-  if (card.status === 'active' && card.ask && card.runtimePhase !== 'attention') {
-    const question = document.createElement('div'); question.className = 'kbn-card-outcome kbn-card-question'
-    question.textContent = card.ask.text
-    el.append(question)
-  }
-  if (card.outcome) {
-    const outcome = document.createElement('div'); outcome.className = 'kbn-card-outcome'
-    outcome.innerHTML = renderMarkdown(card.outcome)
-    el.append(outcome)
-  }
-  return el
-}
-
 type VerdictTarget = 'tempered' | 'composted'
 
 /**
@@ -126,24 +96,6 @@ const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview
 const DRAG_HORIZON_DAYS = 21
 
 
-
-/**
- * Daemon runtime phases that earn a badge on an In-flight card with no live
- * worker to draw. A live worker's turn is never a badge: its pill names the
- * turn (`turnOf`). These fire *without* one: `running` is the rare unmatched
- * case (the daemon says running but no session resolved);
- * `retrying`/`due`/`dispatched`/`starting` are genuinely worker-less. Either
- * way the badge lets the card explain itself instead of reading as an anomaly.
- * Phases that drive their own column (`scheduled`, `awaiting`, `accepted`,
- * `dormant`) are omitted — the column already says it.
- */
-const RUNTIME_PHASE_BADGES: Record<string, { label: string; title: string }> = {
-  retrying: { label: '⟳ retrying', title: 'Dispatch failed — daemon is retrying with backoff. No live worker right now.' },
-  due: { label: '◴ due', title: 'Scheduled tick elapsed — awaiting dispatch.' },
-  dispatched: { label: '▸ dispatched', title: 'Dispatch sent — worker starting up.' },
-  starting: { label: '▸ starting', title: 'The app conversation is starting.' },
-  running: { label: '▸ running', title: 'Daemon reports a running worker, but its session is not matched here.' },
-}
 
 /** Skim-able title for surface affordance announcements. The stored horizon is
  *  still `stashed` everywhere in the wire format and the API; "Resting" is what
@@ -1147,45 +1099,11 @@ export class KanbanSurfaceRenderer {
 
     if (!isStale) this.installDraggable(el, card, false)
 
-    const glyph = document.createElement('span')
-    glyph.className = 'kbn-cluster-item-glyph'
-    glyph.textContent = isAgentCard(card) ? '◐' : '✓'
+    const glyph = stateDot(card, this.o.openDetail)
     const title = document.createElement('span')
     title.className = 'kbn-cluster-item-title'
     title.textContent = card.name
     el.append(glyph, title)
-
-    // TWO WAYS OF COMING BACK, said differently on purpose.
-    //
-    // A standing constitution asleep on its cron returns BY ITSELF — "↻ returns Aug 12"
-    // — and the ↻ is the whole distinction from a snooze, which is a thing YOU
-    // put down and which "wakes" on a day you chose. Reading them the same way
-    // would make the desk claim you had parked a role you never touched.
-    //
-    // The day comes from `nextLaunchAt`, the cron's next occurrence (an INSTANT,
-    // so it is formatted from the instant, not read as a civil day). A role
-    // whose schedule will not parse simply shows no chip rather than a lie.
-    if (sleeping) {
-      const returns = card.nextLaunchAt ? formatLaunchDay(card.nextLaunchAt) : null
-      const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
-      const chip = document.createElement('span')
-      chip.className = 'kbn-cluster-item-wakes kbn-cluster-item-returns'
-      chip.textContent = returns ? `↻ returns ${returns}` : '↻ on a schedule'
-      const detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
-      chip.title = `Sleeping on its schedule${detail ? ` — ${detail}` : ''}. It dispatches itself.`
-      el.append(chip)
-      el.title = `${card.name}${who} — sleeping on its schedule${detail ? ` (${detail})` : ''}`
-    } else if (card.due) {
-      const wakes = document.createElement('span')
-      wakes.className = 'kbn-cluster-item-wakes'
-      wakes.textContent = `wakes ${formatDue(card.due)}`
-      wakes.title = `Resting until ${formatDue(card.due)} — it returns to the desk that day`
-      el.append(wakes)
-      el.title = `${card.name}${who} — resting until ${formatDue(card.due)}`
-    } else {
-      const until = untilOf(card, threadIndexFor(this.o.getLastResponse()))
-      if (until) el.append(untilLine(until, this.o.openDetail))
-    }
 
 
     // A verdict waits out its undo window at the line's right end.
@@ -1598,12 +1516,11 @@ export class KanbanSurfaceRenderer {
    * Render one Desk row — a line in a thread list, not a slip of paper.
    *
    * At a glance a row carries only what decides where to look next: whose
-   * hand it is in (the glyph), the title, the awake-descendant count,
-   * and the turn chip. The document workspace holds the
+   * hand it is in (the dot), the title, the awake-descendant count,
+   * and the action menu. The document workspace holds the
    * outcome, question, path, agent, due, warnings and the report itself.
    *
-   * Clicking the row opens the document workspace reader; the turn chip opens
-   * its conversation.
+   * Clicking the row or its dot opens the constitution's chat.
    */
   private renderCard(
     card: KanbanCard,
@@ -1640,10 +1557,7 @@ export class KanbanSurfaceRenderer {
     // reports that it happened, and on which element to hang the menu.
     this.installLongPressMove(el, card)
 
-    const glyph = document.createElement('span')
-    glyph.className = `kbn-card-glyph ${isAgentCard(card) ? 'kbn-card-glyph-agent' : 'kbn-card-glyph-human'}`
-    glyph.textContent = isAgentCard(card) ? '◐' : '✓'
-    glyph.setAttribute('aria-hidden', 'true')
+    const glyph = stateDot(card, this.o.openDetail)
     const name = document.createElement('span')
     name.className = 'kbn-card-name'
     name.textContent = card.name
@@ -1656,18 +1570,6 @@ export class KanbanSurfaceRenderer {
     markVerdictHost(meta, card)
 
 
-    // A card whose host has gone quiet says so in one glyph; its aria label
-    // carries the sentence.
-    if (isStale) {
-      const stale = document.createElement('span')
-      stale.className = 'kbn-card-stale-mark'
-      stale.textContent = '⌛'
-      stale.title = `Waiting on ${originStaleness.hostname ?? card.originId}`
-      meta.append(stale)
-    }
-
-    const turnChip = this.renderTurnChip(card, kind)
-    if (turnChip) meta.append(turnChip)
     el.append(meta)
     installFrontierDetails(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
     meta.append(this.cardMenu(card, kind, isStale))
@@ -1698,6 +1600,12 @@ export class KanbanSurfaceRenderer {
         label: target === 'tempered' ? 'Temper' : 'Discard',
         run: () => { void this.o.transition(card, target) },
       }))
+      if (card.held && this.o.releaseQuarantine) {
+        actions.push({ label: 'Release boot quarantine', run: () => { void this.o.releaseQuarantine!(card.shuttleHost) } })
+      }
+      if (card.tmuxSession && this.o.openWorker) {
+        actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
+      }
       if (place !== 'resting' && !stale && isAgentCard(card) && this.o.onRest) {
         actions.push({ label: 'Rest', run: () => this.o.onRest?.(card) })
       }
@@ -1708,76 +1616,6 @@ export class KanbanSurfaceRenderer {
 
   private dismissCardMenu?: () => void
   closeMenu(): void { this.dismissCardMenu?.(); this.dismissCardMenu = undefined }
-
-  /**
-   * The turn chip at a row's right end: at most one of phase badge, held
-   * pill or worker pill, since they are mutually exclusive states. Undefined
-   * when the card has none of them.
-   */
-  private renderTurnChip(card: KanbanCard, kind: NowColumnKind): HTMLElement | undefined {
-    // A live worker's pill names its turn (`turnOf`): the same word, pigment
-    // and age on every column, the reader and the dock, and the pill is the
-    // action that opens the conversation. A terminal worker's pill is a
-    // button into its tmux session; an app worker's links into the Codex app.
-    // The worker-less dispatch phases (retrying/due/dispatched/starting/
-    // running) show as a badge only when there is no worker to draw.
-    let rightChip: HTMLElement | undefined
-    if (kind === 'inFlight' && !card.tmuxSession) {
-      const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && !!card.sessionUuid
-      const badge = card.runtimePhase ? RUNTIME_PHASE_BADGES[card.runtimePhase] : undefined
-      if (app) {
-        rightChip = workerPlate(card, appWorkerLink(card))
-      } else if (badge) {
-        const phase = document.createElement('span')
-        phase.className = `kbn-card-phase kbn-card-phase-${card.runtimePhase}`
-        phase.textContent = badge.label
-        phase.title = card.launchError ? `${badge.title}\n\n${card.launchError}` : badge.title
-        rightChip = phase
-      } else if (hasLiveWorker(card)) {
-        // A live worker with no conversation handle here still states its turn.
-        rightChip = workerPlate(card, null)
-        rightChip.title = turnTitle(card)
-      }
-    }
-    // Boot-quarantine hold: a genuinely-fresh launch the owning daemon is
-    // withholding after a restart. Reads as "held, awaiting release" — distinct
-    // from a live worker's pill and from an idle-active card (mutually
-    // exclusive with `tmuxSession`: held means parked, not running). The badge
-    // is the release control: click POSTs the release to the card's owning
-    // host. Release is global per daemon (one
-    // restart parks the whole board, one click frees every held launch on that
-    // host), so `title` names that so a single click isn't a surprise.
-    if (card.held) {
-      const heldEl = document.createElement('button')
-      heldEl.type = 'button'
-      heldEl.className = 'kbn-card-held'
-      const since = card.heldSince
-        ? ` since ${formatInstant(card.heldSince, TIME_OF_DAY)}`
-        : ''
-      const host = card.shuttleHost
-      heldEl.setAttribute(
-        'aria-label',
-        `Release boot quarantine${host ? ` on ${host}` : ''} — dispatches every held launch`,
-      )
-      heldEl.title =
-        `Held by boot quarantine — a fresh launch parked until release${since}. ` +
-        `The daemon restarted; click to release${host ? ` ${host}` : ''} and dispatch ` +
-        'every held launch on that host.'
-      heldEl.textContent = '⏹︎ held'
-      heldEl.addEventListener('click', (e) => {
-        e.stopPropagation()
-        heldEl.disabled = true
-        void Promise.resolve(this.o.releaseQuarantine?.(host)).finally(() => {
-          heldEl.disabled = false
-        })
-      })
-      rightChip = heldEl
-    }
-    if (card.tmuxSession) {
-      rightChip = workerPlate(card, terminalWorkerPill(card, { openWorker: this.o.openWorker }))
-    }
-    return rightChip
-  }
 
   /** Wire the long press, when the board offered somewhere for it to go.
    *  Installed on STALE cards too: what a stale card may do is the move menu's

@@ -47,6 +47,7 @@ export class ThreadIndex {
   private readonly parents = new Map<string, KanbanCard>()
   private readonly kids = new Map<string, KanbanCard[]>()
   private readonly states = new Map<string, ThreadState>()
+  private readonly ancestryTitles = new Map<string, string>()
   private readonly sums = new Map<string, ThreadSummary>()
   private readonly awakeSums = new Map<string, { awakeDescendants: number; waitingDescendants: number }>()
   /** A UID proves mirrored identity; without it, host/store/path stays distinct. */
@@ -186,6 +187,22 @@ export class ThreadIndex {
   }
   awakeCounts(card: KanbanCard): { awakeDescendants: number; waitingDescendants: number } {
     return this.awakeSums.get(this.key(card)) ?? { awakeDescendants: 0, waitingDescendants: 0 }
+  }
+  /** Cached parent-chain tooltips keep deep rail rendering linear in graph reads. */
+  ancestryTitle(card: KanbanCard): string {
+    const key = this.key(card)
+    if (this.ancestryTitles.has(key)) return this.ancestryTitles.get(key)!
+    const chain: KanbanCard[] = []
+    let next: KanbanCard | undefined = card
+    while (next && !this.ancestryTitles.has(this.key(next))) {
+      chain.push(next); next = this.parentOf(next)
+    }
+    while (chain.length) {
+      const child = chain.pop()!, parent = this.parentOf(child)
+      const prefix = parent ? this.ancestryTitles.get(this.key(parent)) : ''
+      this.ancestryTitles.set(this.key(child), parent ? `${prefix ? `${prefix} › ` : ''}${parent.name}` : '')
+    }
+    return this.ancestryTitles.get(key)!
   }
   /** Known ancestry is navigable; missing ancestry is only a path, never a guessed identity. */
   ancestry(card: KanbanCard): Array<{ name: string; card?: KanbanCard }> {

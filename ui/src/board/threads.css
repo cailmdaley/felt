@@ -1,14 +1,12 @@
-.kbn-thread-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; width: 100%; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
+.kbn-thread-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
-.kbn-thread-row small { color: var(--kbn-ink-muted); font-size: 10px; }
-.kbn-thread-row[data-thread-state='waiting'] > .kbn-thread-name { font-weight: 600; color: var(--kbn-owed-ink); }
-.kbn-thread-outcome { grid-column: 1 / -1; color: var(--kbn-ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-/* Messages waiting for a constitution's next worker. */
+.kbn-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Messages waiting for a constitution's next worker outside constitution index rows. */
 .kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: calc(11px * var(--kbn-type-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* A rail row and its pin; a pinned row fills its pin. */
-.kbn-thread-item { position: relative; display: flex; align-items: flex-start; min-width: 0; }
-.kbn-thread-item > .kbn-thread-row { flex: 1 1 auto; min-width: 0; padding-right: 22px; }
-.kbn-thread-pin { position: absolute; top: 4px; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kbn-ink-muted); cursor: pointer; opacity: 0.45; }
+.kbn-thread-item { position: relative; display: flex; align-items: center; min-width: 0; }
+.kbn-thread-item > .kbn-thread-row { flex: 1 1 auto; min-width: 0; padding-right: 24px; }
+.kbn-thread-pin { position: absolute; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kbn-ink-muted); cursor: pointer; opacity: 0.45; }
+.kbn-thread-pin[hidden] { display: none; }
 .kbn-thread-pin svg { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
 .kbn-thread-pin:hover, .kbn-thread-pin:focus-visible { color: var(--kbn-ink); background: var(--kbn-plate); }
 .kbn-thread-pin[aria-pressed='true'] { color: var(--kbn-ink); }

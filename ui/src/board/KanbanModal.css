@@ -1402,17 +1402,6 @@
 .kbn-flight-band[data-flight-band="yourTurn"] .kbn-flight-caption {
   color: var(--kbn-owed-ink);
 }
-/* Your turn draws a question heavier than an idle or blocked turn: a full
-   gold edge against a hairline. The edge is painted inside the card's own 1 px border,
-   so a card crossing into the band changes colour, never size. A background
-   layer leaves the card's shadows to whichever surface draws it. */
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card[data-turn="question"] {
-  border-left-color: var(--kbn-owed);
-  background-image: linear-gradient(to right, var(--kbn-owed) 2px, transparent 2px);
-}
-.kbn-flight-band[data-flight-band="yourTurn"] .kbn-card:is([data-turn="idle"], [data-turn="blocked"]) {
-  border-left-color: color-mix(in srgb, var(--kbn-owed) 55%, transparent);
-}
 .kbn-card-question {
   color: var(--kbn-owed-ink);
 }
@@ -1872,8 +1861,8 @@
   border-radius: 2px;
   margin-top: 2px;
 }
-/* THE WORKER PILL — one treatment wherever a worker is drawn: the Desk card,
-   the reader's sidebar card and the reader's head. A dot carries the state's
+/* THE WORKER PILL — the conversation backend control in the reader's head
+   and chat. A dot carries the state's
    turn's pigment (cobalt working, gold idle, cinnabar blocked, prompt or
    question, muted when the turn is unknown); the turn word and its compact age ("11m", "3h", "2d") are mono capitals,
    set tight, with no plate. Only the pointer or the keyboard draws a plate.

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
-import { claudeOpening, saveClaudeOpening } from '../conversationOpening.js'
+import { saveClaudeOpening } from '../conversationOpening.js'
 import { terminalWorkerPill } from '../appConversation.js'
 import { Reader, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
@@ -118,56 +118,45 @@ describe('Reader channel sidebar', () => {
     const reader = makeReader(alpha)
     const strip = reader.el.querySelector<HTMLElement>('.ws-sidebar-index')!
     expect(reader.el.querySelector('.ws-sidebar-legend')).toBeNull()
-    expect(strip.title).toBe('Row marks: ◐ agent · ✓ you · dot blue working, red question, yellow idle')
+    expect(strip.title).toBe('State dot: gold your turn · blue working · muted starting · paper no live worker')
     for (const entry of strip.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')) expect(entry.title.endsWith(strip.title)).toBe(true)
   })
 
-  it('repaints a retained worker pill when its turn changes', () => {
+  it('repaints a retained state dot when its turn changes', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'running', runtimePhase: 'attention', lastActivityAt: Date.now() }
     listedCards = [asking, beta]
     const reader = makeReader(asking, undefined, card => terminalWorkerPill(card))
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('question')
+    expect(row.querySelector<HTMLElement>('.constitution-state-dot')?.dataset.turn).toBe('question')
     asking.runtimePhase = 'working'
     reader.refreshChannels()
     expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
-    expect(row.querySelector<HTMLElement>('.ws-worker-control')?.dataset.turn).toBe('working')
-    expect(row.querySelector('.ws-worker-state')?.textContent).toBe('working')
+    expect(row.querySelector<HTMLElement>('.constitution-state-dot')?.dataset.turn).toBe('working')
+    expect(row.querySelector('.ws-worker-state')).toBeNull()
   })
 
-  it('refreshes retained worker targets when the browser opening preference changes', () => {
+  it('keeps sidebar dots pointed at the constitution regardless of backend opening preference', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
-    const reader = makeReader(alpha, undefined, () => {
-      const target = document.createElement(claudeOpening() === 'terminal' ? 'button' : 'a')
-      return target
-    })
+    const reader = makeReader(alpha)
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    expect(row.querySelector('button.ws-worker-control')).not.toBeNull()
     saveClaudeOpening('browser')
     reader.refreshChannels()
     expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
-    expect(row.querySelector('a.ws-worker-control')).not.toBeNull()
+    row.querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
+    expect(onChannel).toHaveBeenCalledExactlyOnceWith(alpha)
+    expect(row.querySelector('.ws-worker-control, .kbn-card-glyph, .kbn-card-meta')).toBeNull()
   })
-  it('gives a sidebar worker separate state and elapsed text without replacing its conversation target', () => {
+  it('gives a sidebar row only one state dot and no state words or elapsed text', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 11 * 60000 }
     listedCards = [working]
-    const open = vi.fn()
-    const targets: HTMLButtonElement[] = []
-    const reader = makeReader(working, undefined, () => {
-      const target = document.createElement('button')
-      targets.push(target)
-      target.addEventListener('click', open)
-      return target
-    })
-    const target = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar .ws-worker-control')!
-    expect(targets).toContain(target)
-    expect(target.querySelector('.ws-worker-state')?.textContent).toBe('working')
-    expect(target.querySelector('.ws-worker-elapsed')?.textContent).toBe('11m')
-    expect(target.dataset.part).toBe('act')
-    target.click()
-    expect(open).toHaveBeenCalledOnce()
+    const reader = makeReader(working)
+    const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="beta"]')!
+    expect(row.querySelectorAll('.constitution-state-dot')).toHaveLength(1)
+    expect(row.querySelector('.ws-worker-state, .ws-worker-elapsed, .ws-worker-dot, .kbn-row-elapsed')).toBeNull()
+    row.querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
+    expect(onChannel).toHaveBeenCalledExactlyOnceWith(working)
   })
   it("draws the card's own worker pill bare at the head's right end; the map rides the centre column", () => {
     const working = { ...beta, workerState: 'running' as const, runtimePhase: 'working', tmuxSession: 'beta-worker', lastActivityAt: Date.now() - 34 * 60000 }
@@ -417,7 +406,7 @@ describe('Reader channel sidebar', () => {
     expect(onChannel).toHaveBeenCalledWith(alpha)
   })
 
-  it('marks only a fiber on the Desk lifecycle with its glyph', () => {
+  it('replaces lifecycle glyphs with a state dot on every sidebar row', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const managed = { ...gamma, shuttleKind: 'oneshot' as const }
     channels.splice(2, 1, managed)
@@ -426,7 +415,8 @@ describe('Reader channel sidebar', () => {
       const reader = makeReader(alpha)
       const glyph = (uid: string) => reader.el.querySelector(`.ws-sidebar [data-channel-uid="${uid}"] .kbn-card-glyph`)
       expect(glyph('alpha')).toBeNull()
-      expect(glyph('gamma')?.textContent).toBe('◐')
+      expect(glyph('gamma')).toBeNull()
+      expect(reader.el.querySelectorAll('.ws-sidebar .constitution-state-dot')).toHaveLength(3)
     } finally { channels.splice(2, 1, gamma) }
   })
 

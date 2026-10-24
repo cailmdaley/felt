@@ -51,6 +51,13 @@ it('Enter opens the selected constitution on the first press, never a family', (
   expect(open).toHaveBeenCalledExactlyOnceWith(head)
   expect(row().querySelector('.kbn-thread-peek')).toBeNull()
 })
+it.each([false, true])('the state dot opens the constitution once on phone=%s, without pills or glyphs', phone => {
+  mobile = phone; draw()
+  const open = vi.spyOn(inside, 'openDocumentChannel').mockImplementation(() => {})
+  row().querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()
+  expect(open).toHaveBeenCalledExactlyOnceWith(head)
+  expect(row().querySelector('.kbn-card-worker, .kbn-card-glyph')).toBeNull()
+})
 it('arrows navigate and Escape clears selection without family state', () => {
   press('j'); expect(selected()).toBe('hub-uid')
   press('j'); expect(selected()).toBe('after-uid')
@@ -69,6 +76,8 @@ it('a poll preserves card selection without exposing pinned or waiting subentrie
 })
 it('Tab reaches the count and action menu without hidden family stops', () => {
   press('j'); row().focus(); press('Tab', row())
+  expect(document.activeElement).toBe(row().querySelector('.constitution-state-dot'))
+  press('Tab', document.activeElement!)
   expect(document.activeElement).toBe(row().querySelector('.kbn-thread-count'))
   press('Tab', document.activeElement!)
   expect(document.activeElement).toBe(row().querySelector('.kbn-card-menu'))

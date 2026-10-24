@@ -1,7 +1,6 @@
 import { MOBILE_MEDIA } from '../mobile.js'
-import { hasLiveWorker, type KanbanCard } from '../KanbanTypes.js'
+import { type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
-import { untilLine, untilOf } from '../blockedOn.js'
 import { deskColumn } from '../deskColumn.js'
 import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
@@ -156,7 +155,7 @@ export class ThreadRail {
     const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
     const index = this.index!
     const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    // A row whose parent stands in the same group sits indented beneath it; any other names its nearest parent below the family's head, its title holding up to three links of the chain.
+    // A row whose parent stands in the same group sits indented beneath it.
     const depthIn = (card: KanbanCard, members: ReadonlySet<string>, memo: Map<string, number>): number => {
       const key = threadKey(card), known = memo.get(key)
       if (known !== undefined) return known
@@ -175,48 +174,31 @@ export class ThreadRail {
       memo.set(key, base)
       return base
     }
-    const parentOf = (card: KanbanCard): { name: string; chain: string } | null => {
-      const chain: string[] = []
-      let p = index.parentOf(card)
-      for (; p && p.id !== scope.id && chain.length < 3; p = index.parentOf(p)) chain.unshift(p.name)
-      if (!chain.length) return null
-      return { name: chain[chain.length - 1], chain: `${p && p.id !== scope.id ? '… › ' : ''}${chain.join(' › ')}` }
-    }
     // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, a live worker under a working one, or a discarded one among the tempered.
     const markOf = (card: KanbanCard, state: ThreadState): { kind: string; title: string } | null => {
       if (state === 'waiting') { const turn = turnOf(card); return { kind: turn.turn, title: turn.word } }
-      if (state === 'working' && hasLiveWorker(card)) return turnOf(card).busy ? { kind: 'busy', title: 'Worker busy' } : { kind: 'live', title: 'Worker live' }
       if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
       return null
     }
     const rowFor = (card: KanbanCard, group: string, label: string, members: ReadonlySet<string>, memo: Map<string, number>): HTMLElement => {
       const item = threadItem(card, index, this.open, focusOf(group, card))
       const row = item.querySelector<HTMLElement>('.kbn-thread-row')!, state = index.state(card)
-      row.querySelector('small')?.remove()
-      const head = document.createElement('span'); head.className = 'ws-thread-head'
       const depth = depthIn(card, members, memo)
       if (depth) { item.dataset.depth = String(depth); item.style.setProperty('--ws-thread-depth', String(depth)) }
-      const parent = depth ? null : parentOf(card)
-      if (parent) {
-        const lead = document.createElement('span'); lead.className = 'ws-thread-parent'; lead.textContent = parent.name; lead.title = parent.chain
-        head.append(lead)
-      }
-      head.append(row.querySelector('.kbn-thread-name')!)
-      const waiting = row.querySelector('.kbn-waiting'); if (waiting) head.append(waiting)
-      row.prepend(head)
-      const until = untilOf(card, index)
-      if (until) head.after(untilLine(until, this.open))
       const mark = markOf(card, state)
       let title = label
-      if (mark) {
+      if (mark && ['question', 'blocked', 'discarded'].includes(mark.kind)) {
         const el = document.createElement('span'); el.className = 'ws-thread-mark'; el.dataset.kind = mark.kind
         el.title = mark.title; el.setAttribute('aria-hidden', 'true')
         el.textContent = mark.kind === 'discarded' ? '×' : mark.kind === 'question' ? '?' : mark.kind === 'blocked' ? '!' : ''
-        row.prepend(el); if (state !== 'working') title = mark.title
+        row.append(el); title = mark.title
       }
       const here = card.id === current.id && card.originId === current.originId
       row.classList.toggle('ws-thread-current', here)
       if (here) row.setAttribute('aria-current', 'page')
+      const pin = item.querySelector<HTMLButtonElement>('.kbn-thread-pin')!
+      pin.hidden = !here && pin.getAttribute('aria-pressed') !== 'true'
+      pin.tabIndex = pin.hidden ? -1 : 0
       row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
       return item
     }

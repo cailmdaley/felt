@@ -198,18 +198,12 @@
 /* The meta row's line box is the worker pill's, held whether or not a worker runs, so one starting moves nothing. */
 .ws-sidebar .ws-constitution-card .kbn-card-meta { min-height: var(--ws-meta-row); }
 .ws-sidebar .ws-constitution-card .kbn-card-meta > * { max-height: var(--ws-meta-row); }
-/* A compact row: the header and the meta share one line, the name taking what is left. */
+/* A compact row: one state dot and the name on one line. */
 .ws-sidebar .ws-constitution-row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; padding: var(--ws-small-gap) var(--ws-inset); }
 .ws-sidebar .ws-constitution-row > .kbn-card-header { flex: 1 1 0; min-width: 0; }
 .ws-sidebar .ws-constitution-row .kbn-card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-sidebar .ws-constitution-row > .kbn-card-meta { flex: 0 1 auto; min-width: 0; }
 .ws-sidebar .ws-constitution-card .kbn-review-meta-btn { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; text-transform: none; }
-.ws-sidebar .ws-constitution-row .kbn-card-glyph { width: auto; font-size: var(--ws-sidebar-glyph-size); }
-/* The worker is its dot alone; its word and age stay for assistive technology and the title. */
-.ws-sidebar .ws-constitution-row .kbn-card-worker { --worker-dot-size: var(--ws-sidebar-dot-size); width: calc(var(--ws-sidebar-dot-size) + 8px); margin: 0; padding: 0; justify-content: center; }
-.ws-sidebar .ws-constitution-row .ws-worker-state { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.ws-sidebar .ws-constitution-row :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
-.ws-sidebar .ws-constitution-row .ws-worker-dot { position: static; translate: none; }
 .ws-sidebar .ws-constitution-card:hover { background: var(--ws-hover); }
 .ws-sidebar .ws-constitution-card[aria-current='true'] { background: var(--ws-fill); color: var(--ws-ink); }
 .ws-sidebar .ws-constitution-card[aria-current='true'] .kbn-card-name { color: var(--ws-ink); }
