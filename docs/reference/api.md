@@ -92,6 +92,11 @@ The two options are mutually exclusive.
 
 A durable migration journal pins the session identity, backend and before/after values of touched fields before the backend moves.
 Recovery finishes or reverses interrupted moves before ordinary adoption and dispatch.
+Journals live in `$SHUTTLE_DATA_DIR/migrations/<sha256(host-id)>/` (the data directory defaults to `~/.shuttle`); only the daemon's frozen host identity may replay them.
+Other hosts' namespaces and flat journals are logged and ignored, never used to hold unrelated launches.
+Matching flat journals are relocated into their owner's namespace before replay.
+Changing `~/.shuttle/host` does not transfer pending migrations: finish recovery before changing the identity, or restore the old identity and restart to recover.
+Do not rename a namespace or edit a journal's host to adopt it; backend ownership and installed fiber anchors must agree with the original owner.
 Fiber changes use both documents' advisory locks and preserve their current bodies and untouched fields; the journal never stores historical bodies.
 An unresolved migration holds every launch, including force-dispatch, cron and previously observed workers.
 Restore the recorded backend or reconcile conflicting fiber fields, then restart the daemon to retry recovery; keep the journal and surviving worker intact.

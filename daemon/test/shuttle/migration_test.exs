@@ -186,6 +186,14 @@ defmodule Shuttle.MigrationTest do
     assert current["fiber_id"] == "dest"
   end
 
+  test "foreign journals do not disable this host", %{poller: p, root: root} do
+    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(p), "source", "dest", [])
+    {:ok, _} = Shuttle.MigrationJournal.create(plan, "another-host")
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold == nil
+  end
+
   test "public migration rekeys runtime, watcher, ledger and mailbox ownership; retries and late events are inert",
        %{poller: poller} do
     old = Poller.worker_status(poller, "source")

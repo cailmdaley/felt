@@ -4986,7 +4986,7 @@ defmodule Shuttle.Poller do
 
   defp recover_migrations(state) do
     result =
-      with {:ok, entries} <- Shuttle.MigrationJournal.pending() do
+      with {:ok, entries} <- Shuttle.MigrationJournal.pending(state.own_host_id) do
         Enum.reduce_while(entries, :ok, fn entry, :ok ->
           case complete_migration(state, entry) do
             {:ok, _} -> {:cont, :ok}
