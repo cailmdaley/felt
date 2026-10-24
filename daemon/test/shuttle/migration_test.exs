@@ -158,6 +158,23 @@ defmodule Shuttle.MigrationTest do
     %{poller: poller, root: root}
   end
 
+  test "foreign journals do not disable this host", %{poller: p, root: root} do
+    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(p), "source", "dest", [])
+    {:ok, _} = Shuttle.MigrationJournal.create(plan, "another-host")
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold == nil
+  end
+
+  test "invalid v1 journals hold without crashing startup", %{poller: p, root: root} do
+    File.mkdir_p!(Shuttle.MigrationJournal.root())
+    File.write!(Path.join(Shuttle.MigrationJournal.root(), "broken.json"),
+      Jason.encode!(%{"version" => 1, "id" => "broken", "host" => "test-host"}))
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold != nil
+  end
+
   test "concurrent app status writes cannot undo migration", %{poller: p, root: root} do
     alias Shuttle.AppWorkers
     id = "native-session"
@@ -186,21 +203,15 @@ defmodule Shuttle.MigrationTest do
     assert current["fiber_id"] == "dest"
   end
 
-  test "foreign journals do not disable this host", %{poller: p, root: root} do
-    {:ok, plan} = Shuttle.Migration.prepare(:sys.get_state(p), "source", "dest", [])
-    {:ok, _} = Shuttle.MigrationJournal.create(plan, "another-host")
-    GenServer.stop(p)
-    {:ok, restarted} = restart(root)
-    assert :sys.get_state(restarted).reconciliation_hold == nil
-  end
-
-  test "invalid v1 journals hold without crashing startup", %{poller: p, root: root} do
-    File.mkdir_p!(Shuttle.MigrationJournal.root())
-    File.write!(Path.join(Shuttle.MigrationJournal.root(), "broken.json"),
-      Jason.encode!(%{"version" => 1, "id" => "broken", "host" => "test-host"}))
-    GenServer.stop(p)
-    {:ok, restarted} = restart(root)
-    assert :sys.get_state(restarted).reconciliation_hold != nil
+  test "stale intent cannot move a replacement conversation", %{poller: p} do
+    s = :sys.get_state(p)
+    {:ok, plan} = Shuttle.Migration.prepare(s, "source", "dest", [])
+    {:ok, entry} = Shuttle.MigrationJournal.create(plan, "test-host")
+    source = FiberUid.session("source")
+    FeltStoreRunner.remove_tmux_session(source)
+    FeltStoreRunner.add_tmux_session(source)
+    FeltStoreRunner.set_ps_result({"12345 1 claude --session-id replacement-conversation\n", 0})
+    assert {:error, _} = Shuttle.Migration.reconcile_backend(s, entry)
   end
 
   test "journal schema rejects missing and wrongly typed recovery fields", %{poller: p} do
@@ -220,6 +231,10 @@ defmodule Shuttle.MigrationTest do
     for corrupt <- [
           put_in(entry, ["worker", "session"], %{}),
           put_in(entry, ["worker", "context_harness"], []),
+          put_in(entry, ["backend", "identity"], nil),
+          put_in(entry, ["backend", "identity", "panes"], []),
+          put_in(entry, ["backend", "identity", "panes"], [7]),
+          put_in(entry, ["backend", "identity", "session_uuid"], "replacement"),
           put_in(entry, ["backend", "aliases"], [nil]),
           put_in(entry, ["backend", "aliases"], [%{"path" => 7, "before" => nil, "after" => "x"}]),
           Map.put(entry, "documents", [nil, nil]),
@@ -244,6 +259,93 @@ defmodule Shuttle.MigrationTest do
     assert {_, 0} = Runner.cmd("tmux", ["has-session", "-t", "=" <> FiberUid.session("source")], [])
     conn = get(api_conn(), "/api/v1/version")
     assert Jason.decode!(conn.resp_body)["reconciliation_hold"] == hold
+  end
+
+  for direction <- ["forward", "reverse"] do
+    test "#{direction} resource mismatch persists an unresolvable journal across restart", %{poller: p, root: root} do
+      state = :sys.get_state(p)
+      {:ok, plan} = Shuttle.Migration.prepare(state, "source", "dest", [])
+      {:ok, entry} = Shuttle.MigrationJournal.create(plan, "test-host")
+
+      {entry, replaced} =
+        if unquote(direction) == "reverse" do
+          assert :ok = Shuttle.Migration.reconcile_backend(state, entry)
+          {:ok, reversed} = Shuttle.MigrationJournal.reverse(entry)
+          {reversed, FiberUid.session("dest")}
+        else
+          {entry, FiberUid.session("source")}
+        end
+
+      FeltStoreRunner.remove_tmux_session(replaced)
+      FeltStoreRunner.add_tmux_session(replaced)
+      before = bytes()
+      assert {:error, :backend_identity_mismatch} = Shuttle.Migration.reconcile_backend(state, entry)
+      path = Path.join(Shuttle.MigrationJournal.root("test-host"), entry["id"] <> ".json")
+      persisted = Jason.decode!(File.read!(path))
+      assert persisted["resolution"] == "unresolvable"
+      assert persisted["reason"] == "backend_identity_mismatch"
+      assert {:error, {:journal_unresolvable, "backend_identity_mismatch"}} =
+               Shuttle.Migration.reconcile_backend(state, persisted)
+      GenServer.stop(p)
+      {:ok, restarted} = restart(root)
+      hold = :sys.get_state(restarted).reconciliation_hold
+      assert hold =~ path
+      assert hold =~ "backend_identity_mismatch"
+      assert bytes() == before
+      assert {:error, :reconciliation_required} = Poller.dispatch_fiber(restarted, "source", force: true)
+      assert {_, 0} = Runner.cmd("tmux", ["has-session", "-t", "=" <> replaced], [])
+    end
+  end
+
+  test "public migration cannot erase a terminal identity mismatch during compensation", %{poller: p, root: root} do
+    source = FiberUid.session("source")
+    Env.put_app_env(:migration_documents_hook, fn request, run ->
+      result = run.(request)
+      if request["mode"] == "check" do
+        FeltStoreRunner.remove_tmux_session(source)
+        FeltStoreRunner.add_tmux_session(source)
+      end
+      result
+    end)
+
+    assert {:error, {:rollback_failed, _}} = Poller.migrate(p, "source", "dest", rest: true)
+    [path] = Path.wildcard(Path.join(Shuttle.MigrationJournal.root("test-host"), "*.json"))
+    entry = Jason.decode!(File.read!(path))
+    assert entry["resolution"] == "unresolvable"
+    assert entry["reason"] == "backend_identity_mismatch"
+    assert entry["direction"] == "forward"
+    # Even absence of the replacement cannot turn this into automatic recovery.
+    FeltStoreRunner.remove_tmux_session(source)
+    GenServer.stop(p)
+    {:ok, restarted} = restart(root)
+    assert :sys.get_state(restarted).reconciliation_hold =~ "journal_unresolvable"
+    assert File.exists?(path)
+    assert get_in(fm("source"), ["shuttle", "runtime", "session_uuid"]) == "native-session"
+    refute get_in(fm("dest"), ["shuttle", "runtime"])
+  end
+
+  @tag :integration
+  test "real tmux replacement keeps its PID and name when stale intent is replayed", %{poller: p} do
+    socket = "migrate-stale-#{System.pid()}-#{System.unique_integer([:positive])}"
+    Env.put_app_env(:migration_tmux_socket, socket)
+    on_exit(fn -> System.cmd("tmux", ["-L", socket, "kill-server"], stderr_to_stdout: true) end)
+    source = FiberUid.session("source")
+    dest = FiberUid.session("dest")
+    cmd = fn args -> System.cmd("tmux", ["-L", socket | args], stderr_to_stdout: true) end
+    assert {_, 0} = cmd.(["-f", "/dev/null", "new-session", "-d", "-s", source, "sleep 300"])
+    state = :sys.get_state(p)
+    {:ok, plan} = Shuttle.Migration.prepare(state, "source", "dest", [])
+    {:ok, entry} = Shuttle.MigrationJournal.create(plan, "test-host")
+    # Keep the isolated server alive so the replacement gets a distinct tmux ID.
+    assert {_, 0} = cmd.(["new-session", "-d", "-s", "keeper", "sleep 300"])
+    assert {_, 0} = cmd.(["kill-session", "-t", "=" <> source])
+    assert {_, 0} = cmd.(["new-session", "-d", "-s", source, "sleep 300"])
+    assert {pid, 0} = cmd.(["display-message", "-p", "-t", "=" <> source, "\#{pane_pid}"])
+    assert {:error, :backend_identity_mismatch} = Shuttle.Migration.reconcile_backend(state, entry)
+    assert {^pid, 0} = cmd.(["display-message", "-p", "-t", "=" <> source, "\#{pane_pid}"])
+    assert {_, 1} = cmd.(["has-session", "-t", "=" <> dest])
+    path = Path.join(Shuttle.MigrationJournal.root("test-host"), entry["id"] <> ".json")
+    assert Jason.decode!(File.read!(path))["resolution"] == "unresolvable"
   end
 
   test "public migration rekeys runtime, watcher, ledger and mailbox ownership; retries and late events are inert",

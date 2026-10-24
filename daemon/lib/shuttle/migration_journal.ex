@@ -10,6 +10,10 @@ defmodule Shuttle.MigrationJournal do
   under the old identity before changing it, or restore the old identity and
   restart to recover. Never rename a namespace or edit its host to adopt work:
   backend ownership and installed fiber anchors must still agree with the owner.
+
+  Tmux intent captures pane PIDs and tmux IDs alongside the native UUID. A
+  replacement resource permanently marks intent unresolvable for operator
+  reconciliation; missing identity evidence holds rather than trusting a name.
   """
 
   require Logger
@@ -51,8 +55,19 @@ defmodule Shuttle.MigrationJournal do
   end
 
   def reverse(entry) do
-    entry = Map.put(entry, "direction", "reverse")
-    with :ok <- put(entry), do: {:ok, entry}
+    # Backend verification can persist a terminal mismatch after the caller
+    # captured this entry. Compensation must not overwrite that evidence.
+    with {:ok, bytes} <- File.read(path(entry)),
+         {:ok, current} <- Jason.decode(bytes),
+         :ok <- validate(current),
+         true <- current["id"] == entry["id"] and current["host"] == entry["host"],
+         :ok <- resolvable(current) do
+      reversed = Map.put(current, "direction", "reverse")
+      with :ok <- put(reversed), do: {:ok, reversed}
+    else
+      false -> {:error, :journal_identity_conflict}
+      error -> error
+    end
   end
 
   def pending(host \\ Shuttle.Poller.own_host_id()) do
@@ -68,7 +83,10 @@ defmodule Shuttle.MigrationJournal do
 
       paths =
         Enum.map(Enum.filter(names, &String.ends_with?(&1, ".json")), &Path.join(root(), &1)) ++
-          Enum.map(Enum.filter(owned, &String.ends_with?(&1, ".json")), &Path.join(root(host), &1))
+          Enum.map(
+            Enum.filter(owned, &String.ends_with?(&1, ".json")),
+            &Path.join(root(host), &1)
+          )
 
       paths
       |> Enum.sort()
@@ -78,6 +96,7 @@ defmodule Shuttle.MigrationJournal do
              true <- is_binary(owner) and owner != "" do
           if owner == host do
             with :ok <- validate(entry),
+                 :ok <- resolvable(entry),
                  true <- Path.basename(path) == entry["id"] <> ".json",
                  :ok <- relocate(entry, path) do
               {:cont, {:ok, entries ++ [entry]}}
@@ -115,19 +134,21 @@ defmodule Shuttle.MigrationJournal do
   end
 
   @doc "Validate every value consumed by recovery before any backend or document operation."
-  def validate(%{
-        "version" => 1,
-        "id" => id,
-        "host" => host,
-        "direction" => direction,
-        "from" => from,
-        "to" => to,
-        "uuid" => uuid,
-        "session" => session,
-        "worker" => worker,
-        "documents" => documents,
-        "backend" => backend
-      }) do
+  def validate(
+        %{
+          "version" => 1,
+          "id" => id,
+          "host" => host,
+          "direction" => direction,
+          "from" => from,
+          "to" => to,
+          "uuid" => uuid,
+          "session" => session,
+          "worker" => worker,
+          "documents" => documents,
+          "backend" => backend
+        } = entry
+      ) do
     checks = [
       {"id", token?(id)},
       {"host", text?(host)},
@@ -138,7 +159,8 @@ defmodule Shuttle.MigrationJournal do
       {"to", fiber?(to)},
       {"worker", worker?(worker)},
       {"documents", documents?(documents, from, to, host)},
-      {"backend", backend?(backend, uuid, from, to, host)}
+      {"backend", backend?(backend, uuid, from, to, host)},
+      {"resolution", resolution?(entry)}
     ]
 
     case Enum.find(checks, fn {_, valid?} -> not valid? end) do
@@ -161,8 +183,10 @@ defmodule Shuttle.MigrationJournal do
 
   defp worker?(%{"session" => session} = worker) do
     text?(session) and
-      Enum.all?(~w(fiber_id uid felt_store session_uuid context_harness agent_id role),
-        &optional_text?(worker[&1]))
+      Enum.all?(
+        ~w(fiber_id uid felt_store session_uuid context_harness agent_id role),
+        &optional_text?(worker[&1])
+      )
   end
 
   defp worker?(_), do: false
@@ -174,8 +198,12 @@ defmodule Shuttle.MigrationJournal do
 
   defp documents?(_, _, _, _), do: false
 
-  defp document?(%{"path" => path, "uid" => uid, "host" => host,
-                   "before" => before, "after" => target}, fiber, host, dest?) do
+  defp document?(
+         %{"path" => path, "uid" => uid, "host" => host, "before" => before, "after" => target},
+         fiber,
+         host,
+         dest?
+       ) do
     uid == fiber["uid"] and absolute?(path) and
       fields?(before, dest?) and fields?(target, dest?)
   end
@@ -183,7 +211,9 @@ defmodule Shuttle.MigrationJournal do
   defp document?(_, _, _, _), do: false
 
   defp fields?(fields, dest?) when is_map(fields) do
-    keys = ~w(status closed-at tempered horizon shuttle.runtime) ++ if(dest?, do: ["ask"], else: [])
+    keys =
+      ~w(status closed-at tempered horizon shuttle.runtime) ++ if(dest?, do: ["ask"], else: [])
+
     Enum.sort(Map.keys(fields)) == Enum.sort(keys) and
       fields["status"] in [nil, "open", "active", "closed"] and
       optional_text?(fields["closed-at"]) and optional_text?(fields["horizon"]) and
@@ -193,13 +223,27 @@ defmodule Shuttle.MigrationJournal do
 
   defp fields?(_, _), do: false
 
-  defp backend?(%{"type" => "tmux", "before" => before, "after" => target,
-                 "aliases" => aliases}, _, _, _, _) do
-    text?(before) and text?(target) and before != target and is_list(aliases) and
+  defp backend?(
+         %{
+           "type" => "tmux",
+           "before" => before,
+           "after" => target,
+           "aliases" => aliases,
+           "identity" => identity
+         },
+         uuid,
+         _,
+         _,
+         _
+       ) do
+    identity?(identity, uuid) and text?(before) and text?(target) and before != target and
+      is_list(aliases) and
       Enum.all?(aliases, fn
         %{"path" => path, "before" => previous, "after" => next} ->
           absolute?(path) and optional_text?(previous) and text?(next)
-        _ -> false
+
+        _ ->
+          false
       end)
   end
 
@@ -218,6 +262,29 @@ defmodule Shuttle.MigrationJournal do
   end
 
   defp app_record?(_, _, _, _), do: false
+
+  defp identity?(%{"session_uuid" => uuid, "panes" => panes}, uuid) do
+    is_list(panes) and panes != [] and
+      Enum.all?(panes, fn pane ->
+        is_binary(pane) and Regex.match?(~r/^\$[0-9]+\t[0-9]+\t%[0-9]+\t[1-9][0-9]*$/, pane)
+      end)
+  end
+
+  defp identity?(_, _), do: false
+
+  defp resolution?(%{"resolution" => "unresolvable", "reason" => reason}), do: text?(reason)
+
+  defp resolution?(entry),
+    do: not Map.has_key?(entry, "resolution") and not Map.has_key?(entry, "reason")
+
+  defp resolvable(%{"resolution" => "unresolvable", "reason" => reason}),
+    do: {:error, {:journal_unresolvable, reason}}
+
+  defp resolvable(_), do: :ok
+
+  @doc "Persist a resource mismatch for operator reconciliation, without retrying another conversation."
+  def unresolvable(entry, reason),
+    do: put(Map.merge(entry, %{"resolution" => "unresolvable", "reason" => to_string(reason)}))
 
   def clear(entry), do: File.rm(path(entry))
 
@@ -246,9 +313,10 @@ defmodule Shuttle.MigrationJournal do
 
   defp encode_backend({:app, old, new}), do: %{"type" => "app", "before" => old, "after" => new}
 
-  defp encode_backend({:tmux, old, new, aliases}) do
+  defp encode_backend({:tmux, old, new, aliases, identity}) do
     %{
       "type" => "tmux",
+      "identity" => identity,
       "before" => old,
       "after" => new,
       "aliases" =>

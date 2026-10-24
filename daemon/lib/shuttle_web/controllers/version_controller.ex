@@ -50,7 +50,10 @@ defmodule ShuttleWeb.VersionController do
   defp unavailable_health(reason) do
     %{
       contract: %{
-        expected: Shuttle.Contract.expected_level(), observed: nil, ok: nil, reason: reason
+        expected: Shuttle.Contract.expected_level(),
+        observed: nil,
+        ok: nil,
+        reason: reason
       },
       reconciliation_hold: nil
     }

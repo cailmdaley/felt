@@ -305,11 +305,25 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
   @linger_pid 4242
 
-  def add_tmux_session(session),
-    do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.put(&1.tmux_sessions, session)})
+  def add_tmux_session(session) do
+    Agent.update(server(), fn state ->
+      identities = Map.get(state, :tmux_identities, %{})
+      generation = System.unique_integer([:positive])
+      identity = Map.get(identities, session, generation)
 
-  def remove_tmux_session(session),
-    do: Agent.update(server(), &%{&1 | tmux_sessions: MapSet.delete(&1.tmux_sessions, session)})
+      state
+      |> Map.put(:tmux_sessions, MapSet.put(state.tmux_sessions, session))
+      |> Map.put(:tmux_identities, Map.put(identities, session, identity))
+    end)
+  end
+
+  def remove_tmux_session(session) do
+    Agent.update(server(), fn state ->
+      state
+      |> Map.put(:tmux_sessions, MapSet.delete(state.tmux_sessions, session))
+      |> Map.put(:tmux_identities, Map.delete(Map.get(state, :tmux_identities, %{}), session))
+    end)
+  end
 
   def set_new_session_delay(ms),
     do: Agent.update(server(), &Map.put(&1, :new_session_delay_ms, ms))
@@ -678,19 +692,45 @@ defmodule Shuttle.Test.FeltStoreRunner do
             {"", 0}
         end
 
-      command == "tmux" and hd(args) == "rename-session" ->
-        ["rename-session", "-t", "=" <> old_name, new_name] = args
+      command == "tmux" and hd(args) == "list-panes" ->
+        name = args |> Enum.at(3) |> String.trim_leading("=")
 
-        Agent.update(server(), fn state ->
-          if MapSet.member?(state.tmux_sessions, old_name) do
-            sessions = state.tmux_sessions |> MapSet.delete(old_name) |> MapSet.put(new_name)
-            %{state | tmux_sessions: sessions}
+        Agent.get(server(), fn state ->
+          if MapSet.member?(state.tmux_sessions, name) do
+            generation = Map.get(Map.get(state, :tmux_identities, %{}), name, 1)
+            {"$#{generation}\t1\t%#{generation}\t#{generation}\n", 0}
           else
-            state
+            {"can't find session", 1}
           end
         end)
 
-        {"", 0}
+      command == "tmux" and hd(args) == "rename-session" ->
+        ["rename-session", "-t", target, new_name] = args
+
+        Agent.get_and_update(server(), fn state ->
+          identities = Map.get(state, :tmux_identities, %{})
+          target = String.trim_leading(target, "=")
+
+          old_name =
+            if String.starts_with?(target, "$") do
+              Enum.find_value(identities, fn {name, generation} ->
+                if target == "$#{generation}", do: name
+              end)
+            else
+              target
+            end
+
+          if MapSet.member?(state.tmux_sessions, old_name) do
+            sessions = state.tmux_sessions |> MapSet.delete(old_name) |> MapSet.put(new_name)
+            generation = Map.get(identities, old_name, 1)
+            identities = identities |> Map.delete(old_name) |> Map.put(new_name, generation)
+
+            {{"", 0},
+             state |> Map.put(:tmux_sessions, sessions) |> Map.put(:tmux_identities, identities)}
+          else
+            {{"can't find session", 1}, state}
+          end
+        end)
 
       command == "tmux" and hd(args) == "ls" and
           Agent.get(server(), &Map.get(&1, :tmux_ls_timeout, false)) ->

@@ -100,6 +100,10 @@ Do not rename a namespace or edit a journal's host to adopt it; backend ownershi
 Fiber changes use both documents' advisory locks and preserve their current bodies and untouched fields; the journal never stores historical bodies.
 An unresolved migration holds every launch, including force-dispatch, cron and previously observed workers.
 Restore the recorded backend or reconcile conflicting fiber fields, then restart the daemon to retry recovery; keep the journal and surviving worker intact.
+Tmux intent captures the native session UUID and the tmux session ID, creation time, pane IDs and pane PIDs before any rename.
+Replay verifies the captured panes at the source or destination, then addresses a rename by the captured tmux ID rather than the reusable name.
+A replacement conversation causes `backend_identity_mismatch`; the journal is durably marked `unresolvable` with that reason, and restart holds launches rather than retrying the replacement.
+A journal without captured tmux identity requires operator reconciliation; recovery never invents identity from a reused name.
 Recovery validates the complete journal schema before executing any pending move.
 Invalid JSON, unsupported versions and incomplete or wrongly typed records hold launches without crashing startup; the hold names the file and invalid field.
 `GET /api/v1/version` exposes `reconciliation_hold`, and `shuttle doctor` reports it even when the CLI contract matches.
@@ -107,7 +111,8 @@ Invalid JSON, unsupported versions and incomplete or wrongly typed records hold 
 
 To clear an invalid journal, stop the daemon and back up the named file outside the migrations directory.
 Inspect both fibers, the session ledger and the native backend to determine which fiber owns the surviving conversation; repair its assignment and runtime fields consistently without stopping that conversation.
-Restore a valid journal from backup to let recovery finish, or, only after manually reconciling those resources, move the invalid file outside the migrations directory.
+Restore a valid journal from backup to let recovery finish, or, only after manually reconciling those resources, move the invalid or unresolvable file outside the migrations directory.
+For an identity mismatch, preserve the replacement conversation and reconcile the original resource separately; never clear the marker merely to retry against the replacement.
 Restart the daemon, confirm that `shuttle doctor` no longer reports the hold, then release the boot quarantine.
 Removing a journal alone is not recovery: it discards the evidence that prevents duplicate launches.
 
