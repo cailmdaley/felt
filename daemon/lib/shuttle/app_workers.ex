@@ -161,6 +161,10 @@ defmodule Shuttle.AppWorkers do
   end
 
   def put(%{"session_uuid" => id} = record) do
+    :global.trans({{__MODULE__, id}, self()}, fn -> write_record(record) end)
+  end
+
+  defp write_record(%{"session_uuid" => id} = record) do
     if Regex.match?(~r/^[A-Za-z0-9_-]+$/, id) do
       path = Path.join(root(), id <> ".json")
       tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
@@ -198,9 +202,20 @@ defmodule Shuttle.AppWorkers do
     end)
   end
 
-  def update(id, values) do
+  def update(id, values) when is_map(values),
+    do: update(id, fn record -> {:ok, Map.merge(record, values)} end)
+
+  @doc "Validate and transform the latest ownership record under the record writer lock."
+  def update(id, transform) when is_function(transform, 1) do
     :global.trans({{__MODULE__, id}, self()}, fn ->
-      with {:ok, record} <- get(id), do: put(Map.merge(record, values))
+      with {:ok, record} <- get(id),
+           {:ok, updated} <- transform.(record),
+           true <- updated["session_uuid"] == id and updated["thread_id"] == id do
+        write_record(updated)
+      else
+        false -> {:error, :session_owner_mismatch}
+        error -> error
+      end
     end)
   end
 
@@ -244,7 +259,7 @@ defmodule Shuttle.AppWorkers do
                :ok <- Shuttle.CodexBackend.require_ready(),
                {:ok, thread} <- load_embedded(id, backend_opts),
                :ok <-
-                 put(
+                 write_record(
                    Map.merge(attributes, %{
                      "session_uuid" => id,
                      "thread_id" => id,
@@ -305,7 +320,7 @@ defmodule Shuttle.AppWorkers do
            true <- resume_assignment_matches?(record, fiber_id, uid, store),
            false <- record["active"] == true,
            :ok <-
-             put(
+             write_record(
                Map.merge(record, %{
                  "fiber_id" => fiber_id,
                  "uid" => uid,
@@ -449,7 +464,7 @@ defmodule Shuttle.AppWorkers do
             # record symlink still requires explicit repair.
             case File.lstat(record_path(id)) do
               {:error, :enoent} ->
-                put(%{
+                write_record(%{
                   "session_uuid" => id,
                   "thread_id" => id,
                   "transcript_session_uuid" => thread["sessionId"] || id,
@@ -489,7 +504,7 @@ defmodule Shuttle.AppWorkers do
              (same_fiber?(record, fiber["id"], fiber["uid"]) and
                 record["felt_store"] in [nil, store]),
          :ok <-
-           put(
+           write_record(
              Map.merge(record, %{
                "fiber_id" => fiber["id"],
                "uid" => fiber["uid"],

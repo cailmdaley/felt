@@ -184,21 +184,22 @@ defmodule Shuttle.Migration do
     fiber = entry[if(entry["direction"] == "forward", do: "to", else: "from")]
     target = Map.put(target, "fiber_path", fiber["path"])
 
-    with {:ok, current} <- AppWorkers.get(entry["uuid"]),
-         :ok <-
-           AppWorkers.check_owner(
-             current,
-             entry["uuid"],
-             state.own_host_id,
-             Shuttle.CodexApp.Transport.default_socket()
-           ),
-         true <- current["uid"] in [old["uid"], backend["after"]["uid"]] do
-      # Assignment fields change; contemporaneous backend state is retained.
-      AppWorkers.put(Map.merge(current, Map.take(target, ~w(fiber_id uid felt_store fiber_path))))
-    else
-      false -> {:error, :backend_assignment_conflict}
-      error -> error
-    end
+    AppWorkers.update(entry["uuid"], fn current ->
+      with :ok <-
+             AppWorkers.check_owner(
+               current,
+               entry["uuid"],
+               state.own_host_id,
+               Shuttle.CodexApp.Transport.default_socket()
+             ),
+           true <- current["uid"] in [old["uid"], backend["after"]["uid"]] do
+        # Assignment fields change; contemporaneous backend state is retained.
+        {:ok, Map.merge(current, Map.take(target, ~w(fiber_id uid felt_store fiber_path)))}
+      else
+        false -> {:error, :backend_assignment_conflict}
+        error -> error
+      end
+    end)
   end
 
   def reconcile_backend(state, %{"backend" => %{"type" => "tmux"} = backend} = entry) do

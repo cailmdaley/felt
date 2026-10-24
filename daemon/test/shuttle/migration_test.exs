@@ -158,6 +158,34 @@ defmodule Shuttle.MigrationTest do
     %{poller: poller, root: root}
   end
 
+  test "concurrent app status writes cannot undo migration", %{poller: p, root: root} do
+    alias Shuttle.AppWorkers
+    id = "native-session"
+    record = %{"session_uuid" => id, "thread_id" => id, "active" => true,
+      "fiber_id" => "source", "uid" => FiberUid.for("source"), "felt_store" => root,
+      "backend_host" => "test-host", "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()}
+    :ok = AppWorkers.put(record)
+    :sys.replace_state(p, fn s ->
+      put_in(s.running[Poller.running_key(s, "source")].session, AppWorkers.ref(id))
+    end)
+    parent = self()
+    writer = Task.async(fn ->
+      :global.trans({{AppWorkers, id}, self()}, fn ->
+        {:ok, snapshot} = AppWorkers.get(id)
+        send(parent, :read)
+        receive do :commit -> AppWorkers.put(Map.put(snapshot, "remote_state", "running")) end
+      end)
+    end)
+    assert_receive :read
+    moving = Task.async(fn -> Poller.migrate(p, "source", "dest", rest: true) end)
+    early = Task.yield(moving, 2000)
+    send(writer.pid, :commit)
+    Task.await(writer)
+    if early == nil, do: Task.await(moving)
+    {:ok, current} = AppWorkers.get(id)
+    assert current["fiber_id"] == "dest"
+  end
+
   test "public migration rekeys runtime, watcher, ledger and mailbox ownership; retries and late events are inert",
        %{poller: poller} do
     old = Poller.worker_status(poller, "source")
