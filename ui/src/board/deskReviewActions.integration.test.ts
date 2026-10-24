@@ -24,13 +24,21 @@ describe('verdict actions ride cards awaiting review and in flight', () => {
       inFlight: [card({ id: 'flight', status: 'active', shuttleKind: 'oneshot' })],
       awaitingReview: [card({ id: 'review', status: 'closed' })],
     } })
-    const root = renderer().renderNowSection(data.now, data.staleness)
-    expect(root.querySelector('[data-fiber-id="draft"] .kbn-card-review-meta-actions')).toBeNull()
-    for (const id of ['flight', 'review']) {
-      const actions = root.querySelectorAll<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-review-meta-btn`)
-      expect([...actions].map((button) => button.textContent)).toEqual(['Temper', 'Discard'])
-      expect([...actions].every((button) => button.type === 'button')).toBe(true)
-    }
+    const surfaces = renderer()
+    const root = surfaces.renderNowSection(data.now, data.staleness)
+    document.body.append(root)
+    try {
+      for (const id of ['draft', 'flight', 'review']) {
+        const trigger = root.querySelector<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-card-menu`)!
+        expect(trigger.textContent).toBe('•••')
+        expect(trigger.parentElement!.lastElementChild).toBe(trigger)
+        trigger.click()
+        const actions = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
+        expect([...actions].map(button => button.textContent)).toEqual(id === 'draft' ? [] : ['Temper', 'Discard'])
+        expect([...actions].every(button => button.type === 'button')).toBe(true)
+        surfaces.closeMenu()
+      }
+    } finally { surfaces.closeMenu(); document.body.replaceChildren() }
   })
   it('waits out every Desk verdict on the card\'s own foot, whatever the column', async () => {
     vi.useFakeTimers()

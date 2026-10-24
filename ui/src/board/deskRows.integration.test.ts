@@ -62,7 +62,14 @@ describe('a Resting line takes its verdicts', () => {
   const data = response({ stash: [once, standing, todo] })
   it('offers Temper and Discard on a constitution at rest, Discard alone on a standing one, none on a plain note', () => {
     const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(data.stash, {})
-    const labels = (id: string) => [...root.querySelectorAll(`[data-fiber-id="${id}"] .kbn-cluster-item-verdicts button`)].map(b => b.textContent)
+    document.body.append(root)
+    const labels = (id: string) => {
+      root.querySelector<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-card-menu`)!.click()
+      const menu = document.querySelector('[role="menu"]')!
+      const labels = [...menu.querySelectorAll('button:not(:disabled)')].map(b => b.textContent)
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+      return labels
+    }
     expect(labels('once')).toEqual(['Temper', 'Discard'])
     expect(labels('standing')).toEqual(['Discard'])
     expect(labels('todo')).toEqual([])
@@ -71,7 +78,9 @@ describe('a Resting line takes its verdicts', () => {
   it('sends the verdict through the board transition, without opening the card', () => {
     const o = options(data)
     const root = new KanbanSurfaceRenderer(o).renderStashSection(data.stash, {})
-    root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-action-discard')!.click()
+    document.body.append(root)
+    root.querySelector<HTMLButtonElement>('[data-fiber-id="once"] .kbn-card-menu')!.click()
+    ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Discard')!.click()
     expect(o.transition).toHaveBeenCalledWith(expect.objectContaining({ id: 'once' }), 'composted')
     expect(o.openDetail).not.toHaveBeenCalled()
   })

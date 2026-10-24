@@ -583,6 +583,7 @@ export class KanbanModal {
    * the kanban's container (already a child of host).
    */
   unmount(): void {
+    this.surfaces.closeMenu()
     if (this.container === null) return
     this.keymapHelp?.dispose()
     this.keymapHelp = null
@@ -1889,6 +1890,7 @@ export class KanbanModal {
   }
 
   private render(data: KanbanResponse): void {
+    this.surfaces.closeMenu()
     if (!this.body || !this.deskEl) return
     this.ensureFleetDefaultAgents(data)
     this.syncWorkspaceRuntime()
@@ -2323,6 +2325,11 @@ export class KanbanModal {
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
 
     const active = document.activeElement as HTMLElement | null
+    // A selected line offers its action menu before column navigation resumes.
+    if (active?.matches('.kbn-card, .kbn-cluster-item') && !active.closest('.kbn-thread-family') && !e.shiftKey) {
+      const menu = active.querySelector<HTMLButtonElement>('.kbn-card-menu')
+      if (menu) { e.preventDefault(); e.stopPropagation(); menu.focus(); return }
+    }
     // Inside a thread family, Tab steps through its card, badge and drawn rows
     // before the column order takes over.
     const familyStop = active ? threadFamilyTab(active, e.shiftKey) : null

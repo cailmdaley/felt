@@ -386,7 +386,7 @@ export function threadFamilyTab(active: HTMLElement, backwards: boolean): HTMLEl
   const family = familyOf(active)
   if (!family) return null
   const own = threadFamilyCard(family)
-  const controls = [...family.querySelectorAll<HTMLElement>('.kbn-thread-badge, .kbn-thread-row, .kbn-thread-more')]
+  const controls = [...family.querySelectorAll<HTMLElement>('.kbn-thread-badge, .kbn-thread-row, .kbn-thread-more'), ...family.querySelectorAll<HTMLElement>('.kbn-card-menu')]
     .filter(el => !el.closest('[hidden]') && familyOf(el) === family)
   const stops = own ? [own, ...controls] : controls
   const at = stops.findIndex(stop => stop === active || (stop !== own && stop.contains(active)))

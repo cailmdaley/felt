@@ -8,6 +8,7 @@ import { documentKind } from './workspace/documents.js'
 import { unseenSince } from './workspace/DocumentSeen.js'
 import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
+import { openActionMenu, type ConversationAction } from './conversationMenu.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
   ascByKey,
@@ -1187,7 +1188,7 @@ export class KanbanSurfaceRenderer {
     el.dataset.cardOrigin = card.originId
     el.setAttribute('role', 'listitem')
     // The agent is inventory, not a next move: it rides in the label and the
-    // line's title, and the preview names it, so the title gets the width.
+    // line's title, and the workspace names it, so the title gets the width.
     const who = agentName ? ` — ${agentName}` : ''
     el.setAttribute('aria-label', `${card.name}${who}`)
     el.title = `${card.name}${who}`
@@ -1240,17 +1241,12 @@ export class KanbanSurfaceRenderer {
     if (waiting) el.append(waiting)
     installThreadPeek(el, el, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
 
-    // Temper / Discard at the line's right end, over the title's end, revealed
-    // the way a Desk row's are: under the pointer at that end, or on focus. A
-    // verdict waits out its undo window here.
-    const verdicts = isStale ? [] : verdictTargets(card, 'resting')
-    if (verdicts.length) {
-      const end = document.createElement('span')
-      end.className = 'kbn-cluster-item-verdicts'
-      markVerdictHost(end, card)
-      end.append(this.verdictButtons(card, verdicts))
-      el.append(end)
-    }
+    // A verdict waits out its undo window at the line's right end.
+    const end = document.createElement('span')
+    end.className = 'kbn-cluster-item-verdicts'
+    markVerdictHost(end, card)
+    end.append(this.cardMenu(card, 'resting', el, isStale))
+    el.append(end)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
@@ -1712,29 +1708,6 @@ export class KanbanSurfaceRenderer {
     markVerdictHost(meta, card)
 
 
-    // Temper / Discard (awaiting review and in flight) and Rest (every
-    // Shuttle-managed card) lie over the title's end, shown under the pointer,
-    // on focus and on the key-selected row — the thread-list idiom of actions
-    // standing in where the row's own words run out.
-    const hoverActions = document.createElement('div')
-    hoverActions.className = 'kbn-card-hover-actions'
-    const verdicts = isStale ? [] : verdictTargets(card, kind)
-    if (verdicts.length) hoverActions.append(this.verdictButtons(card, verdicts))
-    if (this.o.onRest && isAgentCard(card) && !isStale) {
-      const restBtn = document.createElement('button')
-      restBtn.type = 'button'
-      restBtn.className = 'kbn-card-rest'
-      restBtn.textContent = 'rest'
-      restBtn.title = 'Rest (s)'
-      restBtn.setAttribute('aria-label', `Rest fiber: ${card.name} (s)`)
-      restBtn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        this.o.onRest?.(card)
-      })
-      hoverActions.append(restBtn)
-    }
-    if (hoverActions.childElementCount) meta.append(hoverActions)
-
     // A card whose host has gone quiet says so in one glyph; its aria label
     // carries the sentence.
     if (isStale) {
@@ -1757,6 +1730,7 @@ export class KanbanSurfaceRenderer {
 
     el.append(meta)
     installThreadPeek(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail, this.threadFamilies)
+    meta.append(this.cardMenu(card, kind, el, isStale))
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
@@ -1766,25 +1740,36 @@ export class KanbanSurfaceRenderer {
     return el
   }
 
-  /** Temper / Discard for `card`, each queueing its verdict through the board's transition. */
-  private verdictButtons(card: KanbanCard, targets: readonly VerdictTarget[]): HTMLElement {
-    const group = document.createElement('div')
-    group.className = 'kbn-card-review-meta-actions'
-    for (const target of targets) {
-      const label = target === 'tempered' ? 'Temper' : 'Discard'
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = `kbn-action kbn-action-${target === 'tempered' ? 'tempered' : 'discard'} kbn-review-meta-btn`
-      btn.textContent = label
-      btn.setAttribute('aria-label', `${label} fiber: ${card.name}`)
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation()
-        void this.o.transition(card, target)
-      })
-      group.append(btn)
-    }
-    return group
+  /** The same quiet action control ends every Desk line, including Resting. */
+  private cardMenu(card: KanbanCard, place: NowColumnKind | 'resting', row: HTMLElement, stale: boolean): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'kbn-card-menu'
+    button.textContent = '•••'
+    button.title = `Actions for ${card.name}`
+    button.setAttribute('aria-label', button.title)
+    button.setAttribute('aria-haspopup', 'menu')
+    button.setAttribute('aria-expanded', 'false')
+    button.addEventListener('pointerdown', event => event.stopPropagation())
+    button.addEventListener('click', event => {
+      event.stopPropagation()
+      this.closeMenu()
+      const actions: ConversationAction[] = (stale ? [] : verdictTargets(card, place)).map(target => ({
+        label: target === 'tempered' ? 'Temper' : 'Discard',
+        run: () => { void this.o.transition(card, target) },
+      }))
+      if (place !== 'resting' && !stale && isAgentCard(card) && this.o.onRest) {
+        actions.push({ label: 'Rest', run: () => this.o.onRest?.(card) })
+      }
+      const badge = row.querySelector<HTMLButtonElement>('.kbn-thread-badge')
+      if (badge) actions.push({ label: badge.getAttribute('aria-expanded') === 'true' ? 'Fold family' : 'Expand family', run: () => badge.click() })
+      this.dismissCardMenu = openActionMenu(button, actions, `Actions for ${card.name}`)
+    })
+    return button
   }
+
+  private dismissCardMenu?: () => void
+  closeMenu(): void { this.dismissCardMenu?.(); this.dismissCardMenu = undefined }
 
   /**
    * The turn chip at a row's right end: at most one of phase badge, held

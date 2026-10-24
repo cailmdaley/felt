@@ -1,22 +1,9 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   THE DESK AS A THREAD LIST
-   ══════════════════════════════════════════════════════════════════════════
-   A Desk column is an index of lines, one per card, so a column shows twenty
-   things instead of three. A line is a glyph, a title and the facts that
-   decide where to look next (report, turn, threads). The card it stands for —
-   outcome, question, path, machine, agent, due, what it sent — opens over the
-   neighbouring column under the pointer or the keyboard selection
-   (`.kbn-preview`).
-
-   The lines keep the paper's grammar at a smaller size: the same rag ground
-   and hairline, Drafts dashed on the recess, Awaiting review edged in gold,
-   Your turn's gold left edge. */
-
+/* The Desk is an index of lines: glyph, title, glance facts and actions.
+   Reading a card or its report opens the document workspace. */
 .kbn-col-list { gap: 3px; padding: 6px; }
 .kbn-flight-band-list { gap: 3px; }
 .kbn-flight-caption { margin-bottom: 3px; }
 .kbn-flight-band + .kbn-flight-band { margin-top: 3px; padding-top: 6px; }
-
 .kbn-col-list .kbn-card {
   --kbn-row-ground: var(--kbn-paper);
   flex: 0 0 auto;
@@ -30,9 +17,7 @@
   padding: 5px 6px 5px 8px;
   background-color: var(--kbn-row-ground);
 }
-/* Drafts are not yet anyone's work: their lines sit in the recess without a
-   box of their own, a hairline between them, the title in regular weight and
-   softer ink. The weight belongs to the live columns. */
+/* Drafts sit in the recess; live work carries the weight. */
 .kbn-col-list .kbn-card.kbn-card-drafts {
   --kbn-row-ground: transparent;
   border-color: transparent;
@@ -43,26 +28,12 @@
 .kbn-col-list .kbn-card.kbn-card-drafts:hover,
 .kbn-col-list .kbn-card.kbn-card-drafts.kbn-key-selected { --kbn-row-ground: color-mix(in srgb, var(--kbn-paper) 60%, transparent); }
 .kbn-col-list .kbn-card.kbn-card-drafts .kbn-card-name { font-weight: 400; color: var(--kbn-ink-soft); }
-/* A line brightens under the pointer; it does not lift. Twenty lines rising
-   one by one as the pointer runs down a column would read as the column
-   shivering. */
-.kbn-col-list .kbn-card:hover {
-  --kbn-row-ground: var(--kbn-paper-bright);
-  transform: none;
-}
+.kbn-col-list .kbn-card:hover { --kbn-row-ground: var(--kbn-paper-bright); }
 .kbn-col-list .kbn-card.kbn-key-selected {
   --kbn-row-ground: var(--kbn-paper-bright);
   border-color: color-mix(in srgb, var(--kbn-ink) 34%, transparent);
 }
-/* The leading glyph is ink, faint: it says "a line" and nothing more, so
-   pigment on the Desk is left to state alone (the turn pill's red, gold or
-   blue dot; a family's marks). */
-.kbn-col-list .kbn-card .kbn-card-glyph {
-  width: 12px;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  color: var(--kbn-ink);
-  opacity: .32;
-}
+.kbn-col-list .kbn-card .kbn-card-glyph { width: 12px; font-size: calc(10px * var(--kbn-type-scale, 1)); color: var(--kbn-ink); opacity: .32; }
 .kbn-cluster-item[data-card-uid] .kbn-cluster-item-glyph { color: var(--kbn-ink); opacity: .32; }
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
@@ -70,67 +41,37 @@
   font-size: calc(14.5px * var(--kbn-type-scale, 1));
   font-weight: 500;
   line-height: 1.25;
-  /* A long title takes a second line rather than losing the words that tell
-     it from its neighbours. */
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
 }
-/* The column heads step down so the titles beneath them are what the eye
-   lands on; the illuminated initial keeps its em ratio and comes down with
-   the word. The line box keeps the 0.868 strut the full-size head uses. */
 .kbn-now-board .kbn-col-title { font-size: calc(32px * var(--kbn-type-scale, 1)); }
-
-/* The line's right end: report, turn chip, thread badge. */
-.kbn-col-list .kbn-card > .kbn-card-meta {
-  position: relative;
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  gap: 5px;
-  margin: 0;
-}
-/* An undo window needs room for its sentence even on a line whose end held
-   only a pill. */
+.kbn-col-list .kbn-card > .kbn-card-meta { position: relative; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; margin: 0; }
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
 .kbn-col-list .kbn-card--meeting .kbn-meeting { flex-basis: 100%; }
 
-/* Verdicts and Rest stand in over the title's end, on a fade of the line's
-   own ground, while the pointer is anywhere on the card or focus is inside it. */
-.kbn-card-hover-actions {
-  position: absolute;
-  right: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 4px 0 22px;
-  background: linear-gradient(to right, transparent, var(--kbn-row-ground) 18px);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 120ms ease;
+/* A native button at the same right edge in every column, never a reveal. */
+.kbn-card-menu {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--kbn-ink-muted);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 1px;
+  cursor: pointer;
 }
-.kbn-col-list .kbn-card:is(:hover, :focus-within) > .kbn-card-meta .kbn-card-hover-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-/* The group shows and hides as one: its members' own hover rules (written
-   for the paper card) would otherwise make them live, unseen, under a
-   pointer anywhere on the line. */
-.kbn-col-list .kbn-card .kbn-card-hover-actions :is(.kbn-card-review-meta-actions, .kbn-card-rest) {
-  opacity: 1;
-  pointer-events: inherit;
-  transition: none;
-}
+.kbn-card-menu:hover { background: color-mix(in srgb, var(--kbn-ink) 7%, transparent); }
+.kbn-card-menu:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 2px; }
+.kbn-cluster-item-verdicts { position: relative; margin-left: auto; }
+.kbn-cluster-item-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }
 
-/* Under its own Held caption the pill offers what it does, release, rather
-   than saying held a second time. */
-.kbn-flight-band[data-flight-band='held'] .kbn-card-held .kbn-card-held-label { display: none; }
-.kbn-flight-band[data-flight-band='held'] .kbn-card-held .kbn-card-held-release { display: inline; }
-
-/* The newest report: a small leaf with the document's kind on it. */
+/* A report leaf carries its kind and a dot until the reader shows it. */
 .kbn-card-report {
   box-sizing: border-box;
   display: inline-grid;
@@ -146,7 +87,6 @@
   font-size: 9px;
   line-height: 1;
 }
-/* Sent since the reader last showed it: a gold dot on the leaf's corner. */
 .kbn-card-report[data-unseen] { position: relative; color: var(--kbn-ink-soft); }
 .kbn-card-report[data-unseen]::after {
   content: '';
@@ -159,350 +99,26 @@
   background: var(--kbn-owed-bright);
   box-shadow: 0 0 0 1.5px var(--kbn-row-ground, var(--kbn-paper));
 }
-.kbn-card-stale-mark {
-  flex-shrink: 0;
-  color: var(--kbn-ink-muted);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-}
+.kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: calc(11px * var(--kbn-type-scale, 1)); }
 
-/* Without hover, the line carries what hover would have offered: awaiting
-   review keeps its verdicts in the row (in flight hides them, see
-   KanbanModal.css), set in the flow rather than over the title. */
-@media (hover: none) {
-  .kbn-card-hover-actions {
-    position: static;
-    transform: none;
-    padding: 0;
-    background: none;
-    opacity: 1;
-    pointer-events: auto;
-  }
-}
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .kbn-col-list .kbn-card {
-    min-height: 44px;
-    padding: 6px 9px;
-  }
-  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
-
-  /* The tabs are plain navigation: one word and its count at a readable
-     size, ornament left to the column itself. */
+  .kbn-col-list .kbn-card { min-height: 44px; padding: 6px 9px; }
+  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; flex: 1 1 calc(100% - 24px); }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
-  .kbn-folio .kbn-folio-name {
-    font-size: 14px; font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0;
-    overflow: visible; text-overflow: clip;
-  }
+  .kbn-folio .kbn-folio-name { font-size: 14px; font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
   .kbn-folio .kbn-folio-count { font-family: inherit; font-size: 14px; color: var(--kbn-ink-muted); }
-
-  /* A live card is a tile of two rows: its title across the full width, then
-     its state, threads and reviews. The report leaf stays in the card, one
-     tap away; the row gives its room to the words. */
-  .kbn-col-list .kbn-card .kbn-card-name { flex: 1 1 calc(100% - 24px); }
   .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { flex: 1 0 100%; justify-content: flex-start; gap: 8px; padding: 4px 0 1px 19px; }
   .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
-
-  /* A seat with threads is one tile, its badge inside the tile's right end,
-     so every Roles line shares the same right edge. */
-  .kbn-role-seat {
-    position: relative; box-sizing: border-box; align-items: center; gap: 0;
-    background: var(--kbn-paper); border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent); border-radius: 3px;
-  }
+  .kbn-card-menu { min-width: 28px; min-height: 28px; }
+  .kbn-role-seat { position: relative; box-sizing: border-box; align-items: center; gap: 0; background: var(--kbn-paper); border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent); border-radius: 3px; }
   .kbn-role-seat > .kbn-role-chip { margin: -1px 0 -1px -1px; border-color: transparent; background: transparent; }
   .kbn-role-seat .kbn-thread-badge { margin-right: 8px; }
-
-  /* The cycle chip in the bottom bar is a compact label that fits its slot:
-     its name, ellipsized if it must be. The dates and the count stay on the
-     desktop chip and in its title. */
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }
   .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; letter-spacing: 0.05em; }
   .kbn-viewtabs .kbn-lens-chip .kbn-cyclechip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-}
-
-/* ── The preview ───────────────────────────────────────────────────────────
-   The full card and what it sent, laid over the column beside the row's own
-   in that column's exact frame (`data-frame="column"`), or beside the row
-   where no neighbour is on screen (`data-frame="float"`). It is a place: the
-   pointer can enter it, scroll it and open what it shows. */
-.kbn-preview {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  z-index: 10000;
-  box-sizing: border-box;
-  display: flex;
-  overflow: visible;
-  background: transparent;
-  color: var(--kbn-ink);
-  animation: kbn-preview-in 110ms ease-out;
-}
-.kbn-preview[data-frame="float"] {
-  width: min(460px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
-}
-.kbn-preview[hidden] { display: none; }
-.kbn-preview[data-warm] { animation: none; }
-@keyframes kbn-preview-in {
-  from { opacity: 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .kbn-preview { animation: none; }
-}
-
-/* The sheet: one scroll for the card and its gallery. */
-.kbn-preview-sheet {
-  --kbn-type-scale: 1;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  background: var(--kbn-sheet);
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
-  border-radius: 3px;
-  box-shadow:
-    0 14px 32px -12px color-mix(in srgb, var(--kbn-shade) 45%, transparent),
-    0 2px 6px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
-}
-.kbn-preview[data-frame="float"] .kbn-preview-sheet { max-height: calc(100vh - 16px); }
-.kbn-preview-sheet[data-column="awaitingReview"] { border-color: color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent); }
-
-.kbn-preview-card {
-  --card-line-clamp: 10;
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 14px 16px 12px;
-  text-align: left;
-  background-color: var(--kbn-paper-bright);
-  border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent);
-}
-.kbn-preview-card .kbn-card-name { font-size: calc(16px * var(--kbn-type-scale, 1)); }
-.kbn-preview-facts { margin-top: 1px; gap: 6px; flex-wrap: wrap; align-items: center; }
-/* The machine the fiber lives on: the first fact, set like a plate on a
-   crate rather than a footnote. */
-.kbn-preview-host {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.03em;
-  color: var(--kbn-ink);
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 28%, transparent);
-  border-radius: 2px;
-  line-height: 1.6;
-}
-.kbn-preview-mirrors {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  color: var(--kbn-ink-muted);
-}
-.kbn-preview-facts > .kbn-preview-turn { margin-left: auto; }
-
-/* ── The gallery: plots at the column's width, the rest as tiles and lines. */
-.kbn-preview-gallery {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px 12px 14px;
-}
-.kbn-preview-gallery-clear,
-.kbn-preview-send-dismiss {
-  align-self: flex-end;
-  padding: 3px 7px;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 25%, transparent);
-  border-radius: 2px;
-  background: transparent;
-  color: var(--kbn-ink-muted);
-  font: inherit;
-  font-size: 10px;
-  cursor: pointer;
-}
-.kbn-preview-gallery-clear:hover,
-.kbn-preview-send-dismiss:hover { color: var(--kbn-ink); }
-.kbn-preview-gallery-clear:focus-visible,
-.kbn-preview-send-dismiss:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 2px; }
-.kbn-preview-gallery-clear:disabled,
-.kbn-preview-send-dismiss:disabled { cursor: wait; opacity: 0.5; }
-.kbn-preview-send-wrap { position: relative; min-width: 0; }
-.kbn-preview-send-wrap[hidden] { display: none; }
-.kbn-preview-send-wrap > .kbn-preview-send { width: 100%; }
-.kbn-preview-send-dismiss {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  padding: 0;
-  width: 22px;
-  height: 22px;
-  font-size: 16px;
-  line-height: 1;
-  background: var(--kbn-paper);
-  opacity: 0;
-  pointer-events: none;
-}
-.kbn-preview-send-wrap:is(:hover, :focus-within) > .kbn-preview-send-dismiss {
-  opacity: 1;
-  pointer-events: auto;
-}
-.kbn-preview-gallery-error { margin: 0; font-size: 12px; color: var(--kbn-ink); }
-@media (hover: none) {
-  .kbn-preview-send-dismiss { opacity: 1; pointer-events: auto; }
-}
-.kbn-preview-tiles {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 10px;
-}
-.kbn-preview-send {
-  appearance: none;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.kbn-preview-send .kbn-preview-thumb {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  border: 1px solid color-mix(in srgb, var(--kbn-ink) 16%, transparent);
-  border-radius: 2px;
-  transition: border-color 120ms ease;
-}
-.kbn-preview-send[data-slot="cover"] .kbn-preview-thumb { aspect-ratio: 16 / 10; }
-.kbn-preview-send:hover .kbn-preview-thumb { border-color: color-mix(in srgb, var(--kbn-ink) 45%, transparent); }
-.kbn-preview-send:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 3px; border-radius: 2px; }
-.kbn-preview-send-caption {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  letter-spacing: 0.02em;
-  color: var(--kbn-ink-muted);
-}
-.kbn-preview-send:hover .kbn-preview-send-name { color: var(--kbn-ink); }
-.kbn-preview-send-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kbn-preview-send-age { flex-shrink: 0; }
-.kbn-preview-send[data-unseen] .kbn-preview-send-name::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 5px;
-  border-radius: 50%;
-  vertical-align: 1px;
-  background: var(--kbn-owed-bright);
-}
-.kbn-preview-send[data-slot="line"] {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 8px;
-  padding: 2px 2px;
-}
-.kbn-preview-send[data-slot="line"] .kbn-preview-send-caption { flex: 1 1 auto; min-width: 0; }
-.kbn-preview-send-glyph { color: var(--kbn-ink-muted); font-family: var(--font-mono, 'JetBrains Mono', monospace); font-size: 12px; }
-.kbn-preview-more {
-  margin: 0;
-  font-style: italic;
-  font-size: 12px;
-  color: var(--kbn-ink-muted);
-  text-align: center;
-}
-
-/* ── The constitution, read below the gallery: the reader's prose at the
-   column's measure. */
-.kbn-preview-body { display: flex; flex-direction: column; min-width: 0; }
-.kbn-preview-body .kbn-preview-prose { padding: 14px 18px 22px; }
-.kbn-preview-body-note {
-  margin: 0;
-  padding: 16px 18px;
-  font-style: italic;
-  font-size: 12.5px;
-  color: var(--kbn-ink-muted);
-}
-
-/* ── Verdicts in the preview's head: always shown, it is a place to act. */
-.kbn-preview-card .kbn-card-header { align-items: center; }
-.kbn-preview-verdicts {
-  margin-left: auto;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-}
-.kbn-preview-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }
-.kbn-preview-verdicts .kbn-card-review-meta-actions { opacity: 1; pointer-events: auto; }
-
-/* ── A Resting line's verdicts: over the title's end, on the line's hover
-   ground, while the pointer is at the line's right end (a 2.75rem zone) or
-   focus is inside. The rest of the line opens the card, so a pointer crossing
-   its middle never finds a verdict under it. */
-.kbn-cluster-item { position: relative; }
-.kbn-cluster-item-verdicts {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  width: 0;
-}
-.kbn-cluster-item-verdicts::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 0 auto;
-  width: 2.75rem;
-}
-.kbn-cluster-item-verdicts .kbn-card-review-meta-actions {
-  position: absolute;
-  right: 2px;
-  top: 50%;
-  transform: translateY(-50%);
-  padding-left: 18px;
-  background: linear-gradient(to right, transparent, var(--kbn-paper) 16px);
-}
-.kbn-cluster-item-verdicts:is(:hover, :focus-within) .kbn-card-review-meta-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-.kbn-cluster-item-verdicts[data-verdict-pending] {
-  left: auto;
-  width: 10.5rem;
-  background: var(--kbn-paper);
-}
-@media (hover: none) {
-  .kbn-cluster-item-verdicts {
-    position: static;
-    width: auto;
-    margin-left: auto;
-  }
-  .kbn-cluster-item-verdicts::before { content: none; }
-  .kbn-cluster-item-verdicts .kbn-card-review-meta-actions {
-    position: static;
-    transform: none;
-    opacity: 1;
-    pointer-events: auto;
-    padding-left: 0;
-    background: none;
-  }
-  .kbn-cluster-item-verdicts[data-verdict-pending] { position: relative; min-height: 19px; }
-}
-
-/* A portrait phone gives the live leaf the screen its folded bands leave:
-   the strip above, Roles and Resting folded below, and the bottom bar take
-   about 260px; the leaf takes the rest, never less than its 58vh. */
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   @media (orientation: portrait) {
     .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 260px - env(safe-area-inset-bottom, 0px))); }
   }

@@ -90,9 +90,9 @@ describe('thread rows on the Desk keyboard', () => {
     const el = family(); el.tabIndex = -1; el.focus()
     expect(press('Tab', {}, el).defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(badge())
-    // Collapsed, the badge is the family's last stop: Tab falls through to the
-    // Desk's column order (whose heads jsdom cannot lay out, so it stays put).
-    expect(press('Tab', {}, badge()).defaultPrevented).toBe(false)
+    // Collapsed, the action menu is the family's final stop.
+    expect(press('Tab', {}, badge()).defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(family().querySelector('.kbn-card-menu'))
     badge().focus(); badge().click()
     press('Tab', {}, badge())
     expect((document.activeElement as HTMLElement).dataset.cardUid).toBe('ask-uid')
