@@ -49,7 +49,7 @@ defmodule ShuttleWeb.StateController do
       remotes: render_remotes(remotes)
     }
 
-    json(conn, body)
+    ShuttleWeb.ConditionalJSON.send(conn, body)
   end
 
   # Render remotes as a JSON-friendly map. `last_polled_at` is a

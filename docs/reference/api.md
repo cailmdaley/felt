@@ -232,6 +232,12 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
 | `GET /meeting/audio` | recorder-addressed | WebSocket: relay a phone's microphone through the serving hub to the selected recorder |
 
+`GET /fibers/composite` and `/state/composite` return a weak `ETag` and
+`Cache-Control: no-cache`. Their validators exclude the volatile `generated_at`
+field: a 304 means the fiber/state content is semantically unchanged. The board
+keeps its existing copy and tracks poll time itself; remote-origin freshness
+continues to describe the body that would have been returned.
+
 `GET /fibers?fields=index` returns the local wikilink and parent-picker index: only `id`, optional `slug`, and `name` inside each `fiber` row.
 The first request shares one live listing with concurrent callers.
 Warm requests return a pre-encoded in-memory response; after 30 seconds, the next request starts one background refresh and returns the cached response immediately.

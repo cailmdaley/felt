@@ -328,7 +328,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         cache: local_cache
       })
 
-    json(conn, %{
+    ShuttleWeb.ConditionalJSON.send(conn, %{
       host: local_origin,
       generated_at: DateTime.to_iso8601(DateTime.utc_now()),
       fibers: fibers,

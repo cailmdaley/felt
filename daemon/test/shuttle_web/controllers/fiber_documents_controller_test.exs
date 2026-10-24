@@ -1101,6 +1101,27 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert Jason.decode!(conn.resp_body)["fibers"] == []
   end
 
+  test "GET /api/v1/fibers/composite honors ETag and changes it when its body changes", %{store: store} do
+    write_fiber!(store, "tests/etag", "---\nname: Before\nstatus: active\nshuttle:\n  host: test-host\n---\n")
+    warm_poller!(store)
+
+    first = get(api_conn(), "/api/v1/fibers/composite")
+    assert first.status == 200
+    [etag] = get_resp_header(first, "etag")
+    assert get_resp_header(first, "cache-control") == ["no-cache"]
+    assert etag =~ ~r/^W\/\"[0-9a-f]{64}\"$/
+
+    unchanged = api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers/composite")
+    assert unchanged.status == 304
+    assert unchanged.resp_body == ""
+
+    write_fiber!(store, "tests/etag", "---\nname: After\nstatus: active\nshuttle:\n  host: test-host\n---\n")
+    warm_poller!(store)
+    changed = get(api_conn(), "/api/v1/fibers/composite")
+    assert changed.status == 200
+    refute get_resp_header(changed, "etag") == [etag]
+  end
+
   test "GET /api/v1/fibers/composite stamps origin and reports the local origin (no remotes)",
        %{store: store} do
     write_fiber!(store, "tests/managed", """
