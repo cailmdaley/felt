@@ -94,14 +94,12 @@ defmodule Shuttle.WorkerWatcher do
   end
 
   @impl true
-  def handle_call({:migrate, fiber_id, session, uid, store}, _from, state) do
+  def handle_call({:migrate, fiber_id, session, _uid, _store}, _from, state) do
     {:reply, :ok,
      %{
        state
        | fiber_id: fiber_id,
          session: session,
-         uid: uid,
-         felt_store: store,
          consecutive_failures: 0
      }}
   end
