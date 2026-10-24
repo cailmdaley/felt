@@ -179,6 +179,57 @@ func workerHasHandoff(f *felt.Felt) bool {
 	return felt.MappingValueNode(runtime, "handed_off_at") != nil
 }
 
+func TestNativeWorkerRecoversRenamedLedgerPathByUID(t *testing.T) {
+	t.Parallel()
+	for _, reused := range []bool{false, true} {
+		name := "missing-path"
+		if reused {
+			name = "reused-path"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			sourceDir, source := newStore(t)
+			_, destination := newStore(t)
+			seedShuttleRole(t, source, "source", felt.StatusActive, oneshot(), nil)
+			seedShuttleRole(t, destination, "destination", felt.StatusActive, oneshot(), nil)
+			original := mustRead(t, destination, "destination")
+			oldPath := original.Path
+			newPath := destination.Path("renamed")
+			if err := os.MkdirAll(filepath.Dir(newPath), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Rename(oldPath, newPath); err != nil {
+				t.Fatal(err)
+			}
+			if reused {
+				seedShuttleRole(t, destination, "destination", felt.StatusActive, oneshot(), nil)
+			}
+			env.Chdir(sourceDir)
+			env.Set("SHUTTLE_HOST", "test-host")
+			env.Set("CODEX_THREAD_ID", "thread")
+			env.Set("SHUTTLE_FIBER_PATH", source.Path("source"))
+			// The ledger's canonical store hint must suffice even without registry
+			// membership: the worker's project cwd is in another store.
+			writeMessageIdentityLedger(t, env, []SessionProvenance{{Kind: "migrate", Host: "test-host", Harness: "codex", Session: "thread", Fiber: original.ID, UID: original.UID, FiberPath: oldPath, At: 1}})
+			a := newApp(env)
+			f, err := a.currentWorkerFiber()
+			if err != nil || f == nil || f.ID != "renamed" || f.UID != original.UID || !a.samePath(f.Path, newPath) {
+				t.Fatalf("renamed identity = %+v (%v)", f, err)
+			}
+			if out, err := runIn(t, env, sourceDir, "handoff"); err != nil {
+				t.Fatalf("renamed native exit: %v\n%s", err, out)
+			}
+			if !workerHasHandoff(mustRead(t, destination, "renamed")) {
+				t.Fatal("renamed destination not handed off")
+			}
+			if reused && workerHasHandoff(mustRead(t, destination, "destination")) {
+				t.Fatal("replacement at old path mutated")
+			}
+		})
+	}
+}
+
 func TestWorkerLedgerPathRequiresMatchingUID(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

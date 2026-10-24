@@ -63,6 +63,48 @@ func TestSendFilesRecordsExplicitDelivery(t *testing.T) {
 	}
 }
 
+func TestSendFilesNativeBindingOverridesInheritedPane(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"app", "different-terminal", "unbound", "manual-explicit-session"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			env, sink, artifact := sendFileTestEnv(t)
+			stubWorkerExitTmux(t, env, "unrelated-inherited-shuttle", artifact)
+			env.Set("SHUTTLE_TMUX_SESSION", "stale-dispatch-shuttle")
+			wantTmux, explicit := "", ""
+			switch mode {
+			case "app", "different-terminal":
+				if mode == "different-terminal" {
+					wantTmux = "moved-destination-shuttle"
+				}
+				writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "test-host", Harness: "codex", Session: "codex-session", Fiber: "destination", Kind: "migrate", Tmux: wantTmux, At: 2}})
+			case "manual-explicit-session":
+				env.Set("CODEX_THREAD_ID", "")
+				explicit = "human-selected-session"
+				wantTmux = "unrelated-inherited-shuttle"
+			}
+			if _, err := newApp(env).sendFiles([]string{artifact}, explicit); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(sink)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var event eventLine
+			if err := json.Unmarshal(raw, &event); err != nil {
+				t.Fatal(err)
+			}
+			wantSession := "codex-session"
+			if explicit != "" {
+				wantSession = explicit
+			}
+			if event.TmuxSession != wantTmux || event.SessionID != wantSession {
+				t.Fatalf("artifact attribution = %+v, want tmux %q session %q", event, wantTmux, wantSession)
+			}
+		})
+	}
+}
+
 func TestSendFilesFailuresNeverRecord(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"missing", "directory", "disabled", "identity", "unwritable"} {

@@ -79,7 +79,13 @@ func (a *app) workerBindingFiber(row SessionProvenance) (*felt.Felt, error) {
 		if !filepath.IsAbs(row.FiberPath) {
 			return nil, fmt.Errorf("session ledger fiber_path is not absolute")
 		}
-		return a.workerFiberAtPath(row.FiberPath, row.UID)
+		f, err := a.workerFiberAtPath(row.FiberPath, row.UID)
+		if err == nil || row.UID == "" {
+			return f, err
+		}
+		// A ledger path is a location hint; the immutable UID remains authority
+		// when a rename removes the path or another fiber takes its place.
+		return a.workerFiberByUID(row.UID, workerStoreRoot(row.FiberPath))
 	}
 	if row.UID != "" {
 		return a.workerFiberByUID(row.UID)
@@ -120,10 +126,15 @@ func workerStoreRoot(path string) string {
 	return ""
 }
 
-func (a *app) workerFiberByUID(uid string) (*felt.Felt, error) {
+func (a *app) workerFiberByUID(uid string, storeHints ...string) (*felt.Felt, error) {
 	stores, err := a.configuredFeltStores()
 	if err != nil {
 		return nil, err
+	}
+	for _, root := range storeHints {
+		if root != "" {
+			stores = append(stores, root)
+		}
 	}
 	if root, err := felt.ProjectRoot(a.env, a.dir); err == nil {
 		stores = append(stores, root)

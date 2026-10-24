@@ -382,17 +382,10 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 // carrier of the fiber ULID for dispatched CLI workers. It provides artifact
 // and terminal context; turn phases join only by harness session UUID.
 //
-// A pane's live name takes precedence over the immutable dispatch name.
-// Native app sessions without a pane use their current local ledger binding.
-// The environment-only compatibility fallback cannot detect a reassignment.
+// Native sessions use their current ledger binding, never an inherited pane.
+// Without native identity, a pane's live name takes precedence over dispatch
+// environment. The environment-only fallback cannot detect reassignment.
 func (a *app) currentTmuxSession() string {
-	if a.env.Getenv("TMUX") != "" {
-		s, err := a.tmuxCurrentSession()
-		if err != nil {
-			return ""
-		}
-		return s
-	}
 	if harness, id := a.harnessSessionFromEnv(); id != "" {
 		host, err := a.resolveOwnHost("")
 		if err != nil {
@@ -403,6 +396,13 @@ func (a *app) currentTmuxSession() string {
 			return ""
 		}
 		return row.Tmux
+	}
+	if a.env.Getenv("TMUX") != "" {
+		s, err := a.tmuxCurrentSession()
+		if err != nil {
+			return ""
+		}
+		return s
 	}
 	return strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION"))
 }
