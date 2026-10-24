@@ -5,7 +5,7 @@ defmodule ShuttleWeb.TranscriptSearchController do
 
   Full-text search over every Claude Code, Codex and Pi transcript on this
   host. The index and the ranking live in the CLI; this route runs
-  `shuttle transcript search <q> --json` and relays its document unchanged:
+  `shuttle transcript search <q> --json --no-index` and relays its document unchanged:
   `{query, index, hits, errors}`.
 
   `session` is repeatable and `fiber` is a single id, `since` is `30d` or a date, `harness` is `claude|codex|pi`,
@@ -19,8 +19,9 @@ defmodule ShuttleWeb.TranscriptSearchController do
 
   A CLI failure is a JSON error, never a crash: 400 for a missing query or an
   invalid argument, 502 when the CLI fails or prints something that is not the
-  contract, 504 when it outlives the bound. The bound is generous because the
-  first search on a host may build the index before it answers.
+  contract, 504 when it outlives the bound. Indexing belongs to the background
+  `Shuttle.TranscriptIndexer`; searches never start a corpus scan. The CLI's
+  actionable missing-index message is preserved in the error detail.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -42,7 +43,7 @@ defmodule ShuttleWeb.TranscriptSearchController do
   end
 
   defp run(conn, query, flags) do
-    args = ["transcript", "search", "--json"] ++ flags ++ ["--", query]
+    args = ["transcript", "search", "--json", "--no-index"] ++ flags ++ ["--", query]
 
     case Shuttle.CLI.run(args, timeout_ms: @timeout_ms) do
       {:ok, output} ->

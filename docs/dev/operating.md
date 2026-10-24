@@ -166,8 +166,32 @@ If a marker or ledger pairing is absent, preserve uncertainty rather than inferr
 
 `shuttle transcript index` indexes complete JSONL messages from the configured Claude Code, Codex, and Pi roots into a private, rebuildable SQLite FTS5 cache.
 Search ranks messages with BM25 and applies session, ledger-resolved fiber, age, project-prefix, and harness filters.
-A completed root scan enables automatic catch-up on subsequent searches; `--no-index` skips that walk, and `--rebuild` discards and rebuilds the derived data.
-SessionEnd events carrying a transcript path schedule only that file as an advisory background update.
+The daemon's supervised `Shuttle.TranscriptIndexer` starts a background scan five seconds after boot, then catches up five minutes after each completed pass.
+It runs `nice -n 10 shuttle transcript index --json`, with a 30-minute command timeout and a task deadline five seconds beyond that.
+Only one daemon-owned pass runs at a time; duplicate ticks during a pass are ignored.
+Task crashes, command failures, timeouts, malformed receipts, and partial-scan errors are logged and retried at the next interval.
+If the indexer restarts or the daemon stops, its in-flight task is killed and the command runner reaps the subprocess.
+
+Indexing never holds daemon readiness, polling, dispatch, or the boot quarantine.
+The board's search route uses `--no-index`, so a request doesn't initiate a corpus scan.
+While the first index is being built, the route preserves the CLI's actionable missing-index message in its JSON `detail`, which the board displays with the error.
+For an offline or immediate build, run `shuttle transcript index` explicitly; add `--rebuild` to discard and rebuild the derived data.
+
+Set `"transcript_index": false` in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`) to opt out of daemon indexing.
+Only literal JSON `false` disables it; an absent key defaults to enabled.
+The indexer reads this setting before each pass, including while disabled, so a change takes effect at its next tick without restarting the daemon.
+Opting out doesn't cancel a pass already running or prevent explicit CLI indexing.
+
+Inspect `transcript_indexer` in `GET /api/v1/version`:
+
+- `state` is `scheduled`, `running`, `idle`, `disabled`, or `unavailable`.
+- `last_run_at` is the completion time of the last attempted scan, or `null` before one finishes.
+- `duration_ms` is that attempt's elapsed time.
+- `ok` and `error` report its outcome, including incomplete scans; both are `null` before the first attempt.
+
+A running scan retains the previous outcome until it finishes.
+An opted-out pass leaves the last scan's outcome intact and reports `state: "disabled"`.
+If search keeps reporting a missing index, check this health report and daemon logs for a missing `shuttle`/`nice` executable, cache permissions, or a scan timeout.
 Checkpoints track complete-line byte offsets, file identity, size, mtime, and bounded prefix/tail fingerprints; unchanged files need only a stat, while replaced or truncated files are reindexed.
 Native transcripts are append-only: arbitrary edits inside a growing file that preserve both fingerprints require `--rebuild`.
 User and assistant text is indexed in full, tool calls are capped at 2 KiB, and tool results at 4 KiB; images, reasoning, signatures, request mirrors, and bookkeeping are excluded.

@@ -39,10 +39,21 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
       query = List.last(args)
 
       cond do
-        query == "boom" -> {"index is corrupt", 3}
-        query == "garbage" -> {"not json", 0}
-        query == "slow" -> {"", :timeout}
-        true -> {Jason.encode!(@doc_), 0}
+        query == "missing" ->
+          {"Transcript index is being built by the daemon; check /api/v1/version transcript_indexer",
+           1}
+
+        query == "boom" ->
+          {"index is corrupt", 3}
+
+        query == "garbage" ->
+          {"not json", 0}
+
+        query == "slow" ->
+          {"", :timeout}
+
+        true ->
+          {Jason.encode!(@doc_), 0}
       end
     end
   end
@@ -75,6 +86,7 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
              "transcript",
              "search",
              "--json",
+             "--no-index",
              "--session=s1",
              "--session=s2",
              "--fiber=a/b",
@@ -105,6 +117,16 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
              |> json_response(400)
 
     refute_received {:argv, _}
+  end
+
+  test "missing-index detail keeps the actionable daemon-building message for the board" do
+    body =
+      api_conn()
+      |> get("/api/v1/transcripts/search", %{"q" => "missing"})
+      |> json_response(502)
+
+    assert body["detail"] ==
+             "Transcript index is being built by the daemon; check /api/v1/version transcript_indexer"
   end
 
   test "CLI failure, non-contract output and timeout are JSON errors" do
