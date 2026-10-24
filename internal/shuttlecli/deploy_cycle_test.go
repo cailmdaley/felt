@@ -17,7 +17,11 @@ import (
 // shuttle-launch respawn loop in TestRemoteDeployRestartsInactiveSystemdUnit.
 func TestDeployCycleListenerChild(t *testing.T) {
 	port := os.Getenv("SHUTTLE_CYCLE_CHILD_PORT")
-	if port == "" {
+	pidFile := os.Getenv("SHUTTLE_CYCLE_CHILD_PID_FILE")
+	if port == "" || pidFile == "" {
+		return
+	}
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
 		return
 	}
 	server := &http.Server{Addr: "127.0.0.1:" + port, Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "alive") })}
@@ -54,6 +58,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := listener
+	pidFile := filepath.Join(root, "listener.pid")
 	socket := filepath.Join(root, "tmux.sock")
 	write := func(path, body string) {
 		t.Helper()
@@ -83,12 +88,12 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(filepath.Join(root, "bin", "rel", "bin", "shuttled"), "#!/bin/sh\nexit 0\n")
-	startLoop := exec.Command("/usr/bin/env", "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"), "SHUTTLE_DIR="+root, "SHUTTLE_DATA_DIR="+data, "SHUTTLE_PORT="+port, "SHUTTLE_CYCLE_CHILD_PORT="+port, filepath.Join(bin, "shuttle-launch"), "--tmux")
+	startLoop := exec.Command("/usr/bin/env", "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"), "SHUTTLE_DIR="+root, "SHUTTLE_DATA_DIR="+data, "SHUTTLE_PORT="+port, "SHUTTLE_CYCLE_CHILD_PORT="+port, "SHUTTLE_CYCLE_CHILD_PID_FILE="+pidFile, filepath.Join(bin, "shuttle-launch"), "--tmux")
 	if out, err := startLoop.CombinedOutput(); err != nil {
 		t.Fatalf("start real tmux loop: %v\n%s", err, out)
 	}
 	t.Cleanup(func() { _ = exec.Command(tmux, "-S", socket, "kill-server").Run() })
-	env := []string{"HOME=" + home, "PATH=" + bin + ":" + os.Getenv("PATH"), "SHUTTLE_DIR=" + root, "SHUTTLE_DATA_DIR=" + data, "SHUTTLE_PORT=" + port, "SHUTTLE_CYCLE_CHILD_PORT=" + port}
+	env := []string{"HOME=" + home, "PATH=" + bin + ":" + os.Getenv("PATH"), "SHUTTLE_DIR=" + root, "SHUTTLE_DATA_DIR=" + data, "SHUTTLE_PORT=" + port, "SHUTTLE_CYCLE_CHILD_PORT=" + port, "SHUTTLE_CYCLE_CHILD_PID_FILE=" + pidFile}
 	waitHealthy := func(want bool) int {
 		t.Helper()
 		deadline := time.Now().Add(8 * time.Second)
@@ -97,7 +102,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 			if err == nil {
 				response.Body.Close()
 				if want {
-					return processListeningPID(t, port)
+					return processListeningPID(t, pidFile)
 				}
 			}
 			if !want && err != nil {
@@ -146,11 +151,11 @@ func netListenLoopback() (string, error) {
 	return strconv.Itoa(port), nil
 }
 
-func processListeningPID(t *testing.T, port string) int {
+func processListeningPID(t *testing.T, pidFile string) int {
 	t.Helper()
-	out, err := exec.Command("lsof", "-ti:"+port, "-sTCP:LISTEN").Output()
+	out, err := os.ReadFile(pidFile)
 	if err != nil {
-		t.Fatalf("listener PID: %v", err)
+		t.Fatalf("listener PID file: %v", err)
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(out)))
 	if err != nil {
