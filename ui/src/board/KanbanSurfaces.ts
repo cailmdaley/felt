@@ -1246,7 +1246,8 @@ export class KanbanSurfaceRenderer {
     end.className = 'kbn-cluster-item-verdicts'
     markVerdictHost(end, card)
     end.append(this.cardMenu(card, 'resting', el, isStale))
-    el.append(end)
+    // Full-width thread children begin the next line; actions stay with the title.
+    el.insertBefore(end, el.querySelector(':scope > .kbn-thread-tree'))
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('button')) return
@@ -1805,8 +1806,8 @@ export class KanbanSurfaceRenderer {
     // withholding after a restart. Reads as "held, awaiting release" — distinct
     // from a live worker's pill and from an idle-active card (mutually
     // exclusive with `tmuxSession`: held means parked, not running). The badge
-    // IS the release control: hover flips `⏹︎ held` → `▶ release`, click POSTs
-    // the release to the card's OWNING host. Release is global per daemon (one
+    // is the release control: click POSTs the release to the card's owning
+    // host. Release is global per daemon (one
     // restart parks the whole board, one click frees every held launch on that
     // host), so `title` names that so a single click isn't a surprise.
     if (card.held) {
@@ -1825,13 +1826,7 @@ export class KanbanSurfaceRenderer {
         `Held by boot quarantine — a fresh launch parked until release${since}. ` +
         `The daemon restarted; click to release${host ? ` ${host}` : ''} and dispatch ` +
         'every held launch on that host.'
-      const heldLabel = document.createElement('span')
-      heldLabel.className = 'kbn-card-held-label'
-      heldLabel.textContent = '⏹︎ held'
-      const releaseLabel = document.createElement('span')
-      releaseLabel.className = 'kbn-card-held-release'
-      releaseLabel.textContent = '▶ release'
-      heldEl.append(heldLabel, releaseLabel)
+      heldEl.textContent = '⏹︎ held'
       heldEl.addEventListener('click', (e) => {
         e.stopPropagation()
         heldEl.disabled = true

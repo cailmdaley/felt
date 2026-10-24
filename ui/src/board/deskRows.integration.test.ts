@@ -75,6 +75,18 @@ describe('a Resting line takes its verdicts', () => {
     expect(labels('todo')).toEqual([])
     expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
   })
+  it('keeps a Resting family’s menu on its title line, ahead of full-width subentries and tree', () => {
+    const root = resting({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
+    const child = card({ id: 'family/child', orchestrator: 'family', tags: ['pinned'], status: 'active' })
+    const data = response({ stash: [root], threads: [child] })
+    const surfaces = new KanbanSurfaceRenderer(options(data))
+    const row = surfaces.renderStashSection(data.stash, {}).querySelector<HTMLElement>('[data-fiber-id="family"]')!
+    const end = row.querySelector<HTMLElement>('.kbn-cluster-item-verdicts')!
+    const trees = [...row.querySelectorAll<HTMLElement>(':scope > .kbn-thread-tree')]
+    expect(trees).toHaveLength(2)
+    for (const tree of trees) expect(end.compareDocumentPosition(tree) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(end.dataset.verdictKey).toBeTruthy()
+  })
   it('sends the verdict through the board transition, without opening the card', () => {
     const o = options(data)
     const root = new KanbanSurfaceRenderer(o).renderStashSection(data.stash, {})

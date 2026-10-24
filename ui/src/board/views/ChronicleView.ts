@@ -3494,6 +3494,7 @@ class ChronicleView implements TemporalView {
       track.classList.toggle('chr-track-hot', on)
     }
     for (const el of [label, track]) {
+      // Desk hover policy exception: Chronicle only tints this settled cycle; no content or geometry changes.
       el.addEventListener('mouseenter', () => hot(true))
       el.addEventListener('mouseleave', () => hot(false))
     }

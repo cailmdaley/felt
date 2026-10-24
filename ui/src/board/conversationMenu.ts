@@ -30,6 +30,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     boxShadow: '0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent)', minWidth: '220px', fontFamily: 'var(--font-main, serif)',
   })
   const items: HTMLElement[] = []
+  const anchorBounds = anchor.getBoundingClientRect()
   let closed = false
   const dismiss = (restore = false): void => {
     if (closed) return
@@ -38,12 +39,18 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     window.removeEventListener('pointerdown', outside, true)
     window.removeEventListener('keydown', keyboard, true)
     window.removeEventListener('resize', close)
-    window.removeEventListener('scroll', close, true)
+    window.removeEventListener('scroll', scrolled, true)
     if (dismissOpenMenu === close) dismissOpenMenu = undefined
     anchor.setAttribute('aria-expanded', 'false')
-    if (restore && anchor.isConnected) anchor.focus()
+    if (restore && anchor.isConnected) anchor.focus({ preventScroll: true })
   }
   const close = (): void => dismiss()
+  const scrolled = (): void => {
+    // A click can queue a scroll event before opening the menu. Only actual
+    // anchor movement invalidates its position, not delivery of that event.
+    const next = anchor.getBoundingClientRect()
+    if (next.left !== anchorBounds.left || next.top !== anchorBounds.top) dismiss()
+  }
   const outside = (e: Event): void => {
     // The portal must not trigger the card's click-away handling.
     if (menu.contains(e.target as Node)) e.stopPropagation()
@@ -60,7 +67,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       const current = items.indexOf(document.activeElement as HTMLElement)
       const index = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
         : (current + (e.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
-      items[index].focus()
+      items[index].focus({ preventScroll: true })
     }
     // Native Enter/Space activate the focused button; Desk verb keys stay beneath the menu.
     if (menu.contains(e.target as Node)) e.stopPropagation()
@@ -95,8 +102,8 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   window.addEventListener('pointerdown', outside, true)
   window.addEventListener('keydown', keyboard, true)
   window.addEventListener('resize', close)
-  window.addEventListener('scroll', close, true)
-  ;(items[0] ?? menu).focus()
+  window.addEventListener('scroll', scrolled, true)
+  ;(items[0] ?? menu).focus({ preventScroll: true })
   return close
 }
 

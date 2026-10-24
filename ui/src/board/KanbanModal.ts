@@ -2247,9 +2247,10 @@ export class KanbanModal {
     // The view keys work from the reader too: 1 or 2 parks it, 3 comes back to it.
     if (this.workspace?.isActive) { this.handleViewHotkey(e); return }
     const deskKey = this.activeViewId === 'desk' && !e.isComposing && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !(e.target instanceof HTMLElement && isTypingTarget(e.target))
+    const nativeControl = (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
     // Enter or → on a card whose thread family is folded opens the family;
     // open, Enter opens the constitution and → moves on, as on any card.
-    if (deskKey && (e.key === 'Enter' || e.key === 'ArrowRight') && !e.repeat && expandThreadFamily(this.deskKeyboard?.selectedRow ?? null)) {
+    if (deskKey && !nativeControl && (e.key === 'Enter' || e.key === 'ArrowRight') && !e.repeat && expandThreadFamily(this.deskKeyboard?.selectedRow ?? null)) {
       e.preventDefault()
       e.stopPropagation()
       return
@@ -2313,7 +2314,7 @@ export class KanbanModal {
         if (pin) { pin.click(); e.preventDefault(); e.stopPropagation() }
         return
       }
-      const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
+      const nativeActivation = e.key === 'Enter' && nativeControl
       if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
         e.preventDefault()
         e.stopPropagation()

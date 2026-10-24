@@ -142,6 +142,7 @@ export class TabStrip {
     this.motion = typeof window.matchMedia === 'function'
       ? window.matchMedia('(prefers-reduced-motion: reduce)')
       : null
+    // Desk hover policy exceptions: the document workspace keeps its tab tooltips.
     this.el.addEventListener('pointerover', this.onPointerOver)
     this.el.addEventListener('pointerleave', this.onPointerLeave)
     this.el.addEventListener('pointerdown', this.hideTip)

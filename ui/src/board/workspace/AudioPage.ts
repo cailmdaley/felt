@@ -103,6 +103,7 @@ export class AudioPage {
       this.hover.textContent = mediaTime(fraction * audio.duration)
       this.hover.style.left = `${fraction * 100}%`
     })
+    // Desk hover policy exception: clears the document workspace's waveform time cursor.
     this.waveform.addEventListener('pointerleave', () => { this.hover.hidden = true })
     this.waveform.addEventListener('keydown', event => {
       if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {

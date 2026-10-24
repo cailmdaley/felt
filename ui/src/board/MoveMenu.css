@@ -100,9 +100,9 @@
 }
 .kbn-move-item:hover,
 .kbn-move-item:focus-visible {
-  outline: none;
   background: color-mix(in srgb, var(--kbn-owed-bright) 14%, transparent);
 }
+.kbn-move-item:focus-visible { outline: none; }
 .kbn-move-item-label { font-weight: 600; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {

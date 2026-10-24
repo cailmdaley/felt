@@ -31,7 +31,8 @@
 .kbn-thread-tree-foot[hidden] { display: none; }
 .kbn-thread-tree-more { min-width: 0; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kbn-thread-tree .kbn-thread-tree-foot .kbn-thread-more { display: inline; padding: 0; border-radius: 2px; cursor: pointer; font-size: inherit; }
-.kbn-thread-tree .kbn-thread-more.kbn-thread-fold:hover, .kbn-thread-tree .kbn-thread-more.kbn-thread-fold[aria-expanded='true'] { color: var(--kbn-ink-muted); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; }
+.kbn-thread-tree .kbn-thread-more.kbn-thread-fold:hover { color: var(--kbn-ink-muted); }
+.kbn-thread-tree .kbn-thread-more.kbn-thread-fold[aria-expanded='true'] { color: var(--kbn-ink-muted); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); text-underline-offset: 2px; }
 .kbn-thread-tree .kbn-thread-tree-foot .kbn-thread-all { flex: none; margin-left: auto; }
 .kbn-thread-tree .kbn-thread-more.kbn-thread-all { color: var(--kbn-ink-muted); font-style: normal; }
 .kbn-thread-tree[hidden], .kbn-thread-more[hidden] { display: none; }
@@ -54,7 +55,8 @@
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-row:is(.kbn-key-selected, :focus-visible) { align-items: flex-start; height: auto; padding-top: calc((var(--tree-line) - 1.2em) / 2); padding-bottom: 3px; }
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-row:is(.kbn-key-selected, :focus-visible) > .kbn-tree-mark { margin-top: calc(0.6em - 3px); }
 .kbn-thread-tree .kbn-thread-row:is(.kbn-key-selected, :focus-visible) > .kbn-thread-name { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.kbn-thread-tree .kbn-thread-row:hover, .kbn-thread-tree .kbn-thread-row:focus-visible, .kbn-thread-tree .kbn-thread-row.kbn-key-selected { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); outline: none; }
+.kbn-thread-tree .kbn-thread-row:hover, .kbn-thread-tree .kbn-thread-row:focus-visible, .kbn-thread-tree .kbn-thread-row.kbn-key-selected { color: var(--kbn-ink); background: color-mix(in srgb, var(--kbn-plate) 70%, transparent); }
+.kbn-thread-tree .kbn-thread-row:focus-visible, .kbn-thread-tree .kbn-thread-row.kbn-key-selected { outline: none; }
 .kbn-thread-tree .kbn-thread-row.kbn-key-selected { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-ink) 30%, transparent); }
 .kbn-thread-tree .kbn-thread-row[data-thread-state='waiting'] { color: var(--kbn-ink); font-weight: 600; }
 .kbn-thread-tree .kbn-thread-row:is([data-thread-state='drafts'], [data-thread-state='roles'], [data-thread-state='resting']) { color: var(--kbn-ink-muted); }
@@ -77,51 +79,35 @@
 /* A cap's fold and the archived count: the tree's quietest lines. */
 .kbn-thread-tree .kbn-thread-more { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 0 3px; font: inherit; font-size: calc(12.5px * var(--kbn-type-scale, 1)); font-style: italic; color: var(--kbn-ink-faint); }
 .kbn-thread-tree .kbn-thread-more .kbn-tree-mark { opacity: .55; }
-.kbn-thread-tree .kbn-thread-more:hover, .kbn-thread-tree .kbn-thread-more:focus-visible { color: var(--kbn-ink); text-decoration: none; }
+.kbn-thread-tree .kbn-thread-more:hover, .kbn-thread-tree .kbn-thread-more:focus-visible { color: var(--kbn-ink); }
+.kbn-thread-tree .kbn-thread-more:focus-visible { text-decoration: none; }
 .kbn-thread-tree .kbn-thread-more:focus { outline: none; }
 .kbn-thread-tree .kbn-thread-more:focus-visible { outline: 1px solid color-mix(in srgb, var(--kbn-ink) 30%, transparent); outline-offset: 1px; }
 .kbn-tree-archived { font-size: inherit; }
 /* What waits for a constitution's next worker: a count in the faint ink, never a badge. */
 .kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: calc(11px * var(--kbn-type-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
-/* The pin waits at the line's end, out of sight until the line is pointed at or focused. */
+/* The pin stays at the line's end, quietly drawn on every device. */
 .kbn-thread-tree .kbn-tree-line > .kbn-thread-pin { position: static; align-self: center; margin-left: -20px; width: 16px; height: 16px; }
-
-/* What a thread last said, under the pointer or the keyboard: state and age, then the agent's words. */
-.kbn-thread-whisper {
-  position: fixed; z-index: 60; box-sizing: border-box; width: min(320px, calc(100vw - 16px)); padding: 7px 10px 8px;
-  background: var(--kbn-paper-bright); color: var(--kbn-ink-soft); border: 1px solid var(--kbn-rule-strong); border-radius: 3px;
-  box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--kbn-shade) 45%, transparent);
-  font-family: var(--font-serif, 'EB Garamond', serif); pointer-events: none;
-}
-.kbn-thread-whisper[hidden] { display: none; }
-.kbn-thread-whisper-head { font-size: calc(10.5px * var(--kbn-type-scale, 1)); letter-spacing: .06em; font-variant: small-caps; text-transform: lowercase; color: var(--kbn-ink-muted); }
-.kbn-thread-whisper[data-thread-state='waiting'] .kbn-thread-whisper-head { color: var(--kbn-owed-ink); }
-.kbn-thread-whisper-body { margin: 3px 0 0; font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 1.38; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.kbn-thread-whisper-body[hidden] { display: none; }
-:root[data-ws-appearance='dark'] .kbn-thread-whisper { background: var(--kbn-sheet); }
 
 /* A seat with threads: the chip, then its thread badge, whose peek drops beneath both. */
 .kbn-role-seat { flex: 0 1 auto; display: inline-flex; flex-wrap: wrap; align-items: center; align-self: flex-start; gap: 4px; max-width: 360px; min-width: 0; }
 .kbn-role-threads { display: contents; }
 .kbn-thread-more { display: block; margin-left: 8px; font: inherit; font-size: 11px; color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 4px 0; cursor: pointer; }
-.kbn-thread-more:hover { color: var(--kbn-ink); text-decoration: underline; }
+.kbn-thread-more:hover { color: var(--kbn-ink); }
 .kbn-thread-mark { font-size: 10px; color: var(--kbn-ink-muted); border: 1px dashed var(--kbn-rule); border-radius: 3px; padding: 1px 4px; white-space: nowrap; }
 /* A phone draws each seat as a full-width line: the chip takes what the badge leaves, and the peek drops beneath both. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-role-seat { max-width: none; width: 100%; flex-wrap: wrap; }
   .kbn-role-seat > .kbn-role-chip { flex: 1 1 0; width: auto; min-width: 0; }
 }
-/* A thread row and its pin. The pin waits out of sight until the row is pointed at or focused; a pinned row keeps it, filled. */
+/* A thread row and its pin; a pinned row fills its pin. */
 .kbn-thread-item { position: relative; display: flex; align-items: flex-start; min-width: 0; }
 .kbn-thread-item > .kbn-thread-row { flex: 1 1 auto; min-width: 0; padding-right: 22px; }
-.kbn-thread-pin { position: absolute; top: 4px; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kbn-ink-muted); cursor: pointer; opacity: 0; }
+.kbn-thread-pin { position: absolute; top: 4px; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kbn-ink-muted); cursor: pointer; opacity: 0.45; }
 .kbn-thread-pin svg { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; }
-.kbn-thread-item:hover > .kbn-thread-pin, .kbn-thread-item:focus-within > .kbn-thread-pin, .kbn-thread-pin[aria-pressed='true'] { opacity: 1; }
 .kbn-thread-pin:hover, .kbn-thread-pin:focus-visible { color: var(--kbn-ink); background: var(--kbn-plate); }
 .kbn-thread-pin[aria-pressed='true'] { color: var(--kbn-ink); }
 .kbn-thread-pin[aria-pressed='true'] svg { fill: currentColor; }
-/* With no hover to reveal it, the pin stays in reach, quietly. */
-@media (hover: none) { .kbn-thread-pin { opacity: 0.45; } }
 /* A phone draws the same tree, a touch taller a line. */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-thread-tree { --tree-line: 30px; }

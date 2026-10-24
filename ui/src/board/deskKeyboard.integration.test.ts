@@ -120,8 +120,10 @@ describe('Desk action menu keyboard controls', () => {
     draw(response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] }))
     const row = document.querySelector<HTMLElement>('[data-card-uid="family"]')!
     const button = row.querySelector<HTMLButtonElement>('.kbn-card-menu')!
+    press('j')
+    expect(selected()).toBe('family')
     const choose = (text: string) => {
-      button.click()
+      activate(button, 'Enter')
       const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === text)!
       expect(action).toBeDefined()
       activate(action, ' ')

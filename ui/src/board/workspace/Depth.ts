@@ -17,6 +17,7 @@ export class WorkspaceDepth {
   constructor(root: HTMLElement) {
     this.root = root
     document.addEventListener('pointermove', this.pointer, { passive: true })
+    // Desk hover policy exception: resets drift only while the document workspace is raised.
     document.addEventListener('pointerleave', this.leave)
     window.addEventListener('blur', this.leave)
     this.motion.addEventListener('change', this.preference)

@@ -114,11 +114,6 @@ async function choose(p, label) {
   await p.waitForFunction(label => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === label, displayLabel(label))
 }
 async function poll(p, fn, arg) { await p.waitForFunction(fn, arg, { timeout: 15000, polling: 40 }) }
-async function waitOpacity(p, locator, value) {
-  const element = await locator.elementHandle()
-  await p.waitForFunction(({ element, value }) => getComputedStyle(element).opacity === value,
-    { element, value }, { timeout: 15000, polling: 40 })
-}
 // The board bar: one row of view tabs, Find, the view's centre and Settings, on every view.
 const barTab = (p, view) => p.locator(`.kbn-viewtabs .kbn-viewtab[data-view="${view}"]`)
 // Hand the keyboard back to the app (no field, no frame holds it).
@@ -258,80 +253,92 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
 }, viewport)
 
-test("Awaiting-review actions reveal at the row's end without shifting; the rest of the row opens the card", async p => {
-  const drafts = p.locator('[data-column="drafts"]')
-  const flight = p.locator('[data-column="inFlight"]')
+test('Desk action menus stay drawn without shifting on hover and support native Enter and Space', async p => {
   const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
-  const actions = review.locator('.kbn-card-review-meta-actions')
-  const group = review.locator('.kbn-card-hover-actions')
-  assert.equal(await drafts.locator('.kbn-card-review-meta-actions').count(), 0)
-  // Work in flight reveals the same pair at its row's end, so a card can be cleared from the Desk.
-  const flightGroup = flight.locator('.kbn-card-hover-actions').first()
-  assert.equal(await flightGroup.evaluate(el => getComputedStyle(el).opacity), '0')
-  await flight.locator('.kbn-card > .kbn-card-meta').first().hover()
-  await waitOpacity(p, flightGroup, '1')
-  assert.deepEqual(await flightGroup.locator('.kbn-card-review-meta-actions button').allTextContents(), ['Temper', 'Discard'])
+  const button = review.locator('.kbn-card-menu')
   await p.mouse.move(0, 0)
-  assert.equal(await actions.locator('button').count(), 2)
-  await waitOpacity(p, group, '0')
-  const before = await actions.evaluate(el => {
-    const { width, height } = el.getBoundingClientRect()
-    return { width, height }
-  })
-  // The middle of the row is the way into the card: no verdict surfaces under it.
-  const row = await review.boundingBox()
-  await p.mouse.move(row.x + row.width * 0.3, row.y + row.height / 2)
-  await p.waitForTimeout(150)
-  assert.equal(await group.evaluate(el => getComputedStyle(el).opacity), '0')
-  assert.equal(await group.evaluate(el => getComputedStyle(el).pointerEvents), 'none')
-  const end = await review.locator('.kbn-card-meta').boundingBox()
-  await p.mouse.move(end.x + end.width / 2, end.y + end.height / 2)
-  await waitOpacity(p, group, '1')
-  assert.deepEqual(await actions.evaluate(el => {
-    const { width, height } = el.getBoundingClientRect()
-    return { width, height }
-  }), before)
-  await p.mouse.move(0, 0)
-  await waitOpacity(p, group, '0')
-  await actions.locator('button').first().focus()
-  await waitOpacity(p, group, '1')
-  await p.evaluate(() => document.activeElement?.blur())
-  await waitOpacity(p, group, '0')
-  // The keyboard selection previews the card; its verdicts are keys.
-  await p.keyboard.press('j')
-  assert.ok(await review.evaluate(el => el.classList.contains('kbn-key-selected')))
-  await p.locator('.kbn-preview .kbn-preview-card').waitFor()
-  assert.equal(await group.evaluate(el => getComputedStyle(el).opacity), '0')
+  const before = await button.boundingBox()
+  const words = await review.innerText()
+  await review.hover()
+  assert.deepEqual(await button.boundingBox(), before)
+  assert.equal(await review.innerText(), words)
+  assert.equal(await p.getByRole('menu').count(), 0)
+  for (const key of ['Enter', 'Space']) {
+    await button.focus()
+    await p.keyboard.press(key)
+    const menu = p.getByRole('menu')
+    await menu.waitFor()
+    assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
+    assert.equal(await menu.getByRole('menuitem').first().evaluate(el => el === document.activeElement), true)
+    await p.keyboard.press('ArrowDown')
+    assert.equal(await menu.getByRole('menuitem', { name: 'Discard', exact: true }).evaluate(el => el === document.activeElement), true)
+    await p.keyboard.press('Escape')
+    assert.equal(await p.getByRole('menu').count(), 0)
+    assert.equal(await button.evaluate(el => el === document.activeElement), true)
+  }
+  await button.press('Enter')
+  await p.keyboard.press('End')
+  await p.keyboard.press('Space')
+  await p.locator('.kbn-rest-popover').waitFor()
   await p.keyboard.press('Escape')
-  await p.locator('.kbn-preview').waitFor({ state: 'hidden' })
 }, undefined, undefined, 'reduce')
 
-test('Awaiting-review actions stay visible and thumb-sized without hover', async p => {
-  // The column is a folio on the phone: show it, so every probe lands on a button really on screen.
+test('Desk action menus offer the same verbs on a phone without hover', async p => {
   await chooseDeskColumn(p, 2)
-  const actions = p.locator('[data-column="awaitingReview"] .kbn-card-review-meta-actions').first()
-  assert.equal(await actions.evaluate(el => getComputedStyle(el).opacity), '1')
-  // A compact 28 px plate inside a 44 px button, whose reach does not grow the card's meta row.
-  for (const button of await actions.locator('button').all()) {
-    const reach = await button.evaluate(el => {
-      const box = el.getBoundingClientRect(), x = box.left + box.width / 2
-      const plate = getComputedStyle(el, '::before'), meta = el.closest('.kbn-card-meta').getBoundingClientRect()
-      const hit = y => el.contains(document.elementFromPoint(x, y))
-      return {
-        onScreen: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
-        height: box.height, plate: parseFloat(plate.height) + parseFloat(plate.borderTopWidth) + parseFloat(plate.borderBottomWidth),
-        meta: meta.height, top: hit(box.top + 1), bottom: hit(box.bottom - 1),
-      }
-    })
-    assert.ok(reach.onScreen, `the verdict is on screen: ${JSON.stringify(reach)}`)
-    assert.ok(reach.height >= 44 && reach.top && reach.bottom, `verdict touch target: ${JSON.stringify(reach)}`)
-    assert.equal(reach.plate, 28, 'the plate reads compact')
-    assert.equal(reach.meta, 28, 'the touch reach does not grow the meta row')
+  await p.locator('[data-column="awaitingReview"] .kbn-card-menu').first().click()
+  const menu = p.getByRole('menu')
+  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
+  for (const item of await menu.getByRole('menuitem').all()) {
+    const reach = await item.boundingBox()
+    assert.ok(reach.height >= 38 && reach.width >= 200)
+    assert.ok(reach.x >= 0 && reach.x + reach.width <= 390)
   }
-  // Without hover, in-flight cards keep their meta row to the worker.
+  await p.keyboard.press('Escape')
   await chooseDeskColumn(p, 1)
-  assert.equal(await p.locator('[data-column="inFlight"] .kbn-card-review-meta-actions').first().evaluate(el => getComputedStyle(el).display), 'none')
+  await p.locator('[data-column="inFlight"] .kbn-card-menu').first().click()
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
+
+test('Desk action menus preserve native activation on selected folded families and stay ahead of Resting subentries', async p => {
+  const fixture = new URL(url); fixture.searchParams.set('example', 'threads')
+  await p.goto(fixture.href)
+  const family = p.locator('.kbn-card').filter({ hasText: name })
+  const button = family.locator('.kbn-card-menu')
+  await button.waitFor()
+  await p.keyboard.press('j')
+  assert.ok(await family.evaluate(el => el.classList.contains('kbn-key-selected')))
+  await button.focus()
+  await p.keyboard.press('Enter')
+  await p.getByRole('menu').waitFor()
+  assert.equal(await family.locator('.kbn-thread-badge').getAttribute('aria-expanded'), 'false')
+  await p.keyboard.press('Escape')
+  assert.ok(await button.evaluate(el => el === document.activeElement))
+  await p.keyboard.press('Space')
+  await p.keyboard.press('End')
+  await p.keyboard.press('Enter')
+  assert.equal(await family.locator('.kbn-thread-badge').getAttribute('aria-expanded'), 'true')
+  await family.locator('.kbn-thread-badge').click()
+
+  // Stage a Resting snapshot with the same family and pinned/waiting entries.
+  await p.evaluate(name => {
+    const modal = window.__harness.modal, data = modal.lastResponse
+    const card = data.now.awaitingReview.find(card => card.name === name)
+    data.now.awaitingReview = data.now.awaitingReview.filter(candidate => candidate !== card)
+    data.stash.push({ ...card, status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' })
+    modal.render(data)
+  }, name)
+  const resting = p.locator('.kbn-cluster-item').filter({ hasText: name })
+  const geometry = await resting.evaluate(row => {
+    const button = row.querySelector('.kbn-card-menu').getBoundingClientRect()
+    const title = row.querySelector('.kbn-cluster-item-title').getBoundingClientRect()
+    const entries = row.querySelector('.kbn-thread-subentries').getBoundingClientRect()
+    return { buttonTop: button.top, titleBottom: title.bottom, entriesTop: entries.top }
+  })
+  assert.ok(geometry.buttonTop < geometry.titleBottom, JSON.stringify(geometry))
+  assert.ok(geometry.buttonTop < geometry.entriesTop, JSON.stringify(geometry))
+  await resting.locator('.kbn-card-menu').click()
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Expand family'])
+})
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
   await open(p)
@@ -1473,11 +1480,11 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   if (surface === 'fiber') { await open(p); await choose(p, 'Constitution') }
   const controls = surface === 'Desk'
-    ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-review-meta-actions')
+    ? p.getByRole('menu')
     : selected(p).locator('.kbn-ctl-verdict')
-  // A Desk row offers its verdicts at its right end.
-  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta').hover()
-  await controls.getByRole('button', { name: /Discard/ }).click({ force: true })
+  // A Desk row offers its verdicts through the persistent action button.
+  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-menu').click()
+  await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
   const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
   assert.equal(await p.locator('.ws-verdict-toasts').count(), 0, 'no floating line')
