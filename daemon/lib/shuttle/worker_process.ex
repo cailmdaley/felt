@@ -51,7 +51,7 @@ defmodule Shuttle.WorkerProcess do
   def script_path(session) when is_binary(session) do
     Path.join(
       System.tmp_dir!(),
-      "#{@script_prefix}#{session}.#{System.unique_integer([:positive])}.sh"
+      "#{@script_prefix}#{session}.#{:binary.decode_unsigned(:crypto.strong_rand_bytes(12))}.sh"
     )
   end
 
