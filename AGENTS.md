@@ -78,8 +78,11 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   `accept` and `resume` run `shuttle <verb> <fiber> --local` inside the owning
   daemon's Poller, serialized with its state changes. A poll read in flight sees
   the old document or the new one, whose status and `handed_off_at` land in
-  one atomic write. The daemon writes a document itself only on worker exit or
-  force-dispatch (`Shuttle.LifecycleStore`). At boot, `shuttle contract`
+  one atomic write. `Shuttle.LifecycleStore` owns worker-exit, force-dispatch and migration writes.
+  Migration applies two locked document patches through `shuttle migrate-documents`
+  and journals resource ownership before changing the backend; unresolved recovery
+  holds every launch, including force, cron and previously observed workers.
+  At boot, `shuttle contract`
   checks the Go CLI against `daemon/lib/shuttle/contract.ex`; the daemon holds
   on a skew.
 - **Live host-addressed content and control use `Shuttle.OriginRouter`.**

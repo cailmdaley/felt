@@ -90,9 +90,16 @@ The destination becomes active with the moved `session_uuid` and a new `dispatch
 The source loses its session identity and stays active for a fresh worker from `## Status`; `rest: true` leaves it open with `horizon: stashed`, and `disabled: true` leaves it open in Drafts.
 The two options are mutually exclusive.
 
+A durable migration journal pins the session identity, backend and before/after values of touched fields before the backend moves.
+Recovery finishes or reverses interrupted moves before ordinary adoption and dispatch.
+Fiber changes use both documents' advisory locks and preserve their current bodies and untouched fields; the journal never stores historical bodies.
+An unresolved migration holds every launch, including force-dispatch, cron and previously observed workers.
+Restore the recorded backend or reconcile conflicting fiber fields, then restart the daemon to retry recovery; keep the journal and surviving worker intact.
+
 Success returns `{ok: true, from, to, session_uuid}`.
 A retry identifying the same session and destination succeeds without moving it again.
 Refusals carry a `reason` and a corrective message, including `not_installed`, `already_running`, `other_host`, `same_fiber`, and `surface_unsupported`.
+Ordinary refusals return 422; incomplete rollback or unresolved recovery returns 503 because the assignment needs inspection rather than a blind retry.
 Messages to the destination follow the moved session; messages to the source wait for its next worker.
 Messages to the exact session address keep reaching the same conversation.
 No conversation context is copied or merged.
