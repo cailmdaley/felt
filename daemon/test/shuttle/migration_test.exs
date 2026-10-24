@@ -21,7 +21,17 @@ defmodule Shuttle.MigrationTest do
               args
             end
 
-          Shuttle.Env.cmd("tmux", ["-L", socket | args], Keyword.delete(opts, :timeout_ms))
+          result =
+            Shuttle.Env.cmd("tmux", ["-L", socket | args], Keyword.delete(opts, :timeout_ms))
+
+          if hd(args) == "new-session" do
+            case Shuttle.Env.app(:migration_spawn_observer) do
+              pid when is_pid(pid) -> send(pid, {:migration_fixture_spawn, result})
+              _ -> :ok
+            end
+          end
+
+          result
 
         command == "ps" and is_binary(Shuttle.Env.app(:migration_tmux_socket)) ->
           Shuttle.Env.cmd(command, args, Keyword.delete(opts, :timeout_ms))
@@ -372,8 +382,11 @@ defmodule Shuttle.MigrationTest do
     {:ok, procs} = WorkerProcess.scan(Runner)
     assert WorkerProcess.session_process(procs, source) == nil
     assert WorkerProcess.session_process(procs, dest) != nil
-    # The real tmux launch is replaced with a sleeping fixture by this runner.
-    assert {:ok, _} = Poller.dispatch_fiber(poller, "source", force: true)
+    # The ordinary poll launches a sleeping fixture, without force-dispatch.
+    Env.put_app_env(:migration_spawn_observer, self())
+    send(poller, :run_poll_cycle)
+    assert_receive {:migration_fixture_spawn, {_, 0}}, 30_000
+    assert %{session: ^source} = Poller.worker_status(poller, "source")
 
     {fresh_pid, 0} =
       Runner.cmd("tmux", ["display-message", "-p", "-t", source <> ":0.0", "\#{pane_pid}"], [])
