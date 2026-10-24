@@ -100,18 +100,18 @@ func (a *app) transcriptIndexCmd() *cobra.Command {
 		return err
 	}}
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "discard and rebuild the index")
-	cmd.Flags().StringVar(&file, "file", "", "index one transcript file (hook use)")
-	cmd.Flags().StringVar(&harness, "harness", "", "transcript harness (hook use)")
+	cmd.Flags().StringVar(&file, "file", "", "index one transcript file")
+	cmd.Flags().StringVar(&harness, "harness", "", "transcript harness")
 	_ = cmd.Flags().MarkHidden("file")
 	_ = cmd.Flags().MarkHidden("harness")
 	return cmd
 }
 
 func (a *app) transcriptSearchCmd() *cobra.Command {
-	var sessions []string
+	var sessions, excludeSessions []string
 	var fiber, since, project, harness string
 	var limit int
-	var noIndex bool
+	var noIndex, includeSelf bool
 	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		query := strings.Join(args, " ")
 		if limit < 1 {
@@ -145,11 +145,11 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 			return err
 		}
 		if !ready && stats.UpdatedAt == "" && stats.Messages == 0 {
-			return fmt.Errorf("transcript search index is empty; run `shuttle transcript index` first")
+			return fmt.Errorf("transcript search index is empty; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
 		}
 		if !noIndex {
 			if !ready {
-				return fmt.Errorf("transcript search index has no completed scan; run `shuttle transcript index` first")
+				return fmt.Errorf("transcript search index has no completed scan; the daemon builds it in the background when available; if no daemon is running, run `shuttle transcript index`")
 			}
 			roots, e := transcriptindex.Roots(a.env)
 			if e != nil {
@@ -200,7 +200,13 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 		} else if len(sessions) > 0 {
 			selected = sessions
 		}
-		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, Since: sinceValue, Project: project, Harness: harness, Limit: limit})
+		excluded := append([]string(nil), excludeSessions...)
+		if !includeSelf {
+			if _, session := a.harnessSessionFromEnv(); session != "" {
+				excluded = append(excluded, session)
+			}
+		}
+		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, ExcludeSessions: excluded, Since: sinceValue, Project: project, Harness: harness, Limit: limit})
 		if err != nil {
 			return err
 		}
@@ -249,6 +255,8 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 		return nil
 	}}
 	cmd.Flags().StringArrayVar(&sessions, "session", nil, "restrict to session ID (repeatable)")
+	cmd.Flags().StringArrayVar(&excludeSessions, "exclude-session", nil, "exclude session ID even with --include-self (repeatable)")
+	cmd.Flags().BoolVar(&includeSelf, "include-self", false, "disable automatic exclusion of the calling harness session")
 	cmd.Flags().StringVar(&fiber, "fiber", "", "restrict to sessions linked to this fiber")
 	cmd.Flags().StringVar(&since, "since", "", "restrict by age (30d or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&project, "project", "", "project path prefix")

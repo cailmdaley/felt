@@ -9,6 +9,7 @@ import (
 
 type Options struct {
 	Sessions         []string
+	ExcludeSessions  []string
 	Since            string
 	Project, Harness string
 	Limit            int
@@ -59,6 +60,12 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	if opts.Sessions != nil {
 		sql += " AND f.session IN (" + strings.TrimSuffix(strings.Repeat("?,", len(opts.Sessions)), ",") + ")"
 		for _, s := range opts.Sessions {
+			args = append(args, s)
+		}
+	}
+	if len(opts.ExcludeSessions) > 0 {
+		sql += " AND f.session NOT IN (" + strings.TrimSuffix(strings.Repeat("?,", len(opts.ExcludeSessions)), ",") + ")"
+		for _, s := range opts.ExcludeSessions {
 			args = append(args, s)
 		}
 	}
