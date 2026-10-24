@@ -1,8 +1,13 @@
 defmodule Shuttle.ApplicationBootTest do
   use ExUnit.Case, async: true
 
+  test "test startup never starts transcript indexing without scoped enable" do
+    refute Enum.any?(Shuttle.Application.child_specs(), &(&1.id == Shuttle.TranscriptIndexer))
+    refute Process.whereis(Shuttle.TranscriptIndexer)
+  end
+
   test "endpoint starts before Poller and TailnetDial" do
-    flags = [:start_poller, :start_tailnet_dial, :start_event_stream]
+    flags = [:start_poller, :start_tailnet_dial, :start_event_stream, :start_transcript_indexer]
     Enum.each(flags, &Shuttle.Test.Env.put_app_env(&1, true))
 
     children = Shuttle.Application.child_specs()
@@ -19,6 +24,8 @@ defmodule Shuttle.ApplicationBootTest do
     assert endpoint < poller
     assert endpoint < tailnet
     assert endpoint < event_stream
+    indexer = Enum.find_index(ids, &(&1 == Shuttle.TranscriptIndexer))
+    assert is_integer(indexer) and endpoint < indexer
 
     # The Poller takes the identity application start froze instead of
     # shelling felt for its own.

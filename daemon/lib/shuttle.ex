@@ -124,6 +124,7 @@ defmodule Shuttle.Application do
     {:start_log_rotator, Shuttle.LogRotator},
     {:start_remote_control, Shuttle.RemoteControl},
     {:start_codex_backend, Shuttle.CodexBackend},
+    {:start_transcript_indexer, Shuttle.TranscriptIndexer},
     {:start_poller, Shuttle.Poller}
   ]
 

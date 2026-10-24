@@ -7,6 +7,8 @@ config :shuttle,
   start_poller: false,
   start_remote_control: false,
   start_codex_backend: false,
+  # Only scoped indexer tests may scan synthetic transcripts.
+  start_transcript_indexer: false,
   codex_backend: Shuttle.Test.ReadyCodexBackend,
   # Tests boot pollers constantly; quarantining every one would park the very
   # dispatches the suite asserts on. Quarantine tests pass `boot_quarantine:

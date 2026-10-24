@@ -282,6 +282,31 @@ defmodule Shuttle.Host do
     end
   end
 
+  @doc "Whether transcript catch-up is enabled. Only host.json `transcript_index: false` opts out."
+  @spec transcript_index?() :: boolean()
+  def transcript_index? do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, %{"transcript_index" => false}} ->
+        false
+
+      {:ok, %{"transcript_index" => value}} when value != true ->
+        Logger.warning(
+          ~s(#{path}: "transcript_index" must be true or false, got #{inspect(value)}; keeping it on)
+        )
+
+        true
+
+      {:ok, _} ->
+        true
+
+      {:error, _kind, message} ->
+        Logger.warning("#{message}; cannot read transcript_index; keeping it on")
+        true
+    end
+  end
+
   @doc "This host's class, read fresh. Raises on a malformed host.json."
   @spec class() :: class()
   def class, do: resolve!().class
