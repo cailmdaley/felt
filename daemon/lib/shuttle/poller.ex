@@ -3961,7 +3961,7 @@ defmodule Shuttle.Poller do
 
           retired? =
             app? and
-              Shuttle.WorkerBackend.retire_assignment(meta.session, fiber, meta.started_at) ==
+              Shuttle.WorkerBackend.retire_assignment(meta.session, fiber) ==
                 :retired
 
           cond do
@@ -4814,8 +4814,6 @@ defmodule Shuttle.Poller do
       session: Map.fetch!(metadata, :session),
       poller: state.self_ref,
       runner: state.runner,
-      uid: Map.get(metadata, :uid),
-      felt_store: Map.get(metadata, :felt_store),
       heartbeat_interval_ms: state.heartbeat_interval_ms,
       callers: Shuttle.Env.callers()
     ]

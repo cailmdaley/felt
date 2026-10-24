@@ -131,7 +131,7 @@ defmodule Shuttle.CodexBackendRealTest do
              })
 
     session = AppWorkers.ref(id)
-    assert :retained = WorkerBackend.retire_assignment(session, %{}, started)
+    assert :retained = WorkerBackend.retire_assignment(session, %{})
 
     fiber = %{
       "shuttle" => %{
@@ -141,10 +141,24 @@ defmodule Shuttle.CodexBackendRealTest do
       }
     }
 
-    assert :retired = WorkerBackend.retire_assignment(session, fiber, started)
+    assert :retired = WorkerBackend.retire_assignment(session, fiber)
     assert {:ok, %{"id" => ^id}} = CodexApp.read_thread(id)
     assert :idle = CodexApp.state(id)
     IO.puts("REAL_CODEX completed_assignment=#{id} conversation_still_loaded=true")
+
+    # Archiving unloads a real idle native thread.
+    # That ends the assignment without requiring a worker-written handoff.
+    assert :ok = AppWorkers.update(id, %{"active" => true})
+    client = Process.whereis(Shuttle.CodexApp.Client)
+
+    assert {:ok, _} =
+             Shuttle.CodexApp.Transport.request(client, "thread/archive", %{"threadId" => id})
+
+    assert :not_loaded = await_unloaded(id, System.monotonic_time(:millisecond) + 5_000)
+    assert :not_loaded = WorkerBackend.observe(session)
+    assert :retired = WorkerBackend.retire_assignment(session, %{})
+    assert {:ok, %{"active" => false, "thread_id" => ^id}} = AppWorkers.get(id)
+    IO.puts("REAL_CODEX unloaded_assignment=#{id} retired_without_handoff=true")
 
     # A real tmux child gets TMUX/TMUX_PANE from its server even when the
     # launching daemon has neither. Exercise the exact viewer command builder.
@@ -169,6 +183,21 @@ defmodule Shuttle.CodexBackendRealTest do
 
     if client = Process.whereis(Shuttle.CodexApp.Client),
       do: Shuttle.CodexApp.Transport.close(client)
+  end
+
+  defp await_unloaded(id, deadline) do
+    state = Shuttle.CodexApp.state(id)
+
+    if state == :not_loaded do
+      state
+    else
+      assert System.monotonic_time(:millisecond) < deadline, inspect(state)
+
+      receive do
+      after
+        10 -> await_unloaded(id, deadline)
+      end
+    end
   end
 
   defp await_viewer_env(path, deadline) do

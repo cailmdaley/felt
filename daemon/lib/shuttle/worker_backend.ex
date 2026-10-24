@@ -18,32 +18,13 @@ defmodule Shuttle.WorkerBackend do
   end
 
   @doc "Observe app state without releasing ownership on an idle or uncertain result."
-  def observe(session, expected \\ %{}) do
+  def observe(session) do
     case AppWorkers.id(session) do
       nil ->
         :terminal
 
       id ->
         %{state: remote, phase: phase} = AppWorkers.status(id)
-
-        {remote, phase} =
-          if remote == :not_loaded do
-            case AppWorkers.recover(
-                   id,
-                   Map.get(expected, :fiber_id),
-                   Map.get(expected, :uid),
-                   Map.get(expected, :felt_store)
-                 ) do
-              :ok ->
-                %{state: recovered, phase: recovered_phase} = AppWorkers.status(id)
-                {recovered, recovered_phase}
-
-              {:error, _} ->
-                {remote, phase}
-            end
-          else
-            {remote, phase}
-          end
 
         case {remote, AppWorkers.get(id)} do
           {:missing, {:ok, %{"active" => true} = record}} ->
@@ -77,14 +58,34 @@ defmodule Shuttle.WorkerBackend do
   end
 
   @doc "Release a finished assignment without ending or reloading its conversation."
-  def retire_assignment(session, fiber, started_at) do
+  def retire_assignment(session, fiber) do
     with id when is_binary(id) <- AppWorkers.id(session),
-         true <- assignment_ended?(fiber, started_at),
-         state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
+         {:ok, record} <- AppWorkers.get(id),
+         state <- AppWorkers.state(id),
+         true <- completed?(state, fiber, assignment_start(record)),
          :ok <- AppWorkers.deactivate(id) do
       :retired
     else
       _ -> :retained
+    end
+  end
+
+  # A confirmed unloaded/missing thread has no running turn. Idle alone is
+  # still a conversation waiting for input, not a completed assignment.
+  defp completed?(state, _fiber, _start) when state in [:not_loaded, :missing], do: true
+  defp completed?(:idle, fiber, start), do: assignment_ended?(fiber, start)
+  defp completed?(_state, _fiber, _start), do: false
+
+  defp assignment_start(record) do
+    case record["started_at"] do
+      stamp when is_binary(stamp) ->
+        case DateTime.from_iso8601(stamp) do
+          {:ok, timestamp, _} -> timestamp
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 

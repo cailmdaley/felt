@@ -3,8 +3,9 @@ defmodule Shuttle.WorkerWatcher do
   Per-worker GenServer that observes a backend's ownership and liveness.
 
   Terminal workers use tmux liveness; app conversations use their durable
-  ownership record. An idle app conversation remains owned until a handoff or
-  explicit stop releases it. The watcher reports confirmed absence to Poller;
+  ownership record. An idle app conversation remains assigned until a handoff,
+  fiber closure or explicit stop releases it. Poller retires confirmed unloaded
+  or missing threads; the watcher never reloads them. It reports confirmed absence to Poller;
   uncertainty never creates a replacement worker.
   """
 
@@ -25,7 +26,6 @@ defmodule Shuttle.WorkerWatcher do
   Options:
     * `:fiber_id` — required. The fiber being watched.
     * `:session` — required. The terminal session name or durable app worker reference.
-    * `:uid` and `:felt_store` — the captured ownership identity used to recover an unloaded app thread.
     * `:poller` — required. The Poller to notify on exit: its registered name,
       or a pid.
     * `:runner` — module implementing `Shuttle.Runner` behavior. Defaults to `Shuttle.Runner.Default`.
@@ -56,8 +56,6 @@ defmodule Shuttle.WorkerWatcher do
     fiber_id = Keyword.fetch!(opts, :fiber_id)
     session = Keyword.fetch!(opts, :session)
     poller = Keyword.fetch!(opts, :poller)
-    uid = Keyword.get(opts, :uid)
-    felt_store = Keyword.get(opts, :felt_store)
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     heartbeat_interval = Keyword.get(opts, :heartbeat_interval_ms, @default_heartbeat_interval_ms)
 
@@ -67,8 +65,6 @@ defmodule Shuttle.WorkerWatcher do
     state = %{
       fiber_id: fiber_id,
       session: session,
-      uid: uid,
-      felt_store: felt_store,
       poller: poller,
       runner: runner,
       heartbeat_interval_ms: heartbeat_interval,
@@ -140,11 +136,7 @@ defmodule Shuttle.WorkerWatcher do
   # ── Internal ──
 
   defp observe_app(state) do
-    case Shuttle.WorkerBackend.observe(state.session, %{
-           fiber_id: state.fiber_id,
-           uid: state.uid,
-           felt_store: state.felt_store
-         }) do
+    case Shuttle.WorkerBackend.observe(state.session) do
       :missing ->
         try do
           send(state.poller, {:app_worker_missing, state.fiber_id, state.session})

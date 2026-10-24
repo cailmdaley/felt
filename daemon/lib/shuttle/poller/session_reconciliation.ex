@@ -177,7 +177,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
       last_activity_at: started_at
     }
 
-    case Shuttle.WorkerBackend.retire_assignment(session, fiber, started_at) do
+    case Shuttle.WorkerBackend.retire_assignment(session, fiber) do
       :retired ->
         cond do
           fiber["status"] == "closed" ->

@@ -102,6 +102,7 @@ defmodule Shuttle.AppWorkersTest do
     def start_turn(id, prompt, opts) do
       {:ok, %{"active" => true}} = AppWorkers.get(id)
       record({:turn, id, prompt, opts})
+      if hook = Agent.get(__MODULE__, &Map.get(&1, :turn_hook)), do: hook.(id)
       Agent.get(__MODULE__, & &1.result)
     end
 
@@ -222,13 +223,13 @@ defmodule Shuttle.AppWorkersTest do
     )
   end
 
-  defp terminal_fiber(id) do
-    fiber(id)
+  defp terminal_fiber(id, status \\ "active") do
+    fiber(id, status)
 
     Runner.set_shuttle(
       id,
       "kind: oneshot\nagent: codex\nsurface: cli\nhost: #{Poller.own_host_id()}\nproject_dir: /tmp\n",
-      "active"
+      status
     )
   end
 
@@ -1045,11 +1046,7 @@ defmodule Shuttle.AppWorkersTest do
         assert {:error, ^expected} = AppWorkers.start_turn("app-session-1", "do not start", [])
 
         assert :unknown =
-                 WorkerBackend.observe(session, %{
-                   fiber_id: id,
-                   uid: record["uid"],
-                   felt_store: Runner.felt_root()
-                 })
+                 WorkerBackend.observe(session)
 
         assert {reason, 1} = WorkerBackend.stop(Runner, session)
         assert reason =~ Atom.to_string(expected)
@@ -1601,7 +1598,7 @@ defmodule Shuttle.AppWorkersTest do
     assert Enum.count(results, &(&1 == {:error, :already_running})) == 29
   end
 
-  test "watcher recovery reloads only an explicitly not-loaded owned thread without a turn" do
+  test "observation never reloads an unloaded thread even with complete ownership evidence" do
     id = "recover-thread"
     fiber_id = "tests/recover"
 
@@ -1622,19 +1619,15 @@ defmodule Shuttle.AppWorkersTest do
     assert :not_loaded = WorkerBackend.observe("codex-app:" <> id)
     assert App.calls() == []
 
-    assert :idle =
-             WorkerBackend.observe("codex-app:" <> id, %{
-               fiber_id: fiber_id,
-               uid: "recover-uid",
-               felt_store: Runner.felt_root()
-             })
+    assert :not_loaded =
+             WorkerBackend.observe("codex-app:" <> id)
 
-    assert [{:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert [] = App.calls()
     assert {:ok, %{"active" => true, "fiber_id" => ^fiber_id}} = AppWorkers.get(id)
     refute Enum.any?(App.calls(), &match?({:turn, _, _, _}, &1))
   end
 
-  test "watcher passes captured UID and store into not-loaded recovery" do
+  test "heartbeat observes an unloaded thread without reloading it before reconciliation" do
     id = "watcher-recover-thread"
     fiber_id = "tests/watcher-recover"
 
@@ -1655,7 +1648,7 @@ defmodule Shuttle.AppWorkersTest do
 
     {:ok, %{pid: watcher}} =
       Poller.start_watcher(
-        %Poller.State{self_ref: self(), runner: Runner, heartbeat_interval_ms: 10},
+        %Poller.State{self_ref: self(), runner: Runner, heartbeat_interval_ms: 60_000},
         fiber_id,
         %{
           session: "codex-app:" <> id,
@@ -1664,7 +1657,10 @@ defmodule Shuttle.AppWorkersTest do
         }
       )
 
-    assert eventually(fn -> Enum.any?(App.calls(), &match?({:resume, ^id, []}, &1)) end)
+    send(watcher, :heartbeat)
+    :sys.get_state(watcher)
+    assert [] = App.calls()
+    assert :not_loaded = App.state(id)
     assert :ok = Shuttle.WorkerWatcher.stop(watcher)
     assert {:ok, %{"active" => true, "fiber_id" => ^fiber_id}} = AppWorkers.get(id)
   end
@@ -2092,18 +2088,27 @@ defmodule Shuttle.AppWorkersTest do
     assert WorkerBackend.assignment_ended?(%{"status" => "closed"}, start)
   end
 
-  for remote <- [:idle, :not_loaded, :missing, :running, :unknown], boot? <- [true, false] do
-    test "handoff with backend #{remote} at boot=#{boot?} separates assignment from conversation" do
+  for remote <- [:idle, :not_loaded, :missing, :running, :unknown],
+      boot? <- [true, false],
+      completion <- [:handoff, :closed, :none] do
+    test "#{completion} with backend #{remote} at boot=#{boot?} separates assignment from conversation" do
       remote = unquote(remote)
       boot? = unquote(boot?)
+      completion = unquote(completion)
       fiber("tests/app")
       {:ok, session} = dispatch("tests/app")
-      App.set(:state, remote)
-      # Do not let a watcher recover the unloaded thread before reconciliation.
-      App.set(:read_result, {:error, :disconnected})
+
+      App.set(
+        :read_result,
+        {:ok, %{"id" => "app-session-1", "status" => %{"type" => "notLoaded"}}}
+      )
+
       App.set(:interrupt_result, {:error, :disconnected})
 
-      if boot?, do: end_assignment()
+      if boot? do
+        end_assignment(completion)
+        App.set(:state, remote)
+      end
 
       {:ok, poller} =
         start_poller!(
@@ -2117,13 +2122,18 @@ defmodule Shuttle.AppWorkersTest do
 
       unless boot? do
         assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
-        end_assignment()
+        end_assignment(completion)
+        App.set(:state, remote)
+        %{pid: watcher} = Poller.worker_status(poller, "tests/app")
+        send(watcher, :heartbeat)
+        :sys.get_state(watcher)
+        refute Enum.any?(App.calls(), &match?({:resume, _, _}, &1))
         before = :sys.get_state(poller).poll_cycles
         send(poller, :run_poll_cycle)
         eventually(fn -> :sys.get_state(poller).poll_cycles > before end)
       end
 
-      if unquote(remote in [:idle, :not_loaded, :missing]) do
+      if unquote(remote in [:not_loaded, :missing] or (remote == :idle and completion != :none)) do
         assert nil == Poller.worker_status(poller, "tests/app")
 
         assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
@@ -2145,7 +2155,40 @@ defmodule Shuttle.AppWorkersTest do
       end
 
       refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+      refute Enum.any?(App.calls(), &match?({:resume, _, _}, &1))
     end
+  end
+
+  test "Poller dispatch accepts a handoff before dispatcher return using the durable assignment start" do
+    terminal_fiber("tests/app", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    App.set(:turn_hook, fn _id -> end_assignment() end)
+    assert {:ok, session} = Poller.dispatch_fiber(poller, "tests/app", force: true)
+
+    assert %{session: ^session, started_at: registered} =
+             Poller.worker_status(poller, "tests/app")
+
+    handoff = Shuttle.Continuation.handed_off_at(Runner.fiber("tests/app"))
+    assert DateTime.compare(handoff, registered) == :lt
+    assert {:ok, record} = AppWorkers.get("app-session-1")
+    {:ok, assignment_start, _} = DateTime.from_iso8601(record["started_at"])
+    assert DateTime.compare(handoff, assignment_start) != :lt
+    before = :sys.get_state(poller).poll_cycles
+    send(poller, :run_poll_cycle)
+    eventually(fn -> :sys.get_state(poller).poll_cycles > before end)
+    assert nil == Poller.worker_status(poller, "tests/app")
+
+    assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
+             AppWorkers.get("app-session-1")
   end
 
   test "stale handoff cannot retire a newer owned assignment at boot" do
@@ -2190,12 +2233,15 @@ defmodule Shuttle.AppWorkersTest do
     assert {:interrupt, "app-session-1"} in App.calls()
   end
 
-  defp end_assignment do
-    Runner.put_shuttle_fields("tests/app", %{
-      "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
-    })
+  defp end_assignment(completion \\ :handoff) do
+    if completion == :handoff do
+      Runner.put_shuttle_fields("tests/app", %{
+        "handed_off_at" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+    end
 
-    Runner.set_fiber("tests/app", Map.put(Runner.fiber("tests/app"), "status", "open"))
+    status = if completion == :closed, do: "closed", else: "open"
+    Runner.set_fiber("tests/app", Map.put(Runner.fiber("tests/app"), "status", status))
   end
 
   test "app workers can launch without a tmux executable" do
@@ -2224,30 +2270,40 @@ defmodule Shuttle.AppWorkersTest do
     assert App.calls() == []
   end
 
-  test "confirmed missing conversations block automatic duplication but explicit stop releases ownership" do
+  defmodule PauseWriterRunner do
+    def cmd("shuttle", args, opts) do
+      if "pause" in args,
+        do: Shuttle.Runner.Default.cmd(Shuttle.Test.FakeCli.real!("shuttle"), args, opts),
+        else: Runner.cmd("shuttle", args, opts)
+    end
+
+    def cmd(command, args, opts), do: Runner.cmd(command, args, opts)
+  end
+
+  test "failed pause disarms the fiber but preserves its owned conversation and watcher" do
     fiber("tests/app")
     {:ok, session} = dispatch("tests/app")
-    App.set(:state, :missing)
-    App.set(:interrupt_result, {:error, :not_found})
+    App.set(:state, :running)
+    App.set(:interrupt_result, {:error, :disconnected})
 
     {:ok, poller} =
       start_poller!(
-        runner: Runner,
+        runner: PauseWriterRunner,
         name: nil,
         felt_stores: [Runner.felt_root()],
-        poll_interval_ms: 60_000,
-        heartbeat_interval_ms: 20
+        poll_interval_ms: 60_000
       )
 
-    eventually(fn -> match?(%{state: "blocked"}, Poller.worker_status(poller, "tests/app")) end)
+    await_boot_cycle!(poller)
+    assert {:error, _} = Poller.lifecycle_transition(poller, :pause, "tests/app", [])
+    assert File.read!(Runner.fiber("tests/app")["path"]) =~ "status: open"
+    assert %{session: ^session, pid: watcher} = Poller.worker_status(poller, "tests/app")
+    assert Process.alive?(watcher)
 
-    assert {:ok, %{"active" => true, "remote_state" => "missing"}} =
+    assert {:ok, %{"active" => true, "thread_id" => "app-session-1"}} =
              AppWorkers.get("app-session-1")
 
-    assert {:error, :already_running} = dispatch("tests/app")
-    assert {:ok, ^session} = Poller.kill_session(poller, "tests/app")
-    assert WorkerBackend.session_status(Runner, session) == :gone
-    refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+    assert {:interrupt, "app-session-1"} in App.calls()
   end
 
   test "an unavailable app server never releases ownership" do

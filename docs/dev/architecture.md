@@ -141,8 +141,10 @@ dispatch assigns the conversation immediately. Both use the same execution
 backend. A completed turn can wait for a reply without releasing its task or
 starting another conversation.
 An explicit stop releases the assignment through the backend's interrupt operation.
-A handoff belonging to the current assignment, or a closed fiber, releases the assignment once the backend confirms the thread is idle, not loaded, or missing.
-This completion path does not interrupt or reload the conversation.
+A handoff belonging to the current assignment, or a closed fiber, releases an idle assignment.
+A confirmed unloaded or missing thread also releases its assignment without requiring a handoff, because it has no running turn.
+Handoff validation uses the durable assignment start, not watcher-registration time.
+Neither completion nor heartbeat observation interrupts or reloads the conversation.
 Boot adoption applies the same rule as polling.
 The durable conversation identity and endpoint survive assignment retirement, while the next dispatch selects the fiber's current agent.
 An unavailable backend leaves the assignment supervised until its state can be established.
