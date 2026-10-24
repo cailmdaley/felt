@@ -52,6 +52,7 @@ func (a *app) currentWorkerFiber() (*felt.Felt, error) {
 
 func currentSessionBinding(address messaging.Address, records []SessionProvenance) (*SessionProvenance, error) {
 	var found *SessionProvenance
+	conflict := false
 	for _, row := range records {
 		if row.Host != address.Host || messaging.NormalizeHarness(row.Harness) != address.Harness || row.nativeSessionID() != address.ID || row.fiber() == "" || !workerBindingKind(row.Kind) {
 			continue
@@ -59,11 +60,16 @@ func currentSessionBinding(address messaging.Address, records []SessionProvenanc
 		if found != nil && row.At < found.At {
 			continue
 		}
-		if found != nil && row.At == found.At && !sessionRecordBelongsToFiber(row, &felt.Felt{ID: found.fiber(), UID: found.UID}) {
-			return nil, fmt.Errorf("native session %s has conflicting newest worker bindings", address.ID)
+		if found == nil || row.At > found.At {
+			conflict = false
+		} else if !sessionRecordBelongsToFiber(row, &felt.Felt{ID: found.fiber(), UID: found.UID}) {
+			conflict = true
 		}
 		copy := row
 		found = &copy
+	}
+	if conflict {
+		return nil, fmt.Errorf("native session %s has conflicting newest worker bindings", address.ID)
 	}
 	return found, nil
 }

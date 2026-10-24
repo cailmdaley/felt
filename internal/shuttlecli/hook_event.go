@@ -382,17 +382,27 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 // carrier of the fiber ULID for dispatched CLI workers. It provides artifact
 // and terminal context; turn phases join only by harness session UUID.
 //
-// SHUTTLE_TMUX_SESSION wins when set (the dispatcher knows the name it chose,
-// and reading it costs nothing). Otherwise ask tmux, but only inside tmux and
-// only for a second: this runs on the PreToolUse hot path, and a wedged tmux
-// server must not stall the agent.
+// A pane's live name takes precedence over the immutable dispatch name.
+// Native app sessions without a pane use their current local ledger binding.
+// The environment-only compatibility fallback cannot detect a reassignment.
 func (a *app) currentTmuxSession() string {
-	if s := strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION")); s != "" {
+	if a.env.Getenv("TMUX") != "" {
+		s, err := a.tmuxCurrentSession()
+		if err != nil {
+			return ""
+		}
 		return s
 	}
-	s, err := a.tmuxCurrentSession()
-	if err != nil {
-		return ""
+	if harness, id := a.harnessSessionFromEnv(); id != "" {
+		host, err := a.resolveOwnHost("")
+		if err != nil {
+			return ""
+		}
+		row, err := currentSessionBinding(messaging.Address{Host: host, Harness: harness, ID: id}, a.localMessageLedger())
+		if err != nil || row == nil {
+			return ""
+		}
+		return row.Tmux
 	}
-	return s
+	return strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION"))
 }

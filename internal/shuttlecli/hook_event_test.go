@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
@@ -933,6 +934,43 @@ func TestEmptyTmuxSessionWithoutTmux(t *testing.T) {
 
 // A hook outside a known pane names no session: asking tmux without a target
 // answers with the attached client's session, which may be another worker's.
+func TestHookTmuxSessionFollowsRenamedPane(t *testing.T) {
+	t.Parallel()
+	env, _ := isolateEvents(t)
+	_, st := newStore(t)
+	seedShuttleRole(t, st, "destination", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, st, "destination")
+	session := shuttleTmuxSessionName(f.ID, f.UID)
+	stubWorkerExitTmux(t, env, session, f.Path)
+	env.Set("SHUTTLE_FIBER_PATH", filepath.Join(t.TempDir(), "source.md"))
+	env.Set("SHUTTLE_TMUX_SESSION", "source-stale-shuttle")
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	env.Set("SHUTTLE_EVENTS_FILE", path)
+	lines := record(t, env, path, map[string]any{"hook_event_name": "Stop", "session_id": "moved-native-session"})
+	if got := lines[0]["tmuxSession"]; got != session {
+		t.Fatalf("hook kept dispatch identity: %v, want %s", got, session)
+	}
+}
+
+func TestHookTmuxSessionUsesMovedNativeBindingWithoutPane(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("CODEX_THREAD_ID", "thread")
+	env.Set("SHUTTLE_TMUX_SESSION", "source-stale-shuttle")
+	writeMessageIdentityLedger(t, env, []SessionProvenance{
+		{Host: "test-host", Harness: "codex", Session: "thread", Fiber: "source", Kind: "dispatch", Tmux: "source-stale-shuttle", At: 1},
+		{Host: "test-host", Harness: "codex", Session: "thread", Fiber: "destination", Kind: "migrate", Tmux: "destination-shuttle", At: 2},
+	})
+	if got := newApp(env).currentTmuxSession(); got != "destination-shuttle" {
+		t.Fatalf("native hook identity = %q", got)
+	}
+	env.Set("CODEX_THREAD_ID", "unbound-child")
+	if got := newApp(env).currentTmuxSession(); got != "" {
+		t.Fatalf("unbound native inherited dispatch identity %q", got)
+	}
+}
+
 func TestHookTmuxSessionRequiresExactPane(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
