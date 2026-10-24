@@ -1810,7 +1810,10 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     send(poller, :run_poll_cycle)
 
     wait_until(fn ->
-      state = :sys.get_state(poller)
+      # Applying a poll reconciles external processes inside the Poller's
+      # mailbox. Let ExUnit bound a hang; a default five-second system-call
+      # timeout must not cut off this condition wait on a loaded runner.
+      state = :sys.get_state(poller, :infinity)
 
       state.poll_cycles > reset_state.poll_cycles and not state.poll_check_in_progress and
         state.document_cache_ready and map_size(state.document_cache) > 0
