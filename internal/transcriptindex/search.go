@@ -54,11 +54,18 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	if opts.Limit < 0 {
 		return nil, fmt.Errorf("limit must be positive")
 	}
+	// Native Codex exports can carry external-agent tools as assistant text.
+	// Resolve their anchored envelopes at query time so populated indexes need
+	// no rebuild; both the returned role and ranking use the effective role.
+	const role = `CASE
+ WHEN substr(m.text,1,28)='[external_agent_tool_result]' THEN 'tool_result'
+ WHEN substr(m.text,1,26)='[external_agent_tool_call:' THEN 'tool_call'
+ ELSE m.role END`
 	// BM25 scores are negative; negate before applying the conversational-role
 	// boost. A tool match can still win if its raw relevance is >1.5 times
 	// that of a user/assistant match. Apply this before LIMIT, not to a shortlist.
-	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,m.role,
- -bm25(search) * CASE WHEN m.role IN ('user','assistant') THEN 1.5 ELSE 1.0 END AS score,
+	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,` + role + `,
+ -bm25(search) * CASE WHEN (` + role + `) IN ('user','assistant') THEN 1.5 ELSE 1.0 END AS score,
  snippet(search,0,'«','»','…',40)
  FROM search JOIN messages m ON m.id=search.rowid JOIN files f ON f.id=m.file_id WHERE search MATCH ?`
 	args := []any{match}

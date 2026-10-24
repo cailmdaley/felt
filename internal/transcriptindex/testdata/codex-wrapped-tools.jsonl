@@ -1,0 +1,5 @@
+{"timestamp":"2026-10-02T12:00:00Z","type":"session_meta","payload":{"id":"44444444-4444-4444-8444-444444444444","cwd":"/work/project"}}
+{"timestamp":"2026-10-02T12:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"[external_agent_tool_result]\n<persisted-output>\nPreview: wrapperneedle toolonlywrapped\n</persisted-output>\n[/external_agent_tool_result]"}]}}
+{"timestamp":"2026-10-02T12:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"[external_agent_tool_call: Read]\nfile: wrapperneedle\n[/external_agent_tool_call]"}]}}
+{"timestamp":"2026-10-02T12:00:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Discuss wrapperneedle and the literal [external_agent_tool_result] marker without wrapping a tool."}]}}
+{"timestamp":"2026-10-02T12:00:04Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Discuss wrapperneedle and [external_agent_tool_call: Read] as quoted documentation."}]}}

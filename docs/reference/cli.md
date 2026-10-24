@@ -101,6 +101,9 @@ Results rank by SQLite FTS5 BM25 relevance, with user and assistant message scor
 For example, raw relevance 10 becomes 15 for conversational text; a tool match scoring 16 still wins, while a tool match scoring 12 doesn't.
 This favors conversations over similarly relevant tool echoes without removing tool-only matches.
 The role multiplier applies before the result limit, and returned scores include it (higher is better).
+Messages beginning with `[external_agent_tool_result]` or `[external_agent_tool_call:` are classified as tool results or calls even when the native record uses an assistant role.
+Search resolves these envelopes before ranking and returns the effective role; existing indexes don't need rebuilding.
+Mentions of these markers inside ordinary prose don't change its role.
 
 Whitespace-separated query terms are literal keywords combined with AND; FTS operators are not evaluated.
 Punctuation within a term separates adjacent tokens, so `daemon/lib/shuttle/harness_paths.ex` matches that sequence of path fragments rather than scattered words.

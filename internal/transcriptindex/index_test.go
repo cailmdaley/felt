@@ -312,6 +312,42 @@ func TestSearchConversationalRolesBoostBeforeLimit(t *testing.T) {
 	}
 }
 
+func TestSearchClassifiesExternalAgentToolEnvelopesWithoutReindex(t *testing.T) {
+	i := testIndex(t)
+	if err := i.IndexFile(ctx, fixture(t, "codex-wrapped-tools"), "codex"); err != nil {
+		t.Fatal(err)
+	}
+	// Persisted data still has native assistant roles, as populated indexes do.
+	var stored string
+	if err := i.db.QueryRow("SELECT role FROM messages WHERE line=2").Scan(&stored); err != nil || stored != "assistant" {
+		t.Fatalf("fixture must exercise an assistant-role tool envelope: %s %v", stored, err)
+	}
+	want := map[int64]string{2: "tool_result", 3: "tool_call", 4: "assistant", 5: "user"}
+	hits := search(t, i, "wrapperneedle", Options{Limit: 4})
+	if len(hits) != len(want) {
+		t.Fatalf("lost wrapped or conversational matches: %+v", hits)
+	}
+	for _, hit := range hits {
+		if hit.Role != want[hit.Line] {
+			t.Fatalf("line %d effective role=%s want %s", hit.Line, hit.Role, want[hit.Line])
+		}
+		var raw float64
+		if err := i.db.QueryRow(`SELECT -bm25(search) FROM search JOIN messages m ON m.id=search.rowid WHERE search MATCH 'wrapperneedle' AND m.line=?`, hit.Line).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		factor := 1.0
+		if hit.Role == "user" || hit.Role == "assistant" {
+			factor = 1.5
+		}
+		if ratio := hit.Score / raw; ratio < factor-0.00001 || ratio > factor+0.00001 {
+			t.Fatalf("line %d role %s multiplier=%g want %g", hit.Line, hit.Role, ratio, factor)
+		}
+	}
+	if got := search(t, i, "toolonlywrapped", Options{}); len(got) != 1 || got[0].Role != "tool_result" {
+		t.Fatalf("lost tool-only wrapped match: %+v", got)
+	}
+}
+
 func TestPathsRespectScopedEnvironment(t *testing.T) {
 	env := sysenv.New("/work", []string{"HOME=/home/test", "XDG_CACHE_HOME=/cache", "SHUTTLE_PI_SESSIONS_DIR=/pi"})
 	p, e := DefaultPath(env)
