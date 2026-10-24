@@ -24,6 +24,7 @@ type migrateDocumentsRequest struct {
 type migrateDocument struct {
 	Path   string         `json:"path"`
 	UID    string         `json:"uid"`
+	Host   string         `json:"host"`
 	Before map[string]any `json:"before"`
 	After  map[string]any `json:"after"`
 }
@@ -114,8 +115,8 @@ func validateMigrateDocuments(req migrateDocumentsRequest) error {
 		if err != nil || !info.Mode().IsRegular() {
 			return fmt.Errorf("document must be a regular file: %q", canonical)
 		}
-		if doc.UID == "" || len(doc.Before) == 0 || len(doc.Before) != len(doc.After) {
-			return fmt.Errorf("UID and matching nonempty snapshots required")
+		if doc.UID == "" || strings.TrimSpace(doc.Host) == "" || len(doc.Before) == 0 || len(doc.Before) != len(doc.After) {
+			return fmt.Errorf("UID, expected host and matching nonempty snapshots required")
 		}
 		for key, value := range doc.Before {
 			after, exists := doc.After[key]
@@ -191,13 +192,6 @@ func applyMigrateDocuments(req migrateDocumentsRequest, writeFile func(string, [
 }
 
 func prepareMigrateDocument(doc migrateDocument, raw []byte, mode string) ([]byte, error) {
-	f, err := felt.Parse("", raw)
-	if err != nil {
-		return nil, err
-	}
-	if f.UID != doc.UID {
-		return nil, fmt.Errorf("intrinsic UID does not match request")
-	}
 	// Keep the body byte-for-byte, including whitespace around its Status block.
 	if !bytes.HasPrefix(raw, []byte("---\n")) {
 		return nil, fmt.Errorf("missing frontmatter delimiter")
@@ -215,17 +209,35 @@ func prepareMigrateDocument(doc migrateDocument, raw []byte, mode string) ([]byt
 		return nil, fmt.Errorf("frontmatter must be a mapping")
 	}
 	mapping := document.Content[0]
+	var validated any
+	if err := migrationLexicalNode(mapping, make(map[*yaml.Node]*yaml.Node)).Decode(&validated); err != nil {
+		return nil, err
+	}
+	uid := felt.MappingValueNode(mapping, "id")
+	if uid == nil || uid.Kind != yaml.ScalarNode || uid.Tag != "!!str" || uid.Value != doc.UID {
+		return nil, fmt.Errorf("intrinsic UID does not match request")
+	}
+	facet := felt.MappingValueNode(mapping, "shuttle")
+	if facet == nil || facet.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("shuttle must remain installed as a mapping")
+	}
+	host := felt.MappingValueNode(facet, "host")
+	if host == nil || host.Kind != yaml.ScalarNode || host.Tag != "!!str" || host.Value != doc.Host {
+		return nil, fmt.Errorf("shuttle.host does not match expected host %q", doc.Host)
+	}
 	current := map[string]any{}
 	for key := range doc.Before {
 		node := migrateFieldNode(mapping, key)
 		var value any
 		if node != nil {
-			if err := node.Decode(&value); err != nil {
+			// The daemon preserves timestamp spellings as strings, including
+			// dates, explicit offsets and trailing fractional zeroes.
+			lexical := migrationLexicalNode(node, make(map[*yaml.Node]*yaml.Node))
+			if err := lexical.Decode(&value); err != nil {
 				return nil, err
 			}
 		}
-		// JSON normalization makes YAML timestamps and numeric nodes comparable
-		// with the daemon's JSON snapshots without depending on map ordering.
+		// Normalize numeric and collection types to the JSON request's types.
 		encoded, err := json.Marshal(value)
 		if err != nil {
 			return nil, err
@@ -264,6 +276,28 @@ func prepareMigrateDocument(doc migrateDocument, raw []byte, mode string) ([]byt
 	return result, nil
 }
 
+// migrationLexicalNode copies only the comparison tree. The original nodes
+// retain their tags, comments and values for untouched-frontmatter writes.
+func migrationLexicalNode(node *yaml.Node, seen map[*yaml.Node]*yaml.Node) *yaml.Node {
+	if node == nil {
+		return nil
+	}
+	if copy := seen[node]; copy != nil {
+		return copy
+	}
+	copy := *node
+	seen[node] = &copy
+	if copy.Tag == "!!timestamp" {
+		copy.Tag = "!!str"
+	}
+	copy.Content = make([]*yaml.Node, len(node.Content))
+	for i, child := range node.Content {
+		copy.Content[i] = migrationLexicalNode(child, seen)
+	}
+	copy.Alias = migrationLexicalNode(node.Alias, seen)
+	return &copy
+}
+
 func migrateFieldNode(mapping *yaml.Node, key string) *yaml.Node {
 	if key == "ask" || key == "shuttle.runtime" {
 		mapping = felt.MappingValueNode(mapping, "shuttle")
@@ -275,14 +309,7 @@ func migrateFieldNode(mapping *yaml.Node, key string) *yaml.Node {
 func patchMigrateField(mapping *yaml.Node, key string, value any) error {
 	if key == "ask" || key == "shuttle.runtime" {
 		nested := felt.MappingValueNode(mapping, "shuttle")
-		if nested == nil {
-			if value == nil {
-				return nil
-			}
-			nested = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-			mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "shuttle"}, nested)
-		}
-		if nested.Kind != yaml.MappingNode {
+		if nested == nil || nested.Kind != yaml.MappingNode {
 			return fmt.Errorf("shuttle must be a mapping")
 		}
 		mapping = nested

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cailmdaley/felt/internal/felt"
+	"gopkg.in/yaml.v3"
 )
 
 func migrationDocumentsFixture(t *testing.T) migrateDocumentsRequest {
@@ -18,7 +19,9 @@ func migrationDocumentsFixture(t *testing.T) migrateDocumentsRequest {
 	_, st := newStore(t)
 	var docs []migrateDocument
 	for _, id := range []string{"a", "b"} {
-		seedShuttleRole(t, st, id, felt.StatusActive, oneshot(), nil)
+		block := oneshot()
+		block["host"] = "test-host"
+		seedShuttleRole(t, st, id, felt.StatusActive, block, nil)
 		f := mustRead(t, st, id)
 		raw, err := os.ReadFile(f.Path)
 		if err != nil {
@@ -28,7 +31,7 @@ func migrationDocumentsFixture(t *testing.T) migrateDocumentsRequest {
 		if err := os.WriteFile(f.Path, raw, 0644); err != nil {
 			t.Fatal(err)
 		}
-		docs = append(docs, migrateDocument{Path: f.Path, UID: f.UID,
+		docs = append(docs, migrateDocument{Path: f.Path, UID: f.UID, Host: "test-host",
 			Before: map[string]any{"status": "active", "horizon": nil, "tempered": nil, "closed-at": nil, "ask": nil, "shuttle.runtime": nil},
 			After:  map[string]any{"status": "open", "horizon": "stashed", "tempered": true, "closed-at": "2026-04-10T09:00:00Z", "ask": map[string]any{"text": "Ready?", "at": "2026-04-10T09:00:00Z"}, "shuttle.runtime": map[string]any{"session_uuid": "native-session", "dispatched_at": "2026-04-10T09:00:00Z"}},
 		})
@@ -143,7 +146,7 @@ func TestMigrateDocumentsPreflightAllBeforeWrites(t *testing.T) {
 
 func TestMigrateDocumentsRejectInvalidRequests(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"relative", "unclean", "symlink-alias", "duplicate", "alias-duplicate", "unknown-field", "field-sets", "bad-mode", "one-document"} {
+	for _, mode := range []string{"relative", "unclean", "symlink-alias", "duplicate", "alias-duplicate", "unknown-field", "field-sets", "bad-mode", "one-document", "missing-host"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			req := migrationDocumentsFixture(t)
@@ -173,6 +176,8 @@ func TestMigrateDocumentsRejectInvalidRequests(t *testing.T) {
 				req.Mode = "rollback"
 			case "one-document":
 				req.Documents = req.Documents[:1]
+			case "missing-host":
+				req.Documents[0].Host = ""
 			}
 			writes := 0
 			result := applyMigrateDocuments(req, func(string, []byte) error { writes++; return nil })
@@ -180,6 +185,117 @@ func TestMigrateDocumentsRejectInvalidRequests(t *testing.T) {
 				t.Fatalf("invalid request = %+v, writes=%d", result, writes)
 			}
 		})
+	}
+}
+
+func TestMigrateDocumentsTimestampSnapshotsPreserveLexicalStrings(t *testing.T) {
+	t.Parallel()
+	for _, timestamp := range []string{"2026-04-10T09:00:00.000000Z", "2026-04-10T09:00:00+00:00", "2026-04-10"} {
+		t.Run(timestamp, func(t *testing.T) {
+			t.Parallel()
+			req := migrationDocumentsFixture(t)
+			runtime := map[string]any{"dispatched_at": timestamp, "unknown": map[string]any{"timestamps": []any{timestamp}}}
+			after := map[string]any{"dispatched_at": timestamp, "unknown": runtime["unknown"], "session_uuid": "moved-session"}
+			for i := range req.Documents {
+				doc := &req.Documents[i]
+				doc.Before["closed-at"] = "2026-04-10"
+				doc.Before["shuttle.runtime"] = runtime
+				doc.After["closed-at"] = "2026-04-10"
+				doc.After["shuttle.runtime"] = after
+				raw := migrationDocumentBytes(t, doc.Path)
+				// Deliberately bare YAML timestamps: unmarshaling into time.Time loses
+				// these spellings even though the daemon's snapshots preserve them.
+				raw = bytes.Replace(raw, []byte("host: test-host\n"), []byte("host: test-host\n    runtime:\n        dispatched_at: "+timestamp+"\n        unknown:\n            timestamps: ["+timestamp+"]\n"), 1)
+				raw = bytes.Replace(raw, []byte("status: active\n"), []byte("status: active\nclosed-at: 2026-04-10\n"), 1)
+				if err := os.WriteFile(doc.Path, raw, 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, mode := range []string{"check", "forward", "forward", "reverse", "reverse"} {
+				req.Mode = mode
+				result := applyMigrateDocuments(req, felt.WriteFiberFile)
+				if !result.OK {
+					t.Fatalf("%s lexical timestamp %q: %+v", mode, timestamp, result)
+				}
+				for _, doc := range req.Documents {
+					raw := migrationDocumentBytes(t, doc.Path)
+					end := bytes.Index(raw[4:], []byte("\n---\n")) + 4
+					var tree yaml.Node
+					if err := yaml.Unmarshal(raw[4:end], &tree); err != nil {
+						t.Fatal(err)
+					}
+					mapping := tree.Content[0]
+					nested := migrateFieldNode(mapping, "shuttle.runtime")
+					if got := felt.MappingValueNode(nested, "dispatched_at"); got == nil || got.Value != timestamp {
+						t.Fatalf("timestamp changed: %+v", got)
+					}
+					unknown := felt.MappingValueNode(nested, "unknown")
+					sequence := felt.MappingValueNode(unknown, "timestamps")
+					if sequence == nil || len(sequence.Content) != 1 || sequence.Content[0].Value != timestamp {
+						t.Fatalf("unknown nested timestamp changed: %+v", sequence)
+					}
+					if got := migrateFieldNode(mapping, "closed-at"); got == nil || got.Value != "2026-04-10" {
+						t.Fatalf("bare date changed: %+v", got)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestMigrateDocumentsRefusesConcurrentUninstallOrReassignment(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"check", "forward", "reverse"} {
+		for _, change := range []string{"uninstalled", "reassigned-host", "missing-host", "malformed-block"} {
+			t.Run(mode+"/"+change, func(t *testing.T) {
+				t.Parallel()
+				req := migrationDocumentsFixture(t)
+				if mode == "reverse" {
+					if result := applyMigrateDocuments(req, felt.WriteFiberFile); !result.OK {
+						t.Fatal(result)
+					}
+				}
+				req.Mode = mode
+				path := req.Documents[1].Path
+				raw := migrationDocumentBytes(t, path)
+				f, err := felt.Parse("", raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				switch change {
+				case "uninstalled":
+					err = f.SetExtraField("shuttle", nil)
+				case "reassigned-host":
+					node := felt.MappingValueNode(f.ExtraFields["shuttle"], "host")
+					node.Value = "new-owner"
+				case "missing-host":
+					err = patchMigrateField(f.ExtraFields["shuttle"], "host", nil)
+				case "malformed-block":
+					err = f.SetExtraField("shuttle", "removed")
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err = f.Marshal()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, raw, 0644); err != nil {
+					t.Fatal(err)
+				}
+				originals := [][]byte{migrationDocumentBytes(t, req.Documents[0].Path), migrationDocumentBytes(t, path)}
+				writes := 0
+				result := applyMigrateDocuments(req, func(path string, data []byte) error { writes++; return felt.WriteFiberFile(path, data) })
+				if result.Reason != "document_conflict" || writes != 0 {
+					t.Fatalf("ownership race: %+v writes=%d", result, writes)
+				}
+				for i, doc := range req.Documents {
+					if !bytes.Equal(originals[i], migrationDocumentBytes(t, doc.Path)) {
+						t.Fatalf("ownership conflict changed document %d", i)
+					}
+				}
+			})
+		}
 	}
 }
 
