@@ -873,7 +873,7 @@ func transcriptResult(receipt TranscriptReceipt, localPath string) transcriptCom
 func (a *app) shuttleTranscriptCmd() *cobra.Command {
 	shuttleTranscriptCmd := &cobra.Command{
 		Use:   "transcript <session-id>",
-		Short: "Print a session's native transcript path or materialize its remote copy",
+		Short: "Search every local transcript, or print one session's transcript path",
 		Long: `Resolves a complete native transcript by session ID. When the transcript
 is on this host, prints its original native path. When it is remote, streams the
 exact bytes through Shuttle's native transcript surface into the managed

@@ -184,6 +184,8 @@ A plain message starts or steers a turn; `--context-only` adds or queues context
 Both Codex surfaces use the exact App Server thread; a hook-only embedded Codex session cannot be woken, and Shuttle never pastes into its terminal.
 The receipt says how far delivery got (`accepted` means the native harness acknowledged accepting the input), never that the model replied or the work is done. The `shuttle` CLI prints the message ID before sending; to retry an interrupted call or refresh its receipt, rerun it with `--message-id <id>`, which never delivers twice. You reach only the hosts in your fleet file (`shuttle remotes list`), and reach is judged by the local daemon (`GET /api/v1/fleet` shows each remote's polled health), never by `curl` or `ssh` from your shell, which on a userspace-Tailscale host cannot dial the tailnet at all ([references/operating.md](references/operating.md#remote-hosts)). Without a route, leave a note in the fiber and `felt sync --push`.
 
+**Past conversations.** To find the session where something was worked out — a phrase, a filename, an error string — run `shuttle transcript search "<query>"` (`--fiber`, `--since 30d`, `--harness`, `--project`, `--json`). It ranks every Claude, Codex and Pi transcript on this host by BM25 and names each hit's session and fiber; `shuttle transcript <session-id>` then gives the file. Your own session is excluded unless you pass `--include-self`. The daemon keeps the index current; other hosts' transcripts are searched on those hosts.
+
 To put a finished file in front of the human, use your harness's own file tool (Claude Code's `SendUserFile`), or `shuttle send-file <path>...` for the Board tab.
 
 ## Where to go next
