@@ -488,7 +488,11 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
 	home := t.TempDir()
 	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	launchDir := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(launchDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	unit, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
@@ -496,6 +500,14 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), unit, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plist, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.plist.template")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plist = []byte(strings.ReplaceAll(string(plist), "__LABEL__", defaultDaemonLabel))
+	if err := os.WriteFile(filepath.Join(launchDir, defaultDaemonLabel+".plist"), plist, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	bin := t.TempDir()
@@ -506,6 +518,7 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 		}
 	}
 	write("systemctl", "exit 1\n")
+	write("launchctl", "exit 1\n")
 	write("tmux", "[ \"$1\" = list-panes ] && { echo 12345; exit 0; }; exit 1\n")
 	localBin := filepath.Join(home, ".local", "bin")
 	if err := os.MkdirAll(localBin, 0755); err != nil {
@@ -531,9 +544,15 @@ func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing
 		t.Fatalf("verified tmux loop should take precedence: %q", got)
 	}
 	write("systemctl", "case \"$*\" in *is-active*) exit 3;; *) exit 0;; esac\n")
+	write("launchctl", "echo 'pid = 0'\nexit 0\n")
 	if got := run("0"); got != "0" {
-		t.Fatalf("inactive matching unit counted as owner: %q", got)
+		t.Fatalf("inactive matching systemd/launchd definitions counted as owner: %q", got)
 	}
+	write("launchctl", "echo 'pid = 12345'\nexit 0\n")
+	if got := run("0"); got != "1" {
+		t.Fatalf("loaded launchd job not recognized: %q", got)
+	}
+	write("launchctl", "exit 1\n")
 	write("systemctl", "case \"$*\" in *is-active*) exit 0;; *) exit 0;; esac\n")
 	if got := run("1"); got != "tmux" {
 		t.Fatalf("live tmux lost to enabled reachable systemd: %q", got)

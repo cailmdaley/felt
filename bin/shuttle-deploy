@@ -59,7 +59,9 @@ if "$HOME/.local/bin/shuttle" daemon loop-present >/dev/null 2>&1; then
 fi
 for candidate in "$HOME"/Library/LaunchAgents/*.plist; do
   [ -f "$candidate" ] || continue
-  if grep -q 'io.shuttle.daemon' "$candidate"; then echo 1; exit 0; fi
+  grep -q 'io.shuttle.daemon' "$candidate" || continue
+  label=$(basename "$candidate" .plist)
+  if launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -Eq '^[[:space:]]*pid = [1-9][0-9]*$'; then echo 1; exit 0; fi
 done
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   for candidate in "$HOME"/.config/systemd/user/*.service; do

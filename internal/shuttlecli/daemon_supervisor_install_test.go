@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,12 +20,15 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		manager, listener string
+		targetPort        string
 		reachable, want   bool
 	}{
-		{"matching supervisor", "12345", "12345", true, true},
-		{"other supervisor", "23456", "", true, false},
-		{"unreachable manager", "12345", "12345", false, false},
-		{"stale enabled supervisor", "0", "", true, false},
+		{"matching supervisor", "12345", "12345", "", true, true},
+		{"other supervisor", "23456", "", "", true, false},
+		{"secondary endpoint install beside live 4401", "0", "", "4402", true, true},
+		{"same endpoint 4401 outside target supervisor", "0", "", "4401", true, false},
+		{"unreachable manager", "12345", "12345", "", false, false},
+		{"stale enabled supervisor", "0", "", "", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testEnv(t)
@@ -51,13 +55,23 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 			})
 			write(filepath.Join(bin, "lsof"), "#!/bin/sh\n[ -n '"+tc.listener+"' ] || exit 1\necho '"+tc.listener+"'\n")
 			env.Set("PATH", bin+":"+env.Getenv("PATH"))
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"ready":true}`) }))
+			listener, err := net.Listen("tcp", "127.0.0.1:4401")
+			if err != nil {
+				t.Skipf("cannot bind process-test endpoint 4401: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"ready":true}`) }))
+			server.Listener = listener
+			server.Start()
 			defer server.Close()
 			// Caller-only overrides must not select the installed service's claim.
 			env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:1")
 			address := strings.TrimPrefix(server.URL, "http://")
+			targetAddress := address
+			if tc.targetPort != "" {
+				targetAddress = "127.0.0.1:" + tc.targetPort
+			}
 			gate := filepath.Join(bin, "child-gate")
-			child := fmt.Sprintf("( while [ ! -f %q ]; do sleep 0.01; done; exec env SHUTTLE_TEST_OWNER_HELPER=service SHUTTLE_TEST_OWNER_HOME=%q SHUTTLE_TEST_OWNER_ADDRESS=%q %q -test.run=^TestDaemonOwnerHelper$ ) </dev/null >%q 2>&1 &\necho $! >%q\n", gate, home, address, os.Args[0], filepath.Join(bin, "child.log"), pidFile)
+			child := fmt.Sprintf("( while [ ! -f %q ]; do sleep 0.01; done; exec env SHUTTLE_TEST_OWNER_HELPER=service SHUTTLE_TEST_OWNER_HOME=%q SHUTTLE_TEST_OWNER_ADDRESS=%q %q -test.run=^TestDaemonOwnerHelper$ ) </dev/null >%q 2>&1 &\necho $! >%q\n", gate, home, targetAddress, os.Args[0], filepath.Join(bin, "child.log"), pidFile)
 			mainPID := fmt.Sprintf("cat %q 2>/dev/null || echo %s", pidFile, tc.manager)
 			managerCode := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *show-environment*) %s;; *MainPID*) %s;; *restart*) %s;; *) exit 0;; esac\n", map[bool]string{true: "echo SHUTTLE_DATA_DIR=" + serviceData, false: "exit 1"}[tc.reachable], mainPID, child)
 			write(filepath.Join(bin, "systemctl"), managerCode)
@@ -112,7 +126,11 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 				}
 			})
 			a := newApp(env)
-			options := supervisorOptions{OS: osName, Label: defaultDaemonLabel, Port: strings.TrimPrefix(address, "127.0.0.1:"), Path: env.Getenv("PATH"), Log: filepath.Join(home, "daemon.log"), Stores: "test-store", TmuxTmpdirSet: true, SSHSocketSet: true}
+			port := strings.TrimPrefix(address, "127.0.0.1:")
+			if tc.targetPort != "" {
+				port = tc.targetPort
+			}
+			options := supervisorOptions{OS: osName, Label: defaultDaemonLabel, Port: port, Path: env.Getenv("PATH"), Log: filepath.Join(home, "daemon.log"), Stores: "test-store", TmuxTmpdirSet: true, SSHSocketSet: true}
 			// Darwin has no systemd reachability probe; exercise that separately.
 			want := tc.want || (osName == "Darwin" && tc.name == "unreachable manager")
 			if want {
@@ -175,6 +193,20 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 				}
 				if _, err := os.Stat(unit); err != nil {
 					t.Fatalf("refresh did not install supervisor: %v", err)
+				}
+				if tc.targetPort == "4402" {
+					contents, err := os.ReadFile(unit)
+					if err != nil || !strings.Contains(string(contents), "4402") {
+						t.Fatalf("secondary unit does not target 4402: %v", err)
+					}
+					response, err := http.Get(server.URL + "/api/v1/version")
+					if err != nil {
+						t.Fatalf("live 4401 daemon was disrupted by secondary install: %v", err)
+					}
+					response.Body.Close()
+					if response.StatusCode != http.StatusOK {
+						t.Fatalf("live 4401 daemon returned %s", response.Status)
+					}
 				}
 			}
 			if !tc.reachable {
