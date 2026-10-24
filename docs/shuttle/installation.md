@@ -682,7 +682,7 @@ environment you start it in. Give it stores through `SHUTTLE_STORES`, or persist
 them once in `~/.config/shuttle/stores.json` (see [Configuring
 stores](#configuring-stores)).
 
-The loop runs `shuttle daemon start --force` and backs off exponentially. A
+The loop runs `shuttle daemon start --force` and backs off exponentially. The start command probes the live daemon endpoint even with `--force`; the loop's status probe stands down while the daemon answers, so `--force` does not bypass duplicate protection. A
 daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s cap.
 One that survives 60 seconds resets it. This exists because a wedged login node
 once drove a fixed 2-second loop to roughly 35,000 restarts.

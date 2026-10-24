@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
 
@@ -148,6 +149,18 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	if err := validateSupervisorOptions(options); err != nil {
 		return err
 	}
+	if !options.Print {
+		if daemonRespawnLoopPresent(a.env) {
+			return errors.New("the shuttle-daemon tmux respawn loop is active; stop it before installing a service supervisor")
+		}
+		settings, err := a.resolveHostSettings()
+		if err != nil {
+			return err
+		}
+		if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", 2*time.Second); err == nil {
+			return errors.New("a daemon is already answering; stop its current supervisor before installing another")
+		}
+	}
 	if err := a.resolveSupervisorCodex(&options); err != nil {
 		return err
 	}
@@ -219,6 +232,32 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 		return a.installLaunchAgent(options, release, rendered)
 	}
 	return a.installSystemdUserUnit(options, release, rendered)
+}
+
+func daemonRespawnLoopPresent(env *sysenv.Env) bool {
+	tmux, err := env.LookPath("tmux")
+	if err != nil {
+		return false
+	}
+	cmd := env.Command(tmux, "list-panes", "-t", "shuttle-daemon", "-F", "#{pane_pid}")
+	pids, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	ps, err := env.LookPath("ps")
+	if err != nil {
+		return false
+	}
+	for _, pid := range strings.Fields(string(pids)) {
+		if _, err := strconv.Atoi(pid); err != nil {
+			continue
+		}
+		output, err := env.Command(ps, "eww", "-p", pid, "-o", "command=").Output()
+		if err == nil && strings.Contains(string(output), "SHUTTLE_RESPAWN_LOOP=1") {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSupervisorOptions(options supervisorOptions) error {

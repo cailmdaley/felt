@@ -52,13 +52,24 @@ done
 
 supervisor_probe_cmd() {
   cat <<'SH'
-for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
-  [ -f "$candidate" ] || continue
-  if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then
-    echo 1
+# A live respawn loop is the selected owner even if a stale unit file exists.
+if command -v tmux >/dev/null 2>&1; then
+  pane_pid=$(tmux list-panes -t shuttle-daemon -F '#{pane_pid}' 2>/dev/null | head -n 1)
+  if [ -n "$pane_pid" ] && ps eww -p "$pane_pid" -o command= 2>/dev/null | grep -F 'SHUTTLE_RESPAWN_LOOP=1' >/dev/null; then
+    echo 0
     exit 0
   fi
+fi
+for candidate in "$HOME"/Library/LaunchAgents/*.plist; do
+  [ -f "$candidate" ] || continue
+  if grep -q 'io.shuttle.daemon' "$candidate"; then echo 1; exit 0; fi
 done
+if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+  for candidate in "$HOME"/.config/systemd/user/*.service; do
+    [ -f "$candidate" ] || continue
+    if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; }; then echo 1; exit 0; fi
+  done
+fi
 echo 0
 SH
 }

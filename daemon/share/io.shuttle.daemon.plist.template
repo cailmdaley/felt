@@ -38,7 +38,6 @@
         <string>__SHUTTLE_BIN__</string>
         <string>daemon</string>
         <string>start</string>
-        <string>--force</string>
     </array>
 
     <key>EnvironmentVariables</key>

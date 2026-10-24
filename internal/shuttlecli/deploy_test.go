@@ -75,6 +75,10 @@ func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map
 		}
 	}
 	capture := filepath.Join(t.TempDir(), "install-args")
+	fakeSystemctl := filepath.Join(localBin, "systemctl")
+	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	fakeShuttle := `#!/bin/sh
 [ "$1 $2" = "daemon install" ] || exit 2
 {
@@ -95,7 +99,7 @@ config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
 	cmd := exec.Command("/bin/bash", "-c", harness)
 	cmd.Env = append(os.Environ(),
 		"HOME="+home,
-		"PATH=/usr/bin:/bin",
+		"PATH="+localBin+":/usr/bin:/bin",
 		"SHUTTLE_RELEASE="+release.Dir,
 		"SHUTTLE_CAPTURE_FILE="+capture,
 	)
@@ -450,6 +454,52 @@ func shellFunction(t *testing.T, script, name string) string {
 		}
 	}
 	return script[start:start+end+2] + "\n"
+}
+
+func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing.T) {
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
+	home := t.TempDir()
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	if err := os.MkdirAll(unitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), []byte("ExecStart=shuttle daemon start\nEnvironment=SHUTTLE_RELEASE=/release"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	write := func(name, source string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("systemctl", "exit 1\n")
+	write("tmux", "[ \"$1\" = list-panes ] && { echo 12345; exit 0; }; exit 1\n")
+	write("ps", "printf '%s\\n' \"$SHUTTLE_TEST_PS\"\n")
+	run := func(ps string) string {
+		t.Helper()
+		cmd := exec.Command("/bin/bash", "-c", probe+"supervisor_probe_cmd | /bin/bash")
+		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "SHUTTLE_TEST_PS="+ps)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("probe: %v: %s", err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := run("/bin/sh -c unrelated"); got != "0" {
+		t.Fatalf("unreachable manager or unverified pane probe=%q", got)
+	}
+	if got := run("/bin/sh /home/user/bin/shuttle-launch --loop SHUTTLE_RESPAWN_LOOP=1"); got != "0" {
+		t.Fatalf("verified tmux loop should take precedence: %q", got)
+	}
+	write("systemctl", "exit 0\n")
+	if got := run("/bin/sh -c unrelated"); got != "1" {
+		t.Fatalf("reachable systemd service probe=%q", got)
+	}
 }
 
 func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {

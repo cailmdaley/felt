@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -302,7 +303,7 @@ func TestDaemonStartForceExecutesReleaseLauncher(t *testing.T) {
 	env := testEnv(t)
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
 	env.Set("SHUTTLE_RELEASE", release.Dir)
-	env.Set("SHUTTLE_LISTEN", "invalid listener ignored by --force")
+	env.Set("SHUTTLE_LISTEN", "tcp://127.0.0.1:1")
 	a := newApp(env)
 	var gotPath string
 	var gotArgs []string
@@ -331,6 +332,53 @@ func TestDaemonStartGuardRefusesWhenTCPOwnerCheckFails(t *testing.T) {
 	_, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "start")
 	if err == nil || launched || !strings.Contains(err.Error(), "foreign listener") || strings.Contains(stderr, "Daemon already running") {
 		t.Fatalf("start result err=%v launched=%t stderr=%q", err, launched, stderr)
+	}
+}
+
+func TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess(t *testing.T) {
+	if os.Getenv("SHUTTLE_LIVE_DAEMON_HELPER") == "1" {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			os.Exit(3)
+		}
+		if err := os.WriteFile(os.Getenv("SHUTTLE_LIVE_DAEMON_ADDRESS"), []byte(listener.Addr().String()), 0o600); err != nil {
+			os.Exit(4)
+		}
+		server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, `{"ready":true}`) })}
+		_ = server.Serve(listener)
+		os.Exit(0)
+	}
+	dir := t.TempDir()
+	addressFile := filepath.Join(dir, "address")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestDaemonStartForceCannotBypassLiveDaemonInAnotherProcess$")
+	cmd.Env = append(os.Environ(), "SHUTTLE_LIVE_DAEMON_HELPER=1", "SHUTTLE_LIVE_DAEMON_ADDRESS="+addressFile)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	deadline := time.Now().Add(5 * time.Second)
+	var address string
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(addressFile)
+		if err == nil {
+			address = string(data)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if address == "" {
+		t.Fatal("helper process did not publish its live listener")
+	}
+	env := testEnv(t)
+	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
+	env.Set("SHUTTLE_RELEASE", release.Dir)
+	env.Set("SHUTTLE_LISTEN", "tcp://"+address)
+	launched := false
+	a := newApp(env)
+	a.execDaemonRelease = func(string, ...string) error { launched = true; return nil }
+	_, _, err := executeApp(t, a, t.TempDir(), "daemon", "start", "--force")
+	if err == nil || launched || !strings.Contains(err.Error(), "daemon is already running") {
+		t.Fatalf("--force result err=%v launched=%t", err, launched)
 	}
 }
 

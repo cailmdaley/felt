@@ -86,7 +86,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 					t.Fatalf("systemd WorkingDirectory must be unquoted:\n%s", rendered)
 				}
 				for _, want := range []string{
-					`ExecStart="/tmp/go bin/shuttle \"quoted\" \\literal %%bin" daemon start --force`,
+					`ExecStart="/tmp/go bin/shuttle \"quoted\" \\literal %%bin" daemon start`,
 					`Environment="SHUTTLE_STORES=/tmp/store with spaces & <notes> \"quoted\" \\literal %%store"`,
 					`StandardOutput=append:/tmp/log dir/"quoted"\literal %%log`,
 					`StandardError=append:/tmp/log dir/"quoted"\literal %%log`,
@@ -133,7 +133,7 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 		tmux   string
 	}{
 		{"Darwin", `<string>daemon</string>`, "<key>TMUX_TMPDIR</key>\n        <string>/scratch/tmux</string>"},
-		{"Linux", `ExecStart="/opt/shuttle" daemon start --force`, `Environment="TMUX_TMPDIR=/scratch/tmux"`},
+		{"Linux", `ExecStart="/opt/shuttle" daemon start`, `Environment="TMUX_TMPDIR=/scratch/tmux"`},
 	} {
 		t.Run(tc.osName, func(t *testing.T) {
 			t.Parallel()
@@ -290,7 +290,7 @@ func TestDaemonInstallPrintRendersFromFakeRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("daemon install --dry-run: %v\n%s", err, stderr)
 	}
-	if templatePlaceholderPattern.MatchString(out) || !strings.Contains(out, "daemon start --force") {
+	if templatePlaceholderPattern.MatchString(out) || !strings.Contains(out, "daemon start") {
 		t.Fatalf("preview is incomplete:\n%s", out)
 	}
 }
@@ -682,7 +682,7 @@ func supervisorTemplateFixtures() map[string]string {
 		"io.shuttle.daemon.service.template": `[Service]
 LimitNOFILE=8192
 WorkingDirectory=__WORKING_DIRECTORY__
-ExecStart="__SHUTTLE_BIN__" daemon start --force
+ExecStart="__SHUTTLE_BIN__" daemon start
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'
 Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
 Environment="PATH=__PATH__"

@@ -44,8 +44,8 @@ WorkingDirectory=__WORKING_DIRECTORY__
 # $$ (not $) below: systemd expands bare $VAR/$() in ExecStartPre before
 # handing the command to /bin/sh, so shell dollars must survive that pass.
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 67108864 ]; then mv -f "__LOG__" "__LOG__.1"; fi'
-# `--force` skips the already-running guard, so a restart never refuses.
-ExecStart="__SHUTTLE_BIN__" daemon start --force
+# The daemon start guard refuses any listener that survives a service restart.
+ExecStart="__SHUTTLE_BIN__" daemon start
 
 # The release and user's real login PATH, set at install time.
 Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"

@@ -79,6 +79,8 @@ SHUTTLE_RELEASE=""
 }
 
 if [ "${1:-}" = "--loop" ]; then
+  SHUTTLE_RESPAWN_LOOP=1
+  export SHUTTLE_RESPAWN_LOOP
   cd "$REPO" || exit 1
   # Durable daemon logging. Redirect the daemon's stdout+stderr to a file so
   # dispatch history survives tmux scrollback — a Linux host running this

@@ -238,7 +238,7 @@ configured stores; they refuse guessed paths and duplicate matches.
 | Command | Purpose |
 |---|---|
 | `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration |
-| `shuttle daemon start [--force]` | Start the local Mix release in the foreground |
+| `shuttle daemon start [--force]` | Start the local Mix release in the foreground; refuses an answering daemon even with `--force` |
 | `shuttle daemon stop` | Stop the local daemon and mark the shutdown as intentional |
 | `shuttle daemon status` | Print daemon state; exits 2 when the daemon is down |
 | `shuttle daemon release` | Release the boot quarantine |

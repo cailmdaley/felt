@@ -42,39 +42,35 @@ func (a *app) shuttleDaemonStartCmd() *cobra.Command {
 		Short: "Start the daemon in the foreground",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			force, _ := cmd.Flags().GetBool("force")
 			release, err := a.findDaemonRelease()
 			if err != nil {
 				return err
 			}
-			if !force {
-				settings, err := a.resolveHostSettings()
-				if err != nil {
-					return err
+			settings, err := a.resolveHostSettings()
+			if err != nil {
+				return err
+			}
+			if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
+				return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
+			}
+			if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
+				fmt.Fprintf(a.env.Stderr, "Daemon already running at %s.\n", settings.Listen)
+				fmt.Fprintln(a.env.Stderr, "If a keep-alive supervisor owns it, cycle it there:")
+				fmt.Fprintln(a.env.Stderr, "  launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   (macOS)")
+				fmt.Fprintln(a.env.Stderr, "  systemctl --user restart shuttle-daemon.service         (Linux)")
+				fmt.Fprintln(a.env.Stderr, "Otherwise stop the listener directly:")
+				if settings.listen.Network == "unix" {
+					fmt.Fprintf(a.env.Stderr, "  lsof -t -- %s | xargs kill\n", settings.listen.Address)
+				} else {
+					_, port, _ := net.SplitHostPort(settings.listen.Address)
+					fmt.Fprintf(a.env.Stderr, "  lsof -ti:%s -sTCP:LISTEN | xargs kill\n", port)
 				}
-				if err := a.daemonLifecycleOwnerCheck(settings); err != nil {
-					return fmt.Errorf("refusing to start after the daemon owner check failed: %w", err)
-				}
-				if _, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
-					fmt.Fprintf(a.env.Stderr, "Daemon already running at %s.\n", settings.Listen)
-					fmt.Fprintln(a.env.Stderr, "If a keep-alive supervisor owns it, cycle it there:")
-					fmt.Fprintln(a.env.Stderr, "  launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   (macOS)")
-					fmt.Fprintln(a.env.Stderr, "  systemctl --user restart shuttle-daemon.service         (Linux)")
-					fmt.Fprintln(a.env.Stderr, "Otherwise stop the listener directly:")
-					if settings.listen.Network == "unix" {
-						fmt.Fprintf(a.env.Stderr, "  lsof -t -- %s | xargs kill\n", settings.listen.Address)
-					} else {
-						_, port, _ := net.SplitHostPort(settings.listen.Address)
-						fmt.Fprintf(a.env.Stderr, "  lsof -ti:%s -sTCP:LISTEN | xargs kill\n", port)
-					}
-					fmt.Fprintln(a.env.Stderr, "Pass --force to launch anyway.")
-					return errors.New("daemon is already running")
-				}
+				return errors.New("daemon is already running")
 			}
 			return a.execDaemonRelease(release.Launcher, "start")
 		},
 	}
-	shuttleDaemonStartCmd.Flags().Bool("force", false, "Start without checking whether a daemon is already running")
+	shuttleDaemonStartCmd.Flags().Bool("force", false, "Deprecated; live daemons are never bypassed")
 	return shuttleDaemonStartCmd
 }
 
