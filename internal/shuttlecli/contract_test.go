@@ -1,6 +1,8 @@
 package shuttlecli
 
 import (
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -33,6 +35,25 @@ func TestShuttleContract_PrintsBareInteger(t *testing.T) {
 	}
 	if n < 1 {
 		t.Fatalf("ShuttleContractLevel must start at 1, got %d", n)
+	}
+}
+
+func TestMigrateContractMatchesDaemon(t *testing.T) {
+	t.Parallel()
+	data, err := os.ReadFile("../../daemon/lib/shuttle/contract.ex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	match := regexp.MustCompile(`@expected_level\s+(\d+)`).FindSubmatch(data)
+	if len(match) != 2 {
+		t.Fatal("daemon has no expected contract level")
+	}
+	level, err := strconv.Atoi(string(match[1]))
+	if err != nil || level != ShuttleContractLevel {
+		t.Fatalf("daemon level %s differs from CLI %d", match[1], ShuttleContractLevel)
+	}
+	if !strings.Contains(string(data), "migrate") {
+		t.Fatal("daemon contract does not name migrate")
 	}
 }
 
