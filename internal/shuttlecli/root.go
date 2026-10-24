@@ -214,6 +214,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.askCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),
+		a.migrateCmd(),
 		a.codexDesktopBridgeCmd(),
 		a.shuttleContractCmd(),
 		a.processIdentityCmd(),

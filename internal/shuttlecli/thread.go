@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 
 func (a *app) threadCmd() *cobra.Command {
 	var host, agent, projectDir, role, slug, surface string
-	var disabled bool
+	var disabled, take bool
 	cmd := &cobra.Command{
 		Use:   `thread <parent> "<ask>"`,
 		Short: "Create and install a child constitution",
@@ -28,9 +29,25 @@ inherit. An absent parent surface means CLI. Inherited app execution falls back
 to CLI when the selected agent is not Codex. --surface cli|app overrides inheritance;
 app requires a Codex agent. Invalid selections never create or arm a child.
 
---json prints an object with the new id. No daemon is needed.`,
+--take creates a disabled thread, then moves your live session into it through
+its owning daemon. The source is armed for a fresh worker. If migration fails,
+the child stays created but disabled. --take cannot be combined with --disabled
+or a host different from the caller's.
+
+--json prints an object with the new id. Without --take no daemon is needed.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if take && disabled {
+				return fmt.Errorf("--take and --disabled are incompatible")
+			}
+			var source *felt.Felt
+			if take {
+				var err error
+				source, err = a.currentWorkerFiber()
+				if err != nil {
+					return fmt.Errorf("--take requires an identifiable live worker: %w", err)
+				}
+			}
 			ask := strings.TrimSpace(args[1])
 			if ask == "" {
 				return fmt.Errorf("ask must not be empty")
@@ -43,7 +60,11 @@ app requires a Codex agent. Invalid selections never create or arm a child.
 			if err != nil {
 				return err
 			}
-			defer unlock()
+			defer func() {
+				if unlock != nil {
+					unlock()
+				}
+			}()
 			inherited, ok, err := shuttle.BlockOf(parent)
 			if err != nil {
 				return err
@@ -56,6 +77,15 @@ app requires a Codex agent. Invalid selections never create or arm a child.
 				block.Host = host
 				if host != inherited.Host && !cmd.Flags().Changed("project-dir") {
 					return fmt.Errorf("changing host requires --project-dir; the parent's path belongs to %s", inherited.Host)
+				}
+			}
+			if take {
+				own, err := a.resolveOwnHost("")
+				if err != nil {
+					return err
+				}
+				if block.Host != own {
+					return fmt.Errorf("--take requires the caller's host %q, not %q", own, block.Host)
 				}
 			}
 			if cmd.Flags().Changed("agent") {
@@ -123,14 +153,18 @@ app requires a Codex agent. Invalid selections never create or arm a child.
 			if err != nil {
 				return err
 			}
-			defer childUnlock()
+			defer func() {
+				if childUnlock != nil {
+					childUnlock()
+				}
+			}()
 			if err := st.CheckAvailableID(child.ID); err != nil {
 				return err
 			}
 			child.Body = ask + "\n\n## Desired State\n\n## Status\n"
 			child.AddTag("constitution")
 			child.Status = felt.StatusActive
-			if disabled {
+			if disabled || take {
 				child.Status = felt.StatusOpen
 			}
 			if err := shuttle.SetConfig(child, block); err != nil {
@@ -139,6 +173,21 @@ app requires a Codex agent. Invalid selections never create or arm a child.
 			child.Touch(child.CreatedAt)
 			if err := st.Write(child); err != nil {
 				return err
+			}
+			if take {
+				child.Path = st.Path(child.ID)
+				// The daemon must acquire both document locks during migration.
+				childUnlock()
+				childUnlock = nil
+				unlock()
+				unlock = nil
+				if _, err := a.migrateWorker(cmd, source, child, false, false); err != nil {
+					var uncertain migrationUnconfirmed
+					if errors.As(err, &uncertain) {
+						return fmt.Errorf("thread %s was created; its assignment is unconfirmed, inspect it before retrying: %w", child.ID, err)
+					}
+					return fmt.Errorf("thread %s was created but remains disabled; migration failed: %w", child.ID, err)
+				}
 			}
 			if a.json {
 				return a.outputJSON(map[string]string{"id": child.ID})
@@ -153,6 +202,7 @@ app requires a Codex agent. Invalid selections never create or arm a child.
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Worker cwd; required when changing host")
 	cmd.Flags().StringVar(&role, "role", "", "Role slug (default: parent's role)")
 	cmd.Flags().StringVar(&slug, "slug", "", "Child slug (default: derived from ask)")
+	cmd.Flags().BoolVar(&take, "take", false, "Move your live session into the thread and launch a fresh source worker")
 	cmd.Flags().BoolVar(&disabled, "disabled", false, "Create a draft instead of arming it")
 	return cmd
 }
