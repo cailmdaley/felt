@@ -251,7 +251,7 @@ defmodule Shuttle.ThreadReceiverTest do
       assert get_in(unresolved, ["shuttle", "resolved", "agent"]) == nil
       assert get_in(unresolved, ["shuttle", "agent"]) == "receiver-custom"
       cycle!(poller)
-      assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
+      assert %{session_uuid: ^uuid, cli: "claude"} = Poller.live_worker(poller, "hub")
       assert authority!(data) == committed
       # Retain stale A across restart too, not just the healthy mirror repaired above.
       assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
@@ -259,7 +259,7 @@ defmodule Shuttle.ThreadReceiverTest do
       GenServer.stop(poller)
       poller = start_poller_for!(store)
       await_boot_cycle!(poller)
-      assert %{session_uuid: ^uuid, cli: nil} = Poller.live_worker(poller, "hub")
+      assert %{session_uuid: ^uuid, cli: "claude"} = Poller.live_worker(poller, "hub")
       assert authority!(data) == committed
       assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
       assert get_in(entry.fiber, ["shuttle", "resolved", "agent"]) == nil

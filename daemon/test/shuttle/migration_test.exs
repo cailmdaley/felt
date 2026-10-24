@@ -14,7 +14,12 @@ defmodule Shuttle.MigrationTest do
           socket = Shuttle.Env.app(:migration_tmux_socket)
 
           args =
-            if hd(args) == "new-session", do: List.replace_at(args, -1, "sleep 300"), else: args
+            if hd(args) == "new-session" do
+              command_index = Enum.find_index(args, &(&1 == "bash"))
+              Enum.take(args, command_index) ++ ["sleep", "300"]
+            else
+              args
+            end
 
           Shuttle.Env.cmd("tmux", ["-L", socket | args], Keyword.delete(opts, :timeout_ms))
 
@@ -374,6 +379,18 @@ defmodule Shuttle.MigrationTest do
       Runner.cmd("tmux", ["display-message", "-p", "-t", source <> ":0.0", "\#{pane_pid}"], [])
 
     assert fresh_pid != old_pid
+    assert String.to_integer(String.trim(fresh_pid)) > 0
+    fresh_worker = Poller.worker_status(poller, "source")
+    send(fresh_worker.pid, :heartbeat)
+    assert :sys.get_state(fresh_worker.pid).consecutive_failures == 0
+
+    assert {^fresh_pid, 0} =
+             Runner.cmd(
+               "tmux",
+               ["display-message", "-p", "-t", source <> ":0.0", "\#{pane_pid}"],
+               []
+             )
+
     assert Poller.session_uuid(poller, "source") != "native-session"
     assert Poller.session_uuid(poller, "dest") == "native-session"
 
