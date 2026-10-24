@@ -541,6 +541,11 @@ defmodule Shuttle.Poller do
   `shuttle.runtime.meeting` so the meeting's daemon can find the fiber).
   """
   @spec claim_session(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def migrate(from, to, opts \\ []), do: migrate(Shuttle.Env.server(__MODULE__), from, to, opts)
+
+  def migrate(server, from, to, opts),
+    do: GenServer.call(server, {:migrate, from, to, opts}, dispatch_call_timeout_ms())
+
   def claim_session(fiber_id, tmux_session, opts \\ []),
     do: claim_session(Shuttle.Env.server(__MODULE__), fiber_id, tmux_session, opts)
 
@@ -1393,6 +1398,29 @@ defmodule Shuttle.Poller do
   def handle_call({:worker_status, fiber_id}, _from, state) do
     # `running_worker` resolves a uid or slug input through `running_key`'s scan.
     {:reply, running_worker(state, fiber_id), state}
+  end
+
+  def handle_call({:migrate, from_id, to_id, opts}, _from, state) do
+    case Shuttle.Migration.prepare(state, from_id, to_id, opts) do
+      {:retry, reply} ->
+        {:reply, {:ok, reply}, state}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+
+      {:ok, plan} ->
+        # A task can have read one document before and the other after the
+        # transition. Its token, even if already queued, must never be applied.
+        state =
+          state
+          |> stop_poll_task()
+          |> cancel_poll_stall_timer()
+          |> Map.put(:poll_check_in_progress, false)
+          |> Map.put(:poll_token, nil)
+
+        {result, state} = migrate_worker(state, plan)
+        {:reply, result, schedule_tick(state, state.poll_interval_ms)}
+    end
   end
 
   def handle_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
@@ -4789,6 +4817,145 @@ defmodule Shuttle.Poller do
   # claim: start the liveness watcher and, on success, register the entry.
   # `running` is an in-memory watcher registry, not persisted — tmux is the
   # source of truth; a restart re-adopts live sessions.
+  defp migrate_worker(state, plan) do
+    case Shuttle.Migration.move_backend(state, plan) do
+      {:ok, undo_backend} ->
+        migrate_documents(state, plan, undo_backend)
+
+      {:error, _} = error ->
+        {error, state}
+    end
+  end
+
+  defp migrate_documents(state, plan, undo_backend) do
+    old = plan.worker
+
+    new =
+      old
+      |> Map.merge(%{
+        fiber_id: plan.to["id"],
+        uid: plan.to["uid"],
+        felt_store: plan.to["store"],
+        session: plan.session,
+        session_uuid: plan.uuid,
+        identity_captured: true,
+        started_at: DateTime.utc_now()
+      })
+      |> Map.delete(:identity_token)
+      |> Map.delete(:identity_error)
+
+    result =
+      with :ok <- Shuttle.LifecycleStore.commit_migration(plan.documents),
+           {:ok, _, _, _} <- persist_context_receiver(state, old, nil),
+           {:ok, epoch, harness, address} <- persist_context_receiver(state, new, new),
+           :ok <- rebind_migration_watcher(new),
+           :ok <- record_migration(state, plan, new, harness) do
+        {:ok,
+         Map.merge(new, %{
+           context_epoch: epoch,
+           context_harness: harness,
+           context_address: address
+         })}
+      end
+
+    case result do
+      {:ok, new} ->
+        from_key = running_key(state, plan.from["id"])
+        to_key = runtime_key_for_fiber(plan.to)
+
+        state =
+          %{
+            state
+            | running: state.running |> Map.delete(from_key) |> Map.put(to_key, new),
+              dispatch_failures: Map.drop(state.dispatch_failures, [from_key, to_key]),
+              resume_loop: Map.drop(state.resume_loop, [from_key, to_key])
+          }
+          |> note_running(to_key)
+
+        state = refresh_migration_documents(state, plan)
+        {{:ok, Shuttle.Migration.reply(plan.from, plan.to, plan.uuid)}, state}
+
+      error ->
+        # Attempt every repair even when one failed. In particular a lost
+        # watcher-call response may already have changed the observer's key.
+        repairs = [
+          Shuttle.LifecycleStore.rollback_migration(plan.documents),
+          undo_backend.(),
+          persist_context_receiver(state, new, nil),
+          persist_context_receiver(state, old, old),
+          rebind_migration_watcher(old)
+        ]
+
+        failures =
+          Enum.reject(repairs, fn
+            :ok -> true
+            {:ok, _, _, _} -> true
+            _ -> false
+          end)
+
+        if failures == [] do
+          # Receiver publication advances its epoch during rollback too.
+          state = put_running(state, running_key(state, old.fiber_id), old)
+          {{:error, {:migration_failed, error}}, state}
+        else
+          # Uncertain repairs are not dispatch authority. Hold all autonomous
+          # launches until the operator reconciles and restarts this daemon.
+          contract = %{state.contract_check | ok: false, reason: "migration rollback incomplete"}
+
+          {{:error, {:rollback_failed, failures}},
+           %{state | contract_check: contract, boot_quarantine: true}}
+        end
+    end
+  end
+
+  defp record_migration(state, plan, new, harness) do
+    Shuttle.SessionLedger.record_checked(
+      fiber: plan.to["id"],
+      uid: plan.to["uid"],
+      session: plan.uuid,
+      fiber_path: plan.to["path"],
+      tmux: plan.session,
+      kind: :migrate,
+      host: state.own_host_id,
+      harness: harness,
+      agent: new[:agent_id],
+      thread_id: Shuttle.AppWorkers.id(plan.session),
+      role: new[:role]
+    )
+  end
+
+  defp rebind_migration_watcher(meta) do
+    WorkerWatcher.migrate(meta.pid, meta.fiber_id, meta.session, meta.uid, meta.felt_store)
+  catch
+    :exit, _ -> {:error, :watcher_unavailable}
+  end
+
+  defp refresh_migration_documents(state, plan) do
+    Enum.reduce([plan.from, plan.to], state, fn fiber, state ->
+      state = refresh_document_entry(state, fiber["id"])
+      # Degraded listings are still dispatch inputs. Replace their old runtime
+      # too, so a failed next read cannot resurrect the source's moved UUID.
+      case fetch_fiber_full(fiber["id"], state) do
+        {:ok, fresh} ->
+          listings =
+            Map.new(state.last_known_listings, fn {store, rows} ->
+              {store,
+               Enum.map(rows, fn row -> if row["uid"] == fiber["uid"], do: fresh, else: row end)}
+            end)
+
+          %{state | last_known_listings: listings}
+
+        _ ->
+          listings =
+            Map.new(state.last_known_listings, fn {store, rows} ->
+              {store, Enum.reject(rows, &(&1["uid"] == fiber["uid"]))}
+            end)
+
+          %{state | last_known_listings: listings}
+      end
+    end)
+  end
+
   defp register_running(%State{} = state, fiber_id, runtime_key, meta) do
     case start_watcher(state, fiber_id, meta) do
       {:ok, meta} ->

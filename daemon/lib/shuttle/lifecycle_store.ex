@@ -87,6 +87,63 @@ defmodule Shuttle.LifecycleStore do
     end
   end
 
+  @doc "Prepare reversible migration writes without touching either document."
+  def prepare_migration(from_path, to_path, uuid, opts) do
+    with {:ok, _, from_raw, from_fm, from_body} <- FiberDoc.read_path(from_path),
+         {:ok, _, to_raw, to_fm, to_body} <- FiberDoc.read_path(to_path),
+         {:ok, _} <- shuttle_block(from_fm),
+         {:ok, _} <- shuttle_block(to_fm) do
+      now = DateTime.to_iso8601(DateTime.utc_now())
+      status = if opts[:rest] == true or opts[:disabled] == true, do: "open", else: "active"
+
+      source_ops =
+        [
+          {:put, "status", status},
+          {:delete, "closed-at"},
+          {:delete, "tempered"},
+          {:delete_nested, "shuttle", "runtime"}
+        ] ++ if(opts[:rest], do: [{:put, "horizon", "stashed"}], else: [{:delete, "horizon"}])
+
+      runtime = %{"session_uuid" => uuid, "dispatched_at" => now}
+
+      dest_ops = [
+        {:put, "status", "active"},
+        {:delete, "closed-at"},
+        {:delete, "tempered"},
+        {:delete, "horizon"},
+        {:delete, "ask"},
+        {:put_nested, "shuttle", "runtime", runtime}
+      ]
+
+      {:ok,
+       [
+         {from_path, from_raw, from_body, source_ops},
+         {to_path, to_raw, to_body, dest_ops}
+       ]}
+    end
+  end
+
+  @doc "Write both migration documents; restore both snapshots on a write failure."
+  def commit_migration(documents) do
+    writer = Shuttle.Env.app(:migration_document_writer, &FiberDoc.write!/4)
+    Enum.each(documents, fn {path, raw, body, ops} -> writer.(path, raw, body, ops) end)
+    :ok
+  rescue
+    error ->
+      case rollback_migration(documents) do
+        :ok -> {:error, {:write_failed, Exception.message(error)}}
+        {:error, reason} -> {:error, {:rollback_failed, reason}}
+      end
+  end
+
+  @doc "Restore the document snapshots retained by a migration transaction."
+  def rollback_migration(documents) do
+    Enum.each(documents, fn {path, raw, body, _} -> FiberDoc.write!(path, raw, body, []) end)
+    :ok
+  rescue
+    error -> {:error, Exception.message(error)}
+  end
+
   defp shuttle_block(%{"shuttle" => shuttle}) when is_map(shuttle), do: {:ok, shuttle}
   defp shuttle_block(_), do: {:error, "fiber has no shuttle: block"}
 

@@ -58,7 +58,7 @@ defmodule Shuttle.SessionLedger do
   # it carries every hook event; this carries one line per session.
   @max_bytes 8 * 1024 * 1024
 
-  @kinds ~w(dispatch claim resume)
+  @kinds ~w(dispatch claim resume migrate)
 
   @typedoc "One ledger line, as written and as served."
   @type record :: %{String.t() => String.t() | integer() | map() | nil}
@@ -105,6 +105,14 @@ defmodule Shuttle.SessionLedger do
       :ok
   end
 
+  @doc "Append a required assignment pairing, reporting persistence failure to its transaction."
+  def record_checked(fields) when is_list(fields) do
+    case build_line(fields) do
+      {:ok, line} -> append_checked(line, Keyword.get(fields, :path, default_path()))
+      :drop -> {:error, :invalid_ledger_record}
+    end
+  end
+
   # A pairing with no session UUID is not a pairing. Drop it here so no caller
   # has to remember the rule and no reader has to filter for it.
   defp build_line(fields) do
@@ -126,6 +134,7 @@ defmodule Shuttle.SessionLedger do
           "at" => Keyword.get(fields, :at) || System.system_time(:millisecond),
           "kind" => kind
         }
+        |> maybe_put("fiber_path", presence(Keyword.get(fields, :fiber_path)))
         |> maybe_put("thread_id", presence(Keyword.get(fields, :thread_id)))
         |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
         |> maybe_put("model", presence(Keyword.get(fields, :model)))
@@ -151,13 +160,23 @@ defmodule Shuttle.SessionLedger do
   # one O_APPEND write per line (atomic against other appenders on Darwin and
   # Linux alike, which is why the line is built whole before we get here).
   defp append(line, path) do
+    case append_checked(line, path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.debug("session ledger: append to #{path} failed — #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp append_checked(line, path) do
     File.mkdir_p!(Path.dirname(path))
     maybe_rotate(path)
     File.write!(path, line, [:append])
+    :ok
   rescue
-    error ->
-      Logger.debug("session ledger: append to #{path} failed — #{Exception.message(error)}")
-      :ok
+    error -> {:error, {:ledger_write_failed, Exception.message(error)}}
   end
 
   defp maybe_rotate(path) do

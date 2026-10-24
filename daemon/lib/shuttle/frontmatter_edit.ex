@@ -36,6 +36,7 @@ defmodule Shuttle.FrontmatterEdit do
           {:put, String.t(), term()}
           | {:delete, String.t()}
           | {:delete_nested, String.t(), String.t()}
+          | {:put_nested, String.t(), String.t(), term()}
 
   @doc """
   Apply a list of `op`s to the raw frontmatter `text`, returning new text.
@@ -228,6 +229,23 @@ defmodule Shuttle.FrontmatterEdit do
       end)
     else
       entries ++ [%{key: key, lines: [line]}]
+    end
+  end
+
+  defp apply_op(entries, {:put_nested, parent, child, value}) do
+    child_lines =
+      render_field(child, value, 2) |> String.trim_trailing("\n") |> String.split("\n")
+
+    if Enum.any?(entries, &(&1.key == parent)) do
+      Enum.map(entries, fn
+        %{key: ^parent, lines: lines} = e ->
+          %{e | lines: drop_nested_key(lines, child) ++ child_lines}
+
+        other ->
+          other
+      end)
+    else
+      entries ++ [%{key: parent, lines: [parent <> ":" | child_lines]}]
     end
   end
 

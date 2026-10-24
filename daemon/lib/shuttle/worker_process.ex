@@ -310,9 +310,86 @@ defmodule Shuttle.WorkerProcess do
   end
 
   defp script_session_in(args) do
-    case Regex.run(~r{(?:^|[\s/])shuttle-run-([^\s/.]+)\.\d+\.sh(?:\s|$)}, args) do
-      [_, session] -> session
+    case script_token(args) do
+      {token, session} ->
+        case File.read(alias_path(token)) do
+          {:ok, name} when name != "" -> name
+          _ -> session
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp script_token(args) do
+    case Regex.run(~r{(?:^|[\s/])(shuttle-run-([^\s/.]+)\.\d+\.sh)(?:\s|$)}, args) do
+      [_, token, session] -> {token, session}
       _ -> nil
+    end
+  end
+
+  # Bind the immutable script token, not its reused source session name. A
+  # successor's fresh script must never inherit the moved worker's assignment.
+  def migration_aliases(procs, old, new) do
+    for proc <- procs,
+        not tmux?(proc),
+        script_session(proc) == old,
+        {token, _} <- [script_token(proc.args)],
+        uniq: true do
+      path = alias_path(token)
+      {path, File.read(path), new}
+    end
+  end
+
+  def write_migration_aliases(aliases) do
+    Enum.reduce_while(aliases, :ok, fn {path, _, new}, :ok ->
+      case write_alias(path, new) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  def restore_migration_aliases(aliases) do
+    Enum.reduce_while(aliases, :ok, fn {path, previous, _}, :ok ->
+      result =
+        case previous do
+          {:ok, old} ->
+            write_alias(path, old)
+
+          {:error, :enoent} ->
+            case File.rm(path) do
+              {:error, :enoent} -> :ok
+              result -> result
+            end
+
+          error ->
+            error
+        end
+
+      case result do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp alias_path(token) do
+    Path.join([Shuttle.data_dir(), "worker-script-bindings", token])
+  end
+
+  defp write_alias(path, value) do
+    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(tmp, value),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      error ->
+        File.rm(tmp)
+        error
     end
   end
 

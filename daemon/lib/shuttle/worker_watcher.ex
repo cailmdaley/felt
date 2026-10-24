@@ -48,6 +48,11 @@ defmodule Shuttle.WorkerWatcher do
     GenServer.stop(server, :normal)
   end
 
+  @doc "Rebind this observer without changing or stopping its backend worker."
+  def migrate(server, fiber_id, session, uid, store) do
+    GenServer.call(server, {:migrate, fiber_id, session, uid, store}, :infinity)
+  end
+
   # ── Server ──
 
   @impl true
@@ -86,6 +91,19 @@ defmodule Shuttle.WorkerWatcher do
         ref = Process.send_after(self(), :heartbeat, heartbeat_interval)
         {:ok, %{state | heartbeat_timer_ref: ref}}
     end
+  end
+
+  @impl true
+  def handle_call({:migrate, fiber_id, session, uid, store}, _from, state) do
+    {:reply, :ok,
+     %{
+       state
+       | fiber_id: fiber_id,
+         session: session,
+         uid: uid,
+         felt_store: store,
+         consecutive_failures: 0
+     }}
   end
 
   @impl true
