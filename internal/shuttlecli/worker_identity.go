@@ -10,6 +10,13 @@ import (
 	"github.com/cailmdaley/felt/internal/messaging"
 )
 
+const workerExitIdentityHelp = `
+
+Omit the fiber to use the current native session binding or exact tmux pane,
+including after migrate. If only SHUTTLE_FIBER_PATH is available (no native
+session ID or tmux pane), pass the destination fiber explicitly to handoff,
+close, and rest after migrating; the inherited environment cannot follow it.`
+
 func workerBindingKind(kind string) bool {
 	return kind == "dispatch" || kind == "resume" || kind == "claim" || kind == "migrate"
 }

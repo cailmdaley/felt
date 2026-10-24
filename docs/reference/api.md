@@ -37,6 +37,7 @@ is not enough.
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
 | `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
+| `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation |
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
 | `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
@@ -78,6 +79,23 @@ the new one, whose status and `handed_off_at` land in one atomic write. The
 outcome is always kept. A success is 200 with the Shuttle CLI's output as
 text. A Shuttle refusal is 422 with `shuttle exited <status>: <message>`; an
 unknown action or a missing field is 400.
+
+### Worker migration
+
+`POST /migrate` takes `{from, to, session_id?, tmux_pane?, rest?, disabled?}`.
+Both fibers must be installed on the receiving daemon's host, and the destination must have no live worker.
+The daemon serializes the move with polling, writes both runtime blocks through `LifecycleStore`, and moves the watcher, session binding and durable worker assignment.
+For tmux workers it renames the session without replacing its pane or process; Codex conversations keep their native thread identity.
+The destination becomes active with the moved `session_uuid` and a new `dispatched_at`.
+The source loses its session identity and stays active for a fresh worker from `## Status`; `rest: true` leaves it open with `horizon: stashed`, and `disabled: true` leaves it open in Drafts.
+The two options are mutually exclusive.
+
+Success returns `{ok: true, from, to, session_uuid}`.
+A retry identifying the same session and destination succeeds without moving it again.
+Refusals carry a `reason` and a corrective message, including `not_installed`, `already_running`, `other_host`, `same_fiber`, and `surface_unsupported`.
+Messages to the destination follow the moved session; messages to the source wait for its next worker.
+Messages to the exact session address keep reaching the same conversation.
+No conversation context is copied or merged.
 
 ### Capture and meeting mode
 

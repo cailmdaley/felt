@@ -212,7 +212,7 @@ serialized with dispatch, and then stops the worker through its backend — a
 tmux session, or an app conversation's interrupt. --local writes here and
 stops nothing: the daemon that shells it does the stop. A daemon that cannot
 be reached is bypassed: the document is written here and a tmux worker on
-this host is killed.`,
+this host is killed.` + workerExitIdentityHelp,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			args, err := a.implicitWorkerArgs(args)
@@ -626,7 +626,7 @@ The shuttle block stays installed; closed fibers are ignored by the daemon
 until reopen or accept moves them (resume also re-arms a standing constitution
 awaiting review). When closing your own fiber from tmux, this command ends your
 session after the close succeeds; make it your final action. Closing another
-fiber leaves your session running.`,
+fiber leaves your session running.` + workerExitIdentityHelp,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			args, err := a.implicitWorkerArgs(args)

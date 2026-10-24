@@ -65,6 +65,17 @@ func TestMigrateRoutesIdentityWithoutLocalLifecycleWrites(t *testing.T) {
 	}
 }
 
+func TestExitHelpNamesEnvironmentOnlyMigrationLimit(t *testing.T) {
+	t.Parallel()
+	dir, _ := newStore(t)
+	for _, verb := range []string{"handoff", "close", "rest"} {
+		out, err := runIn(t, testEnv(t), dir, verb, "--help")
+		if err != nil || !strings.Contains(out, "pass the destination fiber explicitly") || !strings.Contains(out, "SHUTTLE_FIBER_PATH") {
+			t.Fatalf("%s help does not explain migration identity limit: %v %s", verb, err, out)
+		}
+	}
+}
+
 func TestMigrateInfersSourceFromWorkerContext(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

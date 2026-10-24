@@ -153,7 +153,7 @@ the daemon speaks directly, see the [HTTP API](api.md).
 |---|---|
 | `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
 | `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
-| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. `--host` requires `--project-dir`. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit |
+| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. `--host` requires `--project-dir`. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit. `--take` moves the caller's live session into the child and arms its source for a fresh worker; it requires the caller's host and is incompatible with `--disabled`. If migration fails, the child stays created but disabled |
 | `shuttle threads <fiber>` | A constitution's direct threads from this host's daemon, grouped Waiting, Working, Armed, To review, Draft, Resting. Armed is active with no worker running anywhere the daemon can see; `Armed · host unreachable` means its host is out of the daemon's fleet view. Each row gives the id, state, name, the first sentence of the outcome, and the count of unfinished threads below; a thread resting until something reads `⏸ until <name>`; `N waiting for its next worker` counts the thread results and messages queued for a constitution this host owns that has no live worker, on the header for the orchestrator itself and on each row. Archived threads (a tempered or discarded verdict) are a count; `--all` lists them and every deeper level, indented. `--json` adds each thread's board column and `pending_results` |
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
@@ -175,6 +175,7 @@ untouched by any of this.
 | Command | Purpose |
 |---|---|
 | `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`) |
+| `shuttle migrate <to-fiber>` | Move the caller's live conversation to another installed fiber on the same host without ending it. Infer the source from current session/pane identity; `--from <fiber>` overrides it. The destination must have no live worker. The source gets a fresh worker from `## Status`; `--rest` leaves it resting, or `--disabled` leaves it open in Drafts. The destination receives the session UUID, watcher and current assignment; exact-session messages still reach it. Repeating the same session/destination succeeds without a second move. No conversation context is copied or merged. Supports `--json` |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one, and always writes locally. `--local` skips the daemon |
 | `shuttle accept <fiber>` | Resolve the human verdict on an untempered standing constitution, closed or still active: it re-arms and its run concludes (`handed_off_at`). The outcome is kept. A oneshot is refused. `--local` skips the daemon |
@@ -199,6 +200,10 @@ Without `--new`, assigning a role still requires an existing charter.
 To adopt your current conversation, install the constitution with
 `shuttle install <fiber> --disabled --project-dir <dir> -m <agent>`, then run
 `shuttle claim <fiber>` and, only after it succeeds, `shuttle resume <fiber>`.
+
+`shuttle handoff`, `shuttle close`, and `shuttle rest` accept an omitted fiber inside a worker.
+Current native session bindings and the exact tmux pane identify its destination after `migrate`, ahead of an inherited dispatch path.
+If the only available identity is `SHUTTLE_FIBER_PATH` (no native session ID or tmux pane), the environment cannot follow the move: pass the destination explicitly to `handoff`, `close`, and `rest`.
 Terminal claims identify the current tmux pane; `--tmux-session` supplies an
 explicit existing session. App claims use `CODEX_THREAD_ID` or `--session`
 and require the daemon to verify the native conversation. The claimed host

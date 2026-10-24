@@ -28,7 +28,7 @@ stamped is the resolved path when the tmux session's fiber UID matches, so
 renames during a run are safe. Without an argument the current native session's
 local ledger binding, or the current tmux pane's fiber UID, identifies the fiber.
 SHUTTLE_FIBER_PATH is a fallback only without native or worker-pane evidence.
-An explicit different fiber stamps that fiber and leaves the caller running.`,
+An explicit different fiber stamps that fiber and leaves the caller running.` + workerExitIdentityHelp,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := ""

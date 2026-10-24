@@ -76,6 +76,8 @@ Questions lead Your turn and are drawn heavier: an outstanding `ask`, or a harne
 
 **Threads.** A constitution nested under another constitution is a *thread*; its *orchestrator* is the nearest ancestor with a `shuttle:` block that is not archived; a tempered or discarded constitution orchestrates nothing, so its live threads answer to the next one up.
 Create one with `shuttle thread <parent> "<ask>"`: it inherits the parent's host, project directory, role, agent and compatible execution surface unless overridden, and starts armed unless `--disabled` keeps it in drafts.
+Use `shuttle thread <parent> "<ask>" --take` when pulled into a sidequest: your live session moves into the new thread and a fresh worker takes your source fiber from `## Status`.
+Use `shuttle migrate <orchestrator>` to carry a thread's session up to its orchestrator without copying or merging conversation context; `--rest` leaves the source resting instead of launching its next worker.
 Changing `--host` requires an explicit `--project-dir` for that host.
 An absent parent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent.
 Use `--surface cli|app` to override inheritance; app requires Codex, and invalid selections never create or arm a child.
@@ -117,6 +119,9 @@ Use a handoff when context pressure calls for a fresh worker, at a coherent sub-
 To pick the successor's agent, `shuttle set-agent <id> <agent>` with a registry id from `shuttle agents`, never a model name; handoff refuses a block naming an agent the registry does not know.
 
 ## Exiting
+
+`shuttle handoff`, `shuttle close`, and `shuttle rest` can infer your current fiber from its native session binding or exact tmux pane, including after `migrate`.
+If your harness exposes only `SHUTTLE_FIBER_PATH` with no native session ID or tmux pane, that inherited path cannot follow a move: pass the destination fiber explicitly to `handoff`, `close`, and `rest` after migrating.
 
 Expect `thread <id> <verb>: <outcome or question>` messages from your threads: close wakes your conversation by default, ask always wakes, and handoff and rest arrive as context, as does `unblocked` when the fiber a resting thread waits for closes.
 A close, rest or ask you make yourself on one of your threads is not delivered back to you.
