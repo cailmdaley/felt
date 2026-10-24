@@ -2,7 +2,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
 import { THREAD_LABEL, ThreadIndex } from './threads.js'
-import { LastReplies } from './threadReply.js'
 import { response } from './testFixtures.js'
 import { badgeWords, installThreadPeek, THREAD_PIN, TREE_LINES_IN_VIEW, ThreadFamilies, type ThreadPinRequest } from './ThreadPeek.js'
 import { card } from './testFixtures.js'
@@ -311,48 +310,6 @@ describe('a family drawn as a tree', () => {
       expect(new Set(names).size).toBe(names.length)
     }
   })
-  it('a line under the pointer or the keyboard whispers its state, age and what its agent last said', async () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(Date.parse('2026-07-02T15:00:00Z'))
-    saveWaitingThreadEntries(false)
-    const transcript = [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'An **earlier** reply.' }] } },
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The cut is ready; see [the report](report.html).' }, { type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } },
-    ].map(r => JSON.stringify(r)).join('\n') + '\n'
-    const fetcher = vi.fn(async (url: string) => url.includes('/raw?')
-      ? new Response(transcript)
-      : new Response(JSON.stringify({ byte_count: transcript.length })))
-    const root = card({ id: 'root' })
-    const child = card({ id: 'root/child', name: 'Choose the cut', orchestrator: 'root', status: 'closed', outcome: 'Cut chosen.',
-      sessionUuid: 'sess-1', shuttleHost: 'far', closedAt: '2026-07-02T12:00:00Z' })
-    const host = document.createElement('div'); document.body.append(host)
-    const families = new ThreadFamilies(new LastReplies('http://daemon', fetcher as unknown as typeof fetch))
-    installThreadPeek(host, host, root, new ThreadIndex([root, child]), vi.fn(), families)
-    host.querySelector<HTMLButtonElement>('.kbn-thread-badge')!.click()
-    const row = host.querySelector<HTMLElement>('.kbn-thread-peek .kbn-thread-row')!
-    // Nothing inline but the name.
-    expect(row.querySelector('.kbn-thread-name')!.textContent).toBe('Choose the cut')
-    expect(row.querySelector('.kbn-tree-tag')!.textContent).toBe('review')
-    const pointer = new Event('pointerenter'); Object.assign(pointer, { pointerType: 'mouse' }); row.dispatchEvent(pointer)
-    const whisper = () => document.querySelector<HTMLElement>('.kbn-thread-whisper')
-    expect(whisper()?.hidden ?? true).toBe(true)
-    await vi.advanceTimersByTimeAsync(400)
-    expect(whisper()!.hidden).toBe(false)
-    expect(whisper()!.querySelector('.kbn-thread-whisper-head')!.textContent).toBe('To review · 3h')
-    expect(whisper()!.querySelector('.kbn-thread-whisper-body')!.textContent).toBe('The cut is ready; see the report.')
-    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
-      'http://daemon/api/v1/transcript?session=sess-1&host=far',
-      'http://daemon/api/v1/transcript/raw?session=sess-1&host=far&offset=0',
-    ])
-    row.dispatchEvent(new Event('pointerleave'))
-    expect(whisper()!.hidden).toBe(true)
-    // The keyboard's focus shows it at once, from the reply already read.
-    row.focus()
-    expect(whisper()!.hidden).toBe(false)
-    await vi.advanceTimersByTimeAsync(0)
-    expect(whisper()!.querySelector('.kbn-thread-whisper-body')!.textContent).toBe('The cut is ready; see the report.')
-    expect(fetcher).toHaveBeenCalledTimes(2)
-  })
 })
 describe('quiet families', () => {
   it('a family whose threads are all archived draws no badge', () => {
@@ -414,27 +371,3 @@ describe('pinned threads', () => {
   })
 })
 
-describe('the floating preview of a card with threads', () => {
-  const root = card({ id: 'root' }), child = card({ id: 'root/child', orchestrator: 'root' })
-  const index = new ThreadIndex([root, child])
-  root.threadSummary = index.summary(root)
-  const data = response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] })
-  const draw = () => {
-    const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
-      stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onRefresh: () => {} })
-    document.body.append(renderer.renderNowSection(data.now, {}))
-    return renderer
-  }
-  const row = () => document.querySelector<HTMLElement>('[data-card-uid="root"]')!
-  it('previews while its family is folded and yields while it is expanded', () => {
-    const renderer = draw()
-    const badge = row().querySelector<HTMLButtonElement>('.kbn-thread-badge')!
-    expect(badge.getAttribute('aria-expanded')).toBe('false')
-    expect(renderer.buildCardPreview(row())).not.toBeNull()
-    badge.click()
-    expect(badge.getAttribute('aria-expanded')).toBe('true')
-    expect(renderer.buildCardPreview(row())).toBeNull()
-    badge.click()
-    expect(renderer.buildCardPreview(row())).not.toBeNull()
-  })
-})

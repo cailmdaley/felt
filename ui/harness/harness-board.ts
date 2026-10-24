@@ -560,8 +560,7 @@ const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unkn
 /**
  * `?desk=dense`: a Desk at the density a working week reaches — about forty
  * cards across the three columns, live workers and idle turns among them, and
- * reports on many — for judging how many lines a column shows and how the
- * preview behaves among them.
+ * reports on many — for judging how many lines a column shows.
  */
 const DENSE_NAMES = {
   drafts: [

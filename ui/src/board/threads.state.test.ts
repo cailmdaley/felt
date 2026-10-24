@@ -55,7 +55,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
       const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
       const host = document.createElement('div'); installThreadPeek(host, host, hub, index, vi.fn())
-      // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark and whisper draw.
+      // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark draws.
       const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('.ws-thread-group-label')?.textContent ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))

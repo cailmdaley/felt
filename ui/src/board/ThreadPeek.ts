@@ -1,8 +1,6 @@
 import type { KanbanCard } from './KanbanTypes.js'
 import { THREAD_LABEL, threadKey, waitingWords, type ThreadIndex, type ThreadState } from './threads.js'
 import { waitingThreadEntries } from './threadPreferences.js'
-import { LastReplies, ThreadWhisper } from './threadReply.js'
-import { untilOf } from './blockedOn.js'
 import { turnOf } from './turn.js'
 import './threads.css'
 
@@ -126,14 +124,8 @@ const BRANCH_RANK_REST = 2
 /** The word an opened tree's line carries at its end, for the states that are the reader's to act on. */
 const STATE_TAGS: Partial<Record<ThreadState, string>> = { waiting: 'waiting', 'to-review': 'review' }
 
-/** The last pointer press, so a click's focus does not raise the whisper a keyboard's focus does. */
-let pressedAt = 0
-/**
- * One thread as one line of the tree: its branches, its state mark and its
- * name. What it last said waits in the whisper, under the pointer or the
- * keyboard's focus; the pin sits at the line's end.
- */
-export function treeLine(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, focus: string, cells: readonly TreeGuide[], whisper?: ThreadWhisper, tagged = false): HTMLElement {
+/** One thread as one line of the tree: branches, state mark, name and pin. */
+export function treeLine(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void, focus: string, cells: readonly TreeGuide[], tagged = false): HTMLElement {
   const state = index.state(card)
   const item = document.createElement('div'); item.className = 'kbn-thread-item kbn-tree-line'
   const row = document.createElement('button')
@@ -148,15 +140,8 @@ export function treeLine(card: KanbanCard, index: ThreadIndex, open: (card: Kanb
   const tag = tagged ? STATE_TAGS[state] : undefined
   if (tag) { const el = document.createElement('span'); el.className = 'kbn-tree-tag'; el.dataset.tag = state; el.textContent = tag; el.setAttribute('aria-hidden', 'true'); row.append(el) }
   row.classList.toggle('kbn-thread-pinned', isPinned(card))
-  row.addEventListener('click', event => { event.stopPropagation(); whisper?.hide(); open(card) })
-  row.addEventListener('pointerdown', event => { pressedAt = Date.now(); event.stopPropagation() })
-  if (whisper) {
-    const until = untilOf(card, index)
-    row.addEventListener('pointerenter', event => { if (event.pointerType === 'mouse') whisper.show(row, card, state, 260, until) })
-    row.addEventListener('pointerleave', () => whisper.hide(row))
-    row.addEventListener('focus', () => { if (Date.now() - pressedAt > 600) whisper.show(row, card, state, 0, until) })
-    row.addEventListener('blur', () => whisper.hide(row))
-  }
+  row.addEventListener('click', event => { event.stopPropagation(); open(card) })
+  row.addEventListener('pointerdown', event => event.stopPropagation())
   const pinned = isPinned(card)
   const pin = document.createElement('button'); pin.type = 'button'; pin.className = 'kbn-thread-pin'
   pin.dataset.threadFocus = JSON.stringify([focus, 'pin'])
@@ -185,14 +170,12 @@ function moreLine(count: number, focus: string, cells: readonly TreeGuide[], kin
 
 /**
  * Which families are open, kept by the renderer across Desk repaints, which
- * rebuild every card, and the one whisper their lines share. A family opens
+ * rebuild every card. A family opens
  * on its badge or from the keyboard and stays open until folded.
  */
 export class ThreadFamilies {
   private readonly open = new Set<string>()
   private readonly unfolded = new Set<string>()
-  readonly whisper: ThreadWhisper
-  constructor(replies?: LastReplies) { this.whisper = new ThreadWhisper(replies) }
   isOpen(card: KanbanCard): boolean { return this.open.has(threadKey(card)) }
   set(card: KanbanCard, open: boolean): void {
     if (open) this.open.add(threadKey(card))
@@ -223,7 +206,6 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   if (!index.summary(card).unfinished) return
   const family = threadKey(card)
   const focusId = (...parts: string[]): string => JSON.stringify([family, ...parts])
-  const whisper = families.whisper
   const descendants = index.subtree(card)
   const isLive = (c: KanbanCard): boolean => index.state(c) !== 'archived'
   const live = descendants.filter(isLive).sort(index.compare)
@@ -245,7 +227,6 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   const paint = (expanded: boolean): void => {
     peek.hidden = !expanded; badge.setAttribute('aria-expanded', String(expanded))
     if (entries) entries.hidden = expanded
-    if (!expanded) whisper.hide()
     families.set(card, expanded)
   }
   badge.dataset.threadFocus = focusId('badge')
@@ -293,7 +274,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
     const lines = liveChildren(parent).filter(isDrawn).sort((a, b) => branchUrgency(a) - branchUrgency(b))
     lines.forEach((line, n) => {
       const last = n === lines.length - 1
-      body.append(treeLine(line, index, open, focusId('thread', threadKey(line)), [...above, last ? 'elbow' : 'tee'], whisper, true))
+      body.append(treeLine(line, index, open, focusId('thread', threadKey(line)), [...above, last ? 'elbow' : 'tee'], true))
       lineCount++
       grow(line, [...above, last ? 'gap' : 'pipe'])
     })
@@ -314,7 +295,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
       fold.addEventListener('click', event => {
         event.stopPropagation()
         families.setUnfolded(card, state, !unfolded)
-        whisper.hide(); draw()
+        draw()
         restoreThreadFocus(peek, fold.dataset.threadFocus)
       })
       more.push(fold)
@@ -331,7 +312,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
       all.dataset.threadFocus = focusId('all')
       all.textContent = 'Open family →'
       all.title = `Open ${card.name} with all ${live.length} threads`
-      all.addEventListener('click', event => { event.stopPropagation(); whisper.hide(); open(card) })
+      all.addEventListener('click', event => { event.stopPropagation(); open(card) })
       foot.append(all)
     }
     foot.hidden = !foot.childElementCount
@@ -348,7 +329,7 @@ export function installThreadPeek(host: HTMLElement, badgeHost: HTMLElement, car
   if (entryRows.length) {
     entries = document.createElement('div'); entries.className = 'kbn-thread-subentries kbn-thread-tree'
     const unshown = waitingEntries.length ? waitingUnpinned.length - waitingEntries.length : 0
-    entryRows.forEach((c, n) => entries!.append(treeLine(c, index, open, focusId('thread', threadKey(c)), [n === entryRows.length - 1 && !unshown ? 'elbow' : 'tee'], whisper)))
+    entryRows.forEach((c, n) => entries!.append(treeLine(c, index, open, focusId('thread', threadKey(c)), [n === entryRows.length - 1 && !unshown ? 'elbow' : 'tee'])))
     if (unshown > 0) entries.append(moreLine(unshown, focusId('more'), ['elbow'], 'question', `${unshown} more waiting — open ${card.name} for every thread`, () => open(card)))
     entries.addEventListener('pointerdown', event => event.stopPropagation())
     entries.addEventListener('click', event => event.stopPropagation())

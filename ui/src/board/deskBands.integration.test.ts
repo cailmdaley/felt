@@ -119,9 +119,7 @@ describe('In flight bands', () => {
       { band: 'yourTurn', caption: 'Your turn', label: 'Your turn', ids: ['question', 'worker-0'] },
       { band: 'working', caption: 'Working', label: 'Working', ids: ['worker-1'] },
     ])
-    // The question is read in the row's preview; the row itself is the gold edge.
-    const preview = renderer(data).buildCardPreview(root.querySelector<HTMLElement>('[data-fiber-id="question"]')!)!
-    expect(preview.el.querySelector('.kbn-card-question')?.textContent).toBe(question.ask!.text)
+    // The row carries the turn; the workspace reads the question.
     expect(root.querySelector<HTMLElement>('[data-fiber-id="question"]')?.dataset.turn).toBe('question')
     expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-0"]')?.dataset.turn).toBe('idle')
     expect(root.querySelector<HTMLElement>('[data-fiber-id="worker-1"]')?.dataset.turn).toBe('working')
@@ -129,7 +127,6 @@ describe('In flight bands', () => {
     expect(flightOrder(renderer(data).renderNowSection(data.now, {}))).toEqual(flightOrder(root))
     question.ask = undefined
     const attention = renderer(data).renderNowSection(data.now, {})
-    expect(renderer(data).buildCardPreview(attention.querySelector<HTMLElement>('[data-fiber-id="question"]')!)!.el.querySelector('.kbn-card-question')).toBeNull()
     expect(attention.querySelector('[data-fiber-id="question"] .ws-worker-state')?.textContent).toBe('question')
   })
 

@@ -15,7 +15,6 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
-  cardPreview: import('./CardPreview.js').CardPreview
   lensCycleId: string | null
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
   setView(view: 'desk' | 'chronicle'): void

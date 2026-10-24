@@ -13,7 +13,6 @@ interface BoardInternals {
   fetchAndRender(): Promise<void>
   workspace: Workspace
   deskEl: HTMLElement
-  cardPreview: import('./CardPreview.js').CardPreview
   lensCycleId: string | null
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
   setView(view: 'desk' | 'chronicle'): void
@@ -64,27 +63,6 @@ beforeEach(() => {
   draw(data())
 })
 afterEach(() => { board?.unmount(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-
-describe('Preview keyboard controls', () => {
-  it('Tabs from the selected row into the preview and leaves its controls native', async () => {
-    vi.useFakeTimers()
-    try {
-      const row = document.querySelector<HTMLElement>('.kbn-card[data-card-uid="review"]')!
-      row.tabIndex = -1
-      row.focus()
-      inside.cardPreview.select(row)
-      await vi.advanceTimersByTimeAsync(500)
-      expect(inside.cardPreview.isOpen).toBe(true)
-      expect(press('Tab', {}, row).defaultPrevented).toBe(true)
-      const control = document.activeElement as HTMLElement
-      expect(inside.cardPreview.panel.contains(control)).toBe(true)
-      expect(press('Tab', {}, control).defaultPrevented).toBe(false)
-      expect(press('Enter', {}, control).defaultPrevented).toBe(false)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-})
 
 describe('Reader Rest lifecycle', () => {
   it.each([

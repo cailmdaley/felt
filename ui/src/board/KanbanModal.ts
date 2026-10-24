@@ -95,7 +95,6 @@ import {
   viewFallbackKind,
 } from './views/index.js'
 import { isTypingTarget } from './views/ViewRegistry.js'
-import { CardPreview } from './CardPreview.js'
 import { FiberSends } from './fiberSends.js'
 import type { DocKey } from './workspace/documents.js'
 
@@ -297,9 +296,7 @@ export class KanbanModal {
   private workspace: Workspace | null = null
   private readonly dock: Dock
   private deskKeyboard: DeskKeyboard | null = null
-  /** The Desk's hover preview: one panel, built per row on demand. */
-  private cardPreview: CardPreview | null = null
-  /** Each fiber's newest report, for the rows' marks and the previews. */
+  /** Each fiber's newest report, for the rows' marks. */
   private fiberSends: FiberSends | null = null
   private keymapHelp: KeymapHelp | null = null
   private workspaceReturnFocus: HTMLElement | null = null
@@ -396,29 +393,6 @@ export class KanbanModal {
     })
     this.surfaces = new KanbanSurfaceRenderer({
       getLatestReport: card => this.fiberSends?.latest(card),
-      getSentFiles: card => this.fiberSends?.all(card) ?? [],
-      clearSentFiles: async card => {
-        try {
-          await this.fiberSends?.clear(card)
-          this.announce(`Cleared sent files for “${card.name}”.`)
-        } catch (error) {
-          const message = `Sent files for “${card.name}”: ${errText(error)}`
-          this.showBanner(message, 'error')
-          this.announce(message)
-        } finally {
-          this.workspace?.overview.refresh(true)
-        }
-      },
-      dismissSentFile: async (card, send) => {
-        try {
-          await this.fiberSends?.dismiss(card, send)
-          this.announce(`Dismissed ${send.basename}.`)
-        } finally {
-          this.workspace?.overview.refresh(true)
-        }
-      },
-      openCardDocument: (card, doc) => this.openDocumentChannel(card, false, doc),
-      shuttleBase: this.shuttleBase,
       getDragSourceId: () => this.dragSourceId,
       setDragSourceId: (id) => { this.dragSourceId = id },
       getLastResponse: () => this.lastResponse,
@@ -614,8 +588,6 @@ export class KanbanModal {
     this.keymapHelp = null
     this.deskKeyboard?.dispose()
     this.deskKeyboard = null
-    this.cardPreview?.dispose()
-    this.cardPreview = null
     this.workspace?.dispose()
     this.workspace = null
     this.dock.reset()
@@ -710,11 +682,6 @@ export class KanbanModal {
     this.viewHostEl = document.createElement('div')
     this.viewHostEl.className = 'kbn-view-host'
     this.body.append(this.dragHorizonEl, this.deskEl, this.viewHostEl)
-    this.cardPreview = new CardPreview({
-      root: this.deskEl,
-      host: this.body,
-      build: row => this.surfaces.buildCardPreview(row),
-    })
     this.syncViewChrome()
 
     // The bar stands outside the body: the body goes inert under the reader,
@@ -733,7 +700,6 @@ export class KanbanModal {
 
   /** Desk and Chronicle cards enter the same owner-addressed document channel. */
   private openDocumentChannel(card: KanbanCard, compose = false, doc?: DocKey): void {
-    this.cardPreview?.hide()
     if (this.activeViewId === 'desk') this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
     this.workspaceReturnFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
       ? document.activeElement
@@ -942,7 +908,6 @@ export class KanbanModal {
       else this.workspace.suspend(id)
     }
     if (id === this.activeViewId) return
-    this.cardPreview?.hide()
     this.workspace?.clearFind()
     this.activeView?.unmount()
     this.activeView = null
@@ -1995,8 +1960,6 @@ export class KanbanModal {
     this.deskKeyboard?.refresh()
     // Focus on a thread control lands on the same control, rebuilt.
     restoreThreadFocus(this.deskEl, threadFocus)
-    // An open preview follows its card onto the rebuilt row.
-    this.cardPreview?.rerendered()
     void this.fiberSends?.refresh()
     this.updateBodyScrollAffordance()
     window.requestAnimationFrame(() => this.updateBodyScrollAffordance())
@@ -2350,8 +2313,6 @@ export class KanbanModal {
       }
       const nativeActivation = e.key === 'Enter' && (e.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')
       if (intent && !nativeActivation && this.deskKeyboard?.handle(intent)) {
-        // The selected row previews, after the same settle a pointer gets.
-        this.cardPreview?.select(intent === 'open' ? null : this.deskKeyboard.selectedRow)
         e.preventDefault()
         e.stopPropagation()
         return
@@ -2362,19 +2323,6 @@ export class KanbanModal {
     if (e.key !== 'Tab' || this.activeViewId !== 'desk') return
 
     const active = document.activeElement as HTMLElement | null
-    const preview = this.cardPreview
-    if (active && preview?.isOpen) {
-      if (preview.panel.contains(active)) return
-      if (!e.shiftKey && preview.openRow?.contains(active)) {
-        const first = preview.panel.querySelector<HTMLButtonElement>('button:not(:disabled)')
-        if (first) {
-          e.preventDefault()
-          e.stopPropagation()
-          first.focus()
-          return
-        }
-      }
-    }
     // Inside a thread family, Tab steps through its card, badge and drawn rows
     // before the column order takes over.
     const familyStop = active ? threadFamilyTab(active, e.shiftKey) : null

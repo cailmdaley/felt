@@ -1,16 +1,12 @@
 import { untilLine, untilOf } from './blockedOn.js'
 import { installThreadPeek, ThreadFamilies, threadMark, waitingNote } from './ThreadPeek.js'
-import { LastReplies } from './threadReply.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { ownColumn } from './deskColumn.js'
 import { appWorkerLink, terminalWorkerPill, turnTitle } from './appConversation.js'
 import { workerPlate } from './workspace/workerPlate.js'
-import { documentKind, type DocKey } from './workspace/documents.js'
+import { documentKind } from './workspace/documents.js'
 import { unseenSince } from './workspace/DocumentSeen.js'
-import { withEmbeds, type FiberSend } from './fiberSends.js'
-import { buildSendGallery } from './previewGallery.js'
-import { buildPreviewConstitution } from './previewConstitution.js'
-import type { PreviewContent } from './CardPreview.js'
+import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { humanizeIdleAge, renderMarkdown } from './utils.js'
 import {
@@ -110,16 +106,11 @@ const REPORT_GLYPH: Record<ReturnType<typeof documentKind>, string> = {
 
 /**
  * A row's mark for its newest report: a small leaf with the document's kind on
- * it, in the thumbnail's own glyph vocabulary. The report itself is the
- * preview's — a live thumbnail at a row's height would be a smudge. A report
+ * it, in the thumbnail's own glyph vocabulary. The workspace reads the report;
+ * a live thumbnail at a row's height would be a smudge. A report
  * sent since the reader last showed it carries a gold dot on the leaf's corner
  * (`data-unseen`), cleared by opening it.
  */
-/** What a gallery shows, as one comparable string. */
-function sendsSignature(sends: readonly FiberSend[]): string {
-  return sends.map((send) => `${send.key}\u0000${send.timestamp}`).join('\u0001')
-}
-
 function reportMark(report: FiberSend): HTMLElement {
   const mark = document.createElement('span')
   mark.className = 'kbn-card-report'
@@ -243,14 +234,6 @@ interface KanbanSurfaceRendererOptions {
   openDetail: (card: KanbanCard) => void
   /** The newest report a card sent — the row's mark. */
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
-  /** Everything a card sent, newest first — the preview's gallery. */
-  getSentFiles?: (card: KanbanCard) => FiberSend[]
-  clearSentFiles?: (card: KanbanCard) => void | Promise<void>
-  dismissSentFile?: (card: KanbanCard, send: FiberSend) => Promise<void>
-  /** Open one of a card's documents (a sent file, a file its body names) in the reader, in its channel. */
-  openCardDocument?: (card: KanbanCard, doc: DocKey) => void
-  /** Daemon base URL, for the preview's thumbnails. */
-  shuttleBase?: string
   /** Opens the Rest popover on the card's own Rest affordance. */
   onRest?: (card: KanbanCard) => void
   /** Resolve the owning host's registry default for agent labels. */
@@ -282,7 +265,7 @@ interface KanbanSurfaceRendererOptions {
 }
 
 export class KanbanSurfaceRenderer {
-  /** Open thread families, carried across the Desk's rebuilds, and the whisper their lines share. */
+  /** Open thread families, carried across the Desk's rebuilds. */
   readonly threadFamilies: ThreadFamilies
   /** Horizontal edge-scroll for the drag horizon. Lets a held card push
    *  against the strip's left/right edge to reach off-screen days. Separate
@@ -313,7 +296,7 @@ export class KanbanSurfaceRenderer {
 
   constructor(options: KanbanSurfaceRendererOptions) {
     this.o = options
-    this.threadFamilies = new ThreadFamilies(new LastReplies(options.shuttleBase ?? ''))
+    this.threadFamilies = new ThreadFamilies()
   }
 
   private agentName(card: KanbanCard): string | null {
@@ -1672,11 +1655,8 @@ export class KanbanSurfaceRenderer {
    *
    * At a glance a row carries only what decides where to look next: whose
    * hand it is in (the glyph), the title, a mark for its
-   * newest report, and the turn chip. Everything read rather than glanced —
-   * outcome, question, path, agent, due, warnings and the report itself — is
-   * the preview's (`buildCardPreview`), built when the row is hovered or
-   * selected and never before. The verdicts and Rest surface over the row's
-   * right end under the pointer or the keyboard selection.
+   * newest report, and the turn chip. The document workspace holds the
+   * outcome, question, path, agent, due, warnings and the report itself.
    *
    * Clicking the row opens the document workspace reader; the turn chip opens
    * its conversation.
@@ -1755,8 +1735,8 @@ export class KanbanSurfaceRenderer {
     }
     if (hoverActions.childElementCount) meta.append(hoverActions)
 
-    // A card whose host has gone quiet says so in one glyph; the preview and
-    // the aria label carry the sentence.
+    // A card whose host has gone quiet says so in one glyph; its aria label
+    // carries the sentence.
     if (isStale) {
       const stale = document.createElement('span')
       stale.className = 'kbn-card-stale-mark'
@@ -1880,156 +1860,6 @@ export class KanbanSurfaceRenderer {
       rightChip = workerPlate(card, terminalWorkerPill(card, { openWorker: this.o.openWorker }))
     }
     return rightChip
-  }
-
-  /**
-   * The full card behind a Desk row or Resting line, and what it sent — the
-   * preview's content. Built on demand, for one row at a time: the paper face
-   * (title, path, question, outcome), the facts the row leaves out (the
-   * machine it lives on, agent, due, its turn, where else the fiber lives),
-   * any warning, then the gallery of what it embeds and sent, then the
-   * constitution's body. The sheet scrolls as one; `dispose` releases the
-   * gallery's thumbnails.
-   */
-  buildCardPreview(row: HTMLElement): PreviewContent | null {
-    const card = this.previewCard(row)
-    if (!card) return null
-    // An expanded family shows its thread rows in place; the floating preview would cover them.
-    if (this.threadFamilies.isOpen(card)) return null
-    const sheet = document.createElement('div')
-    sheet.className = 'kbn-preview-sheet'
-    let paper = this.buildPreviewPaper(card, row, sheet)
-    sheet.append(paper)
-
-    const sends = this.o.getSentFiles?.(card) ?? []
-    const signature = sendsSignature(sends)
-    const shuttleBase = this.o.shuttleBase ?? ''
-    const galleryOptions = { shuttleBase, open: (send: FiberSend) => this.o.openCardDocument?.(card, send.key), clear: sends.length && card.uid && this.o.clearSentFiles ? () => this.o.clearSentFiles?.(card) : undefined, dismiss: card.uid && this.o.dismissSentFile ? (send: FiberSend) => this.o.dismissSentFile!(card, send) : undefined }
-    // The gallery: what the fiber sent now, joined by what its body embeds
-    // once the body is read. Then the constitution itself, always.
-    let gallery = buildSendGallery(sends, galleryOptions)
-    if (gallery) sheet.append(gallery.el)
-    const constitution = buildPreviewConstitution(card, {
-      shuttleBase,
-      openDocument: (doc) => this.o.openCardDocument?.(card, doc),
-      openFiber: (id) => {
-        const target = boardCards(this.o.getLastResponse()).find((c) => c.id === id)
-        if (target) this.o.openDetail(target)
-      },
-      onEmbeds: (embeds) => {
-        const files = withEmbeds(sends, embeds)
-        if (sendsSignature(files) === signature) return
-        const next = buildSendGallery(files, galleryOptions)!
-        if (gallery) gallery.el.replaceWith(next.el)
-        else constitution.el.before(next.el)
-        gallery?.dispose()
-        gallery = next
-      },
-    })
-    sheet.append(constitution.el)
-    return {
-      el: sheet,
-      dispose: () => { gallery?.dispose(); constitution.dispose() },
-      // A Desk redraw repaints the card face in place; the gallery, and the
-      // thumbnails it has loaded, stand unless what the fiber sent changed.
-      refresh: (next) => {
-        const fresh = this.previewCard(next)
-        if (!fresh || sendsSignature(this.o.getSentFiles?.(fresh) ?? []) !== signature) return false
-        const repainted = this.buildPreviewPaper(fresh, next, sheet)
-        paper.replaceWith(repainted)
-        paper = repainted
-        return true
-      },
-    }
-  }
-
-  private previewCard(row: HTMLElement): KanbanCard | undefined {
-    const uid = row.dataset.cardUid
-    const origin = row.dataset.cardOrigin
-    return boardCards(this.o.getLastResponse()).find((c) => (c.uid ?? c.id) === uid && c.originId === origin)
-  }
-
-  /** The preview's card face, stamping the row's column and turn on the sheet. */
-  private buildPreviewPaper(card: KanbanCard, row: HTMLElement, sheet: HTMLElement): HTMLElement {
-    const resp = this.o.getLastResponse()
-    const column = row.closest<HTMLElement>('[data-column]')?.dataset.column
-    if (column) sheet.dataset.column = column
-    else delete sheet.dataset.column
-    const turn = row.dataset.turn
-    if (turn) sheet.dataset.turn = turn
-    else delete sheet.dataset.turn
-
-    const paper = buildCardPaper(card)
-    // Not a `.kbn-card`: the preview is a reading of a card, and nothing that
-    // finds, drags or counts Desk cards may find it.
-    paper.className = 'kbn-preview-card'
-
-    const facts = document.createElement('div')
-    facts.className = 'kbn-card-meta kbn-preview-facts'
-    // The machine: where the fiber's work runs, or where its file lives when
-    // nothing runs it.
-    const machine = card.shuttleHost || card.originId
-    if (machine) {
-      const where = document.createElement('span')
-      where.className = 'kbn-preview-host'
-      where.textContent = machine
-      where.title = card.shuttleHost ? `Runs on ${card.shuttleHost}` : `Lives on ${card.originId}`
-      facts.append(where)
-    }
-    const actor = document.createElement('span')
-    if (isAgentCard(card)) {
-      actor.className = 'kbn-card-actor kbn-card-actor-agent'
-      actor.textContent = card.shuttleAgent ?? this.o.getFleetDefaultAgent?.(card.originId) ?? FALLBACK_DEFAULT_AGENT
-    } else {
-      actor.className = 'kbn-card-actor kbn-card-actor-human'
-      actor.textContent = 'me'
-    }
-    facts.append(actor)
-    if (card.due) {
-      const due = document.createElement('span')
-      due.className = 'kbn-card-due'
-      due.textContent = formatDue(card.due)
-      // The due date is what drifted the card, so the due chip carries that story.
-      if (card.drifted) due.textContent += ` · promoted from ${card.storedHorizon ?? 'unset'}`
-      facts.append(due)
-    }
-    // A fiber in a git-synced store is served by every daemon holding it. The
-    // board shows one card (see `dedupeMirroredRows`); say where else it
-    // lives, so "one card" doesn't read as "the other host lost it".
-    if (card.mirroredOrigins?.length) {
-      const mirrored = document.createElement('span')
-      mirrored.className = 'kbn-preview-mirrors'
-      mirrored.textContent = `also on ${card.mirroredOrigins.join(', ')}`
-      facts.append(mirrored)
-    }
-    const kind = column === 'drafts' || column === 'inFlight' || column === 'awaitingReview' ? column : 'drafts'
-    const turnChip = this.renderTurnChip(card, kind)
-    if (turnChip) {
-      turnChip.classList.add('kbn-preview-turn')
-      facts.append(turnChip)
-    }
-    paper.querySelector(':scope > .kbn-card-id')?.after(facts)
-    const place = column === 'drafts' || column === 'inFlight' || column === 'awaitingReview'
-      ? column
-      : row.matches('.kbn-cluster-item') ? 'resting' : null
-    const verdicts = place && resp?.staleness[card.originId]?.status !== 'stale' ? verdictTargets(card, place) : []
-    if (verdicts.length) {
-      const actions = document.createElement('div')
-      actions.className = 'kbn-preview-verdicts'
-      markVerdictHost(actions, card)
-      actions.append(this.verdictButtons(card, verdicts))
-      paper.querySelector(':scope > .kbn-card-header')?.append(actions)
-    }
-
-
-    const staleness = resp?.staleness[card.originId]
-    if (staleness?.status === 'stale') {
-      const waiting = document.createElement('div')
-      waiting.className = 'kbn-card-waiting'
-      waiting.textContent = `⌛ waiting on ${staleness.hostname ?? card.originId}${staleness.staleSince ? `, disconnected since ${staleness.staleSince}` : ''}`
-      paper.append(waiting)
-    }
-    return paper
   }
 
   /** Wire the long press, when the board offered somewhere for it to go.
