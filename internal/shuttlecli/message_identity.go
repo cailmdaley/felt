@@ -50,19 +50,11 @@ func (a *app) localMessageLedger() []SessionProvenance {
 }
 
 func messageSessionFiber(address messaging.Address, records []SessionProvenance) *felt.Felt {
-	var found *felt.Felt
-	for _, row := range records {
-		if row.Host != address.Host || messaging.NormalizeHarness(row.Harness) != address.Harness ||
-			row.nativeSessionID() != address.ID || row.fiber() == "" ||
-			(row.Kind != "dispatch" && row.Kind != "resume" && row.Kind != "claim") {
-			continue
-		}
-		if found != nil && !sessionRecordBelongsToFiber(row, found) {
-			return nil
-		}
-		found = &felt.Felt{ID: row.fiber(), UID: row.UID}
+	row, err := currentSessionBinding(address, records)
+	if err != nil || row == nil {
+		return nil
 	}
-	return found
+	return &felt.Felt{ID: row.fiber(), UID: row.UID, Path: row.FiberPath}
 }
 
 func (a *app) messageReplyTarget(from string) string {
@@ -73,6 +65,14 @@ func (a *app) messageReplyTarget(from string) string {
 	host, err := a.resolveOwnHost("")
 	if err != nil || address.Host != host {
 		return ""
+	}
+	if row, err := currentSessionBinding(address, a.localMessageLedger()); err != nil {
+		return ""
+	} else if row != nil {
+		if f, err := a.workerBindingFiber(*row); err == nil {
+			return f.ID
+		}
+		return row.fiber()
 	}
 	// Dispatch exports this path. Check the native identity too: nested harnesses
 	// inherit the path but are not the fiber's assigned worker.

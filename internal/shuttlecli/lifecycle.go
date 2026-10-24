@@ -179,7 +179,7 @@ func (a *app) restCmd() *cobra.Command {
 	var restLocal bool
 	var until, restActor string
 	restCmd := &cobra.Command{
-		Use:   "rest <fiber>",
+		Use:   "rest [fiber]",
 		Short: "Put a constitution down in Resting, without review",
 		Long: `Puts the constitution at rest: status: open with horizon: stashed, so the
 board shows it in Resting and the daemon never dispatches it. Any verdict and
@@ -213,8 +213,12 @@ tmux session, or an app conversation's interrupt. --local writes here and
 stops nothing: the daemon that shells it does the stop. A daemon that cannot
 be reached is bypassed: the document is written here and a tmux worker on
 this host is killed.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, err := a.implicitWorkerArgs(args)
+			if err != nil {
+				return err
+			}
 			fields := map[string]any{}
 			untilSet := cmd.Flags().Changed("until")
 			restFor, err := parseRestUntil(until)
@@ -603,7 +607,7 @@ func (a *app) closeCmd() *cobra.Command {
 	var closeTempered, closeActor string
 	var closeQuiet bool
 	closeCmd := &cobra.Command{
-		Use:   "close <fiber>",
+		Use:   "close [fiber]",
 		Short: "Close a shuttle-managed fiber and optionally set the human verdict",
 		Long: `Sets status: closed, sets/clears tempered, and stamps closed-at when the
 field is missing. Use:
@@ -623,8 +627,12 @@ until reopen or accept moves them (resume also re-arms a standing constitution
 awaiting review). When closing your own fiber from tmux, this command ends your
 session after the close succeeds; make it your final action. Closing another
 fiber leaves your session running.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			args, err := a.implicitWorkerArgs(args)
+			if err != nil {
+				return err
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err

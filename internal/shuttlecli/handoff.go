@@ -14,7 +14,7 @@ import (
 
 func (a *app) shuttleHandoffCmd() *cobra.Command {
 	shuttleHandoffCmd := &cobra.Command{
-		Use:   "handoff <fiber>",
+		Use:   "handoff [fiber]",
 		Short: "Stamp the clean-exit handoff signal for a worker",
 		Long: `Stamps shuttle.runtime.handed_off_at = now into the fiber's frontmatter — the
 signal that tells the daemon this worker exited CLEANLY, so the next dispatch
@@ -25,15 +25,17 @@ A worker calls this as its FINAL action, after rewriting the constitution's
 '## Status' block: it stamps the field and then ends its own tmux session — so
 the exit is one command, no separate 'kill $PPID'. For its own fiber the file
 stamped is the resolved path when the tmux session's fiber UID matches, so
-renames during a run are safe. Otherwise SHUTTLE_FIBER_PATH, exported at
-dispatch, identifies its own fiber. Outside a daemon-launched worker the
-<fiber> argument is resolved instead, and the current tmux session (if any)
-still ends. An exact id
-or UID naming a different fiber stamps that fiber and leaves the caller's
-session running.`,
-		Args: cobra.ExactArgs(1),
+renames during a run are safe. Without an argument the current native session's
+local ledger binding, or the current tmux pane's fiber UID, identifies the fiber.
+SHUTTLE_FIBER_PATH is a fallback only without native or worker-pane evidence.
+An explicit different fiber stamps that fiber and leaves the caller running.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, self, err := a.resolveHandoffPath(args[0])
+			query := ""
+			if len(args) > 0 {
+				query = args[0]
+			}
+			path, self, err := a.resolveHandoffPath(query)
 			if err != nil {
 				return err
 			}
@@ -55,51 +57,36 @@ session running.`,
 	return shuttleHandoffCmd
 }
 
-// isOwnFiber identifies the caller by the stable UID in its tmux session name,
-// then falls back to the dispatch path. Without either identity, ownership is
-// unknown and close must leave the caller alive.
+// isOwnFiber compares the target against current worker identity, never against
+// a dispatch path contradicted by native-session or live-pane evidence.
 func (a *app) isOwnFiber(f *felt.Felt) bool {
-	session, _ := a.tmuxCurrentSession()
-	uid := fiberUIDFromTmuxSession(session)
-	if uid != "" && uid == f.UID {
-		return true
-	}
-	if envPath := a.env.Getenv("SHUTTLE_FIBER_PATH"); envPath != "" {
-		return a.samePath(envPath, f.Path)
-	}
-	return false
+	own, err := a.currentWorkerFiber()
+	return err == nil && own.UID == f.UID && a.samePath(own.Path, f.Path)
 }
 
-// resolveHandoffPath returns the stamp path and whether the caller is exiting.
-// A matching worker UID selects the resolved path, including after a rename.
-// Otherwise the dispatch path wins on lookup failure or fuzzy ambiguity; an
-// exact id or UID naming a different fiber always selects that fiber without
-// ending the caller's session.
+// resolveHandoffPath infers an omitted target and honors an explicit target.
+// Lookup failure never substitutes the caller's ambient dispatch path.
 func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
-	envPath := a.env.Getenv("SHUTTLE_FIBER_PATH")
-	f, _, err := a.shuttleResolveFiber(fiber, false)
-	if err != nil {
-		if envPath != "" {
-			return envPath, true, nil
-		}
-		return "", false, fmt.Errorf("resolving fiber %q (SHUTTLE_FIBER_PATH unset): %w", fiber, err)
-	}
-	if a.isOwnFiber(f) {
-		if envPath != "" && a.samePath(envPath, f.Path) {
-			return envPath, true, nil
+	if fiber == "" {
+		f, err := a.currentWorkerFiber()
+		if err != nil {
+			return "", false, err
 		}
 		return f.Path, true, nil
 	}
-	if envPath == "" {
-		// Manual handoff ends the current session; a recognized worker naming
-		// another fiber must stay alive even without its dispatch environment.
-		session, _ := a.tmuxCurrentSession()
-		return f.Path, fiberUIDFromTmuxSession(session) == "", nil
+	f, _, err := a.shuttleResolveFiber(fiber, false)
+	if err != nil {
+		return "", false, err
 	}
-	if fiber == f.ID || fiber == f.UID {
-		return f.Path, false, nil
+	if a.isOwnFiber(f) {
+		return f.Path, true, nil
 	}
-	return envPath, true, nil
+	// An explicit target is never replaced with ambient worker identity.
+	// Preserve manual handoff outside an identified worker.
+	session, _ := a.tmuxCurrentSession()
+	_, native := a.harnessSessionFromEnv()
+	manual := native == "" && fiberUIDFromTmuxSession(session) == "" && a.env.Getenv("SHUTTLE_FIBER_PATH") == ""
+	return f.Path, manual, nil
 }
 
 // samePath reports whether two paths name the same file, absolutizing and
@@ -207,6 +194,12 @@ func (a *app) endOwnTmuxSession() {
 	session, err := a.tmuxCurrentSession()
 	if err != nil || session == "" {
 		return
+	}
+	if _, native := a.harnessSessionFromEnv(); native != "" {
+		own, err := a.currentWorkerFiber()
+		if err != nil || fiberUIDFromTmuxSession(session) != own.UID {
+			return
+		}
 	}
 	// This kills our own pane mid-call; the field is already durably on disk (the
 	// rename completed before we got here), so nothing is lost.

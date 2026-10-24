@@ -51,15 +51,16 @@ type TranscriptReceipt struct {
 // predecessor/children fields are optional because old ledger rows predate
 // explicit lineage; absence is not interpreted as proof of no lineage.
 type SessionProvenance struct {
-	Fiber    string `json:"fiber,omitempty"`
-	FiberID  string `json:"fiber_id,omitempty"`
-	UID      string `json:"uid,omitempty"`
-	Session  string `json:"session"`
-	ThreadID string `json:"thread_id,omitempty"`
-	Address  string `json:"address,omitempty"`
-	Harness  string `json:"harness,omitempty"`
-	Host     string `json:"host,omitempty"`
-	Tmux     string `json:"tmux,omitempty"`
+	Fiber     string `json:"fiber,omitempty"`
+	FiberID   string `json:"fiber_id,omitempty"`
+	FiberPath string `json:"fiber_path,omitempty"`
+	UID       string `json:"uid,omitempty"`
+	Session   string `json:"session"`
+	ThreadID  string `json:"thread_id,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Harness   string `json:"harness,omitempty"`
+	Host      string `json:"host,omitempty"`
+	Tmux      string `json:"tmux,omitempty"`
 	// Role, Agent and Model record launch-time settings, not session authorship.
 	// They are not reconstructed from the fiber's current configuration.
 	Role string `json:"role,omitempty"`

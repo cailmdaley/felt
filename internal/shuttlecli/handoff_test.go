@@ -248,27 +248,17 @@ func TestResolveHandoffPath_ExplicitArgBeatsAmbientEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(own): %v", err)
 	}
-	if path != storage.Path("own") || !self {
+	if !newApp(env).samePath(path, storage.Path("own")) || !self {
 		t.Fatalf("self-handoff: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
 	}
 
-	// Resolution failure: falls back to the env path (the pre-existing
-	// daemon-worker behavior), still self.
-	path, self, err = newApp(env).resolveHandoffPath("no-such-fiber")
-	if err != nil {
-		t.Fatalf("resolveHandoffPath(no-such-fiber): %v", err)
-	}
-	if path != storage.Path("own") || !self {
-		t.Fatalf("fallback: path=%q self=%v, want env path self=true", path, self)
+	// A missing explicit target must never stamp the caller's fiber.
+	if _, _, err := newApp(env).resolveHandoffPath("no-such-fiber"); err == nil {
+		t.Fatal("explicit missing target accepted")
 	}
 }
 
-// TestResolveHandoffPath_FuzzyAndNoStoreFallbacks pins the reviewer-flagged
-// edges: (a) a fuzzy resolution that disagrees with SHUTTLE_FIBER_PATH is
-// ambiguity — env wins, self=true (never silently stamp a suffix-matched
-// stranger and suppress the self-kill); (b) a cwd with no .felt store at all —
-// the daemon-worker reality when project_dir isn't a felt repo — falls back to
-// the env path, self=true.
+// Explicit targets stay explicit; only an omitted target uses worker identity.
 func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -278,14 +268,13 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 	env.Set("SHUTTLE_FIBER_PATH", storage.Path("own"))
 
 	env.Chdir(dir)
-	// "nested-card" fuzzily resolves to parent/nested-card but is not its exact
-	// id — ambiguity, env wins.
+	// A unique slug resolves the named sibling, not the dispatch environment.
 	path, self, err := newApp(env).resolveHandoffPath("nested-card")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath(nested-card): %v", err)
 	}
-	if path != storage.Path("own") || !self {
-		t.Fatalf("fuzzy mismatch: path=%q self=%v, want env path %q self=true", path, self, storage.Path("own"))
+	if !newApp(env).samePath(path, storage.Path("parent/nested-card")) || self {
+		t.Fatalf("slug target: path=%q self=%v", path, self)
 	}
 	// The exact nested id is honored as a sibling handoff.
 	path, self, err = newApp(env).resolveHandoffPath("parent/nested-card")
@@ -296,13 +285,13 @@ func TestResolveHandoffPath_FuzzyAndNoStoreFallbacks(t *testing.T) {
 		t.Fatalf("exact nested id: path=%q self=%v, want sibling path self=false", path, self)
 	}
 
-	// No felt store in cwd at all: resolution errors, env fallback, self=true.
+	// An omitted target works even outside a felt store.
 	env.Chdir(t.TempDir())
-	path, self, err = newApp(env).resolveHandoffPath("parent/nested-card")
+	path, self, err = newApp(env).resolveHandoffPath("")
 	if err != nil {
 		t.Fatalf("resolveHandoffPath outside store: %v", err)
 	}
-	if path != storage.Path("own") || !self {
+	if !newApp(env).samePath(path, storage.Path("own")) || !self {
 		t.Fatalf("no-store fallback: path=%q self=%v, want env path self=true", path, self)
 	}
 }

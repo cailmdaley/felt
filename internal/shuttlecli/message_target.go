@@ -423,7 +423,14 @@ func newestFiberWorkerRecord(f *felt.Felt, records []SessionProvenance) (*Sessio
 	latest := map[string]SessionProvenance{}
 	for _, row := range records {
 		if !sessionRecordBelongsToFiber(row, f) || row.Session == "" ||
-			(row.Kind != "dispatch" && row.Kind != "resume" && row.Kind != "claim") {
+			!workerBindingKind(row.Kind) {
+			continue
+		}
+		binding, err := currentSessionBinding(messaging.Address{Host: row.Host, Harness: messaging.NormalizeHarness(row.Harness), ID: row.nativeSessionID()}, records)
+		if err != nil {
+			return nil, err
+		}
+		if binding != nil && !sessionRecordBelongsToFiber(*binding, f) {
 			continue
 		}
 		key := row.Session + "\x00" + row.ThreadID + "\x00" + row.Host + "\x00" + messaging.NormalizeHarness(row.Harness)
