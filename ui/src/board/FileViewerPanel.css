@@ -34,6 +34,57 @@
   background: var(--kbn-rag);
 }
 
+.kbn-fileview-pdf-stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--ws-paper);
+}
+
+.kbn-pdf-toolbar {
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  padding: 0.2rem 0.5rem;
+  color: var(--ws-ink);
+  background: var(--ws-paper);
+  border-bottom: 1px solid var(--ws-hairline);
+}
+
+.kbn-pdf-control {
+  min-width: 2rem;
+  min-height: 2rem;
+  padding: 0.25rem 0.55rem;
+  color: inherit;
+  font: inherit;
+  background: var(--ws-paper);
+  border: 1px solid var(--ws-hairline);
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.kbn-pdf-control:focus-visible { outline: 2px solid var(--ws-accent, var(--ws-ink)); outline-offset: 2px; }
+.kbn-pdf-page-label { min-width: 3.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+
+.kbn-pdf-scroll {
+  position: absolute;
+  inset: 2.5rem 0 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--ws-paper);
+}
+
+.kbn-pdf-scroll .pdfViewer { padding: 0.5rem 0; }
+.kbn-pdf-scroll .page { margin-bottom: 0.5rem; }
+
 /* Loading veil over the iframe while a (possibly large, possibly remote)
    document is fetched. Lifts on iframe `load`. */
 .kbn-fileview-loading {

@@ -12,3 +12,7 @@ from Symphony's orchestrator.ex and adapted for Shuttle's integration layer.
 The integration layer (Linear adapter → felt CLI; codex-app-server → tmux +
 agent CLI wrappers; WORKFLOW.md → fiber-frontmatter shuttle: block) is original
 work by Cail Daley.
+
+The board's PDF viewer includes PDF.js (https://mozilla.github.io/pdf.js/),
+Copyright Mozilla Foundation, under the Apache License, Version 2.0.
+Its license is distributed with the board as pdfjs-LICENSE.txt.

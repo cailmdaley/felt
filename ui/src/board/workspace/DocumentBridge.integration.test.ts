@@ -513,15 +513,14 @@ describe('minified production document keyboard bridge', () => {
     expect(content.querySelector('a[href="https://example.com"]')?.classList.contains('ws-channel-reference')).toBe(false)
   })
 
-  it('never applies the HTML transform to native PDF, image, or audio viewers', async () => {
+  it('never applies the HTML transform to PDF, image, or audio viewers', async () => {
     const transformHtml = vi.fn(production.withWorkspaceKeyBridge)
-    for (const [path, kind, tag] of [
-      ['/report.pdf', 'pdf', 'iframe'], ['/figure.png', 'image', 'img'], ['/audio.mp3', undefined, 'audio'],
+    for (const [path, kind, selector] of [
+      ['/report.pdf', 'pdf', '.kbn-fileview-pdf-stage'], ['/figure.png', 'image', 'img'], ['/audio.mp3', undefined, 'audio'],
     ] as const) {
       const viewer = production.buildFileViewer('', path, 'host-a', undefined, undefined, { kind, transformHtml })
       document.body.append(viewer)
-      expect(viewer.querySelector(tag)).not.toBeNull()
-      expect(viewer.querySelector('iframe')?.srcdoc ?? '').toBe('')
+      expect(viewer.querySelector(selector)).not.toBeNull()
       expect(viewer.querySelector('script')).toBeNull()
       production.disposeFileViewer(viewer)
       viewer.remove()

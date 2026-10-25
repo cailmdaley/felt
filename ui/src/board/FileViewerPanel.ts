@@ -2,8 +2,8 @@
  * Shared renderer for document workspace pages and Board overview thumbnails.
  *
  * Images and audio use native elements, markdown and text render in a scrolling
- * pane, HTML renders in a scrollable iframe, and browser-native formats such
- * as PDF stay in their own iframe. HTML, markdown, and text subscribe to the
+ * pane, HTML renders in a scrollable iframe, and PDF uses the lazy PDF.js
+ * viewer. HTML, markdown, and text subscribe to the
  * shared conditional file poller; their DOM changes only when the body does.
  *
  * Native elements stream owner-routed `GET /api/v1/file` by URL; every other
@@ -138,9 +138,8 @@ export function buildFileViewer(
     return buildHtmlViewer(src, fullPath, onFrameLoad, options)
   }
 
-  // The native PDF plugin is blocked by the API's sandbox CSP. Fetch bytes
-  // through that protected route, then give only validated PDF bytes to the
-  // browser plugin through a PDF blob URL.
+  // PDF.js renders within the board's stage so the first page can fit even in
+  // embedded WebKit, whose native PDF plugin ignores fit-view fragments.
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
@@ -148,14 +147,12 @@ export function buildFileViewer(
   let disposed = false
   let faulted = false
   const controller = new AbortController()
-  let objectUrl: string | null = null
-  let iframe: HTMLIFrameElement | null = document.createElement('iframe')
-  let initialFrameLoaded = false
-  let pdfSource: string | null = null
-  iframe.className = 'kbn-fileview-frame'
-  iframe.style.background = 'var(--ws-paper)'
-  iframe.title = basename(fullPath)
-  wrap.append(iframe, veil)
+  let pdfDispose: (() => void) | null = null
+  const stage = document.createElement('div')
+  stage.className = 'kbn-fileview-pdf-stage'
+  stage.setAttribute('role', 'region')
+  stage.setAttribute('aria-label', `PDF: ${basename(fullPath)}`)
+  wrap.append(stage, veil)
 
   const failed = (detail: string): void => {
     if (disposed) return
@@ -163,32 +160,26 @@ export function buildFileViewer(
     showLoadFailure(veil, wrap, fullPath, detail)
     options.onState?.({ status: 'error', error: new Error(`file request failed: ${detail}`), hasContent: false })
   }
-  const startPdf = (): void => {
-    if (!iframe || !initialFrameLoaded || !objectUrl || pdfSource || disposed) return
-    pdfSource = `${objectUrl}#navpanes=0&view=FitH`
-    iframe.src = pdfSource
-  }
-  iframe.addEventListener('error', () => failed('the daemon could not be reached'))
-  iframe.addEventListener('load', () => {
-    if (!pdfSource) { initialFrameLoaded = true; startPdf(); return }
-    if (disposed || faulted || iframe?.src !== pdfSource) return
-    veil.remove()
-    onFrameLoad?.(iframe, false)
-    options.onState?.({ status: 'ready' })
-  })
   void fetch(src, { cache: 'no-cache', signal: controller.signal }).then(async response => {
     if (!response.ok) throw new Error(response.status === 404 ? '404 Not Found' : `${response.status} ${response.statusText}`)
-    const payload = await response.blob()
-    const prefix = new Uint8Array(await payload.slice(0, 5).arrayBuffer())
+    const payload = await response.arrayBuffer()
+    const prefix = new Uint8Array(payload, 0, Math.min(payload.byteLength, 5))
     const signature = String.fromCharCode(...prefix)
     if (controller.signal.aborted || disposed) return
-    if (payload.size < 5 || signature !== '%PDF-') {
+    if (payload.byteLength < 5 || signature !== '%PDF-') {
       throw new Error('response is not a PDF')
     }
-    options.onWeight?.(payload.size > 2 * 1024 * 1024 ? 2 : 1)
-    const pdf = payload.slice(0, payload.size, 'application/pdf')
-    objectUrl = URL.createObjectURL(pdf)
-    startPdf()
+    options.onWeight?.(payload.byteLength > 2 * 1024 * 1024 ? 2 : 1)
+    const { mountPdfViewer } = await import('./pdfViewer')
+    if (disposed) return
+    const mounted = mountPdfViewer(stage, payload, () => {
+      if (disposed || faulted) return
+      veil.remove()
+      options.onState?.({ status: 'ready' })
+    }, error => failed(error))
+    pdfDispose = mounted.dispose
+    if (disposed) pdfDispose()
+    await mounted.ready
   }).catch(error => {
     if (controller.signal.aborted || disposed) return
     failed(error instanceof Error ? error.message : 'the daemon could not be reached')
@@ -196,8 +187,7 @@ export function buildFileViewer(
   viewerDisposers.set(wrap, () => {
     disposed = true
     controller.abort()
-    iframe?.removeAttribute('src')
-    if (objectUrl) URL.revokeObjectURL(objectUrl)
+    pdfDispose?.()
   })
 
   return wrap

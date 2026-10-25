@@ -143,11 +143,11 @@ describe('native media documents', () => {
     expect(replacement.paused).toBe(false)
   })
 
-  it('leaves native PDF content and its accessible name without an in-page metadata block', () => {
+  it('gives PDF pages an accessible viewer region without an in-page metadata block', () => {
     const el = viewer('/scan.pdf')
-    expect(el.querySelector('iframe')?.title).toBe('scan.pdf')
+    expect(el.querySelector('.kbn-fileview-pdf-stage')?.getAttribute('aria-label')).toBe('PDF: scan.pdf')
     expect(el.querySelector('h1,h3,.kbn-media-title,.kbn-media-provenance')).toBeNull()
-    expect(el.querySelector('iframe')?.hasAttribute('src')).toBe(false)
+    expect(el.querySelector('iframe')).toBeNull()
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/file?'), expect.objectContaining({ cache: 'no-cache' }))
   })
 
