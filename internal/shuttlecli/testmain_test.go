@@ -138,7 +138,17 @@ func runFenced(m *testing.M) int {
 // build and module caches, the go env file, the toolchain), so a helper
 // binary built under the moved HOME reuses them. Without go on PATH nothing
 // is pinned and those tests build cold.
+//
+// A re-executed helper inherits the pinned values and the marker, and skips
+// the go invocation: under a test's moved XDG_CONFIG_HOME, go's telemetry
+// would write into that test's TempDir, from a detached upload process that
+// can outlive the helper and race the TempDir cleanup.
 func pinGoCaches() {
+	const pinned = "SHUTTLE_TEST_GO_CACHES_PINNED"
+	if os.Getenv(pinned) == "1" {
+		return
+	}
+	_ = os.Setenv(pinned, "1")
 	keys := []string{"GOCACHE", "GOPATH", "GOMODCACHE", "GOENV", "GOTOOLCHAIN"}
 	out, err := exec.Command("go", append([]string{"env", "-json"}, keys...)...).Output()
 	if err != nil {
