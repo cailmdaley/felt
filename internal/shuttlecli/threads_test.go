@@ -51,12 +51,12 @@ func TestThreadsGroupsDirectThreadsByState(t *testing.T) {
 Waiting
   hub/c  Waiting  C: Which one?
 
+To review
+  hub/a  To review  A: Found it. (1 thread)
+
 Armed
   hub/e  Armed · host unreachable  E
   hub/f  Armed  F
-
-To review
-  hub/a  To review  A: Found it. (1 thread)
 
 Draft
   hub/d  Draft  D
@@ -107,7 +107,7 @@ func TestThreadsJSONCarriesColumnsAndCounts(t *testing.T) {
 			t.Fatalf("deeper levels without --all: %+v", r)
 		}
 	}
-	if got.FiberID != "hub" || got.Archived != 1 || strings.Join(ids, ",") != "hub/c=in_flight,hub/e=in_flight,hub/f=in_flight,hub/a=awaiting_review,hub/d=drafts" || got.Threads[3].Unfinished != 1 || !got.Threads[1].HostUnreachable || got.Threads[2].HostUnreachable {
+	if got.FiberID != "hub" || got.Archived != 1 || strings.Join(ids, ",") != "hub/c=in_flight,hub/a=awaiting_review,hub/e=in_flight,hub/f=in_flight,hub/d=drafts" || got.Threads[1].Unfinished != 1 || !got.Threads[2].HostUnreachable || got.Threads[3].HostUnreachable {
 		t.Fatalf("unexpected %s", out)
 	}
 }

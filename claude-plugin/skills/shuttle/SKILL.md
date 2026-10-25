@@ -89,7 +89,8 @@ Results reach **only that nearest orchestrator**, never automatically propagatin
 **Orchestrate.** Spawn a thread when work outlives your session or deserves a constitution — a Desired State worth writing and an outcome worth tracking; use a subagent for the rest.
 Give the ask a lede and a checkable Desired State before arming it ([references/authoring.md](references/authoring.md#threads)).
 Every thread has a role: inherit the parent's unless it doesn't fit.
-Your launch prompt's `## Threads` lists your threads as they stood then; `shuttle threads <your-id>` lists them now (`--all` for archived threads and deeper levels).
+Your launch prompt's `## Threads` counts your direct threads and lists those waiting for a decision: open questions and outcomes to review.
+Run `shuttle threads <your-id>` for their current state (`--all` for archived threads and deeper levels).
 Armed means a thread is armed with no worker running; `Armed · host unreachable` means its host is out of your daemon's sight, so it may be running there or stuck.
 `N waiting for its next worker` on a thread counts results and messages queued while it has no worker; arming it releases them.
 When a result arrives, read its outcome and evidence against Desired State, decide what it changes, and act.

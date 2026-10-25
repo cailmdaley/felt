@@ -129,14 +129,12 @@ defmodule Shuttle.Threads do
   end
 
   @roster_cap 40
-  @state_order ["Waiting", "Working", "Armed", "To review", "Draft", "Resting"]
+  @state_order ["Waiting", "To review", "Working", "Armed", "Draft", "Resting"]
 
   @doc """
-  The `## Threads` block for an orchestrator's launch prompt: its direct
-  threads, Waiting first, each with the count of unfinished threads below it
-  (the board's thread badge) and of what waits for its next worker, and the
-  archived ones as a count. Empty when it
-  has none. `live` and `reachable` are as `tree/5` takes them.
+  The `## Threads` block for an orchestrator's launch prompt: counts for its
+  direct threads in board order, then only the Waiting and To review inbox.
+  `live` and `reachable` are as `tree/5` takes them.
   """
   def roster(fiber_id, felt_store, entries, live, reachable \\ nil) do
     case tree(fiber_id, felt_store, entries, live, reachable) do
@@ -146,40 +144,91 @@ defmodule Shuttle.Threads do
       threads ->
         {archived, rows} = Enum.split_with(threads, &(&1["state"] == "Archived"))
 
-        rows =
-          Enum.sort_by(
-            rows,
-            &{Enum.find_index(@state_order, fn s -> s == &1["state"] end), &1["id"]}
-          )
+        groups = Enum.group_by(rows, & &1["state"])
 
-        lines =
-          rows
-          |> Enum.take(@roster_cap)
-          |> Enum.map(fn row ->
-            "- #{row["id"]} — #{state_label(row)} — #{first_sentence(row["outcome"])}" <>
-              counts(row)
+        count_items =
+          Enum.flat_map(@state_order, fn state ->
+            case Map.get(groups, state, []) do
+              [] -> []
+              members -> [{state, length(members)}]
+            end
           end)
 
-        more =
-          if length(rows) > @roster_cap,
-            do: ["… and #{length(rows) - @roster_cap} more"],
-            else: []
+        count_items =
+          count_items ++ if(archived == [], do: [], else: [{"Archived", length(archived)}])
 
-        tail = if archived != [], do: ["(#{length(archived)} archived)"], else: []
+        counts = Enum.map(count_items, &count_label(&1, groups))
 
-        Enum.join(
-          ["## Threads" | lines] ++
-            more ++
-            tail ++
-            [
-              "Results from these arrive as messages (close/ask wake you; handoff/rest arrive as context, " <>
-                "as does `unblocked` when what a resting thread waits for closes). " <>
-                "`shuttle thread #{fiber_id} \"<ask>\"` files a new one."
-            ],
-          "\n"
-        )
+        summary =
+          "## Threads — " <>
+            Enum.join(counts, " · ") <>
+            " — `shuttle threads #{fiber_id}`"
+
+        {inbox, {_remaining, omitted}} =
+          Enum.map_reduce(["Waiting", "To review"], {@roster_cap, 0}, fn state,
+                                                                         {remaining,
+                                                                          omitted_total} ->
+            members =
+              rows
+              |> Enum.filter(&(&1["state"] == state))
+              |> Enum.sort_by(& &1["id"])
+
+            if members == [] do
+              {[], {remaining, omitted_total}}
+            else
+              shown = Enum.take(members, remaining)
+
+              lines =
+                Enum.map(shown, fn row ->
+                  detail =
+                    if state == "Waiting",
+                      do: single_line(row["ask"] || "(no question)"),
+                      else: first_sentence(row["outcome"])
+
+                  "- #{relative_id(fiber_id, row["id"])} — #{truncate(detail, 160)}" <>
+                    child_count(row)
+                end)
+
+              omitted = length(members) - length(shown)
+
+              {["### #{state} (#{length(members)})" | lines],
+               {max(remaining - length(shown), 0), omitted_total + omitted}}
+            end
+          end)
+
+        inbox = List.flatten(inbox)
+        inbox = inbox ++ if(omitted > 0, do: ["… and #{omitted} more"], else: [])
+
+        Enum.join([summary | inbox], "\n")
     end
   end
+
+  defp relative_id(parent, id), do: String.replace_prefix(id, parent <> "/", "")
+
+  defp count_label({"Armed", count}, groups) do
+    unreachable = Enum.count(Map.get(groups, "Armed", []), & &1["host_unreachable"])
+    suffix = if unreachable > 0, do: " (#{unreachable} on an unreachable host)", else: ""
+    "#{count} armed#{suffix}"
+  end
+
+  defp count_label({"Draft", 1}, _groups), do: "1 draft"
+  defp count_label({"Draft", count}, _groups), do: "#{count} drafts"
+  defp count_label({"To review", count}, _groups), do: "#{count} to review"
+  defp count_label({"Archived", count}, _groups), do: "#{count} archived"
+  defp count_label({state, count}, _groups), do: "#{count} #{String.downcase(state)}"
+
+  defp child_count(row) do
+    n = unfinished(row["threads"])
+    if n > 0, do: " (#{n} #{if(n == 1, do: "thread", else: "threads")})", else: ""
+  end
+
+  defp truncate(text, limit) when is_binary(text) do
+    if String.length(text) > limit, do: String.slice(text, 0, limit - 1) <> "…", else: text
+  end
+
+  defp truncate(_, _), do: "(no outcome yet)"
+
+  defp single_line(text), do: text |> String.replace(~r/\s+/, " ") |> String.trim()
 
   @doc """
   A thread's roster state as written: Armed says when its host is out of
@@ -191,24 +240,6 @@ defmodule Shuttle.Threads do
     do: "#{state} · ⏸ until #{until}"
 
   def state_label(%{"state" => state}), do: state
-
-  # A roster row's counts: the thread badge's, then what waits for its next
-  # worker.
-  defp counts(row) do
-    n = unfinished(row["threads"])
-    waiting = row["pending_results"] || 0
-
-    case Enum.reject(
-           [
-             n > 0 && "#{n} #{if n == 1, do: "thread", else: "threads"}",
-             waiting > 0 && "#{waiting} waiting for its next worker"
-           ],
-           &(&1 == false)
-         ) do
-      [] -> ""
-      parts -> "\n  (#{Enum.join(parts, "; ")})"
-    end
-  end
 
   # The thread badge's count: unfinished threads anywhere below.
   defp unfinished(threads),
@@ -266,6 +297,7 @@ defmodule Shuttle.Threads do
           state == "Armed" and is_binary(host) and reachable != nil and
             not MapSet.member?(reachable, host),
         "outcome" => fiber["outcome"],
+        "ask" => get_in(fiber, ["shuttle", "ask", "text"]),
         "blocked_on" => blocked,
         "until" => blocked && blocker_name(blocked, entry.felt_store, by_uid),
         "pending_results" => waiting(entry, live?),
@@ -440,7 +472,7 @@ defmodule Shuttle.Threads do
 
   defp first_sentence(text) when is_binary(text) and text != "" do
     sentence = text |> String.split(~r/(?<=[.!?])\s|\n/, parts: 2) |> hd() |> String.trim()
-    if String.length(sentence) > 120, do: String.slice(sentence, 0, 119) <> "…", else: sentence
+    if String.length(sentence) > 160, do: String.slice(sentence, 0, 159) <> "…", else: sentence
   end
 
   defp first_sentence(_), do: "(no outcome yet)"

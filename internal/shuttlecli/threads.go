@@ -16,7 +16,7 @@ import (
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
-var threadStates = []string{"Waiting", "Working", "Armed", "To review", "Draft", "Resting", "Archived"}
+var threadStates = []string{"Waiting", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
 
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
@@ -77,7 +77,7 @@ func (a *app) threadsCmd() *cobra.Command {
 		Short: "A constitution's threads, grouped by state",
 		Long: `Lists the threads of a constitution: the constitutions nested under it, as
 the orchestrator's launch prompt and the board's thread rail see them. Direct
-threads are grouped Waiting, Working, Armed, To review, Draft, Resting; each row gives
+threads are grouped Waiting, To review, Working, Armed, Draft, Resting; each row gives
 the thread's id, state, name and the first sentence of its outcome, and the
 number of unfinished threads below it. A thread resting until something
 (shuttle rest --until) reads "⏸ until <name>". Archived threads (a tempered or

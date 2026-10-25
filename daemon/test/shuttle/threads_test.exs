@@ -215,7 +215,7 @@ defmodule Shuttle.ThreadsTest do
       assert Shuttle.ULID.valid?(uid)
 
       assert Threads.roster("hub", store, entries, MapSet.new()) =~
-               "- hub/child — Resting · ⏸ until The mocks land — "
+               "## Threads — 1 resting — `shuttle threads hub`"
     end
 
     test "a note its orchestrator could not take survives a publisher restart", %{
@@ -1302,9 +1302,9 @@ defmodule Shuttle.ThreadsTest do
                %{"hub/mr7" => 2, "hub/live" => 0, "hub/none" => 0}
 
       roster = Threads.roster("hub", "/s", entries, live)
-      assert roster =~ "- hub/mr7 — Draft — (no outcome yet)\n  (2 waiting for its next worker)\n"
-      assert roster =~ "- hub/live — Working — (no outcome yet)\n  (1 thread)\n"
-      assert roster =~ "- hub/none — Draft — (no outcome yet)\nResults"
+      assert roster == "## Threads — 1 working · 2 drafts — `shuttle threads hub`"
+      refute roster =~ "hub/mr7"
+      refute roster =~ "Results"
     end
 
     test "a hub's launch prompt lists its threads by state; a leaf gets no block" do
@@ -1320,7 +1320,7 @@ defmodule Shuttle.ThreadsTest do
         thread("hub/elsewhere", %{"status" => "active", "shuttle" => %{"host" => "candide"}}),
         thread("hub/asking", %{
           "status" => "active",
-          "shuttle" => %{"ask" => %{"text" => "?", "at" => "t"}}
+          "shuttle" => %{"ask" => %{"text" => "Which model?", "at" => "t"}}
         }),
         thread("hub/done", %{"status" => "closed", "tempered" => true}),
         thread("hub/dropped", %{"status" => "closed", "tempered" => false}),
@@ -1336,34 +1336,88 @@ defmodule Shuttle.ThreadsTest do
              MapSet.new(["test-host", "candide"])}
         )
 
-      assert prompt =~ "## Threads"
+      assert prompt =~
+               "## Threads — 1 waiting · 1 to review · 2 working · 2 armed (1 on an unreachable host) · 1 draft · 1 resting · 2 archived — `shuttle threads hub`"
 
-      rows =
-        for [path, state] <-
-              Regex.scan(~r/^- (\S+) — ([^—]+) —/m, prompt, capture: :all_but_first),
-            do: {path, String.trim(state)}
-
-      assert rows == [
-               {"hub/asking", "Waiting"},
-               {"hub/elsewhere", "Working"},
-               {"hub/live", "Working"},
-               {"hub/armed", "Armed"},
-               {"hub/away", "Armed · host unreachable"},
-               {"hub/review", "To review"},
-               {"hub/draft", "Draft"},
-               {"hub/rest", "Resting"}
-             ]
-
-      assert prompt =~ "- hub/live — Working — (no outcome yet)\n  (1 thread)"
-      assert prompt =~ "— To review — Found it.\n"
-      assert prompt =~ "(2 archived)"
-      assert prompt =~ ~s(`shuttle thread hub "<ask>"`)
+      assert prompt =~ "### Waiting (1)\n- asking — Which model?"
+      assert prompt =~ "### To review (1)\n- review — Found it."
+      refute prompt =~ "hub/asking"
+      refute prompt =~ "shuttle thread hub \"<ask>\""
 
       refute Shuttle.Dispatcher.render_prompt("hub/rest",
                felt_store: "/nonexistent",
                runner: FailingMailboxRunner,
                threads: {entries, MapSet.new(), nil}
              ) =~ "## Threads"
+    end
+
+    test "the launch inbox caps the combined groups and reports overflow" do
+      waiting =
+        for n <- 1..41 do
+          thread("hub/w#{n}", %{
+            "status" => "active",
+            "shuttle" => %{"ask" => %{"text" => "Which\nmodel?"}}
+          })
+        end
+
+      reviews = for n <- 1..2, do: thread("hub/review/r#{n}", %{"status" => "closed"})
+      entries = [thread("hub", %{"status" => "active"}) | waiting ++ reviews]
+      roster = Threads.roster("hub", "/s", entries, MapSet.new())
+      assert length(Regex.scan(~r/^- /m, roster)) == 40
+      assert roster =~ "### Waiting (41)"
+      assert length(Regex.scan(~r/… and 3 more/, roster)) == 1
+      assert roster =~ "- w1 — Which model?"
+    end
+
+    test "the launch inbox normalizes asks and bounds relative review outcomes" do
+      long = String.duplicate("λ", 180)
+
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/asking", %{
+          "status" => "active",
+          "shuttle" => %{"ask" => %{"text" => "Which\nmodel?"}}
+        }),
+        thread("hub/methodology/covariance/noise-closure", %{
+          "status" => "closed",
+          "outcome" => long <> ". More."
+        })
+      ]
+
+      roster = Threads.roster("hub", "/s", entries, MapSet.new())
+      assert roster =~ "- asking — Which model?"
+
+      assert roster =~
+               "- methodology/covariance/noise-closure — " <> String.duplicate("λ", 159) <> "…"
+    end
+
+    test "an archived-only family leaves its count line and no inbox" do
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/done", %{"status" => "closed", "tempered" => true}),
+        thread("hub/dropped", %{"status" => "closed", "tempered" => false})
+      ]
+
+      assert Threads.roster("hub", "/s", entries, MapSet.new()) ==
+               "## Threads — 2 archived — `shuttle threads hub`"
+    end
+
+    test "thread ids in the inbox are relative to the orchestrator" do
+      nested =
+        thread("hub/methodology/covariance/noise-closure", %{
+          "status" => "closed",
+          "outcome" => "Validated."
+        })
+
+      nested_roster =
+        Threads.roster(
+          "hub",
+          "/s",
+          [thread("hub", %{"status" => "active"}), nested],
+          MapSet.new()
+        )
+
+      assert nested_roster =~ "- methodology/covariance/noise-closure — Validated."
     end
   end
 end
