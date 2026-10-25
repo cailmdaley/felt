@@ -5,19 +5,6 @@ import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 
 const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
 
-/** The open constitution's family from its root, as the phone's threads control counts it: live threads, reviews, and those waiting. */
-export function familyCounts(card: KanbanCard, index: ThreadIndex): { threads: number; reviews: number; waiting: number } {
-  let root = index.card(card)
-  for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) root = parent
-  const states = index.subtree(root).map(thread => index.state(thread)).filter(state => state !== 'archived')
-  return { threads: states.length, reviews: states.filter(s => s === 'to-review').length, waiting: states.filter(s => s === 'waiting').length }
-}
-
-/** The control's words: `24 threads · 3 reviews`, the reviews only when there are some. */
-export function familyLabel({ threads, reviews }: { threads: number; reviews: number }): string {
-  return [`${threads} ${threads === 1 ? 'thread' : 'threads'}`, ...(reviews ? [`${reviews} ${reviews === 1 ? 'review' : 'reviews'}`] : [])].join(' · ')
-}
-
 /**
  * The phone's thread list for the open constitution: its family from the
  * root down, the threads waiting on an answer first, the open one marked.

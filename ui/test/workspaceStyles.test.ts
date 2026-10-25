@@ -28,8 +28,8 @@ describe('workspace style contracts', () => {
     expect(themes.length).toBeGreaterThan(0)
     for (const theme of themes) expect(read(`themes/${theme}`), theme).not.toContain('sidebar-card')
   })
-  it('separates the meter facts with a dot, the cached share included', () => {
-    expect(read('chat.css')).toMatch(/\.ws-transcript-meter > :not\(\[hidden\]\) ~ \.ws-transcript-hit::before\s*\{[^}]*content:\s*'·'/)
+  it('keeps the constitution name on one ellipsized line', () => {
+    expect(read('chat.css')).toMatch(/\.ws-chat-title\s*\{[^}]*white-space:\s*nowrap;[^}]*text-overflow:\s*ellipsis/)
   })
   it('defines every workspace token that its reader uses', () => {
     const declarations = new Set([...`${tokens}\n${css}`.matchAll(/(--ws-[\w-]+)\s*:/g)].map(m => m[1]))

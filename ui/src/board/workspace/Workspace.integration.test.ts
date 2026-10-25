@@ -277,14 +277,15 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
-  it('a Question opens its chat with the report inset rather than a remembered file', async () => {
+  it('a Question opens its chat with the report chip rather than a remembered file', async () => {
     const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
     onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0]); await flush(); await flush()
     workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     workspace.openQuestion(cards[0]); await flush(); await flush()
     expect(workspace.reader.document?.kind).toBe('chat')
-    expect(document.querySelector('.ws-selected .ws-report-inset')).not.toBeNull()
+    expect(document.querySelector('.ws-selected .ws-report-chip')).not.toBeNull()
+    expect(document.querySelector('.ws-report-inset')).toBeNull()
   })
 
   it('a Question without a report opens its constitution', async () => {
@@ -570,17 +571,16 @@ describe('workspace reader integration', () => {
     const title = (): string | null | undefined => document.querySelector('.ws-page.ws-selected .ws-chat-title')?.textContent
     workspace.open(feed[0], 'Desk'); await flush()
     expect(title()).toBe('hub')
-    // The phone's way to the threads page says what the family holds.
-    const pages = document.querySelector<HTMLButtonElement>('.ws-chat-pages')!
-    expect([pages.classList.contains('ws-chat-pages-family'), pages.textContent]).toEqual([true, '2 threads'])
+    expect(document.querySelector('.ws-chat-pages')).toBeNull()
+    expect(document.querySelector('.ws-chat-head button[aria-label="Settings"]')).not.toBeNull()
     // A root has no orchestrator: no way back on its line, and b does nothing.
-    expect(document.querySelector<HTMLElement>('.ws-page.ws-selected .ws-chat-ancestry')?.hidden).toBe(true)
+    expect(document.querySelector<HTMLElement>('.ws-page.ws-selected .ws-settings-ancestry')?.hidden).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true, cancelable: true }))
     await flush()
     expect(title()).toBe('hub')
     workspace.open(feed[1], 'Desk'); await flush()
     expect(title()).toBe('hub/sub')
-    const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-page.ws-selected .ws-chat-ancestry .ws-ancestry-link')]
+    const links = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-page.ws-selected .ws-settings-ancestry .ws-ancestry-link')]
     expect(links().map(b => b.textContent)).toEqual(['hub'])
     links()[0].click(); await flush()
     expect(title()).toBe('hub')
@@ -900,11 +900,11 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     expect(document.querySelector('.ws-tab,.ws-thumbbar')).toBeNull()
     expect(document.querySelector('.ws-chat-outcome')).toBeNull()
-    expect(document.querySelector('.ws-report-inset')).not.toBeNull()
+    expect(document.querySelector('.ws-report-chip')).not.toBeNull()
 
     const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
     expect(constitution.hidden).toBe(false)
-    expect(constitution.querySelector('.ws-header-tile-title')?.textContent).toBe('Constitution')
+    expect(constitution.getAttribute('aria-label')).toBe('Constitution')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')
@@ -1002,7 +1002,8 @@ describe('workspace reader integration', () => {
     expect(band.querySelector('textarea')).toBe(draft)
     expect(draft.value).toBe('Keep this draft')
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
-    expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(1)
+    expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(0)
+    expect(document.querySelector('.ws-fiber-acts .ws-chat-console')).not.toBeNull()
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -1100,9 +1101,9 @@ describe('workspace reader integration', () => {
     })
     workspace.open(live)
     await flush()
-    // The chat's header line carries the one worker control, the same pill the head draws.
-    expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(1)
-    document.querySelector<HTMLButtonElement>('.ws-chat-acts button.kbn-card-worker')!.click()
+    // The chat's Console reaches the same conversation as the navbar pill.
+    expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(0)
+    document.querySelector<HTMLButtonElement>('.ws-chat-acts .ws-chat-console')!.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!

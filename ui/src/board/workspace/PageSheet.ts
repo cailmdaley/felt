@@ -9,6 +9,7 @@ export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly body = document.createElement('div')
   private readonly threads = document.createElement('div')
+  private readonly settings = document.createElement('div')
   private readonly list = document.createElement('div')
   private readonly heading = document.createElement('h2')
   private readonly token = `files:${Math.random().toString(36).slice(2)}`
@@ -30,8 +31,10 @@ export class PageSheet {
     close.setAttribute('aria-label', 'Close sent files'); close.addEventListener('click', () => this.close())
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'; head.append(this.heading)
     this.body.className = 'ws-page-sheet-body'
+    this.settings.className = 'ws-sheet-settings'
+    this.settings.dataset.part = 'act'
     this.threads.className = 'ws-page-sheet-threads'
-    this.body.append(this.threads, this.list); panel.append(close, head, this.body); this.el.append(panel)
+    this.body.append(this.settings, this.threads, this.list); panel.append(close, head, this.body); this.el.append(panel)
     this.el.addEventListener('click', event => { if (event.target === this.el) this.close() })
     this.el.addEventListener('cancel', event => { event.preventDefault(); this.close() })
     let start: number | null = null
@@ -40,18 +43,22 @@ export class PageSheet {
     close.addEventListener('pointercancel', () => { start = null })
     window.addEventListener('resize', this.position)
     window.addEventListener('popstate', this.pop)
-    window.addEventListener('keydown', this.keydown, true)
+    this.el.addEventListener('keydown', this.keydown)
   }
   get isOpen(): boolean { return this.el.open }
   update(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>): void {
     this.model = { channel, selected, fresh }
     if (this.isOpen) this.render()
   }
-  show(opener: HTMLElement, threads: HTMLElement | null = null): void {
+  show(opener: HTMLElement, threads: HTMLElement | null = null, settings: HTMLElement | null = null): void {
     if (this.isOpen || this.pendingBack || !this.model) return
     this.opener = opener
     this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
-    this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
+    this.settings.replaceChildren(...(settings ? [settings] : []))
+    if (settings) settings.hidden = false
+    this.heading.textContent = settings ? 'Settings' : threads ? 'Threads and sent files' : 'Sent files'
+    this.el.setAttribute('aria-label', this.heading.textContent)
+    this.el.querySelector('button')?.setAttribute('aria-label', settings ? 'Close settings' : 'Close sent files')
     window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
   }
@@ -59,7 +66,7 @@ export class PageSheet {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
     const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)))
-    if (this.threads.hidden) files.querySelector('h3')?.remove()
+    if (this.threads.hidden && !this.settings.childElementCount) files.querySelector('h3')?.remove()
     this.list.replaceChildren(files)
   }
   private open(): void {
@@ -103,16 +110,16 @@ export class PageSheet {
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     if (!this.isOpen) return
-    event.stopImmediatePropagation()
+    event.stopPropagation()
     if (event.key === 'Escape') { event.preventDefault(); this.close() }
     if (event.key === 'Tab') {
-      const buttons = [...this.el.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.checkVisibility())
+      const buttons = [...this.el.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], [tabindex="0"]')].filter(button => button.checkVisibility() && !button.matches(':disabled'))
       const first = buttons[0], last = buttons.at(-1)
       if (event.shiftKey && (document.activeElement === first || !this.el.contains(document.activeElement))) { event.preventDefault(); last?.focus() }
       else if (!event.shiftKey && (document.activeElement === last || !this.el.contains(document.activeElement))) { event.preventDefault(); first?.focus() }
     }
   }
   dispose(): void {
-    this.hide(); window.removeEventListener('resize', this.position); window.removeEventListener('popstate', this.pop); window.removeEventListener('keydown', this.keydown, true); this.el.remove()
+    this.hide(); window.removeEventListener('resize', this.position); window.removeEventListener('popstate', this.pop); this.el.removeEventListener('keydown', this.keydown); this.el.remove()
   }
 }

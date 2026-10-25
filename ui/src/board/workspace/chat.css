@@ -14,8 +14,8 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  flex: none; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 12px; min-width: 0;
-  min-height: 44px; padding: 8px calc(var(--ws-chat-gutter) - 10px) 8px var(--ws-chat-gutter);
+  flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; min-width: 0;
+  min-height: 60px; padding: 6px 16px;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
 /* One back control leads to the parent chat or the originating board view. */
@@ -27,22 +27,23 @@
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
-/* The name takes the line and wraps rather than truncating; the acts keep to its first line. */
+/* The name yields space to the immediate controls without growing the bar. */
 .ws-chat-title {
   flex: 1 1 0; min-width: 0; margin: 0; padding-block: 3px;
-  overflow: hidden; white-space: normal; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
-.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 12px; min-height: 32px; }
+.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 4px; min-height: 32px; }
+.ws-chat-acts > .kbn-ctl-verdict { display: flex; gap: 4px; }
+.ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
 /* The lifecycle chip: the rail's state word in its tone, beside the name's first line. */
 .ws-chat-state {
   --tone: var(--ws-ink-muted);
-  flex: none; align-self: flex-start; margin-top: 7px; padding: 1px 8px; border-radius: 999px;
-  color: var(--tone); background: color-mix(in srgb, var(--tone) 13%, transparent);
+  flex: none; min-width: 10ch; padding: 1px 0;
+  color: var(--tone);
   font: 500 var(--ws-small-size)/1.5 var(--ws-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
 }
-.ws-chat-state[hidden], .ws-chat-state-live { display: none; }
+.ws-chat-state[hidden] { display: none; }
 .ws-chat-state[data-state='question'] { --tone: var(--ws-state-question); }
 .ws-chat-state[data-state='waiting'] { --tone: var(--ws-state-idle); }
 .ws-chat-state[data-state='working'] { --tone: var(--ws-state-working); }
@@ -50,60 +51,42 @@
 .ws-chat-state[data-state='drafts'] { --tone: var(--ws-state-drafts); }
 .ws-chat-state[data-state='resting'] { --tone: var(--ws-state-resting); color: var(--ws-ink-muted); }
 .ws-chat-state:is([data-state='tempered'], [data-state='discarded']) { --tone: var(--ws-state-tempered); }
-/* Inside a thread its ancestry runs beneath the name, a line of its own. */
-.ws-chat-ancestry { flex: 1 0 100%; order: 1; margin-top: 1px; }
+/* Settings keeps the further ancestors reachable without a second header row. */
+.ws-settings-ancestry { margin-bottom: 12px; }
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
-.ws-chat-acts .ws-fiber-worker:empty { display: none; }
-.ws-chat-acts .ws-worker-control { min-width: 13ch; }
-.ws-chat-trail { display: none; }
 
-/* The meter: context tokens tinted as they fill the window, the window's
-   share, the cache's warmth and the session's cached share, in one mono run. */
+/* One context figure and the cache's warmth; cache-read share lives in settings. */
 .ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
-.ws-chat .ws-transcript-share::before, .ws-chat .ws-transcript-meter > :not([hidden]) ~ .ws-transcript-hit::before { content: '·'; margin-right: 7px; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
-/* Act and Look share one compact visual sheet on desktop and phone. */
-.ws-chat .ws-header-control {
-  display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 6px;
-  border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted); cursor: pointer;
+/* Immediate actions use the board's glyph vocabulary and native keyboard focus. */
+.ws-reader .ws-header-icon {
+  display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
+  border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
+  color: var(--ws-ink-muted); cursor: pointer; font: var(--ws-section-size)/1 var(--ws-mono);
 }
-.ws-header-control svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
-.ws-chat .ws-header-control:hover, .ws-chat .ws-header-control[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-header-control:focus-visible, .ws-header-tile:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
-.ws-chat .ws-header-sheet {
-  box-sizing: border-box; width: 280px; max-width: calc(100vw - 16px); padding: 12px;
-  border: var(--ws-line-width) solid var(--ws-hairline); border-radius: 12px;
-  background: var(--ws-sheet); color: var(--ws-ink); box-shadow: var(--ws-shadow-low);
-}
-.ws-header-sheet[hidden] { display: none; }
-.ws-header-sheet-title { margin: 0 0 10px; color: var(--ws-ink-muted); font: 500 var(--ws-label-size)/1.3 var(--ws-serif); }
-.ws-header-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.ws-chat .ws-header-grid .kbn-ctl-verdict { display: contents; }
-.ws-chat .ws-header-grid .kbn-ctl-verdict[hidden] { display: none; }
-.ws-chat .ws-header-grid .ws-header-tile {
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 6px;
-  min-height: 76px; width: 100%; margin: 0; padding: 12px; box-sizing: border-box;
-  border: var(--ws-line-width) solid var(--ws-hairline-soft) !important; border-radius: 7px;
-  background: var(--ws-paper); color: var(--ws-ink); text-align: left; cursor: pointer;
-  font: var(--ws-label-size)/1.25 var(--ws-serif);
-}
-.ws-chat .ws-header-tile[hidden] { display: none; }
-.ws-chat .ws-header-tile:hover:not(:disabled), .ws-chat .ws-header-tile[aria-expanded='true'] { background: var(--ws-hover); border-color: var(--ws-hairline) !important; }
-.ws-chat .ws-header-tile:disabled { opacity: .45; cursor: default; }
-.ws-header-tile-glyph { font: var(--ws-section-size)/1 var(--ws-mono); color: var(--ws-ink-muted); }
-.ws-chat .ws-header-grid .ws-header-tile:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
-.ws-chat .ws-header-tile:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) .ws-header-tile-glyph { color: inherit; }
+.ws-reader .ws-header-icon[hidden] { display: none; }
+.ws-reader .ws-header-icon:hover:not(:disabled), .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
+.ws-reader .ws-header-icon:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
+.ws-header-overflow { display: flex; align-items: center; gap: 8px; }
+.ws-header-overflow:empty { display: none; }
+.ws-reader .ws-header-overflow .kbn-ctl-verdict { display: flex; gap: 8px; }
+.ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
+.ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--ws-label-size); }
+.ws-header-overflow .ws-header-icon::after { content: attr(aria-label); font-family: var(--ws-serif); }
+.ws-report-chip { display: flex; align-items: center; flex: none; gap: 8px; max-width: 220px; padding: 0 8px 0 0; border-radius: 5px; text-align: left; }
+.ws-report-preview { display: block; position: relative; overflow: hidden; width: 64px; height: 44px; flex: none; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
+.ws-report-preview > .ws-thumbnail { width: 100%; height: 100%; }
+.ws-chat-head[data-compact='true'] .ws-report-chip { max-width: 150px; }
+.ws-report-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--ws-note-size)/1.3 var(--ws-serif); }
 .ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
-.ws-header-meter:has(> :not([hidden])) { margin-top: 12px; }
 
-/* What the menu opens, under the header: settings, sessions. */
+/* The content is seated inside the settings sheet when opened. */
 .ws-chat-drawer {
-  flex: none; max-height: 50%; overflow: auto; overscroll-behavior: contain;
-  padding: 4px var(--ws-chat-gutter) 8px;
-  border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
+  padding: 4px 0 8px;
 }
 .ws-chat-section + .ws-chat-section:not([hidden]) { border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
 
@@ -193,49 +176,23 @@
   .ws-chat-head { align-items: center; }
   .ws-chat-lead:not([hidden]) { display: inline-flex; }
   .ws-chat-title { font-size: var(--ws-label-size); -webkit-line-clamp: 1; }
-  /* Inside a thread the phone's line has no back button: the name and its ancestry keep one inset. */
+  /* A page without a back destination keeps the title inset. */
   .ws-chat-lead[hidden] + .ws-chat-title { padding-left: 12px; }
-  .ws-chat-ancestry { padding: 0 0 6px 12px; }
   .ws-chat-acts { gap: 6px; }
-  .ws-chat-acts .ws-fiber-worker:not([hidden]) { display: contents; }
-  .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
-  .ws-chat-acts .ws-fiber-worker .kbn-card-worker { min-width: 28px; min-height: var(--ws-phone-target); justify-content: center; padding: 0; border: 0; background: transparent; }
-  /* The header: the name and the menu on the first line; the lifecycle and the family's control beneath. */
-  .ws-chat-head {
-    display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; column-gap: 6px; row-gap: 2px; padding-bottom: 6px;
-    grid-template-areas: 'lead title title acts trail' '. state . . .' '. anc anc anc anc';
-  }
-  .ws-chat-head:has(.ws-chat-pages-family) { grid-template-areas: 'lead title title acts acts' '. state trail trail trail' '. anc anc anc anc'; }
-  .ws-chat-lead { grid-area: lead; }
-  .ws-chat-title { grid-area: title; }
-  .ws-chat-acts { grid-area: acts; }
-  .ws-chat-trail { grid-area: trail; justify-self: start; }
-  .ws-chat-state { grid-area: state; align-self: center; margin: 0; }
-  /* The phone folds the worker plate away; the lifecycle still names its state. */
-  .ws-chat-state-live:not([hidden]) { display: inline-block; }
-  .ws-chat-lead[hidden] ~ .ws-chat-state { margin-left: 12px; }
-  .ws-chat-ancestry { grid-area: anc; }
+  .ws-chat-head { display: flex; flex-wrap: nowrap; gap: 5px; min-height: 56px; padding: 4px 6px; }
+  .ws-chat-title { font-size: var(--ws-label-size); }
+  .ws-chat-state { margin: 0; font-size: var(--ws-small-size); letter-spacing: 0; }
+  .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); gap: 4px; white-space: nowrap; }
+  .ws-chat-acts { gap: 4px; }
+  .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
+  .ws-chat-head .ws-report-chip { max-width: 100px; gap: 4px; padding: 0; }
+  .ws-report-preview { width: 44px; height: 40px; }
+  .ws-report-title { max-width: 50px; font-size: var(--ws-small-size); }
+  .ws-header-overflow { flex-wrap: wrap; }
   /* Folded, the composer is one row, the field and its one verb; it opens on focus or while a meeting is armed. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; justify-self: end; }
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) :is(.kbn-ctl-meet, .kbn-ctl-sends > .kbn-ctl-secondary) { display: none; }
-  .ws-chat .ws-header-control { width: var(--ws-phone-target); height: var(--ws-phone-target); }
-  /* Reserve the rail toggle's fixed slot between Act and Look without moving it. */
-  .ws-reader:has(.ws-rail-toggle:not([hidden])) .ws-chat-head { padding-right: 0; }
-  .ws-reader:has(.ws-rail-toggle:not([hidden])) .ws-chat-acts { gap: 0; }
-  .ws-reader:has(.ws-rail-toggle:not([hidden])) .ws-header-control[aria-label='Act'] { margin-right: var(--ws-phone-target); }
-  .ws-reader:has(.ws-rail-toggle:not([hidden])) .ws-chat-title { padding-right: 0; }
-  .ws-chat-trail { display: inline-flex; flex: none; }
-  .ws-reader .ws-chat-pages { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); padding: 0; color: var(--ws-ink); }
-  /* With a family the control says what is in it, a dot while any thread waits on the reader. */
-  .ws-reader .ws-chat-pages.ws-chat-pages-family {
-    display: inline-flex; align-items: center; gap: 6px; width: auto; height: 26px; padding: 0 10px; border-radius: 999px;
-    border: var(--ws-line-width) solid var(--ws-hairline) !important; background: var(--ws-fill); color: var(--ws-ink-soft);
-    font: var(--ws-small-size)/1 var(--ws-serif); white-space: nowrap;
-  }
-  .ws-chat-pages-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ws-state-question); }
-  .ws-chat-pages-dot[hidden] { display: none; }
-  .ws-chat-pages svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
   .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding-inline: 16px; }
   .ws-chat-compose { padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
   .ws-chat .ws-transcript-inline .ws-transcript-msg-you { max-width: 85%; }

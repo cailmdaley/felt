@@ -40,7 +40,7 @@ import { addFrontierFixtures, addThreadFixtures } from './thread-fixtures.js'
 import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
-import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, workspaceExample } from './workspace-fixtures.js'
+import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
 import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, transcriptSearchHits, type TranscriptScenario } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
@@ -67,6 +67,10 @@ const example = search.get('example')
 const transcriptScenario = search.get('transcript')
 const docsExample = example === 'workshop' ? workshopExample(now) : null
 const workspaceFixture = example === 'workspace' || example === 'music' || example === 'threads' || example === 'frontier' ? workspaceExample(now, { music: example === 'music', transcriptScenario }) : null
+if (workspaceFixture && search.has('long-title')) {
+  const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
+  fiber.name = LONG_WORKSPACE_NAME
+}
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null

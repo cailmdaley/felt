@@ -20,18 +20,19 @@ async function shot(page, name) {
 }
 async function back(page, phone) {
   if (phone) await frame(page).locator('body').evaluate(() => window.scrollBy(0, -100)).catch(() => {})
-  await (phone ? page.locator('.ws-navbar .ws-return') : selected(page).getByRole('button', { name: 'Back one level', exact: true })).click()
+  const button = phone ? page.locator('.ws-navbar .ws-return') : selected(page).getByRole('button', { name: 'Back one level', exact: true })
+  if (phone) await button.focus()
+  await button.click()
   await page.waitForTimeout(100)
 }
 async function report(page) {
-  const dock = page.locator('.ws-report-dock:not([hidden]) .ws-report-compact')
-  await (await dock.count() ? dock : page.locator('.ws-report-open')).click()
+  await selected(page).locator('.ws-report-chip').click()
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
   await page.waitForTimeout(100)
 }
 export function registerLivingReportJourneys(test) {
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
-    test(`Living report (${device}): inset, fragments, reload ancestry, nested files, sends and family`, async page => {
+    test(`Living report (${device}): header chip, fragments, reload ancestry, nested files, sends and family`, async page => {
       const context = page.context()
       await context.addInitScript(() => {
         if (window.parent !== window) return
@@ -42,19 +43,14 @@ export function registerLivingReportJourneys(test) {
       await page.goto(url)
       await page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
       await selected(page).locator('textarea').waitFor()
-      await page.locator('.ws-report-dock:not([hidden]) .ws-thumbnail').waitFor()
-      await page.frameLocator('.ws-report-inset iframe').locator('#report-sentinel').waitFor({ state: 'attached' })
-      const insetIdentity = await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent()
+      await page.locator('.ws-report-chip .ws-thumbnail').waitFor()
+      assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
       await shot(page, `${device}-landing`)
-      const dockBox = await page.locator('.ws-report-dock').boundingBox()
-      if (!phone) {
-        const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
-        const actBox = await selected(page).getByRole('button', { name: 'Act', exact: true }).boundingBox()
-        assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'desktop chip stays within the header')
-        assert.ok(dockBox.x + dockBox.width <= actBox.x, 'desktop chip sits left of Act and Look')
-      } else {
-        assert.equal(await page.locator('.ws-report-dock').evaluate(el => el.previousElementSibling?.className), 'ws-chat-head')
-      }
+      const dockBox = await page.locator('.ws-report-chip').boundingBox()
+      const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
+      const settingsBox = await selected(page).getByRole('button', { name: 'Settings', exact: true }).boundingBox()
+      assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'the chip stays within the bar on every device')
+      assert.ok(dockBox.x + dockBox.width <= settingsBox.x, 'the chip precedes the icons')
       assert.equal(await selected(page).locator('.ws-transcript-find').count(), 0, 'the conversation has no local Find or reserved band')
       const composerBox = await selected(page).locator('textarea').boundingBox()
       assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
@@ -63,24 +59,14 @@ export function registerLivingReportJourneys(test) {
         await page.locator('.ws-transcript-earlier:visible').click()
         await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
       }
-      await page.locator('.ws-report-inset iframe').waitFor()
-      await page.frameLocator('.ws-report-inset iframe').locator('#report-sentinel').waitFor()
-      assert.equal(await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent(), insetIdentity, 'real intersection keeps the iframe document alive')
+      assert.equal(await page.locator('.ws-report-chip').isVisible(), true, 'scrolling does not dock or hide the chip')
       assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
       assert.equal(await page.locator('.ws-chat-outcome').count(), 0)
-      const geometry = await page.locator('.ws-report-inset').evaluate(el => {
-        const box = el.getBoundingClientRect(), chat = el.closest('.ws-chat').getBoundingClientRect()
-        return { width: box.width, right: box.right, chatRight: chat.right }
-      })
-      assert.ok(geometry.width > (phone ? 150 : 300), `report is an illustration, not a tiny thumbnail: ${JSON.stringify(geometry)}`)
       await shot(page, `${device}-top`)
-      const prompt = selected(page).locator('.ws-transcript-turn').first().locator('.ws-transcript-prompt-text').first()
-      assert.equal(await prompt.evaluate(el => getComputedStyle(el).maxHeight), 'none', 'the floated prompt is not prematurely clamped')
 
-      // Both the full figure and the compact landing dock open the same reader.
+      // The persistent chip opens the report in the existing nested reader.
       await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = el.scrollHeight })
-      await page.locator('.ws-report-dock:not([hidden]) .ws-thumbnail').waitFor()
-      assert.equal(await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent(), insetIdentity)
+      await page.locator('.ws-report-chip .ws-thumbnail').waitFor()
       await report(page)
       await shot(page, `${device}-report`)
       // Local fragments stay in srcdoc, retain identity and keep the key bridge alive.
@@ -129,33 +115,32 @@ export function registerLivingReportJourneys(test) {
       await selected(page).locator('textarea').waitFor()
 
       if (phone) {
-        await page.getByRole('button', { name: 'Show threads', exact: true }).click()
+        await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor()
         assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
         assert.ok(await page.locator('.ws-page-sheet [data-group="archived"]').count() > 0)
         await shot(page, 'phone-sheet')
-        await page.getByRole('button', { name: 'Close sent files', exact: true }).click()
+        await page.getByRole('button', { name: 'Close settings', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       } else {
-        await page.getByRole('button', { name: 'Look', exact: true }).click()
-        await page.getByRole('button', { name: 'Sent files', exact: true }).click()
+        await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor()
         assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
         assert.ok(await page.locator('.ws-sent-new').count() > 0)
-        assert.equal(await page.locator('.ws-page-sheet h3').count(), 0)
+        assert.ok(await page.locator('.ws-page-sheet .kbn-ctl-history').count() > 0, 'sessions share settings with dated sends')
         const panel = await page.locator('.ws-page-sheet-panel').boundingBox()
         const card = await selected(page).boundingBox()
         assert.ok(panel.x >= card.x && panel.x + panel.width <= card.x + card.width, 'files panel stays in the constitution card')
         await shot(page, 'desktop-sent-files')
-        await page.getByRole('button', { name: 'Close sent files', exact: true }).click()
+        await page.getByRole('button', { name: 'Close settings', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
         const toggle = page.getByRole('button', { name: 'Hide threads', exact: true })
         await toggle.click()
         assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
         await page.getByRole('button', { name: 'Show threads', exact: true }).click()
       }
-      // Body embeds and links remain reachable from Look.
-      await page.getByRole('button', { name: 'Look', exact: true }).click()
+      // Body embeds and links remain reachable from the constitution icon.
+      if (phone) await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(await selected(page).locator('.ws-dock').count(), 0)
@@ -163,12 +148,22 @@ export function registerLivingReportJourneys(test) {
       await selected(page).locator('textarea').waitFor()
       // A thread's back goes to its orchestrator's chat, not the Desk.
       if (phone) {
-        await page.locator('.ws-chat-pages').click()
+        await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
         await page.locator('.ws-page-sheet [data-group="working"] .kbn-thread-row').first().click()
       } else await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
       await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
       await selected(page).locator('.ws-chat-origin').click()
       await selected(page).getByRole('heading', { name: 'Calibrate the shear response', exact: true }).waitFor()
+      // Further ancestors stay reachable from settings without adding a header row.
+      if (phone) {
+        await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
+        await page.locator('.ws-page-sheet [data-group="working"] .kbn-thread-row').first().click()
+      } else await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
+      await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
+      await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.locator('.ws-page-sheet[open] .ws-settings-ancestry .ws-ancestry-link').click()
+      await selected(page).getByRole('heading', { name: 'Calibrate the shear response', exact: true }).waitFor()
+      assert.equal(await page.locator('.ws-page-sheet[open]').count(), 0)
       assert.equal(errors.length, 0, errors.join('\n'))
     }, viewport, 'false', 'reduce', phone)
   }

@@ -12,7 +12,7 @@ function setup(phone = false) {
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
   reader = new Reader({ shuttleBase: '', buildProse: () => {
-    const el = document.createElement('div'); el.innerHTML = '<div class="ws-chat-log"></div>'; return el
+    const el = document.createElement('div'); el.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"></div></header><div class="ws-chat-log"></div>'; return el
   }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,
@@ -22,12 +22,13 @@ function setup(phone = false) {
 }
 afterEach(() => { reader?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals() })
 
-it('lands on chat with a live report figure and no strip, tabs or bottom page chooser', () => {
+it('lands on chat with a persistent report chip and no inset, strip, tabs or bottom page chooser', () => {
   setup()
   expect(reader.document?.kind).toBe('chat')
-  expect(reader.el.querySelector('figure.ws-report-inset iframe')).not.toBeNull()
+  expect(reader.el.querySelector('.ws-report-inset')).toBeNull()
+  expect(reader.el.querySelector('.ws-chat-head .ws-report-chip')).not.toBeNull()
   expect(reader.el.querySelector('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice')).toBeNull()
-  reader.el.querySelector<HTMLButtonElement>('.ws-report-open')!.click()
+  reader.el.querySelector<HTMLButtonElement>('.ws-report-chip')!.click()
   expect(reader.document?.name).toBe('report.html')
   reader.back(); expect(reader.document?.kind).toBe('chat')
 })

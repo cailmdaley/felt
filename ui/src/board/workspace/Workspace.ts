@@ -472,11 +472,11 @@ export class Workspace {
   private seatNav(state: ChannelState, dock: Dock): void {
     const ancestry: KanbanCard[] = []
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
-    dock.openSentFiles = () => this.reader.showSentFiles()
+    dock.openSettings = (content, opener) => this.reader.showSettings(content, opener)
+    dock.closeSettings = after => this.reader.closeSettings(after)
     dock.setNav({
-      ancestry: ancestry.map(card => ({ name: card.name, open: () => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) } })),
+      ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
       origin: { label: ancestry.at(-1)?.name ?? this.origin, open: () => this.reader.back() },
-      trail: this.reader.pagesButton,
       constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
     })
   }

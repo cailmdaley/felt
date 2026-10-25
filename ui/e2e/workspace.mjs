@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
+import { registerHeaderBarJourneys } from './headerBar.mjs'
 
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
@@ -36,18 +37,27 @@ async function open(p, expected = 'calibration-report') {
   await selected(p).waitFor()
   await choose(p, expected)
 }
+async function headerAction(p, label) {
+  const button = selected(p).getByRole('button', { name: label, exact: true })
+  if (!await button.isVisible()) await selected(p).getByRole('button', { name: 'Settings', exact: true }).click()
+  await button.click()
+}
 async function chatMenu(p, label) {
+  const sheet = p.locator('.ws-page-sheet[open]')
+  if (['Settings', 'Sessions'].includes(label) && await sheet.count()) {
+    await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }); return
+  }
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: ['Settings', 'Sessions', 'Constitution', 'Console', 'Sent files'].includes(label) ? 'Look' : 'Act', exact: true }).click()
-  await selected(p).getByRole('button', { name: label, exact: true }).click()
+  await headerAction(p, ['Settings', 'Sessions'].includes(label) ? 'Settings' : label)
 }
 async function sentFiles(p) {
+  if (await p.locator('.ws-page-sheet[open]').count()) return
   const chat = await isSelected(p, 'Chat')
   if (!chat && p.viewportSize().width <= 700) {
     const menu = p.locator('.ws-navbar .ws-phone-document-menu')
     await menu.focus(); await menu.click()
-  } else await selected(p).getByRole('button', { name: chat ? 'Look' : 'Document menu', exact: true }).click()
-  await p.getByRole('button', { name: 'Sent files', exact: true }).click()
+  } else await selected(p).getByRole('button', { name: chat ? 'Settings' : 'Document menu', exact: true }).click()
+  if (!chat) await p.getByRole('button', { name: 'Sent files', exact: true }).click()
   await p.locator('.ws-page-sheet[open]').waitFor()
 }
 
@@ -122,6 +132,10 @@ test('The large transcript pages earlier turns inline, retains them across files
 })
 
 async function choose(p, label) {
+  const sheet = p.locator('.ws-page-sheet[open]')
+  if (await sheet.count() && ['Chat', 'Constitution', 'calibration-report'].includes(label)) {
+    await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' })
+  }
   if (await isSelected(p, label)) return
   if (label === 'Chat' || label === 'Constitution') {
     while (!(await isSelected(p, 'Chat'))) {
@@ -129,12 +143,10 @@ async function choose(p, label) {
       await p.waitForTimeout(30)
     }
     if (label === 'Constitution') {
-      await selected(p).getByRole('button', { name: 'Look', exact: true }).click()
-      await selected(p).getByRole('button', { name: 'Constitution', exact: true }).click()
+      await headerAction(p, 'Constitution')
     }
   } else if (label === 'calibration-report' && await isSelected(p, 'Chat')) {
-    const dock = p.locator('.ws-report-dock:not([hidden]) .ws-report-compact')
-    await (await dock.count() ? dock : p.locator('.ws-report-open')).click()
+    await selected(p).locator('.ws-report-chip').click()
   } else {
     await sentFiles(p)
     await p.locator(`.ws-page-sheet[open] .ws-sent-file[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`).click()
@@ -153,6 +165,8 @@ const barFind = p => p.locator('.kbn-viewtabs-find input')
 // Leave the reader: the phone's back chevron, or on the desktop the bar's
 // origin tab (the view the reader was opened from), which closes it back there.
 async function leave(p) {
+  const sheet = p.locator('.ws-page-sheet[open]')
+  if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
   if (p.viewportSize().width <= 700) {
     for (let step = 0; step < 32 && await p.locator('.kbn-reader-open').count(); step++) {
       await appFocus(p); await p.keyboard.press('Escape'); await p.waitForTimeout(30)
@@ -804,8 +818,7 @@ for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the read
   await origins[origin].open(p)
   await choose(p, 'Constitution')
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
-  await selected(p).getByRole('button', { name: /^Rest / }).click()
+  await headerAction(p, 'Rest')
   const panel = p.locator('.kbn-rest-popover')
   await panel.waitFor()
   assert.equal(await panel.getAttribute('aria-modal'), 'true', 'Rest is a modal over the reader')
@@ -813,7 +826,7 @@ for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the read
     const rect = el.getBoundingClientRect()
     return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
   }), true, 'Rest is visible and receives pointer input above the reader')
-  assert.equal(await panel.evaluate(el => el.contains(document.activeElement)), true, 'closing Act leaves focus in the Rest dialog')
+  assert.equal(await panel.evaluate(el => el.contains(document.activeElement)), true, 'Rest leaves focus in its confirmation dialog')
   await p.keyboard.press('Enter')
   await panel.waitFor({ state: 'detached' })
 })
@@ -1118,15 +1131,13 @@ test('Card FLIP opens, interrupts and returns on the 280 ms crossing', async p =
   assert.equal(await p.locator('.ws-sidebar-source,.ws-card-travelling,.ws-sidebar-flight').count(), 0)
 }, undefined, 'true', 'no-preference')
 
-test('Verdicts live in the chat menu, with the undo line on its header; keys reach them from a report', async p => {
+test('Verdicts live in the chat bar, with the undo line on its header; keys reach them from a report', async p => {
   await open(p)
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   const pair = selected(p).getByRole('group', { name: 'Verdict', exact: true })
   assert.ok(await pair.getByRole('button', { name: 'Temper', exact: true }).isVisible())
   assert.ok(await pair.getByRole('button', { name: 'Discard', exact: true }).isVisible())
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   await choose(p, 'calibration-report')
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await appFocus(p); await p.keyboard.press('t')
@@ -1138,8 +1149,7 @@ test('Verdicts live in the chat menu, with the undo line on its header; keys rea
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  assert.equal(await selected(p).locator('.ws-chat-acts .ws-worker-control').count(), 1)
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+  assert.equal(await selected(p).locator('.ws-chat-acts .ws-chat-console').count(), 1)
   assert.ok(await selected(p).getByRole('button', { name: 'Temper', exact: true }).isVisible())
   assert.ok(await selected(p).getByRole('button', { name: 'Discard', exact: true }).isVisible())
 })
@@ -1166,7 +1176,6 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
   await open(p)
   await choose(p, 'Chat')
   const looks = {}
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   looks.act = [await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-temper')), await verdictLook(selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard'))]
   await p.clock.pauseAt(new Date('2026-10-04T14:00:30Z'))
   await selected(p).locator('.kbn-ctl-verdict .kbn-ctl-discard').click()
@@ -1215,15 +1224,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await picker.count(), 0)
   }
   if (device === 'desktop') {
-    await appFocus(p); await p.keyboard.press('Enter')
-    await poll(p, () => !!document.querySelector('.ws-page.ws-expanded'))
-    await p.waitForTimeout(400)
+    // The modal settings sheet contains expansion shortcuts as well as typing.
+    assert.equal(await p.locator('.ws-page.ws-expanded').count(), 0)
     const effort = selected(p).locator('select[aria-label="Effort"]')
     await effort.scrollIntoViewIfNeeded()
     await effort.click()
     const picker = selected(p).locator('.ws-select-picker')
     const first = await anchoredInView(p, picker, effort, 'Effort list (expanded)')
-    await selected(p).locator('.ws-chat-drawer').evaluate(el => { el.scrollTop += 20 })
+    await selected(p).locator('.ws-page-sheet-body').evaluate(el => { el.scrollTop += 20 })
     await p.waitForTimeout(100)
     const after = await anchoredInView(p, picker, effort, 'Effort list (scrolled)')
     assert.ok(Math.abs((after.box.y - after.anchor.y) - (first.box.y - first.anchor.y)) <= 1, 'the list follows its select through a scroll')
@@ -1234,7 +1242,6 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 test('Phone fiber page: the folded settings line ends in an ellipsis', async p => {
   await open(p); await choose(p, 'Chat')
   await chatMenu(p, 'Settings')
-  await chatMenu(p, 'Sessions')
   const toggle = selected(p).locator('.kbn-detail-controls-toggle')
   await toggle.click(); await frames(p)
   const history = selected(p).locator('.kbn-ctl-history-toggle')
@@ -1250,15 +1257,10 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   const title = await p.locator('.ws-channel-title').boundingBox()
   assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
   await choose(p, 'Chat')
-  await selected(p).locator('.ws-chat-pages').click()
+  await headerAction(p, 'Settings')
   await p.locator('.ws-sent-file').first().waitFor()
-  assert.equal(await p.locator('.ws-page-sheet :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0, 'the page sheet lists pages only')
-  await p.keyboard.press('Escape')
-  await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
-  await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    const box = await selected(p).locator(`.ws-fiber-acts .kbn-ctl-verdict ${verb}`).boundingBox()
+    const box = await p.locator(`.ws-page-sheet[open] .kbn-ctl-verdict ${verb}`).boundingBox()
     assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
   }
 }, { width: 844, height: 390 }, 'false', 'reduce', true)
@@ -1316,7 +1318,6 @@ test('A key discard waits on the constitution in place of the pair; undo, then T
   assert.ok(await pair.getByRole('button', { name: 'Temper', exact: true }).isHidden(), 'the pair gives way to the line')
   await p.clock.runFor(3000)
   await pair.getByRole('button', { name: `Undo verdict on ${name}`, exact: true }).click()
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   await pair.getByRole('button', { name: 'Temper', exact: true }).click()
   assert.equal(await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').count(), 1)
   assert.match(await pair.locator('.ws-verdict-undo').innerText(), /^TEMPERED/i)
@@ -1364,7 +1365,6 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
     : selected(p).locator('.ws-chat-acts')
   // A Desk row offers its verdicts through the persistent action button.
   if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-menu').click()
-  if (surface === 'fiber') await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
   const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
@@ -1416,9 +1416,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
   await chooseDeskColumn(p, 0)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
-  assert.ok(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), 'a draft offers verdicts in its menu')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+  assert.ok(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), 'a draft offers verdicts in its bar')
   await p.keyboard.press('t')
   await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').waitFor()
   await p.keyboard.press('z')
@@ -1438,7 +1436,6 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
       if (!error.message.includes('No dialog is showing')) dialogErrors.push(error)
     } finally { finishDialog() }
   })
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').click()
   await Promise.race([dialogHandled, p.waitForTimeout(50)])
   assert.deepEqual(dialogErrors, [])
@@ -1838,7 +1835,7 @@ test('Remote worker conversation records attach handler without launching a term
 test("The fiber page's worker pill opens the same remote worker as c", async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  await selected(p).locator('.ws-chat-head .ws-fiber-acts .kbn-card-worker').click()
+  await selected(p).locator('.ws-chat-head .ws-chat-console').click()
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -1925,9 +1922,9 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
     await choose(p, 'Chat')
     const url = p.url()
-    const opener = selected(p).getByRole('button', { name: 'Threads and sent files', exact: true })
+    const opener = selected(p).getByRole('button', { name: 'Settings', exact: true })
     await opener.click()
-    const sheet = p.getByRole('dialog', { name: 'Threads and sent files' })
+    const sheet = p.getByRole('dialog', { name: 'Settings', exact: true })
     await sheet.waitFor()
     assert.equal(p.url(), url, 'sheet is a same-address history layer')
     assert.ok(await sheet.locator('.ws-sent-file').count() >= 12)
@@ -1948,7 +1945,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     await choose(p, 'Chat'); await opener.click(); await p.mouse.click(10, 10)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
     await opener.click()
-    const grabber = await sheet.getByRole('button', { name: 'Close sent files' }).boundingBox()
+    const grabber = await sheet.getByRole('button', { name: 'Close settings' }).boundingBox()
     await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
     await leave(p)
@@ -2240,13 +2237,13 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await open(p); await choose(p, 'Chat')
     assert.equal(await selected(p).locator('.ws-chat-acts .kbn-card-worker').count(), 0)
     assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper, .kbn-ctl-discard)').count(), 0)
-    await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+    if (device === 'phone') await headerAction(p, 'Settings')
     for (const verb of ['Temper', 'Discard']) {
       const button = selected(p).getByRole('button', { name: verb, exact: true }), box = await button.boundingBox()
       assert.ok(box.x >= 0 && box.x + box.width <= viewport.width)
       if (device === 'phone') assert.ok(box.height >= 44)
     }
-    await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+    if (device === 'phone') { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' }) }
     await shot('awaiting-review')
     await appFocus(p); await p.keyboard.press('t')
     const line = selected(p).locator('.ws-chat-acts > .ws-verdict-undo')
@@ -2256,27 +2253,17 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
     await choose(p, 'Chat')
-    const head = selected(p).locator('.ws-chat-acts .ws-worker-control'), dot = head.locator('.ws-worker-dot')
-    await poll(p, () => document.querySelector('.ws-selected .ws-chat-acts .ws-worker-control')?.dataset.turn === 'working')
-    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 1, 'one worker control in the chat')
-    assert.ok(await dot.isVisible())
-    assert.equal(await dot.evaluate(el => getComputedStyle(el).animationName), 'none')
-    assert.ok(await head.evaluate(el => el.classList.contains('ws-turn-active')))
-    const colour = await dot.evaluate(el => getComputedStyle(el).backgroundColor)
-    if (device === 'phone') {
-      assert.ok((await head.boundingBox()).height >= 44)
-      assert.ok(await head.locator('.ws-worker-state').isHidden())
-    } else assert.equal(await head.textContent(), 'working')
+    const state = selected(p).locator('.ws-chat-state')
+    await poll(p, () => document.querySelector('.ws-selected .ws-chat-state')?.textContent === 'Working')
+    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0, 'the state is said once, without a second worker pill')
+    assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
     await shot('working')
     await p.evaluate(async () => {
       const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
       row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
       await window.__harness.modal.fetchAndRender()
     })
-    await poll(p, () => document.querySelector('.ws-selected .ws-chat-acts .ws-worker-control')?.dataset.turn === 'idle')
-    assert.equal(await head.evaluate(el => el.classList.contains('ws-turn-active')), false)
-    assert.notEqual(await dot.evaluate(el => getComputedStyle(el).backgroundColor), colour)
-    if (device === 'desktop') assert.equal(await head.locator('.ws-worker-elapsed').textContent(), '2m')
+    await poll(p, () => document.querySelector('.ws-selected .ws-chat-state')?.textContent === 'Your turn')
     await shot('waiting'); await leave(p); await chooseDeskColumn(p, 0)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
     assert.equal(await selected(p).locator('.kbn-card-worker').count(), 0)
@@ -2284,15 +2271,11 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   }, viewport)
 }
 
-test('Only the owner-reported working phase breathes, on a 2.4 s opacity cycle', async p => {
+test('The chat state word stays still while the sidebar worker breathes', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
-  const dot = selected(p).locator('.ws-chat-acts .ws-worker-dot')
-  await dot.waitFor()
-  const timing = await p.evaluate(() => {
-    const css = getComputedStyle(document.querySelector('.ws-selected .ws-chat-acts .ws-worker-dot'))
-    return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction }
-  })
-  assert.deepEqual(timing, { name: 'kbn-worker-breathe', duration: '2.4s', easing: 'ease-in-out' })
+  const state = selected(p).locator('.ws-chat-state')
+  await state.waitFor()
+  assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
 }, undefined, 'true', 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the
@@ -2355,7 +2338,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.doesNotMatch(await selected(p).locator('.ws-provenance').innerText(), /claude-opus/)
     await leave(p); await chooseDeskColumn(p, 1)
     await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click(); await choose(p, 'Chat')
-    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 1)
+    assert.equal(await selected(p).locator('.kbn-card-worker:visible').count(), 0)
     await chatMenu(p, 'Settings')
     const cadence = selected(p).locator('.kbn-detail-controls-toggle .kbn-ctl-cadence')
     assert.equal(await cadence.count(), 1); assert.ok((await cadence.innerText()).trim())
@@ -2530,7 +2513,6 @@ test('Act zone stops broad button rules and resets theme fonts, sizes and pigmen
     return color
   }), 'rgb(255, 0, 0)', 'the broad rule is active in the reading zone')
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   const temper = selected(p).getByRole('button', { name: 'Temper', exact: true })
   const style = await temper.evaluate(el => ({ color: getComputedStyle(el).color, font: getComputedStyle(el).fontFamily, height: getComputedStyle(el).getPropertyValue('--ws-control-height').trim(), agent: getComputedStyle(el).getPropertyValue('--ws-agent').trim(), transform: getComputedStyle(el).textTransform, pigment: getComputedStyle(el).getPropertyValue('--kbn-agent').trim(), mono: getComputedStyle(el).getPropertyValue('--font-mono').trim() }))
   assert.notEqual(style.color, 'rgb(255, 0, 0)', 'button { color: red } cannot reach Temper')
@@ -2681,7 +2663,6 @@ test('Protected verdict plate and its undo line hold without author CSS', async 
   await open(p)
   await poll(p, () => getComputedStyle(document.querySelector('.ws-reader')).getPropertyValue('--ws-custom-ready').trim() === '1')
   await choose(p, 'Chat')
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   const plate = selected(p).locator('.ws-chat-acts')
   assert.equal(await plate.evaluate(el => el.closest('[data-part="act"]')?.dataset.act), 'verdict')
   assert.notEqual(await plate.getByRole('button', { name: 'Temper', exact: true }).evaluate(el => getComputedStyle(el).color), 'rgb(255, 0, 0)')
@@ -2721,7 +2702,7 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
     assert.deepEqual(await frame.evaluate(el => { const s = getComputedStyle(el); return [s.borderRadius, s.clipPath, s.boxShadow, s.borderTopWidth] }), ['0px', 'none', 'none', '0px'])
     assert.ok(await p.locator('[data-part="phone-topbar"]').isVisible())
     await choose(p, 'Chat')
-    await selected(p).locator('.ws-chat-pages').click()
+    await selected(p).getByRole('button', { name: 'Settings', exact: true }).click()
     assert.ok(await p.locator('[data-part="page-sheet-panel"]').isVisible())
     assert.ok(await p.locator('[data-part="page-sheet-row"]').count() > 1)
     assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
@@ -2794,12 +2775,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click(); await choose(p, 'Chat')
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-chat-state'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+  if (phone) await headerAction(p, 'Settings')
   for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
     assert.ok(await selected(p).locator(control).isVisible())
     if (!phone) await still(p, `hovering ${control}`, () => selected(p).locator(control).hover(), { allow: [`.ws-selected ${control}`] })
   }
-  await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
+  if (phone) { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' }) }
   const flightField = selected(p).locator('.kbn-detail-directive')
   await flightField.click()
   assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.ws-selected .ws-chat-head'], act: () => p.keyboard.type(' compare the corrected masks at high ell against the previous run and the run before it') })), [], 'in-flight typing leaves the header as it is')
@@ -2828,11 +2809,11 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     await window.__harness.modal.fetchAndRender()
   }), settle: 100 }), [], 'a worker starting leaves the open report still')
   await composerKeyStaysPut(p); await fieldBlur(p)
-  await still(p, 'hovering the worker control', () => selected(p).locator('.ws-fiber-acts .ws-worker-control').hover(), { allow: ['.ws-worker-control'] })
+  await still(p, 'hovering Settings', () => selected(p).locator('.ws-chat-settings').hover(), { allow: ['.ws-chat-settings'] })
   await still(p, 'a chat worker-state change', () => p.evaluate(async () => {
     const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
     row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000; await window.__harness.modal.fetchAndRender()
-  }), { allow: ['.kbn-card-worker', '.ws-worker-control'], settle: 100 })
+  }), { allow: ['.kbn-card-worker', '.ws-chat-state'], settle: 100 })
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control', '.ws-sidebar-index'], settle: 100 })
 }, viewport)
 async function fieldBlur(p) { await selected(p).locator('textarea').evaluate(el => el.blur()) }
@@ -2866,6 +2847,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 }, viewport)
 
 registerLivingReportJourneys(test)
+registerHeaderBarJourneys(test)
 
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))
 const started = performance.now()

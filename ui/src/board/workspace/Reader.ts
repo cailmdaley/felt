@@ -24,8 +24,8 @@ import { stateDot } from '../stateDot.js'
 import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
-import { ReportInset } from './ReportInset.js'
-import { familyCounts, familyLabel, phoneThreads } from './PhoneThreads.js'
+import { ReportChip } from './ReportChip.js'
+import { phoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
@@ -119,7 +119,7 @@ export class Reader {
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
   private readonly parents: DocKey[] = []
-  private inset: { key: DocKey; view: ReportInset } | null = null
+  private reportChip: { key: DocKey; view: ReportChip } | null = null
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
   private workerClock = 0
@@ -133,8 +133,6 @@ export class Reader {
   private pressDismisses = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
-  /** The phone chat's top-right control: the constitution's threads and pages, as a page of their own. */
-  readonly pagesButton: HTMLButtonElement
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
@@ -213,11 +211,6 @@ export class Reader {
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintRail())
-    const pages = this.pagesButton = button('ws-chat-pages', '', () => this.openPhonePage(), 'Threads and sent files')
-    pages.title = 'Threads and sent files'
-    pages.setAttribute('aria-haspopup', 'dialog')
-    pages.setAttribute('aria-expanded', 'false')
-    this.paintPages(null)
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -325,7 +318,6 @@ export class Reader {
     this.selected = selected
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     if (this.currentCard) this.threadRail.show(this.currentCard, index)
-    this.paintPages(this.currentCard && familyCounts(this.currentCard, index))
     this.paintRail()
     if (this.phoneRailPending && this.phone.matches && settled) { this.phoneRailPending = false; this.openPhonePage() }
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
@@ -371,7 +363,7 @@ export class Reader {
     this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
-    this.inset?.view.dispose(); this.inset = null
+    this.reportChip?.view.dispose(); this.reportChip = null
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
@@ -416,35 +408,14 @@ export class Reader {
     this.runSettled = settled
     if (!settled) this.pageSheet.hide()
   }
-  /**
-   * The phone's way to the threads page: with a family, it says what is in it
-   * (`24 threads · 3 reviews`, a dot while any waits on the reader); without
-   * one, it is the pages glyph alone.
-   */
-  private paintPages(counts: { threads: number; reviews: number; waiting: number } | null): void {
-    const pages = this.pagesButton
-    const signature = JSON.stringify(counts?.threads ? counts : null)
-    if (pages.dataset.counts === signature) return
-    pages.dataset.counts = signature
-    pages.classList.toggle('ws-chat-pages-family', !!counts?.threads)
-    if (!counts?.threads) {
-      pages.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>'
-      pages.setAttribute('aria-label', 'Threads and sent files')
-      return
-    }
-    const words = familyLabel(counts)
-    const dot = element('span', 'ws-chat-pages-dot')
-    dot.setAttribute('aria-hidden', 'true'); dot.hidden = !counts.waiting
-    pages.replaceChildren(dot, document.createTextNode(words))
-    pages.setAttribute('aria-label', `${words}${counts.waiting ? `, ${counts.waiting} waiting` : ''}: threads and sent files`)
-  }
   /** The phone's sheet leads with the whole family, then its sent files. */
   private openPhonePage(): void {
     const card = this.currentCard
     if (!this.runSettled || !card) return
     this.closeMenu()
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-    this.pageSheet.show(this.pagesButton, phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
+    this.el.append(this.pageSheet.el)
+    this.pageSheet.show(this.railToggle, phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
   }
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {
@@ -460,9 +431,24 @@ export class Reader {
     else if (landing && this.selected !== landing.key) this.opts.onSelect(landing.key)
     else if (!this.opts.onOrchestrator?.()) this.opts.onReturn()
   }
+  closeSettings(after: () => void): void {
+    if (this.pageSheet.isOpen) this.pageSheet.close(after)
+    else after()
+  }
+  showSettings(content: HTMLElement, opener: HTMLElement): void {
+    this.closeMenu()
+    // Keep the settings controls in their chat's protected styling boundary.
+    opener.closest('.ws-chat')?.append(this.pageSheet.el)
+    const card = this.currentCard
+    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
+    const threads = this.phone.matches && card ? phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))) : null
+    this.pageSheet.show(opener, threads, content)
+  }
   showSentFiles(): void {
     this.closeMenu()
-    this.pageSheet.show(this.pagesButton)
+    this.el.append(this.pageSheet.el)
+    const opener = this.phone.matches ? this.navbar.querySelector<HTMLElement>('.ws-phone-document-menu') : this.host.get(this.selected ?? '')?.label.querySelector<HTMLElement>('.ws-menu-button')
+    this.pageSheet.show(opener ?? this.railToggle)
   }
   private get swipeable(): boolean {
     return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
@@ -544,11 +530,13 @@ export class Reader {
     const prose = proseDocument(ch)
     const report = ch.documents.find(d => d.owner === ch.owner && d.path === `${prose?.path.slice(0, prose.path.lastIndexOf('/'))}/report.html`)
     const chatFrame = chat && this.host.get(chat.key)
-    const insetKey = this.selected === chat?.key && report && chatFrame ? report.key : null
-    if (this.inset?.key !== insetKey) {
-      this.inset?.view.dispose(); this.inset = null
-      if (insetKey && report && chatFrame) this.inset = { key: insetKey, view: new ReportInset(this.opts.shuttleBase, report, chatFrame.content, () => this.openDocument(report.key)) }
+    const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
+    if (this.reportChip?.key !== chipKey) {
+      this.reportChip?.view.dispose(); this.reportChip = null
+      if (chipKey && report) this.reportChip = { key: chipKey, view: new ReportChip(this.opts.shuttleBase, report, () => this.openDocument(report.key)) }
     }
+    const acts = chatFrame?.content.querySelector('.ws-chat-acts')
+    if (acts && this.reportChip && this.reportChip.view.el.parentElement !== acts) acts.prepend(this.reportChip.view.el)
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page
@@ -1205,7 +1193,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
-    this.inset?.view.dispose()
+    this.reportChip?.view.dispose()
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)

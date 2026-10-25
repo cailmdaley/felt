@@ -470,8 +470,10 @@ export class TranscriptBand {
   private readonly contextFact: HTMLElement
   private readonly shareFact: HTMLElement
   private readonly hitFact: HTMLElement
-  /** The session's usage facts: context tokens, the window's share, the cache's warmth and last hit. */
+  /** Context and cache warmth; standalone bands also carry window and cache-read shares. */
   readonly meter: HTMLElement
+  /** Cache-read share, seated in settings for inline conversations. */
+  get cacheShare(): HTMLElement { return this.hitFact }
   private readonly inline: boolean
   private readonly onFile?: (path: string, title?: string) => void
   private readonly onFacts?: () => void
@@ -576,7 +578,7 @@ export class TranscriptBand {
     this.meter = document.createElement('span')
     this.meter.className = 'ws-transcript-meter'
     this.meter.dataset.part = 'context-meter'
-    this.meter.append(this.contextFact, this.shareFact, this.cacheFact, this.hitFact)
+    this.meter.append(this.contextFact, ...(this.inline ? [] : [this.shareFact]), this.cacheFact, ...(this.inline ? [] : [this.hitFact]))
     this.head.append(chevron, this.label, this.reading, this.liveDot, this.liveLabel, ...(this.inline ? [] : [this.meter]))
     this.latestButton = createButton('ws-transcript-latest', '← latest')
     this.latestButton.hidden = true
@@ -930,9 +932,9 @@ export class TranscriptBand {
   /**
    * The session's usage facts, as words in the head line, each saying what it
    * is. Context is its token count, tinted from verdigris toward red as it
-   * fills the window, then that share of the window (`66% ctx`). The cache is
-   * a verdigris dot draining as the entry ages, an alarm-red ring once cold,
-   * then the share of the session's context tokens read from it (`91% cached`).
+   * fills the window. The cache is a verdigris dot draining as the entry ages,
+   * an alarm-red ring once cold. Standalone bands also show the window share
+   * and cache-read share; inline chats seat the latter in settings.
    */
   private paintFacts(): void {
     this.clearCacheTimer()
@@ -962,12 +964,13 @@ export class TranscriptBand {
     const context = stats.context
     this.contextFact.hidden = context === undefined
     this.shareFact.hidden = true
-    this.meter.hidden = context === undefined && until === undefined && cache === undefined
+    this.meter.hidden = context === undefined && until === undefined && (this.inline || cache === undefined)
     const window_ = context === undefined ? undefined : contextWindow(stats.window, stats.model ?? this.target?.agent)
     this.contextFact.textContent = context === undefined ? '' : tokenLabel(context)
     this.contextFact.title = context === undefined ? '' : `Context: ${count(context)} tokens${window_ ? ` of a ${count(window_)}-token window` : ''}`
     if (context !== undefined && window_) {
       const share = Math.round(Math.min(1, context / window_) * 100)
+      this.contextFact.title += ` (${share}% full)`
       this.contextFact.style.color = `color-mix(in oklch, var(--kbn-alarm) ${share}%, var(--kbn-tempered))`
       this.shareFact.hidden = false
       this.shareFact.textContent = `${share}% ctx`

@@ -11,6 +11,7 @@ export const WORKSPACE_HOST = 'umber-workstation'
 export const WORKSPACE_REMOTE = 'basalt-login-02'
 export const WORKSPACE_UID = '01KVBR1F9BWBVKF97473PV67K8'
 export const WORKSPACE_NAME = 'Calibrate the shear response'
+export const LONG_WORKSPACE_NAME = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 export const WORKSPACE_ID = 'research/workspace/calibration-report'
 import { OVERSIZED_IMAGE } from './oversized-image.js'
 

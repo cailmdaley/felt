@@ -12,6 +12,8 @@
 .ws-page-sheet-grabber::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--ws-hairline); }
 .ws-page-sheet-head { margin: 0 0 12px; flex: none; }
 .ws-page-sheet h2 { font: var(--ws-section-size)/1.2 var(--ws-serif); margin: 0; }
+.ws-page-sheet .ws-sheet-settings { border: 0; margin: 0; padding: 0; }
+.ws-sheet-settings:empty { display: none; }
 .ws-page-sheet-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 24px; }
 .ws-phone-threads h3, .ws-sent-files h3 { margin: 20px 0 8px; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); letter-spacing: .06em; text-transform: uppercase; }
 .ws-reader .ws-phone-threads .kbn-thread-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; min-height: var(--ws-phone-target); padding: 8px; border-top: 1px solid var(--ws-hairline-soft); text-align: left; }

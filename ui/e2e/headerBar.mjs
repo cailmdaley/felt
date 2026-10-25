@@ -1,0 +1,96 @@
+import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { getBrowser } from './browser.mjs'
+
+const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
+export function registerHeaderBarJourneys(test) {
+  for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+    for (const scheme of ['light', 'dark']) test(`One header bar (${device}, ${scheme}): long name, immediate icons and unified settings`, async page => {
+      await page.emulateMedia({ colorScheme: scheme })
+      await page.addInitScript(scheme => {
+        if (window !== window.top) return
+        localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
+        localStorage.setItem('shuttle:workspace:sidebar', 'false')
+        localStorage.setItem('shuttle:workspace:rail', 'false')
+      }, scheme)
+      await page.goto(url)
+      await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+      const chat = page.locator('.ws-page.ws-selected')
+      const header = chat.locator('.ws-chat-head')
+      await chat.locator('.ws-transcript-context:not([hidden])').waitFor()
+      await header.locator('.ws-report-chip .ws-thumbnail').waitFor()
+      assert.equal(title.length, 90)
+      assert.equal(await header.locator('h1').getAttribute('title'), title)
+      const geometry = await header.evaluate(el => {
+        const box = el.getBoundingClientRect(), title = el.querySelector('h1'), name = title.getBoundingClientRect()
+        const style = getComputedStyle(title)
+        return { barHeight: box.height, titleHeight: name.height, lineHeight: parseFloat(style.lineHeight),
+          nowrap: style.whiteSpace, ellipsis: style.textOverflow, left: box.left, right: box.right,
+          childrenInside: [...el.children].filter(child => child.checkVisibility()).every(child => {
+            const r = child.getBoundingClientRect(); return r.top >= box.top && r.bottom <= box.bottom && r.left >= box.left && r.right <= box.right
+          }) }
+      })
+      assert.equal(geometry.nowrap, 'nowrap'); assert.equal(geometry.ellipsis, 'ellipsis')
+      assert.ok(geometry.titleHeight <= geometry.lineHeight + 7, JSON.stringify(geometry))
+      assert.ok(geometry.barHeight <= 74 && geometry.childrenInside, JSON.stringify(geometry))
+      assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
+      assert.equal(await chat.locator('.ws-report-inset, .ws-chat-outcome, .ws-transcript-find, .ws-header-sheet').count(), 0)
+      assert.equal(await header.locator('.ws-transcript-share, .ws-transcript-hit').count(), 0)
+      assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
+      assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
+      for (const label of device === 'desktop' ? ['Constitution', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
+        const icon = header.getByRole('button', { name: label, exact: true })
+        assert.equal(await icon.getAttribute('title'), label)
+        await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
+      }
+      await chat.locator('textarea').focus(); await chat.locator('textarea').blur()
+      if (process.env.WORKSPACE_SHOTS) {
+        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `header-${device}-${scheme}.png`) })
+      }
+      await header.getByRole('button', { name: 'Settings', exact: true }).click()
+      const sheet = page.getByRole('dialog', { name: 'Settings', exact: true })
+      await sheet.waitFor()
+      assert.ok(await sheet.locator('.kbn-ctl-history').count())
+      assert.ok(await sheet.locator('.ws-sent-file time').count())
+      assert.ok(await sheet.locator('.ws-transcript-hit:not([hidden])').count())
+      assert.match(await sheet.locator('.ws-transcript-hit').innerText(), /% cached/)
+      if (device === 'phone') {
+        assert.ok(await sheet.getByRole('button', { name: 'Constitution', exact: true }).isVisible())
+        assert.ok(await sheet.getByRole('button', { name: 'Temper', exact: true }).isVisible())
+        assert.ok(await sheet.getByRole('button', { name: 'Discard', exact: true }).isVisible())
+      }
+      await sheet.getByRole('button', { name: 'Close settings', exact: true }).click()
+      await sheet.waitFor({ state: 'hidden' })
+      assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
+      // Overflow actions leave the modal before opening a confirmation or undo window.
+      if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click()
+      await chat.getByRole('button', { name: 'Rest', exact: true }).click()
+      const rest = page.locator('.kbn-rest-popover')
+      await rest.waitFor()
+      assert.equal(await page.locator('.ws-page-sheet[open]').count(), 0)
+      assert.equal(await rest.getAttribute('aria-modal'), 'true')
+      assert.equal(await rest.evaluate(el => el.contains(document.activeElement)), true)
+      await page.keyboard.press('Escape'); await rest.waitFor({ state: 'hidden' })
+      if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click()
+      await chat.getByRole('button', { name: 'Temper', exact: true }).click()
+      const undo = header.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
+      await undo.waitFor(); await undo.click()
+      assert.equal(await header.locator('.ws-verdict-undo').count(), 0)
+      assert.equal(await page.evaluate(() => window.__harness.requests.filter(r => r.method === 'POST' && r.url.includes('/transition')).length), 0)
+    }, viewport)
+  }
+}
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] ?? '')).href) {
+  const cases = []; registerHeaderBarJourneys((...args) => cases.push(args))
+  const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
+  try {
+    for (const [name, run, viewport] of cases) {
+      const context = await browser.newContext({ viewport, isMobile: viewport.width <= 700, hasTouch: viewport.width <= 700, reducedMotion: 'reduce' })
+      try { await run(await context.newPage()); console.log(`PASS ${name}`) } finally { await context.close() }
+    }
+  } finally { await browser.close() }
+}
