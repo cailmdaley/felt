@@ -1,6 +1,8 @@
 # Writing report.html
 
-The report is the fiber's human-facing surface: what a person reads to know where the work stands. It is a **current-state document, rewritten each session** — the same rule as `outcome:` and `## Status`, extended to the surface that carries figures.
+The report is the surface the human lands on to understand the work.
+The constitution opens on chat with `report.html` inset at its upper right; clicking the figure opens the report full-size.
+Keep that one living surface current, and link to depth rather than making the human choose among sent files. It is a **current-state document, rewritten each session** — the same rule as `outcome:` and `## Status`, extended to the surface that carries figures.
 
 Not every constitution wants one (see SKILL.md, "The fiber's surfaces"). When one exists, these rules bind.
 
@@ -50,7 +52,7 @@ Nothing goes above this opening, including a title, as-of stamp, status panel or
 A loose, nonblocking request for a view is welcome; don't manufacture fixed choices.
 3. **Executive summary** — below the question, followed by evidence and depth.
 
-A question card, which leads the Your turn band, opens the report when one is present.
+A question card leads the Your turn band and opens the chat with its report inset.
 Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
@@ -98,8 +100,74 @@ You may give the report's channel a bundled theme with `theme: blueprint` (or `p
 A sibling `theme.css` layers scoped variables, fonts and flourishes over that base; it styles Shuttle's reader and overview folio, while `report.html` keeps its own CSS.
 The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/themes/) documents the `--ws-*` tokens, stable parts and pigment meanings.
 
-Start from [report-template.html](../assets/report-template.html) — a battle-tested palette and set of classes, not a content model to fill in. It follows the viewer's light or dark appearance automatically. Render the report with an explicit `:::{embed} report.html` line in the fiber body, placed where the reader should meet it (usually the top).
+Start from [report-template.html](../assets/report-template.html), a palette and primitives kit, not a framework or a content model to fill in.
+Plain HTML is right too.
+It follows the viewer's light or dark appearance automatically.
+A sibling `report.html` appears inset in the constitution's chat without a directive.
+An explicit `:::{embed} report.html` in the fiber body also declares it there.
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
+
+## Copy-paste primitives
+
+These blocks use the template's CSS.
+Replace sample claims and data; keep figures self-contained.
+
+### Figure and caption
+
+```html
+<figure>
+  <img src="data:image/png;base64,REPLACE_WITH_PLOT_BYTES" alt="Residuals with their uncertainty bands">
+  <figcaption>All five residuals lie within one standard deviation of zero.</figcaption>
+</figure>
+```
+
+### Table
+
+```html
+<table>
+  <caption>Validation against independent patches</caption>
+  <thead><tr><th scope="col">Patch</th><th scope="col">Residual / σ</th></tr></thead>
+  <tbody><tr><th scope="row">North</th><td class="num">0.3</td></tr></tbody>
+</table>
+```
+
+### Status strip
+
+```html
+<div class="status-strip" role="status">
+  <strong>Validated</strong><span>Five independent patches pass.</span>
+  <span>Next: review the scale cut.</span>
+</div>
+```
+
+### Nested page
+
+```html
+<p><a href="./validation.html">Read the validation and its plots →</a></p>
+<p><a href="./checks/report.html">Read the checks thread's report →</a></p>
+```
+
+Relative file links open in place, one level deeper in the reader.
+The `‹` button, key or phone swipe goes up one level, then back to chat.
+In-page `#anchors` stay in the report; external links open outside the reader.
+Download links keep their download behaviour.
+Each nested report is itself self-contained; links express structure without bundling every page into the overview.
+
+### Another fiber's report
+
+```html
+<figure class="report-embed">
+  <iframe src="./checks/report.html" title="Independent checks report"
+    loading="lazy" sandbox="allow-scripts"></iframe>
+  <figcaption>The independent checks pass in every patch.
+    <a href="./checks/report.html">Read the full checks report →</a>
+  </figcaption>
+</figure>
+```
+
+A live report embed is the deliberate exception to the no-fetch rule: it reads another report from the fiber tree.
+Use a relative path from this report to that fiber's `report.html` (for a sibling fiber, `../checks/report.html`).
+The embed needs that companion to travel with it; for a portable single-file export, replace it with an inlined figure and retain the link to depth.
 
 The test before handoff: **give the report to someone who has never seen this fiber and ask what they'd do next.** If they have to reconstruct the present by diffing paragraphs, rewrite it.

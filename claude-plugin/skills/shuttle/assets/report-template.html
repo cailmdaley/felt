@@ -19,10 +19,10 @@
     3. OPEN QUESTIONS ARE WORKED FIRST. Each surviving one names what
        would resolve it.
 
-  The report renders only where something embeds it — an explicit
-  `:::{embed} report.html` line in the fiber body, usually at the top,
-  with the markdown spec (Desired State, earned sections) below. Nothing
-  prepends it for you.
+  report.html is the human's living surface. The constitution opens on chat
+  with this page inset at the upper right; clicking it opens the full report.
+  Relative file links open one level deeper; ‹ returns a level. An explicit
+  `:::{embed} report.html` also declares it in the constitution body.
 
   This file must stand on its own CSS: the kanban mounts it in an
   iframe and injects no styles, so the :root block below is
@@ -165,12 +165,46 @@
   /* A callout carries the one thing a skimming reader must not miss. */
   .callout { margin: 20px 0; padding: 12px 18px; background: var(--cinnabar-faint); border-left: 2px solid var(--cinnabar); }
   .callout > :last-child { margin-bottom: 0; }
+  .status-strip { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0; border-block: 1px solid var(--rule); color: var(--ink-muted); font: 14px/1.5 var(--mono); }
+  .status-strip strong { color: var(--teal); }
+  .report-embed iframe { display: block; width: 100%; height: 480px; border: 1px solid var(--rule); background: var(--rag); }
   .depth { font-size: 16px; }
   .depth code { font-size: 0.88em; }
 </style>
 </head>
 <body>
 <main class="page">
+
+  <!-- PRIMITIVES KIT — copy a block, replace every sample claim, delete unused blocks.
+       Figures inline their bytes. A live report embed needs its companion;
+       replace it with an inlined figure for a portable single-file export. -->
+  <!--
+  <figure>
+    <img src="data:image/png;base64,REPLACE_WITH_PLOT_BYTES" alt="Residuals and uncertainty bands">
+    <figcaption>All five residuals lie within one standard deviation of zero.</figcaption>
+  </figure>
+
+  <table>
+    <caption>Validation against independent patches</caption>
+    <thead><tr><th scope="col">Patch</th><th scope="col">Residual / σ</th></tr></thead>
+    <tbody><tr><th scope="row">North</th><td class="num">0.3</td></tr></tbody>
+  </table>
+
+  <div class="status-strip" role="status">
+    <strong>Validated</strong><span>Five independent patches pass.</span>
+    <span>Next: review the scale cut.</span>
+  </div>
+
+  <p><a href="./validation.html">Read the validation and its plots →</a></p>
+
+  <figure class="report-embed">
+    <iframe src="./checks/report.html" title="Independent checks report"
+      loading="lazy" sandbox="allow-scripts"></iframe>
+    <figcaption>The checks pass in every patch.
+      <a href="./checks/report.html">Read the full checks report →</a>
+    </figcaption>
+  </figure>
+  -->
 
   <div class="stamp">
     <span class="dot"></span>
