@@ -1392,10 +1392,14 @@ let liveTranscriptReads = 0
 window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   const method = (init?.method ?? 'GET').toUpperCase()
-  const request = { url, method, body: typeof init?.body === 'string' ? init.body : null, headers: Object.fromEntries(new Headers(init?.headers).entries()) }
+  const request: Record<string, unknown> = { url, method, body: typeof init?.body === 'string' ? init.body : null, headers: Object.fromEntries(new Headers(init?.headers).entries()) }
   mockRequests.push(request)
   mockHandlers.push({ method, path: new URL(url, 'http://harness.invalid').pathname })
-  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  const json = (body: unknown, status = 200) => {
+    const serialized = JSON.stringify(body)
+    request.responseBytes = new TextEncoder().encode(serialized).byteLength
+    return new Response(serialized, { status, headers: { 'Content-Type': 'application/json' } })
+  }
   const body = (): Record<string, unknown> => {
     try {
       return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>

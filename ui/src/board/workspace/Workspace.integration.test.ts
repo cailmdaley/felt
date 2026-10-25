@@ -32,6 +32,7 @@ const cards = [
 ]
 const body = 'The result is ready.\n\n:::{embed} report.html\n:title: Report\n:::\n\n[Data](data.csv)'
 let bodyCards: KanbanCard[] = cards
+let boardCards: KanbanCard[] = cards
 const bodyOverrides = new Map<string, string>()
 const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
   const frontmatter: Record<string, unknown> = {
@@ -80,6 +81,7 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (_cb: FrameRequestCallback) => 1)
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   bodyCards = cards
+  boardCards = cards
   bodyOverrides.clear()
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.includes('/sent-files/all/')) return new Response(JSON.stringify({ files: [
@@ -109,9 +111,41 @@ beforeEach(() => {
   localStorage.clear()
   changed.mockClear()
   visibility.mockClear()
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+it('does not redraw an unchanged active channel and follows changed cards across navigation', async () => {
+  workspace.open(cards[0], 'Desk')
+  await flush()
+  workspace.update() // The first poll seats the current card revision.
+  const show = vi.spyOn(workspace.reader, 'show')
+
+  workspace.update()
+  expect(show).not.toHaveBeenCalled()
+
+  boardCards = [
+    { ...cards[0], name: 'Alpha updated' },
+    { ...cards[1], orchestrator: cards[0].id },
+  ]
+  workspace.update()
+  expect(show).toHaveBeenCalledOnce()
+
+  workspace.open(boardCards[1], 'Desk')
+  await flush()
+  show.mockClear()
+  workspace.update()
+  expect(show).not.toHaveBeenCalled()
+
+  boardCards = [...boardCards, card({ id: 'work/unrelated', uid: 'unrelated', originId: 'host-c', status: 'active', runtimePhase: 'working' })]
+  workspace.update()
+  expect(show).not.toHaveBeenCalled()
+
+  boardCards = [boardCards[0], { ...boardCards[1], name: 'Beta working', status: 'active', workerState: 'running', runtimePhase: 'working' }]
+  workspace.update()
+  expect(show).toHaveBeenCalledOnce()
+  expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta working')
+})
 
 it('discovers a report only after it exists, including creation on a later refresh', async () => {
   vi.useFakeTimers()

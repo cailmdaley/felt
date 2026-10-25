@@ -58,6 +58,26 @@ describe('constitution mentions', () => {
     expect(root.querySelector('a')!.dataset.fiber).toBe('child')
     binding.dispose()
   })
+  it('loads the full fiber index only after a mention candidate appears, and retries a failed load on refresh', async () => {
+    const root = document.createElement('div'), prose = document.createElement('div')
+    prose.className = 'ws-prose-body'; root.append(prose)
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ fibers: [{ fiber: { id: 'remote/note', name: 'Remote note' } }] })))
+    vi.stubGlobal('fetch', fetchMock)
+    const binding = bindConstitutionMentions(root, () => [work()], vi.fn(), { shuttleBase: 'http://mentions-lazy.invalid', frameActive: () => null })
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    prose.textContent = '[[remote note]]'
+    binding.refresh()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    await new Promise(resolve => setTimeout(resolve, 0))
+    binding.refresh()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/v1/fibers?fields=index')
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/v1/fibers?fields=index')
+    binding.dispose()
+  })
   it('resolves newly spawned read-model constitutions without waiting for a cached full index to include them', () => {
     const rows = constitutionMentions([work()])
     expect(resolveConstitutionCandidates(['[[work/child]]'], rows, []).rows).toEqual(rows)

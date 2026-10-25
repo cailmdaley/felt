@@ -166,6 +166,23 @@ describe('TranscriptFeed', () => {
     await first
     reader.dispose()
   })
+
+  it('does not parse JSONL again on 239 unchanged byte-offset reads', async () => {
+    const body = new TextEncoder().encode(jsonLine('the transcript remains unchanged'))
+    const parse = vi.spyOn(JSON, 'parse')
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const offset = offsetFrom(String(input))
+      return response(offset === 0 ? body : new Uint8Array(), 200, { 'x-transcript-offset': String(offset) })
+    })
+    const { reader, onEntries } = feed(fetcher)
+    expect(await reader.read()).toBe(true)
+    expect(parse).toHaveBeenCalledTimes(1)
+    for (let tick = 0; tick < 239; tick++) expect(await reader.read()).toBe(false)
+    expect(fetcher).toHaveBeenCalledTimes(240)
+    expect(parse).toHaveBeenCalledTimes(1)
+    expect(entriesFrom(onEntries)).toEqual([{ kind: 'prompt', text: 'the transcript remains unchanged', images: 0, dispatch: false }])
+    reader.dispose()
+  })
 })
 
 describe('TranscriptFeed default fetch', () => {

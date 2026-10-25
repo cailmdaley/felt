@@ -1254,8 +1254,10 @@ export class Dock {
       // beside it (⌥↵), marked while its prompt cache is estimated warm.
       const live = resumable && hasLiveWorker(card)
       const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
-      if (!this.blockedDispatches.has(fresh)) fresh.textContent = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
-      if (!this.blockedDispatches.has(resume)) resume.textContent = live ? 'Send ↵' : 'Resume ⌥↵'
+      const freshLabel = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
+      const resumeLabel = live ? 'Send ↵' : 'Resume ⌥↵'
+      if (!this.blockedDispatches.has(fresh) && fresh.textContent !== freshLabel) fresh.textContent = freshLabel
+      if (!this.blockedDispatches.has(resume) && resume.textContent !== resumeLabel) resume.textContent = resumeLabel
       fresh.classList.toggle('kbn-ctl-secondary', live)
       fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
       resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
@@ -1466,7 +1468,8 @@ export class Dock {
       const control = this.meeting
       if (!control) return
       const recorder = control.recorder?.()
-      word.textContent = recorder ? `Meeting · ${recorder}` : 'Meeting'
+      const label = recorder ? `Meeting · ${recorder}` : 'Meeting'
+      if (word.textContent !== label) word.textContent = label
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || !canJoin()

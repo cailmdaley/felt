@@ -10,8 +10,9 @@
     "preview": "vite preview",
     "test": "TZ=America/Los_Angeles vitest run",
     "typecheck": "tsc --noEmit",
-    "e2e": "npm run harness:board && node e2e/workspace.mjs && node e2e/requestBudget.mjs",
+    "e2e": "npm run harness:board && node e2e/workspace.mjs && node e2e/requestBudget.mjs && node e2e/performance.mjs",
     "harness:board": "vite build -c vite.harness-board.config.ts",
+    "perf": "npm run harness:board && node e2e/performance.mjs",
     "screenshots:docs": "npm run harness:board && node scripts/capture-docs.mjs",
     "video:docs": "node scripts/render-tour.mjs"
   },

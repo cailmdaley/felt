@@ -150,16 +150,25 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
   const reports = new Map<HTMLIFrameElement, Set<string>>()
   const protocol = 'shuttle-constitution-mentions'
   let disposed = false, scheduled = false, index: FiberIndexEntry[] | undefined
+  let indexRequest: Promise<void> | null = null
   const rows = () => constitutionMentions(cards())
+  const ensureIndex = (): void => {
+    if (index !== undefined || indexRequest) return
+    indexRequest = fiberIndex(opts.shuttleBase).then(value => {
+      if (!disposed) { index = value; refresh() }
+    }, () => {}).finally(() => { indexRequest = null })
+  }
   const send = (frame: HTMLIFrameElement): void => {
     if (!root.contains(frame) || opts.frameActive(frame) === null) { reports.delete(frame); return }
     const candidates = reports.get(frame)
     if (!candidates) return
+    if (candidates.size > 0 && index === undefined) ensureIndex()
     const resolved = resolveConstitutionCandidates([...candidates], rows(), index)
     const colors = Object.fromEntries(['ink', 'ink-muted', 'sheet', 'hairline', 'agent', 'owed', 'tempered'].map(name => [name, getComputedStyle(root).getPropertyValue(`--kbn-${name}`)]))
     frame.contentWindow?.postMessage({ protocol, type: 'resolved', ...resolved, colors }, '*')
   }
   const paint = (entry: { surface: ReturnType<typeof mentionRuntime>; candidates: string[] }, next = rows()): void => {
+    if (entry.candidates.length > 0 && index === undefined) ensureIndex()
     const resolved = resolveConstitutionCandidates(entry.candidates, next, index)
     // Local chips keep all identities so a moved or missing fiber updates in place.
     entry.surface.update(next, resolved.targets)
@@ -204,7 +213,6 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
   })
   observer.observe(root, { childList: true, subtree: true })
   window.addEventListener('message', receive)
-  void fiberIndex(opts.shuttleBase).then(value => { if (!disposed) { index = value; refresh() } }, () => {})
   refresh()
   return { refresh, dispose() { disposed = true; observer.disconnect(); window.removeEventListener('message', receive); for (const entry of surfaces.values()) entry.surface.dispose(); surfaces.clear(); reports.clear() } }
 }

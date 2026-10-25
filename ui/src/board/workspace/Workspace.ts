@@ -71,6 +71,12 @@ const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chroni
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
+const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
+  const current = index.card(card)
+  const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
+  const scope = ancestry[0] ?? current
+  return JSON.stringify({ card: current, ancestry, family: [scope, ...index.subtree(scope)], summary: index.summary(scope) })
+}
 /** The Board's Read lately shelf holds this many constitutions. */
 const READ_LATELY = 8
 
@@ -107,6 +113,9 @@ export class Workspace {
   /** A channel opened to write to: its composer takes focus once it is shown. */
   private composing: string | null = null
   private transcriptHit: { card: KanbanCard; hit: TranscriptHit; query: string } | null = null
+  /** The complete board-card payload used by the reader's thread and runtime surfaces. */
+  private lastUpdateRevision = ''
+  private lastRenderedFamilyRevision = ''
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -378,12 +387,29 @@ export class Workspace {
 
   /** Keep worker metadata current without rebuilding live file instruments. */
   update(): void {
+    if (!this.current || !this.isActive) {
+      this.mentions.refresh()
+      this.overview.cardsChanged()
+      return
+    }
+    const cards = this.opts.cards()
+    const card = cards.find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
+    // A fiber outside the feed (a role, a note) keeps its card; a role page still follows its holds.
+    if (!card) {
+      this.mentions.refresh()
+      this.overview.cardsChanged()
+      this.refreshProse(this.current)
+      return
+    }
+    const revision = JSON.stringify(cards)
+    if (revision === this.lastUpdateRevision) return
+    this.lastUpdateRevision = revision
     this.mentions.refresh()
     this.overview.cardsChanged()
-    if (!this.current || !this.isActive) return
-    const card = this.opts.cards().find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
-    // A fiber outside the feed (a role, a note) keeps its card; a role page still follows its holds.
-    if (!card) { this.refreshProse(this.current); return }
+    if (threadFamilyRevision(card, this.opts.threadIndex?.() ?? new ThreadIndex(cards)) === this.lastRenderedFamilyRevision) {
+      this.reader.refreshChannels()
+      return
+    }
     this.current.card = card
     this.current.channel = {
       ...this.current.channel, name: card.name, outcome: card.outcome ?? this.current.channel.outcome,
@@ -657,6 +683,8 @@ export class Workspace {
   }
   private show(state: ChannelState, animate = true): void {
     const ch = state.channel
+    const cards = this.opts.cards()
+    this.lastRenderedFamilyRevision = threadFamilyRevision(state.card, this.opts.threadIndex?.() ?? new ThreadIndex(cards))
     const selected = this.shown(state)
     this.refreshProse(state)
     this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
