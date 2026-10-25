@@ -977,7 +977,7 @@ export class Dock {
         } : undefined,
         onError: message => { errorEl.textContent = message; errorEl.style.display = '' },
       })
-      if (history?.isConnected) history.replaceWith(next)
+      history?.replaceWith(next)
       history = next
       const unfold = next.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')!
       if (open) unfold.click()

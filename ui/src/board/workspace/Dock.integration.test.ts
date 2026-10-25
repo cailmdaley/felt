@@ -357,6 +357,44 @@ describe('state-shaped act zone', () => {
     expect(drawer.hidden).toBe(true)
     expect(band.handleEscape()).toBe(false)
   })
+  it('refreshes borrowed session history across A → B → A after a session change', async () => {
+    let session = 'a-first-session'
+    vi.mocked(fetch).mockImplementation(async input => {
+      const url = String(input)
+      if (url.endsWith('/agents')) return response(agents)
+      if (url.includes('/sessions/composite')) {
+        const uid = new URL(url, 'http://test.invalid').searchParams.get('uid')!
+        return response({ records: [{ at: 1, fiber: uid, uid, session: uid === 'task-uid' ? session : 'b-session', host: 'owner', harness: 'codex', kind: 'dispatch' }] })
+      }
+      return response()
+    })
+    const other = dock.bandFor(task({ id: 'b/task', uid: 'other-uid' }))
+    document.body.append(other.el)
+    // PageSheet lends its one settings slot to each selected Dock in turn.
+    const slot = document.createElement('div'); document.body.append(slot)
+    const borrow = (drawer: HTMLElement): void => { drawer.hidden = false; slot.replaceChildren(drawer) }
+    band.openSettings = other.openSettings = borrow
+    const open = (view: Dock): void => view.head.querySelector<HTMLButtonElement>('.ws-chat-settings')!.click()
+    const rows = (): string[] => [...slot.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session!)
+    open(band); await flush()
+    expect(rows()).toEqual(['a-first-session'])
+    const drawerA = slot.firstElementChild!
+    open(other); await flush()
+    expect(drawerA.isConnected).toBe(false)
+    expect(rows()).toEqual(['b-session'])
+    session = 'a-next-session'
+    dock.bandFor(task({ sessionUuid: session }))
+    await flush()
+    open(band); await flush()
+    expect(rows()).toEqual(['a-next-session'])
+    const fold = (): HTMLButtonElement => slot.querySelector('.kbn-ctl-history-toggle')!
+    fold().click()
+    expect(fold().getAttribute('aria-expanded')).toBe('false')
+    session = 'a-latest-session'
+    fold().click(); await flush()
+    expect(fold().getAttribute('aria-expanded')).toBe('true')
+    expect(rows()).toEqual(['a-latest-session'])
+  })
   it.each([
     ['drafts', { status: 'open' }, ['Launch ↵']],
     ['drafts with a session', { status: 'open', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
