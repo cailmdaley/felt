@@ -804,7 +804,7 @@ export class Workspace {
       const reportPath = state.card.fiberDir && `${state.card.fiberDir}/report.html`
       if (reportPath && !state.channel.documents.some(d => d.path === reportPath)) {
         void head(fileBytesUrl(this.opts.shuttleBase, reportPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true }).then(report => {
-          if (!report || this.disposed || state.links.some(link => link.path === reportPath)) return
+          if (!report?.exists || this.disposed || state.links.some(link => link.path === reportPath)) return
           state.links.push({ path: reportPath }); this.rebuild(state)
           if (this.current === state && this.isActive) this.show(state, false)
         })

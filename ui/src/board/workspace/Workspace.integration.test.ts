@@ -113,6 +113,22 @@ beforeEach(() => {
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+it('discovers a report only after it exists, including creation on a later refresh', async () => {
+  vi.useFakeTimers()
+  bodyOverrides.set('host-b:beta', 'No report yet.')
+  let exists = false
+  const original = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?')
+    ? new Response(JSON.stringify({ exists })) : original(input, init))
+  workspace.open(cards[1], 'Desk'); await flush()
+  const key = docKey('host-b', '/notes/beta/report.html', 'host-b')
+  expect(workspace.reader.host.get(key)).toBeUndefined()
+  expect(document.querySelector('.ws-report-inset')).toBeNull()
+  exists = true
+  await vi.advanceTimersByTimeAsync(15000); await flush()
+  expect(workspace.reader.host.get(key)).toBeDefined()
+})
+
 describe('bar Find transcripts', () => {
   const hit = {
     session: 'b4edf873-cb1c-40ab-a891-f26f5333b321', harness: 'claude', project: '/work/alpha',
