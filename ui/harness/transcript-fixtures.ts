@@ -17,7 +17,7 @@ export function transcriptSearchHits(now: number) {
   ]
 }
 
-export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context' | 'search'
+export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context' | 'search' | 'report'
 
 export const LONG_OUTCOME = 'What changed in the deck:\n\n' + Array.from({ length: 12 }, (_, i) =>
   `${i + 1}. **Validation slide ${i + 1}.** The fictional response and mask-split results are shown alongside the independent reference bins. The source products and reviewer notes are ready for the next check.`,
@@ -168,6 +168,7 @@ export function workspaceTranscriptBytes(
   const transcriptStart = options.earlier ? now - 5 * 60_000 : now
   const source = scenario === 'large'
     ? largeTranscript(now)
+    : scenario === 'report' && !options.earlier ? ordinaryTranscript(now - 9_000_000, false) + searchTranscript(now)
     : scenario === 'search' && !options.earlier ? searchTranscript(now)
     : ordinaryTranscript(transcriptStart, options.earlier === true, scenario === 'long-outcome') + (scenario === 'live' ? liveTranscript(now, options.updates ?? 0) : '')
   return encoder.encode(source + headFacts(now, scenario))

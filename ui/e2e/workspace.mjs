@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--allow-file-access-from-files'] })
-const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads`
+const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=report`
 const shots = process.env.WORKSPACE_SHOTS || resolve('e2e-shots')
 await mkdir(shots, { recursive: true })
 const selected = page => page.locator('.ws-page.ws-selected')
@@ -15,18 +15,34 @@ async function back(page, phone) {
   await (phone ? page.locator('.ws-navbar .ws-return') : selected(page).getByRole('button', { name: 'Back one level', exact: true })).click()
 }
 async function report(page) {
-  await page.getByRole('button', { name: 'Read report', exact: true }).click()
+  const dock = page.locator('.ws-report-dock:not([hidden]) .ws-report-compact')
+  await (await dock.count() ? dock : page.locator('.ws-report-open')).click()
   await frame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
 }
 try {
   for (const [device, viewport, phone] of [['desktop', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true]]) {
     const context = await browser.newContext({ viewport, isMobile: phone, hasTouch: phone, reducedMotion: 'reduce' })
+    await context.addInitScript(() => {
+      if (window.parent !== window) return
+      localStorage.setItem('shuttle.workspace.channel-seen:' + JSON.stringify(['umber-workstation', '01KVBR1F9BWBVKF97473PV67K8']), '0')
+    })
     const page = await context.newPage()
     const errors = []
     page.on('pageerror', error => errors.push(String(error)))
     await page.goto(url)
     await page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
     await selected(page).locator('textarea').waitFor()
+    await page.locator('.ws-report-dock:not([hidden]) iframe').waitFor()
+    await page.frameLocator('.ws-report-dock iframe').locator('#report-sentinel').waitFor()
+    await shot(page, `${device}-landing`)
+    const dockBox = await page.locator('.ws-report-dock').boundingBox()
+    const composerBox = await selected(page).locator('textarea').boundingBox()
+    assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
+    await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
+    while (await page.locator('.ws-transcript-earlier:visible').count()) {
+      await page.locator('.ws-transcript-earlier:visible').click()
+      await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
+    }
     await page.locator('.ws-report-inset iframe').waitFor()
     await page.frameLocator('.ws-report-inset iframe').locator('#report-sentinel').waitFor()
     assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
@@ -36,8 +52,13 @@ try {
       return { width: box.width, right: box.right, chatRight: chat.right }
     })
     assert.ok(geometry.width > (phone ? 150 : 300), `report is an illustration, not a tiny thumbnail: ${JSON.stringify(geometry)}`)
-    await shot(page, `${device}-landing`)
+    await shot(page, `${device}-top`)
+    const prompt = selected(page).locator('.ws-transcript-turn').first().locator('.ws-transcript-prompt-text').first()
+    assert.equal(await prompt.evaluate(el => getComputedStyle(el).maxHeight), 'none', 'the floated prompt is not prematurely clamped')
 
+    // Both the full figure and the compact landing dock open the same reader.
+    await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = el.scrollHeight })
+    await page.locator('.ws-report-dock:not([hidden]) iframe').waitFor()
     await report(page)
     await shot(page, `${device}-report`)
     // A relative page not declared in the body or sent-file ledger opens in the same stage.
@@ -62,7 +83,7 @@ try {
     await selected(page).locator('textarea').waitFor()
 
     if (phone) {
-      await page.locator('.ws-chat-pages').click()
+      await page.getByRole('button', { name: 'Show threads', exact: true }).click()
       await page.locator('.ws-page-sheet[open]').waitFor()
       assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
       assert.ok(await page.locator('.ws-page-sheet [data-group="archived"]').count() > 0)
@@ -74,6 +95,11 @@ try {
       await page.getByRole('button', { name: 'Sent files', exact: true }).click()
       await page.locator('.ws-page-sheet[open]').waitFor()
       assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
+      assert.ok(await page.locator('.ws-sent-new').count() > 0)
+      assert.equal(await page.locator('.ws-page-sheet h3').count(), 0)
+      const panel = await page.locator('.ws-page-sheet-panel').boundingBox()
+      const card = await selected(page).boundingBox()
+      assert.ok(panel.x >= card.x && panel.x + panel.width <= card.x + card.width, 'files panel stays in the constitution card')
       await shot(page, 'desktop-sent-files')
       await page.getByRole('button', { name: 'Close sent files', exact: true }).click()
       await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
@@ -100,5 +126,22 @@ try {
     assert.equal(errors.length, 0, errors.join('\n'))
     await context.close()
     console.log(`PASS living report (${device}): inset, nested pages/plots/thread report, back, sends, body, family`)
+  }
+  for (const hasTouch of [false, true]) {
+    const context = await browser.newContext({ viewport: { width: 1200, height: 900 }, hasTouch, reducedMotion: 'reduce' })
+    const page = await context.newPage()
+    await page.goto(url)
+    const enter = () => page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
+    await enter()
+    await page.getByRole('button', { name: 'Hide threads', exact: true }).click()
+    assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
+    assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:rail')), 'false')
+    await page.reload()
+    await page.getByRole('button', { name: 'Show threads', exact: true }).waitFor()
+    assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
+    await page.getByRole('button', { name: 'Show threads', exact: true }).click()
+    assert.equal(await page.locator('.ws-thread-rail').isVisible(), true)
+    await context.close()
+    console.log(`PASS persistent rail (${hasTouch ? 'coarse' : 'fine'} pointer)`)
   }
 } finally { await browser.close() }
