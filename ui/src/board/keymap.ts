@@ -90,7 +90,7 @@ export function shouldForwardDocumentKey(event: Pick<KeyboardEvent, 'defaultPrev
   const editable = el?.closest?.('[contenteditable]')
   if (editable && editable.getAttribute('contenteditable') !== 'false') return false
   if (!event.altKey && !event.ctrlKey && !event.metaKey) {
-    if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="button"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
+    if (['Enter', ' '].includes(event.key ?? '') && el?.closest?.('button,a[href],summary,[role="link"],[role="button"],[role="option"],[role="treeitem"],[role="checkbox"],[role="radio"],[role="switch"],[role="tab"]')) return false
     if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key ?? '') && el?.closest?.('[role="menu"],[role="radiogroup"],[role="tablist"],[role="slider"],[role="listbox"]')) return false
   }
   return true

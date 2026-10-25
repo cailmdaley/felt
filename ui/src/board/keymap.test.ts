@@ -49,6 +49,12 @@ describe('shared keyboard table', () => {
     const button = document.createElement('button')
     for (const key of ['Enter', ' ']) expect(shouldForwardDocumentKey(event(key, {}, button))).toBe(false)
 
+    for (const role of ['link', 'button', 'option', 'treeitem']) {
+      const control = document.createElement('div'); control.setAttribute('role', role)
+      const child = document.createElement('span'); control.append(child)
+      for (const key of ['Enter', ' ']) expect(shouldForwardDocumentKey(event(key, {}, child))).toBe(false)
+    }
+
     const radioGroup = document.createElement('div')
     radioGroup.setAttribute('role', 'radiogroup')
     const radio = document.createElement('div')

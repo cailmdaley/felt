@@ -111,6 +111,37 @@ export function registerHeaderBarJourneys(test) {
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
+  test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'true')
+    })
+    await page.goto(url)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    const row = name => page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name })
+    for (const key of ['Enter', 'Space']) {
+      await row('Response analysis').focus(); await page.keyboard.press(key)
+      await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
+      await row(title).focus(); await page.keyboard.press(key)
+      await header.getByRole('heading', { name: title, exact: true }).waitFor()
+    }
+    await page.evaluate(() => { document.activeElement?.blur(); document.body.focus() })
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(() => !document.querySelector('.ws-reader').classList.contains('ws-expand-mode'))
+    await page.setViewportSize({ width: 1440, height: 400 })
+    const log = page.locator('.ws-selected .ws-transcript-scroll')
+    await page.waitForFunction(() => {
+      const el = document.querySelector('.ws-selected .ws-transcript-scroll')
+      return el.scrollHeight > el.clientHeight
+    })
+    await log.evaluate(el => { el.scrollTop = 0 })
+    await page.keyboard.press('Space')
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ws-transcript-scroll').scrollTop > 0)
+  }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     for (const scheme of ['light', 'dark']) test(`Root heads the family at every depth (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {

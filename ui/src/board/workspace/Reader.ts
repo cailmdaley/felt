@@ -1063,6 +1063,8 @@ export class Reader {
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
     // Each column's edge takes its own arrows, Home, End and Enter.
     if ((e.target === this.sidebarHandle || e.target === this.threadRail.handle) && ['ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(e.key)) return
+    // Activation belongs to the focused control, including command-modified keys.
+    if (['Enter', ' '].includes(e.key) && !shouldForwardDocumentKey({ target: e.target, defaultPrevented: false, key: e.key })) return
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)
     if (e.altKey && !forward) return
