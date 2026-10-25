@@ -26,6 +26,7 @@ async function openScenario(name, query, selectChat) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
   const page = await context.newPage()
   await page.addInitScript(() => {
+    window.__perfNavigationStart = performance.now()
     const parse = JSON.parse
     window.__perfParse = { count: 0, elapsedMs: 0 }
     JSON.parse = function (...args) {
@@ -38,6 +39,7 @@ async function openScenario(name, query, selectChat) {
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`${base}${query}`)
   await page.locator('.kbn-desk').waitFor()
+  const harnessReadyMs = await page.evaluate(() => performance.now() - window.__perfNavigationStart)
   if (selectChat) {
     await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
     await page.locator('.ws-page.ws-selected .ws-transcript-turn').last().waitFor()
@@ -71,6 +73,7 @@ async function openScenario(name, query, selectChat) {
       heapBytes: performance.memory?.usedJSHeapSize ?? null,
     }
   })
+  initial.harnessReadyMs = harnessReadyMs
   result.scenarios[name] = { screenshot: join(screenshotDir, `${name}.png`), initial, parseInstrumentation: null, snapshotTick: null, errors }
 
   await page.evaluate(() => window.__harness.modal.fetchAndRender())
