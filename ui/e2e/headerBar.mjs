@@ -23,13 +23,14 @@ export function registerHeaderBarJourneys(test) {
     }
     const focused = locator => locator.evaluate(el => el === document.activeElement)
     await settings.focus()
-    await resize(850, true)
+    await resize(850, false)
     assert.ok(await focused(settings), 'Settings stays focused when lifecycle actions move away')
     await resize(1440, false)
     assert.ok(await focused(settings), 'Settings stays focused when lifecycle actions return')
-    await header.getByRole('button', { name: 'Temper', exact: true }).focus()
-    await resize(850, true)
-    assert.ok(await focused(settings), 'a focused action moving into closed settings hands focus to Settings')
+    const temper = header.getByRole('button', { name: 'Temper', exact: true })
+    await temper.focus()
+    await resize(850, false)
+    assert.ok(await focused(temper), 'desktop actions retain focus in narrow cards')
     await resize(1440, false)
     await header.getByRole('button', { name: 'Constitution', exact: true }).focus()
     await resize(390, true)
@@ -37,6 +38,38 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await focused(settings), 'a page icon moving into phone settings hands focus to Settings')
     await resize(1440, false)
     assert.ok(await focused(settings), 'the same Settings control retains focus on return to desktop')
+  }, { width: 1440, height: 900 })
+  test('Desktop title fits two lines at the smallest card and short names keep the one-line height', async page => {
+    await page.addInitScript(() => {
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+    })
+    await page.goto(url)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    for (const width of [1440, 850, 701]) {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForFunction(() => {
+        const el = document.querySelector('.ws-selected h1')
+        return el && el.scrollHeight <= el.clientHeight + 1
+      })
+      const geometry = await header.locator('h1').evaluate(el => ({ height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), clamp: getComputedStyle(el).webkitLineClamp }))
+      assert.equal(geometry.clamp, '2')
+      assert.ok(geometry.height <= 2 * geometry.line + 7)
+      for (const name of ['Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible(), `${name} remains in the ${width}px header`)
+      assert.equal(await page.locator('.ws-selected .ws-header-overflow .kbn-ctl-verdict').count(), 0)
+    }
+    // The family's active thread exercises Close as well as the verdicts.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.getByRole('button', { name: 'Show threads', exact: true }).click()
+    await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
+    await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
+    for (const width of [1440, 701]) {
+      await page.setViewportSize({ width, height: 900 })
+      for (const name of ['Close', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
+      const height = await header.evaluate(el => el.getBoundingClientRect().height)
+      assert.ok(Math.abs(height - 60) <= 1, `short title keeps the 60px header at ${width}: ${height}`)
+    }
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     for (const scheme of ['light', 'dark']) test(`One header bar (${device}, ${scheme}): long name, immediate icons and unified settings`, async page => {
@@ -64,15 +97,17 @@ export function registerHeaderBarJourneys(test) {
             const r = child.getBoundingClientRect(); return r.top >= box.top && r.bottom <= box.bottom && r.left >= box.left && r.right <= box.right
           }) }
       })
-      assert.equal(geometry.nowrap, 'nowrap'); assert.equal(geometry.ellipsis, 'ellipsis')
-      assert.ok(geometry.titleHeight <= geometry.lineHeight + 7, JSON.stringify(geometry))
-      assert.ok(geometry.barHeight <= 74 && geometry.childrenInside, JSON.stringify(geometry))
+      assert.notEqual(geometry.nowrap, 'nowrap')
+      assert.ok(geometry.titleHeight <= geometry.lineHeight * 2 + 7, JSON.stringify(geometry))
+      if (device === 'desktop') assert.ok(await header.locator('h1').evaluate(el => el.scrollHeight <= el.clientHeight + 1), 'the full title fits, not only the clamped box')
+      assert.ok(geometry.barHeight <= 90 && geometry.childrenInside, JSON.stringify(geometry))
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       const report = header.locator('.ws-report-chip')
       const reportTitle = await report.getAttribute('title')
       assert.ok(reportTitle?.length)
       assert.equal(await report.getAttribute('aria-label'), `Read report: ${reportTitle}`)
-      assert.equal(await report.locator('.ws-report-title').isVisible(), device === 'desktop', 'phone chips are thumbnail-only; desktop keeps the visible report title')
+      assert.equal(await report.locator('.ws-report-title').count(), 0)
+      assert.equal(await report.evaluate(el => [...el.childNodes].filter(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim()).length), 0, 'the chip has no text label')
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()

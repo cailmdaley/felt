@@ -28,8 +28,9 @@ describe('workspace style contracts', () => {
     expect(themes.length).toBeGreaterThan(0)
     for (const theme of themes) expect(read(`themes/${theme}`), theme).not.toContain('sidebar-card')
   })
-  it('keeps the constitution name on one ellipsized line', () => {
-    expect(read('chat.css')).toMatch(/\.ws-chat-title\s*\{[^}]*white-space:\s*nowrap;[^}]*text-overflow:\s*ellipsis/)
+  it('limits the constitution name to two wrapping lines', () => {
+    expect(read('chat.css')).toMatch(/\.ws-chat-title\s*\{[^}]*-webkit-line-clamp:\s*2;/)
+    expect(read('chat.css')).not.toMatch(/\.ws-chat-title\s*\{[^}]*white-space:\s*nowrap/)
   })
   it('defines every workspace token that its reader uses', () => {
     const declarations = new Set([...`${tokens}\n${css}`.matchAll(/(--ws-[\w-]+)\s*:/g)].map(m => m[1]))

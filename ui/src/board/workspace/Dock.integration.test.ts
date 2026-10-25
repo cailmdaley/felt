@@ -40,6 +40,25 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('header action placement', () => {
+  it('keeps every lifecycle control in a narrow desktop card, overflowing only on phones', () => {
+    let phone = false
+    vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 'narrow' }))
+    const header = band.el.querySelector<HTMLElement>('.ws-chat-head')!
+    Object.defineProperty(header, 'clientWidth', { value: 420 })
+    const verbs = (): string[] => [...header.querySelectorAll('.kbn-ctl-verdict button')].map(b => b.getAttribute('aria-label')!)
+    window.dispatchEvent(new Event('resize'))
+    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+    expect(header.dataset.compact).toBe('false')
+    phone = true; window.dispatchEvent(new Event('resize'))
+    expect(verbs()).toEqual([])
+    expect(header.dataset.compact).toBe('true')
+    phone = false; window.dispatchEvent(new Event('resize'))
+    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+  })
+})
+
 describe('shared verdict controls', () => {
   it('uses the same lifecycle callback from both verdict buttons of the act zone', async () => {
     const transition = vi.fn()

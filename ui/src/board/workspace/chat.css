@@ -1,4 +1,4 @@
-/* The chat: one header line, the conversation as a centred column, the
+/* The chat: a wrapping header, the conversation as a centred column, the
    composer pinned beneath it. The page is the widest of the run; its words
    keep a reading measure inside it. */
 .ws-chat-page { display: flex; flex-direction: column; min-height: 0; }
@@ -14,8 +14,8 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  flex: none; display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; min-width: 0;
-  min-height: 60px; padding: 6px 16px;
+  flex: none; display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 10px; min-width: 0;
+  min-height: 60px; padding: 6px 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
 /* One back control leads to the parent chat or the originating board view. */
@@ -27,10 +27,12 @@
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
-/* The name yields space to the immediate controls without growing the bar. */
+.ws-chat-identity { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 0 10px; }
+/* The name wraps before any desktop action leaves the first line. */
 .ws-chat-title {
-  flex: 1 1 0; min-width: 0; margin: 0; padding-block: 3px;
-  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  min-width: 0; margin: 0; padding-block: 3px;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
 .ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 4px; min-height: 32px; }
@@ -165,17 +167,23 @@
 .ws-chat-frame .ws-labelbar { display: none; }
 .ws-reader[data-page='chat'] .ws-stage-column > .ws-thread-breadcrumb { display: none; }
 
+/* Narrow cards give the name both metadata columns without hiding any action. */
+@container (max-width: 850px) {
+  .ws-chat-identity { grid-template-columns: auto 1fr; gap: 0 8px; }
+  .ws-chat-title { grid-column: 1 / -1; font-size: var(--ws-prose-size); }
+}
+
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
   .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
   .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }
   .ws-chat .ws-chat-back { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
-  .ws-chat-head { align-items: center; }
+  .ws-chat-head { align-items: flex-start; }
   .ws-chat-lead:not([hidden]) { display: inline-flex; }
-  .ws-chat-title { font-size: var(--ws-label-size); -webkit-line-clamp: 1; }
+  .ws-chat-title { font-size: var(--ws-label-size); }
   /* A page without a back destination keeps the title inset. */
-  .ws-chat-lead[hidden] + .ws-chat-title { padding-left: 12px; }
+  .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
   .ws-chat-head { display: flex; flex-wrap: nowrap; gap: 5px; min-height: 56px; padding: 4px 6px; }
   .ws-chat-title { font-size: var(--ws-label-size); }

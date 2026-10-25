@@ -1077,8 +1077,7 @@ export class Dock {
     }
     let iconLayout = -1
     const placeIcons = (): void => {
-      const width = this.header?.clientWidth || window.innerWidth
-      const layout = isMobileViewport() || width < 600 ? 0 : width < 850 ? 1 : 2
+      const layout = isMobileViewport() ? 0 : 2
       if (layout === iconLayout) return
       iconLayout = layout
       const active = document.activeElement
@@ -1092,8 +1091,8 @@ export class Dock {
           next = control
         }
       }
-      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : layout === 1 ? [verdict] : [])
-      place(this.head, layout === 0 ? [settingsItem] : layout === 1 ? [constitutionItem, consoleItem, settingsItem] : [constitutionItem, consoleItem, settingsItem, verdict])
+      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : [])
+      place(this.head, layout === 0 ? [settingsItem] : [constitutionItem, consoleItem, settingsItem, verdict])
       if (focused) {
         const target = focused.checkVisibility() ? focused : settingsItem
         if (document.activeElement !== target) target.focus({ preventScroll: true })
@@ -1120,11 +1119,10 @@ export class Dock {
     lifecycle.className = 'ws-chat-state'
     lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
-    header.append(lead, title, lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []), this.head)
+    const identity = document.createElement('div'); identity.className = 'ws-chat-identity'
+    identity.append(title, lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
+    header.append(lead, identity, this.head)
     placeIcons()
-    const headerSize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(placeIcons)
-    headerSize?.observe(header)
-    this.composerDisposers.push(() => headerSize?.disconnect())
 
     const log = document.createElement('div')
     log.className = 'ws-chat-log'

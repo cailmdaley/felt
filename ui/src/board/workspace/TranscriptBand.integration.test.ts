@@ -88,7 +88,7 @@ describe('Dock worker transcript', () => {
     const transcript = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-transcript')!
     expect(transcript.classList.contains('ws-transcript-inline')).toBe(true)
     expect(transcript.querySelector('.ws-transcript-headrow')).toBeNull()
-    expect(band.el.querySelector('.ws-chat-head > .ws-transcript-meter')).not.toBeNull()
+    expect(band.el.querySelector('.ws-chat-head .ws-transcript-meter')).not.toBeNull()
     expect(band.head.querySelector(':scope > .ws-transcript-meter')).toBeNull()
     expect(band.el.querySelector('.ws-chat-log')!.nextElementSibling?.classList.contains('ws-chat-compose')).toBe(true)
   })
