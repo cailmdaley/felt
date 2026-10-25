@@ -1081,14 +1081,23 @@ export class Dock {
       const layout = isMobileViewport() || width < 600 ? 0 : width < 850 ? 1 : 2
       if (layout === iconLayout) return
       iconLayout = layout
+      const active = document.activeElement
+      const focused = active instanceof HTMLElement && [constitutionItem, consoleItem, settingsItem, verdict].some(control => control.contains(active)) ? active : null
       if (this.header) this.header.dataset.compact = String(layout < 2)
-      if (layout === 0) {
-        overflow.append(constitutionItem, consoleItem, verdict)
-        this.head.append(settingsItem)
-      } else if (layout === 1) {
-        this.head.append(constitutionItem, consoleItem, settingsItem)
-        overflow.append(verdict)
-      } else this.head.append(constitutionItem, consoleItem, settingsItem, verdict)
+      const place = (parent: HTMLElement, controls: HTMLElement[]): void => {
+        let next: HTMLElement | null = null
+        for (let i = controls.length - 1; i >= 0; i--) {
+          const control = controls[i]
+          if (control.parentElement !== parent || control.nextElementSibling !== next) parent.insertBefore(control, next)
+          next = control
+        }
+      }
+      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : layout === 1 ? [verdict] : [])
+      place(this.head, layout === 0 ? [settingsItem] : layout === 1 ? [constitutionItem, consoleItem, settingsItem] : [constitutionItem, consoleItem, settingsItem, verdict])
+      if (focused) {
+        const target = focused.checkVisibility() ? focused : settingsItem
+        if (document.activeElement !== target) target.focus({ preventScroll: true })
+      }
     }
     this.head.replaceChildren()
     window.addEventListener('resize', placeIcons)

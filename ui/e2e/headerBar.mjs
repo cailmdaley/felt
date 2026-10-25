@@ -7,6 +7,37 @@ import { getBrowser } from './browser.mjs'
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
 export function registerHeaderBarJourneys(test) {
+  test('Header breakpoint crossings preserve visible focus and hand overflow focus to Settings', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+    })
+    await page.goto(url)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    const settings = header.getByRole('button', { name: 'Settings', exact: true })
+    const resize = async (width, compact) => {
+      await page.setViewportSize({ width, height: 900 })
+      await page.waitForFunction(compact => document.querySelector('.ws-selected .ws-chat-head')?.dataset.compact === String(compact), compact)
+    }
+    const focused = locator => locator.evaluate(el => el === document.activeElement)
+    await settings.focus()
+    await resize(850, true)
+    assert.ok(await focused(settings), 'Settings stays focused when lifecycle actions move away')
+    await resize(1440, false)
+    assert.ok(await focused(settings), 'Settings stays focused when lifecycle actions return')
+    await header.getByRole('button', { name: 'Temper', exact: true }).focus()
+    await resize(850, true)
+    assert.ok(await focused(settings), 'a focused action moving into closed settings hands focus to Settings')
+    await resize(1440, false)
+    await header.getByRole('button', { name: 'Constitution', exact: true }).focus()
+    await resize(390, true)
+    await page.waitForFunction(() => !!document.querySelector('.ws-selected .ws-chat-drawer .ws-chat-constitution'))
+    assert.ok(await focused(settings), 'a page icon moving into phone settings hands focus to Settings')
+    await resize(1440, false)
+    assert.ok(await focused(settings), 'the same Settings control retains focus on return to desktop')
+  }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     for (const scheme of ['light', 'dark']) test(`One header bar (${device}, ${scheme}): long name, immediate icons and unified settings`, async page => {
       await page.emulateMedia({ colorScheme: scheme })
