@@ -19,12 +19,11 @@ export class ReportChip {
       priority: () => 1, distance: () => 0,
     })
     preview.append(this.thumbnail.el)
-    const title = document.createElement('span'); title.className = 'ws-report-title'
-    this.el.append(preview, title)
+    this.el.append(preview)
     const label = (): void => {
-      title.textContent = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Report'
-      this.el.title = title.textContent
-      this.el.setAttribute('aria-label', `Read report: ${title.textContent}`)
+      const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Report'
+      this.el.title = title
+      this.el.setAttribute('aria-label', `Read report: ${title}`)
     }
     label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
   }
