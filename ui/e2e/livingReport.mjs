@@ -48,10 +48,14 @@ export function registerLivingReportJourneys(test) {
       await shot(page, `${device}-landing`)
       const dockBox = await page.locator('.ws-report-dock').boundingBox()
       if (!phone) {
-        const findBox = await selected(page).locator('.ws-transcript-find-bar').boundingBox()
-        assert.ok(findBox.height <= 44, 'desktop report chip adds no transcript band')
-        assert.ok(dockBox.y >= findBox.y && dockBox.y + dockBox.height <= findBox.y + findBox.height, 'desktop chip stays within the find row')
+        const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
+        const actBox = await selected(page).getByRole('button', { name: 'Act', exact: true }).boundingBox()
+        assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'desktop chip stays within the header')
+        assert.ok(dockBox.x + dockBox.width <= actBox.x, 'desktop chip sits left of Act and Look')
+      } else {
+        assert.equal(await page.locator('.ws-report-dock').evaluate(el => el.previousElementSibling?.className), 'ws-chat-head')
       }
+      assert.equal(await selected(page).locator('.ws-transcript-find').count(), 0, 'the conversation has no local Find or reserved band')
       const composerBox = await selected(page).locator('textarea').boundingBox()
       assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
       await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })
@@ -133,7 +137,7 @@ export function registerLivingReportJourneys(test) {
         await page.getByRole('button', { name: 'Close sent files', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
       } else {
-        await page.getByLabel('Constitution menu', { exact: true }).click()
+        await page.getByRole('button', { name: 'Look', exact: true }).click()
         await page.getByRole('button', { name: 'Sent files', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor()
         assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
@@ -150,8 +154,8 @@ export function registerLivingReportJourneys(test) {
         assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
         await page.getByRole('button', { name: 'Show threads', exact: true }).click()
       }
-      // Body embeds and links remain reachable from the constitution menu.
-      await page.getByLabel('Constitution menu', { exact: true }).click()
+      // Body embeds and links remain reachable from Look.
+      await page.getByRole('button', { name: 'Look', exact: true }).click()
       await page.getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(await selected(page).locator('.ws-dock').count(), 0)
