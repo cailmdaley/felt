@@ -128,7 +128,7 @@ export function buildFiberProse(
   title.textContent = channel.name
   title.dataset.part = 'fiber-title'
   const outcome = document.createElement('div')
-  const outcomeText = channel.outcome ?? card.outcome ?? ''
+  const outcomeText = card.shuttleKind !== undefined ? '' : channel.outcome ?? card.outcome ?? ''
   outcome.innerHTML = ledeHtml(outcomeText)
   if (outcomeText.trim() && opts.onContinueReading) {
     outcome.className = 'ws-outcome-preview'
@@ -160,7 +160,7 @@ export function buildFiberProse(
   void installWikilinks(body, { shuttleBase: opts.shuttleBase, onOpen: opts.onFiber })
   const slug = roleSlug(card)
   const ledger = slug ? buildRoleLedger(opts.holds ?? [], { onCard: opts.onCard ?? (() => {}) }) : null
-  article.append(header, title, outcome, ...(ledger ? [ledger] : []), ...(opts.controls ? [opts.controls] : []), body)
+  article.append(header, title, ...(outcomeText.trim() ? [outcome] : []), ...(ledger ? [ledger] : []), ...(opts.controls ? [opts.controls] : []), body)
   scroller.append(article)
   return scroller
 }

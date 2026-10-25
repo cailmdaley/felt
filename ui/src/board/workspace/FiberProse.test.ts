@@ -59,6 +59,15 @@ describe('fiber prose', () => {
     expect(preview.querySelector('[aria-expanded="true"]')).toBeNull()
   })
 
+  it('draws no outcome on a constitution page, including its body view', () => {
+    const pane = buildFiberProse({ ...card, shuttleKind: 'oneshot' }, channel, {
+      shuttleBase: '', onFiber: vi.fn(), onFile: vi.fn(), onContinueReading: vi.fn(),
+    })
+    expect(pane.querySelector('.kbn-detail-lede, .ws-outcome-preview, .ws-outcome-continue')).toBeNull()
+    expect(pane.textContent).not.toContain('Outcome')
+    expect(pane.querySelector('.ws-prose-body')?.textContent).toContain('See')
+  })
+
   it('names no Desk column for a fiber without a shuttle block', () => {
     for (const status of ['open', 'closed']) {
       const note = { ...card, status, shuttleAgent: undefined, shuttleKind: undefined }
