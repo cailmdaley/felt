@@ -1,7 +1,7 @@
 # Writing report.html
 
 The report is the surface the human lands on to understand the work.
-The constitution opens on chat with `report.html` inset at its upper right; clicking the figure opens the report full-size.
+The constitution opens on chat with a thumbnail and title for `report.html` in its header; clicking this report chip opens the report full-size.
 Keep that one living surface current, and link to depth rather than making the human choose among sent files. It is a **current-state document, rewritten each session** — the same rule as `outcome:` and `## Status`, extended to the surface that carries figures.
 
 Not every constitution wants one (see SKILL.md, "The fiber's surfaces"). When one exists, these rules bind.
@@ -52,7 +52,7 @@ Nothing goes above this opening, including a title, as-of stamp, status panel or
 A loose, nonblocking request for a view is welcome; don't manufacture fixed choices.
 3. **Executive summary** — below the question, followed by evidence and depth.
 
-A question card leads the Your turn band and opens the chat with its report inset.
+A question card leads the Your turn band and opens the chat with its report chip in the header.
 Keep working after raising the ask, and clear it when it becomes moot.
 
 Without an outstanding ask, the default skeleton is:
@@ -103,7 +103,7 @@ The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/the
 Start from [report-template.html](../assets/report-template.html), a palette and primitives kit, not a framework or a content model to fill in.
 Plain HTML is right too.
 It follows the viewer's light or dark appearance automatically.
-A sibling `report.html` appears inset in the constitution's chat without a directive.
+A sibling `report.html` appears as a chip in the constitution's chat header without a directive.
 An explicit `:::{embed} report.html` in the fiber body also declares it there.
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).

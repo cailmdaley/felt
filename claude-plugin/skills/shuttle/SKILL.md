@@ -60,7 +60,7 @@ The diagonal agrees to 3%. The off-diagonal comparison is half-built in `validat
 - **`## Status`** — the handoff. Each worker leaves here what landed, where it got stuck, and what the next one needs to know, rewriting rather than appending; the next worker starts from it.
 - **`role`** — the office this work belongs to, here `analyst`. Each role has a charter, the fiber `roles/<role>`, where its holders keep the playbooks, the human gates and the people the work touches; a worker reads it before it starts. A constitution that *is* an office you return to — the cmbx chair, the vizier — is a seat (`shuttle seat <id>` sets `seat: true`), and the board draws it among the Roles when it rests.
 - **`report.html`** — the surface the human lands on to understand the work, kept beside the fiber and rewritten whole each session.
-  The constitution opens on chat with the report inset top-right; click to read it full-size.
+  The constitution opens on chat with a report chip in its header; click the thumbnail or title to read it full-size.
   Relative links open nested pages and plots in place; `‹` goes up one level, then back to chat.
   Keep what matters in this one living report rather than asking the reader to choose among sent files.
   [references/report.md](references/report.md) and the report template carry copy-paste primitives for a figure, table, status strip, nested page and another fiber's report.
@@ -114,7 +114,7 @@ Keep outcomes, reports and thread chips easy to inspect: give the human the high
 The report must lead with short background pitched at what the human knows since their last engagement: bridge the gap, without re-explaining a conversation you just had.
 Follow with the question and its options and tradeoffs; put the executive summary below them, with nothing above this opening.
 A question can be a loose, nonblocking request for a view, not only a decision between fixed options.
-The card leads **Your turn** without pausing your worker and opens the chat with the report inset.
+The card leads **Your turn** without pausing your worker and opens the chat with the report chip in its header.
 In Claude Code, also send a PushNotification with the question.
 Clear it with `shuttle -C <store> ask <id> --clear` when it becomes moot; resuming or messaging the worker also clears it.
 
