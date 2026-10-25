@@ -18,12 +18,14 @@ export class PageSheet {
   private pendingBack = false
 
   private readonly onChoose: (key: DocKey) => void
-  constructor(_base: string, onChoose: (key: DocKey) => void) {
+  private readonly onVisibility: () => void
+  constructor(_base: string, onChoose: (key: DocKey) => void, onVisibility = (): void => {}) {
     this.onChoose = onChoose
+    this.onVisibility = onVisibility
     this.el.className = 'ws-page-sheet'
     this.el.dataset.part = 'page-sheet'
     this.el.setAttribute('aria-label', 'Threads and sent files')
-    const panel = document.createElement('section'); panel.className = 'ws-page-sheet-panel'
+    const panel = document.createElement('section'); panel.className = 'ws-page-sheet-panel'; panel.dataset.part = 'page-sheet-panel'
     const close = document.createElement('button'); close.type = 'button'; close.className = 'ws-page-sheet-grabber'
     close.setAttribute('aria-label', 'Close sent files'); close.addEventListener('click', () => this.close())
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'; head.append(this.heading)
@@ -36,6 +38,7 @@ export class PageSheet {
     close.addEventListener('pointerdown', event => { start = event.clientY; close.setPointerCapture(event.pointerId) })
     close.addEventListener('pointerup', event => { if (start !== null && event.clientY - start > 44) this.close(); start = null })
     close.addEventListener('pointercancel', () => { start = null })
+    window.addEventListener('resize', this.position)
     window.addEventListener('popstate', this.pop)
     window.addEventListener('keydown', this.keydown, true)
   }
@@ -55,12 +58,23 @@ export class PageSheet {
   private render(): void {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
-    this.list.replaceChildren(sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key))))
+    const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)))
+    if (this.threads.hidden) files.querySelector('h3')?.remove()
+    this.list.replaceChildren(files)
   }
   private open(): void {
-    this.render(); this.el.showModal(); this.body.scrollTop = 0
+    this.render(); this.position(); this.el.showModal(); this.body.scrollTop = 0; this.onVisibility()
     this.el.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
     this.opener?.setAttribute('aria-expanded', 'true')
+  }
+  private readonly position = (): void => {
+    const card = this.el.closest('.ws-reader')?.querySelector('.ws-page.ws-selected')?.getBoundingClientRect()
+    if (!card) return
+    const width = Math.min(480, card.width - 32)
+    this.el.style.setProperty('--ws-files-left', `${card.right - width - 16}px`)
+    this.el.style.setProperty('--ws-files-top', `${card.top + 52}px`)
+    this.el.style.setProperty('--ws-files-width', `${width}px`)
+    this.el.style.setProperty('--ws-files-height', `${Math.max(120, card.height - 72)}px`)
   }
   close(after?: () => void): void {
     if (!this.isOpen || this.pendingBack) return
@@ -71,6 +85,7 @@ export class PageSheet {
   private dismiss(): void {
     if (this.el.open) this.el.close()
     this.pendingBack = false
+    this.onVisibility()
     this.opener?.setAttribute('aria-expanded', 'false')
     if (this.opener?.isConnected && !this.opener.closest('[inert]')) this.opener.focus({ preventScroll: true })
     const after = this.afterClose; this.afterClose = null; after?.()
@@ -98,6 +113,6 @@ export class PageSheet {
     }
   }
   dispose(): void {
-    this.hide(); window.removeEventListener('popstate', this.pop); window.removeEventListener('keydown', this.keydown, true); this.el.remove()
+    this.hide(); window.removeEventListener('resize', this.position); window.removeEventListener('popstate', this.pop); window.removeEventListener('keydown', this.keydown, true); this.el.remove()
   }
 }

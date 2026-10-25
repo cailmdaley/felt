@@ -1,7 +1,12 @@
 .ws-page-sheet { position: fixed; inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ws-ink); }
 .ws-page-sheet::backdrop { background: color-mix(in srgb, var(--ws-ink) 30%, transparent); }
 .ws-page-sheet-panel { position: absolute; bottom: 0; left: 0; right: 0; display: flex; flex-direction: column; max-height: min(85dvh, 760px); padding: 0 24px env(safe-area-inset-bottom); background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-bottom: 0; border-radius: 16px 16px 0 0; box-shadow: var(--ws-float); animation: ws-sheet-enter 180ms var(--ws-ease); }
-@media (min-width: 701px) { .ws-page-sheet-panel { max-width: 720px; margin-inline: auto; } }
+@media (min-width: 701px) and (min-height: 501px), (min-width: 701px) and (pointer: fine) {
+  .ws-page-sheet-panel { left: var(--ws-files-left); top: var(--ws-files-top); right: auto; bottom: auto; width: var(--ws-files-width); max-height: var(--ws-files-height); padding: 16px; border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); }
+  .ws-reader .ws-page-sheet .ws-page-sheet-grabber { align-self: flex-end; width: 32px; height: 32px; }
+  .ws-reader .ws-page-sheet-grabber::before { content: '×'; width: auto; height: auto; background: none; font-size: var(--ws-section-size); }
+  .ws-reader .ws-page-sheet-head { margin-top: -28px; margin-right: 36px; }
+}
 @keyframes ws-sheet-enter { from { transform: translateY(24px); opacity: 0; } }
 .ws-reader .ws-page-sheet-grabber { display: grid; place-items: center; width: 100%; height: 44px; flex: none; touch-action: none; }
 .ws-page-sheet-grabber::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--ws-hairline); }
