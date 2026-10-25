@@ -1748,27 +1748,38 @@ for (const format of ['mp4', 'webm']) test(`Video ${format} plays and seeks nati
   assert.ok(await video.evaluate(v => v === window.__video && Math.abs(v.currentTime - 0.5) < 0.1 && getComputedStyle(v.closest('.ws-content')).opacity === '1'))
 })
 
-test('Native PDF renderer loads fixture; owner route; Overview draws PDFs as faces', async p => {
-  await open(p); await choose(p, 'response.pdf')
-  const pdf = selected(p).locator('iframe')
-  await pdf.waitFor()
-  const fixtureURL = await pdf.getAttribute('src')
-  assert.ok(fixtureURL.startsWith('blob:'))
-  const deadline = Date.now() + 2500
-  let loaded = false
-  while (!loaded && Date.now() < deadline) {
-    for (const frame of p.frames().filter(f => f.url().startsWith('chrome-extension://'))) {
-      loaded ||= await frame.evaluate(url => {
-        const viewer = document.querySelector('pdf-viewer')
-        const embed = viewer?.shadowRoot?.querySelector('embed')
-        return !!embed && embed.getAttribute('original-url') === url && viewer.loadState_ === 'success' && viewer.documentDimensions?.pageDimensions?.length === 1
-      }, fixtureURL)
+async function assertRenderedPdf(p) {
+  const canvas = selected(p).locator('.pdfViewer .page[data-page-number="1"] canvas').first()
+  await canvas.waitFor()
+  await p.waitForFunction(() => {
+    const canvas = document.querySelector('.ws-page.ws-selected .pdfViewer canvas')
+    if (!canvas?.width || !canvas.height) return false
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+    let ink = false
+    let paper = false
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] === 0) continue
+      ink ||= pixels[i] < 200 && pixels[i + 1] < 200 && pixels[i + 2] < 200
+      paper ||= pixels[i] > 240 && pixels[i + 1] > 240 && pixels[i + 2] > 240
+      if (ink && paper) return true
     }
-    if (!loaded) await new Promise(resolve => setTimeout(resolve, 40))
-  }
-  assert.ok(loaded, 'Chrome PDF extension must finish loading the exact one-page fixture')
+    return false
+  })
+  assert.equal(await selected(p).locator('.kbn-pdf-page-label').innerText(), '1 / 1')
+  const fits = await canvas.evaluate(canvas => {
+    const page = canvas.closest('.page').getBoundingClientRect()
+    const viewport = canvas.closest('.kbn-pdf-scroll').getBoundingClientRect()
+    return page.left >= viewport.left - 1 && page.right <= viewport.right + 1
+      && page.top >= viewport.top - 1 && page.bottom <= viewport.bottom + 1
+  })
+  assert.ok(fits, 'the whole first PDF page fits in the viewer')
+}
+
+test('PDF.js paints fixture; owner route; Overview draws PDFs as faces', async p => {
+  await open(p); await choose(p, 'response.pdf')
+  await assertRenderedPdf(p)
   await choose(p, 'remote-summary.pdf')
-  await poll(p, () => window.__harness.nativeFiles.rewrites.some(r => r.owner === 'basalt-login-02' && r.path.endsWith('remote-summary.pdf')))
+  await assertRenderedPdf(p)
   assert.ok((await records(p)).some(r => r.url.includes('origin=basalt-login-02') && r.url.includes('remote-summary.pdf')))
   await leave(p)
   await p.locator('[data-view="shelf"]').click()
@@ -2292,7 +2303,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
         await poll(p, () => document.querySelector('.ws-selected audio')?.currentTime > 0.2)
         await capture('audio-playing'); await selected(p).getByRole('button', { name: 'Pause', exact: true }).click()
       }
-      if (state === 'pdf') await selected(p).locator('iframe').waitFor()
+      if (state === 'pdf') await assertRenderedPdf(p)
       if (state === 'unsupported') await selected(p).getByRole('link', { name: 'Download', exact: true }).waitFor()
       await poll(p, () => { const v = document.querySelector('.ws-selected .ws-document-viewer'); return v && getComputedStyle(v).opacity === '1' })
       assert.equal(await selected(p).locator('.ws-label-title').innerText(), label)
