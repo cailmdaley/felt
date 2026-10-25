@@ -1092,9 +1092,9 @@ defmodule Shuttle.DispatcherTest do
              )
 
     script = read_run_script_for(session)
-    assert script =~ "## Threads"
-    assert script =~ "- tests/haiku/live — Working —"
-    assert script =~ "- tests/haiku/blinding — To review — Rebuilt."
+    assert script =~ "## Threads — 1 to review · 1 working — `shuttle threads tests/haiku`"
+    assert script =~ "### To review (1)\n- blinding — Rebuilt."
+    refute script =~ "tests/haiku/live"
   end
 
   test "a block naming no registry agent is refused with the id and the way to fix it" do
