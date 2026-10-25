@@ -50,6 +50,7 @@ export interface FileViewerOptions {
   /** Transform HTML after its base URL is installed, before srcdoc assignment. */
   transformHtml?: (html: string) => string
   onDocumentKey?: (key: DocumentKey) => void
+  onNavigate?: (href: string) => void
   /** A page swipe recognised inside the document; the reader decides whether it pages. */
   onDocumentSwipe?: (signal: SwipeSignal) => void
   onWeight?: (slots: number) => void
@@ -485,6 +486,8 @@ function buildHtmlViewer(
         const candidate = message.payload.candidate
         if (typeof candidate !== 'string' || !resolved.has(candidate)) return
         options.onReferenceIntent?.(message.type as 'select' | 'play' | 'pause', candidate)
+      } else if (message.type === 'navigate' && embedded.bridge === bridge && embedded.active) {
+        options.onNavigate?.(message.payload.href as string)
       } else if (message.type === 'key' && embedded.bridge === bridge && embedded.active && typeof message.payload.key === 'string') {
         options.onDocumentKey?.(message.payload as unknown as DocumentKey)
       } else if (message.type === 'swipe' && embedded.bridge === bridge && embedded.active) {

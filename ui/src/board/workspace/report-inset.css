@@ -1,0 +1,19 @@
+.ws-report-inset {
+  float: right; position: sticky; top: 8px; z-index: 2; width: 49%; margin: 0 0 20px 24px;
+  background: var(--ws-paper); border-bottom: 1px solid var(--ws-hairline); break-inside: avoid;
+}
+.ws-report-open { display: block; width: 100%; padding: 0; border: 0; background: var(--ws-paper); cursor: zoom-in; }
+.ws-report-viewport { display: block; width: 100%; aspect-ratio: 1.35; overflow: hidden; pointer-events: none; box-shadow: var(--ws-shadow-low); }
+.ws-report-viewport > * { width: 800px; height: 600px; transform-origin: top left; max-width: none; pointer-events: none; }
+.ws-report-inset figcaption { padding: 8px 0; color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.4 var(--ws-serif); }
+/* The first turn contains the sticky figure; its prose shares the float's formatting context. */
+.ws-chat .ws-transcript-scroll:has(.ws-report-inset) :is(.ws-transcript-turn, .ws-transcript-msg-agent) { display: block; }
+.ws-chat .ws-transcript-scroll .ws-transcript-turn:has(.ws-report-inset) { display: flow-root; }
+.ws-chat .ws-transcript-scroll:has(.ws-report-inset) .ws-transcript-prose { display: block; overflow: visible; }
+.ws-chat .ws-transcript-scroll:has(.ws-report-inset) .ws-transcript-msg-you { display: block; max-width: none; }
+.ws-chat .ws-transcript-turn:has(.ws-report-inset) .ws-transcript-msg-you { margin-bottom: 16px; }
+.ws-chat .ws-transcript-turn:has(.ws-report-inset) .ws-transcript-prompt-text { background: transparent; display: block; padding: 0; overflow: visible; border-radius: 0; }
+.ws-chat .ws-transcript-turn:has(.ws-report-inset) .ws-transcript-steps { width: auto; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-report-inset { margin-left: 16px; width: 49%; }
+}

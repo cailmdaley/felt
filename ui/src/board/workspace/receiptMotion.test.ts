@@ -27,23 +27,21 @@ describe('receipt arrival baselines', () => {
   })
 })
 describe('receipt motion', () => {
-  it('uses one 280 ms crossing for tabs and a single 400 ms folio lift', () => {
+  it('uses a single 400 ms folio lift', () => {
     const el = document.createElement('div')
     const animation = { addEventListener: vi.fn(), cancel: vi.fn() }
     el.animate = vi.fn(() => animation as unknown as Animation)
     const motion = new ReceiptMotion()
-    motion.tab(el); motion.folio(el)
-    expect(el.animate).toHaveBeenNthCalledWith(1, [
-      { transform: 'translateX(-24px)', opacity: 0 }, { transform: 'translateX(0)', opacity: 1 },
-    ], { duration: 280, easing: 'ease' })
-    expect(vi.mocked(el.animate).mock.calls[1][1]).toEqual({ duration: 400, easing: 'ease' })
-    expect(vi.mocked(el.animate).mock.calls[1][0]).toEqual(expect.arrayContaining([
+    motion.folio(el)
+    expect(el.animate).toHaveBeenCalledOnce()
+    expect(vi.mocked(el.animate).mock.calls[0][1]).toEqual({ duration: 400, easing: 'ease' })
+    expect(vi.mocked(el.animate).mock.calls[0][0]).toEqual(expect.arrayContaining([
       expect.objectContaining({ transform: 'translateY(-4px)', offset: 0.5 }),
     ]))
     motion.dispose()
     expect(animation.cancel).toHaveBeenCalled()
   })
-  it('runs neither animation under reduced motion and cancels when the preference changes', () => {
+  it('skips animation under reduced motion and cancels when the preference changes', () => {
     let onChange!: () => void
     const preference = { matches: false, addEventListener: (_: string, fn: () => void) => { onChange = fn }, removeEventListener: vi.fn() }
     vi.stubGlobal('matchMedia', () => preference)
@@ -51,11 +49,11 @@ describe('receipt motion', () => {
     const el = document.createElement('div')
     el.animate = vi.fn(() => animation as unknown as Animation)
     const motion = new ReceiptMotion()
-    motion.tab(el)
+    motion.folio(el)
     preference.matches = true
     onChange()
     expect(animation.cancel).toHaveBeenCalledTimes(1)
-    motion.tab(el); motion.folio(el)
+    motion.folio(el)
     expect(el.animate).toHaveBeenCalledTimes(1)
     motion.dispose()
   })

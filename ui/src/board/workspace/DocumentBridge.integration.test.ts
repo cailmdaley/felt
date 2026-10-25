@@ -164,8 +164,8 @@ describe('minified production document keyboard bridge', () => {
     }))
     for (const key of ['x', 't', 'z', '.', 'c', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
     expect(app).not.toHaveBeenCalled()
-    send('ArrowDown'); send('ArrowRight', { altKey: true })
-    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'next'])
+    send('ArrowDown'); send('ArrowLeft', { altKey: true })
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'back'])
   })
 
   it('does not forward an untrusted library-generated key event', async () => {
@@ -177,7 +177,7 @@ describe('minified production document keyboard bridge', () => {
   it('executes serialized functions and bubbles unhandled reader chords through the selected host to the app', async () => {
     const frame = await report()
     const keys: Array<[string, KeyboardEventInit, string]> = [
-      ['h', {}, 'prev'], ['l', {}, 'next'],
+      ['h', {}, 'back'], ['‹', {}, 'back'],
       ['/', {}, 'find'],
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
       ['J', { shiftKey: true }, 'nextGroup'], ['K', { shiftKey: true }, 'prevGroup'],
@@ -328,20 +328,20 @@ describe('minified production document keyboard bridge', () => {
     for (const id of ['audio', 'video']) expect(press(frame, 'j', {}, '#' + id).defaultPrevented).toBe(false)
     expect(messages).not.toHaveBeenCalled()
     press(frame, 'h', {}, '#button')
-    press(frame, 'ArrowRight', { altKey: true }, '#slider')
-    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['prev', 'next'])
+    press(frame, 'ArrowLeft', { altKey: true }, '#slider')
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['back', 'back'])
   })
 
   it('ignores executed bridges from receded or parked frames and messages from foreign sources', async () => {
     const first = await report(documents[0])
     const second = await report(documents[1])
-    press(first, 'l')
+    press(first, 'h')
     expect(messages).toHaveBeenCalledOnce()
     expect(app).not.toHaveBeenCalled()
-    const data = { protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'l' } }
+    const data = { protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'h' } }
     for (const source of [window, null]) window.dispatchEvent(new MessageEvent('message', { source, data }))
     expect(app).not.toHaveBeenCalled()
-    press(second, 'l')
+    press(second, 'h')
     expect(app).toHaveBeenCalledOnce()
     host.setChannel([documents[1]], documents[1].key)
     press(first, 'j')

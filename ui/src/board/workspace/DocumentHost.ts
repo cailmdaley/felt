@@ -74,6 +74,7 @@ export class DocumentHost {
     shuttleBase: string
     buildProse: (doc: WorkspaceDocument) => HTMLElement
     onSelect: (key: DocKey) => void
+    onNavigate?: (source: WorkspaceDocument, href: string) => void
     /** Active-document positions, including restoration, from local or validated bridge scrolls. */
     onScroll?: (key: DocKey, y: number) => void
     /** Page swipes recognised inside the selected HTML document. */
@@ -281,7 +282,7 @@ export class DocumentHost {
     el.addEventListener('click', event => {
       // A selected page can recede in a descendant's handler before this bubbles.
       // Inert neighbour sheets target their surrounding frame, not their content.
-      if (el.classList.contains('ws-receded') && !sheet.contains(event.target as Node)) this.options.onSelect(frame.doc.key)
+      if (el.classList.contains('ws-receded') && el.contains(event.target as Node) && !sheet.contains(event.target as Node)) this.options.onSelect(frame.doc.key)
     })
     this.frames.set(doc.key, state)
     // This is the only append of a frame. Reordering is geometry, not DOM motion.
@@ -364,6 +365,7 @@ export class DocumentHost {
         },
         onReferenceIntent: (type, candidate) => this.referenceIntent(state, type, candidate),
         onThumbnailSource: (source, etag) => cacheDocumentTitle(doc.key, doc.path, source, etag),
+        onNavigate: href => { if (state.active) this.options.onNavigate?.(state.frame.doc, href) },
         onDocumentKey: key => this.forwardKey(state, key),
         onDocumentSwipe: signal => this.forwardSwipe(state, signal),
         onWeight: weight => queueMicrotask(() => {

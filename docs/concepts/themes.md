@@ -112,7 +112,7 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts and workers |
 | `[data-part='prose']` | Fiber article or text/Markdown pane |
 | `[data-part='prose'] h1`, `h2`, `h3`, `p`, `blockquote`, `code`, `table`, `hr` | Prose elements; prefix each with the prose selector |
-| `[data-part='thumbnail']` | Shared preview's UI paper in folios, changed-work rows and the page sheet |
+| `[data-part='thumbnail']` | Shared preview's UI paper in folios and changed-work rows |
 | `[data-part='thumbnail-face']` | Designed text face beneath a loaded preview |
 | `:scope[data-part='sidebar-card']` | Channel's Desk-card face in the reader sidebar |
 | `:scope[data-part='since-row']` | Channel's since-you-were-here row |
@@ -121,10 +121,9 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | `:scope[data-part='folio'][data-density='compact']` | Compact thumbnail-and-text card |
 | `:scope[data-part='folio'][data-density='line']` | Short row: 36 px desktop, 44 px phone |
 | `[data-part='phone-topbar']` | Reader navbar; top bar on phone |
-| `[data-part='phone-bottom-bar']` | Phone page title, arrival and stepping controls |
-| `[data-part='page-sheet']` | Modal page chooser |
-| `[data-part='page-sheet-panel']` | Page chooser's paper panel |
-| `[data-part='page-sheet-row']` | One page choice, with its thumbnail |
+| `[data-part='page-sheet']` | Modal sent-files list and phone thread sheet |
+| `[data-part='page-sheet-panel']` | Files-and-threads sheet's paper panel |
+| `[data-part='page-sheet-row']` | One dated sent-file choice |
 | `[data-part='audio-page']` | Listening page and comparison list |
 | `[data-part='audio-waveform']` | Canvas; its CSS `color` sets the played waveform ink |
 

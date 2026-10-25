@@ -477,7 +477,6 @@ export class Dock {
   /** Opens a file the worker touched in the reader's file viewer; the workspace seats it. */
   openFile?: (path: string, title?: string) => void
   /** The menu's slot for a way back that the header line has no room for. */
-  private menuBack: HTMLElement | null = null
   /** The menu's way to the constitution's page, shown while the nav carries one. */
   private menuConstitution: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
@@ -564,25 +563,21 @@ export class Dock {
    * Seat the header line's way back and its trailing control. The acts come
    * home too: a fiber page drawn before the chat existed may have borrowed them.
    */
+  openSentFiles?: () => void
+
   setNav(nav: ChatNav): void {
     if (!this.lead || !this.trail || !this.header || !this.ancestry) return
     if (this.head.parentElement !== this.header) this.header.insertBefore(this.head, this.trail)
     const back: HTMLButtonElement[] = []
     paintAncestry(this.ancestry, nav.ancestry ?? [])
-    // Inside a thread the ancestry is the way back; the origin waits in the menu.
-    const menuBack: HTMLButtonElement[] = []
     if (nav.origin) {
       const { label, open } = nav.origin
-      const inMenu = Boolean(nav.ancestry?.length)
-      const button = inMenu ? document.createElement('button') : ctlButton('‹', 'ws-chat-back ws-chat-origin')
-      if (inMenu) { button.type = 'button'; button.className = 'kbn-ctl-menu-item ws-chat-origin-item'; button.textContent = `‹ ${label}` }
+      const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
       button.title = `Return to ${label}`
       button.setAttribute('aria-label', `Return to ${label}`)
-      if (inMenu) button.setAttribute('role', 'menuitem')
       button.addEventListener('click', () => open())
-      if (inMenu) menuBack.push(button); else back.unshift(button)
+      back.unshift(button)
     }
-    if (this.menuBack) { this.menuBack.replaceChildren(...menuBack); this.menuBack.hidden = !menuBack.length }
     this.openConstitution = nav.constitution ?? null
     if (this.menuConstitution) this.menuConstitution.hidden = !this.openConstitution
     this.lead.replaceChildren(...back)
@@ -674,7 +669,7 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.verdictMenu = null
-    this.menuBack = this.menuConstitution = this.openConstitution = null
+    this.menuConstitution = this.openConstitution = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     for (const timer of this.timers) window.clearTimeout(timer)
@@ -1106,6 +1101,7 @@ export class Dock {
     const meterSlot = document.createElement('div'); meterSlot.className = 'ws-chat-menu-meter'; meterSlot.hidden = true
     const constitutionItem = this.menuConstitution = item('Constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
+    const sentItem = item('Sent files', 'ws-chat-sent-files', () => this.openSentFiles?.())
     const consoleItem = item('Console', 'ws-chat-console', () => { this.openConversation(card) })
     consoleItem.title = 'Open the worker’s own conversation'
     this.drawerClose = () => {
@@ -1118,9 +1114,7 @@ export class Dock {
     // Who and where, said once, muted: the header line carries only the name.
     const facts = document.createElement('p')
     facts.className = 'ws-chat-menu-facts'
-    const backSlot = this.menuBack = document.createElement('div'); backSlot.className = 'ws-chat-menu-back'; backSlot.hidden = true
-    backSlot.addEventListener('click', () => { menu.open = false })
-    choices.append(facts, meterSlot, verdict, rule, freshItem, meetingItem, constitutionItem, settingsItem, sessionsItem, consoleItem, backSlot)
+    choices.append(facts, meterSlot, verdict, rule, freshItem, meetingItem, constitutionItem, sentItem, settingsItem, sessionsItem, consoleItem)
     menu.append(more, choices)
     let release: Release | null = null
     // A press anywhere else closes the menu, as it does every popover on the page.
@@ -1174,10 +1168,7 @@ export class Dock {
     const empty = document.createElement('p')
     empty.className = 'ws-chat-empty'
     empty.textContent = 'No conversation yet. Write below to start a worker.'
-    // Where the work stands, from the fiber's outcome: a resumed session opens on it, not on an empty column.
-    const standing = this.buildOutcome()
     if (this.guidance) log.append(this.guidance)
-    log.append(standing.el)
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
@@ -1195,7 +1186,6 @@ export class Dock {
       lifecycle.textContent = stage.label
       lifecycle.dataset.state = stage.state
       lifecycle.hidden = !shuttleManaged || hasLiveWorker(card)
-      standing.paint(card.outcome?.trim() ?? '')
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent
       const reachable = verdictReachable(card)
@@ -1212,46 +1202,6 @@ export class Dock {
       this.paintHeadWorker(card, worker)
     }
     this.actPaint()
-  }
-
-  /**
-   * Where the work stands, from the fiber's outcome, in a region of its own
-   * above the conversation: a quiet label run into two lines of text, and,
-   * when there is more, a control that opens the whole outcome in place.
-   */
-  private buildOutcome(): { el: HTMLElement; paint(text: string): void } {
-    const el = document.createElement('section')
-    el.className = 'ws-chat-outcome'
-    el.dataset.part = 'chat-outcome'
-    el.setAttribute('aria-label', 'Outcome')
-    const text = document.createElement('p'); text.className = 'ws-chat-outcome-text'
-    const label = document.createElement('span'); label.className = 'ws-chat-outcome-label'; label.textContent = 'Outcome'
-    const words = document.createElement('span')
-    text.append(label, words)
-    const more = document.createElement('button'); more.type = 'button'; more.className = 'ws-chat-outcome-more'
-    el.append(text, more)
-    let open = false
-    const measure = (): void => {
-      el.classList.toggle('ws-chat-outcome-open', open)
-      more.textContent = open ? 'Show less ▴' : 'Read full outcome ▸'
-      more.setAttribute('aria-expanded', String(open))
-      more.hidden = !open && text.scrollHeight <= text.clientHeight + 1
-    }
-    more.addEventListener('click', () => { open = !open; measure() })
-    if (typeof ResizeObserver !== 'undefined') {
-      const observer = new ResizeObserver(() => measure())
-      observer.observe(text)
-      this.composerDisposers.push(() => observer.disconnect())
-    }
-    return {
-      el,
-      paint: (value: string) => {
-        if (words.textContent !== value) { words.textContent = value; open = false }
-        el.hidden = !value
-        measure()
-        requestAnimationFrame(measure)
-      },
-    }
   }
 
   /**

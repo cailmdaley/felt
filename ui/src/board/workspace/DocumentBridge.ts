@@ -51,6 +51,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
       return fields(p, ['phase', 'dx', 'velocity']) && p.phase === 'end' && travel(p.dx)
         && typeof p.velocity === 'number' && Number.isFinite(p.velocity) && Math.abs(p.velocity) <= 20
     case 'references': return fields(p, ['candidates']) && boundedArray(p.candidates, item => shortString(item))
+    case 'navigate': return fields(p, ['href']) && shortString(p.href, 4096) && !!p.href
     case 'select': case 'play': return fields(p, ['candidate']) && shortString(p.candidate)
     case 'references:resolved': return fields(p, ['targets']) && boundedArray(p.targets, item =>
       fields(item, ['candidate', 'title', 'audio']) && shortString(item.candidate) && shortString(item.title) && typeof item.audio === 'boolean')
@@ -213,6 +214,13 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
   document.addEventListener('click', event => {
     const link = (event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null
     if (!link || link.dataset.wsReference || link.hasAttribute('download') || link.getAttribute('href')?.startsWith('#')) return
+    const href = link.getAttribute('href') ?? ''
+    if (active && href && href.length <= 4096 && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      send('navigate', { href })
+      return
+    }
     link.target = '_blank'
     link.rel = 'noopener noreferrer'
   }, true)

@@ -196,7 +196,7 @@
   background-color: var(--ws-fill);
   box-shadow: inset 2px 0 var(--ws-accent);
 }
-.ws-reader [data-part="page-sheet-row"] .ws-page-sheet-summary { color: var(--ws-ink-muted); }
+.ws-reader [data-part="page-sheet-row"] time { color: var(--ws-ink-muted); }
 [data-part="audio-page"] { color: var(--ws-ink); background-color: transparent; }
 [data-part="audio-waveform"] { color: var(--ws-accent); }
 
@@ -210,13 +210,12 @@
     box-shadow: none;
     clip-path: none;
   }
-  [data-part="phone-topbar"], [data-part="phone-bottom-bar"] {
+  [data-part="phone-topbar"] {
     color: var(--ws-ink);
     background-color: var(--ws-paper);
     border-color: var(--ws-hairline-soft);
   }
   [data-part="phone-topbar"] { border-bottom: 1px solid var(--ws-hairline-soft); }
-  [data-part="phone-bottom-bar"] { border-top: 1px solid var(--ws-hairline-soft); }
 }
 @media (prefers-reduced-transparency: reduce) {
   [data-part="page-sheet"]::backdrop {

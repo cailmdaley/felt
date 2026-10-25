@@ -11,8 +11,7 @@ import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
-import { TabStrip } from './TabStrip.js'
+import { chatDocument, proseDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
@@ -23,9 +22,9 @@ import { invalidateWorkspaceMeasures, workspaceMeasure, workspaceToken } from '.
 import { workerPlate } from './workerPlate.js'
 import { stateDot } from '../stateDot.js'
 import { type Verdict } from './Verdicts.js'
-import { ReceiptArrivals } from './receiptMotion.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
+import { ReportInset } from './ReportInset.js'
 import { familyCounts, familyLabel, phoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
@@ -35,6 +34,7 @@ export interface ReaderOptions {
   buildProse(doc: WorkspaceDocument): HTMLElement
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
+  onNavigate?(source: WorkspaceDocument, href: string): void
   onCrossing?(travel: number): void
   onReturn(): void
   workerPill?(card: KanbanCard): HTMLElement | null
@@ -70,7 +70,6 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
   if (text) el.textContent = text
   return el
 }
-/** The index strip abbreviates a caption too wide for its row; the caption keeps its full name. */
 /** The index strip explains the single state mark shared by constitution rows. */
 const ROW_MARKS = 'State dot: gold your turn · blue working · muted starting · paper no live worker'
 const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
@@ -110,27 +109,20 @@ export class Reader {
   private readonly opts: ReaderOptions
   private readonly stopTitles: () => void
   private readonly seen = new DocumentSeen()
-  private readonly receipts = new ReceiptArrivals()
   private channelReady = false
-  /** Whether the channel's run is final: the strip, ticks, count and steps wait for it. */
+  /** The body and receipts have settled; the files sheet can open. */
   private runSettled = true
-  private readonly tabs: TabStrip
   private readonly navbar: HTMLElement
   private readonly lead: HTMLElement
   private keyboardInput = false
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
-  private readonly position = element('span', 'ws-position')
-  /** The map floating above the centre column on the desktop: the tiles, the selected one over the page's centre. */
-  private readonly band = element('div', 'ws-head-index')
-  /** The phone's sense of place: one tick per page along the bottom bar's top edge. */
-  private readonly ticks = element('div', 'ws-page-ticks')
+  private readonly parents: DocKey[] = []
+  private inset: { key: DocKey; view: ReportInset } | null = null
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
   private workerClock = 0
-  private readonly pageTitle = element('span', 'ws-thumb-title')
-  private readonly arrivalSummary = element('span', 'ws-thumb-arrival')
   private readonly topbar = new PhoneTopbar(hidden => this.el.classList.toggle('ws-topbar-hidden', this.phone.matches && hidden))
   private readonly stopSwipe: () => void
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
@@ -144,9 +136,6 @@ export class Reader {
   /** The phone chat's top-right control: the constitution's threads and pages, as a page of their own. */
   readonly pagesButton: HTMLButtonElement
   private readonly announcement = element('div', 'ws-sr-only')
-  private readonly prev: HTMLButtonElement
-  private readonly pageChoice: HTMLButtonElement
-  private readonly next: HTMLButtonElement
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
@@ -196,21 +185,19 @@ export class Reader {
       const ch = this.channel
       if (!ch?.documents.some(d => d.key === key)) return
       ch.labels = documentLabels(ch.documents, ch.labels[ch.documents.findIndex(d => d.kind === 'fiber')] === 'Constitution')
-      this.tabs.render(ch.labels, ch.documents.map(d => d.key), ch)
       if (this.active) this.paint(false)
     })
     this.el.setAttribute('aria-label', 'Document reader')
     this.el.dataset.wsThemeBoundary = ''
     this.veil.dataset.part = 'veil'
     this.el.inert = true
-    this.tabs = new TabStrip(i => this.selectIndex(i), () => this.toggleExpand(), { shuttleBase: opts.shuttleBase })
     this.sidebarToggle = button('ws-sidebar-toggle', '', () => this.toggleSidebar(), 'Constitutions')
     this.sidebarToggle.title = 'Constitutions · s'
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
     this.railToggle.title = 'Threads · ⌘|'
     this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="10" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>'
-    this.returnButton = button('ws-return', '‹ Desk', () => opts.onReturn())
+    this.returnButton = button('ws-return', '‹', () => this.back(), 'Back one level')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
@@ -218,38 +205,17 @@ export class Reader {
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
     trail.append(this.headWorker)
-    this.band.dataset.part = 'page-band'
-    this.band.append(this.tabs.el, this.tabs.tip)
     // The phone's top bar: back, the fiber's name, the worker's dot. The desktop
     // draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
-    this.ticks.setAttribute('aria-hidden', 'true')
-    this.prev = button('ws-thumb-button', '', () => this.step(-1), 'Previous document')
-    this.next = button('ws-thumb-button', '', () => this.step(1), 'Next document')
-    this.prev.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="M10 2 2 10l8 8"/></svg>'
-    this.next.innerHTML = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true"><path d="m2 2 8 8-8 8"/></svg>'
-    const thumbMenu = button('ws-thumb-button', '⋯', () => {
-      const doc = this.document
-      if (doc) this.openMenu(doc, thumbMenu)
-    }, 'Document menu')
-    const thumb = element('div', 'ws-thumbbar')
-    thumb.dataset.part = 'phone-bottom-bar'
-    thumb.dataset.wsSwipe = 'on'
-    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.opts.onSelect(key))
-    const pageChoice = this.pageChoice = button('ws-page-choice', '', () => { if (!this.runSettled) return; this.closeMenu(); this.pageSheet.show(pageChoice) }, 'Choose a page')
-    pageChoice.setAttribute('aria-haspopup', 'dialog')
-    pageChoice.setAttribute('aria-expanded', 'false')
-    const pages = this.pagesButton = button('ws-chat-pages', '', () => this.openPhonePage(), 'Threads and pages')
-    pages.title = 'Threads and pages'
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key))
+    const pages = this.pagesButton = button('ws-chat-pages', '', () => this.openPhonePage(), 'Threads and sent files')
+    pages.title = 'Threads and sent files'
     pages.setAttribute('aria-haspopup', 'dialog')
     pages.setAttribute('aria-expanded', 'false')
     this.paintPages(null)
-    const pageMeta = element('span', 'ws-thumb-meta')
-    pageMeta.append(this.position, this.arrivalSummary)
-    pageChoice.append(this.pageTitle, pageMeta)
-    thumb.append(this.ticks, this.prev, pageChoice, this.next, thumbMenu)
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
     this.parallax.append(this.track)
@@ -291,15 +257,16 @@ export class Reader {
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
-    column.append(this.threadRail.breadcrumb, this.band, this.stage)
+    column.append(this.threadRail.breadcrumb, this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
-    this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, thumb, this.announcement, this.pageSheet.el)
+    this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, this.announcement, this.pageSheet.el)
     this.host = new DocumentHost(this.track, {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
       onRefreshProse: opts.onRefreshProse,
-      onSelect: key => opts.onSelect(key),
+      onSelect: key => this.openDocument(key),
+      onNavigate: (source, href) => this.opts.onNavigate?.(source, href),
       onFrame: frame => this.prepareFrame(frame),
       onScroll: (key, y) => this.topbar.scroll(key, y),
       onSwipe: signal => this.swipe(signal),
@@ -312,8 +279,6 @@ export class Reader {
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
-    // The index's slot moves with the lead's width (a name, a font arriving).
-    this.observer?.observe(this.tabs.el)
     window.addEventListener('resize', this.relayout)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
@@ -340,18 +305,12 @@ export class Reader {
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
 
-  /**
-   * `settled` says the channel's run is final (its body has been read, or the
-   * read has failed). Until then the selected page shows alone: the strip's
-   * tiles, the ticks, the count and the steps hold their room unseen, and
-   * stepping keys do nothing, so no page appears on one side of the § and
-   * then crosses it.
-   */
+  /** Show the selected page; settled body and receipt reads enable the files sheet. */
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
     if (switching) { this.railForcedForVisit = false; this.phoneRailPending = false; this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
-    const arrivals = this.receipts.observe(channel, ready)
+    if (switching) this.parents.length = 0
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.settleRun(settled)
@@ -370,21 +329,16 @@ export class Reader {
     if (arriving) this.arrive(origin === 'Board')
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
-    this.returnButton.textContent = `‹ ${origin}`
-    this.returnButton.setAttribute('aria-label', `Return to ${origin}`)
+    this.returnButton.textContent = '‹'
+    this.returnButton.setAttribute('aria-label', 'Back one level')
     this.title.textContent = channel.name
     this.title.title = channel.name
     if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
-    this.tabs.setVisible(true)
-    this.tabs.render(channel.labels, channel.documents.map(d => d.key), channel)
-    if (!switching) this.tabs.arrive(arrivals)
     this.renderSidebar()
     this.host.setChannel(channel.documents, selected)
     this.paint(!switching && !reordered && animate)
     if (arriving) this.setSidebarVisible(this.sidebarShown)
-    // A keyboard switch gives focus a home on the new channel: its selected tile
-    // on the desktop, the top bar's back control on the phone.
-    if (switching && this.keyboardInput) (this.phone.matches || !settled ? this.returnButton : this.tabs.buttons.find(tab => tab.tabIndex === 0) ?? this.returnButton).focus({ preventScroll: true })
+    if (switching && this.keyboardInput) this.returnButton.focus({ preventScroll: true })
     requestAnimationFrame(() => this.layout(false))
   }
 
@@ -394,6 +348,7 @@ export class Reader {
     this.cancelResize?.()
     this.closeMenu()
     this.selected = key
+    if (this.expanded) this.setExpanded(false)
     this.host.select(key)
     this.paint(true)
   }
@@ -412,10 +367,10 @@ export class Reader {
     this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
+    this.inset?.view.dispose(); this.inset = null
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
-    this.tabs.setVisible(false)
     this.closeMenu()
     this.el.inert = true
     this.el.setAttribute('aria-hidden', 'true')
@@ -454,14 +409,7 @@ export class Reader {
 
   /** Hide the run's surfaces while it is provisional; they fade in once, when it lands. */
   private settleRun(settled: boolean): void {
-    const landing = settled && !this.runSettled
     this.runSettled = settled
-    this.pageChoice.setAttribute('aria-disabled', String(!settled))
-    for (const el of [this.tabs.el, this.ticks, this.position, this.prev, this.next]) {
-      el.classList.toggle('ws-run-pending', !settled)
-      if (!settled || landing) el.classList.remove('ws-run-landing')
-      if (landing) el.classList.add('ws-run-landing')
-    }
     if (!settled) this.pageSheet.hide()
   }
   /**
@@ -477,16 +425,16 @@ export class Reader {
     pages.classList.toggle('ws-chat-pages-family', !!counts?.threads)
     if (!counts?.threads) {
       pages.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h7"/></svg>'
-      pages.setAttribute('aria-label', 'Threads and pages')
+      pages.setAttribute('aria-label', 'Threads and sent files')
       return
     }
     const words = familyLabel(counts)
     const dot = element('span', 'ws-chat-pages-dot')
     dot.setAttribute('aria-hidden', 'true'); dot.hidden = !counts.waiting
     pages.replaceChildren(dot, document.createTextNode(words))
-    pages.setAttribute('aria-label', `${words}${counts.waiting ? `, ${counts.waiting} waiting` : ''}: threads and pages`)
+    pages.setAttribute('aria-label', `${words}${counts.waiting ? `, ${counts.waiting} waiting` : ''}: threads and sent files`)
   }
-  /** The phone's page of threads (the family from its root) and the run's pages. */
+  /** The phone's sheet leads with the whole family, then its sent files. */
   private openPhonePage(): void {
     const card = this.currentCard
     if (!this.runSettled || !card) return
@@ -494,17 +442,27 @@ export class Reader {
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     this.pageSheet.show(this.pagesButton, phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
   }
-  private selectIndex(index: number): void {
-    if (!this.runSettled) return
-    const doc = this.channel?.documents[index]
-    if (doc) this.opts.onSelect(doc.key)
+  /** Open a file over the current page, preserving its exact return point. */
+  openDocument(key: DocKey): void {
+    if (key === this.selected) return
+    if (this.selected) this.parents.push(this.selected)
+    this.opts.onSelect(key)
   }
-  private step(delta: number): void {
-    if (this.channel) this.selectIndex(this.channel.documents.findIndex(d => d.key === this.selected) + delta)
+  /** One level up: a file's parent, the chat, the orchestrator, then the origin view. */
+  back(): void {
+    const parent = this.parents.pop()
+    const landing = this.channel && (chatDocument(this.channel) ?? proseDocument(this.channel))
+    if (parent) this.opts.onSelect(parent)
+    else if (landing && this.selected !== landing.key) this.opts.onSelect(landing.key)
+    else if (!this.opts.onOrchestrator?.()) this.opts.onReturn()
+  }
+  showSentFiles(): void {
+    this.closeMenu()
+    this.pageSheet.show(this.pagesButton)
   }
   private get swipeable(): boolean {
     return this.active && this.phone.matches && !this.expanded && !this.pageSheet.isOpen && !this.menu
-      && this.runSettled && (window.visualViewport?.scale ?? 1) <= 1.01 && (this.channel?.documents.length ?? 0) > 1
+      && this.runSettled && (window.visualViewport?.scale ?? 1) <= 1.01
   }
   /**
    * The track follows a latched page swipe, then settles on the page the
@@ -517,7 +475,7 @@ export class Reader {
     const width = this.stage.clientWidth
     if (!ch || index < 0 || !width) { this.cancelSwipe(); return }
     if (!this.swiping && (signal.phase !== 'move' || !this.swipeable)) return
-    const hasPrevious = index > 0, hasNext = index < ch.documents.length - 1
+    const hasPrevious = true, hasNext = false
     if (signal.phase === 'move') {
       if (this.swipeSettle !== null) { clearTimeout(this.swipeSettle); this.swipeSettle = null }
       if (this.swipeWatchdog !== null) clearTimeout(this.swipeWatchdog)
@@ -539,7 +497,7 @@ export class Reader {
       this.stage.classList.add('ws-swipe-release')
       this.swipeSettle = setTimeout(() => { this.swipeSettle = null; this.stage.classList.remove('ws-swipe-release') }, settle + 40)
     }
-    if (delta) this.step(delta)
+    if (delta < 0) this.back()
     else this.layout(true)
   }
   /** Abandon a latched swipe in place: the track returns to the selected page without a release. */
@@ -577,23 +535,23 @@ export class Reader {
       this.fillLabel(frame, ch.labels[i])
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
-    this.tabs.fresh(fresh)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
-    this.tabs.mark(index, animate)
-    this.position.textContent = `${index + 1} / ${ch.documents.length}`
-    this.paintTicks(index, ch.documents.length)
+    const chat = chatDocument(ch)
+    const prose = proseDocument(ch)
+    const report = ch.documents.find(d => d.owner === ch.owner && d.path === `${prose?.path.slice(0, prose.path.lastIndexOf('/'))}/report.html`)
+    const chatFrame = chat && this.host.get(chat.key)
+    const insetKey = this.selected === chat?.key && report && chatFrame ? report.key : null
+    if (this.inset?.key !== insetKey) {
+      this.inset?.view.dispose(); this.inset = null
+      if (insetKey && report && chatFrame) this.inset = { key: insetKey, view: new ReportInset(this.opts.shuttleBase, report, chatFrame.content, () => this.openDocument(report.key)) }
+    }
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page
     if (doc) {
-      const metadata = documentLabelMetadata(doc, ch.labels[index], ch.owner)
-      this.pageTitle.textContent = doc.kind === 'fiber' || doc.kind === 'chat' ? ch.labels[index] : metadata.title
-      this.arrivalSummary.textContent = metadata.summary && ` · ${metadata.summary.charAt(0).toLowerCase()}${metadata.summary.slice(1)}`
       this.topbar.select(doc.key)
     }
-    this.prev.disabled = index <= 0
-    this.next.disabled = index >= ch.documents.length - 1
-    const announcement = `${ch.labels[index]}, ${index + 1} of ${ch.documents.length}`
+    const announcement = ch.labels[index] ?? ''
     // A provisional run's count goes unannounced; the final one is read once it lands.
     if (this.runSettled && this.announcement.textContent !== announcement) this.announcement.textContent = announcement
     this.layout(animate)
@@ -610,7 +568,8 @@ export class Reader {
     const provenance = element('span', 'ws-provenance')
     const expand = button('ws-icon-button ws-expand-button', '⤢', () => this.toggleExpand(), 'Expand document')
     const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
-    frame.label.append(glyph, title, provenance, expand, menu)
+    const back = button('ws-icon-button ws-document-back', '‹', () => this.back(), 'Back one level')
+    frame.label.append(back, glyph, title, provenance, expand, menu)
     this.labels.set(frame, { glyph, title, provenance, expand })
     frame.label.addEventListener('dblclick', e => {
       if (!(e.target as Element).closest('button,a') && frame.doc.key === this.selected) this.toggleExpand()
@@ -661,23 +620,13 @@ export class Reader {
   private layoutNavbar(): void {
     if (this.phone.matches) this.el.style.setProperty('--ws-phone-bar-height', `${this.navbar.offsetHeight}px`)
   }
-  /** One tick per page, the selected one in ink; a long run's ticks close up rather than wrap. */
-  private paintTicks(index: number, count: number): void {
-    if (count < 2) count = 0
-    if (this.ticks.childElementCount !== count) this.ticks.replaceChildren(...Array.from({ length: count }, () => element('i', 'ws-page-tick')))
-    ;[...this.ticks.children].forEach((tick, i) => tick.classList.toggle('ws-page-tick-current', i === index))
-  }
   private layout(animate: boolean): void {
     this.layoutNavbar()
-    const tabIndex = this.channel?.documents.findIndex(d => d.key === this.selected) ?? -1
     const ch = this.channel
-    if (!ch || !this.active) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
+    if (!ch || !this.active) return
     const W = this.stage.clientWidth, H = this.stage.clientHeight
-    if (!W || !H) { if (tabIndex >= 0) this.tabs.mark(tabIndex, animate); return }
+    if (!W || !H) return
     const inset = this.measure('stage-inset', 28), top = this.measure('stage-top', 10), gap = this.measure('gap', 24)
-    const tile = this.tabs.selectedWidth / 2 + this.measure('index-fade', 40)
-    const column = this.stage.parentElement?.getBoundingClientRect().left ?? 0
-    const stripLeft = this.tabs.el.getBoundingClientRect().left, stripWidth = this.tabs.el.clientWidth
     // Beside the sidebar the page keeps one page gap from the column and shrinks
     // before that gutter grows; the right neighbour has the room left over.
     // Without the sidebar the page is centred in the stage.
@@ -698,7 +647,7 @@ export class Reader {
       const f = this.host.get(doc.key)
       if (!f) return
       const sel = doc.key === this.selected
-      const width = sel && (this.expanded || (fill && doc.kind === 'chat' && this.liveWidth === null)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
+      const width = sel && (doc.kind !== 'chat' || this.expanded || (fill && this.liveWidth === null)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`
@@ -706,11 +655,6 @@ export class Reader {
       x += width + gap
     })
     const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
-    // The index holds the selected tile over the page's centre, or as near it as its slot allows.
-    // The strip and the stage share the column; the page's centre is measured on screen all the same.
-    const focus = column + target + centre - stripLeft
-    this.tabs.setFocus(Math.max(Math.min(tile, stripWidth / 2), Math.min(Math.max(stripWidth / 2, stripWidth - tile), focus)))
-    if (tabIndex >= 0) this.tabs.mark(tabIndex, animate)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
@@ -737,8 +681,6 @@ export class Reader {
     this.renderSidebar()
     this.paintRail()
     this.layout(false)
-    const index = this.channel?.documents.findIndex(d => d.key === this.selected) ?? 0
-    this.tabs.mark(index, false)
   }
   /** Expand takes the whole window: the board bar and the sidebar step aside until it is restored. */
   private toggleExpand(): void {
@@ -802,6 +744,7 @@ export class Reader {
     if (same) return
     const menu = element('div', 'ws-menu')
     menu.setAttribute('aria-label', 'Document and constitution actions')
+    menu.append(button('ws-menu-item', 'Sent files', () => this.showSentFiles()))
     const url = doc.kind === 'fiber' ? window.location.href : fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner)
     for (const [label, download] of [['Open in new tab', false], ['Download', true]] as const) {
       const a = element('a', 'ws-menu-item', label)
@@ -918,7 +861,7 @@ export class Reader {
   }
   /**
    * Opening or closing the sidebar is one coordinated motion: the column
-   * slides in or out while the stage and the tab strip glide to their new
+   * slides in or out while the stage glides to its new
    * places. The layout lands at once and only `translate` and `opacity`
    * animate back from where things were, so nothing reflows per frame.
    * Under reduced motion it lands instantly.
@@ -986,13 +929,11 @@ export class Reader {
     this.railToggle.setAttribute('aria-expanded', String(open))
     this.railToggle.setAttribute('aria-label', open ? 'Hide threads' : 'Show threads')
   }
-  private stagePlaces(): { page: number; tabs: number[]; sidebar: number } {
+  private stagePlaces(): { page: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
-    return { page, tabs: this.tabs.buttons.map(tab => tab.getBoundingClientRect().left), sidebar: this.sidebar.offsetWidth }
+    return { page, sidebar: this.sidebar.offsetWidth }
   }
-  private slideSidebar(shown: boolean, before: { page: number; tabs: number[]; sidebar: number }): void {
-    // The tiles glide from where they were to where the strip's scroll puts them.
-    this.tabs.flushLayout()
+  private slideSidebar(shown: boolean, before: { page: number; sidebar: number }): void {
     const after = this.stagePlaces()
     const options: KeyframeAnimationOptions = {
       duration: this.measure('sidebar-time', 220),
@@ -1003,8 +944,6 @@ export class Reader {
       if (el && Math.abs(from) >= 1) animations.push(el.animate([{ translate: `${from}px 0` }, { translate: '0 0' }], options))
     }
     glide(this.parallax, before.page - after.page)
-    // The tiles follow their page across the head, inside the index's slot.
-    this.tabs.buttons.forEach((tab, i) => glide(tab, (before.tabs[i] ?? after.tabs[i]) - after.tabs[i]))
     const width = Math.max(before.sidebar, after.sidebar)
     const hidden = { translate: `${-width}px 0`, opacity: 0 }, rest = { translate: '0 0', opacity: 1 }
     this.el.classList.add('ws-sidebar-sliding')
@@ -1141,7 +1080,7 @@ export class Reader {
     const forward = shouldForwardDocumentKey(e)
     if (e.altKey && !forward) return
     // Native controls own activation and composite navigation; the managed tablist uses our shared intents.
-    if (!this.tabs.el.contains(e.target as Node) && !forward && !e.metaKey && !e.ctrlKey) return
+    if (!forward && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
     if (intent && this.handleIntent(intent, e.repeat)) {
       e.preventDefault(); e.stopImmediatePropagation()
@@ -1150,15 +1089,14 @@ export class Reader {
   private handleIntent(intent: KeyIntent, repeat = false): boolean {
     if (intent === 'help') return false
     if (intent === 'back') {
+      if (repeat) return true
       if (this.cancelResize) this.cancelResize()
       else if (this.picker.isOpen) this.picker.close(true)
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
-      else if (this.expanded) this.toggleExpand()
-      else this.opts.onReturn()
+      else this.back()
       return true
     }
-    if (this.tabs.handleIntent(intent)) return true
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
     if (constitutionAction(intent, this.currentCard, {
       verdict: (_, verdict) => this.opts.onVerdict?.(verdict),
@@ -1174,8 +1112,6 @@ export class Reader {
       else if (this.picker.isOpen) this.picker.focus()
       else this.openSwitcher()
     }
-    else if (intent === 'prev' || intent === 'next') this.step(intent === 'prev' ? -1 : 1)
-    else if (intent === 'first' || intent === 'last') this.selectIndex(intent === 'first' ? 0 : (this.channel?.documents.length ?? 1) - 1)
     else if (intent === 'open') this.toggleExpand()
     else if (intent === 'prevChannel' || intent === 'nextChannel') {
       const cards = this.sidebarCards()
@@ -1270,6 +1206,7 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    this.inset?.view.dispose()
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
@@ -1284,7 +1221,6 @@ export class Reader {
     cancelAnimationFrame(this.arrival)
     if (this.departure !== null) clearTimeout(this.departure)
     this.stopTitles()
-    this.tabs.dispose()
     this.picker.dispose()
     this.sidebarPicker.dispose()
     for (const ghost of this.flightRoots) this.opts.themes?.unbind(ghost)

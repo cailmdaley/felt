@@ -18,8 +18,8 @@
   min-height: 44px; padding: 8px calc(var(--ws-chat-gutter) - 10px) 8px var(--ws-chat-gutter);
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
-/* The lead holds only the phone's way back to the origin; the desktop leaves by Escape and the board bar. */
-.ws-chat-lead { display: none; flex: none; align-items: center; gap: 2px; }
+/* One back control leads to the parent chat or the originating board view. */
+.ws-chat-lead { display: inline-flex; flex: none; align-items: center; gap: 2px; }
 .ws-chat .ws-chat-back {
   flex: none; min-height: 28px; padding: 2px 6px; margin-left: -6px;
   border: 0 !important; background: transparent; color: var(--ws-ink-muted);
@@ -193,7 +193,7 @@
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
-  .ws-reader[data-page='chat'] :is(.ws-navbar, .ws-thumbbar) { display: none; }
+  .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
   .ws-chat .ws-chat-menu-back:not([hidden]) { display: block; border-top: var(--ws-line-width) solid var(--ws-hairline-soft); margin-top: 4px; padding-top: 4px; }
   .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }

@@ -39,7 +39,7 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerP
     shuttleBase: '', themes, workerPill,
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
-    onSelect: vi.fn(),
+    onSelect: key => reader.select(key),
     onReturn: vi.fn(),
     onChannel,
     cards: () => channels,
@@ -175,7 +175,7 @@ describe('Reader channel sidebar', () => {
     expect(head.nextElementSibling).toBeNull()
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
-    expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"] > [role="tablist"]')).not.toBeNull()
+    expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"]')).toBeNull()
     const control = head.querySelector<HTMLElement>('.ws-worker-control')!
     expect(control.dataset.turn).toBe('working')
     expect(control.querySelector('.ws-worker-dot')).not.toBeNull()
@@ -205,11 +205,11 @@ describe('Reader channel sidebar', () => {
     expect(bind.mock.calls.every(([el]) => el === reader.el)).toBe(true)
     // The running head sits on the veil: there are no chrome plates to theme.
     expect(reader.el.querySelectorAll('[data-part="chrome-plate"]')).toHaveLength(0)
-    for (const part of ['page-band', 'tab-strip', 'tab', 'tab-tip', 'page-sheet', 'page-sheet-panel']) {
+    for (const part of ['page-sheet']) {
       expect(reader.el.querySelector(`[data-part="${part}"]`)).not.toBeNull()
     }
     expect(reader.el.querySelector('.ws-navbar')?.getAttribute('data-part')).toBe('phone-topbar')
-    expect(reader.el.querySelector('.ws-thumbbar')?.getAttribute('data-part')).toBe('phone-bottom-bar')
+    expect(reader.el.querySelector('.ws-thumbbar')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar .kbn-ctl-temper, .ws-navbar .kbn-ctl-discard')).toBeNull()
     expect(reader.el.querySelector<HTMLElement>('.ws-navbar .ws-head-worker')?.hidden).toBe(true)
     reader.hide()
@@ -526,65 +526,16 @@ describe('Reader channel sidebar', () => {
     expect(writes).toHaveBeenCalledOnce()
   })
 
-  it('keeps the selected tab visible when opening the sidebar changes layout', () => {
+  it('keeps the selected page mounted when the sidebar changes layout', () => {
     const reader = makeReader()
-    const base = channel(alpha)
-    const documents = Array.from({ length: 4 }, (_, index) => ({
-      ...base.documents[0], key: `fiber:host-a:alpha-${index}`, name: `Page ${index + 1}`,
-    }))
-    const pages: Channel = { ...base, documents, labels: documents.map(doc => doc.name) }
-    reader.show(pages, documents[3].key, 'Desk', alpha)
-    const strip = reader.el.querySelector<HTMLElement>('.ws-tabs')!
-    const selected = reader.el.querySelector<HTMLButtonElement>('.ws-tab[aria-selected="true"]')!
-    Object.defineProperty(strip, 'clientWidth', {
-      configurable: true, get: () => reader.el.classList.contains('ws-with-sidebar') ? 100 : 120,
-    })
-    Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 500 })
-    Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
-    Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
-    window.dispatchEvent(new Event('resize'))
-    paintFrame()
-    expect(strip.scrollLeft).toBe(290)
+    const pages = channel(alpha)
+    reader.show(pages, pages.documents[0].key, 'Desk', alpha)
+    const frame = reader.host.get(pages.documents[0].key)!
     reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
     paintFrame()
-    expect(strip.scrollLeft).toBe(300)
-    expect(strip.scrollLeft).toBeLessThanOrEqual(310)
-    expect(strip.scrollLeft + strip.clientWidth).toBeGreaterThanOrEqual(390)
-  })
-
-  it('glides the tiles from the scroll they had to the scroll the opened sidebar gives them', () => {
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate')
-    const glides = new Map<Element, Keyframe[]>()
-    Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: function (this: HTMLElement, keyframes: Keyframe[]) {
-      glides.set(this, keyframes)
-      return { finished: new Promise(() => {}), cancel() {} } as unknown as Animation
-    } })
-    try {
-      const reader = makeReader()
-      const base = channel(alpha)
-      const documents = Array.from({ length: 4 }, (_, index) => ({
-        ...base.documents[0], key: `fiber:host-a:alpha-${index}`, name: `Page ${index + 1}`,
-      }))
-      reader.show({ ...base, documents, labels: documents.map(doc => doc.name) }, documents[3].key, 'Desk', alpha)
-      const strip = reader.el.querySelector<HTMLElement>('.ws-tabs')!
-      const selected = reader.el.querySelector<HTMLButtonElement>('.ws-tab[aria-selected="true"]')!
-      Object.defineProperty(strip, 'clientWidth', {
-        configurable: true, get: () => reader.el.classList.contains('ws-with-sidebar') ? 100 : 120,
-      })
-      Object.defineProperty(strip, 'scrollWidth', { configurable: true, value: 500 })
-      Object.defineProperty(selected, 'offsetLeft', { configurable: true, value: 310 })
-      Object.defineProperty(selected, 'offsetWidth', { configurable: true, value: 80 })
-      selected.getBoundingClientRect = () => new DOMRect(310 - strip.scrollLeft, 0, 80, 40)
-      window.dispatchEvent(new Event('resize'))
-      paintFrame()
-      expect(strip.scrollLeft).toBe(290)
-      reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
-      expect(strip.scrollLeft).toBe(300)
-      expect(glides.get(selected)).toEqual([{ translate: '10px 0' }, { translate: '0 0' }])
-    } finally {
-      if (descriptor) Object.defineProperty(HTMLElement.prototype, 'animate', descriptor)
-      else Reflect.deleteProperty(HTMLElement.prototype, 'animate')
-    }
+    expect(reader.host.get(pages.documents[0].key)).toBe(frame)
+    expect(frame.el.classList.contains('ws-selected')).toBe(true)
+    expect(reader.el.querySelector('.ws-tabs')).toBeNull()
   })
 
   it('leaves activation keys to focused controls while keeping native Reader modality', () => {
@@ -602,45 +553,20 @@ describe('Reader channel sidebar', () => {
     expect(reader.el.classList.contains('ws-keyboard')).toBe(false)
   })
 
-  it('shares arrow navigation with TabStrip without double-stepping focus or selection', () => {
-    const reader = makeReader()
-    const base = channel(alpha)
-    const first = base.documents[0]
-    const second = { ...first, key: 'fiber:host-a:second', name: 'Second' }
-    const pages: Channel = { ...base, documents: [first, second], labels: ['Note', 'Second'] }
-    reader.show(pages, first.key, 'Desk', alpha)
-    const tabs = [...reader.el.querySelectorAll<HTMLButtonElement>('.ws-tab')]
-    expect(tabs).toHaveLength(2)
-    tabs[0].focus()
 
-    const right = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
-    tabs[0].dispatchEvent(right)
-    expect(right.defaultPrevented).toBe(true)
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(tabs[1])
-    expect(reader.el.classList.contains('ws-keyboard')).toBe(true)
 
-    const left = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
-    tabs[1].dispatchEvent(left)
-    expect(left.defaultPrevented).toBe(true)
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
-    expect(document.activeElement).toBe(tabs[0])
-  })
-
-  it('caps a channel\'s sent attachments in the strip but shows the document the reader lands on', () => {
+  it('keeps all sent attachments available without drawing page chrome', () => {
     const big = buildChannel({
       uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '',
       sent: Array.from({ length: 6 }, (_, i) => ({ path: `/sent-${i}.html`, time: 100 + i })),
     })
     const reader = makeReader(alpha)
-    const tiles = (): string[] => [...reader.el.querySelectorAll<HTMLElement>('.ws-tab')].map(tab => tab.dataset.tabKey!)
     reader.show(big, big.documents[0].key, 'Board', alpha)
-    expect(tiles()).toEqual(big.documents.slice(0, 4).map(d => d.key))
-    expect(reader.el.querySelector('.ws-tab-more')?.textContent).toBe('+3')
-    const hidden = big.documents.at(-1)!
-    reader.show(big, hidden.key, 'Board', alpha)
-    expect(tiles()).toEqual(big.documents.map(d => d.key))
-    expect(reader.el.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey).toBe(hidden.key)
-    expect(reader.el.querySelector('.ws-tab-more')).toBeNull()
+    expect(reader.el.querySelector('.ws-tabs,.ws-thumbbar')).toBeNull()
+    const file = big.documents.at(-1)!
+    reader.openDocument(file.key)
+    expect(reader.document?.key).toBe(file.key)
+    reader.back()
+    expect(reader.document?.kind).toBe('fiber')
   })
 })

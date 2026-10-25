@@ -3,7 +3,7 @@ import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
 const receipts = (doc: WorkspaceDocument): string => JSON.stringify(doc.provenance
   .filter(p => p.kind === 'sent').map(p => JSON.stringify(p)).sort())
 
-/** Loading and entering a channel establish a baseline; only another receipt moves a tab. */
+/** Loading and entering a channel establish a baseline; only another receipt animates a folio. */
 export class ReceiptArrivals {
   private readonly channels = new Map<string, Map<DocKey, string>>()
   observe(channel: Channel, ready: boolean): Set<DocKey> {
@@ -21,9 +21,6 @@ export class ReceiptMotion {
   private readonly motion = window.matchMedia?.('(prefers-reduced-motion: reduce)')
   private readonly animations = new Set<Animation>()
   constructor() { this.motion?.addEventListener('change', this.motionChanged) }
-  tab(el: HTMLElement): void {
-    this.run(el, [{ transform: 'translateX(-24px)', opacity: 0 }, { transform: 'translateX(0)', opacity: 1 }], 280)
-  }
   folio(el: HTMLElement): void {
     const shadow = getComputedStyle(el).getPropertyValue('--ws-chrome-shadow').trim() || '0 8px 18px rgba(0,0,0,.15)'
     this.run(el, [

@@ -577,7 +577,7 @@ describe('document keyboard bridge', () => {
     const receded = render.calls.find(call => call.path === docs[1].path)!.options.onDocumentKey!
     const keydown = vi.fn()
     track.addEventListener('keydown', keydown)
-    const arrow = { key: 'ArrowRight', altKey: true }
+    const arrow = { key: 'ArrowLeft', altKey: true }
     receded(arrow)
     selected({ ...arrow, altKey: false })
     expect(keydown).toHaveBeenCalledOnce()

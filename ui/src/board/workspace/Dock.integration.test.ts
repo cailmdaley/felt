@@ -427,48 +427,31 @@ describe('state-shaped act zone', () => {
     dock.bandFor(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
     expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
   })
-  it("opens the conversation on the fiber's outcome under a quiet label, kept current, opening in place when it runs long", () => {
-    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees with its original posterior.' }))
-    const region = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-chat-outcome')!
-    const text = region.querySelector<HTMLElement>('.ws-chat-outcome-text')!
-    const more = region.querySelector<HTMLButtonElement>('.ws-chat-outcome-more')!
-    expect(region.hidden).toBe(false)
-    expect(text.querySelector('.ws-chat-outcome-label')?.textContent).toBe('Outcome')
-    expect(text.textContent).toBe('OutcomeSeed 3000 agrees with its original posterior.')
-    expect(region.nextElementSibling?.classList.contains('ws-transcript')).toBe(true)
-    // Short enough to show whole: no control.
-    expect(more.hidden).toBe(true)
-    // Clamped: the control offers the rest and opens it in place.
-    Object.defineProperty(text, 'scrollHeight', { configurable: true, value: 120 })
-    Object.defineProperty(text, 'clientHeight', { configurable: true, value: 40 })
-    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Mechanism found, at length.' }))
-    expect(text.textContent).toBe('OutcomeMechanism found, at length.')
-    expect([more.hidden, more.textContent]).toEqual([false, 'Read full outcome ▸'])
-    more.click()
-    expect(region.classList.contains('ws-chat-outcome-open')).toBe(true)
-    expect([more.textContent, more.getAttribute('aria-expanded')]).toEqual(['Show less ▴', 'true'])
-    more.click()
-    expect(region.classList.contains('ws-chat-outcome-open')).toBe(false)
-    dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: '' }))
-    expect(region.hidden).toBe(true)
+  it('lands on the conversation without repeating the outcome, with sent files in the menu', () => {
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees.' }))
+    expect(band.el.querySelector('.ws-chat-outcome')).toBeNull()
+    expect(band.el.querySelector('.ws-chat-log .ws-transcript')).not.toBeNull()
+    const sent = vi.fn(); band.openSentFiles = sent
+    band.el.querySelector<HTMLButtonElement>('.ws-chat-sent-files')!.click()
+    expect(sent).toHaveBeenCalledOnce()
   })
-  it('inside a thread the header traces the ancestry beneath the name and the menu holds the origin', () => {
+  it('inside a thread the header keeps a back control alongside its ancestry', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's' }))
     const origin = vi.fn(), chair = vi.fn()
     band.setNav({ ancestry: [{ name: 'Chair', open: chair }, { name: 'Validation', open: vi.fn() }], origin: { label: 'Board', open: origin } })
     const trail = band.el.querySelector<HTMLElement>('.ws-chat-head .ws-chat-ancestry')!
     expect(trail.hidden).toBe(false)
     expect(trail.textContent).toBe('Chair/Validation')
-    expect(band.el.querySelector('.ws-chat-lead button')).toBeNull()
+    expect(band.el.querySelector('.ws-chat-lead button')).not.toBeNull()
     trail.querySelector<HTMLButtonElement>('.ws-ancestry-link')!.click()
     expect(chair).toHaveBeenCalled()
-    const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-origin-item')!
-    expect(item.textContent).toBe('‹ Board')
+    const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-lead button')!
+    expect(item.textContent).toBe('‹')
     item.click()
     expect(origin).toHaveBeenCalled()
     band.setNav({ origin: { label: 'Board', open: origin } })
     expect(trail.hidden).toBe(true)
-    expect(band.el.querySelector('.ws-chat-menu-back')!.hasAttribute('hidden')).toBe(true)
+    expect(band.el.querySelector('.ws-chat-menu-back')).toBeNull()
     expect(band.el.querySelector('.ws-chat-lead .ws-chat-origin')).not.toBeNull()
   })
 })

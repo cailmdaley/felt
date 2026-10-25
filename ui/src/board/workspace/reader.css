@@ -16,16 +16,16 @@
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
   background: var(--ws-veil); -webkit-backdrop-filter: var(--ws-veil-filter); backdrop-filter: var(--ws-veil-filter);
 }
-.ws-stage-row, .ws-thumbbar { position: relative; z-index: 1; }
-.ws-veil, .ws-navbar, .ws-stage-row, .ws-thumbbar { transition: opacity var(--ws-veil-time) var(--ws-ease); }
+.ws-stage-row { position: relative; z-index: 1; }
+.ws-page.ws-receded { display: none; }
+.ws-veil, .ws-navbar, .ws-stage-row { transition: opacity var(--ws-veil-time) var(--ws-ease); }
 .ws-stage { transition: transform var(--ws-veil-time) var(--ws-ease); }
 .ws-reader.ws-arriving .ws-veil, .ws-reader.ws-departing .ws-veil,
 .ws-reader.ws-arriving .ws-navbar, .ws-reader.ws-departing .ws-navbar,
 .ws-reader.ws-arriving .ws-stage-row, .ws-reader.ws-departing .ws-stage-row,
-.ws-reader.ws-arriving .ws-thumbbar, .ws-reader.ws-departing .ws-thumbbar { opacity: 0; }
 .ws-reader.ws-veil-held .ws-veil { opacity: 1; transition: none; }
 .ws-reader.ws-dormant .ws-veil, .ws-reader.ws-dormant .ws-navbar, .ws-reader.ws-dormant .ws-stage-row,
-.ws-reader.ws-dormant .ws-thumbbar, .ws-reader.ws-dormant .ws-stage { transition: none; }
+.ws-reader.ws-dormant .ws-stage { transition: none; }
 .ws-reader.ws-arriving .ws-stage, .ws-reader.ws-departing .ws-stage { transform: var(--ws-settle); }
 :where(.ws-reader button) { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; }
 .ws-reader button:focus, .ws-reader a:focus { outline: none; }
@@ -37,7 +37,7 @@
 .ws-reader.ws-keyboard button:focus-visible, .ws-reader.ws-keyboard a:focus-visible, .ws-reader.ws-keyboard input:focus-visible {
   outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: var(--ws-focus-offset);
 }
-.ws-mono, .ws-labelbar, .ws-receipts, .ws-position {
+.ws-mono, .ws-labelbar, .ws-receipts {
   font-family: var(--ws-mono); letter-spacing: var(--ws-mono-tracking);
 }
 /* Expand takes the whole window: no bar above, no sidebar beside. */
@@ -246,7 +246,6 @@
 .ws-with-sidebar .ws-page.ws-receded.ws-before { clip-path: inset(0 100% 0 0); pointer-events: none; }
 .ws-with-rail .ws-page.ws-receded.ws-after { clip-path: inset(0 0 0 100%); pointer-events: none; }
 .ws-zen .ws-page.ws-receded { opacity: 0; pointer-events: none; }
-.ws-thumbbar { display: none; }
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .ws-placeholder { background: var(--ws-paper); }
@@ -300,8 +299,6 @@
   .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
-  /* The phone keeps its place in the bottom bar's ticks and count and its page sheet. */
-  .ws-head-index, .ws-tab-tip { display: none !important; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }
@@ -314,15 +311,6 @@
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { text-align: center; flex: 1; height: var(--ws-phone-target); line-height: var(--ws-phone-target); padding: 0; }
-  .ws-thumbbar { display: grid; grid-template-columns: var(--ws-phone-target) minmax(0, 1fr) var(--ws-phone-target) var(--ws-phone-target); align-items: center; padding: 0 var(--ws-small-gap) env(safe-area-inset-bottom); height: calc(var(--ws-thumb-height) + env(safe-area-inset-bottom)); flex: none; border-top: var(--ws-line-width) solid var(--ws-hairline); background: var(--ws-paper); touch-action: pan-y; user-select: none; }
-  /* Two lines: the page's title, then where it sits and how it arrived. */
-  .ws-page-choice { min-width: 0; height: 55px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; padding: 0 4px; }
-  .ws-thumb-title, .ws-thumb-meta { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
-  .ws-thumb-title { font: var(--ws-label-size)/1.15 var(--ws-serif); color: var(--ws-ink); }
-  .ws-thumb-meta, .ws-thumb-meta > * { font: var(--ws-small-size)/1.2 var(--ws-mono); letter-spacing: 0; color: var(--ws-ink-muted); }
-  .ws-thumb-meta .ws-position { font-variant-numeric: tabular-nums; }
-  .ws-thumb-button { display: grid; place-items: center; width: var(--ws-phone-target); height: var(--ws-phone-target); color: var(--ws-ink); font-size: var(--ws-section-size) !important; }
-  .ws-thumb-button svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
   .ws-icon-button, .ws-sidebar, .ws-sidebar-toggle, .ws-page .ws-edge { display: none !important; }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
@@ -331,8 +319,6 @@
   /* A wide table scrolls inside itself, so the page keeps its width and its swipe. */
   .ws-content .kbn-detail-prose table { display: block; width: max-content; max-width: 100%; overflow-x: auto; }
   .ws-menu-item { min-height: var(--ws-phone-target); }
-  /* While the keyboard is up the field owns the screen; the page bar would sit under Safari's input accessory. */
-  .ws-reader:has(.ws-content :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"]), [contenteditable="true"]):focus) .ws-thumbbar { display: none; }
 }
 /* Under a finger the head's worker control is a full target, as the pill was. */
 @media (pointer: coarse) {
@@ -341,7 +327,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ws-track, .ws-page { transition: none !important; }
   .ws-parallax { transform: none; }
-  .ws-veil, .ws-navbar, .ws-stage-row, .ws-thumbbar, .ws-stage, .ws-sheet, .ws-sidebar .ws-constitution-card { transition: none !important; }
+  .ws-veil, .ws-navbar, .ws-stage-row, .ws-stage, .ws-sheet, .ws-sidebar .ws-constitution-card { transition: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }

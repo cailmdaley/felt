@@ -12,8 +12,6 @@ const events = new Set(['pointerenter', 'pointerleave', 'pointerover', 'pointero
 // Adding a listener, even in one of these files, needs its own reason.
 const exceptions = [
   { file: 'workspace/AudioPage.ts', source: "this.waveform.addEventListener('pointerleave', () => { this.hover.hidden = true })", reason: 'The workspace audio waveform clears its time cursor when the pointer leaves.' },
-  { file: 'workspace/TabStrip.ts', source: "this.el.addEventListener('pointerleave', this.onPointerLeave)", reason: 'The workspace tab strip dismisses its tooltip when the pointer leaves; workspace is outside the Desk rule.' },
-  { file: 'workspace/TabStrip.ts', source: "this.el.addEventListener('pointerover', this.onPointerOver)", reason: 'The workspace tab strip shows document tooltips; workspace is outside the Desk rule.' },
   { file: 'workspace/Depth.ts', source: "document.addEventListener('pointerleave', this.leave)", reason: 'Workspace depth resets its pointer drift when leaving the document, only while the workspace is raised.' },
   { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseenter', () => hot(true))", reason: 'Chronicle tints a settled cycle under the pointer without changing its content or geometry.' },
   { file: 'views/ChronicleView.ts', source: "el.addEventListener('mouseleave', () => hot(false))", reason: 'Chronicle restores the settled cycle tint when the pointer leaves.' },

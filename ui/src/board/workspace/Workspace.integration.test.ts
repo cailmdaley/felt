@@ -239,13 +239,14 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true, cancelable: true }))
     expect(onRest).toHaveBeenCalledWith(expect.objectContaining({ uid: 'alpha' }), workspace.reader.el)
   })
-  it('a Question opens its report rather than the previously selected prose', async () => {
+  it('a Question opens its chat with the report inset rather than a remembered file', async () => {
+    const original = cards[0]; cards[0] = { ...original, shuttleKind: 'oneshot' }
+    onTestFinished(() => { cards[0] = original })
     workspace.open(cards[0]); await flush(); await flush()
-    const prose = document.querySelector<HTMLElement>('[data-key="fiber:host-a:alpha"]')!
-    prose.click(); await flush()
+    workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     workspace.openQuestion(cards[0]); await flush(); await flush()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key'))
-      .toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    expect(workspace.reader.document?.kind).toBe('chat')
+    expect(document.querySelector('.ws-selected .ws-report-inset')).not.toBeNull()
   })
 
   it('a Question without a report opens its constitution', async () => {
@@ -680,23 +681,18 @@ describe('workspace reader integration', () => {
       })
       const key = docKey('host-a', `/notes/alpha/${landing}`, 'host-a')
       workspace.open(cards[0], 'Desk', landing === 'report.html' ? undefined : key); await flush()
-      const run = [workspace.reader.el.querySelector('.ws-tabs')!, workspace.reader.el.querySelector('.ws-page-ticks')!]
-      const tabs = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => ['fiber', 'chat'].includes(tab.dataset.kind!) ? '§' : tab.dataset.tabKey!)
-      const selected = (): string | undefined => document.querySelector<HTMLElement>('.ws-tab[aria-selected="true"]')?.dataset.tabKey
+      const selected = (): string | null | undefined => document.querySelector('.ws-selected')?.getAttribute('data-key')
       // Before the body, the selected page shows; the strip and ticks wait unseen, and stepping does nothing.
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
-      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(true)
-      for (const press of ['G', 'l', 'h']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))
+      expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-ticks')).toBeNull()
+      for (const press of ['G', 'l']) document.dispatchEvent(new KeyboardEvent('keydown', { key: press, bubbles: true, cancelable: true }))
       await flush()
       expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(key)
       release(); await flush(); await flush()
-      for (const el of run) expect(el.classList.contains('ws-run-pending'), el.className).toBe(false)
-      // The body declares the report, which runs left of the fiber page; the sent table runs right.
-      expect(tabs()).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
       expect(selected()).toBe(key)
-      // Once the run lands, the same keys step through it.
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: landing === 'report.html' ? 'G' : 'g', bubbles: true, cancelable: true })); await flush()
-      expect(selected()).not.toBe(key)
+      expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-ticks')).toBeNull()
+      workspace.reader.back(); await flush()
+      expect(selected()).toBe('fiber:host-a:alpha')
     })
   }
   it('shows the body as soon as it lands while the strip waits for the receipts, then the strip in its final order', async () => {
@@ -708,25 +704,15 @@ describe('workspace reader integration', () => {
       return original(input, init)
     })
     workspace.open(cards[0]); await flush(); await flush()
-    const strip = workspace.reader.el.querySelector('.ws-tabs')!
     const prose = (): string => document.querySelector('.ws-prose')?.textContent ?? ''
     // The body is in hand: its prose shows and the loading note is gone, while the run waits.
     expect(prose()).toContain('The result is ready.')
     expect(document.querySelector('.ws-body-status')).toBeNull()
-    expect(strip.classList.contains('ws-run-pending')).toBe(true)
-    const choice = workspace.reader.el.querySelector('.ws-page-choice')!
-    const live = workspace.reader.el.querySelector(':scope > .ws-sr-only[aria-live]')!
-    expect(choice.getAttribute('aria-disabled')).toBe('true')
-    expect(live.textContent).toBe('')
-    // A feed-poll repaint in this window keeps the strip pending.
+    expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-choice')).toBeNull()
     workspace.update(); await flush()
-    expect(strip.classList.contains('ws-run-pending')).toBe(true)
     release(); await flush(); await flush()
-    expect(strip.classList.contains('ws-run-pending')).toBe(false)
-    expect(choice.getAttribute('aria-disabled')).toBe('false')
-    expect(live.textContent).toBe('Note, 2 of 3')
-    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => ['fiber', 'chat'].includes(tab.dataset.kind!) ? '§' : tab.dataset.tabKey!)
-    expect(tabs).toEqual([docKey('host-a', '/notes/alpha/report.html', 'host-a'), '§', docKey('host-a', '/notes/alpha/table.html', 'host-a')])
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
+    expect(workspace.reader.host.get(docKey('host-a', '/notes/alpha/table.html', 'host-a'))).toBeDefined()
   })
   it('holds a sent page opened by address between the channel\'s body and its receipts', async () => {
     const original = vi.mocked(fetch).getMockImplementation()!
@@ -758,12 +744,10 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.host.get(tableKey)?.doc.modifiedAt).toBe(new Date(1900000000 * 1000).toISOString())
     expect(workspace.reader.host.get(reportKey)?.doc.modifiedAt).toBe(new Date(2000000000 * 1000).toISOString())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    const order = [...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))
-    // The declared report sits left of the fiber page, the sent table right; the report's newer file time moves neither.
-    expect(order).toEqual(['Report', 'Note', 'table.html'])
+    expect(document.querySelector('.ws-tab')).toBeNull()
     const metadataRequests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))
     expect(metadataRequests.every(([url]) => String(url).includes('origin=host-a'))).toBe(true)
-    document.querySelector<HTMLButtonElement>('.ws-tab[aria-label="Note"]')!.click()
+    workspace.reader.openDocument('fiber:host-a:alpha')
     document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!.click()
     await flush()
     const selectedKey = document.querySelector('.ws-selected')?.getAttribute('data-key')
@@ -776,7 +760,7 @@ describe('workspace reader integration', () => {
     workspace.open(cards[0]); await flush()
     const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
-    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).toContain('table.html')
+    expect(workspace.reader.host.get(docKey('host-a', '/notes/alpha/table.html', 'host-a'))).toBeDefined()
     // The metadata reads wait in the quiet lane, two at a time over HTTP/1.1.
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/file-info?'))).toHaveLength(2)
   })
@@ -856,11 +840,9 @@ describe('workspace reader integration', () => {
     const iframe = frame.content.querySelector('iframe')!
     expect(frame.el.classList.contains('ws-selected')).toBe(true)
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
-    const reportIndex = workspace.reader.host.get(reportKey) ? [...document.querySelectorAll('.ws-tab')].findIndex(tab => tab.getAttribute('aria-selected') === 'true') : -1
-    const away = reportIndex === document.querySelectorAll('.ws-tab').length - 1 ? 'ArrowLeft' : 'ArrowRight'
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: away, altKey: true, bubbles: true }))
+    workspace.reader.openDocument('fiber:host-a:alpha')
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: away === 'ArrowLeft' ? 'ArrowRight' : 'ArrowLeft', altKey: true, bubbles: true }))
+    workspace.reader.back()
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -886,17 +868,16 @@ describe('workspace reader integration', () => {
     expect(article.querySelector('.ws-dock')).toBeNull()
     expect(article.querySelector('.kbn-detail-lede')).not.toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
-    const tabs = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')]
-    expect(tabs().at(-1)?.dataset.kind).toBe('chat')
-    expect(tabs().some(b => b.dataset.kind === 'fiber')).toBe(false)
+    expect(document.querySelector('.ws-tab,.ws-thumbbar')).toBeNull()
+    expect(document.querySelector('.ws-chat-outcome')).toBeNull()
+    expect(document.querySelector('.ws-report-inset')).not.toBeNull()
 
     const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
     expect(constitution.hidden).toBe(false)
     expect(constitution.textContent).toBe('Constitution')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
-    const proseTab = tabs().find(b => b.dataset.kind === 'fiber')!
-    expect(proseTab.getAttribute('aria-selected')).toBe('true')
+    expect(workspace.reader.document?.kind).toBe('fiber')
     const link = document.querySelector<HTMLAnchorElement>('.ws-selected a[data-file-path]')!
     link.click()
     await flush()
@@ -1036,8 +1017,6 @@ describe('workspace reader integration', () => {
     escape()
     expect(document.querySelector('.ws-menu')).toBeNull()
     expect(popover).toHaveBeenCalledOnce()
-    escape()
-    expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()
     const returned = new Promise(resolve => window.addEventListener('popstate', resolve, { once: true }))
     escape()
     await returned
@@ -1125,40 +1104,22 @@ describe('workspace reader integration', () => {
     })
     workspace.open(orderedCards[0])
     await flush()
-    const labels = (): string[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].map(tab => tab.getAttribute('aria-label') ?? '')
-    const firstOrder = labels()
-    expect(firstOrder).toEqual(['notes.md', 'table.html', 'shared', 'Note'])
-
-    workspace.open(orderedCards[1])
-    await flush()
-    // Each channel orders its declarations as its own body does, its report beside the fiber page.
-    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
-    // Nothing named a page before the channel painted, so it stays on its own page.
-    expect(document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Note')
-    const note = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')].find(tab => tab.getAttribute('aria-label') === 'Note')!
-    note.click()
-    const prose = workspace.reader.host.get(`fiber:host-b:second`)!.content
+    expect(workspace.reader.document?.key).toBe('fiber:host-a:first')
+    workspace.open(orderedCards[1]); await flush()
+    expect(workspace.reader.document?.key).toBe('fiber:host-b:second')
+    const prose = workspace.reader.host.get('fiber:host-b:second')!.content
     expect(prose.querySelector('.ws-prose-documents')).toBeNull()
-    expect(labels()).toEqual(['table.html', 'notes.md', 'shared', 'Note'])
+    expect(document.querySelector('.ws-tab')).toBeNull()
   })
 
-  it('uses the shared Reader keymap for single-step tab roving focus', async () => {
-    workspace.open(cards[0])
-    await flush()
-    const tabs = [...document.querySelectorAll<HTMLButtonElement>('.ws-tab')]
-    const first = tabs[0]
-    first.focus()
-    const right = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
-    first.dispatchEvent(right)
-    expect(right.defaultPrevented).toBe(true)
-    expect(document.activeElement).toBe(tabs[1])
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
-    expect(tabs.filter(tab => tab.tabIndex === 0)).toHaveLength(1)
-    const left = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
-    tabs[1].dispatchEvent(left)
-    expect(left.defaultPrevented).toBe(true)
-    expect(document.activeElement).toBe(first)
-    expect(tabs.filter(tab => tab.getAttribute('aria-selected') === 'true')).toHaveLength(1)
+  it('uses the Reader back key to pop an opened file to its parent', async () => {
+    workspace.open(cards[0]); await flush()
+    const key = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    workspace.reader.openDocument(key)
+    expect(workspace.reader.document?.key).toBe(key)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(workspace.reader.document?.kind).toBe('fiber')
+    expect(workspace.isActive).toBe(true)
   })
 
   it('leaves Enter and Space activation on native expand controls alone', async () => {
@@ -1189,7 +1150,7 @@ describe('workspace reader integration', () => {
     await flush()
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe(ordered[0].name)
 
-    document.querySelector<HTMLButtonElement>('.ws-tab:is([data-kind="fiber"], [data-kind="chat"])')!.click()
+    workspace.reader.openDocument('fiber:host-a:alpha')
     const scroller = document.querySelector<HTMLElement>('.ws-selected .ws-prose-scroll')!
     let scrollHeight = 1800
     Object.defineProperties(scroller, {
@@ -1297,7 +1258,7 @@ describe('workspace reader integration', () => {
     vi.stubGlobal('fetch', vi.fn((url: string) => url.includes('/api/v1/fibers/work/')
       ? new Promise<Response>(resolve => { deliver = resolve }) : originalFetch(url)))
     workspace.open(cards[0])
-    document.querySelector<HTMLButtonElement>('.ws-tab')!.click()
+    workspace.reader.openDocument('fiber:host-a:alpha')
     deliver(fiberReadResponse(cards[0]))
     await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('fiber:host-a:alpha')
@@ -1351,14 +1312,14 @@ describe('workspace reader integration', () => {
     await flush()
     workspace.open(cards[0])
     await flush()
-    expect(document.activeElement).not.toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
+    expect(document.activeElement).not.toBe(document.querySelector('.ws-return'))
     const control = document.querySelector<HTMLButtonElement>('.ws-selected .ws-menu-button')!
     const press = new MouseEvent('mousedown', { button: 0, bubbles: true, cancelable: true })
     control.dispatchEvent(press)
     expect(press.defaultPrevented).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', altKey: true, bubbles: true }))
     await flush()
-    expect(document.activeElement).toBe(document.querySelector('.ws-tab[aria-selected="true"]'))
+    expect(document.activeElement).toBe(document.querySelector('.ws-return'))
   })
 
   it('keeps Alt-arrow stepping in sidebar order and ignores messages from unrelated frames', async () => {
@@ -1380,7 +1341,7 @@ describe('workspace reader integration', () => {
   it('restores a Desk-opened channel over Desk after reload', async () => {
     workspace.open(cards[0])
     await flush()
-    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹')
     expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
 
     workspace.dispose()
@@ -1393,7 +1354,7 @@ describe('workspace reader integration', () => {
     await flush()
 
     expect(onView).toHaveBeenCalledWith('desk')
-    expect(document.querySelector('.ws-return')?.textContent).toBe('‹ Desk')
+    expect(document.querySelector('.ws-return')?.textContent).toBe('‹')
   })
 
   it('restores overview scroll after returning from a channel opened on the Board', async () => {

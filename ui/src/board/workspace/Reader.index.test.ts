@@ -2,40 +2,39 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import { Reader } from './Reader.js'
-import { buildChannel, defaultSelection } from './documents.js'
+import { buildChannel, chatDocument } from './documents.js'
 
 const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', shuttleKind: 'oneshot' })
-
-afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals() })
-
-it('floats the map of pages above the centre column, the chat last and selected, no constitution tile', () => {
-  vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  vi.stubGlobal('requestAnimationFrame', () => 1)
-  vi.stubGlobal('cancelAnimationFrame', vi.fn())
-  const reader = new Reader({
-    shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(),
-    onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [alpha], switcherCards: () => [alpha], files: () => [],
-  })
+let reader: Reader
+function setup(phone = false) {
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
+  const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
+  reader = new Reader({ shuttleBase: '', buildProse: () => {
+    const el = document.createElement('div'); el.innerHTML = '<div class="ws-chat-log"></div>'; return el
+  }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,
-    embeds: [{ path: '/report.html' }], sent: [{ path: '/plot.png', time: 1 }] })
-  reader.show(channel, defaultSelection(channel), 'Desk', alpha)
-  const band = reader.el.querySelector<HTMLElement>('[data-part="page-band"]')!
-  // In the centre column, directly above the stage; not in the phone's top bar or the board's.
-  expect(band.parentElement?.classList.contains('ws-stage-column')).toBe(true)
-  expect(band.nextElementSibling).toBe(reader.stage)
-  expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
-  const tabs = [...band.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-  expect(tabs.map(tab => tab.dataset.kind)).toEqual(['image', 'html', 'chat'])
-  expect(tabs.at(-1)?.getAttribute('aria-selected')).toBe('true')
-  // Opening the constitution draws it as a plain § tile, selected, until another page is.
-  const fiber = channel.documents.find(d => d.kind === 'fiber')!
-  reader.select(fiber.key)
-  const withFiber = [...band.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-  expect(withFiber.map(tab => tab.dataset.kind)).toEqual(['fiber', 'image', 'html', 'chat'])
-  expect(withFiber[0].getAttribute('aria-selected')).toBe('true')
-  reader.select(channel.documents.at(-1)!.key)
-  expect([...band.querySelectorAll<HTMLButtonElement>('[role="tab"]')].map(tab => tab.dataset.kind)).toEqual(['image', 'html', 'chat'])
-  reader.dispose()
+    embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent: [{ path: '/plot.png', time: 1 }] })
+  reader.show(channel, chatDocument(channel)!.key, 'Desk', alpha)
+  return { channel, onReturn, onOrchestrator }
+}
+afterEach(() => { reader?.dispose(); document.body.replaceChildren(); vi.unstubAllGlobals() })
+
+it('lands on chat with a live report figure and no strip, tabs or bottom page chooser', () => {
+  setup()
+  expect(reader.document?.kind).toBe('chat')
+  expect(reader.el.querySelector('figure.ws-report-inset iframe')).not.toBeNull()
+  expect(reader.el.querySelector('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice')).toBeNull()
+  reader.el.querySelector<HTMLButtonElement>('.ws-report-open')!.click()
+  expect(reader.document?.name).toBe('report.html')
+  reader.back(); expect(reader.document?.kind).toBe('chat')
+})
+for (const phone of [false, true]) it(`pops nested files then chat then orchestrator/origin, phone=${phone}`, () => {
+  const { channel, onReturn, onOrchestrator } = setup(phone)
+  for (const name of ['report.html', 'detail.html', 'plot.png']) reader.openDocument(channel.documents.find(d => d.name === name)!.key)
+  for (const name of ['detail.html', 'report.html']) { reader.back(); expect(reader.document?.name).toBe(name) }
+  reader.back(); expect(reader.document?.kind).toBe('chat'); expect(onReturn).not.toHaveBeenCalled()
+  reader.back(); expect(onOrchestrator).toHaveBeenCalledOnce(); expect(onReturn).toHaveBeenCalledOnce()
 })

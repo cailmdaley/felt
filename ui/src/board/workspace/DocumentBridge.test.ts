@@ -21,6 +21,21 @@ describe('bounded document messages', () => {
     expect(documentMessage(envelope('references:resolved', { targets: [{ candidate: 'a', title: 'a'.repeat(257), audio: false }] }))).toBe(false)
   })
 
+  it('carries bounded relative navigation only from its connected frame', () => {
+    expect(documentMessage(envelope('navigate', { href: './checks/report.html' }))).toBe(true)
+    for (const payload of [{ href: '' }, { href: 1 }, { href: 'a'.repeat(4097) }, { href: './detail.html', owner: 'other-host' }]) {
+      expect(documentMessage(envelope('navigate', payload))).toBe(false)
+    }
+    const frame = document.createElement('iframe'); document.body.append(frame)
+    const receive = vi.fn(), bridge = connectDocumentFrame(frame, receive)
+    const data = envelope('navigate', { href: './checks/report.html' })
+    window.dispatchEvent(new MessageEvent('message', { source: window, data }))
+    expect(receive).not.toHaveBeenCalled()
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data }))
+    expect(receive).toHaveBeenCalledExactlyOnceWith(data)
+    bridge.dispose()
+  })
+
   it('carries page swipes as bounded travel and release, never extra fields', () => {
     expect(documentMessage(envelope('swipe', { phase: 'move', dx: -120 }))).toBe(true)
     expect(documentMessage(envelope('swipe', { phase: 'end', dx: -120, velocity: -0.8 }))).toBe(true)

@@ -13,7 +13,7 @@ import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { buildChannel, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey } from './documents.js'
+import { buildChannel, normalizeAbsolutePath, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
@@ -164,6 +164,7 @@ export class Workspace {
       onFind: () => opts.focusFind?.() ?? false,
       onExpand: expanded => opts.onExpand?.(expanded),
       onSelect: key => this.select(key),
+      onNavigate: (source, href) => this.openRelative(source, href),
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.returnToOrigin(),
       workerPill: card => this.dock.workerPillFor(card),
@@ -289,7 +290,7 @@ export class Workspace {
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
-    this.history.enter(state.channel.uid, state.channel.owner, doc ?? state.selected, viewForOrigin(origin))
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? (chatDocument(state.channel)?.key ?? state.selected), viewForOrigin(origin))
   }
 
   /**
@@ -471,9 +472,10 @@ export class Workspace {
   private seatNav(state: ChannelState, dock: Dock): void {
     const ancestry: KanbanCard[] = []
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
+    dock.openSentFiles = () => this.reader.showSentFiles()
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) } })),
-      origin: { label: this.origin, open: () => this.returnToOrigin() },
+      origin: { label: ancestry.at(-1)?.name ?? this.origin, open: () => this.reader.back() },
       trail: this.reader.pagesButton,
       constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
     })
@@ -598,7 +600,7 @@ export class Workspace {
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
     // A constitution with a conversation opens on its chat; another lands on its report.
-    const wanted = route.doc ?? state.selected ?? (chatDocument(state.channel) ? undefined : this.knownReport(state))
+    const wanted = route.doc ?? (chatDocument(state.channel)?.key ?? state.selected ?? this.knownReport(state))
     const loadedBefore = state.loaded && state.runFinal
     if (wanted) this.intend(state, wanted)
     this.opts.onVisibility(true)
@@ -617,7 +619,7 @@ export class Workspace {
     if (state.questionLanding) {
       state.questionLanding = false
       const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
-      state.selected = report?.key ?? proseDocument(state.channel)?.key
+      state.selected = this.landing(state.channel) ?? report?.key
     }
     this.show(state, loadedBefore)
     this.landComposer(state, true)
@@ -679,15 +681,22 @@ export class Workspace {
       [link.dataset.filePath, link.dataset.filePathAlt].some(path => path && docKey(state.card.originId, path, state.card.originId, state.card.fiberDir) === key))
   }
 
-  private openFile(path: string, title?: string): void {
+  private openRelative(source: WorkspaceDocument, href: string): void {
+    if (!href || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)) return
+    let path: string
+    try { path = decodeURIComponent(href.split(/[?#]/)[0]) } catch { return }
+    if (!path || path.includes('\0') || path.includes('\\')) return
+    this.openFile(normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/'))), undefined, source.owner)
+  }
+
+  private openFile(path: string, title?: string, owner = this.current?.card.originId): void {
     const state = this.current
     if (!state) return
-    const key = docKey(state.card.originId, path, state.card.originId, state.card.fiberDir)
-    if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title })
+    const key = docKey(owner ?? state.card.originId, path, state.card.originId, state.card.fiberDir)
+    if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title, owner })
     this.rebuild(state)
-    state.selected = key
-    this.show(state)
-    this.history.select(key)
+    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal)
+    this.reader.openDocument(key)
     void this.readFileMetadata(state).then(() => {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })
@@ -792,6 +801,14 @@ export class Workspace {
       if (!wasLoaded && this.current === state && this.isActive && !this.disposed) this.show(state, false)
       await receiptRead
       if (this.disposed) return
+      const reportPath = state.card.fiberDir && `${state.card.fiberDir}/report.html`
+      if (reportPath && !state.channel.documents.some(d => d.path === reportPath)) {
+        void head(fileBytesUrl(this.opts.shuttleBase, reportPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true }).then(report => {
+          if (!report || this.disposed || state.links.some(link => link.path === reportPath)) return
+          state.links.push({ path: reportPath }); this.rebuild(state)
+          if (this.current === state && this.isActive) this.show(state, false)
+        })
+      }
       state.runFinal = true
       this.rebuild(state)
       this.refreshProse(state)
@@ -812,7 +829,7 @@ export class Workspace {
    */
   private readFileMetadata(state: ChannelState): Promise<boolean> {
     if (state.metadataRead) return state.metadataRead
-    const files = state.channel.documents.filter(d => d.kind !== 'fiber')
+    const files = state.channel.documents.filter(d => d.kind !== 'fiber' && d.kind !== 'chat')
     let changed = false
     const read = Promise.all(files.map(async doc => {
       const info = await head(fileBytesUrl(this.opts.shuttleBase, doc.path, doc.owner), RESOURCE_PRIORITY.neighbour, { fresh: true })
