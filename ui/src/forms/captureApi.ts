@@ -1,5 +1,5 @@
 import type { ExecutionSurface } from './executionSurface'
-import type { MeetingMode } from './meetingApi'
+import type { MeetingLanguage, MeetingMode } from './meetingApi'
 
 // Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
 // often a real piece of thinking to crystallize, not throwaway — worth the
@@ -17,6 +17,7 @@ export interface CaptureRequestInput {
   chrome?: boolean
   surface?: ExecutionSurface
   meetingMode?: MeetingMode | null
+  meetingLanguage?: MeetingLanguage
   recorder?: string | null
 }
 
@@ -48,7 +49,7 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
     ...(input.meetingMode
-      ? { surface: 'cli', meeting: { mode: input.meetingMode }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
+      ? { surface: 'cli', meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto' }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
       : input.surface
         ? { surface: input.surface }
         : {}),

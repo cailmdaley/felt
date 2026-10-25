@@ -101,6 +101,34 @@ afterEach(async () => {
 })
 
 describe('rendered Capture capabilities', () => {
+  it.each([false, true])('shows language only when enabled and sends the choice (mobile=%s)', async isMobile => {
+    mobile = isMobile
+    await mount({}, false)
+    expect(document.querySelector('select[aria-label="Language"]')).toBeNull()
+    click('.capture-meeting-toggle')
+    const language = query<HTMLSelectElement>('select[aria-label="Language"]')
+    expect(language.value).toBe('auto')
+    expect([...language.options].map(option => [option.value, option.textContent])).toEqual([
+      ['auto', 'Auto-detect'], ['fr', 'Français'], ['en', 'English'],
+    ])
+    act(() => {
+      language.value = 'fr'
+      language.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    click('.capture-meeting-toggle')
+    expect(document.querySelector('select[aria-label="Language"]')).toBeNull()
+    click('.capture-meeting-toggle')
+    click('.form-submit')
+    await tick()
+    expect(captureBody()).toMatchObject({ meeting: { mode: isMobile ? 'phone' : 'call', language: 'fr' } })
+
+    await act(async () => root!.unmount())
+    root = null
+    await mount({}, false)
+    click('.capture-meeting-toggle')
+    expect(query<HTMLSelectElement>('select[aria-label="Language"]').value).toBe('auto')
+  })
+
   it('uses hub-selected remote recording on mobile, independently of the scribe owner', async () => {
     mobile = true
     status = { available: true, modes, recorder: 'remote', meeting: null }
@@ -165,6 +193,7 @@ describe('rendered Capture capabilities', () => {
     status = { available: true, modes: ['phone'], meeting: null }
     await mount()
     expect(query<HTMLButtonElement>('.capture-meeting-toggle').disabled).toBe(true)
+    expect(document.querySelector('select[aria-label="Language"]')).toBeNull()
     click('.capture-meeting-toggle')
     expect(query('.capture-meeting-toggle').getAttribute('aria-pressed')).toBe('false')
     expect(query('.form-submit').textContent).toBe('Spawn')
@@ -226,6 +255,7 @@ describe('rendered Capture capabilities', () => {
     await tick()
     expect(meetingReads().map(([url]) => url)).toEqual([`${base}/api/v1/meeting`])
     expect(query<HTMLButtonElement>('.capture-meeting-toggle').disabled).toBe(true)
+    expect(document.querySelector('select[aria-label="Language"]')).toBeNull()
     yap()
     click('.form-submit')
     await tick()

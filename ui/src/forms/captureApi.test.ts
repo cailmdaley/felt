@@ -17,7 +17,7 @@ describe('meeting capture request', () => {
       agent: 'claude-opus',
       effort: 'high',
       surface: 'cli',
-      meeting: { mode: 'call' },
+      meeting: { mode: 'call', language: 'auto' },
     })
     expect(captureRequestBody({ ...common, meetingMode: 'call' })).toEqual({
       prompt: 'UNIONS shear telecon',
@@ -26,8 +26,17 @@ describe('meeting capture request', () => {
       agent: 'claude-opus',
       effort: 'high',
       surface: 'cli',
-      meeting: { mode: 'call' },
+      meeting: { mode: 'call', language: 'auto' },
     })
+  })
+
+  it.each(['call', 'phone'] as const)('includes the language for %s but not ordinary captures', meetingMode => {
+    for (const meetingLanguage of ['auto', 'fr', 'en'] as const) {
+      expect(captureRequestBody({ ...common, meetingMode, meetingLanguage })).toMatchObject({
+        meeting: { mode: meetingMode, language: meetingLanguage },
+      })
+      expect(captureRequestBody({ ...common, meetingLanguage })).not.toHaveProperty('meeting')
+    }
   })
 })
 

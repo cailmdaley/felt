@@ -1,5 +1,6 @@
 import { meetingJoinable, parseMeetingRecord, parseMeetingStatus, type MeetingRecord, type MeetingMode } from '../board/meeting'
 export type { MeetingMode } from '../board/meeting'
+export type MeetingLanguage = 'auto' | 'fr' | 'en'
 
 export interface CaptureMeetingCapabilities {
   available: boolean

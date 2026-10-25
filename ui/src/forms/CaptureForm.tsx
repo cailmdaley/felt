@@ -38,7 +38,7 @@ import { isMobileViewport } from '../board/mobile'
 import type { PhoneCaptureAttempt, PhoneCaptureHooks } from '../board/phoneMeeting'
 import { meetingStatusUrl, parseMeetingRecord, type MeetingRecord } from '../board/meeting'
 import { rememberedMeetingProject, rememberMeetingProject } from './meetingProject'
-import { parseCaptureMeetingCapabilities, type MeetingMode } from './meetingApi'
+import { parseCaptureMeetingCapabilities, type MeetingLanguage, type MeetingMode } from './meetingApi'
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import type { Host, Project } from './projectModel'
@@ -113,6 +113,7 @@ export function CaptureForm({
   const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [mobileMeeting] = useState(() => isMobileViewport())
   const [meetingIntent, setMeetingIntent] = useState(false)
+  const [meetingLanguage, setMeetingLanguage] = useState<MeetingLanguage>('auto')
   const [meetingCapabilities, setMeetingCapabilities] = useState({
     loading: true,
     available: false,
@@ -248,6 +249,7 @@ export function CaptureForm({
           chrome: chrome && chromeCapable,
           ...(!meetingEnabled && isCodexAgent(agentRec) ? { surface } : {}),
           meetingMode: requestedMeetingMode,
+          meetingLanguage,
           recorder: meetingCapabilities.recorder,
         })),
       })
@@ -356,6 +358,21 @@ export function CaptureForm({
             </select>
           </Field>
           <EffortField agent={agentRec} effort={effort} onChange={setEffort} />
+          {meetingEnabled && (
+            <Field label="Language">
+              <select
+                className="form-select"
+                aria-label="Language"
+                value={meetingLanguage}
+                disabled={submitting}
+                onChange={(e) => setMeetingLanguage(e.target.value as MeetingLanguage)}
+              >
+                <option value="auto">Auto-detect</option>
+                <option value="fr">Français</option>
+                <option value="en">English</option>
+              </select>
+            </Field>
+          )}
           {isCodexAgent(agentRec) && !meetingEnabled && (
             <SessionField surface={surface} onChange={setSurface} />
           )}
