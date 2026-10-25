@@ -41,6 +41,31 @@ beforeEach(async () => {
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('header action placement', () => {
+  it('measures title overflow on header resize and restores an unstacked bar when it fits', () => {
+    const observers: Array<{ targets: Element[]; run: () => void; disconnect: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      targets: Element[] = []
+      disconnect = vi.fn()
+      constructor(callback: () => void) { observers.push({ targets: this.targets, run: callback, disconnect: this.disconnect }) }
+      observe(el: Element): void { this.targets.push(el) }
+      unobserve(): void {}
+    })
+    band = dock.bandFor(task({ uid: 'measured', sessionUuid: 'measured' }))
+    const header = band.el.querySelector<HTMLElement>('.ws-chat-head')!
+    const title = header.querySelector('h1')!
+    Object.defineProperty(header, 'clientWidth', { value: 400 })
+    Object.defineProperty(title, 'clientHeight', { value: 50 })
+    let height = 75
+    Object.defineProperty(title, 'scrollHeight', { get: () => height })
+    const observer = observers.find(o => o.targets.includes(header))!
+    observer.run(); expect(header.dataset.stacked).toBe('true')
+    height = 50; observer.run(); expect(header.dataset.stacked).toBe('false')
+    height = 75; observer.run(); expect(header.dataset.stacked).toBe('true')
+    vi.stubGlobal('matchMedia', () => ({ matches: true }))
+    observer.run(); expect(header.dataset.stacked).toBe('false')
+    dock.reset(); expect(observer.disconnect).toHaveBeenCalled()
+  })
+
   it('keeps every lifecycle control in a narrow desktop card, overflowing only on phones', () => {
     let phone = false
     vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))

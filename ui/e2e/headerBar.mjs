@@ -72,6 +72,45 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(Math.abs(height - 60) <= 1, `short title keeps the 60px header at ${width}: ${height}`)
     }
   }, { width: 1440, height: 900 })
+  test('Measured header stacking keeps the full title and verbs with open desktop columns', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'true')
+    })
+    await page.goto(url)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    const check = async () => {
+      await page.waitForFunction(() => {
+        const title = document.querySelector('.ws-selected .ws-chat-title')
+        return title && title.clientWidth > 0 && title.scrollHeight <= title.clientHeight + 1
+      })
+      assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 7))
+      for (const name of ['Rest', 'Temper', 'Discard']) {
+        const verb = header.getByRole('button', { name, exact: true })
+        assert.ok(await verb.isVisible())
+        assert.ok(await verb.evaluate(el => {
+          const b = el.getBoundingClientRect(), h = el.closest('header').getBoundingClientRect()
+          return b.left >= h.left && b.right <= h.right && b.top >= h.top && b.bottom <= h.bottom
+        }), `${name} fits inside the header`)
+      }
+    }
+    for (const width of [1440, 850, 701, 1440]) {
+      await page.setViewportSize({ width, height: 900 }); await check()
+      await page.waitForFunction(stacked => document.querySelector('.ws-selected .ws-chat-head').dataset.stacked === String(stacked), width < 1000)
+      if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-rail-open-narrow-desktop-light.png') })
+    }
+    await page.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
+    for (const width of [1440, 1000, 850, 701]) {
+      await page.setViewportSize({ width, height: 900 }); await check()
+      for (const selector of ['.ws-sidebar', '.ws-thread-rail']) {
+        assert.ok(await page.locator(selector).isVisible())
+        assert.ok(await page.locator(selector).evaluate(el => el.getBoundingClientRect().width >= 100), `${selector} keeps usable rows beside the minimum chat card`)
+      }
+      if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
+    }
+  }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
     for (const scheme of ['light', 'dark']) test(`Root heads the family at every depth (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {

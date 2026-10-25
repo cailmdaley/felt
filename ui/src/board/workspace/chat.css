@@ -28,7 +28,7 @@
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-chat-identity { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 0 10px; }
-/* The name wraps before any desktop action leaves the first line. */
+/* The name wraps to two lines; a measured overflow puts actions beneath it. */
 .ws-chat-title {
   min-width: 0; margin: 0; padding-block: 3px;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
@@ -172,6 +172,12 @@
   .ws-chat-identity { grid-template-columns: auto 1fr; gap: 0 8px; }
   .ws-chat-title { grid-column: 1 / -1; font-size: var(--ws-prose-size); }
 }
+
+.ws-chat-head[data-stacked='true'] { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
+.ws-chat-head[data-stacked='true'] .ws-chat-identity { grid-column: 1 / -1; grid-row: 1; grid-template-columns: auto 1fr; }
+.ws-chat-head[data-stacked='true'] .ws-chat-title { grid-column: 1 / -1; font-size: var(--ws-label-size); }
+.ws-chat-head[data-stacked='true'] .ws-chat-lead { grid-column: 1; grid-row: 2; align-self: center; }
+.ws-chat-head[data-stacked='true'] .ws-chat-acts { grid-column: 2; grid-row: 2; justify-self: end; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */

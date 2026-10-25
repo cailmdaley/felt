@@ -1123,6 +1123,16 @@ export class Dock {
     identity.append(title, lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
     header.append(lead, identity, this.head)
     placeIcons()
+    // Measure the unstacked title so widening a stacked card can restore its bar.
+    const fitHeader = (): void => {
+      header.dataset.stacked = 'false'
+      if (isMobileViewport() || !header.clientWidth) return
+      header.dataset.stacked = String(title.scrollHeight > title.clientHeight + 1)
+    }
+    const headerSize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitHeader)
+    headerSize?.observe(header)
+    headerSize?.observe(title)
+    this.composerDisposers.push(() => headerSize?.disconnect())
 
     const log = document.createElement('div')
     log.className = 'ws-chat-log'
@@ -1159,6 +1169,7 @@ export class Dock {
       review.hidden = !reviewable
       consoleItem.hidden = !this.workerPillFor(card)?.matches('a[href],button')
       sessionsSection.hidden = !card.uid
+      fitHeader()
     }
     this.actPaint()
   }

@@ -74,6 +74,11 @@
 .ws-reader .kbn-card-worker:is([data-turn='none'], [data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) .ws-worker-dot { --worker-dot: var(--ws-ink-muted); }
 .ws-stage-row { display: flex; flex: 1; min-height: 0; }
 .ws-stage-column { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+/* Open columns yield width before the desktop chat loses its readable card. */
+@media (min-width: 701px) {
+  .ws-reader[data-page='chat'] .ws-stage-column { min-width: min(100%, calc(320px + 2 * var(--ws-stage-inset))); }
+  .ws-reader[data-page='chat'] :is(.ws-sidebar, .ws-thread-rail) { flex-shrink: 1; min-width: 0; }
+}
 .ws-stage {
   /* Pages clip at the stage's sides; their shadows still fall below it. */
   position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
