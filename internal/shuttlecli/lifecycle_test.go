@@ -185,6 +185,29 @@ func TestShuttleClose_RoutedOwnSession(t *testing.T) {
 	}
 }
 
+func TestShuttleClose_UsesLocalDaemon(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodies.record(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"output":"closed"}`)
+	}))
+
+	if out, err := runIn(t, env, dir, "close", "f", "--tempered=true", "--quiet", "--actor", "chair"); err != nil {
+		t.Fatalf("close: %v\n%s", err, out)
+	}
+	if body := bodies.last(); body["action"] != "close" || body["fiber"] != "f" || body["tempered"] != true || body["quiet"] != true || body["actor"] != "chair" {
+		t.Fatalf("lifecycle request = %#v", body)
+	}
+	if got := mustRead(t, storage, "f").Status; got != felt.StatusActive {
+		t.Fatalf("local close wrote status %q before the daemon handled it", got)
+	}
+}
+
 func TestShuttleClose_Tempered(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -330,6 +353,29 @@ func TestShuttleReopen_AsDraft(t *testing.T) {
 	}
 	if mustRead(t, storage, "f").Status != felt.StatusOpen {
 		t.Fatal("--as-draft must reopen to status: open")
+	}
+}
+
+func TestShuttleReopen_UsesLocalDaemon(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), nil)
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bodies.record(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"output":"reopened"}`)
+	}))
+
+	if out, err := runIn(t, env, dir, "reopen", "f", "--as-draft", "--project-dir", dir); err != nil {
+		t.Fatalf("reopen: %v\n%s", err, out)
+	}
+	if body := bodies.last(); body["action"] != "reopen" || body["fiber"] != "f" || body["as_draft"] != true || body["project_dir"] != dir {
+		t.Fatalf("lifecycle request = %#v", body)
+	}
+	if got := mustRead(t, storage, "f").Status; got != felt.StatusClosed {
+		t.Fatalf("local reopen wrote status %q before the daemon handled it", got)
 	}
 }
 

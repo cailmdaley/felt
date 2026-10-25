@@ -68,10 +68,17 @@ defmodule ShuttleWeb.LifecycleController do
   defp action(%{"action" => action}), do: {:error, "unknown lifecycle action #{inspect(action)}"}
   defp action(_), do: {:error, "missing lifecycle action"}
 
-  # accept and resume go through `Shuttle.LifecycleService`, which runs
+  # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
   defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
+
+  defp execute("close", %{"fiber" => fiber} = params),
+    do: lifecycle_with_args(:close, fiber, params)
+
+  defp execute("reopen", %{"fiber" => fiber} = params),
+    do: lifecycle_with_args(:reopen, fiber, params)
+
   # rest, too: written inside the Poller, so no tick that read the fiber
   # `active` launches a worker after it, and the Poller stops a live one.
   defp execute("rest", %{"until" => until}) when not is_binary(until),
@@ -96,7 +103,7 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp execute(action, %{"fiber" => fiber} = params)
-       when action in ~w(install repeat reshape close reopen set-model set-agent set-outcome uninstall) do
+       when action in ~w(install repeat reshape set-model set-agent set-outcome uninstall) do
     with {:ok, %{store: felt_store, fiber_id: fiber_id}} <- resolve_fiber(fiber) do
       action
       |> args_for(%{params | "fiber" => fiber_id})
@@ -105,6 +112,14 @@ defmodule ShuttleWeb.LifecycleController do
   end
 
   defp execute(action, _params), do: {:error, "missing required fields for #{action}"}
+
+  defp lifecycle_with_args(verb, fiber, params) do
+    action = Atom.to_string(verb)
+
+    with {:ok, [^action, ^fiber | args]} <- args_for(action, params) do
+      verb |> LifecycleService.transition(fiber, args) |> clean_result()
+    end
+  end
 
   defp refresh_card(%{"fiber" => fiber}) do
     case resolve_fiber(fiber) do

@@ -1,7 +1,10 @@
 defmodule Shuttle.ThreadsTest do
   use ExUnit.Case, async: true
+  import Shuttle.Test.ApiConn
+  import Phoenix.ConnTest
   alias Shuttle.{CLI, FiberDocuments, Threads, Test.Env}
   @moduletag :tmp_dir
+  @endpoint ShuttleWeb.Endpoint
 
   defmodule SocketRunner do
     @behaviour Shuttle.Runner
@@ -99,6 +102,53 @@ defmodule Shuttle.ThreadsTest do
     assert {:ok, output} = CLI.run_in_store(store, ["show", "hub", "--json"])
     assert Jason.decode!(output)["status"] == "open"
     assert length(pending(data)) == 4
+  end
+
+  test "lifecycle writes update the thread roster before the next poll", %{store: store} do
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: Shuttle.Runner.Default,
+        poll_interval_ms: 60_000,
+        felt_stores: [store]
+      )
+
+    await(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    for {verb, expected_column} <- [
+          {:close, "awaiting_review"},
+          {:reopen, "in_flight"},
+          {:rest, "resting"},
+          {:resume, "in_flight"}
+        ] do
+      assert {:ok, _} = Shuttle.Poller.lifecycle_transition(poller, verb, "hub/child", [])
+      assert {:ok, {entries, live, reachable}} = Shuttle.Poller.thread_inputs(poller)
+
+      assert [%{"id" => "hub/child", "column" => ^expected_column}] =
+               Threads.tree("hub", store, entries, live, reachable)
+    end
+  end
+
+  test "lifecycle API writes reach the thread endpoint before the next poll", %{store: store} do
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: Shuttle.Runner.Default,
+        poll_interval_ms: 60_000,
+        felt_stores: [store]
+      )
+
+    await(fn -> :sys.get_state(poller).document_cache_ready end)
+
+    for {write, expected_column} <- [
+          {%{"action" => "close", "fiber" => "hub/child"}, "awaiting_review"},
+          {%{"action" => "reopen", "fiber" => "hub/child", "as_draft" => true}, "drafts"},
+          {%{"action" => "resume", "fiber" => "hub/child"}, "in_flight"},
+          {%{"action" => "rest", "fiber" => "hub/child"}, "resting"}
+        ] do
+      assert 200 = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(write)).status
+      roster = get(api_conn(), "/api/v1/threads/hub") |> json_response(200)
+
+      assert [%{"id" => "hub/child", "column" => ^expected_column}] = roster["threads"]
+    end
   end
 
   test "the orchestrator's own rest and close reach no one; another session's are delivered",

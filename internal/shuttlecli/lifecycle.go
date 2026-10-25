@@ -20,10 +20,10 @@ import (
 // the top-level `tempered` ExtraField, and closed-at is f.ClosedAt. Config verbs
 // update only the configuration fields in the shuttle: block, preserving its
 // runtime keys. Every write passes the ownership guard. The Shuttle CLI owns human
-// lifecycle transitions: resume and accept hop through the owning daemon,
-// which runs the same verb with --local inside its Poller (serialized with state
-// changes and followed by a cache refresh); --local or a daemon connection
-// failure writes directly here.
+// lifecycle transitions: rest, resume, accept, close and local reopen hop
+// through the owning daemon, which runs the same verb with --local inside its
+// Poller (serialized with state changes and followed by a cache refresh);
+// --local or a daemon connection failure writes directly here.
 
 // resolveOwnedShuttleFiber is the common preamble for a lifecycle or config
 // write verb: a full read (body preserved for the re-serialize), a required
@@ -501,6 +501,43 @@ func rearmStanding(f *felt.Felt) error {
 	return nil
 }
 
+// routeLocalReopen sends a local owner's reopen through its daemon so the
+// Poller serializes the write and refreshes its cached roster. Remote owners
+// keep their force-dispatch route, and --local keeps the direct path.
+func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, rawProjectDir string) (bool, error) {
+	if localOnly(cmd) {
+		return false, nil
+	}
+	f, _, _, err := a.shuttleResolveFiberRef(query, true)
+	if err != nil {
+		return false, nil
+	}
+	block, ok, err := shuttle.BlockOf(f)
+	if err != nil || !ok {
+		return false, nil
+	}
+	owner, err := a.routeOwnerForCommand(cmd, []string{query}, block.Host)
+	if err != nil {
+		return true, err
+	}
+	if owner != "" {
+		return false, nil
+	}
+	fields := map[string]any{}
+	if asDraft {
+		fields["as_draft"] = true
+	}
+	if rawProjectDir != "" {
+		projectDir, err := a.resolveProjectDirFlag(rawProjectDir)
+		if err != nil {
+			return true, err
+		}
+		fields["project_dir"] = projectDir
+	}
+	anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
+	return a.routeLifecycle(cmd, "reopen", query, anyBlock, fields)
+}
+
 // routeLifecycle hands verb to the owning daemon when the fiber qualifies and
 // reports whether the daemon took it. The daemon runs the same verb with
 // --local serialized with its Poller's state changes, so its document cache
@@ -656,16 +693,38 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err != nil {
 				return err
 			}
+			tempered, err := parseOptionalBool(closeTempered)
+			if err != nil {
+				return fmt.Errorf("parsing --tempered: %w", err)
+			}
+			if !localOnly(cmd) {
+				candidate, _, _, lookupErr := a.shuttleResolveFiberRef(args[0], true)
+				if lookupErr == nil {
+					fields := map[string]any{}
+					if tempered != nil {
+						fields["tempered"] = *tempered
+					}
+					if closeQuiet {
+						fields["quiet"] = true
+					}
+					if actor := a.actorSession(closeActor); actor != "" {
+						fields["actor"] = actor
+					}
+					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
+					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
+						if routed && err == nil && a.isOwnFiber(candidate) {
+							a.endOwnTmuxSession()
+						}
+						return err
+					}
+				}
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err
 			}
 			defer unlock()
 
-			tempered, err := parseOptionalBool(closeTempered)
-			if err != nil {
-				return fmt.Errorf("parsing --tempered: %w", err)
-			}
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
 				return err
@@ -763,6 +822,11 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 — visible on the board, never auto-dispatched.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if !localOnly(cmd) && !reopenConcludeRun && !cmd.Flags().Changed("message") && !cmd.Flags().Changed("message-file") {
+				if routed, err := a.routeLocalReopen(cmd, args[0], reopenAsDraft, reopenProjectDir); routed || err != nil {
+					return err
+				}
+			}
 			f, st, block, ref, unlock, err := a.resolveOwnedShuttleFiber(args[0], "")
 			if err != nil {
 				return err
