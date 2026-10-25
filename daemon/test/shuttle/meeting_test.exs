@@ -131,6 +131,53 @@ defmodule Shuttle.MeetingTest do
     refute File.exists?(Path.join(dir, "meetings"))
   end
 
+  test "invalid languages are rejected before any recording", %{hark_dir: dir} do
+    for language <- ["de", "any", "fr-FR", "", nil, 42, ["fr"], %{}],
+        route <- ["/api/v1/capture", "/api/v1/meeting/join", "/api/v1/meeting/start"] do
+      conn =
+        api_conn()
+        |> post(
+          route,
+          Jason.encode!(%{
+            "meeting" => %{"mode" => "call", "language" => language},
+            "fiber_id" => "proj/fiber"
+          })
+        )
+
+      assert conn.status == 422
+
+      assert Jason.decode!(conn.resp_body)["error"] ==
+               "meeting.language must be 'auto', 'fr' or 'en'"
+    end
+
+    assert Shuttle.Test.MeetingRunner.calls() == []
+    refute File.exists?(Path.join(dir, "meetings"))
+  end
+
+  for mode <- ["call", "phone"], language <- [nil, "auto", "fr", "en"] do
+    test "#{mode} capture passes language #{inspect(language)} to hark", %{hark_dir: dir} do
+      set_starting_meeting_handler(dir)
+      meeting = %{"mode" => unquote(mode)}
+      language = unquote(language)
+      meeting = if language, do: Map.put(meeting, "language", language), else: meeting
+
+      assert {:ok, _} = Meeting.start(meeting, {:capture, "cli"}, "Shear review", nil)
+
+      {"tmux", ["new-session" | args], _} =
+        Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+          cmd == "tmux" and match?(["new-session" | _], args)
+        end)
+
+      command = List.last(Enum.take_while(args, &(&1 != ";")))
+
+      if language in [nil, "auto"] do
+        refute command =~ "--lang"
+      else
+        assert command =~ "'--lang' '#{language}'"
+      end
+    end
+  end
+
   # Mutation control: remove validate_supported_mode/2 from do_start/5.
   test "Linux rejects device capture before inspecting or launching hark", %{hark_dir: dir} do
     Env.put_app_env(:host_capabilities_os_type, {:unix, :linux})

@@ -301,6 +301,7 @@ defmodule Shuttle.Meeting do
 
   defp do_start(meeting, target, note, origin, opts) do
     with {:ok, mode} <- validate_meeting(meeting),
+         {:ok, language} <- validate_language(meeting),
          {:ok, note} <- validate_note(note),
          :ok <- validate_target(target),
          :ok <- validate_origin(origin, opts),
@@ -321,7 +322,7 @@ defmodule Shuttle.Meeting do
          {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
          fiber <- target_fiber(target),
-         argv <- hark_argv(executable, paths, title, mode, launch_id),
+         argv <- hark_argv(executable, paths, title, mode, launch_id, language),
          :ok <- create_session(argv, launch_id, fiber, opts),
          :ok <-
            Logger.info(
@@ -370,6 +371,13 @@ defmodule Shuttle.Meeting do
 
   defp validate_meeting(_),
     do: {:error, {:validation, "meeting.mode must be 'call' or 'phone'"}}
+
+  defp validate_language(meeting) do
+    case Map.get(meeting, "language", "auto") do
+      language when language in ["auto", "fr", "en"] -> {:ok, language}
+      _ -> {:error, {:validation, "meeting.language must be 'auto', 'fr' or 'en'"}}
+    end
+  end
 
   defp validate_supported_mode(mode, opts) do
     if mode in HostCapabilities.meeting_modes(true, opts),
@@ -424,11 +432,15 @@ defmodule Shuttle.Meeting do
 
   defp dismiss_failed(_context, _opts), do: :ok
 
-  defp hark_argv(executable, paths, title, mode, launch_id) do
+  defp hark_argv(executable, paths, title, mode, launch_id, language) do
     [executable, "-o", paths.local_transcript, "--launch=" <> launch_id, "--title=" <> title] ++
       mode_flag(mode) ++
+      language_flag(language) ++
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end
+
+  defp language_flag("auto"), do: []
+  defp language_flag(language), do: ["--lang", language]
 
   defp mode_flag("phone"), do: ["--phone"]
   defp mode_flag("call"), do: []
