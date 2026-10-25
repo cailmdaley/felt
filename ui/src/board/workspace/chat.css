@@ -60,11 +60,11 @@
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
-/* Immediate actions use the board's glyph vocabulary and native keyboard focus. */
+/* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
 .ws-reader .ws-header-icon {
   display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
   border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
-  color: var(--ws-ink-muted); cursor: pointer; font: var(--ws-section-size)/1 var(--ws-mono);
+  color: var(--ws-ink-muted); cursor: pointer;
 }
 .ws-reader .ws-header-icon[hidden] { display: none; }
 .ws-reader .ws-header-icon:hover:not(:disabled), .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }

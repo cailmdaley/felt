@@ -1,6 +1,7 @@
 import { turnOf } from '../turn.js'
 import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
+import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
@@ -1029,23 +1030,22 @@ export class Dock {
     if (history) sessionsSection.append(history)
     drawer.append(settingsSection, sessionsSection)
 
-    const icon = (button: HTMLButtonElement, glyph: string, label: string): HTMLButtonElement => {
+    const icon = (button: HTMLButtonElement, name: HeaderIcon, label: string): HTMLButtonElement => {
       button.classList.remove('kbn-ctl-btn')
       button.classList.add('ws-header-icon')
       button.title = label; button.setAttribute('aria-label', label)
-      const span = document.createElement('span'); span.setAttribute('aria-hidden', 'true'); span.textContent = glyph
-      button.replaceChildren(span)
+      button.innerHTML = headerIcon(name)
       return button
     }
-    for (const [button, glyph, label] of [[review, '✓', 'Close'], [rest, '◷', 'Rest'], [temper, '◇', 'Temper'], [discard, '×', 'Discard']] as const) {
-      if (button) icon(button, glyph, label)
+    for (const [button, name, label] of [[review, 'close', 'Close'], [rest, 'rest', 'Rest'], [temper, 'temper', 'Temper'], [discard, 'discard', 'Discard']] as const) {
+      if (button) icon(button, name, label)
     }
-    const item = (label: string, glyph: string, cls: string, run: () => void): HTMLButtonElement => {
+    const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
       const button = ctlButton('', cls)
-      icon(button, glyph, label); button.addEventListener('click', run)
+      icon(button, name, label); button.addEventListener('click', run)
       return button
     }
-    const settingsItem = item('Settings', '⚙', 'ws-chat-settings', () => {
+    const settingsItem = item('Settings', 'settings', 'ws-chat-settings', () => {
       if (ledger.hidden) toggle.click()
       const unfold = sessionsSection.querySelector<HTMLButtonElement>('.kbn-ctl-history-toggle')
       if (unfold?.getAttribute('aria-expanded') !== 'true') unfold?.click()
@@ -1054,9 +1054,9 @@ export class Dock {
     })
     settingsItem.setAttribute('aria-haspopup', 'dialog')
     settingsItem.setAttribute('aria-expanded', 'false')
-    const constitutionItem = this.constitutionButton = item('Constitution', '▤', 'ws-chat-constitution', () => { this.openConstitution?.() })
+    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
-    const consoleItem = item('Console', '›_', 'ws-chat-console', () => { this.openConversation(card) })
+    const consoleItem = item('Console', 'console', 'ws-chat-console', () => { this.openConversation(card) })
     this.drawerClose = () => {
       if (this.openSettings || drawer.hidden) return false
       drawer.hidden = true; settingsItem.focus({ preventScroll: true }); return true

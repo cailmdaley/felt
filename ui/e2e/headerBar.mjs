@@ -75,6 +75,10 @@ export function registerHeaderBarJourneys(test) {
       for (const label of device === 'desktop' ? ['Constitution', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
         const icon = header.getByRole('button', { name: label, exact: true })
         assert.equal(await icon.getAttribute('title'), label)
+        assert.deepEqual(await icon.evaluate(el => {
+          const svg = el.querySelector('svg'), box = svg?.getBoundingClientRect(), css = svg && getComputedStyle(svg)
+          return { viewBox: svg?.getAttribute('viewBox'), inheritsColor: css?.stroke === getComputedStyle(el).color, width: box?.width, height: box?.height, weight: css?.strokeWidth }
+        }), { viewBox: '0 0 16 16', inheritsColor: true, width: 16, height: 16, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
       await chat.locator('textarea').focus(); await chat.locator('textarea').blur()

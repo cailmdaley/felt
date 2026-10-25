@@ -305,7 +305,16 @@ describe('state-shaped act zone', () => {
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
-      expect(button.querySelector('[aria-hidden="true"]')).not.toBeNull()
+      const svg = button.querySelector('svg')!
+      expect(svg).not.toBeNull()
+      expect(svg.getAttribute('viewBox')).toBe('0 0 16 16')
+      expect(svg.getAttribute('stroke')).toBe('currentColor')
+      expect(svg.getAttribute('stroke-width')).toBe('1.5')
+      expect(svg.getAttribute('fill')).toBe('none')
+      expect(svg.getAttribute('aria-hidden')).toBe('true')
+      expect(svg.getAttribute('focusable')).toBe('false')
+      expect(svg.querySelector('path, rect, circle')).not.toBeNull()
+      expect(button.textContent).toBe('')
       button.focus(); expect(document.activeElement).toBe(button)
     }
     expect(band.head.querySelector('details, summary, [role="dialog"], .ws-chat-fresh, .ws-chat-resume, .ws-chat-meeting')).toBeNull()
