@@ -8,7 +8,7 @@ const alpha = card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'h
 let reader: Reader
 function setup(phone = false) {
   vi.stubGlobal('matchMedia', (query: string) => ({ matches: phone && query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
   reader = new Reader({ shuttleBase: '', buildProse: () => {

@@ -1405,27 +1405,32 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/fibers/composite')) return json(workspaceFixture?.feed ?? docsExample?.feed ?? MOCK_FEED)
   if (workspaceFixture && url.includes('/api/v1/fibers/') && url.includes('body=true')) {
     const id = decodeURIComponent(url.split('/api/v1/fibers/')[1].split('?')[0])
-    const row = workspaceFixture.feed.fibers.find(entry => (entry.fiber as Record<string, unknown>).id === id)
+    const row = workspaceFixture.feed.fibers.find(entry => {
+      const fiber = entry.fiber as Record<string, unknown>
+      return fiber.id === id || fiber.uid === id
+    })
     if (row) {
       const fiber = row.fiber as Record<string, unknown>
-      return json({ fibers: [{ ...row, fiber: { ...fiber, body: workspaceFixture.bodies[id] ?? fiber.outcome ?? '' } }] })
+      return json({ fibers: [{ ...row, fiber: { ...fiber, body: workspaceFixture.bodies[String(fiber.id)] ?? fiber.outcome ?? '' } }] })
     }
-    if (id === 'research/workspace/method-note') {
+    if (id === 'research/workspace/method-note' || id === '01KVBR6M1GJ0ZRM29956V023R3') {
+      const noteId = 'research/workspace/method-note'
       return json({ fibers: [{
         origin: WORKSPACE_HOST,
         felt_store: '/fixture-store/workspace',
         path: '.felt/research/workspace/method-note/method-note.md',
         dir: '/fixture-store/workspace/.felt/research/workspace/method-note',
         fiber: {
-          id, uid: '01KVBR6M1GJ0ZRM29956V023R3', name: 'Method note', status: 'closed',
+          id: noteId, uid: '01KVBR6M1GJ0ZRM29956V023R3', name: 'Method note', status: 'closed',
           outcome: 'The response correction uses independent simulations.',
-          body: workspaceFixture.bodies[id], tags: ['workspace'],
+          body: workspaceFixture.bodies[noteId], tags: ['workspace'],
           shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'claude-opus', project_dir: '/fixture-store/workspace' },
         },
       }] })
     }
-    const note = NOTE_FIBERS.find(row => row.id === id)
+    const note = NOTE_FIBERS.find(row => row.id === id || row.uid === id)
     if (note) {
+      const id = note.id
       return json({ fibers: [{
         origin: WORKSPACE_HOST,
         felt_store: '/fixture-store/workspace',

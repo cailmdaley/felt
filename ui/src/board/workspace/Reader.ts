@@ -202,9 +202,13 @@ export class Reader {
     this.headWorker.dataset.part = 'act'; this.headWorker.dataset.act = 'worker'
     this.headWorker.hidden = true
     const trail = element('div', 'ws-nav-trail')
-    trail.append(this.headWorker)
-    // The phone's top bar: back, the fiber's name, the worker's dot. The desktop
-    // draws no head of its own.
+    const documentMenu = button('ws-icon-button ws-phone-document-menu', '⋯', () => {
+      const doc = this.document
+      if (doc && doc.kind !== 'chat') this.openMenu(doc, documentMenu)
+    }, 'Document menu')
+    trail.append(this.headWorker, documentMenu)
+    // The phone's top bar owns return, the fiber's name, its worker and document actions.
+    // The desktop draws no head of its own.
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
@@ -646,7 +650,7 @@ export class Reader {
       const f = this.host.get(doc.key)
       if (!f) return
       const sel = doc.key === this.selected
-      const width = sel && (doc.kind !== 'chat' || this.expanded || (fill && this.liveWidth === null)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
+      const width = sel && (this.expanded || ((doc.kind !== 'chat' || fill) && this.liveWidth === null && this.sizes[doc.key] === undefined)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`

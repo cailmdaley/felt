@@ -1273,13 +1273,14 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
   })
 
-  it('sends a routed page the loaded channel does not hold to the report', async () => {
+  it('keeps a fresh deep-linked file addressable even outside the document index, with chat/prose as its parent', async () => {
     const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await flush()
-    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
-    expect([...document.querySelectorAll('.ws-tab')].map(tab => tab.getAttribute('aria-label'))).not.toContain('gone.html')
+    expect(workspace.reader.document?.key).toBe(gone)
+    workspace.reader.back()
+    expect(workspace.reader.document?.kind).toBe('fiber')
   })
 
   it('keeps an explicit prose selection made while the body is loading', async () => {

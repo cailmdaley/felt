@@ -58,6 +58,7 @@
 .ws-chat-ancestry { flex: 1 0 100%; order: 1; margin-top: 1px; }
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
 .ws-chat-acts .ws-fiber-worker:empty { display: none; }
+.ws-chat-acts .ws-worker-control { min-width: 13ch; }
 .ws-chat-trail { display: none; }
 
 /* The meter: context tokens tinted as they fill the window, the window's
@@ -180,6 +181,7 @@
   .ws-chat-lead[hidden] + .ws-chat-title { padding-left: 12px; }
   .ws-chat-ancestry { padding: 0 0 6px 12px; }
   .ws-chat-acts { gap: 6px; }
+  .ws-chat-acts .ws-fiber-worker:not([hidden]) { display: contents; }
   .ws-chat-acts .ws-worker-state, .ws-chat-acts :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
   .ws-chat-acts .ws-fiber-worker .kbn-card-worker { min-width: 28px; min-height: var(--ws-phone-target); justify-content: center; padding: 0; border: 0; background: transparent; }
   /* The header: the name and the menu on the first line; the lifecycle and the family's control beneath. */

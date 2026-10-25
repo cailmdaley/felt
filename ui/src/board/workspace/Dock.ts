@@ -862,7 +862,10 @@ export class Dock {
       const rest = ctlButton('Rest', 'kbn-ctl-rest')
       rest.title = 'Rest (s)'
       rest.setAttribute('aria-label', `Rest ${card.name} (s)`)
-      rest.addEventListener('click', () => this.onRest?.(card, rest))
+      rest.addEventListener('click', () => {
+        if (this.verdictMenu) this.verdictMenu.open = false
+        this.onRest?.(card, rest)
+      })
       row.append(rest)
     }
     for (const [label, cls, target] of [

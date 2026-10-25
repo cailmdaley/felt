@@ -15,6 +15,7 @@ export async function frames(p) {
 }
 
 export async function layoutShift(p, { regions, act, allow = [], settle = 0, positionsOnly = false }) {
+  await frames(p)
   await p.evaluate(regions => {
     const path = el => {
       const steps = []
@@ -26,7 +27,7 @@ export async function layoutShift(p, { regions, act, allow = [], settle = 0, pos
     const boxes = new Map()
     for (const selector of regions) for (const root of document.querySelectorAll(selector)) {
       for (const el of [root, ...root.querySelectorAll('*')]) {
-        if (boxes.has(el)) continue
+        if (boxes.has(el) || !el.checkVisibility({ visibilityProperty: true })) continue
         const r = el.getBoundingClientRect()
         if (!r.width && !r.height) continue
         boxes.set(el, { path: path(el), box: [r.x, r.y, r.width, r.height] })

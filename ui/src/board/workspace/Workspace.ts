@@ -592,11 +592,11 @@ export class Workspace {
     }
     this.current = state
     const parents = this.history.parents
-    for (const key of parents) {
+    for (const key of [...parents, ...(route.doc ? [route.doc] : [])]) {
       const file = parseDocKey(key)
       if (file && !state.links.some(link => link.path === file.path && (link.owner ?? state.card.originId) === file.owner)) state.links.push(file)
     }
-    if (parents.length) this.rebuild(state)
+    if (parents.length || route.doc) this.rebuild(state)
     if (this.origin === 'Board') this.lastBoardRoute = route
     // Reserve the body read before the receipt feed can preload this same fiber.
     const bodyRead = this.load(state)

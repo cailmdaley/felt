@@ -171,8 +171,8 @@ describe('Reader channel sidebar', () => {
     const head = reader.el.querySelector<HTMLElement>('.ws-navbar .ws-nav-trail .ws-head-worker')!
     expect(head.hidden).toBe(false)
     expect(head.dataset.part).toBe('act')
-    // The trail ends with the worker; the top bar holds no map and no page count.
-    expect(head.nextElementSibling).toBeNull()
+    // Document actions stay reachable from the phone's top bar, without a map or count.
+    expect(head.nextElementSibling?.getAttribute('aria-label')).toBe('Document menu')
     expect(reader.el.querySelector('.ws-head-position')).toBeNull()
     expect(reader.el.querySelector('.ws-navbar [data-part="page-band"]')).toBeNull()
     expect(reader.el.querySelector('.ws-stage-column > [data-part="page-band"]')).toBeNull()
