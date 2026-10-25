@@ -1,21 +1,3 @@
-import type { Channel, DocKey, WorkspaceDocument } from './documents.js'
-
-const receipts = (doc: WorkspaceDocument): string => JSON.stringify(doc.provenance
-  .filter(p => p.kind === 'sent').map(p => JSON.stringify(p)).sort())
-
-/** Loading and entering a channel establish a baseline; only another receipt animates a folio. */
-export class ReceiptArrivals {
-  private readonly channels = new Map<string, Map<DocKey, string>>()
-  observe(channel: Channel, ready: boolean): Set<DocKey> {
-    if (!ready) return new Set()
-    const id = JSON.stringify([channel.owner, channel.uid])
-    const prior = this.channels.get(id)
-    const next = new Map(channel.documents.filter(doc => doc.kind !== 'fiber').map(doc => [doc.key, receipts(doc)]))
-    this.channels.set(id, next)
-    return new Set(prior ? [...next].filter(([key, stamp]) => stamp !== '[]' && stamp !== prior.get(key)).map(([key]) => key) : [])
-  }
-}
-
 /** Small receipt responses never reload or animate the document itself. */
 export class ReceiptMotion {
   private readonly motion = window.matchMedia?.('(prefers-reduced-motion: reduce)')
