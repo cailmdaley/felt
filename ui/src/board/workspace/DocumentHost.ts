@@ -469,6 +469,7 @@ export class DocumentHost {
     state.stopVideoPoster?.()
     this.saveScroll(state)
     state.revision++
+    state.weight = 1
     state.controller?.abort()
     state.controller = null
     state.references?.dispose()

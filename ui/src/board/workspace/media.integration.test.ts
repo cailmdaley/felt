@@ -147,7 +147,8 @@ describe('native media documents', () => {
     const el = viewer('/scan.pdf')
     expect(el.querySelector('iframe')?.title).toBe('scan.pdf')
     expect(el.querySelector('h1,h3,.kbn-media-title,.kbn-media-provenance')).toBeNull()
-    expect(el.querySelector('iframe')?.src).toContain('/file?')
+    expect(el.querySelector('iframe')?.hasAttribute('src')).toBe(false)
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/v1/file?'), expect.objectContaining({ cache: 'no-cache' }))
   })
 
   it('draws unsupported documents with file-info size and a download', async () => {

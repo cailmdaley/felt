@@ -138,20 +138,21 @@ export function buildFileViewer(
     return buildHtmlViewer(src, fullPath, onFrameLoad, options)
   }
 
-  // The browser-native PDF viewer retains its layout while parked.
+  // The native PDF plugin is blocked by the API's sandbox CSP. Fetch bytes
+  // through that protected route, then give only validated PDF bytes to the
+  // browser plugin through a PDF blob URL.
   const wrap = document.createElement('div')
   wrap.className = 'kbn-fileview-frame-wrap'
 
   const veil = loadingVeil(fullPath, options)
   let disposed = false
-  let loaded = false
-  let checked = false
   let faulted = false
   const controller = new AbortController()
-
-  const iframe = document.createElement('iframe')
+  let objectUrl: string | null = null
+  let iframe: HTMLIFrameElement | null = document.createElement('iframe')
+  let initialFrameLoaded = false
+  let pdfSource: string | null = null
   iframe.className = 'kbn-fileview-frame'
-  iframe.src = `${src}#navpanes=0&view=FitH`
   iframe.style.background = 'var(--ws-paper)'
   iframe.title = basename(fullPath)
   wrap.append(iframe, veil)
@@ -162,39 +163,42 @@ export function buildFileViewer(
     showLoadFailure(veil, wrap, fullPath, detail)
     options.onState?.({ status: 'error', error: new Error(`file request failed: ${detail}`), hasContent: false })
   }
-  const ready = (): void => {
-    if (!disposed && !faulted && loaded && checked) options.onState?.({ status: 'ready' })
+  const startPdf = (): void => {
+    if (!iframe || !initialFrameLoaded || !objectUrl || pdfSource || disposed) return
+    pdfSource = `${objectUrl}#navpanes=0&view=FitH`
+    iframe.src = pdfSource
   }
-
+  iframe.addEventListener('error', () => failed('the daemon could not be reached'))
   iframe.addEventListener('load', () => {
-    if (disposed) return
-    loaded = true
-    // The 404 document loads too, and it loads AFTER the probe has usually
-    // answered. Lifting the veil unconditionally here would erase the error the
-    // probe just wrote and leave a blank frame. Only a frame nobody has faulted
-    // gets revealed.
-    if (veil.classList.contains('kbn-fileview-loading-error')) return
+    if (!pdfSource) { initialFrameLoaded = true; startPdf(); return }
+    if (disposed || faulted || iframe?.src !== pdfSource) return
     veil.remove()
     onFrameLoad?.(iframe, false)
-    ready()
+    options.onState?.({ status: 'ready' })
   })
-  // `error` on an iframe fires for NETWORK failures only. An HTTP 404 is a
-  // perfectly successful navigation to an error document, so `load` fires, the
-  // veil lifts, and the reader would be left looking at an empty frame with
-  // nothing saying why.
-  iframe.addEventListener('error', () => failed('the daemon could not be reached'))
-
-  // So ASK. The cache's head settles what the iframe's own events cannot tell
-  // apart. Ordering is not a race: `failed` re-attaches the veil if `load`
-  // already removed it, so whichever resolves second still tells the truth.
-  void head(src, RESOURCE_PRIORITY.selected, { fresh: true }).then(info => {
-    if (controller.signal.aborted) return
-    checked = true
-    if (!info) failed('the daemon could not be reached')
-    else if (!info.exists) failed('404 Not Found')
-    else ready()
+  void fetch(src, { cache: 'no-cache', signal: controller.signal }).then(async response => {
+    if (!response.ok) throw new Error(response.status === 404 ? '404 Not Found' : `${response.status} ${response.statusText}`)
+    const payload = await response.blob()
+    const prefix = new Uint8Array(await payload.slice(0, 5).arrayBuffer())
+    const signature = String.fromCharCode(...prefix)
+    if (controller.signal.aborted || disposed) return
+    if (payload.size < 5 || signature !== '%PDF-') {
+      throw new Error('response is not a PDF')
+    }
+    options.onWeight?.(payload.size > 2 * 1024 * 1024 ? 2 : 1)
+    const pdf = payload.slice(0, payload.size, 'application/pdf')
+    objectUrl = URL.createObjectURL(pdf)
+    startPdf()
+  }).catch(error => {
+    if (controller.signal.aborted || disposed) return
+    failed(error instanceof Error ? error.message : 'the daemon could not be reached')
   })
-  viewerDisposers.set(wrap, () => { disposed = true; controller.abort() })
+  viewerDisposers.set(wrap, () => {
+    disposed = true
+    controller.abort()
+    iframe?.removeAttribute('src')
+    if (objectUrl) URL.revokeObjectURL(objectUrl)
+  })
 
   return wrap
 }

@@ -4,6 +4,17 @@ import { buildFileViewer, disposeFileViewer, htmlWithBase, htmlAssetUrl } from '
 import { envelope } from './workspace/DocumentBridge.js'
 import { resetDocumentResources } from './documentResources.js'
 const ready = (frame: HTMLIFrameElement) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: envelope('ready') }))
+const responseWithBlob = (content: string): Response => {
+  const response = new Response('')
+  response.blob = async () => ({
+    size: content.length,
+    slice: (start = 0, end = content.length, type = '') => ({
+      type,
+      arrayBuffer: async () => new TextEncoder().encode(content.slice(start, end)).buffer,
+    }),
+  } as unknown as Blob)
+  return response
+}
 afterEach(() => { for (const viewer of document.querySelectorAll<HTMLElement>('.kbn-fileview-frame-wrap')) disposeFileViewer(viewer); vi.unstubAllGlobals(); resetDocumentResources() })
 
 const watch = vi.hoisted(() => ({ content: null as null | ((value: string) => void), error: null as null | ((error: unknown) => void), recover: null as null | (() => void), stop: vi.fn() }))
@@ -201,17 +212,41 @@ describe('workspace file viewer hooks', () => {
     expect(viewer.textContent).toContain('two')
   })
 
-  it('waits for both native frame load and the owner confirming the file before reporting ready', async () => {
-    let settle!: (value: Response) => void
-    const fetcher = vi.fn((_src: string) => new Promise<Response>((resolve) => { settle = resolve }))
+  it('gives validated PDF bytes to the native viewer through a disposable blob URL', async () => {
+    const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:pdf-preview')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+    const fetcher = vi.fn(async (_src: string, _init?: RequestInit) => responseWithBlob(`%PDF-1.7 ${'x'.repeat(2 * 1024 * 1024)}`))
     vi.stubGlobal('fetch', fetcher)
-    const onState = vi.fn()
-    const viewer = buildFileViewer('', '/report.pdf', 'host-a', undefined, undefined, { onState })
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
+    const onState = vi.fn(), onWeight = vi.fn()
+    const viewer = buildFileViewer('', '/report.pdf', 'host-a', undefined, undefined, { onState, onWeight })
+    const iframe = viewer.querySelector('iframe')!
+    iframe.dispatchEvent(new Event('load'))
     expect(onState).not.toHaveBeenCalled()
-    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/file-info?path=%2Freport.pdf&origin=host-a')
-    settle(new Response(JSON.stringify({ exists: true, size: 598, modified_at: 1 })))
-    await vi.waitFor(() => expect(onState).toHaveBeenCalledWith({ status: 'ready' }))
+    await vi.waitFor(() => expect(viewer.querySelector('iframe')?.src).toBe('blob:pdf-preview#navpanes=0&view=FitH'))
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/file?path=%2Freport.pdf&origin=host-a')
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ cache: 'no-cache' })
+    expect(create.mock.calls[0][0]).toHaveProperty('type', 'application/pdf')
+    expect(onWeight).toHaveBeenCalledWith(2)
+    expect(onState).not.toHaveBeenCalled()
+    iframe.dispatchEvent(new Event('load'))
+    expect(onState).toHaveBeenCalledWith({ status: 'ready' })
+    disposeFileViewer(viewer)
+    expect(revoke).toHaveBeenCalledWith('blob:pdf-preview')
+    create.mockRestore(); revoke.mockRestore()
+  })
+
+  it('does not create a PDF viewer when its request settles after disposal', async () => {
+    let settle!: (response: Response) => void
+    const fetcher = vi.fn((_src: string) => new Promise<Response>(resolve => { settle = resolve }))
+    vi.stubGlobal('fetch', fetcher)
+    const create = vi.spyOn(URL, 'createObjectURL')
+    const viewer = buildFileViewer('', '/report.pdf', 'host-a')
+    disposeFileViewer(viewer)
+    settle(responseWithBlob('%PDF-1.7 body'))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(viewer.querySelector('iframe')!.hasAttribute('src')).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+    create.mockRestore()
   })
 
   it('tells an image that exists but cannot be decoded from a missing one', async () => {
@@ -225,13 +260,21 @@ describe('workspace file viewer hooks', () => {
     expect(errors.sort()).toEqual(['file request failed: 404', 'image format is not supported by this browser'])
   })
 
-  it('reports missing native documents even when an HTTP error page loads', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: false }))))
+  it('reports missing PDFs and rejects non-PDF responses before opening a native viewer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"error":"missing"}', { status: 404 })))
     const onState = vi.fn()
     const viewer = buildFileViewer('', '/missing.pdf', 'host-a', undefined, undefined, { onState })
-    viewer.querySelector('iframe')!.dispatchEvent(new Event('load'))
     await vi.waitFor(() => expect(onState).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', hasContent: false })))
     expect(viewer.textContent).toContain('404 Not Found')
     expect(onState).not.toHaveBeenCalledWith({ status: 'ready' })
+
+    vi.stubGlobal('fetch', vi.fn(async () => responseWithBlob('<html>error</html>')))
+    const invalidState = vi.fn()
+    const create = vi.spyOn(URL, 'createObjectURL')
+    const htmlViewer = buildFileViewer('', '/bad.pdf', 'host-a', undefined, undefined, { onState: invalidState })
+    await vi.waitFor(() => expect(invalidState).toHaveBeenCalledWith(expect.objectContaining({ status: 'error', error: expect.objectContaining({ message: 'file request failed: response is not a PDF' }) })))
+    expect(htmlViewer.querySelector('iframe')!.hasAttribute('src')).toBe(false)
+    expect(create).not.toHaveBeenCalled()
+    create.mockRestore()
   })
 })
