@@ -527,74 +527,7 @@
 .ws-transcript-checklist [data-status='in_progress'] .ws-transcript-task-mark { color: var(--kbn-agent); }
 .ws-transcript-checklist [data-status='pending'] { color: var(--ws-ink-muted); }
 
-/* ── Finding words ──────────────────────────────────────────────────────
-   A rule under a line of text, as the Chronicle's search is: the field sits
-   above the conversation and takes the column's own gutter. Marks are the
-   board's gold, the pigment of "this is the one"; the message the find stands
-   on gets a soft halo of it. */
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-find {
-  --ws-find-gutter: 18px;
-  position: relative;
-  z-index: 4;
-  flex: none;
-  padding: 6px var(--ws-find-gutter) 0;
-}
-.ws-chat .ws-transcript-inline .ws-transcript-find { --ws-find-gutter: var(--ws-chat-gutter); }
-.ws-transcript-find-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 10px;
-  min-width: 0;
-}
-.ws-transcript-find-input {
-  flex: 1 1 12em;
-  min-width: 0;
-  box-sizing: border-box;
-  min-height: 28px;
-  padding: 2px 4px;
-  border: 0;
-  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent);
-  border-radius: 0;
-  background: transparent;
-  color: var(--ws-ink);
-  font: italic var(--ws-label-size)/1.4 var(--ws-serif);
-  outline: none;
-  transition: border-color 160ms ease-out;
-}
-.ws-transcript-find-input:focus { border-bottom-color: var(--kbn-owed); }
-.ws-transcript-find-input::placeholder { color: var(--kbn-ink-faint); }
-.ws-transcript-find-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.ws-transcript-find-count {
-  flex: none;
-  min-width: 5.5em;
-  color: var(--ws-ink-muted);
-  text-align: right;
-  white-space: nowrap;
-  font: var(--ws-small-size)/1.4 var(--ws-mono);
-}
-.ws-transcript-find-count[data-empty] { color: var(--kbn-owed); }
-.ws-transcript-find .ws-transcript-find-step {
-  flex: none;
-  border: 0;
-  background: transparent;
-  color: var(--ws-ink-muted);
-  cursor: pointer;
-}
-.ws-transcript-find .ws-transcript-find-step {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border-radius: var(--ws-control-radius);
-  font-size: var(--ws-small-size);
-  line-height: 1;
-}
-.ws-transcript-find .ws-transcript-find-step:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-transcript-find .ws-transcript-find-step:disabled { opacity: .4; cursor: default; }
-.ws-transcript-find .ws-transcript-find-input:focus-visible,
-.ws-reader .ws-transcript-find .ws-transcript-find-input:focus-visible { outline: none; border-bottom-color: var(--ws-focus, var(--kbn-owed)); }
-
-/* Matches in the words. The current message carries a halo, its marks a deeper wash. */
+/* Board Find transcript hits: the current message carries a halo, its marks a deeper wash. */
 :is(.ws-dock, .ws-transcript-pane) mark.ws-transcript-found-mark {
   padding: 0 1px;
   border-radius: 2px;
@@ -609,7 +542,3 @@
   background: color-mix(in srgb, var(--kbn-owed-bright) 58%, transparent);
 }
 
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-transcript-find-count { min-width: 0; margin-left: auto; }
-  .ws-transcript-find .ws-transcript-find-step { width: 44px; height: 44px; }
-}

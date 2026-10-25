@@ -7,7 +7,6 @@ import { toolLabel } from './tools.js'
 import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
 import { TaskChecklist, type WorkerTask } from './tasks.js'
-import { TranscriptFind } from './TranscriptFind.js'
 import { findMatches, markTerms, nearestMatch, queryTerms, snippetTerms, termPattern, unmark, type Match, type TranscriptHit } from './find.js'
 import './transcript.css'
 
@@ -523,14 +522,12 @@ export class TranscriptBand {
   private visibleStart = -1
   private intersecting = true
   private disposed = false
-  private readonly find: TranscriptFind
   private findPattern: RegExp | null = null
   private findKey = ''
   private matches: Match[] = []
   private currentMatch = -1
   private pendingHit: { query: string; at?: number } | null = null
   private findFrame: number | null = null
-  private readonly findListener = (event: KeyboardEvent): void => this.findShortcut(event)
   private readonly visibilityListener = (): void => this.visibilityChanged()
   private observer: IntersectionObserver | null = null
   private resizer: ResizeObserver | null = null
@@ -636,19 +633,14 @@ export class TranscriptBand {
     this.inlineWorking.textContent = 'working'
     this.inlineWorking.hidden = true
     this.sentList.className = 'ws-transcript-sent'
-    this.find = new TranscriptFind({
-      query: (text) => this.setQuery(text),
-      step: (direction) => this.stepMatch(direction),
-      cleared: () => this.clearQuery(),
-    })
     if (this.inline) {
       this.scroller.append(this.sentList, this.inlineWorking)
-      this.pane.append(this.find.el, this.scroller)
+      this.pane.append(this.scroller)
       this.pane.hidden = false
       this.fullOpen = true
       this.el.append(this.note, this.latestButton, this.pane)
     } else {
-      this.pane.append(panelHead, this.find.el, this.scroller)
+      this.pane.append(panelHead, this.scroller)
       this.el.append(headRow, this.note, this.body)
     }
 
@@ -676,11 +668,10 @@ export class TranscriptBand {
       if (event.key !== 'Escape' || event.isComposing) return
       event.preventDefault()
       event.stopPropagation()
-      // The first Escape clears a search in progress; the next peels the pane.
-      if (this.find.value || this.matches.length) this.find.clear()
+      // The first Escape clears a board Find highlight; the next peels the pane.
+      if (this.findKey) this.clearQuery()
       else this.closeFull()
     })
-    document.addEventListener('keydown', this.findListener)
     this.latestButton.addEventListener('click', () => {
       this.pinned = false
       this.showTarget(this.latest)
@@ -746,10 +737,8 @@ export class TranscriptBand {
     this.resizer?.disconnect()
     this.resizer = null
     document.removeEventListener('visibilitychange', this.visibilityListener)
-    document.removeEventListener('keydown', this.findListener)
     if (this.findFrame !== null) cancelAnimationFrame(this.findFrame)
     this.findFrame = null
-    this.find.dispose()
     this.pane.remove()
     this.el.replaceChildren()
   }
@@ -1670,18 +1659,6 @@ export class TranscriptBand {
 
   // ── Finding words ────────────────────────────────────────────────────
 
-  /** ⌘F / Ctrl-F inside the open transcript goes to its own field, not the browser's. */
-  private findShortcut(event: KeyboardEvent): void {
-    if (this.disposed || !this.fullOpen || event.isComposing || event.altKey || event.shiftKey) return
-    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'f') return
-    const active = document.activeElement
-    const within = (node: Element | null): boolean => !!node && (this.el.contains(node) || this.pane.contains(node))
-    if (!within(active) && !this.el.matches(':hover') && !this.pane.matches(':hover')) return
-    event.preventDefault()
-    event.stopPropagation()
-    this.find.focus()
-  }
-
   private currentKey(): string {
     const match = this.matches[this.currentMatch]
     return match ? `${match.turn}:${match.step ?? 'p'}` : ''
@@ -1689,7 +1666,7 @@ export class TranscriptBand {
 
   private matchKey(match: Match): string { return `${match.turn}:${match.step ?? 'p'}` }
 
-  /** The words in the field changed: mark them, then stand on the first match from the reader's place. */
+  /** Mark a board Find hit and stand on its nearest match. */
   private setQuery(text: string, at?: number): void {
     const terms = queryTerms(text)
     this.findPattern = termPattern(terms)
@@ -1697,8 +1674,7 @@ export class TranscriptBand {
     this.matches = findMatches(this.model.turns, terms)
     this.currentMatch = -1
     this.markAll()
-    if (!this.matches.length) { this.find.setCount(0, 0); return }
-    this.revealMatch(at === undefined ? this.firstFromPlace() : nearestMatch(this.matches, at))
+    if (this.matches.length) this.revealMatch(at === undefined ? 0 : nearestMatch(this.matches, at))
   }
 
   private clearQuery(): void {
@@ -1710,27 +1686,11 @@ export class TranscriptBand {
     this.markAll()
   }
 
-  /** The first match at or after the turn the reader is looking at, wrapping to the first. */
-  private firstFromPlace(): number {
-    const top = this.scroller.getBoundingClientRect().top
-    const seen = [...this.list.children].find((node) => node.getBoundingClientRect().bottom > top) as HTMLElement | undefined
-    const place = seen ? Number(seen.dataset.turn) : 0
-    const index = this.matches.findIndex((match) => match.turn >= place)
-    return index < 0 ? 0 : index
-  }
-
-  private stepMatch(direction: 1 | -1): void {
-    const total = this.matches.length
-    if (!total) return
-    this.revealMatch(this.currentMatch < 0 ? (direction > 0 ? 0 : total - 1) : (this.currentMatch + direction + total) % total)
-  }
-
   /** Stand on a match: draw its turn if it is not drawn, open what hides it, and bring it into view. */
   private revealMatch(index: number): void {
     const match = this.matches[index]
     if (!match || !this.hasInitialRender) return
     this.currentMatch = index
-    this.find.setCount(index + 1, this.matches.length)
     if (!this.fullRendered) return
     if (match.turn < this.visibleStart) {
       const previous = this.visibleStart
@@ -1796,19 +1756,18 @@ export class TranscriptBand {
   private refreshFind(): void {
     if (!this.findPattern) return
     const standing = this.currentKey()
-    this.matches = findMatches(this.model.turns, queryTerms(this.find.value))
+    this.matches = findMatches(this.model.turns, queryTerms(this.findKey))
     const kept = standing ? this.matches.findIndex((match) => this.matchKey(match) === standing) : -1
     this.currentMatch = kept
-    this.find.setCount(kept + 1, this.matches.length)
     this.markAll()
   }
 
-  /** A first draw of a session: a hit chosen elsewhere lands on its match; a search left in the field is run again here. */
+  /** A first draw of a session lands on a pending board Find hit. */
   private settleFind(): void {
     const pending = this.pendingHit
     this.pendingHit = null
     if (pending) this.setQuery(pending.query, pending.at)
-    else if (this.find.value.trim()) this.setQuery(this.find.value)
+    else if (this.findKey) this.setQuery(this.findKey)
   }
 
   /** Read the session a hit came from, standing on the match nearest the hit's time. */
@@ -1818,7 +1777,6 @@ export class TranscriptBand {
     // The index folds case and stems; the terms the snippet marked are what the transcript is searched for.
     const words = snippetTerms(hit.snippet)
     const text = words.length ? words.join(' ') : query
-    this.find.set(text)
     if (this.target?.session === hit.session && this.hasInitialRender) {
       this.setQuery(text, at)
       return

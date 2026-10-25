@@ -211,7 +211,7 @@ describe('bar Find transcripts', () => {
     expect(window.location.hash).toContain('alpha')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('chat:host-a:alpha')
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`session=${hit.session}`))).toBe(true)
-    expect(document.querySelector<HTMLInputElement>('.ws-transcript-find-input')?.value).toBe('alpha')
+    expect(document.querySelector('.ws-transcript-find')).toBeNull()
     expect(document.querySelector('.ws-transcript-found')?.textContent).toContain('Alpha result')
   })
 
