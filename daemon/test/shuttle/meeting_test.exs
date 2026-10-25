@@ -1418,6 +1418,120 @@ defmodule Shuttle.MeetingTest do
            end) == 1
   end
 
+  for phase <- ["loading", "live"], missing <- [:tmux_launch, :json_launch, :dead_pane] do
+    test "#{phase} hark with #{missing} supplies the card state and can be stopped", %{
+      hark_dir: hark_dir
+    } do
+      data = %{"launch" => "current", "pid" => 321, "phase" => unquote(phase)}
+      data = if unquote(missing) == :json_launch, do: Map.delete(data, "launch"), else: data
+      write_meeting(hark_dir, data)
+      stamp = if unquote(missing) == :tmux_launch, do: "", else: "current"
+      pane = if unquote(missing) == :dead_pane, do: "1|1", else: "0|0"
+
+      Shuttle.Test.MeetingRunner.set_handler(fn
+        "tmux", ["display-message" | _], _opts, state ->
+          {{"#{pane}|1234|#{stamp}|\n", 0}, state}
+
+        "ps", ["-p", "321", "-o", "command="], _opts, state ->
+          {{"python hark capture", 0}, state}
+
+        _command, _args, _opts, state ->
+          {{"", 0}, state}
+      end)
+
+      assert {:ok, %{meeting: %{state: unquote(phase)}}} = Meeting.show()
+      assert {:ok, _} = Meeting.stop(launch: "current")
+      assert {:ok, _} = Meeting.stop(launch: "current")
+
+      assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn
+               {"kill", ["-INT", "321"], _} -> true
+               _ -> false
+             end) == 1
+
+      refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn
+               {"tmux", ["kill-session" | _], _} -> true
+               _ -> false
+             end)
+    end
+  end
+
+  for phase <- ["live", "failed"] do
+    test "a starting or failed row signals a recovered #{phase} hark pid", %{hark_dir: hark_dir} do
+      write_meeting(hark_dir, %{"launch" => "current", "pid" => 321, "phase" => unquote(phase)})
+      pane = if unquote(phase) == "failed", do: "1|1", else: "0|0"
+
+      Shuttle.Test.MeetingRunner.set_handler(fn
+        "tmux", ["display-message" | _], _opts, state ->
+          {{"#{pane}|1234|current|\n", 0}, state}
+
+        "ps", ["-p", "321", "-o", "command="], _opts, nil ->
+          {{"", 1}, :recovered}
+
+        "ps", ["-p", "321", "-o", "command="], _opts, state ->
+          {{"python hark capture", 0}, state}
+
+        _command, _args, _opts, state ->
+          {{"", 0}, state}
+      end)
+
+      assert {:ok, _} = Meeting.stop(launch: "current")
+      assert {:ok, _} = Meeting.stop(launch: "current")
+
+      assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn
+               {"kill", ["-INT", "321"], _} -> true
+               _ -> false
+             end) == 1
+
+      refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn
+               {"tmux", ["kill-session" | _], _} -> true
+               _ -> false
+             end)
+    end
+  end
+
+  test "stop clears a starting row when its tmux launch disappears and no hark pid lives", %{
+    hark_dir: hark_dir
+  } do
+    write_meeting(hark_dir, %{"launch" => "current", "pid" => 321, "phase" => "live"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _opts, nil ->
+        {{"0|0|1234|current|\n", 0}, :gone}
+
+      "tmux", ["has-session" | _], _opts, :gone ->
+        {{"can't find session: hark-meeting", 1}, :gone}
+
+      "ps", ["-p", "321", "-o", "command="], _opts, state ->
+        {{"", 1}, state}
+
+      _command, _args, _opts, state ->
+        {{"", 0}, state}
+    end)
+
+    assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "current")
+    assert {:ok, %{meeting: nil}} = Meeting.show()
+    assert {:ok, %{meeting: nil}} = Meeting.stop(launch: "current")
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn
+             {"kill", _, _} -> true
+             {"tmux", ["kill-session" | _], _} -> true
+             _ -> false
+           end)
+  end
+
+  test "a different explicit launch never adopts or signals the metadata's hark pid", %{
+    hark_dir: hark_dir
+  } do
+    write_meeting(hark_dir, %{"launch" => "old", "pid" => 321, "phase" => "live"})
+    set_current_meeting_handler("new", 321)
+    assert {:ok, %{meeting: %{state: "starting", launch: "new"}}} = Meeting.show()
+    assert {:error, {:stale_launch, %{launch: "new"}}} = Meeting.stop(launch: "old")
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {command, _, _} ->
+             command in ["ps", "kill"]
+           end)
+  end
+
   test "stop dismisses starting and failed tmux sessions without signalling" do
     Shuttle.Test.MeetingRunner.set_handler(
       fn
@@ -1574,6 +1688,16 @@ defmodule Shuttle.MeetingTest do
     assert Shuttle.Test.MeetingCaptureForwardClient.last() == nil
   end
 
+  test "launch wait recognizes live hark even when tmux has no launch stamp", %{hark_dir: dir} do
+    Env.put_app_env(:meeting_launch_wait_ms, 0)
+    set_starting_meeting_handler(dir, false)
+
+    assert {:ok, %{meeting: %{state: "live", launch: launch}}} =
+             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", nil)
+
+    assert {:ok, %{meeting: %{state: "live", launch: ^launch}}} = Meeting.show()
+  end
+
   test "an unreadable tmux after creation still reports recording as starting" do
     Env.put_app_env(:meeting_launch_wait_ms, 300)
 
@@ -1667,7 +1791,7 @@ defmodule Shuttle.MeetingTest do
     end)
   end
 
-  defp set_starting_meeting_handler(hark_dir) do
+  defp set_starting_meeting_handler(hark_dir, stamp_launch? \\ true) do
     Shuttle.Test.MeetingRunner.set_handler(fn
       "tmux", ["display-message" | _], _opts, nil ->
         {{"can't find session: hark-meeting", 1}, nil}
@@ -1688,7 +1812,8 @@ defmodule Shuttle.MeetingTest do
         {{"$4\n", 0}, launch}
 
       "tmux", ["display-message" | _], _opts, launch ->
-        {{"0|0|1234|#{launch}|\n", 0}, launch}
+        stamp = if stamp_launch?, do: launch, else: ""
+        {{"0|0|1234|#{stamp}|\n", 0}, launch}
 
       "ps", ["-p", "321", "-o", "command="], _opts, launch ->
         {{"python hark capture", 0}, launch}

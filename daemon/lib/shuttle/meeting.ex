@@ -79,20 +79,24 @@ defmodule Shuttle.Meeting do
   @spec derive(tmux_status(), map() | nil, boolean(), String.t() | nil) ::
           {meeting(), boolean()}
   def derive(tmux_status, meeting_json, pid_alive?, pane_tail \\ nil) do
-    fresh = if fresh_for_session?(tmux_status, meeting_json), do: meeting_json, else: nil
+    fresh =
+      if fresh_for_session?(tmux_status, meeting_json) or
+           (pid_alive? and compatible_launch?(tmux_status, meeting_json)),
+         do: meeting_json,
+         else: nil
+
     phase = if is_map(fresh), do: fresh["phase"], else: nil
     clean_end? = phase == "ended" and fresh["error"] in [nil, ""]
 
     case tmux_status do
+      _ when phase in @active_phases and pid_alive? ->
+        {meeting_row(fresh, phase, tmux_status), false}
+
       :absent ->
-        if phase in @active_phases and pid_alive?,
-          do: {meeting_row(fresh, phase, :absent), false},
-          else: {nil, false}
+        {nil, false}
 
       %{state: :alive} ->
-        if phase in @active_phases and pid_alive?,
-          do: {meeting_row(fresh, phase, tmux_status), false},
-          else: {meeting_row(fresh, "starting", tmux_status), false}
+        {meeting_row(fresh, "starting", tmux_status), false}
 
       %{state: {:dead, 0}} when clean_end? ->
         {nil, true}
@@ -528,11 +532,11 @@ defmodule Shuttle.Meeting do
   defp await_launch(launch_id, paths, title, fiber, mode, opts, deadline) do
     observed =
       case inspect_current(opts) do
-        {:ok, %{meeting: %{state: state} = row}, %{tmux: %{launch: ^launch_id}}}
+        {:ok, %{meeting: %{state: state, launch: ^launch_id} = row}, _context}
         when state in @active_phases ->
           {:ok, row}
 
-        {:ok, %{meeting: %{state: "failed"} = row}, %{tmux: %{launch: ^launch_id}}} ->
+        {:ok, %{meeting: %{state: "failed", launch: ^launch_id} = row}, _context} ->
           {:error, {:launch_failed, row}}
 
         _starting_or_unreadable ->
@@ -596,7 +600,7 @@ defmodule Shuttle.Meeting do
   defp observe(opts) do
     with {:ok, tmux} <- tmux_status(opts) do
       raw_meeting = read_meeting_json(opts)
-      usable_meeting = if fresh_for_session?(tmux, raw_meeting), do: raw_meeting, else: nil
+      usable_meeting = if compatible_launch?(tmux, raw_meeting), do: raw_meeting, else: nil
 
       {:ok,
        %{
@@ -639,18 +643,31 @@ defmodule Shuttle.Meeting do
   end
 
   defp validate_stop_launch(_snapshot, nil), do: :ok
+  defp validate_stop_launch(%{meeting: nil}, _launch), do: :ok
 
   defp validate_stop_launch(%{meeting: %{launch: launch}}, launch)
        when is_binary(launch) and launch != "", do: :ok
 
   defp validate_stop_launch(%{meeting: row}, _launch), do: {:error, {:stale_launch, row}}
 
-  defp stop_current(%{meeting: nil}, _context, _opts), do: {:error, :not_found}
+  defp stop_current(%{meeting: nil} = snapshot, _context, _opts), do: {:ok, snapshot}
 
   defp stop_current(%{meeting: %{state: "stopping"}}, _context, opts), do: show(opts)
 
   defp stop_current(%{meeting: %{state: state}}, context, opts)
-       when state in ["loading", "live"] do
+       when state in ["loading", "live"],
+       do: signal_stop(context, opts)
+
+  defp stop_current(%{meeting: %{state: state}}, context, opts)
+       when state in ["starting", "failed"] do
+    if pid_mentions_hark?(context.meeting_json, opts) do
+      signal_stop(context, opts)
+    else
+      with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+    end
+  end
+
+  defp signal_stop(context, opts) do
     with pid when not is_nil(pid) <- valid_pid(context.meeting_json),
          :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch_from(context.meeting_json)}),
          {_output, 0} <- run(opts, "kill", ["-INT", pid]) do
@@ -665,11 +682,6 @@ defmodule Shuttle.Meeting do
       {output, status} ->
         {:error, {:operation, "could not signal hark (#{status}): #{String.trim(output)}"}}
     end
-  end
-
-  defp stop_current(%{meeting: %{state: state}}, context, opts)
-       when state in ["starting", "failed"] do
-    with :ok <- kill_launch(context.tmux, opts), do: show(opts)
   end
 
   defp read_meeting_json(opts) do
@@ -751,6 +763,14 @@ defmodule Shuttle.Meeting do
       value -> value
     end
   end
+
+  # A missing launch stamp can be recovered through a live hark pid, but two
+  # explicit, different launch ids must never be treated as the same recording.
+  defp compatible_launch?(tmux, %{} = meeting_json) do
+    tmux_launch(tmux) in [nil, launch_from(meeting_json)] or is_nil(launch_from(meeting_json))
+  end
+
+  defp compatible_launch?(_tmux, _meeting_json), do: false
 
   defp fresh_for_session?(:absent, meeting_json), do: is_map(meeting_json)
 
@@ -915,10 +935,7 @@ defmodule Shuttle.Meeting do
   defp first_error(_error, fallback) when is_binary(fallback) and fallback != "", do: fallback
   defp first_error(_error, _fallback), do: nil
 
-  defp meeting_identity(:absent, %{"phase" => phase} = data, true)
-       when phase in @active_phases do
-    identity_for(data)
-  end
+  defp meeting_identity(_tmux, %{} = data, true), do: identity_for(data)
 
   defp meeting_identity(%{} = _tmux, %{"phase" => phase} = data, _pid_alive?)
        when phase in @active_phases do
