@@ -91,6 +91,8 @@ export function registerHeaderBarJourneys(test) {
         }), { viewBox: '0 0 16 16', inheritsColor: true, width: 16, height: 16, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
+      const centers = await header.locator('.ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
+      assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `header icons share one vertical center in ${device}/${scheme}: ${centers}`)
       await chat.locator('textarea').focus(); await chat.locator('textarea').blur()
       if (process.env.WORKSPACE_SHOTS) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })

@@ -34,7 +34,7 @@
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
 .ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 4px; min-height: 32px; }
-.ws-chat-acts > .kbn-ctl-verdict { display: flex; gap: 4px; }
+.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; margin: 0; }
 .ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
 /* The lifecycle chip: the rail's state word in its tone, beside the name's first line. */
 .ws-chat-state {
