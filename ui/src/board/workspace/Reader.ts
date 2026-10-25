@@ -208,7 +208,7 @@ export class Reader {
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
-    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key))
+    this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintRail())
     const pages = this.pagesButton = button('ws-chat-pages', '', () => this.openPhonePage(), 'Threads and sent files')
     pages.title = 'Threads and sent files'
     pages.setAttribute('aria-haspopup', 'dialog')
@@ -912,8 +912,8 @@ export class Reader {
     this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar') && !this.el.classList.contains('ws-with-rail'))
   }
   private paintRail(): void {
-    const has = !this.threadRail.el.hidden
-    const open = this.railOpen
+    const has = this.threadRail.hasFamily
+    const open = this.phone.matches ? this.pageSheet.isOpen : this.railOpen
     this.el.classList.toggle('ws-rail-off', !open)
     this.el.classList.toggle('ws-with-rail', this.railShown)
     this.paintZen()
@@ -1097,7 +1097,7 @@ export class Reader {
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'sidebar') this.toggleSidebar()
-    else if (intent === 'rail') { if (!this.threadRail.el.hidden) this.toggleRail() }
+    else if (intent === 'rail') { if (this.threadRail.hasFamily) this.toggleRail() }
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
       else if (this.sidebarShown) this.sidebarPicker.focus()

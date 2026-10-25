@@ -338,5 +338,6 @@
 .ws-rail-toggle[hidden] { display: none; }
 .ws-rail-off .ws-thread-rail { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-rail-toggle { top: 8px; right: 48px; }
+  .ws-rail-toggle { top: calc(2px + env(safe-area-inset-top)); right: 44px; width: var(--ws-phone-target); height: var(--ws-phone-target); }
+  .ws-reader:has(.ws-rail-toggle:not([hidden])) :is(.ws-chat-title, .ws-channel-title) { padding-right: var(--ws-phone-target); }
 }

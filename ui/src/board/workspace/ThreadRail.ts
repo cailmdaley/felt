@@ -1,3 +1,4 @@
+import { MOBILE_MEDIA } from '../mobile.js'
 import { type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
 import { deskColumn } from '../deskColumn.js'
@@ -28,6 +29,8 @@ export class ThreadRail {
   private card: KanbanCard | null = null
   /** Every thread in the family besides the open one is archived: the rail has nothing that asks for the eye. */
   quiet = false
+  /** Family presence is independent of the viewport's rail presentation. */
+  hasFamily = false
   /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
   /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
@@ -119,13 +122,19 @@ export class ThreadRail {
     const scope = ancestors[0] ?? card
     this.card = card; this.scope = scope; this.index = index
     const descendants = index.subtree(scope)
+    const others = descendants.filter(c => !(c.id === card.id && c.originId === card.originId))
+    this.hasFamily = others.length > 0
+    this.quiet = others.every(c => threadState(c) === 'archived')
+    if (window.matchMedia(MOBILE_MEDIA).matches) {
+      this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
+      this.paintBreadcrumb(ancestors)
+      return
+    }
     const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
     // A family that is only the open thread has nothing to show beside it.
-    const others = descendants.filter(c => !(c.id === card.id && c.originId === card.originId))
-    this.el.hidden = others.length === 0
-    this.quiet = others.every(c => threadState(c) === 'archived')
+    this.el.hidden = !this.hasFamily
     this.paintBreadcrumb(ancestors)
     this.paint()
   }
