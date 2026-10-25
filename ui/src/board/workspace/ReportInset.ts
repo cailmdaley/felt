@@ -1,13 +1,15 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
+import { Thumbnail } from './Thumbnail.js'
 import './report-inset.css'
 
-/** One live report moves between the conversation's figure and its viewport dock. */
+/** One mounted live figure, with a static thumbnail in its offscreen dock. */
 export class ReportInset {
   readonly el = document.createElement('figure')
   private readonly dock = document.createElement('div')
   private readonly viewer: HTMLElement
+  private readonly thumbnail: Thumbnail
   private readonly observer: MutationObserver
   private readonly resize: ResizeObserver | null
   private intersection: IntersectionObserver | null = null
@@ -24,7 +26,13 @@ export class ReportInset {
     this.dock.className = 'ws-report-dock'; this.dock.hidden = true
     const compact = document.createElement('button'); compact.type = 'button'; compact.className = 'ws-report-compact'
     compact.setAttribute('aria-label', 'Read report'); compact.addEventListener('click', open)
-    const small = document.createElement('span'); small.className = 'ws-report-viewport'; small.inert = true
+    const small = document.createElement('span'); small.className = 'ws-report-preview'; small.inert = true
+    this.thumbnail = new Thumbnail({
+      key: doc.key, shuttleBase: base, fallback: 'Report', captioned: true,
+      file: { fullPath: doc.path, owner: doc.owner, basename: 'report.html' },
+      priority: () => 1, distance: () => 0,
+    })
+    small.append(this.thumbnail.el)
     const title = document.createElement('span'); title.className = 'ws-report-dock-title'
     compact.append(small, title); this.dock.append(compact)
     const label = (): void => {
@@ -33,15 +41,14 @@ export class ReportInset {
     }
     label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
     const scale = (): void => {
-      const active = this.dock.hidden ? viewport : small
-      this.viewer.style.transform = `scale(${active.clientWidth / 800})`
+      this.viewer.style.transform = `scale(${viewport.clientWidth / 800})`
     }
     this.resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scale)
     this.resize?.observe(viewport); this.resize?.observe(small)
     let root: HTMLElement | null = null
     const seat = (): void => {
       const scroll = chat.querySelector<HTMLElement>('.ws-transcript-scroll')
-      const target = chat.querySelector<HTMLElement>('.ws-transcript-turn') ?? scroll ?? chat.querySelector<HTMLElement>('.ws-chat-log')
+      const target = scroll ?? chat.querySelector<HTMLElement>('.ws-chat-log')
       if (target && this.el.parentElement !== target) target.prepend(this.el)
       const find = chat.querySelector('.ws-transcript-find-bar')
       if (find && this.dock.parentElement !== find) find.append(this.dock)
@@ -56,7 +63,6 @@ export class ReportInset {
             const atBottom = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 2
             this.dock.hidden = visible
             this.el.inert = !visible
-            ;(visible ? viewport : small).append(this.viewer)
             scale()
             if (atBottom && !visible) scroll.scrollTop = scroll.scrollHeight
           }, { root: scroll })
@@ -69,6 +75,6 @@ export class ReportInset {
   }
   dispose(): void {
     this.observer.disconnect(); this.intersection?.disconnect(); this.resize?.disconnect(); this.stopTitle()
-    disposeFileViewer(this.viewer); this.el.remove(); this.dock.remove()
+    this.thumbnail.dispose(); disposeFileViewer(this.viewer); this.el.remove(); this.dock.remove()
   }
 }

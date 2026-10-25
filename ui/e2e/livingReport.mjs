@@ -41,8 +41,9 @@ try {
     await page.goto(url)
     await page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
     await selected(page).locator('textarea').waitFor()
-    await page.locator('.ws-report-dock:not([hidden]) iframe').waitFor()
-    await page.frameLocator('.ws-report-dock iframe').locator('#report-sentinel').waitFor()
+    await page.locator('.ws-report-dock:not([hidden]) .ws-thumbnail').waitFor()
+    await page.frameLocator('.ws-report-inset iframe').locator('#report-sentinel').waitFor({ state: 'attached' })
+    const insetIdentity = await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent()
     await shot(page, `${device}-landing`)
     const dockBox = await page.locator('.ws-report-dock').boundingBox()
     if (!phone) {
@@ -59,6 +60,7 @@ try {
     }
     await page.locator('.ws-report-inset iframe').waitFor()
     await page.frameLocator('.ws-report-inset iframe').locator('#report-sentinel').waitFor()
+    assert.equal(await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent(), insetIdentity, 'real intersection keeps the iframe document alive')
     assert.equal(await page.locator('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice').count(), 0)
     assert.equal(await page.locator('.ws-chat-outcome').count(), 0)
     const geometry = await page.locator('.ws-report-inset').evaluate(el => {
@@ -72,7 +74,8 @@ try {
 
     // Both the full figure and the compact landing dock open the same reader.
     await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = el.scrollHeight })
-    await page.locator('.ws-report-dock:not([hidden]) iframe').waitFor()
+    await page.locator('.ws-report-dock:not([hidden]) .ws-thumbnail').waitFor()
+    assert.equal(await page.frameLocator('.ws-report-inset iframe').locator('#report-identity').textContent(), insetIdentity)
     await report(page)
     await shot(page, `${device}-report`)
     // Local fragments stay in srcdoc, retain identity and keep the key bridge alive.
