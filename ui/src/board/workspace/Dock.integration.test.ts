@@ -334,6 +334,30 @@ describe('state-shaped act zone', () => {
     expect(actions.hidden).toBe(true)
   })
 
+  it.each([
+    { phone: true, sessionLink: undefined, visible: false },
+    { phone: true, sessionLink: 'https://claude.ai/code/session_abc', visible: true },
+    { phone: false, sessionLink: undefined, visible: true },
+  ])('offers Console only with an actionable destination: %j', ({ phone, sessionLink, visible }) => {
+    vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const openWorker = vi.fn()
+    dock.reset(); dock = new Dock('', saved, undefined, openWorker)
+    const worker = task({ tmuxSession: 'terminal-worker', workerState: 'running', sessionLink })
+    band = dock.bandFor(worker)
+    document.body.append(band.el)
+    band.head.querySelector<HTMLButtonElement>('button[aria-label="Look"]')!.click()
+    const console = band.head.querySelector<HTMLButtonElement>('.ws-chat-console')!
+    expect(console.hidden).toBe(!visible)
+    expect(dock.workerPillFor(worker)?.matches('a[href],button')).toBe(visible)
+    if (!phone) {
+      console.click()
+      expect(openWorker).toHaveBeenCalledWith('terminal-worker', 'owner')
+    } else if (!visible) {
+      expect(dock.openConversation(worker)).toBe(false)
+      expect(openWorker).not.toHaveBeenCalled()
+    }
+  })
+
   it('anchors Rest to Act and closes the sheet before the follow-up takes focus', () => {
     const confirm = document.createElement('button')
     document.body.append(confirm)

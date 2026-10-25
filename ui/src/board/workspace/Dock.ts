@@ -1181,7 +1181,7 @@ export class Dock {
       if (rest) rest.hidden = !restable
       temper.hidden = discard.hidden = !reachable
       review.hidden = !reviewable
-      consoleItem.hidden = !this.workerPillFor(card)
+      consoleItem.hidden = !this.workerPillFor(card)?.matches('a[href],button')
       this.paintMenuVerbs(card)
       sessionsItem.hidden = !card.uid
       this.paintHeadWorker(card, worker)
