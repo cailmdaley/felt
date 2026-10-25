@@ -129,6 +129,28 @@ it('discovers a report only after it exists, including creation on a later refre
   expect(workspace.reader.host.get(key)).toBeDefined()
 })
 
+it('restores nested reader parents from the history entry after reload, but not a fresh deep link', async () => {
+  workspace.open(cards[0], 'Desk'); await flush()
+  const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+  const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+  workspace.reader.openDocument(report)
+  workspace.reader.openDocument(table)
+  const hash = window.location.hash
+  workspace.dispose()
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+  await flush()
+  workspace.reader.back()
+  expect(workspace.reader.document?.key).toBe(report)
+  workspace.reader.back()
+  expect(workspace.reader.document?.kind).toBe('fiber')
+  workspace.dispose()
+  window.history.replaceState(null, '', hash)
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+  await flush()
+  workspace.reader.back()
+  expect(workspace.reader.document?.kind).toBe('fiber')
+})
+
 describe('bar Find transcripts', () => {
   const hit = {
     session: 'b4edf873-cb1c-40ab-a891-f26f5333b321', harness: 'claude', project: '/work/alpha',

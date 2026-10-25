@@ -8,7 +8,7 @@ export type WorkspaceRoute =
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
 export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board'
-interface RouteState { depth: number; base: boolean; baseHash: string; originView?: WorkspaceOriginView }
+interface RouteState { depth: number; base: boolean; baseHash: string; originView?: WorkspaceOriginView; parents?: DocKey[] }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -66,9 +66,9 @@ function stateObject(value: unknown): StateObject {
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY]
   if (!entry || typeof entry !== 'object') return null
-  const { depth, base, baseHash, originView } = entry as Partial<RouteState>
+  const { depth, base, baseHash, originView, parents } = entry as Partial<RouteState>
   return Number.isInteger(depth) && depth! >= 0 && typeof base === 'boolean' && typeof baseHash === 'string'
-    ? { depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}) }
+    ? { depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}), parents: Array.isArray(parents) ? parents.filter((key): key is string => typeof key === 'string') : [] }
     : null
 }
 
@@ -95,6 +95,7 @@ export class WorkspaceHistory {
   }
 
   get originView(): WorkspaceOriginView { return this.routeOrigin }
+  get parents(): DocKey[] { return readRouteState(window.history.state)?.parents ?? [] }
 
   start(): void {
     if (this.started) return
@@ -127,7 +128,7 @@ export class WorkspaceHistory {
     if (originView) this.routeOrigin = originView
     // Back lands on this entry, so it needs the channel's origin as well.
     window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
-    window.history.pushState(withRouteState(window.history.state, this.routeState(nextDepth)), '', hash)
+    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(nextDepth), parents: [] }), '', hash)
     this.current = route
     this.currentHash = hash
     this.depth = nextDepth
@@ -149,7 +150,7 @@ export class WorkspaceHistory {
     this.onRoute(this.current)
   }
 
-  select(doc: DocKey): void {
+  select(doc: DocKey, parents = this.parents): void {
     if (this.pendingOwnPop !== null) {
       if (this.queuedEnter) this.queuedEnter = { ...this.queuedEnter, doc }
       return
@@ -157,7 +158,7 @@ export class WorkspaceHistory {
     if (this.current?.kind !== 'channel') return
     const route: WorkspaceRoute = { ...this.current, doc }
     const hash = formatRoute(route)
-    window.history.replaceState(withRouteState(window.history.state, this.routeState()), '', hash)
+    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), parents }), '', hash)
     this.current = route
     this.currentHash = hash
   }
@@ -202,7 +203,7 @@ export class WorkspaceHistory {
   }
 
   private routeState(depth = this.depth): RouteState {
-    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin }
+    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin, parents: this.parents }
   }
 
   private adoptDepth(state: unknown, route: WorkspaceRoute, hash: string): void {

@@ -591,6 +591,12 @@ export class Workspace {
       }, false)
     }
     this.current = state
+    const parents = this.history.parents
+    for (const key of parents) {
+      const file = parseDocKey(key)
+      if (file && !state.links.some(link => link.path === file.path && (link.owner ?? state.card.originId) === file.owner)) state.links.push(file)
+    }
+    if (parents.length) this.rebuild(state)
     if (this.origin === 'Board') this.lastBoardRoute = route
     // Reserve the body read before the receipt feed can preload this same fiber.
     const bodyRead = this.load(state)
@@ -606,6 +612,7 @@ export class Workspace {
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
+    this.reader.restoreAncestry(parents)
     this.landComposer(state, false)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
@@ -671,7 +678,7 @@ export class Workspace {
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
-    this.history.select(key)
+    this.history.select(key, this.reader.ancestry)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {

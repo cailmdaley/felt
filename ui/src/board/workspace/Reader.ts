@@ -303,6 +303,8 @@ export class Reader {
   get sidebarVisible(): boolean { return this.active && this.sidebarShown }
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
+  get ancestry(): DocKey[] { return [...this.parents] }
+  restoreAncestry(parents: DocKey[]): void { this.parents.splice(0, this.parents.length, ...parents) }
 
   /** Show the selected page; settled body and receipt reads enable the files sheet. */
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
