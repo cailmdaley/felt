@@ -41,6 +41,16 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
   rail.breadcrumb.querySelector<HTMLButtonElement>('button')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
+  for (const current of [root, child, deep]) {
+    rail.show(current, new ThreadIndex(all))
+    const first = rail.el.querySelector('.ws-thread-tree')!.firstElementChild!
+    expect(first.classList.contains('ws-thread-root')).toBe(true)
+    expect(first.querySelector('.kbn-thread-name')?.textContent).toBe(root.name)
+    expect(first.querySelector('.constitution-state-dot')).not.toBeNull()
+    expect(first.querySelector('[aria-current="page"]') !== null).toBe(current === root)
+    first.querySelector<HTMLButtonElement>('.kbn-thread-row')!.click()
+    expect(open).toHaveBeenLastCalledWith(root)
+  }
   rail.show(root, new ThreadIndex([root, rest]))
   expect([...rail.el.querySelectorAll('.ws-thread-group summary')].map(s => s.getAttribute('aria-label'))).toEqual(['Resting, 1'])
   vi.unstubAllGlobals()
@@ -110,7 +120,7 @@ it('shows pins only on pinned or current rows and a repaint follows the tag', ()
   const asked = vi.fn((event: Event) => (event as CustomEvent<ThreadPinRequest>).detail)
   document.addEventListener(THREAD_PIN, asked)
   rail.show(root, new ThreadIndex([root, branch]))
-  const pin = () => rail.el.querySelector<HTMLButtonElement>('.ws-thread-tree .kbn-thread-pin')!
+  const pin = () => rail.el.querySelector<HTMLButtonElement>('.ws-thread-group .kbn-thread-pin')!
   expect(pin().getAttribute('aria-pressed')).toBe('false')
   expect(pin().hidden).toBe(true)
   rail.show(branch, new ThreadIndex([root, branch]))
@@ -205,7 +215,7 @@ it("inside a deep thread keeps the whole family from its top-level constitution,
     rail.show(seed, new ThreadIndex(all))
     expect(rail.el.hidden).toBe(false)
     const names = [...rail.el.querySelectorAll('.kbn-thread-name')].map(n => n.textContent)
-    expect(names).toEqual(['Cousin', 'Validation', 'Seed'])
+    expect(names).toEqual(['Chair', 'Cousin', 'Validation', 'Seed'])
     expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
     expect(rail.el.querySelector('.ws-thread-current .kbn-thread-name')?.textContent).toBe('Seed')
     // Archived folds by default, but not when it holds the open thread.
@@ -223,14 +233,15 @@ it("inside a deep thread keeps the whole family from its top-level constitution,
   } finally { vi.unstubAllGlobals() }
 })
 
-it('draws nothing when the family is only the open thread, never listing a thread as its own', () => {
+it('keeps the root reachable from its only thread and hides a root with no family', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   try {
     const chair = card({ id: 'chair', name: 'Chair' })
     const only = card({ id: 'chair/only', orchestrator: chair.id, status: 'active', name: 'Only' })
     const rail = new ThreadRail(vi.fn(), vi.fn())
     rail.show(only, new ThreadIndex([chair, only]))
-    expect(rail.el.hidden).toBe(true)
+    expect(rail.el.hidden).toBe(false)
+    expect(rail.el.querySelector('.ws-thread-root .kbn-thread-name')?.textContent).toBe('Chair')
     rail.show(chair, new ThreadIndex([chair]))
     expect(rail.el.hidden).toBe(true)
   } finally { vi.unstubAllGlobals() }

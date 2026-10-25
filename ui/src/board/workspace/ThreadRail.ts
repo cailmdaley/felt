@@ -122,7 +122,7 @@ export class ThreadRail {
     const scope = ancestors[0] ?? card
     this.card = card; this.scope = scope; this.index = index
     const descendants = index.subtree(scope)
-    const others = descendants.filter(c => !(c.id === card.id && c.originId === card.originId))
+    const others = [scope, ...descendants].filter(c => !(c.id === card.id && c.originId === card.originId))
     this.hasFamily = others.length > 0
     this.quiet = others.every(c => threadState(c) === 'archived')
     if (window.matchMedia(MOBILE_MEDIA).matches) {
@@ -130,7 +130,7 @@ export class ThreadRail {
       this.paintBreadcrumb(ancestors)
       return
     }
-    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
+    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...[scope, ...descendants].map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
     // A family that is only the open thread has nothing to show beside it.
@@ -196,7 +196,9 @@ export class ThreadRail {
       row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
       return item
     }
-    this.tree.replaceChildren()
+    const rootRow = rowFor(scope, 'root', 'Root constitution', new Set(), new Map())
+    rootRow.classList.add('ws-thread-root')
+    this.tree.replaceChildren(rootRow)
     const subtree = index.subtree(scope)
     // Arriving at a thread opens the groups holding it and its ancestry, once; the reader may fold them after.
     const visit = JSON.stringify([current.id, current.originId, scope.id])

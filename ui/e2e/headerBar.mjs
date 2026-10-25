@@ -39,8 +39,9 @@ export function registerHeaderBarJourneys(test) {
     await resize(1440, false)
     assert.ok(await focused(settings), 'the same Settings control retains focus on return to desktop')
   }, { width: 1440, height: 900 })
-  test('Desktop title fits two lines at the smallest card and short names keep the one-line height', async page => {
+  test('Desktop title fits two lines down to a 701px viewport and short names keep the one-line height', async page => {
     await page.addInitScript(() => {
+      if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle:workspace:rail', 'false')
     })
@@ -72,6 +73,38 @@ export function registerHeaderBarJourneys(test) {
     }
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+    for (const scheme of ['light', 'dark']) test(`Root heads the family at every depth (${device}, ${scheme})`, async page => {
+      await page.addInitScript(scheme => {
+        if (window !== window.top) return
+        localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
+        localStorage.setItem('shuttle:workspace:sidebar', 'false')
+        localStorage.setItem('shuttle:workspace:rail', 'true')
+      }, scheme)
+      await page.goto(url)
+      await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+      const header = page.locator('.ws-selected .ws-chat-head')
+      const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
+      const show = async () => { if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click() }
+      const first = () => family.locator(':scope > *').first()
+      const rootButton = () => device === 'phone' ? first() : first().locator('.kbn-thread-row')
+      for (const name of ['Response analysis', 'Choose the response cut']) {
+        await show()
+        await family.locator('.kbn-thread-row').filter({ hasText: name }).click()
+        await header.getByRole('heading', { name, exact: true }).waitFor()
+        await show()
+        assert.equal(await first().locator('.kbn-thread-name').innerText(), title)
+        assert.ok(await first().locator('.constitution-state-dot').isVisible())
+        if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
+          await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+          await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
+        }
+        await rootButton().click()
+        await header.getByRole('heading', { name: title, exact: true }).waitFor()
+        await show()
+        assert.equal(await rootButton().getAttribute('aria-current'), 'page')
+        if (device === 'phone') await page.getByRole('button', { name: 'Close settings', exact: true }).click()
+      }
+    }, viewport)
     for (const scheme of ['light', 'dark']) test(`One header bar (${device}, ${scheme}): long name, immediate icons and unified settings`, async page => {
       await page.emulateMedia({ colorScheme: scheme })
       await page.addInitScript(scheme => {
@@ -132,6 +165,11 @@ export function registerHeaderBarJourneys(test) {
       if (process.env.WORKSPACE_SHOTS) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `header-${device}-${scheme}.png`) })
+        if (device === 'desktop' && scheme === 'light') {
+          const variant = await page.addStyleTag({ content: `.ws-chat-head { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 6px 10px; min-height: 100px; } .ws-chat-identity { display: contents; } .ws-chat-title { grid-column: 2; grid-row: 1; } .ws-chat-state { grid-column: 2; grid-row: 2; align-self: center; } .ws-chat .ws-transcript-meter { grid-column: 2; grid-row: 2; margin-left: 80px; align-self: center; } .ws-chat-acts { grid-column: 2; grid-row: 2; justify-self: end; }` })
+          await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'alternative-two-row-desktop-light.png') })
+          await variant.evaluate(el => el.remove())
+        }
       }
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
       const sheet = page.getByRole('dialog', { name: 'Settings', exact: true })
