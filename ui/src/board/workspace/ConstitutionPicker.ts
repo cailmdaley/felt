@@ -16,6 +16,8 @@ export interface ConstitutionPickerOptions {
   /** After every refresh, once rows and captions are placed, or once a row pass has thrown. */
   onRefresh?(): void
   onOpen(card: KanbanCard): void
+  /** Extra results after constitution rows, used only by the desktop bar Find. */
+  supplement?: { el: HTMLElement; refresh(query: string): void; close(): void; dispose(): void }
   /** A field the picker reads instead of its own (the board bar's Find), heard only while `active`. */
   find?: HTMLInputElement
   active?(): boolean
@@ -50,10 +52,12 @@ export class ConstitutionPicker {
       this.find.setAttribute('aria-label', 'Find a constitution')
       this.el.append(this.find, this.list)
     }
-    this.find.addEventListener('input', () => { if (this.listening) this.refresh() })
+    if (opts.supplement) this.list.append(opts.supplement.el)
+    this.find.addEventListener('input', this.input)
     document.addEventListener('keydown', this.keydown, true)
     document.addEventListener('pointerdown', this.outside)
   }
+  private readonly input = (): void => { if (this.listening) this.refresh() }
   /** An own field always listens; a shared one only while the picker is the one it serves. */
   private get listening(): boolean { return !this.opts.find || (this.opts.active?.() ?? true) }
   focus(): void {
@@ -72,12 +76,14 @@ export class ConstitutionPicker {
   }
   get isOpen(): boolean { return this.popup && this.el.isConnected }
   close(restore = false): void {
+    this.opts.supplement?.close()
     this.release?.(); this.release = null
     if (this.popup) this.el.remove()
     if (restore && this.previous?.isConnected) this.previous.focus({ preventScroll: true })
     this.previous = null
   }
   refresh(reveal = true): void {
+    if (this.listening) this.opts.supplement?.refresh(this.find.value)
     try { this.placeRows(reveal) } finally { this.opts.onRefresh?.() }
   }
   private placeRows(reveal: boolean): void {
@@ -192,9 +198,16 @@ export class ConstitutionPicker {
       else if (event.target === this.find) return
       else this.opts.onEscape?.()
     }
+    else if (this.opts.supplement && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      const rows = [...this.el.querySelectorAll<HTMLElement>('.ws-channel-row, .ws-search-hit, .ws-search-result button')]
+      const at = rows.indexOf(event.target as HTMLElement)
+      if (event.key === 'ArrowDown') rows[Math.min(rows.length - 1, at + 1)]?.focus()
+      else if (at <= 0) this.find.focus()
+      else rows[at - 1]?.focus()
+    }
     else if (event.key === 'Enter' && event.target === this.find) {
       if (event.repeat) return
-      this.list.querySelector<HTMLElement>('.ws-channel-row')?.click()
+      this.el.querySelector<HTMLElement>('.ws-channel-row, .ws-search-hit, .ws-search-result button')?.click()
     } else return
     event.preventDefault(); event.stopImmediatePropagation()
   }
@@ -203,6 +216,8 @@ export class ConstitutionPicker {
   }
   dispose(): void {
     cancelAnimationFrame(this.revealFrame)
+    this.find.removeEventListener('input', this.input)
+    this.opts.supplement?.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
     this.el.remove()

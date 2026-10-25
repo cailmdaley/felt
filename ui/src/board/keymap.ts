@@ -60,7 +60,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     ...constitutionBindings('the open fiber'),
-    bind(['/'], 'find', 'Find a constitution or file'),
+    bind(['/'], 'find', 'Find a constitution or transcript'),
     { ...bind(['\\'], 'sidebar', 'Toggle constitution sidebar'), command: true },
     { ...bind(['|'], 'rail', 'Toggle the threads rail'), command: true },
     bind(['h', 'ArrowLeft'], 'prev', 'Previous tab'), bind(['l', 'ArrowRight'], 'next', 'Next tab'),

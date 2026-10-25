@@ -24,7 +24,7 @@ const other = (): unknown[] => [
 const encoded = (items: unknown[]): Uint8Array => new TextEncoder().encode(items.map((item) => JSON.stringify(item)).join('\n') + '\n')
 const searchHit = {
   session: elsewhere, harness: 'claude', project: '/Users/x/dev/felt', path: '/Users/x/.claude/projects/p/b4ed.jsonl', line: 3,
-  timestamp: stamp(41), role: 'assistant', score: 9.1, snippet: 'The «vmpz» «conventions» are set out', fibers: [{ id: 'ai/felt/vmpz', name: 'Fix the VMPZ convention' }],
+  timestamp: stamp(41), role: 'assistant', score: 9.1, matches: 2, snippet: 'The «vmpz» «conventions» are set out', fibers: [{ id: 'ai/felt/vmpz', name: 'Fix the VMPZ convention' }],
 }
 const calls: string[] = []
 const routed = (reply: () => Response = () => new Response(JSON.stringify({ query: 'vmpz convention', index: { sessions: 12, updated_at: stamp(30) }, hits: [searchHit], errors: [] }))): typeof fetch =>
@@ -128,52 +128,23 @@ describe('finding words in the open transcript', () => {
   })
 })
 
-describe('searching every transcript', () => {
-  const run = async (input: HTMLInputElement): Promise<void> => {
-    await type(input, 'vmpz convention')
-    press(input, 'Enter', { metaKey: true })
-    await vi.waitFor(() => expect(document.querySelector('.ws-transcript-find-hit')).not.toBeNull())
-  }
-
-  it('lists hits with their snippet marks, harness, project, age and fibers, and asks the daemon once', async () => {
-    const { band, input } = await open(routed())
-    await run(input)
-    const requests = calls.filter((call) => call.includes('/transcripts/search'))
-    expect(requests).toHaveLength(1)
-    expect(new URL(requests[0], 'http://x').searchParams.get('q')).toBe('vmpz convention')
-    const row = band.el.querySelector<HTMLElement>('.ws-transcript-find-hit')!
-    expect([...row.querySelectorAll('mark')].map((mark) => mark.textContent)).toEqual(['vmpz', 'conventions'])
-    expect(row.querySelector('.ws-transcript-find-meta')?.textContent).toContain('claude · felt')
-    expect(row.querySelector('a[data-fiber="ai/felt/vmpz"]')?.textContent).toBe('Fix the VMPZ convention')
-    expect(band.el.querySelector('.ws-transcript-find-foot')?.textContent).toContain('12 sessions indexed')
-  })
-
-  it('opens the chosen hit\'s session in place and stands on the match nearest the hit', async () => {
+describe('hits opened by the board Find', () => {
+  it('reads the selected session and marks the match nearest its timestamp', async () => {
     const { band, input, count } = await open(routed())
-    await run(input)
-    band.el.querySelector<HTMLElement>('.ws-transcript-find-hit')!.click()
-    await vi.waitFor(() => expect(calls.some((call) => call.includes(`session=${elsewhere}`))).toBe(true))
+    band.openHit(searchHit, 'vmpz convention')
+    await vi.waitFor(() => expect(calls.some(call => call.includes(`session=${elsewhere}`))).toBe(true))
     await vi.waitFor(() => expect(band.el.querySelector('.ws-transcript-found')).not.toBeNull())
-    expect(band.el.querySelector('.ws-transcript-find-hit')).toBeNull()
     expect(input.value).toBe('vmpz conventions')
     expect(count.textContent).toBe('2 of 2')
     expect(band.el.querySelector('.ws-transcript-found')?.textContent).toContain('set out below')
   })
 
-  it('says so when the daemon fails, rather than showing an empty list', async () => {
-    const { band, input } = await open(routed(() => new Response(JSON.stringify({ error: 'shuttle transcript search exited 3', detail: 'index is corrupt' }), { status: 502 })))
-    await type(input, 'vmpz')
-    press(input, 'Enter', { ctrlKey: true })
-    await vi.waitFor(() => expect(band.el.querySelector('.ws-transcript-find-note[data-problem]')).not.toBeNull())
-    expect(band.el.querySelector('.ws-transcript-find-note')?.textContent).toContain('index is corrupt')
-  })
-
-  it('says so when nothing matches, and hides the list when the words change', async () => {
-    const { band, input } = await open(routed(() => new Response(JSON.stringify({ query: 'q', hits: [], errors: [] }))))
+  it('has no global-search controls or modified-Enter shortcut', async () => {
+    const { band, input } = await open(routed())
     await type(input, 'vmpz')
     press(input, 'Enter', { metaKey: true })
-    await vi.waitFor(() => expect(band.el.querySelector('.ws-transcript-find-note')?.textContent).toContain('Nothing in any transcript'))
-    await type(input, 'vmpz co')
-    expect(band.el.querySelector<HTMLElement>('.ws-transcript-find-results')!.hidden).toBe(true)
+    press(input, 'Enter', { ctrlKey: true })
+    expect(calls.filter(call => call.includes('/transcripts/search'))).toHaveLength(0)
+    expect(band.el.querySelector('.ws-transcript-find-all, .ws-transcript-find-results')).toBeNull()
   })
 })

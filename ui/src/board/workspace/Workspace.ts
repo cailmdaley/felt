@@ -22,6 +22,8 @@ import { Reader } from './Reader.js'
 import { WorkspaceDepth } from './Depth.js'
 import { cardIdentity, type SidebarEntry } from './SidebarFlight.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
+import { TranscriptResults } from './TranscriptResults.js'
+import type { TranscriptHit } from '../transcript/find.js'
 import { Overview } from './Overview.js'
 import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
@@ -102,6 +104,7 @@ export class Workspace {
   private startPrompt: { card: KanbanCard; failure: DispatchFailureBody } | null = null
   /** A channel opened to write to: its composer takes focus once it is shown. */
   private composing: string | null = null
+  private transcriptHit: { card: KanbanCard; hit: TranscriptHit; query: string } | null = null
 
   constructor(root: HTMLElement, opts: WorkspaceOptions) {
     this.opts = opts
@@ -138,6 +141,11 @@ export class Workspace {
     this.picker = new ConstitutionPicker(pickerOptions)
     this.barPicker = new ConstitutionPicker({
       ...pickerOptions, find: opts.find, active: () => this.barPicker.isOpen,
+      supplement: opts.find ? new TranscriptResults({
+        shuttleBase: opts.shuttleBase,
+        canOpen: hit => !!this.cardForHit(hit),
+        open: (hit, query) => this.openTranscriptHit(hit, query),
+      }) : undefined,
       onEscape: () => { this.clearFind(); opts.find?.blur(); (document.activeElement as HTMLElement | null)?.blur?.() },
     })
     this.reader = new Reader({
@@ -192,6 +200,20 @@ export class Workspace {
     if (!this.barPicker.isOpen) this.barPicker.show(this.root, input)
     else this.barPicker.refresh()
     this.overview.refresh()
+  }
+  /** A search result opens through the board card whose conversation can display it. */
+  private cardForHit(hit: TranscriptHit): KanbanCard | undefined {
+    return hit.fibers.flatMap(fiber => this.opts.cards().filter(card =>
+      (card.id === fiber.id || card.uid === fiber.id || card.path === fiber.id) && isAgentCard(card),
+    ))[0]
+  }
+  private openTranscriptHit(hit: TranscriptHit, query: string): void {
+    const card = this.cardForHit(hit)
+    if (!card) return
+    this.clearFind()
+    this.transcriptHit = { card, hit, query }
+    const state = this.ensure(card)
+    this.open(card, this.isActive ? this.origin : this.opts.origin(), chatDocument(state.channel)?.key, true, false)
   }
   /** Close the Find's list, if it hangs open. */
   closeFind(): void { this.barPicker.close() }
@@ -628,7 +650,14 @@ export class Workspace {
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
     const dock = chatDocument(ch) && this.controls(state)
-    if (dock) this.seatNav(state, dock)
+    if (dock) {
+      this.seatNav(state, dock)
+      const pending = this.transcriptHit
+      if (pending && cardIdentity(pending.card) === cardIdentity(state.card)) {
+        this.transcriptHit = null
+        dock.openTranscriptHit(pending.hit, pending.query)
+      }
+    }
   }
   private select(key: DocKey): void {
     const state = this.current

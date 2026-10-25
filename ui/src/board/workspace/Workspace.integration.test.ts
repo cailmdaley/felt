@@ -113,6 +113,102 @@ beforeEach(() => {
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
+describe('bar Find transcripts', () => {
+  const hit = {
+    session: 'b4edf873-cb1c-40ab-a891-f26f5333b321', harness: 'claude', project: '/work/alpha',
+    path: '/transcripts/alpha.jsonl', line: 2, timestamp: '2026-10-20T14:41:00Z', role: 'assistant',
+    score: 9, matches: 3, snippet: 'The «Alpha» result', fibers: [{ id: 'work/alpha', name: 'Alpha' }],
+  }
+  const setup = (): HTMLInputElement => {
+    workspace.dispose()
+    const find = document.createElement('input')
+    document.body.append(find)
+    bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find })
+    return find
+  }
+  const type = (find: HTMLInputElement, text: string): void => {
+    find.value = text
+    find.dispatchEvent(new Event('input', { bubbles: true }))
+    workspace.find(false)
+  }
+  const press = (el: HTMLElement, key: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
+
+  it('debounces, keeps constitutions first, steps across both groups and opens the hit in its card/session', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes('/transcripts/search')) return new Response(JSON.stringify({ hits: [hit], errors: [] }))
+      if (url.includes('/transcript/raw?')) {
+        const bytes = new TextEncoder().encode(JSON.stringify({ type: 'assistant', timestamp: hit.timestamp, message: { content: [{ type: 'text', text: 'The Alpha result' }] } }) + '\n')
+        return new Response(bytes, { headers: { 'x-transcript-offset': '0', 'x-transcript-byte-count': String(bytes.byteLength) } })
+      }
+      return original(input, init)
+    })
+    type(find, 'Al')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/transcripts/search'))).toBe(false)
+    type(find, 'Alpha')
+    await vi.advanceTimersByTimeAsync(299)
+    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    await vi.advanceTimersByTimeAsync(1); await flush()
+    const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-hit')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0].classList.contains('ws-channel-row')).toBe(true)
+    expect(rows[1].querySelector('mark')?.textContent).toBe('Alpha')
+    expect(rows[1].textContent).toContain('claude · alpha')
+    expect(document.querySelector('.ws-search-transcripts .kbn-flight-caption')?.textContent).toBe('Transcripts')
+    press(find, 'ArrowDown'); expect(document.activeElement).toBe(rows[0])
+    press(rows[0], 'ArrowDown'); expect(document.activeElement).toBe(rows[1])
+    press(rows[1], 'ArrowUp'); expect(document.activeElement).toBe(rows[0])
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16))
+    vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id))
+    rows[1].click(); await flush(); await vi.advanceTimersByTimeAsync(64); await flush()
+    expect(workspace.isActive).toBe(true)
+    expect(window.location.hash).toContain('alpha')
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('chat:host-a:alpha')
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`session=${hit.session}`))).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('.ws-transcript-find-input')?.value).toBe('alpha')
+    expect(document.querySelector('.ws-transcript-found')?.textContent).toContain('Alpha result')
+  })
+
+  it('aborts stale requests and hides late replies, including after closing', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    const original = vi.mocked(fetch).getMockImplementation()!
+    const requests: Array<{ signal: AbortSignal; resolve(response: Response): void }> = []
+    vi.mocked(fetch).mockImplementation((input, init) => String(input).includes('/transcripts/search')
+      ? new Promise(resolve => requests.push({ signal: init!.signal as AbortSignal, resolve }))
+      : original(input, init))
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300)
+    type(find, 'Beta'); expect(requests[0].signal.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(300)
+    requests[0].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
+    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    workspace.closeFind(); expect(requests[1].signal.aborted).toBe(true)
+    requests[1].resolve(new Response(JSON.stringify({ hits: [hit], errors: [] }))); await flush()
+    expect(document.querySelector('.ws-switcher')).toBeNull()
+  })
+
+  it('shows one quiet failure and offers copy path for sessions with no board card', async () => {
+    vi.useFakeTimers()
+    const find = setup()
+    const original = vi.mocked(fetch).getMockImplementation()!
+    let fail = true
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
+      ? new Response(JSON.stringify(fail ? { error: 'offline' } : { hits: [{ ...hit, fibers: [] }], errors: [] }), { status: fail ? 502 : 200 })
+      : original(input, init))
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    expect(document.querySelector('.ws-search-note')?.textContent).toBe('Transcript search unavailable.')
+    fail = false
+    type(find, 'Alph'); await vi.advanceTimersByTimeAsync(300); await flush()
+    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
+  })
+})
+
 describe('workspace reader integration', () => {
   it('s on the constitution page requests rest, not the sidebar', async () => {
     workspace.dispose()

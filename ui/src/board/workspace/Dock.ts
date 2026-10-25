@@ -13,6 +13,7 @@ import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, p
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
 import { buildSessionHistory } from '../sessionHistory.js'
+import type { TranscriptHit } from '../transcript/find.js'
 import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptBand.js'
 import { coarsePointer, isMobileViewport, MOBILE_MEDIA } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
@@ -713,6 +714,11 @@ export class Dock {
     const fromTop = box.bottom - view.top + scroller.scrollTop
     scroller.scrollTop = fromTop <= scroller.clientHeight ? 0 : scroller.scrollTop + box.top - view.top - box.height
     return true
+  }
+
+  /** Read a search hit in this constitution's transcript without changing its worker. */
+  openTranscriptHit(hit: TranscriptHit, query: string): void {
+    this.transcriptBand?.openHit(hit, query)
   }
 
   openOutcome(text: string): void {

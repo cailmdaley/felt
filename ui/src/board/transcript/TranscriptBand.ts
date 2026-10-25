@@ -637,11 +637,8 @@ export class TranscriptBand {
     this.inlineWorking.hidden = true
     this.sentList.className = 'ws-transcript-sent'
     this.find = new TranscriptFind({
-      shuttleBase: this.shuttleBase,
-      fetch: this.fetcher,
       query: (text) => this.setQuery(text),
       step: (direction) => this.stepMatch(direction),
-      open: (hit, query) => this.openHit(hit, query),
       cleared: () => this.clearQuery(),
     })
     if (this.inline) {
@@ -1815,13 +1812,12 @@ export class TranscriptBand {
   }
 
   /** Read the session a hit came from, standing on the match nearest the hit's time. */
-  private openHit(hit: TranscriptHit, query: string): void {
+  openHit(hit: TranscriptHit, query: string): void {
     const time = Date.parse(hit.timestamp)
     const at = Number.isFinite(time) ? time : undefined
     // The index folds case and stems; the terms the snippet marked are what the transcript is searched for.
     const words = snippetTerms(hit.snippet)
     const text = words.length ? words.join(' ') : query
-    this.find.hideResults()
     this.find.set(text)
     if (this.target?.session === hit.session && this.hasInitialRender) {
       this.setQuery(text, at)

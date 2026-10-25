@@ -102,7 +102,7 @@ export function unmark(root: HTMLElement, className: string): void {
 
 export interface TranscriptHitFiber { id: string; name: string }
 
-/** One message the host's index matched, as `shuttle transcript search --json` reports it. */
+/** A session's best message, as grouped `shuttle transcript search --json` reports it. */
 export interface TranscriptHit {
   session: string
   harness: string
@@ -112,6 +112,7 @@ export interface TranscriptHit {
   timestamp: string
   role: string
   score: number
+  matches: number
   snippet: string
   fibers: TranscriptHitFiber[]
 }
@@ -153,6 +154,7 @@ function hitFrom(raw: unknown): TranscriptHit | null {
     timestamp: text(row.timestamp),
     role: text(row.role),
     score: typeof row.score === 'number' ? row.score : 0,
+    matches: typeof row.matches === 'number' ? row.matches : 1,
     snippet: text(row.snippet),
     fibers,
   }

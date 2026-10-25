@@ -102,7 +102,7 @@ describe('the search route', () => {
       query: 'vmpz',
       index: { sessions: 2, messages: 9, updated_at: '2026-10-24T09:12:00Z' },
       hits: [
-        { session: 's1', harness: 'claude', project: '/x/felt', path: '/p.jsonl', line: 3, timestamp: '2026-10-22T14:03:11Z', role: 'user', score: 12.7, snippet: 'the «vmpz»', fibers: [{ id: 'a/b', name: 'B' }, { nope: 1 }] },
+        { session: 's1', harness: 'claude', project: '/x/felt', path: '/p.jsonl', line: 3, timestamp: '2026-10-22T14:03:11Z', role: 'user', score: 12.7, matches: 4, snippet: 'the «vmpz»', fibers: [{ id: 'a/b', name: 'B' }, { nope: 1 }] },
         { harness: 'pi' },
       ],
       errors: ['session ledger unavailable'],
@@ -114,7 +114,7 @@ describe('the search route', () => {
     expect(url.searchParams.getAll('session')).toEqual(['s1', 's2'])
     expect([...['fiber', 'since', 'harness', 'limit']].map((k) => url.searchParams.get(k))).toEqual(['a/b', '30d', 'claude', '5'])
     expect(result.hits).toHaveLength(1)
-    expect(result.hits[0]).toMatchObject({ session: 's1', line: 3, fibers: [{ id: 'a/b', name: 'B' }] })
+    expect(result.hits[0]).toMatchObject({ session: 's1', line: 3, matches: 4, fibers: [{ id: 'a/b', name: 'B' }] })
     expect(result.errors).toEqual(['session ledger unavailable'])
   })
 

@@ -574,7 +574,7 @@
   font: var(--ws-small-size)/1.4 var(--ws-mono);
 }
 .ws-transcript-find-count[data-empty] { color: var(--kbn-owed); }
-.ws-transcript-find :is(.ws-transcript-find-step, .ws-transcript-find-all, .ws-transcript-find-copy) {
+.ws-transcript-find .ws-transcript-find-step {
   flex: none;
   border: 0;
   background: transparent;
@@ -590,22 +590,12 @@
   line-height: 1;
 }
 .ws-transcript-find .ws-transcript-find-step:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-transcript-find .ws-transcript-find-all {
-  min-height: 26px;
-  padding: 2px 0;
-  text-decoration: underline;
-  text-decoration-color: var(--ws-hairline);
-  text-underline-offset: 3px;
-  font: italic var(--ws-label-size)/1.4 var(--ws-serif);
-}
-.ws-transcript-find .ws-transcript-find-all:hover:not(:disabled) { color: var(--ws-ink); text-decoration-color: currentColor; }
-.ws-transcript-find :is(.ws-transcript-find-step, .ws-transcript-find-all):disabled { opacity: .4; cursor: default; }
+.ws-transcript-find .ws-transcript-find-step:disabled { opacity: .4; cursor: default; }
 .ws-transcript-find .ws-transcript-find-input:focus-visible,
 .ws-reader .ws-transcript-find .ws-transcript-find-input:focus-visible { outline: none; border-bottom-color: var(--ws-focus, var(--kbn-owed)); }
 
 /* Matches in the words. The current message carries a halo, its marks a deeper wash. */
-:is(.ws-dock, .ws-transcript-pane) mark.ws-transcript-found-mark,
-.ws-transcript-find-mark {
+:is(.ws-dock, .ws-transcript-pane) mark.ws-transcript-found-mark {
   padding: 0 1px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--kbn-owed-bright) 30%, transparent);
@@ -619,79 +609,6 @@
   background: color-mix(in srgb, var(--kbn-owed-bright) 58%, transparent);
 }
 
-/* Every transcript on the machine: a list hung from the field, over the conversation. */
-.ws-transcript-find-results {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: var(--ws-find-gutter);
-  right: var(--ws-find-gutter);
-  max-height: min(56vh, 30rem);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  background: var(--ws-paper);
-  border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
-  border-radius: 3px;
-  box-shadow: var(--ws-shadow-mid);
-}
-.ws-transcript-find-results[hidden] { display: none; }
-.ws-transcript-find-note,
-.ws-transcript-find-foot {
-  margin: 0;
-  padding: 8px 12px;
-  color: var(--ws-ink-muted);
-  font: italic var(--ws-label-size)/1.45 var(--ws-serif);
-}
-.ws-transcript-find-note[data-problem] { color: var(--kbn-owed); }
-.ws-transcript-find-foot {
-  border-top: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
-  font: var(--ws-small-size)/1.4 var(--ws-mono);
-  font-style: normal;
-}
-.ws-transcript-find-hit {
-  padding: 7px 12px 8px;
-  border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
-  cursor: pointer;
-}
-.ws-transcript-find-hit:hover { background: var(--ws-hover); }
-.ws-transcript-find-hit:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: -2px; }
-.ws-transcript-find-snippet {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin: 0;
-  color: var(--ws-ink-soft);
-  font: var(--ws-label-size)/1.4 var(--ws-serif);
-  overflow-wrap: anywhere;
-}
-.ws-transcript-find-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 6px;
-  margin-top: 3px;
-  color: var(--ws-ink-muted);
-  font: var(--ws-small-size)/1.5 var(--ws-mono);
-}
-.ws-transcript-find-fiber {
-  max-width: 22em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font: italic var(--ws-label-size)/1.4 var(--ws-serif);
-}
-.ws-transcript-find .ws-transcript-find-copy {
-  margin-left: auto;
-  padding: 0;
-  opacity: 0;
-  font: var(--ws-small-size)/1.5 var(--ws-mono);
-  text-decoration: underline;
-  text-decoration-color: var(--ws-hairline);
-  text-underline-offset: 3px;
-}
-.ws-transcript-find-hit:is(:hover, :focus-within) .ws-transcript-find-copy { opacity: 1; }
-@media (hover: none) { .ws-transcript-find .ws-transcript-find-copy { opacity: 1; } }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-transcript-find-count { min-width: 0; margin-left: auto; }
   .ws-transcript-find .ws-transcript-find-step { width: 44px; height: 44px; }
