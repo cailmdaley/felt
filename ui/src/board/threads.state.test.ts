@@ -58,7 +58,7 @@ describe('every thread surface names a thread the way the Desk files it', () => 
         .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('.ws-thread-group-label')?.textContent ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
       // The rail has no Roles group: a seat rests with Resting.
-      expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [seat.name]: 'Resting' })
+      expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [spawned.name]: 'Armed', [seat.name]: 'Resting' })
     } finally { vi.unstubAllGlobals() }
   })
 })

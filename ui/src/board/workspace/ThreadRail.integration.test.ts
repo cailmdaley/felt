@@ -15,8 +15,8 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   const all = [root, rest, child, deep, done], open = vi.fn(), rail = new ThreadRail(open, vi.fn())
   rail.show({ ...root }, new ThreadIndex(all))
   const groups = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')]
-  expect(groups.map(g => g.querySelector('summary')!.getAttribute('aria-label'))).toEqual(['Waiting, 1', 'Working, 1', 'Resting, 1', 'Tempered, 1'])
-  expect(groups.map(g => g.querySelector('.ws-thread-group-label')!.textContent)).toEqual(['Waiting', 'Working', 'Resting', 'Tempered'])
+  expect(groups.map(g => g.querySelector('summary')!.getAttribute('aria-label'))).toEqual(['Waiting, 1', 'Armed, 1', 'Resting, 1', 'Archived, 1'])
+  expect(groups.map(g => g.querySelector('.ws-thread-group-label')!.textContent)).toEqual(['Waiting', 'Armed', 'Resting', 'Archived'])
   expect(groups.map(g => g.open)).toEqual([true, true, true, false])
   expect(rail.el.querySelector('.ws-thread-tree ul')).toBeNull()
   const deepRow = groups[0].querySelector('.kbn-thread-row')!
@@ -27,7 +27,7 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   expect(deepRow.querySelector('.ws-thread-mark')?.getAttribute('title')).toBe('question')
   expect(groups[1].querySelector('.ws-thread-parent')).toBeNull()
   expect(groups[1].querySelector('.ws-thread-mark')).toBeNull()
-  expect(rail.el.textContent).not.toMatch(/Archived/)
+  expect(rail.el.textContent).not.toMatch(/Tempered/)
   // A group's state is its heading; no row says it again.
   expect(rail.el.querySelectorAll('.kbn-thread-row small')).toHaveLength(0)
   expect(rail.el.querySelector('button.ws-thread-toggle')).toBeNull()
@@ -68,22 +68,22 @@ it('preserves focused rows and open groups across live repaints without stealing
   document.body.append(rail.el, outside)
   try {
     rail.show(root, new ThreadIndex([root, branch, draft, old]))
-    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
+    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="archived"]')!
     tempered.open = true
     tempered.querySelector<HTMLButtonElement>('.kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, outcome: 'New evidence' }]))
-    const refreshed = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
+    const refreshed = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="archived"]')!
     expect(refreshed.open).toBe(true)
     expect(document.activeElement).toBe(refreshed.querySelector('.kbn-thread-row'))
     expect(document.activeElement?.textContent).toBe('Old')
     expect(refreshed.querySelector('.kbn-thread-outcome')).toBeNull()
     refreshed.querySelector<HTMLButtonElement>('.constitution-state-dot')!.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, name: 'Renamed' }]))
-    expect(document.activeElement).toBe(rail.el.querySelector('details[data-thread-details="tempered"] .constitution-state-dot'))
+    expect(document.activeElement).toBe(rail.el.querySelector('details[data-thread-details="archived"] .constitution-state-dot'))
     outside.focus()
     rail.show(root, new ThreadIndex([root, branch, draft, { ...old, outcome: 'Another update' }]))
     expect(document.activeElement).toBe(outside)
-    rail.el.querySelector<HTMLButtonElement>('details[data-thread-details="working"] .kbn-thread-row')!.focus()
+    rail.el.querySelector<HTMLButtonElement>('details[data-thread-details="armed"] .kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, { ...draft, orchestrator: root.id }]))
     expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-heading'))
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
@@ -165,7 +165,8 @@ it('marks a working thread with a live worker, and only that one', () => {
     rail.show(root, new ThreadIndex([root, live, quiet]))
     const rows = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="working"] .kbn-thread-row')]
     expect(rows.map(r => [r.querySelector('.kbn-thread-name')!.textContent, r.querySelector('.constitution-state-dot')?.getAttribute('data-turn')]))
-      .toEqual([['Live', 'working'], ['Quiet', 'none']])
+      .toEqual([['Live', 'working']])
+    expect(rail.el.querySelector('details[data-thread-details="armed"] .kbn-thread-name')?.textContent).toBe('Quiet')
     expect(rail.el.querySelector('.ws-thread-mark')).toBeNull()
     expect(rows[0].getAttribute('aria-label')).toBe('Live, working')
   } finally { vi.unstubAllGlobals() }
@@ -181,7 +182,7 @@ it('indents same-group descendants and keeps cross-group parents only in the too
     const draft = card({ id: 'hub/branch/draft', orchestrator: branch.id, status: 'open', name: 'Draft' })
     const rail = new ThreadRail(vi.fn(), vi.fn())
     rail.show(root, new ThreadIndex([root, branch, leaf, twig, draft]))
-    const working = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="working"] .kbn-thread-item')]
+    const working = [...rail.el.querySelectorAll<HTMLElement>('details[data-thread-details="armed"] .kbn-thread-item')]
     expect(working.map(item => [item.querySelector('.kbn-thread-name')!.textContent, item.dataset.depth ?? '0', item.querySelector('.ws-thread-parent')?.textContent ?? ''])).toEqual([
       ['Branch', '0', ''], ['Leaf', '1', ''], ['Twig', '2', ''],
     ])
@@ -207,13 +208,13 @@ it("inside a deep thread keeps the whole family from its top-level constitution,
     expect(names).toEqual(['Cousin', 'Validation', 'Seed'])
     expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
     expect(rail.el.querySelector('.ws-thread-current .kbn-thread-name')?.textContent).toBe('Seed')
-    // Tempered folds by default, but not when it holds the open thread.
-    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!
+    // Archived folds by default, but not when it holds the open thread.
+    const tempered = rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="archived"]')!
     expect(tempered.open).toBe(true)
     // A repaint of the same visit leaves a fold the reader made.
     tempered.open = false
     rail.show(seed, new ThreadIndex([chair, validation, { ...seed, outcome: 'news' }, cousin]))
-    expect(rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="tempered"]')!.open).toBe(false)
+    expect(rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="archived"]')!.open).toBe(false)
     // The breadcrumb is the ancestry trail, the head first.
     expect([...rail.breadcrumb.querySelectorAll('.ws-ancestry-link')].map(b => b.textContent)).toEqual(['Chair', 'Validation'])
     expect(rail.breadcrumb.querySelector('.ws-ancestry-sep')?.textContent).toBe('/')
@@ -246,6 +247,6 @@ it('draws what asks for the reader first: waiting, then reviews, then the workin
     const rail = new ThreadRail(vi.fn(), vi.fn())
     rail.show(root, index)
     const order = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')].map(g => g.dataset.threadDetails)
-    expect(order).toEqual(['waiting', 'to-review', 'working'])
+    expect(order).toEqual(['waiting', 'to-review', 'armed'])
   } finally { vi.unstubAllGlobals() }
 })

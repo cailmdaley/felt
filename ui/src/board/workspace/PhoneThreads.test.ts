@@ -20,9 +20,9 @@ describe('the phone thread page', () => {
   it('draws the family from its root, waiting threads first, the open thread marked', () => {
     const open = vi.fn()
     const page = phoneThreads(feed[2], index, open)!
-    expect(page.querySelector('.ws-phone-threads-waiting')?.textContent).toContain('hub/a')
+    expect(page.querySelector('[data-group="waiting"]')?.textContent).toContain('hub/a')
     expect(page.querySelector('.ws-phone-threads-root .kbn-thread-name')?.textContent).toBe('hub')
-    expect([...page.querySelectorAll(':scope > ul .kbn-thread-name')].map(el => el.textContent)).toEqual(['hub/a', 'hub/b'])
+    expect([...page.querySelectorAll(':scope > section .kbn-thread-name')].map(el => el.textContent)).toEqual(['hub/a', 'hub/b'])
     expect(page.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub/b')
     page.querySelector<HTMLButtonElement>('.ws-phone-threads-root')!.click()
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub' }))

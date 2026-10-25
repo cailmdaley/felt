@@ -9,15 +9,7 @@ import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
 const MIN_WIDTH = 220, MAX_WIDTH = 640, STEP = 16
-/** The groups, in the order they are drawn: what asks for the reader first (waiting, then reviews), then what to watch; roles rest with Resting and discarded threads sit with the Tempered. */
-const GROUPS: readonly { key: string; label: string; states: readonly ThreadState[] }[] = [
-  { key: 'waiting', label: 'Waiting', states: ['waiting'] },
-  { key: 'to-review', label: 'To review', states: ['to-review'] },
-  { key: 'working', label: 'Working', states: ['working'] },
-  { key: 'drafts', label: 'Drafts', states: ['drafts'] },
-  { key: 'resting', label: 'Resting', states: ['resting', 'roles'] },
-  { key: 'tempered', label: 'Tempered', states: ['archived'] },
-]
+import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 
 /**
  * A view of the open constitution's whole family, from the top-level
@@ -174,7 +166,7 @@ export class ThreadRail {
       memo.set(key, base)
       return base
     }
-    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, a live worker under a working one, or a discarded one among the tempered.
+    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, a live worker under a working one, or a discarded one among the archived.
     const markOf = (card: KanbanCard, state: ThreadState): { kind: string; title: string } | null => {
       if (state === 'waiting') { const turn = turnOf(card); return { kind: turn.turn, title: turn.word } }
       if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
@@ -211,11 +203,11 @@ export class ThreadRail {
     const lineage = new Set<string>([threadKey(current)])
     for (let p = index.parentOf(current); p; p = index.parentOf(p)) lineage.add(threadKey(p))
     let currentRow: HTMLElement | null = null
-    for (const { key, label, states } of GROUPS) {
-      const members = subtree.filter(c => states.includes(index.state(c)))
+    for (const [key, label] of THREAD_GROUPS) {
+      const members = subtree.filter(c => threadGroup(c) === key)
       if (!members.length) continue
       const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
-      group.open = (arriving && members.some(c => lineage.has(threadKey(c)))) || (open.get(key) ?? key !== 'tempered')
+      group.open = (arriving && members.some(c => lineage.has(threadKey(c)))) || (open.get(key) ?? key !== 'archived')
       const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, scope)
       const name = document.createElement('span'); name.className = 'ws-thread-group-label'; name.textContent = label
       const count = document.createElement('span'); count.className = 'ws-thread-group-count'; count.textContent = String(members.length)

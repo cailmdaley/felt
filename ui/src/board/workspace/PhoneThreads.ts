@@ -1,6 +1,7 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { threadRow } from '../ThreadPeek.js'
 import type { ThreadIndex } from '../threads.js'
+import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 
 const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
 
@@ -36,29 +37,16 @@ export function phoneThreads(card: KanbanCard, index: ThreadIndex, open: (card: 
     if (identity(thread) === current) button.setAttribute('aria-current', 'page')
     return button
   }
-  const waiting = family.filter(thread => index.state(thread) === 'waiting')
-  if (waiting.length) {
-    const strip = document.createElement('div')
-    strip.className = 'ws-phone-threads-waiting'
-    const heading = document.createElement('h3')
-    heading.textContent = `Waiting · ${waiting.length}`
-    strip.append(heading, ...waiting.map(row))
-    section.append(strip)
-  }
-  const tree = (parent: KanbanCard): HTMLUListElement => {
-    const list = document.createElement('ul')
-    for (const child of index.children(parent)) {
-      const item = document.createElement('li')
-      item.append(row(child))
-      if (index.size(child) > 0) item.append(tree(child))
-      list.append(item)
-    }
-    return list
-  }
-  const heading = document.createElement('h3')
-  heading.textContent = 'Threads'
   const rootRow = row(root)
   rootRow.classList.add('ws-phone-threads-root')
-  section.append(heading, rootRow, tree(root))
+  section.append(rootRow)
+  for (const [key, label] of THREAD_GROUPS) {
+    const members = family.filter(thread => threadGroup(thread) === key)
+    if (!members.length) continue
+    const group = document.createElement('section')
+    group.dataset.group = key
+    const heading = document.createElement('h3'); heading.textContent = `${label} · ${members.length}`
+    group.append(heading, ...members.map(row)); section.append(group)
+  }
   return section
 }
