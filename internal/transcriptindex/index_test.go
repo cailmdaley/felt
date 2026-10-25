@@ -210,10 +210,10 @@ func TestRankingFiltersAndLiteralQueries(t *testing.T) {
 		o Options
 		n int
 	}{
-		{"VMPZ", Options{Harness: "pi"}, 1}, {"VMPZ", Options{Project: "/work/sky"}, 3},
+		{"VMPZ", Options{Harness: "pi"}, 1}, {"VMPZ", Options{Project: "/work/sky"}, 2},
 		{"VMPZ", Options{Since: "2026-10-02T00:00:00Z"}, 2}, {"VMPZ", Options{Sessions: []string{"33333333-3333-4333-8333-333333333333"}}, 1},
 		{"VMPZ", Options{Sessions: []string{}}, 0}, {"VMPZ", Options{Limit: 1}, 1},
-		{"src/sky_map.go", Options{}, 5}, {"snake_case", Options{}, 3}, {"cafe", Options{}, 1}, {"SQLITE_BUSY: database is locked", Options{}, 2},
+		{"src/sky_map.go", Options{}, 3}, {"snake_case", Options{}, 3}, {"cafe", Options{}, 1}, {"SQLITE_BUSY: database is locked", Options{}, 2},
 		{"\" OR * NOT :", Options{}, 0}, {"---", Options{}, 0},
 	}
 	for _, c := range cases {
@@ -285,7 +285,7 @@ func TestSearchConversationalRolesBoostBeforeLimit(t *testing.T) {
 	if len(hits) != 1 || hits[0].Role != "user" {
 		t.Fatalf("role weighting must precede limit: %+v", hits)
 	}
-	hits = search(t, i, "needle", Options{Limit: 4})
+	hits = search(t, i, "needle", Options{Limit: 4, PerMessage: true})
 	for n, role := range []string{"user", "assistant", "tool_call", "tool_result"} {
 		if len(hits) != 4 || hits[n].Role != role {
 			t.Fatalf("conversation-first stable ordering: %+v", hits)
@@ -323,7 +323,7 @@ func TestSearchClassifiesExternalAgentToolEnvelopesWithoutReindex(t *testing.T) 
 		t.Fatalf("fixture must exercise an assistant-role tool envelope: %s %v", stored, err)
 	}
 	want := map[int64]string{2: "tool_result", 3: "tool_call", 4: "assistant", 5: "user"}
-	hits := search(t, i, "wrapperneedle", Options{Limit: 4})
+	hits := search(t, i, "wrapperneedle", Options{Limit: 4, PerMessage: true})
 	if len(hits) != len(want) {
 		t.Fatalf("lost wrapped or conversational matches: %+v", hits)
 	}

@@ -26,6 +26,7 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
           "session" => "s1",
           "harness" => "claude",
           "line" => 3,
+          "matches" => 4,
           "snippet" => "the «vmpz» fix",
           "fibers" => []
         }
@@ -77,7 +78,7 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
       })
       |> json_response(200)
 
-    assert [%{"snippet" => "the «vmpz» fix", "line" => 3}] = body["hits"]
+    assert [%{"snippet" => "the «vmpz» fix", "line" => 3, "matches" => 4}] = body["hits"]
     assert body["index"]["sessions"] == 2
 
     assert_received {:argv, argv}
@@ -99,6 +100,24 @@ defmodule ShuttleWeb.TranscriptSearchControllerTest do
              "--",
              "vmpz convention"
            ]
+  end
+
+  test "per_message opts into individual rows and validates the boolean" do
+    for value <- ["true", "1", "false", "0"] do
+      api_conn()
+      |> get("/api/v1/transcripts/search", %{"q" => "vmpz", "per_message" => value})
+      |> json_response(200)
+
+      assert_received {:argv, argv}
+      assert "--per-message" in argv == value in ["true", "1"]
+    end
+
+    assert %{"error" => "per_message must be true or false"} =
+             api_conn()
+             |> get("/api/v1/transcripts/search", %{"q" => "vmpz", "per_message" => "maybe"})
+             |> json_response(400)
+
+    refute_received {:argv, _}
   end
 
   test "board searches include every session despite inherited harness identity" do

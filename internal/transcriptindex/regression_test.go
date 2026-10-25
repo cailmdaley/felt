@@ -68,7 +68,7 @@ func TestEarlyCodexRolloutsKeepCanonicalMessages(t *testing.T) {
 	if err := i.IndexFile(ctx, fixture(t, "codex-early"), "codex"); err != nil {
 		t.Fatal(err)
 	}
-	hits := search(t, i, "earlyneedle", Options{})
+	hits := search(t, i, "earlyneedle", Options{PerMessage: true})
 	if len(hits) != 3 {
 		t.Fatalf("early native items lost: %+v", hits)
 	}

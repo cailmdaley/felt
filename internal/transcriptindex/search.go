@@ -13,6 +13,7 @@ type Options struct {
 	Since            string
 	Project, Harness string
 	Limit            int
+	PerMessage       bool
 }
 type Hit struct {
 	Session   string  `json:"session"`
@@ -24,6 +25,7 @@ type Hit struct {
 	Role      string  `json:"role"`
 	Score     float64 `json:"score"`
 	Snippet   string  `json:"snippet"`
+	Matches   int     `json:"matches"`
 }
 
 // literalQuery quotes whitespace-separated terms, so operator names are
@@ -64,9 +66,9 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	// BM25 scores are negative; negate before applying the conversational-role
 	// boost. A tool match can still win if its raw relevance is >1.5 times
 	// that of a user/assistant match. Apply this before LIMIT, not to a shortlist.
-	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,` + role + `,
+	sql := `SELECT f.session,f.harness,f.project,f.path,m.line,m.timestamp,` + role + ` AS role,
  -bm25(search) * CASE WHEN (` + role + `) IN ('user','assistant') THEN 1.5 ELSE 1.0 END AS score,
- snippet(search,0,'«','»','…',40)
+ snippet(search,0,'«','»','…',40) AS snippet,m.id AS message_id
  FROM search JOIN messages m ON m.id=search.rowid JOIN files f ON f.id=m.file_id WHERE search MATCH ?`
 	args := []any{match}
 	if opts.Sessions != nil {
@@ -93,7 +95,18 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 		sql += " AND f.harness=?"
 		args = append(args, opts.Harness)
 	}
-	sql += " ORDER BY score DESC,m.id LIMIT ?"
+	// Materialize FTS auxiliary values before applying window functions: SQLite
+	// requires bm25 and snippet to run in the MATCH query's context.
+	if opts.PerMessage {
+		sql = "SELECT session,harness,project,path,line,timestamp,role,score,snippet,1 AS matches FROM (" + sql + ") ORDER BY score DESC,message_id LIMIT ?"
+	} else {
+		sql = `WITH matched AS MATERIALIZED (` + sql + `), ranked AS (
+ SELECT *, count(*) OVER (PARTITION BY session) AS matches,
+ row_number() OVER (PARTITION BY session ORDER BY score DESC,message_id) AS position
+ FROM matched)
+ SELECT session,harness,project,path,line,timestamp,role,score,snippet,matches
+ FROM ranked WHERE position=1 ORDER BY score DESC,message_id LIMIT ?`
+	}
 	args = append(args, opts.Limit)
 	rows, err := i.db.QueryContext(ctx, sql, args...)
 	if err != nil {
@@ -102,7 +115,7 @@ func (i *Index) Search(ctx context.Context, query string, opts Options) ([]Hit, 
 	defer rows.Close()
 	for rows.Next() {
 		var h Hit
-		if err = rows.Scan(&h.Session, &h.Harness, &h.Project, &h.Path, &h.Line, &h.Timestamp, &h.Role, &h.Score, &h.Snippet); err != nil {
+		if err = rows.Scan(&h.Session, &h.Harness, &h.Project, &h.Path, &h.Line, &h.Timestamp, &h.Role, &h.Score, &h.Snippet, &h.Matches); err != nil {
 			return nil, err
 		}
 		hits = append(hits, h)

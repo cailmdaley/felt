@@ -1,7 +1,7 @@
 defmodule ShuttleWeb.TranscriptSearchController do
   @moduledoc """
   Agent-API endpoint:
-  `GET /api/v1/transcripts/search?q=&session=&fiber=&since=&harness=&limit=`
+  `GET /api/v1/transcripts/search?q=&session=&fiber=&since=&harness=&limit=&per_message=`
 
   Full-text search over every Claude Code, Codex and Pi transcript on this
   host. The index and the ranking live in the CLI; this route runs
@@ -9,7 +9,9 @@ defmodule ShuttleWeb.TranscriptSearchController do
   `{query, index, hits, errors}`.
 
   `session` is repeatable and `fiber` is a single id, `since` is `30d` or a date, `harness` is `claude|codex|pi`,
-  `limit` is clamped to 100. Every value travels as its own argv element,
+  Results group by session (best message and `matches` count); `per_message=true`
+  returns individual messages. `limit` counts sessions by default and is clamped to 100.
+  Every value travels as its own argv element,
   and the query follows a `--` so one that begins with a dash is a query, not
   a flag.
 
@@ -85,7 +87,8 @@ defmodule ShuttleWeb.TranscriptSearchController do
   end
 
   defp flags(params) do
-    with {:ok, harness} <- harness_flag(params["harness"]) do
+    with {:ok, harness} <- harness_flag(params["harness"]),
+         {:ok, per_message} <- per_message_flag(params["per_message"]) do
       sessions = params |> Map.get("session") |> List.wrap() |> Enum.map(&scalar/1)
 
       {:ok,
@@ -93,7 +96,16 @@ defmodule ShuttleWeb.TranscriptSearchController do
          value_flag("--fiber", scalar(params["fiber"])) ++
          value_flag("--since", scalar(params["since"])) ++
          harness ++
+         per_message ++
          ["--limit", Integer.to_string(limit(params["limit"]))]}
+    end
+  end
+
+  defp per_message_flag(value) do
+    case scalar(value) do
+      v when v in ["", "false", "0"] -> {:ok, []}
+      v when v in ["true", "1"] -> {:ok, ["--per-message"]}
+      _ -> {:error, "per_message must be true or false"}
     end
   end
 

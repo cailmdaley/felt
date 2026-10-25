@@ -114,10 +114,12 @@ Pi's `AI_AGENT=pi` selects its own session ahead of inherited parent-harness var
 Outside a harness there is no automatic exclusion; board searches have no caller.
 `--include-self` disables only automatic exclusion, including when `--session` selects the caller explicitly.
 Repeat `--exclude-session <uuid>` to exclude additional sessions; these exclusions still apply with `--include-self` and intersect all other filters.
-`-n, --limit` defaults to 20 message hits; several hits can come from the same session.
+Results contain one row per session by default, ranked by that session's best-scoring message, with `matches` counting all matching messages after filters.
+`-n, --limit` defaults to 20 sessions.
+`--per-message` returns individual message rows instead; the limit counts messages and each row's `matches` is 1.
 A fiber filter resolves through the session ledger and never broadens on ledger failure.
 Ledger enrichment adds linked fibers to hits; an unavailable ledger is reported in `errors` without discarding otherwise valid search results.
-`--json` returns `{query,index,hits,errors}` with non-null arrays; each hit includes its source location, timestamp, role, higher-is-better score, marked snippet, and fiber links.
+`--json` returns `{query,index,hits,errors}` with non-null arrays; each hit includes its source location, timestamp, role, higher-is-better score, marked snippet, matching-message count (`matches`), and fiber links.
 Human output shows the project basename and an `open: <path>:<line>` hint for the native transcript.
 Matches are bold on a terminal and wrapped in `«»` in JSON or non-terminal output.
 

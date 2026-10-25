@@ -111,8 +111,8 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 	var sessions, excludeSessions []string
 	var fiber, since, project, harness string
 	var limit int
-	var noIndex, includeSelf bool
-	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	var noIndex, includeSelf, perMessage bool
+	cmd := &cobra.Command{Use: "search <query...>", Short: "Search local harness transcripts by relevance", Long: "Search local harness transcripts by relevance, returning each session's best message and matching-message count. Use --per-message for individual messages. The limit counts sessions by default.", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		query := strings.Join(args, " ")
 		if limit < 1 {
 			return fmt.Errorf("--limit must be positive")
@@ -206,7 +206,7 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 				excluded = append(excluded, session)
 			}
 		}
-		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, ExcludeSessions: excluded, Since: sinceValue, Project: project, Harness: harness, Limit: limit})
+		hits, err := idx.Search(ctx, query, transcriptindex.Options{Sessions: selected, ExcludeSessions: excluded, Since: sinceValue, Project: project, Harness: harness, Limit: limit, PerMessage: perMessage})
 		if err != nil {
 			return err
 		}
@@ -250,7 +250,7 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 			if len(hit.Fibers) > 0 {
 				fiberLabel = "[" + strings.Join(fiberNames(hit.Fibers), ", ") + "]"
 			}
-			fmt.Fprintf(a.env.Stdout, "%.4g  %s  %-8s  %s  %s  %s\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, displaySnippet(a.env.Stdout, hit.Snippet), hit.Path, hit.Line, hit.Session)
+			fmt.Fprintf(a.env.Stdout, "%.4g  %s  %-8s  %s  %s  %s  (%d matches)\n  %s\n  open: %s:%d  (shuttle transcript %s)\n", hit.Score, hit.Timestamp, hit.Harness, projectName, shortSession(hit.Session), fiberLabel, hit.Matches, displaySnippet(a.env.Stdout, hit.Snippet), hit.Path, hit.Line, hit.Session)
 		}
 		return nil
 	}}
@@ -261,7 +261,8 @@ func (a *app) transcriptSearchCmd() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "restrict by age (30d or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&project, "project", "", "project path prefix")
 	cmd.Flags().StringVar(&harness, "harness", "", "harness (claude, codex, pi)")
-	cmd.Flags().IntVarP(&limit, "limit", "n", 20, "maximum hits")
+	cmd.Flags().IntVarP(&limit, "limit", "n", 20, "maximum sessions (messages with --per-message)")
+	cmd.Flags().BoolVar(&perMessage, "per-message", false, "return individual messages instead of grouping by session")
 	cmd.Flags().BoolVar(&noIndex, "no-index", false, "search without checking for new transcript content")
 	return cmd
 }

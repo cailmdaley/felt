@@ -79,7 +79,7 @@ func TestTranscriptSearchJSONContractAndFiberThreadAliases(t *testing.T) {
 	if err = json.Unmarshal(result["hits"], &hits); err != nil || len(hits) != 1 {
 		t.Fatalf("fiber alias filter: %v %s", err, out)
 	}
-	exactJSONKeys(t, hits[0], "session", "harness", "project", "path", "line", "timestamp", "role", "score", "snippet", "fibers")
+	exactJSONKeys(t, hits[0], "session", "harness", "project", "path", "line", "timestamp", "role", "score", "snippet", "matches", "fibers")
 	if string(hits[0]["session"]) != `"22222222-2222-4222-8222-222222222222"` || !strings.Contains(string(hits[0]["snippet"]), "«VMPZ»") {
 		t.Fatal(out)
 	}
@@ -126,6 +126,32 @@ func TestTranscriptSearchCLIFiltersAndOfflineFiberFailClosed(t *testing.T) {
 		}
 	}
 }
+func TestTranscriptSearchPerMessageFlag(t *testing.T) {
+	env := indexedTranscriptEnv(t)
+	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+	for _, perMessage := range []bool{false, true} {
+		args := []string{"transcript", "search", "src/sky_map.go", "--no-index", "--json"}
+		want := 3
+		if perMessage {
+			args = append(args, "--per-message")
+			want = 5
+		}
+		out, _, err := executeIn(t, env, t.TempDir(), args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got transcriptSearchResult
+		if err := json.Unmarshal([]byte(out), &got); err != nil || len(got.Hits) != want {
+			t.Fatalf("per-message=%v: %v %s", perMessage, err, out)
+		}
+		for _, hit := range got.Hits {
+			if hit.Matches < 1 || (perMessage && hit.Matches != 1) {
+				t.Fatal(hit)
+			}
+		}
+	}
+}
+
 func TestTranscriptSearchNonTTYOutputCarriesNativeLocation(t *testing.T) {
 	env := indexedTranscriptEnv(t)
 	env.Set("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
@@ -133,7 +159,7 @@ func TestTranscriptSearchNonTTYOutputCarriesNativeLocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, part := range []string{"«VMPZ»", "«convention»", "fleet", "33333333", "session.jsonl:3", "shuttle transcript 33333333-3333-4333-8333-333333333333"} {
+	for _, part := range []string{"«VMPZ»", "«convention»", "fleet", "33333333", "(1 matches)", "session.jsonl:3", "shuttle transcript 33333333-3333-4333-8333-333333333333"} {
 		if !strings.Contains(out, part) {
 			t.Errorf("missing %q: %s", part, out)
 		}
