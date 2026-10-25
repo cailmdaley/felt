@@ -311,7 +311,7 @@
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { text-align: center; flex: 1; height: var(--ws-phone-target); line-height: var(--ws-phone-target); padding: 0; }
-  .ws-icon-button, .ws-sidebar, .ws-sidebar-toggle, .ws-page .ws-edge { display: none !important; }
+  .ws-icon-button, .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle), .ws-page .ws-edge { display: none !important; }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
   .ws-content .kbn-fileview-text:not(:has(> .kbn-detail-prose)) { padding-inline: 16px; }
@@ -337,4 +337,6 @@
 .ws-rail-toggle { left: auto; right: var(--ws-corner-inset); }
 .ws-rail-toggle[hidden] { display: none; }
 .ws-rail-off .ws-thread-rail { display: none; }
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) { .ws-rail-toggle { display: none !important; } }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .ws-rail-toggle { top: 8px; right: 48px; }
+}

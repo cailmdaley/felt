@@ -1,4 +1,3 @@
-import { MOBILE_MEDIA } from '../mobile.js'
 import { type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
 import { deskColumn } from '../deskColumn.js'
@@ -120,12 +119,6 @@ export class ThreadRail {
     const scope = ancestors[0] ?? card
     this.card = card; this.scope = scope; this.index = index
     const descendants = index.subtree(scope)
-    // The phone draws no tree under its chat, only the breadcrumb.
-    if (window.matchMedia(MOBILE_MEDIA).matches) {
-      this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
-      this.paintBreadcrumb(ancestors)
-      return
-    }
     const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...descendants.map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature

@@ -1,5 +1,5 @@
 import { ThreadRail } from './ThreadRail.js'
-import { ThreadIndex, threadKey } from '../threads.js'
+import { ThreadIndex } from '../threads.js'
 import './tokens.css'
 import './reader.css'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -162,10 +162,8 @@ export class Reader {
   private readonly sidebarToggle: HTMLButtonElement
   /** The rail's toggle, the sidebar's mirror in the opposite corner. */
   private readonly railToggle: HTMLButtonElement
-  private railChoice = true
+  private railChoice: boolean | null = null
   /** This view's own answer for a quiet rail, set by its toggle and kept until another thread opens; the stored choice stays untouched. */
-  private railPeek: { thread: string; open: boolean } | null = null
-  private railForcedForVisit = false
   private phoneRailPending = false
   /** The sidebar's edge: a separator that resizes it by pointer or keys. */
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
@@ -293,7 +291,8 @@ export class Reader {
       this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
       const choice = localStorage.getItem(SIDEBAR_STORAGE)
       if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
-      this.railChoice = localStorage.getItem(RAIL_STORAGE) !== 'false'
+      const rail = localStorage.getItem(RAIL_STORAGE)
+      this.railChoice = rail === null ? null : rail !== 'false'
       const width = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE))
       if (Number.isFinite(width) && width > 0) this.sidebarWidthChoice = width
     } catch { /* Storage is optional. */ }
@@ -309,7 +308,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.railForcedForVisit = false; this.phoneRailPending = false; this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
+    if (switching) { this.phoneRailPending = false; this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
     if (switching) this.parents.length = 0
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -319,7 +318,6 @@ export class Reader {
     this.selected = selected
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     if (this.currentCard) this.threadRail.show(this.currentCard, index)
-    if (this.railPeek && (!this.currentCard || threadKey(this.currentCard) !== this.railPeek.thread)) this.railPeek = null
     this.paintPages(this.currentCard && familyCounts(this.currentCard, index))
     this.paintRail()
     if (this.phoneRailPending && this.phone.matches && settled) { this.phoneRailPending = false; this.openPhonePage() }
@@ -359,7 +357,6 @@ export class Reader {
    * sheet wears the same veil, it goes at once.
    */
   hide(animate = false): void {
-    this.railForcedForVisit = false
     this.phoneRailPending = false
     window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
@@ -878,28 +875,23 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
-  /**
-   * The rail shows or hides on its own toggle, remembered for this viewer; a
-   * constitution without threads draws neither. A quiet family's toggle answers
-   * for this view alone and leaves the remembered choice as it was.
-   */
+  /** The viewer's choice persists across families, navigation and reloads. */
   private toggleRail(): void {
-    const open = !this.railOpen
-    this.railForcedForVisit = false
-    if (this.threadRail.quiet && this.currentCard) this.railPeek = { thread: threadKey(this.currentCard), open }
-    else {
-      this.railPeek = null
-      this.railChoice = open
-      try { localStorage.setItem(RAIL_STORAGE, String(this.railChoice)) } catch { /* Storage is optional. */ }
-    }
+    if (this.phone.matches) {
+      if (this.pageSheet.isOpen) { this.setRailVisible(false); this.pageSheet.close() }
+      else { this.setRailVisible(true); this.openPhonePage() }
+    } else this.setRailVisible(!this.railOpen)
+  }
+  private setRailVisible(open: boolean): void {
+    this.railChoice = open
+    try { localStorage.setItem(RAIL_STORAGE, String(open)) } catch { /* Storage is optional. */ }
     this.paintRail()
     this.layout(false)
   }
-  /** An explicit Desk count opens the family for this visit without changing the saved choice. */
+  /** An explicit Desk count asks to show the family, just like its toggle. */
   forceThreadRail(): void {
     if (!this.currentCard) return
-    this.railForcedForVisit = true
-    this.paintRail()
+    this.setRailVisible(true)
     if (this.phone.matches) {
       this.phoneRailPending = !this.runSettled
       if (!this.phoneRailPending) this.openPhonePage()
@@ -909,7 +901,7 @@ export class Reader {
 
   /** Whether the rail is wanted: this visit's explicit opening, else the viewer's choice. */
   private get railOpen(): boolean {
-    return this.railForcedForVisit || (this.railPeek?.open ?? (this.threadRail.quiet ? false : this.railChoice))
+    return this.railChoice ?? !this.threadRail.quiet
   }
   /** Whether the threads rail stands beside the stage: wanted, with threads to show, off the phone. */
   private get railShown(): boolean {
@@ -1079,7 +1071,7 @@ export class Reader {
     // Alt chords never bypass editable/native control guards; command shortcuts may.
     const forward = shouldForwardDocumentKey(e)
     if (e.altKey && !forward) return
-    // Native controls own activation and composite navigation; the managed tablist uses our shared intents.
+    // Native controls own activation and composite navigation.
     if (!forward && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
     if (intent && this.handleIntent(intent, e.repeat)) {

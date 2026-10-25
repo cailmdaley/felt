@@ -82,14 +82,14 @@ it('Tab reaches the count and action menu without hidden family stops', () => {
   press('Tab', document.activeElement!)
   expect(document.activeElement).toBe(row().querySelector('.kbn-card-menu'))
 })
-it('the count opens the constitution with the rail forced for only that visit, preserving the saved closed choice', async () => {
+it('the count explicitly shows the rail and its toggle persists the next hide', async () => {
   row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
   await vi.waitFor(() => expect(inside.workspace.isActive).toBe(true))
-  const reader = inside.workspace.reader as unknown as { railOpen: boolean; hide(): void }
+  const reader = inside.workspace.reader as unknown as { railOpen: boolean }
   expect(reader.railOpen).toBe(true)
-  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('false')
-  // A repaint during the same visit must not lose the override.
+  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
   draw(); expect(reader.railOpen).toBe(true)
+  document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
   inside.workspace.returnToOrigin()
   inside.openDocumentChannel(head)
   expect(reader.railOpen).toBe(false)
@@ -105,5 +105,5 @@ it('the phone count opens the existing threads sheet once, not again after dismi
   expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(false)
   draw()
   expect(document.querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).toBe(false)
-  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('false')
+  expect(localStorage.getItem('shuttle:workspace:rail')).toBe('true')
 })
