@@ -36,6 +36,11 @@ try {
     await page.frameLocator('.ws-report-dock iframe').locator('#report-sentinel').waitFor()
     await shot(page, `${device}-landing`)
     const dockBox = await page.locator('.ws-report-dock').boundingBox()
+    if (!phone) {
+      const findBox = await selected(page).locator('.ws-transcript-find-bar').boundingBox()
+      assert.ok(findBox.height <= 44, 'desktop report chip adds no transcript band')
+      assert.ok(dockBox.y >= findBox.y && dockBox.y + dockBox.height <= findBox.y + findBox.height, 'desktop chip stays within the find row')
+    }
     const composerBox = await selected(page).locator('textarea').boundingBox()
     assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
     await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = 0 })

@@ -13,7 +13,7 @@ it('keeps a single live report reachable outside the scroller when its full figu
     observe = observe; disconnect = disconnect
   })
   const chat = document.createElement('div')
-  chat.innerHTML = '<div class="ws-chat-log"><div class="ws-transcript"><div class="ws-transcript-scroll"><div class="ws-transcript-turn"></div></div></div></div>'
+  chat.innerHTML = '<div class="ws-chat-log"><div class="ws-transcript"><div class="ws-transcript-find-bar"></div><div class="ws-transcript-scroll"><div class="ws-transcript-turn"></div></div></div></div>'
   document.body.append(chat)
   const doc = buildChannel({ uid: 'task', owner: 'host', name: 'Task', path: '/task.md', fiberDir: '/', body: '', embeds: [{ path: '/report.html' }] }).documents[1]
   const open = vi.fn(), inset = new ReportInset('', doc, chat, open)
@@ -23,6 +23,7 @@ it('keeps a single live report reachable outside the scroller when its full figu
   intersect([{ isIntersecting: false }])
   expect(dock.hidden).toBe(false)
   expect(dock.closest('.ws-transcript-scroll')).toBeNull()
+  expect(dock.parentElement).toBe(chat.querySelector('.ws-transcript-find-bar'))
   expect(dock.querySelector('iframe')).not.toBeNull()
   dock.querySelector('button')!.click()
   intersect([{ isIntersecting: true }])

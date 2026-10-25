@@ -43,9 +43,11 @@ export class ReportInset {
       const scroll = chat.querySelector<HTMLElement>('.ws-transcript-scroll')
       const target = chat.querySelector<HTMLElement>('.ws-transcript-turn') ?? scroll ?? chat.querySelector<HTMLElement>('.ws-chat-log')
       if (target && this.el.parentElement !== target) target.prepend(this.el)
+      const find = chat.querySelector('.ws-transcript-find-bar')
+      if (find && this.dock.parentElement !== find) find.append(this.dock)
+      else if (!find && scroll && this.dock.nextElementSibling !== scroll) scroll.before(this.dock)
       if (scroll && scroll !== root) {
         root = scroll
-        scroll.before(this.dock)
         this.intersection?.disconnect()
         if (typeof IntersectionObserver !== 'undefined') {
           this.intersection = new IntersectionObserver(entries => {
