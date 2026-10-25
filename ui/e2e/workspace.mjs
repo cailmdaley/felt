@@ -2276,6 +2276,24 @@ test('The chat state word stays still while the sidebar worker breathes', async 
   const state = selected(p).locator('.ws-chat-state')
   await state.waitFor()
   assert.equal(await state.evaluate(el => getComputedStyle(el).animationName), 'none')
+  const dot = p.locator('.ws-sidebar:not([inert]) .kbn-card').filter({ hasText: 'Remote covariance review' }).locator('.constitution-state-dot')
+  await dot.waitFor()
+  assert.deepEqual(await dot.evaluate(el => {
+    const css = getComputedStyle(el, '::before')
+    return { name: css.animationName, duration: css.animationDuration, easing: css.animationTimingFunction, iterations: css.animationIterationCount }
+  }), { name: 'kbn-worker-breathe', duration: '2.4s', easing: 'ease-in-out', iterations: 'infinite' }, 'the working sidebar dot breathes on the shared opacity cycle')
+  assert.deepEqual(await dot.evaluate(el => el.getAnimations({ subtree: true }).find(animation => animation.animationName === 'kbn-worker-breathe')?.effect?.getKeyframes().map(frame => frame.opacity)), ['1', '0.5', '1'], 'the running animation changes opacity, not geometry')
+  await p.emulateMedia({ reducedMotion: 'reduce' })
+  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'none', 'reduced motion suppresses the sidebar cycle')
+  await p.emulateMedia({ reducedMotion: 'no-preference' })
+  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'kbn-worker-breathe')
+  await p.evaluate(async () => {
+    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
+    row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
+    await window.__harness.modal.fetchAndRender()
+  })
+  await poll(p, () => document.querySelector('.ws-selected .ws-chat-state')?.textContent === 'Your turn')
+  assert.equal(await dot.evaluate(el => getComputedStyle(el, '::before').animationName), 'none', 'the sidebar dot stops breathing when the worker yields')
 }, undefined, 'true', 'no-preference')
 
 // Say-it-once checks cover the selected page and its chrome. Tabs and the

@@ -8,6 +8,9 @@
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent);
 }
 .constitution-state-dot[data-turn='working'] { --state-dot: var(--kbn-agent); }
+.constitution-state-dot[data-turn='working']::before { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
+[inert] .constitution-state-dot::before { animation: none; }
+@media (prefers-reduced-motion: reduce) { .constitution-state-dot::before { animation: none !important; } }
 .constitution-state-dot:is([data-turn='idle'], [data-turn='question']) { --state-dot: var(--kbn-owed-bright); }
 .constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked']) { --state-dot: var(--kbn-ink-muted); }
 .constitution-state-dot:focus-visible { outline: 1px solid var(--kbn-you); outline-offset: -1px; }
