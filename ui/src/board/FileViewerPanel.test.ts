@@ -31,6 +31,24 @@ beforeEach(() => {
 })
 
 describe('workspace file viewer hooks', () => {
+  it('gives a live-arriving image its own full-resolution URL after the strip thumbnail', () => {
+    const thumbnail = buildFileViewer('', '/growth.png', 'host-a', undefined, undefined, { thumbnail: true })
+    const reader = buildFileViewer('', '/growth.png', 'host-a')
+    const thumbImage = thumbnail.querySelector('img')!
+    const stageImage = reader.querySelector('.kbn-fileview-image') as HTMLImageElement
+
+    expect(thumbImage.src).toContain('/api/v1/file?path=%2Fgrowth.png&origin=host-a')
+    const thumbnailUrl = new URL(thumbImage.src)
+    const stageUrl = new URL(stageImage.src)
+    expect(stageImage.decoding).toBe('sync')
+    expect(stageUrl.searchParams.get('presentation')).toBe('stage')
+    stageUrl.searchParams.delete('presentation')
+    expect(stageUrl.href).toBe(thumbnailUrl.href)
+    expect(stageImage).not.toBe(thumbImage)
+
+    disposeFileViewer(thumbnail)
+    disposeFileViewer(reader)
+  })
   it('releases a thumbnail image source when its body is unmounted', () => {
     const viewer = buildFileViewer('', '/plot.svg', 'host-a', undefined, undefined, { thumbnail: true })
     const image = viewer.querySelector('img')!

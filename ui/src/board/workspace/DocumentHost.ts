@@ -93,6 +93,8 @@ export class DocumentHost {
     /** Page swipes recognised inside the selected HTML document. */
     onSwipe?: (signal: SwipeSignal) => void
     onFrame?: (frame: DocumentFrame) => void
+    /** Recompute page geometry after a viewer learns its intrinsic dimensions. */
+    onViewerReady?: () => void
     /** The controller owns fetching fiber bodies; it calls updateProse on success. */
     onRefreshProse?: (doc: WorkspaceDocument) => void | Promise<void>
   }
@@ -460,6 +462,7 @@ export class DocumentHost {
     this.clearNotice(state)
     this.transferAudioPosition(state)
     if (!state.active && this.inlineAudio?.target !== state.frame.doc.key) suspendFileViewer(viewer)
+    if (state.frame.doc.kind === 'image') this.options.onViewerReady?.()
   }
 
   private setActive(state: FrameState, active: boolean): void {

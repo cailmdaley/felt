@@ -32,7 +32,7 @@ const doc = (n: number, owner = 'host-a'): WorkspaceDocument => ({
 const docs = Array.from({ length: 18 }, (_, n) => doc(n))
 let track: HTMLElement
 let host: DocumentHost
-const onSelect = vi.fn(), onFrame = vi.fn(), onScroll = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
+const onSelect = vi.fn(), onFrame = vi.fn(), onScroll = vi.fn(), onViewerReady = vi.fn(), buildProse = vi.fn(() => document.createElement('div'))
 beforeEach(() => {
   vi.clearAllMocks()
   render.calls = []
@@ -40,7 +40,7 @@ beforeEach(() => {
   document.body.replaceChildren()
   track = document.createElement('div')
   document.body.append(track)
-  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll })
+  host = new DocumentHost(track, { shuttleBase: '', buildProse, onSelect, onFrame, onScroll, onViewerReady })
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ exists: true, size: 1, modified_at: 1 }))))
 })
 afterEach(() => { host.dispose(); vi.unstubAllGlobals(); resetDocumentResources() })
@@ -48,6 +48,13 @@ const ready = async (call = render.calls.at(-1)!) => {
   call.options.onState!({ status: 'ready' })
   await Promise.resolve()
 }
+
+it('notifies the reader to recalculate page geometry when a viewer becomes ready', async () => {
+  const image = { ...docs[0], kind: 'image' as const, path: '/figure.png', name: 'figure.png' }
+  host.setChannel([image], image.key)
+  await ready()
+  expect(onViewerReady).toHaveBeenCalledOnce()
+})
 
 describe('say it once label bars', () => {
   it.each([false, true])('updates last-changed and owner-aware arrivals without rerendering or reloading (phone=%s)', phone => {

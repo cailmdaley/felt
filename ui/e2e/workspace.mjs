@@ -1637,6 +1637,43 @@ test('Text, markdown, code, image, archive and missing-file cause', async p => {
   assert.match(await selected(p).locator('.ws-document-path').innerText(), /\/deliverables\/not-produced.csv$/)
 })
 
+test('A live-arriving image opens at full resolution from Sent files', async p => {
+  await open(p)
+  await choose(p, 'Chat')
+  await p.evaluate(() => {
+    const original = window.fetch
+    window.fetch = async (...args) => {
+      const response = await original(...args)
+      if (!String(args[0]).includes('/api/v1/sent-files?')) return response
+      const payload = await response.json()
+      const source = payload.files.find(file => file.fullPath.endsWith('/figure.png'))
+      if (source && !payload.files.some(file => file.fullPath.endsWith('/live-arrival.png'))) {
+        payload.files.push({ ...source, fullPath: source.fullPath.replace(/figure\.png$/, 'live-arrival.png'), basename: 'live-arrival.png', timestamp: Date.now() + 1000, sessionId: 'live-image-arrival' })
+      }
+      return new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+    }
+  })
+  await p.clock.fastForward(15001)
+  await sentFiles(p)
+  const imageCard = p.locator('.ws-page-sheet[open] .ws-sent-file[data-key$="/live-arrival.png"]')
+  await imageCard.waitFor()
+  await imageCard.locator('.ws-sent-new').waitFor()
+  await imageCard.click()
+  await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
+  const image = selected(p).locator('.kbn-fileview-image')
+  await image.waitFor()
+  const geometry = await image.evaluate(async img => {
+    await img.decode()
+    const rect = img.getBoundingClientRect(), content = img.closest('.ws-content').getBoundingClientRect()
+    return { natural: [img.naturalWidth, img.naturalHeight], drawn: [rect.width, rect.height], content: [content.width, content.height] }
+  })
+  assert.deepEqual(geometry.natural, [3000, 600], 'the reader decodes the source image rather than the strip-sized representation')
+  assert.ok(geometry.drawn[0] > 1000, `the source uses its intrinsic aspect ratio to fill the stage: ${JSON.stringify(geometry)}`)
+  assert.ok(geometry.drawn[0] <= geometry.content[0] && geometry.drawn[1] <= geometry.content[1], `the image fits the stage: ${JSON.stringify(geometry)}`)
+  assert.ok(geometry.drawn[0] <= geometry.natural[0] && geometry.drawn[1] <= geometry.natural[1], 'the reader does not enlarge the source beyond its pixels')
+  assert.ok(Math.abs(geometry.drawn[1] / geometry.drawn[0] - .2) < .01, 'the reader preserves the source aspect ratio')
+})
+
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Receded media posters show cached audio peaks and the first video frame (${device})`, async p => {
   await open(p); await choose(p, 'tone.mp3')
   await poll(p, () => document.querySelector('.ws-selected .ws-audio-page')?.dataset.waveform === 'decoded')

@@ -297,6 +297,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   const code = `${project}/deliverables/response.py`
   const pdf = `${project}/deliverables/response.pdf`
   const image = `${project}/deliverables/figure.png`
+  const liveImage = `${project}/deliverables/live-arrival.png`
   const mp3 = `${project}/deliverables/tone.mp3`
   const wav = `${project}/deliverables/tone.wav`
   const mp4 = `${project}/deliverables/test.mp4`
@@ -346,6 +347,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     file(WORKSPACE_HOST, linkedText, 'text/csv', 'ell,response\n100,0.998\n200,1.003\n'),
     file(WORKSPACE_HOST, pdf, 'application/pdf', blobFor(pdfData, 'application/pdf')),
     file(WORKSPACE_HOST, image, 'image/png', blobFor(imageData, 'image/png')),
+    file(WORKSPACE_HOST, liveImage, 'image/png', blobFor(OVERSIZED_IMAGE, 'image/png')),
     file(WORKSPACE_HOST, mp3, 'audio/mpeg', blobFor(mp3Data, 'audio/mpeg')),
     file(WORKSPACE_HOST, wav, 'audio/wav', blobFor(wavData, 'audio/wav')),
     file(WORKSPACE_HOST, mp4, 'video/mp4', blobFor(mp4Data, 'video/mp4')),

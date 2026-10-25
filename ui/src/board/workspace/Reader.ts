@@ -270,6 +270,7 @@ export class Reader {
       onSelect: key => this.openDocument(key),
       onNavigate: (source, href) => this.opts.onNavigate?.(source, href),
       onFrame: frame => this.prepareFrame(frame),
+      onViewerReady: () => this.layout(false),
       onScroll: (key, y) => this.topbar.scroll(key, y),
       onSwipe: signal => this.swipe(signal),
     })

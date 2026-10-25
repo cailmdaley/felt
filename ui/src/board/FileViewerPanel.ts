@@ -102,7 +102,12 @@ export function buildFileViewer(
     wrap.className = 'kbn-fileview-image-wrap'
     const img = document.createElement('img')
     img.className = 'kbn-fileview-image'
-    img.src = src
+    img.decoding = 'sync'
+    // WebKit can reuse a thumbnail-sized decoded representation when the
+    // strip and reader load one image URL at different sizes. Keep the reader
+    // request's cache key distinct so its intrinsic dimensions come from the
+    // full image. The file endpoint ignores this presentation-only parameter.
+    img.src = `${src}&presentation=stage`
     img.alt = basename(fullPath)
     let disposed = false
     img.addEventListener('load', () => {
