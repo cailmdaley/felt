@@ -51,8 +51,12 @@ try {
   await p.clock.install()
   await p.goto(url)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Music' }).first().click()
-  await p.waitForFunction(() => document.querySelector('.ws-tab[aria-selected="true"]')?.getAttribute('aria-label') === 'Listening notes', null, { timeout: 10_000 })
-  // Let titles, neighbours and durations settle.
+  const selected = () => p.locator('.ws-page.ws-selected')
+  await selected().locator('textarea').waitFor()
+  const chip = p.locator('.ws-report-dock:not([hidden]) .ws-report-compact')
+  await (await chip.count() ? chip : p.locator('.ws-report-open')).click()
+  await selected().frameLocator('iframe').getByRole('heading', { name: 'Listening notes', exact: true }).waitFor()
+  // Let titles and durations settle.
   await p.clock.runFor(8_000)
   await p.waitForTimeout(500)
   const snapshot = () => p.evaluate(() => ({
@@ -68,9 +72,13 @@ try {
   const later = await snapshot()
   const idle = tally(later.requests.slice(opened.requests.length), later.rewrites.slice(opened.rewrites.length))
   print('idle minute', idle)
-  // Step onto three recordings: each selected one decodes its waveform once.
+  // Select three sent recordings: each selected one decodes its waveform once.
   for (let step = 0; step < 3; step++) {
-    await p.keyboard.press('ArrowRight')
+    await selected().getByRole('button', { name: 'Document menu', exact: true }).click()
+    await p.getByRole('button', { name: 'Sent files', exact: true }).click()
+    const filename = `take-${String(step + 1).padStart(2, '0')}.${step % 2 ? 'wav' : 'mp3'}`
+    await p.locator(`.ws-page-sheet[open] .ws-sent-file[data-key$="/${filename}"]`).click()
+    await selected().locator('.ws-audio-page[data-waveform="decoded"]').waitFor()
     await p.clock.runFor(3_000)
     await p.waitForTimeout(300)
   }
