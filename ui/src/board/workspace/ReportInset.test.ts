@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
+import { MOBILE_MEDIA } from '../mobile.js'
 import { ReportInset } from './ReportInset.js'
 import { buildChannel } from './documents.js'
 const viewer = vi.hoisted(() => ({ build: vi.fn(() => document.createElement('iframe')), dispose: vi.fn() }))
 vi.mock('../FileViewerPanel.js', () => ({ buildFileViewer: viewer.build, disposeFileViewer: viewer.dispose }))
 vi.mock('./Thumbnail.js', () => ({ Thumbnail: class { el = document.createElement('div'); dispose() {} } }))
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); document.body.replaceChildren() })
-it('keeps a single live report reachable outside the scroller when its full figure is offscreen', () => {
+it.each([false, true])('keeps one live report with its offscreen chip in the header (phone: %s)', mobile => {
+  const changed: Array<() => void> = []
+  vi.stubGlobal('matchMedia', (media: string) => ({ matches: mobile && media !== '(max-height: 500px) and (pointer: coarse)', addEventListener: (_: string, fn: () => void) => changed.push(fn), removeEventListener: vi.fn() }))
   let intersect!: (entries: { isIntersecting: boolean }[]) => void
   const disconnect = vi.fn(), observe = vi.fn()
   vi.stubGlobal('IntersectionObserver', class {
@@ -14,7 +17,7 @@ it('keeps a single live report reachable outside the scroller when its full figu
     observe = observe; disconnect = disconnect
   })
   const chat = document.createElement('div')
-  chat.innerHTML = '<div class="ws-chat-log"><div class="ws-transcript"><div class="ws-transcript-find-bar"></div><div class="ws-transcript-scroll"><div class="ws-transcript-turn"></div></div></div></div>'
+  chat.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"><button class="ws-header-control" aria-label="Act"></button><button class="ws-header-control" aria-label="Look"></button></div></header><div class="ws-chat-log"><div class="ws-transcript"><div class="ws-transcript-scroll"><div class="ws-transcript-turn"></div></div></div></div>'
   document.body.append(chat)
   const doc = buildChannel({ uid: 'task', owner: 'host', name: 'Task', path: '/task.md', fiberDir: '/', body: '', embeds: [{ path: '/report.html' }] }).documents[1]
   const open = vi.fn(), inset = new ReportInset('', doc, chat, open)
@@ -25,7 +28,16 @@ it('keeps a single live report reachable outside the scroller when its full figu
   intersect([{ isIntersecting: false }])
   expect(dock.hidden).toBe(false)
   expect(dock.closest('.ws-transcript-scroll')).toBeNull()
-  expect(dock.parentElement).toBe(chat.querySelector('.ws-transcript-find-bar'))
+  if (mobile) expect(chat.querySelector('.ws-chat-head')?.nextElementSibling).toBe(dock)
+  else {
+    expect(dock.parentElement).toBe(chat.querySelector('.ws-chat-acts'))
+    expect(dock.nextElementSibling?.getAttribute('aria-label')).toBe('Act')
+  }
+  // Resizing moves only the static chip, never the live iframe.
+  vi.stubGlobal('matchMedia', (media: string) => ({ matches: media === MOBILE_MEDIA ? !mobile : false }))
+  changed[0]()
+  if (mobile) expect(dock.parentElement).toBe(chat.querySelector('.ws-chat-acts'))
+  else expect(chat.querySelector('.ws-chat-head')?.nextElementSibling).toBe(dock)
   expect(dock.querySelector('iframe')).toBeNull()
   expect(live.parentElement).toBe(parent)
   expect(live.isConnected).toBe(true)

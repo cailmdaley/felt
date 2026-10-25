@@ -2,6 +2,7 @@ import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
 import { Thumbnail } from './Thumbnail.js'
+import { isMobileViewport, onMobileChange } from '../mobile.js'
 import './report-inset.css'
 
 /** One mounted live figure, with a static thumbnail in its offscreen dock. */
@@ -14,6 +15,7 @@ export class ReportInset {
   private readonly resize: ResizeObserver | null
   private intersection: IntersectionObserver | null = null
   private readonly stopTitle: () => void
+  private readonly stopMobile: () => void
   constructor(base: string, doc: WorkspaceDocument, chat: HTMLElement, open: () => void) {
     this.el.className = 'ws-report-inset'
     const button = document.createElement('button'); button.type = 'button'; button.className = 'ws-report-open'
@@ -50,9 +52,13 @@ export class ReportInset {
       const scroll = chat.querySelector<HTMLElement>('.ws-transcript-scroll')
       const target = scroll ?? chat.querySelector<HTMLElement>('.ws-chat-log')
       if (target && this.el.parentElement !== target) target.prepend(this.el)
-      const find = chat.querySelector('.ws-transcript-find-bar')
-      if (find && this.dock.parentElement !== find) find.append(this.dock)
-      else if (!find && scroll && this.dock.nextElementSibling !== scroll) scroll.before(this.dock)
+      const header = chat.querySelector('.ws-chat-head')
+      const acts = header?.querySelector('.ws-chat-acts')
+      if (isMobileViewport()) {
+        if (header && header.nextElementSibling !== this.dock) header.after(this.dock)
+      } else if (acts && this.dock.parentElement !== acts) {
+        acts.insertBefore(this.dock, acts.querySelector('.ws-header-control'))
+      }
       if (scroll && scroll !== root) {
         root = scroll
         this.intersection?.disconnect()
@@ -71,10 +77,11 @@ export class ReportInset {
       }
       scale()
     }
+    this.stopMobile = typeof window.matchMedia === 'function' ? onMobileChange(seat) : () => {}
     this.observer = new MutationObserver(seat); this.observer.observe(chat, { childList: true, subtree: true }); seat()
   }
   dispose(): void {
-    this.observer.disconnect(); this.intersection?.disconnect(); this.resize?.disconnect(); this.stopTitle()
+    this.observer.disconnect(); this.intersection?.disconnect(); this.resize?.disconnect(); this.stopTitle(); this.stopMobile()
     this.thumbnail.dispose(); disposeFileViewer(this.viewer); this.el.remove(); this.dock.remove()
   }
 }

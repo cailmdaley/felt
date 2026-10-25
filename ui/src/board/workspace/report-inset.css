@@ -13,8 +13,7 @@
 .ws-chat .ws-transcript-scroll:has(.ws-report-inset) .ws-transcript-turn:first-child .ws-transcript-msg-you { margin-bottom: 16px; }
 .ws-chat .ws-transcript-inline .ws-transcript-scroll:has(.ws-report-inset) .ws-transcript-turn:first-child .ws-transcript-prompt-text { background: transparent; display: block; padding: 0; overflow: visible; border-radius: 0; max-height: none; mask-image: none; -webkit-mask-image: none; }
 .ws-chat .ws-transcript-scroll:has(.ws-report-inset) .ws-transcript-turn:first-child .ws-transcript-steps { width: auto; }
-.ws-report-dock { flex: none; display: flex; justify-content: flex-end; background: var(--ws-paper); }
-.ws-transcript-find-bar:has(.ws-report-dock:not([hidden])) { flex-wrap: nowrap; }
+.ws-report-dock { flex: none; display: flex; min-width: 0; justify-content: flex-end; }
 .ws-report-dock[hidden] { display: none; }
 .ws-report-compact { display: flex; align-items: center; gap: 8px; max-width: 190px; padding: 5px; background: var(--ws-paper); border: 1px solid var(--ws-hairline); border-radius: var(--ws-control-radius); box-shadow: var(--ws-shadow-low); cursor: zoom-in; }
 .ws-report-preview { display: block; width: 42px; height: 25px; flex: none; overflow: hidden; pointer-events: none; }
@@ -22,7 +21,6 @@
 .ws-report-dock-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--ws-note-size)/1.3 var(--ws-serif); color: var(--ws-ink); }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-report-inset { margin-left: 16px; width: 49%; }
-  .ws-transcript-find-bar:has(.ws-report-dock:not([hidden])) { flex-wrap: wrap; }
-  .ws-report-dock { flex-basis: 100%; padding: 4px 0 6px; }
-  .ws-report-compact { max-width: 70%; }
+  .ws-report-dock { padding: 4px var(--ws-chat-gutter) 6px; }
+  .ws-report-compact { max-width: min(70%, 240px); min-height: 44px; }
 }
