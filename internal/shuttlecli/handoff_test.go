@@ -1,12 +1,15 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/sysenv"
@@ -39,7 +42,17 @@ esac
 	env.Set("SHUTTLE_TEST_SNAPSHOT", snapshot)
 	env.Set("SHUTTLE_TEST_KILLS", kills)
 	// Warm executable inspection before tmuxCurrentSession's one-second probe.
-	if out, err := env.Command("tmux", "display-message").Output(); err != nil || strings.TrimSpace(string(out)) != session {
+	// A parallel test's fork can briefly inherit the script's write descriptor
+	// (golang/go#22315), so exec retries while Linux reports ETXTBSY.
+	var out []byte
+	var err error
+	for deadline := time.Now().Add(2 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		out, err = env.Command("tmux", "display-message").Output()
+		if !errors.Is(err, syscall.ETXTBSY) || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil || strings.TrimSpace(string(out)) != session {
 		t.Fatalf("fake tmux: %q (%v)", out, err)
 	}
 	return kills, snapshot
