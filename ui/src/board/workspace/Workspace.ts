@@ -689,14 +689,25 @@ export class Workspace {
   }
 
   private openRelative(source: WorkspaceDocument, href: string): void {
-    if (!href || /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i.test(href)) return
-    let path: string
-    try { path = decodeURIComponent(href.split(/[?#]/)[0]) } catch { return }
+    if (!href || href.startsWith('#')) return
+    let path: string, hash: string, owner = source.owner
+    try {
+      const url = new URL(href, window.location.href)
+      const explicit = url.pathname === '/api/v1/file' && url.searchParams.has('path')
+      if (explicit) {
+        path = url.searchParams.get('path')!
+        owner = url.searchParams.get('origin') || owner
+      } else {
+        if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return
+        path = decodeURIComponent(href.split(/[?#]/)[0])
+      }
+      hash = url.hash
+    } catch { return }
     if (!path || path.includes('\0') || path.includes('\\')) return
-    this.openFile(normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/'))), undefined, source.owner)
+    this.openFile(normalizeAbsolutePath(path, source.path.slice(0, source.path.lastIndexOf('/'))), undefined, owner, hash)
   }
 
-  private openFile(path: string, title?: string, owner = this.current?.card.originId): void {
+  private openFile(path: string, title?: string, owner = this.current?.card.originId, hash = ''): void {
     const state = this.current
     if (!state) return
     const key = docKey(owner ?? state.card.originId, path, state.card.originId, state.card.fiberDir)
@@ -704,6 +715,7 @@ export class Workspace {
     this.rebuild(state)
     this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal)
     this.reader.openDocument(key)
+    if (hash) this.reader.host.navigateFragment(key, hash)
     void this.readFileMetadata(state).then(() => {
       if (this.current === state && this.isActive && !this.disposed) { this.rebuild(state); this.show(state, false) }
     })

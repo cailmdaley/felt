@@ -51,6 +51,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
       return fields(p, ['phase', 'dx', 'velocity']) && p.phase === 'end' && travel(p.dx)
         && typeof p.velocity === 'number' && Number.isFinite(p.velocity) && Math.abs(p.velocity) <= 20
     case 'references': return fields(p, ['candidates']) && boundedArray(p.candidates, item => shortString(item))
+    case 'fragment': return fields(p, ['hash']) && shortString(p.hash, 4096)
     case 'navigate': return fields(p, ['href']) && shortString(p.href, 4096) && !!p.href
     case 'select': case 'play': return fields(p, ['candidate']) && shortString(p.candidate)
     case 'references:resolved': return fields(p, ['targets']) && boundedArray(p.targets, item =>
@@ -211,11 +212,31 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     send('media')
   }, true)
   // Delegation prepares dynamically inserted links too. In-page anchors stay local.
+  const fragment = (hash: string): void => {
+    cancelRestore()
+    let id: string
+    try { id = decodeURIComponent(hash.replace(/^#/, '')) } catch { return }
+    const target = document.getElementById(id) ?? document.getElementsByName(id)[0]
+    if (target) target.scrollIntoView()
+    else if (!id || id === 'top') window.scrollTo(0, 0)
+  }
+  window.addEventListener('message', event => {
+    if (event.source === window.parent && event.data?.protocol === protocol && event.data?.version === version
+      && event.data?.type === 'fragment' && typeof event.data.payload?.hash === 'string') fragment(event.data.payload.hash)
+  })
   document.addEventListener('click', event => {
     const link = (event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null
-    if (!link || link.dataset.wsReference || link.hasAttribute('download') || link.getAttribute('href')?.startsWith('#')) return
+    if (!link || link.dataset.wsReference || link.hasAttribute('download')) return
     const href = link.getAttribute('href') ?? ''
-    if (active && href && href.length <= 4096 && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) {
+    if (href.startsWith('#')) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      fragment(href)
+      return
+    }
+    let shuttleFile = false
+    try { const url = new URL(href, document.baseURI); shuttleFile = url.pathname === '/api/v1/file' && url.searchParams.has('path') } catch { /* Invalid links stay ordinary links. */ }
+    if (active && href && href.length <= 4096 && (shuttleFile || !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href))) {
       event.preventDefault()
       event.stopImmediatePropagation()
       send('navigate', { href })

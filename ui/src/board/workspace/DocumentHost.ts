@@ -63,6 +63,19 @@ export class DocumentHost {
   private readonly audioPages = new Map<HTMLAudioElement, AudioPage>()
   private documents: WorkspaceDocument[] = []
   private selected: DocKey | null = null
+  private readonly fragments = new Map<DocKey, string>()
+  /** Apply a fragment after the destination bridge is ready, without changing file identity. */
+  navigateFragment(key: DocKey, hash: string): void {
+    this.fragments.set(key, hash)
+    const frame = this.frames.get(key)?.frame.viewer?.querySelector('iframe')
+    if (frame && this.frames.get(key)?.loaded) this.applyFragment(key, frame)
+  }
+  private applyFragment(key: DocKey, frame: HTMLIFrameElement): void {
+    const hash = this.fragments.get(key)
+    if (hash === undefined || !frameBridge(frame)) return
+    frameBridge(frame)!.command('fragment', { hash })
+    this.fragments.delete(key)
+  }
   private inlineAudio: { source: DocKey; target: DocKey } | null = null
   private disposed = false
   private swipeAt = -Infinity
@@ -330,6 +343,7 @@ export class DocumentHost {
         if (refreshed) this.abandonSwipe(state)
         if (replacement && state.pending) bindReplacementScroll = () => this.bindFrameScroll(state, iframe, false)
         else this.bindFrameScroll(state, iframe, refreshed)
+        this.applyFragment(doc.key, iframe)
       },
       (scroller) => {
         if (state.revision !== revision || this.disposed) return
