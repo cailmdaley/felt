@@ -117,14 +117,14 @@ describe('bar Find transcripts', () => {
   const hit = {
     session: 'b4edf873-cb1c-40ab-a891-f26f5333b321', harness: 'claude', project: '/work/alpha',
     path: '/transcripts/alpha.jsonl', line: 2, timestamp: '2026-10-20T14:41:00Z', role: 'assistant',
-    score: 9, matches: 3, snippet: 'The «Alpha» result', fibers: [{ id: 'work/alpha', name: 'Alpha' }],
+    score: 9, matches: 13, snippet: 'The «Alpha» result', fibers: [{ id: 'work/alpha', name: 'Alpha' }],
   }
-  const setup = (): HTMLInputElement => {
+  const setup = (localHost: string | undefined = 'host-a'): HTMLInputElement => {
     workspace.dispose()
     const find = document.createElement('input')
     document.body.append(find)
     bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find })
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, localHost: () => localHost })
     return find
   }
   const type = (find: HTMLInputElement, text: string): void => {
@@ -134,9 +134,10 @@ describe('bar Find transcripts', () => {
   }
   const press = (el: HTMLElement, key: string): void => { el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
 
-  it('debounces, keeps constitutions first, steps across both groups and opens the hit in its card/session', async () => {
+  it('debounces, keeps constitutions first, steps across groups and opens the local card despite a remote duplicate first', async () => {
     vi.useFakeTimers()
     const find = setup()
+    bodyCards.unshift({ ...bodyCards[0], originId: 'host-remote' })
     const original = vi.mocked(fetch).getMockImplementation()!
     vi.mocked(fetch).mockImplementation(async (input, init) => {
       const url = String(input)
@@ -155,23 +156,41 @@ describe('bar Find transcripts', () => {
     expect(document.querySelector('.ws-search-hit')).toBeNull()
     await vi.advanceTimersByTimeAsync(1); await flush()
     const rows = [...document.querySelectorAll<HTMLElement>('.ws-switcher .ws-channel-row, .ws-switcher .ws-search-hit')]
-    expect(rows).toHaveLength(2)
-    expect(rows[0].classList.contains('ws-channel-row')).toBe(true)
-    expect(rows[1].querySelector('mark')?.textContent).toBe('Alpha')
-    expect(rows[1].textContent).toContain('claude · alpha')
+    expect(rows).toHaveLength(3)
+    expect(rows.slice(0, 2).every(row => row.classList.contains('ws-channel-row'))).toBe(true)
+    expect(rows[2].querySelector('mark')?.textContent).toBe('Alpha')
+    expect(rows[2].textContent).toContain('claude · alpha')
+    expect(rows[2].querySelector('.ws-search-meta')?.textContent).toContain('13 matches')
     expect(document.querySelector('.ws-search-transcripts .kbn-flight-caption')?.textContent).toBe('Transcripts')
     press(find, 'ArrowDown'); expect(document.activeElement).toBe(rows[0])
     press(rows[0], 'ArrowDown'); expect(document.activeElement).toBe(rows[1])
-    press(rows[1], 'ArrowUp'); expect(document.activeElement).toBe(rows[0])
+    press(rows[1], 'ArrowDown'); expect(document.activeElement).toBe(rows[2])
+    press(rows[2], 'ArrowUp'); expect(document.activeElement).toBe(rows[1])
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(performance.now()), 16))
     vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id))
-    rows[1].click(); await flush(); await vi.advanceTimersByTimeAsync(64); await flush()
+    rows[2].click(); await flush(); await vi.advanceTimersByTimeAsync(64); await flush()
     expect(workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('alpha')
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('chat:host-a:alpha')
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes(`session=${hit.session}`))).toBe(true)
     expect(document.querySelector<HTMLInputElement>('.ws-transcript-find-input')?.value).toBe('alpha')
     expect(document.querySelector('.ws-transcript-found')?.textContent).toContain('Alpha result')
+  })
+
+  it.each(['host-a', ''])('offers only copy path when no card belongs to local host %j', async localHost => {
+    vi.useFakeTimers()
+    const find = setup(localHost)
+    bodyCards = [{ ...bodyCards[0], originId: 'host-remote' }]
+    const original = vi.mocked(fetch).getMockImplementation()!
+    vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/transcripts/search')
+      ? new Response(JSON.stringify({ hits: [{ ...hit, matches: 1 }], errors: [] }))
+      : original(input, init))
+    type(find, 'Alpha'); await vi.advanceTimersByTimeAsync(300); await flush()
+    expect(document.querySelector('.ws-search-hit')).toBeNull()
+    expect(document.querySelector('.ws-search-result button')?.textContent).toBe('copy path')
+    expect(document.querySelector('.ws-search-meta')?.textContent).toContain('1 match ·')
+    document.querySelector<HTMLElement>('.ws-search-result')!.click(); await flush()
+    expect(workspace.isActive).toBe(false)
   })
 
   it('aborts stale requests and hides late replies, including after closing', async () => {

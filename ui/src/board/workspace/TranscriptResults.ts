@@ -88,7 +88,7 @@ export class TranscriptResults {
     const meta = document.createElement('small')
     meta.className = 'ws-search-meta'
     const when = Date.parse(hit.timestamp)
-    meta.textContent = [hit.harness || 'session', projectName(hit.project), Number.isFinite(when) ? ago(when) : '', ...hit.fibers.map(fiber => fiber.name || fiber.id)].filter(Boolean).join(' · ')
+    meta.textContent = [hit.harness || 'session', projectName(hit.project), Number.isFinite(when) ? ago(when) : '', `${hit.matches} ${hit.matches === 1 ? 'match' : 'matches'}`, ...hit.fibers.map(fiber => fiber.name || fiber.id)].filter(Boolean).join(' · ')
     if (!canOpen) {
       const copy = document.createElement('button')
       copy.type = 'button'

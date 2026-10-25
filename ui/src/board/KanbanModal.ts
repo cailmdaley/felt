@@ -551,6 +551,7 @@ export class KanbanModal {
     )
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
+      localHost: () => this.lastResponse?.feltHost,
       cards: () => this.workspaceCards(),
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',

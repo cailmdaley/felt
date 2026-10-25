@@ -32,6 +32,8 @@ export interface WorkspaceOptions {
   /** The current response's thread graph, built once per response. */
   threadIndex?(): ThreadIndex
   shuttleBase: string
+  /** The daemon serving shuttleBase, identified by the composite feed; unknown means no local hit can open. */
+  localHost?(): string | undefined
   cards(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
@@ -201,10 +203,12 @@ export class Workspace {
     else this.barPicker.refresh()
     this.overview.refresh()
   }
-  /** A search result opens through the board card whose conversation can display it. */
+  /** Local search results only open cards from the daemon holding the transcript. */
   private cardForHit(hit: TranscriptHit): KanbanCard | undefined {
+    const host = this.opts.localHost?.()
+    if (!host) return undefined
     return hit.fibers.flatMap(fiber => this.opts.cards().filter(card =>
-      (card.id === fiber.id || card.uid === fiber.id || card.path === fiber.id) && isAgentCard(card),
+      card.originId === host && (card.id === fiber.id || card.uid === fiber.id || card.path === fiber.id) && isAgentCard(card),
     ))[0]
   }
   private openTranscriptHit(hit: TranscriptHit, query: string): void {
