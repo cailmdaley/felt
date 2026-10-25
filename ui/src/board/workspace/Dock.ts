@@ -1074,7 +1074,7 @@ export class Dock {
     for (const [button, glyph, label] of [[review, '✓', 'Close'], [rest, '◷', 'Rest'], [temper, '◇', 'Temper'], [discard, '×', 'Discard']] as const) {
       if (button) headerTile(button, glyph, label)
     }
-    verdict.addEventListener('click', closeSheets)
+    verdict.addEventListener('click', closeSheets, { capture: true })
     const item = (label: string, glyph: string, cls: string, run: () => void): HTMLButtonElement => {
       const button = document.createElement('button')
       button.type = 'button'; button.className = cls

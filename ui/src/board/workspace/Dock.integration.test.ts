@@ -334,8 +334,13 @@ describe('state-shaped act zone', () => {
     expect(actions.hidden).toBe(true)
   })
 
-  it('anchors Rest to Act so its follow-up popover survives the sheet closing', () => {
-    const rest = vi.fn()
+  it('anchors Rest to Act and closes the sheet before the follow-up takes focus', () => {
+    const confirm = document.createElement('button')
+    document.body.append(confirm)
+    const rest = vi.fn(() => {
+      expect(band.head.querySelector('button[aria-label="Act"]')?.getAttribute('aria-expanded')).toBe('false')
+      confirm.focus()
+    })
     dock.reset(); dock = new Dock('', saved, undefined, undefined, { onRest: rest })
     band = dock.bandFor(task({ status: 'active' }))
     document.body.append(band.el)
@@ -344,6 +349,7 @@ describe('state-shaped act zone', () => {
     band.head.querySelector<HTMLButtonElement>('.kbn-ctl-rest')!.click()
     expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), act)
     expect(act.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(confirm)
   })
 
   it('opens settings and sessions from Look into the drawer, and Escape folds the drawer', () => {

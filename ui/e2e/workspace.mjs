@@ -813,7 +813,8 @@ for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the read
     const rect = el.getBoundingClientRect()
     return el.contains(document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2))
   }), true, 'Rest is visible and receives pointer input above the reader')
-  await panel.getByRole('button', { name: 'Rest', exact: true }).click()
+  assert.equal(await panel.evaluate(el => el.contains(document.activeElement)), true, 'closing Act leaves focus in the Rest dialog')
+  await p.keyboard.press('Enter')
   await panel.waitFor({ state: 'detached' })
 })
 
@@ -2743,7 +2744,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   }
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click(); await choose(p, 'Chat')
-  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control'], settle: 100 })
+  await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-chat-state'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   await selected(p).getByRole('button', { name: 'Act', exact: true }).click()
   for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
