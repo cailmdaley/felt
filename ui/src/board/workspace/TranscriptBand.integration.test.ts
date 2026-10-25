@@ -79,7 +79,7 @@ describe('Dock worker transcript', () => {
     expect(requests).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
   })
 
-  it('reads the conversation inline between the header and the composer, its meter on the header line', async () => {
+  it('reads the conversation inline between the header and the composer, its meter in Look', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) => String(url).endsWith('/agents')
       ? json([{ id: 'claude-opus', cli: 'claude' }])
       : json({})))
@@ -88,7 +88,8 @@ describe('Dock worker transcript', () => {
     const transcript = band.el.querySelector<HTMLElement>('.ws-chat-log > .ws-transcript')!
     expect(transcript.classList.contains('ws-transcript-inline')).toBe(true)
     expect(transcript.querySelector('.ws-transcript-headrow')).toBeNull()
-    expect(band.head.querySelector('.ws-transcript-meter')).not.toBeNull()
+    expect(band.head.querySelector('.ws-header-sheet[aria-label="Look"] .ws-transcript-meter')).not.toBeNull()
+    expect(band.head.querySelector(':scope > .ws-transcript-meter')).toBeNull()
     expect(band.el.querySelector('.ws-chat-log')!.nextElementSibling?.classList.contains('ws-chat-compose')).toBe(true)
   })
 

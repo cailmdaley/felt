@@ -265,11 +265,11 @@ describe('state-shaped act zone', () => {
     band = dock.bandFor(card({ id: 'roles/surveyor', uid: 'surveyor', status }))
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
   })
-  it("lays the chat out as header, drawer, conversation and composer, with every verdict in the header's menu", () => {
+  it("lays the chat out as header, drawer, conversation and composer, with every verdict in the Act sheet", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
     const verbs = (): string[] => [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')]
-      .filter(button => !button.hidden).map(button => button.textContent ?? '')
+      .filter(button => !button.hidden).map(button => button.querySelector('.ws-header-tile-title')?.textContent ?? '')
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
     const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
@@ -277,8 +277,8 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('.ws-chat-head')!.contains(band.head)).toBe(true)
     expect(band.el.querySelector('.ws-chat-log .ws-transcript')).not.toBeNull()
     expect(band.el.querySelector('.ws-chat-compose .kbn-ctl-compose')).not.toBeNull()
-    // The verdicts wait in the menu; the undo window is drawn on the header's acts.
-    expect(band.head.querySelector('.ws-chat-menu .kbn-ctl-verdict')).not.toBeNull()
+    // The verdicts wait in Act; the undo window is drawn on the header's acts.
+    expect(band.head.querySelector('[aria-label="Act"] .kbn-ctl-verdict')).not.toBeNull()
     expect(band.head.dataset.verdictKey).toBeTruthy()
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(verbs()).toEqual(['Temper', 'Discard'])
@@ -288,15 +288,65 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
     expect(band.head.dataset.column).toBe('inFlight')
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('New session ↵')
   })
-  it('opens settings and sessions from the menu into the drawer, and Escape folds the drawer', () => {
+  it('opens matching visual sheets from glyph-only Act and Look controls, one at a time', () => {
+    band = dock.bandFor(task({ status: 'closed', sessionUuid: 's', tmuxSession: 't' }))
+    document.body.append(band.el)
+    const act = band.head.querySelector<HTMLButtonElement>('button[aria-label="Act"]')!
+    const look = band.head.querySelector<HTMLButtonElement>('button[aria-label="Look"]')!
+    const actions = band.head.querySelector<HTMLElement>('[role="dialog"][aria-label="Act"]')!
+    const views = band.head.querySelector<HTMLElement>('[role="dialog"][aria-label="Look"]')!
+    expect(band.head.querySelector('details, summary')).toBeNull()
+    for (const trigger of [act, look]) {
+      expect(trigger.textContent).toBe('')
+      expect(trigger.title).toBe(trigger.getAttribute('aria-label'))
+      expect(trigger.querySelector('svg[aria-hidden="true"]')).not.toBeNull()
+    }
+    act.focus(); act.click()
+    expect(actions.hidden).toBe(false)
+    expect(act.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement?.classList.contains('ws-header-tile')).toBe(true)
+    for (const tile of actions.querySelectorAll('button')) {
+      expect(tile.classList.contains('kbn-ctl-btn')).toBe(false)
+      expect(tile.querySelector('[aria-hidden="true"]')).not.toBeNull()
+      expect(tile.querySelector('.ws-header-tile-title')).not.toBeNull()
+    }
+    look.click()
+    expect(actions.hidden).toBe(true)
+    expect(views.hidden).toBe(false)
+    expect([...views.querySelectorAll('.ws-header-tile-title')].map(item => item.textContent))
+      .toEqual(['Constitution', 'Sessions', 'Console', 'Sent files', 'Settings'])
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(views.hidden).toBe(true)
+    expect(document.activeElement).toBe(look)
+    act.click()
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    expect(actions.hidden).toBe(true)
+    act.click()
+    expect(band.handleEscape()).toBe(true)
+    expect(actions.hidden).toBe(true)
+  })
+
+  it('anchors Rest to Act so its follow-up popover survives the sheet closing', () => {
+    const rest = vi.fn()
+    dock.reset(); dock = new Dock('', saved, undefined, undefined, { onRest: rest })
+    band = dock.bandFor(task({ status: 'active' }))
+    document.body.append(band.el)
+    const act = band.head.querySelector<HTMLButtonElement>('button[aria-label="Act"]')!
+    act.click()
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-rest')!.click()
+    expect(rest).toHaveBeenCalledWith(expect.objectContaining({ id: 'a/task' }), act)
+    expect(act.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('opens settings and sessions from Look into the drawer, and Escape folds the drawer', () => {
     band = dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 's' }))
     document.body.append(band.el)
     const drawer = band.el.querySelector<HTMLElement>('.ws-chat-drawer')!
@@ -377,14 +427,21 @@ describe('state-shaped act zone', () => {
     await flush()
     expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous', user_message: 'Continue' })
   })
-  it('keeps New session out of the menu while the composer shows it, and holds it there beside a live worker for the phone', () => {
+  it('offers New session in Act in every state and Resume only for an idle recorded session', async () => {
     band = dock.bandFor(task({ status: 'closed', sessionUuid: 'resume-me' }))
-    const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-menu .ws-chat-fresh')!
-    expect(item.hidden).toBe(true)
+    const fresh = band.el.querySelector<HTMLButtonElement>('.ws-chat-fresh')!
+    const resume = band.el.querySelector<HTMLButtonElement>('.ws-chat-resume')!
+    expect(fresh.hidden).toBe(false)
+    expect(resume.hidden).toBe(false)
+    resume.click()
+    await flush()
+    expect(writes().at(-1)).toMatchObject({ resume_mode: 'previous' })
     dock.bandFor(task({ status: 'active', workerState: 'running', sessionUuid: 'resume-me', tmuxSession: 't' }))
-    expect(item.hidden).toBe(false)
-    dock.bandFor(task({ status: 'active', sessionUuid: 'resume-me' }))
-    expect(item.hidden).toBe(true)
+    expect(fresh.hidden).toBe(false)
+    expect(resume.hidden).toBe(true)
+    dock.bandFor(task({ status: 'active', sessionUuid: undefined }))
+    expect(fresh.hidden).toBe(false)
+    expect(resume.hidden).toBe(true)
   })
   it('marks Resume while the previous session\'s cache is estimated warm, and leaves it plain when cold or unknown', () => {
     const until = new Date(2026, 9, 23, 14, 5).getTime()
@@ -415,11 +472,13 @@ describe('state-shaped act zone', () => {
     expect(message.value).toBe('')
   })
   it('names the lifecycle beside the title in the rail\'s words, kept current', () => {
-    // A live worker's pill says its state; the chip does not say it again.
+    // The desktop uses the live worker pill; the phone unfolds this state chip.
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's', workerState: 'running', tmuxSession: 't', runtimePhase: 'working' }))
     const chip = band.el.querySelector<HTMLElement>('.ws-chat-head .ws-chat-state')!
     expect(band.el.querySelector('.ws-chat-head .kbn-card-worker')?.textContent).toMatch(/^working/i)
-    expect(chip.hidden).toBe(true)
+    expect(chip.hidden).toBe(false)
+    expect(chip.classList.contains('ws-chat-state-live')).toBe(true)
+    expect(chip.textContent).toBe('Working')
     dock.bandFor(task({ status: 'active', sessionUuid: 's', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' } }))
     expect([chip.hidden, chip.textContent, chip.dataset.state]).toEqual([false, 'Waiting', 'question'])
     dock.bandFor(task({ status: 'closed', sessionUuid: 's' }))
@@ -427,7 +486,7 @@ describe('state-shaped act zone', () => {
     dock.bandFor(task({ status: 'closed', tempered: true, sessionUuid: 's' }))
     expect([chip.textContent, chip.dataset.state]).toEqual(['Tempered', 'tempered'])
   })
-  it('lands on the conversation without repeating the outcome, with sent files in the menu', () => {
+  it('lands on the conversation without repeating the outcome, with sent files in Look', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's', outcome: 'Seed 3000 agrees.' }))
     expect(band.el.querySelector('.ws-chat-outcome')).toBeNull()
     expect(band.el.querySelector('.ws-chat-log .ws-transcript')).not.toBeNull()
@@ -451,7 +510,6 @@ describe('state-shaped act zone', () => {
     expect(origin).toHaveBeenCalled()
     band.setNav({ origin: { label: 'Board', open: origin } })
     expect(trail.hidden).toBe(true)
-    expect(band.el.querySelector('.ws-chat-menu-back')).toBeNull()
     expect(band.el.querySelector('.ws-chat-lead .ws-chat-origin')).not.toBeNull()
   })
 })
@@ -703,7 +761,7 @@ describe('Dock poll reconciliation', () => {
   })
 })
 
-describe('the chat menu says who and where once', () => {
+describe('Look says who and where once', () => {
   it('names agent, office and host, leaving out an office that repeats the name', async () => {
     const { chatFacts } = await import('./Dock.js')
     expect(chatFacts(card({ id: 'x', name: 'cmbx chair', shuttleRole: 'cmbx-chair', shuttleAgent: 'claude-opus', shuttleHost: 'cineca' }))).toBe('claude-opus · cineca')

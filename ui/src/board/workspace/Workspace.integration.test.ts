@@ -896,7 +896,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock textarea')).not.toBeNull()
     const article = document.querySelector<HTMLElement>('.ws-fiber-prose')!
     expect(article.querySelector('.ws-dock')).toBeNull()
-    expect(article.querySelector('.kbn-detail-lede')).not.toBeNull()
+    expect(article.querySelector('.kbn-detail-lede')).toBeNull()
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     expect(document.querySelector('.ws-tab,.ws-thumbbar')).toBeNull()
     expect(document.querySelector('.ws-chat-outcome')).toBeNull()
@@ -904,7 +904,7 @@ describe('workspace reader integration', () => {
 
     const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
     expect(constitution.hidden).toBe(false)
-    expect(constitution.textContent).toBe('Constitution')
+    expect(constitution.querySelector('.ws-header-tile-title')?.textContent).toBe('Constitution')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')
