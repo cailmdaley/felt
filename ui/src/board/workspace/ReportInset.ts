@@ -3,12 +3,14 @@ import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
 import './report-inset.css'
 
-/** A live page's top, scaled to half the conversation's measure. */
+/** One live report moves between the conversation's figure and its viewport dock. */
 export class ReportInset {
   readonly el = document.createElement('figure')
+  private readonly dock = document.createElement('div')
   private readonly viewer: HTMLElement
   private readonly observer: MutationObserver
   private readonly resize: ResizeObserver | null
+  private intersection: IntersectionObserver | null = null
   private readonly stopTitle: () => void
   constructor(base: string, doc: WorkspaceDocument, chat: HTMLElement, open: () => void) {
     this.el.className = 'ws-report-inset'
@@ -18,19 +20,53 @@ export class ReportInset {
     this.viewer = buildFileViewer(base, doc.path, doc.owner, undefined, undefined, { kind: 'html', active: true, quietLoading: true })
     viewport.append(this.viewer)
     const caption = document.createElement('figcaption')
-    const title = (): void => { caption.textContent = declaredTitle(doc.key)?.title || doc.provenance.find((p): p is Extract<typeof p, { kind: 'embed' }> => p.kind === 'embed')?.title || 'Report' }
-    title(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) title() })
     button.append(viewport); this.el.append(button, caption)
+    this.dock.className = 'ws-report-dock'; this.dock.hidden = true
+    const compact = document.createElement('button'); compact.type = 'button'; compact.className = 'ws-report-compact'
+    compact.setAttribute('aria-label', 'Read report'); compact.addEventListener('click', open)
+    const small = document.createElement('span'); small.className = 'ws-report-viewport'; small.inert = true
+    const title = document.createElement('span'); title.className = 'ws-report-dock-title'
+    compact.append(small, title); this.dock.append(compact)
+    const label = (): void => {
+      caption.textContent = declaredTitle(doc.key)?.title || doc.provenance.find((p): p is Extract<typeof p, { kind: 'embed' }> => p.kind === 'embed')?.title || 'Report'
+      title.textContent = caption.textContent
+    }
+    label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
+    const scale = (): void => {
+      const active = this.dock.hidden ? viewport : small
+      this.viewer.style.transform = `scale(${active.clientWidth / 800})`
+    }
+    this.resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scale)
+    this.resize?.observe(viewport); this.resize?.observe(small)
+    let root: HTMLElement | null = null
     const seat = (): void => {
-      const target = chat.querySelector<HTMLElement>('.ws-transcript-turn') ?? chat.querySelector<HTMLElement>('.ws-transcript-scroll') ?? chat.querySelector<HTMLElement>('.ws-chat-log')
+      const scroll = chat.querySelector<HTMLElement>('.ws-transcript-scroll')
+      const target = chat.querySelector<HTMLElement>('.ws-transcript-turn') ?? scroll ?? chat.querySelector<HTMLElement>('.ws-chat-log')
       if (target && this.el.parentElement !== target) target.prepend(this.el)
+      if (scroll && scroll !== root) {
+        root = scroll
+        scroll.before(this.dock)
+        this.intersection?.disconnect()
+        if (typeof IntersectionObserver !== 'undefined') {
+          this.intersection = new IntersectionObserver(entries => {
+            const visible = entries[0]?.isIntersecting ?? true
+            if (this.dock.hidden === visible) return
+            const atBottom = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop < 2
+            this.dock.hidden = visible
+            this.el.inert = !visible
+            ;(visible ? viewport : small).append(this.viewer)
+            scale()
+            if (atBottom && !visible) scroll.scrollTop = scroll.scrollHeight
+          }, { root: scroll })
+          this.intersection.observe(this.el)
+        }
+      }
+      scale()
     }
     this.observer = new MutationObserver(seat); this.observer.observe(chat, { childList: true, subtree: true }); seat()
-    const scale = (): void => { this.viewer.style.transform = `scale(${viewport.clientWidth / 800})` }
-    this.resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scale)
-    this.resize?.observe(viewport); scale()
   }
   dispose(): void {
-    this.observer.disconnect(); this.resize?.disconnect(); this.stopTitle(); disposeFileViewer(this.viewer); this.el.remove()
+    this.observer.disconnect(); this.intersection?.disconnect(); this.resize?.disconnect(); this.stopTitle()
+    disposeFileViewer(this.viewer); this.el.remove(); this.dock.remove()
   }
 }
