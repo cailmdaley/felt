@@ -10,7 +10,6 @@ export class ReportChip {
   constructor(base: string, doc: WorkspaceDocument, open: () => void) {
     this.el.type = 'button'
     this.el.className = 'ws-report-chip'
-    this.el.setAttribute('aria-label', 'Read report')
     this.el.addEventListener('click', open)
     const preview = document.createElement('span')
     preview.className = 'ws-report-preview'; preview.inert = true
@@ -25,6 +24,7 @@ export class ReportChip {
     const label = (): void => {
       title.textContent = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Report'
       this.el.title = title.textContent
+      this.el.setAttribute('aria-label', `Read report: ${title.textContent}`)
     }
     label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
   }

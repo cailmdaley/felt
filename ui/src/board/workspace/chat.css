@@ -185,9 +185,9 @@
   .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); gap: 4px; white-space: nowrap; }
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
-  .ws-chat-head .ws-report-chip { max-width: 100px; gap: 4px; padding: 0; }
+  .ws-chat-head .ws-report-chip { width: 44px; min-height: var(--ws-phone-target); gap: 0; padding: 0; }
   .ws-report-preview { width: 44px; height: 40px; }
-  .ws-report-title { max-width: 50px; font-size: var(--ws-small-size); }
+  .ws-report-title { display: none; }
   .ws-header-overflow { flex-wrap: wrap; }
   /* Folded, the composer is one row, the field and its one verb; it opens on focus or while a meeting is armed. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }

@@ -58,7 +58,7 @@ export function registerHeaderBarJourneys(test) {
       const geometry = await header.evaluate(el => {
         const box = el.getBoundingClientRect(), title = el.querySelector('h1'), name = title.getBoundingClientRect()
         const style = getComputedStyle(title)
-        return { barHeight: box.height, titleHeight: name.height, lineHeight: parseFloat(style.lineHeight),
+        return { barHeight: box.height, titleHeight: name.height, titleWidth: name.width, lineHeight: parseFloat(style.lineHeight),
           nowrap: style.whiteSpace, ellipsis: style.textOverflow, left: box.left, right: box.right,
           childrenInside: [...el.children].filter(child => child.checkVisibility()).every(child => {
             const r = child.getBoundingClientRect(); return r.top >= box.top && r.bottom <= box.bottom && r.left >= box.left && r.right <= box.right
@@ -68,6 +68,16 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(geometry.titleHeight <= geometry.lineHeight + 7, JSON.stringify(geometry))
       assert.ok(geometry.barHeight <= 74 && geometry.childrenInside, JSON.stringify(geometry))
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
+      const report = header.locator('.ws-report-chip')
+      const reportTitle = await report.getAttribute('title')
+      assert.ok(reportTitle?.length)
+      assert.equal(await report.getAttribute('aria-label'), `Read report: ${reportTitle}`)
+      assert.equal(await report.locator('.ws-report-title').isVisible(), device === 'desktop', 'phone chips are thumbnail-only; desktop keeps the visible report title')
+      if (device === 'phone') {
+        assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
+        const target = await report.boundingBox()
+        assert.ok(target.width >= 44 && target.height >= 44, 'the thumbnail remains a 44px touch target')
+      }
       assert.equal(await chat.locator('.ws-report-inset, .ws-chat-outcome, .ws-transcript-find, .ws-header-sheet').count(), 0)
       assert.equal(await header.locator('.ws-transcript-share, .ws-transcript-hit').count(), 0)
       assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)

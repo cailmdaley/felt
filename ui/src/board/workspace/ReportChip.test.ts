@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { ReportChip } from './ReportChip.js'
 import { buildChannel } from './documents.js'
+import { cacheDocumentTitle } from './DocumentTitles.js'
 
 vi.mock('./Thumbnail.js', () => ({ Thumbnail: class {
   el = document.createElement('span')
@@ -17,7 +18,11 @@ it('keeps a titled thumbnail as one focusable report entry point without a live 
   chip = new ReportChip('', doc, open); document.body.append(chip.el)
   expect(chip.el.title).toBe('Measured response')
   expect(chip.el.querySelector('.ws-report-title')?.textContent).toBe('Measured response')
-  expect(chip.el.getAttribute('aria-label')).toBe('Read report')
+  expect(chip.el.getAttribute('aria-label')).toBe('Read report: Measured response')
+  cacheDocumentTitle(doc.key, doc.path, '<title>Validated response</title>')
+  expect(chip.el.title).toBe('Validated response')
+  expect(chip.el.getAttribute('aria-label')).toBe('Read report: Validated response')
+  expect(chip.el.querySelector('.ws-report-title')?.textContent).toBe('Validated response')
   expect(chip.el.querySelector('iframe, figure')).toBeNull()
   chip.el.focus(); expect(document.activeElement).toBe(chip.el)
   chip.el.click(); expect(open).toHaveBeenCalledOnce()
