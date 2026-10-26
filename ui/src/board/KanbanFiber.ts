@@ -87,8 +87,8 @@ export interface Fiber {
    * daemon). */
   shuttleHost?: string;
   parentId?: string | null; // parent fiber id (derived from slug path); null for top-level
-  /** Canonical absolute path to a sibling `report.html`, set from a feed row's
-   * `report_path` when the owning daemon resolved it. */
+  /** Canonical absolute path to the artifact or legacy report sibling, set
+   * from a feed row's `report_path` when the owning daemon resolved it. */
   reportPath?: string;
   /** Path relative to the owning `.felt/` wire root, carried on a feed row so
    * owner-routed mutations can echo it back. */

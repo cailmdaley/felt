@@ -15,15 +15,15 @@ export class ReportChip {
     preview.className = 'ws-report-preview'; preview.inert = true
     this.thumbnail = new Thumbnail({
       key: doc.key, shuttleBase: base, fallback: 'Report', captioned: true,
-      file: { fullPath: doc.path, owner: doc.owner, basename: 'report.html' },
+      file: { fullPath: doc.path, owner: doc.owner, basename: doc.name },
       priority: () => 1, distance: () => 0,
     })
     preview.append(this.thumbnail.el)
     this.el.append(preview)
     const label = (): void => {
-      const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Report'
+      const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Artifact'
       this.el.title = title
-      this.el.setAttribute('aria-label', `Read report: ${title}`)
+      this.el.setAttribute('aria-label', `Read artifact: ${title}`)
     }
     label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
   }

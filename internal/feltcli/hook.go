@@ -512,7 +512,7 @@ func runPostToolHook(stdin io.Reader) error {
 // fiberFromEditedPath maps an edited file path to the felt store root and the
 // fiber id that owns it, or ok=false when the path is not inside a fiber.
 // Accepts both the fiber's own `<slug>.md` and any companion file in a fiber
-// directory (report.html, plots) — editing either is work on the fiber. The
+// directory (artifact.html, report.html, plots) — editing any is work on the fiber. The
 // store boundary is the nearest enclosing `.felt/`; the owning fiber is
 // confirmed by the presence of its `<slug>.md`.
 func fiberFromEditedPath(absPath string) (root, id string, ok bool) {

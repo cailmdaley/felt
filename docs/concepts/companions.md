@@ -7,7 +7,7 @@ describes it.
 ```
 .felt/bao-analysis/mock-validation/
 ├── mock-validation.md
-├── report.html
+├── artifact.html
 ├── residuals.png
 ├── chains.pdf
 └── interview.m4a
@@ -52,12 +52,15 @@ A `:title:` option supplies the document's label.
     directive as ordinary body text. A plain markdown viewer or an Obsidian
     vault shows it as a literal block.
 
-## The `report.html` convention
+## The `artifact.html` convention
 
-felt names exactly one companion: `report.html`.
+felt recognizes `artifact.html` as a fiber's companion page, with `report.html`
+as a compatibility name for existing fibers. If both files exist, readers
+select `artifact.html`.
 
-Put what a human *reads* — findings, figures, analysis prose — in a sibling
-`report.html` when it outgrows the outcome line. felt detects the file during
+Use `artifact.html` as the living, visual index to a fiber's sub-fibers, sent
+files, and findings. It can combine figures, analysis prose, and links when
+that helps a reader catch up. felt detects the file during
 its directory walk and surfaces the absolute path as `report_path` in JSON
 output:
 
@@ -66,31 +69,32 @@ felt show mock-validation -j | jq -r .report_path
 ```
 
 felt implies nothing further. It does not open the file, render it, or require
-it. Most fibers need no report; work whose story is commits plus an outcome
-line does fine without one.
+it. Most fibers need no companion page.
 
-To make the report the first document selected when the channel opens, declare
+To make the artifact the first document selected when the channel opens, declare
 it at the top of the body:
 
 ```markdown
-:::{embed} report.html
+:::{embed} artifact.html
 :::
 
 The jackknife covariance is the default. …
 ```
 
-HTML beats markdown here: sections, tables, inlined plots, and collapsible
-depth in one self-contained file. Keep it self-contained — base64 the images —
-so the report renders wherever the fiber is opened, including on a different
-machine.
+HTML supports sections, tables, inlined plots, and collapsible depth in one
+self-contained file. Keep it self-contained — base64 the images — so the page
+renders wherever the fiber is opened, including on a different machine.
 
-shuttle workers follow a shape for these reports — current state, standing
-findings, open questions, pointers to depth — rewritten whole each session.
-See [Optional: report.html](../shuttle/constitutions.md#optional-reporthtml).
+Shuttle workers rewrite the artifact as the work changes. Its findings can use
+the concise report register: group by meaning, rewrite instead of appending,
+and inline every image. See [Optional: artifact.html](../shuttle/constitutions.md#optional-artifacthtml).
+
+Existing `report.html` files and explicit `:::{embed} report.html`
+declarations continue to work. New companion pages use `artifact.html`.
 
 ## References between pages
 
-A report can refer to a file already in its constitution's pages, whether the file was embedded or sent.
+An artifact can refer to a file already in its constitution's pages, whether the file was embedded or sent.
 In HTML, use a relative link such as `<a href="./take.mp3">Listen to the take</a>` or name the file in `<code>take.mp3</code>`.
 In markdown, use `[Listen to the take](./take.mp3)` or a code span such as `take.mp3`.
 Plain text panes also recognize filenames in backticks.
@@ -101,7 +105,7 @@ A bare filename in code, or in a link's text, must be unique across the constitu
 Ambiguous filenames stay unlinked, and external URLs keep their own navigation.
 
 Audio references also have an inline ▸ button.
-It plays the channel's audio-page element without leaving the report, changes to ❙❙ while playing, and shows progress as a hairline.
+It plays the channel's audio-page element without leaving the artifact, changes to ❙❙ while playing, and shows progress as a hairline.
 Press it again to pause.
 Only one recording plays at a time; changing pages or leaving the reader pauses inline playback.
 
@@ -114,8 +118,8 @@ A shuttle worker can also push a file at you directly, with
 receipt ribbon and folios; the reader groups repeated sends under each
 document's Receipts menu. See [the Board guide](../shuttle/board.md#board-what-the-work-produced).
 
-The two channels overlap — the file a worker sends is very often its own
-`report.html`, a companion. What differs is durability.
+The two channels overlap — the file a worker sends can also be the fiber's
+`artifact.html` companion. What differs is durability.
 
 | | Companion | Send |
 |---|---|---|

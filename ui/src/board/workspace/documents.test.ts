@@ -82,6 +82,21 @@ describe('buildChannel', () => {
     expect(channel.documents[1].path).toBe('/store/project/task/task.md')
   })
 
+  it('prefers artifact.html over the legacy report.html companion', () => {
+    const channel = buildChannel({ ...base, body: 'plain', embeds: [
+      { path: '/store/project/task/report.html' },
+      { path: '/store/project/task/artifact.html' },
+    ] })
+    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/artifact.html')
+  })
+
+  it('selects artifact.html when report.html is explicitly embedded and artifact is not', () => {
+    const channel = buildChannel({ ...base, body: 'plain', embeds: [
+      { path: '/store/project/task/report.html' },
+    ], sent: [{ path: '/store/project/task/artifact.html', time: 100 }] })
+    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/artifact.html')
+  })
+
   it('ends a run in the chat when the fiber has a conversation, files to its left, and opens on it', () => {
     const channel = buildChannel({ ...base, isConstitution: true, conversation: true })
     expect(channel.documents.map(document => document.key)).toEqual([

@@ -1,13 +1,13 @@
 /* Pigment & Parchment — the felt documentation theme.
  *
- * felt has three surfaces a human looks at: a fiber's report.html, the
+ * felt has three surfaces a human looks at: a fiber's artifact.html, the
  * shuttle board, and these docs. The first two already agree; this file is
  * how the third joins them, so the docs read as the same product rather
  * than as a Material site that happens to describe one.
  *
  * The palette is not invented here. It is lifted verbatim from
- * `claude-plugin/skills/shuttle/assets/report-template.html:50-64` (the
- * :root block every report carries), and the board's pigment semantics come
+ * `claude-plugin/skills/shuttle/assets/artifact-template.html:50-64` (the
+ * :root block every artifact carries), and the board's pigment semantics come
  * from `ui/src/board/KanbanModal.css:14-66`, which names one meaning per
  * colour:
  *

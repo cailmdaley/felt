@@ -57,6 +57,41 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
     end
   end
 
+  describe "companion resolution" do
+    test "prefers artifact.html while retaining the report_path wire field" do
+      dir = Path.join(System.tmp_dir!(), "felt-companion-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      File.write!(Path.join(dir, "task.md"), "---\nname: Task\n---\n")
+      File.write!(Path.join(dir, "report.html"), "legacy")
+      File.write!(Path.join(dir, "artifact.html"), "current")
+
+      assert [%{report_path: path}] = FiberDocuments.entries_for_fiber("/tmp/store", %{
+               "id" => "task",
+               "path" => Path.join(dir, "task.md"),
+               "report_path" => Path.join(dir, "artifact.html")
+             })
+
+      assert path == Path.join(dir, "artifact.html")
+    end
+
+    test "falls back to an existing report.html companion" do
+      dir = Path.join(System.tmp_dir!(), "felt-companion-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      File.write!(Path.join(dir, "task.md"), "---\nname: Task\n---\n")
+      File.write!(Path.join(dir, "report.html"), "legacy")
+
+      assert [%{report_path: path}] = FiberDocuments.entries_for_fiber("/tmp/store", %{
+               "id" => "task",
+               "path" => Path.join(dir, "task.md"),
+               "report_path" => Path.join(dir, "report.html")
+             })
+
+      assert path == Path.join(dir, "report.html")
+    end
+  end
+
   describe "kanban_aux_admissible?/1" do
     test "claims a fiber carrying a due date" do
       assert FiberDocuments.kanban_aux_admissible?(%{"due" => "2026-11-30T00:00:00Z"})

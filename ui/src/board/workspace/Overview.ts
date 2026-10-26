@@ -655,7 +655,9 @@ export class Overview {
     folio.fresh.hidden = folio.latest <= Math.max(this.seen, this.visits.get(folio.uid) ?? 0)
     folio.el.classList.toggle('ws-overview-unseen', !folio.fresh.hidden)
     folio.el.classList.toggle('ws-overview-seen', folio.fresh.hidden)
-    const lead = folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html') ?? folio.receipts[0]
+    const lead = folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
+      ?? folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
+      ?? folio.receipts[0]
     const key = `folio:${folio.uid}:${lead?.key ?? 'prose'}`
     if (folio.thumb?.key !== key) {
       if (folio.thumb) this.removeThumbnail(folio.thumb)

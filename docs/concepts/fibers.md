@@ -97,7 +97,7 @@ A store lives in a `.felt/` directory at a project root. It follows the shape
 `.felt/<path>/<slug>/<slug>.md`.
 
 Each fiber owns a directory for a reason. Companion files — plots, PDFs, a
-`report.html` — live beside the markdown. See
+`artifact.html` — live beside the markdown. See
 [Companion files](companions.md).
 
 ```
@@ -110,7 +110,7 @@ Each fiber owns a directory for a reason. Companion files — plots, PDFs, a
     │   └── damping-prior.md
     └── mock-validation/
         ├── mock-validation.md
-        └── report.html             ← companion file
+        └── artifact.html             ← companion file
 ```
 
 ### The entry-point fiber

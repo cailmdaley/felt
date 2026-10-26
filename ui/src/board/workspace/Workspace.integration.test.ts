@@ -153,7 +153,7 @@ it('discovers a report only after it exists, including creation on a later refre
   let exists = false
   const original = vi.mocked(fetch).getMockImplementation()!
   vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/file-info?')
-    ? new Response(JSON.stringify({ exists })) : original(input, init))
+    ? new Response(JSON.stringify({ exists: !String(input).includes('artifact.html') && exists })) : original(input, init))
   workspace.open(cards[1], 'Desk'); await flush()
   const key = docKey('host-b', '/notes/beta/report.html', 'host-b')
   expect(workspace.reader.host.get(key)).toBeUndefined()

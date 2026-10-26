@@ -73,16 +73,18 @@ without opening anything.
 When the work is blocked, lead the outcome with `Blocked: …` so the card reads
 as "answer me," not "review me."
 
-### Optional: `report.html`
+### Optional: `artifact.html`
 
-If the product is something a human *reads* — findings, figures, comparisons —
-say so in the constitution. The worker then rewrites a `report.html` companion
-file in the fiber directory each session, and embeds it in the body:
+Use `artifact.html` as the fiber's living, visual index to sub-fibers, sent
+files, and findings. The worker rewrites it as the work changes and can embed
+it in the body:
 
 ```markdown
-:::{embed} report.html
+:::{embed} artifact.html
 :::
 ```
+
+Readers also accept existing `report.html` companions and explicit embeds.
 
 Code-shaped work whose story is commits plus an outcome line needs none.
 

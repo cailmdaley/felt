@@ -651,7 +651,8 @@ export class Workspace {
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     if (state.questionLanding) {
       state.questionLanding = false
-      const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
+      const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'artifact.html')
+        ?? state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
       state.selected = this.landing(state.channel) ?? report?.key
     }
     this.show(state, loadedBefore)
@@ -673,7 +674,9 @@ export class Workspace {
   /** The report the Board's receipt feed already names for this channel, before the channel's own reads return. */
   private knownReport(state: ChannelState): DocKey | undefined {
     const card = state.card
-    const report = this.overview.unfiledReceipts(state.channel.uid).find(file => (file.host ?? card.originId) === card.originId && file.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
+    const receipts = this.overview.unfiledReceipts(state.channel.uid).filter(file => (file.host ?? card.originId) === card.originId)
+    const report = receipts.find(file => file.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
+      ?? receipts.find(file => file.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
     return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
   }
   /** The page on screen: the selection when the channel lists it, else the chat, else the fiber's own page. */
@@ -847,12 +850,18 @@ export class Workspace {
       // The body (or its failure) shows as soon as it lands; the run's order waits for the receipts.
       if (!wasLoaded && this.current === state && this.isActive && !this.disposed) this.show(state, false)
       await receiptRead
+      const artifactPath = state.card.fiberDir && `${state.card.fiberDir}/artifact.html`
       if (this.disposed) return
       const reportPath = state.card.fiberDir && `${state.card.fiberDir}/report.html`
-      if (reportPath && !state.channel.documents.some(d => d.path === reportPath)) {
-        void head(fileBytesUrl(this.opts.shuttleBase, reportPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true }).then(report => {
-          if (!report?.exists || this.disposed || state.links.some(link => link.path === reportPath)) return
-          state.links.push({ path: reportPath }); this.rebuild(state)
+      const companionPath = artifactPath ?? reportPath
+      if (companionPath && !state.channel.documents.some(d => d.path === companionPath)) {
+        void head(fileBytesUrl(this.opts.shuttleBase, companionPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true }).then(async artifact => {
+          const legacy = !artifact?.exists && reportPath
+            ? await head(fileBytesUrl(this.opts.shuttleBase, reportPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true })
+            : null
+          const path = artifact?.exists ? companionPath : legacy?.exists ? reportPath : undefined
+          if (!path || this.disposed || state.links.some(link => link.path === path)) return
+          state.links.push({ path }); this.rebuild(state)
           if (this.current === state && this.isActive) this.show(state, false)
         })
       }

@@ -21,7 +21,7 @@ defmodule Shuttle.FiberDocuments do
         }
 
   # The metadata fields the kanban board needs from each Shuttle fiber.
-  # `report_path` is felt's native "does a sibling report.html exist" signal —
+  # `report_path` is felt's native companion path signal —
   # carried on the list JSON so the owner feed never stats the filesystem (the
   # Lustre-scale win). The poller's candidate projection unions this set (see
   # `kanban_fields/0`) so cache entries build directly from candidate rows.
@@ -480,9 +480,10 @@ defmodule Shuttle.FiberDocuments do
       {:ok, dir} ->
         entry = Map.put(entry, :dir, dir)
 
-        if report_present?(fiber, dir, report_mode),
-          do: [Map.put(entry, :report_path, Path.join(dir, "report.html"))],
-          else: [entry]
+        case companion_name(fiber, dir, report_mode) do
+          nil -> [entry]
+          name -> [Map.put(entry, :report_path, Path.join(dir, name))]
+        end
 
       :error ->
         [entry]
@@ -498,7 +499,7 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # Whether the fiber has a sibling report.html. Two sources:
+  # Resolve the fiber's companion. artifact.html takes precedence over report.html.
   #
   #   * `:field` — the felt-list path. felt's native `report_path` field is the
   #     authoritative signal: a non-empty string means a report exists; ABSENT
@@ -511,17 +512,17 @@ defmodule Shuttle.FiberDocuments do
   #   * `:stat` — the single-fiber `felt show` path, which does not yet carry the
   #     native field, so we fall back to a `File.exists?` on the sibling. One
   #     stat for one fiber is fine; the list path must never take this branch.
-  defp report_present?(fiber, _dir, :field) do
+  defp companion_name(fiber, _dir, :field) do
     case Map.get(fiber, "report_path") do
-      value when is_binary(value) and value != "" -> true
-      _ -> false
+      value when is_binary(value) and value != "" -> Path.basename(value)
+      _ -> nil
     end
   end
 
-  defp report_present?(fiber, dir, :stat) do
+  defp companion_name(fiber, dir, :stat) do
     case Map.get(fiber, "report_path") do
-      value when is_binary(value) and value != "" -> true
-      _ -> File.exists?(Path.join(dir, "report.html"))
+      value when is_binary(value) and value != "" -> Path.basename(value)
+      _ -> Enum.find(["artifact.html", "report.html"], &File.exists?(Path.join(dir, &1)))
     end
   end
 

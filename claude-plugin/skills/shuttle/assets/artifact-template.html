@@ -1,17 +1,19 @@
 <!doctype html>
 <!--
-  Starter template for a fiber's report.html companion. This file is a
+  Starter template for a fiber's artifact.html companion. This file is a
   VISUAL PALETTE — typography, colors, classes. It is not a content
-  model to fill in. The rules that govern what goes in a report live in
-  references/report.md; read that first. The three that bite hardest:
+  model to fill in. The artifact is one living, visual index to the fiber's
+  sub-fibers, sent files and findings. Use maps, figures or a two-dimensional
+  arrangement when they help the reader catch up. The guidance lives in
+  references/artifact.md; read that first. The three that bite hardest:
 
-    1. REWRITE, DON'T APPEND. Each session restates the whole report
+    1. REWRITE, DON'T APPEND. Each session restates the whole artifact
        against current understanding. No session numbering, no dated
        update notes, no per-section time stamps — the one stamp below
        is the only time marker the document carries. Findings are
        grouped by MEANING, never by when they were found; superseded
        hypotheses and resolved false alarms are cut, not archived.
-    2. INLINE EVERY IMAGE as a base64 data URI. A report travels alone
+    2. INLINE EVERY IMAGE as a base64 data URI. An artifact travels alone
        — sent as a file, opened off disk, read from a checkout on
        another machine, and most fiber stores gitignore binaries — so
        <img src="plot.png"> renders broken exactly where it is read.
@@ -19,10 +21,10 @@
     3. OPEN QUESTIONS ARE WORKED FIRST. Each surviving one names what
        would resolve it.
 
-  report.html is the human's living surface. The constitution opens on chat
-  with this page inset at the upper right; clicking it opens the full report.
+  artifact.html is the human's living surface. The constitution opens on chat
+  with this page inset at the upper right; clicking it opens the full artifact.
   Relative file links open one level deeper; ‹ returns a level. An explicit
-  `:::{embed} report.html` also declares it in the constitution body.
+  `:::{embed} artifact.html` also declares it in the constitution body.
 
   This file must stand on its own CSS: the kanban mounts it in an
   iframe and injects no styles, so the :root block below is
@@ -47,7 +49,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Report — fiber-slug</title>
+<title>Artifact — fiber-slug</title>
 <!-- No external fetches: a report is one self-contained file. The font
      stacks below fall back to Georgia and a system mono where EB Garamond
      and IBM Plex Mono are not installed. -->
@@ -198,10 +200,10 @@
   <p><a href="./validation.html">Read the validation and its plots →</a></p>
 
   <figure class="report-embed">
-    <iframe src="./checks/report.html" title="Independent checks report"
+    <iframe src="./checks/artifact.html" title="Independent checks report"
       loading="lazy" sandbox="allow-scripts"></iframe>
     <figcaption>The checks pass in every patch.
-      <a href="./checks/report.html">Read the full checks report →</a>
+      <a href="./checks/artifact.html">Read the full checks report →</a>
     </figcaption>
   </figure>
   -->

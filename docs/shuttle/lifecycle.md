@@ -59,7 +59,7 @@ The card lands in Awaiting review. A human accepts it or resumes it.
 Substantive work needs independent fresh-eyes review before the session that
 produced it closes — a subagent reviewer in-session, or leave the fiber `active`
 and let the next dispatch review it cold. Edits to the fiber's own surfaces
-(spec, `## Status`, `outcome`, `report.html`) count as handoff, not work
+(spec, `## Status`, `outcome`, `artifact.html`) count as handoff, not work
 product, and never block a close.
 
 **2. Blocked on something only a human can supply?** Run

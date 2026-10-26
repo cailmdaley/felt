@@ -401,8 +401,11 @@ func TestLsJSONReportPath(t *testing.T) {
 			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".felt", "project", "reported", "report.html"), []byte("<html></html>"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".felt", "project", "reported", "report.html"), []byte("<html>old</html>"), 0644); err != nil {
 		t.Fatalf("writing report.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".felt", "project", "reported", "artifact.html"), []byte("<html>new</html>"), 0644); err != nil {
+		t.Fatalf("writing artifact.html: %v", err)
 	}
 
 	out, err := runCommand(t, dir, "ls", "-j", "--json-field", "id,report_path")
@@ -424,7 +427,7 @@ func TestLsJSONReportPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing project/reported in %v", rows)
 	}
-	wantSuffix := filepath.Join("project", "reported", "report.html")
+	wantSuffix := filepath.Join("project", "reported", "artifact.html")
 	gotPath, _ := reported["report_path"].(string)
 	if !strings.HasSuffix(gotPath, wantSuffix) {
 		t.Fatalf("report_path = %q, want suffix %q", gotPath, wantSuffix)

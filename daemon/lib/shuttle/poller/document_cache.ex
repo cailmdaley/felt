@@ -45,7 +45,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
         if reusable_entry?(cached, modified_at) do
           # mtime-reuse hit: the fiber body is unchanged, but adding/removing a
-          # sibling report.html does NOT bump `modified_at`, so reconcile the
+          # sibling artifact.html does NOT bump `modified_at`, so reconcile the
           # entry's `:report_path` against the candidate row's native field
           # before reusing (put when the field is present, drop when absent).
           reused = reconcile_report_path(cached, candidate)
@@ -89,16 +89,17 @@ defmodule Shuttle.Poller.DocumentCache do
   # Reconcile a reused entry's `:report_path` against the candidate row's native
   # `report_path` field — the only report signal that changes without a
   # `modified_at` bump. Mirrors `FiberDocuments.entry_for/3` (:field): a present
-  # non-empty field means the sibling report exists (emit `dir/report.html`);
+  # non-empty field names the actual sibling companion;
   # absence means it does not (drop any stale `:report_path`). Keyed off the
   # entry's already-computed `:dir`, so it stats nothing.
   defp reconcile_report_path(%{entry: entry} = cached, candidate) do
-    reported? = match?(v when is_binary(v) and v != "", Map.get(candidate, "report_path"))
+    path = Map.get(candidate, "report_path")
+    reported? = match?(v when is_binary(v) and v != "", path)
     dir = Map.get(entry, :dir)
 
     cond do
       reported? and is_binary(dir) ->
-        %{cached | entry: Map.put(entry, :report_path, Path.join(dir, "report.html"))}
+        %{cached | entry: Map.put(entry, :report_path, Path.join(dir, Path.basename(path)))}
 
       not reported? and Map.has_key?(entry, :report_path) ->
         %{cached | entry: Map.delete(entry, :report_path)}

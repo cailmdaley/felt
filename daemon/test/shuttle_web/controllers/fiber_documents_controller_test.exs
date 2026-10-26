@@ -777,7 +777,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     """)
 
     File.write!(Path.join([store, ".felt", "tests", "single", "report.html"]), "<p>report</p>\n")
-    report = real_report_path(store, "tests/single")
+    File.write!(Path.join([store, ".felt", "tests", "single", "artifact.html"]), "<p>artifact</p>\n")
+    report = Path.join(real_fiber_dir(store, "tests/single"), "artifact.html")
 
     conn = get(api_conn(), "/api/v1/fibers/tests/single")
 

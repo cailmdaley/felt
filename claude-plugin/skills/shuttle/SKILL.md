@@ -31,7 +31,7 @@ The null test in [[bmodes/paper]] needs a covariance we trust at large scales. �
 ## Desired State
 
 - `pipeline/covariance.py` produces the jackknife covariance by default.
-- It agrees with the 400-mock covariance to 5% below ℓ=300, shown in the report.
+- It agrees with the 400-mock covariance to 5% below ℓ=300, shown in the artifact.
 
 ## Status
 
@@ -44,13 +44,13 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **`## Desired State`** — the contract: checkable done-conditions and what to leave alone, never steps. Workers choose the path.
 - **`## Status`** — the handoff to the next worker: what landed, what's stuck, what to know. Rewritten, never appended.
 - **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` in the shared store, holds the office's playbooks, human gates and the people it serves.
-- **`report.html`** — optional, beside the fiber: the page the human reads to understand the work, rewritten whole each session ([references/report.md](references/report.md)).
+- **`artifact.html`** — optional, beside the fiber: one living, visual index to its sub-fibers, sent files and findings, rewritten whole each session ([references/artifact.md](references/artifact.md)). Readers prefer it and fall back to `report.html`.
 
 ## Working as a worker
 
-1. **Survey.** Your launch prompt names your fiber and its `Felt store:` (`<store>` below). `felt -C <store> sync`, then `felt -C <store> show <id>` — fresh, since it may have changed since launch. Read `## Status`, the report, and the role's charter. A launch message is the current directive. If the previous session ended without a handoff it was cut off, so Status may lag: check its transcript and the working tree. A standing run (`Run:` in the launch prompt) reads [references/standing-roles.md](references/standing-roles.md) first.
+1. **Survey.** Your launch prompt names your fiber and its `Felt store:` (`<store>` below). `felt -C <store> sync`, then `felt -C <store> show <id>` — fresh, since it may have changed since launch. Read `## Status`, the artifact, and the role's charter. A launch message is the current directive. If the previous session ended without a handoff it was cut off, so Status may lag: check its transcript and the working tree. A standing run (`Run:` in the launch prompt) reads [references/standing-roles.md](references/standing-roles.md) first.
 2. **Take up the role.** No role, or the wrong one: find the fitting charter (`shuttle roles`) and assign it (`shuttle role <id> <role>`; `--new "<Office name>"` creates a missing charter, which you then write) ([references/roles.md](references/roles.md)). Recipes and lessons that would hold on any task in the office go in the charter, not in Status.
-3. **Work.** Decide rather than ask; when a choice is load-bearing, make it and lay out the alternatives in the report.
+3. **Work.** Decide rather than ask; when a choice is load-bearing, make it and lay out the alternatives in the artifact.
 4. **Keep the surfaces current.** Refresh `## Status` and the outcome at each transition, so another session could take over at any moment. Commit as you go, and see background jobs through before you leave.
 
 ## Leaving
@@ -58,7 +58,7 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `rest` find your own fiber when you omit the id (after a `migrate`, name it if they can't) and end your session, so make the verb your last command.
 
 - **`shuttle close`** — the Desired State is met. The card goes to Awaiting review. Have a fresh-context subagent review substantive changes first.
-- **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `report.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
+- **`shuttle -C <store> ask <id> "<question>"`** — a human decision would unlock work. Rewrite `artifact.html` first, leading with the background the human needs and the options; then keep working on what isn't blocked. `--clear` withdraws it.
 - **`shuttle handoff`** — the next slice needs a fresh worker: context is running low, at a sub-task boundary. `shuttle set-agent <id> <agent>` first to change who comes next. A standing constitution always hands off.
 - **`shuttle rest`** — the human drove this session and nothing needs review; the card goes back to Resting.
 - **Nothing** — an ordinary conversational pause. A worker idle with nothing of its own running shows as the human's turn; one waiting on its background jobs or subagents stays Working.
@@ -98,7 +98,7 @@ Messaging a fiber reaches its current worker, or queues for the next one. Anothe
 | Writing a constitution, choosing an agent, drafts vs dispatch | [references/authoring.md](references/authoring.md) |
 | Roles, seats, keeping a charter | [references/roles.md](references/roles.md) |
 | Dispatch rules, board columns, all verbs, claiming a fiber, remote hosts, messaging detail, transcript search | [references/operating.md](references/operating.md) |
-| Writing `report.html` | [references/report.md](references/report.md) |
+| Writing `artifact.html` | [references/artifact.md](references/artifact.md) |
 | A standing constitution's runs | [references/standing-roles.md](references/standing-roles.md) |
 | Capturing an idea into a fiber | [references/capture.md](references/capture.md) |
 | A meeting, a transcript, or a predecessor's session | [references/meeting.md](references/meeting.md) |

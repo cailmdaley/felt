@@ -70,7 +70,7 @@ export interface FileViewerOptions {
 /**
  * Render a deliverable into a fresh element by extension — the shared dispatch
  * a reader mounts for each open file. The iframe variant carries a loading veil
- * (a remote `report.html` can be multi-MB over a slow tunnel; a blank frame
+ * (a remote `artifact.html` can be multi-MB over a slow tunnel; a blank frame
  * reads as broken) that lifts on `load` and flips to an error note on `error`.
  *
  * `onFrameLoad` fires after each HTML document update — the reader uses it

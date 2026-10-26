@@ -26,6 +26,7 @@ func TestWalkStoreMatchesSerialReference(t *testing.T) {
 	writeWalkFile(t, store.root, "entry.md")
 	writeWalkFile(t, store.root, "alpha/notes.md")
 	writeWalkFile(t, store.root, "alpha/report.html")
+	writeWalkFile(t, store.root, "alpha/artifact.html")
 	writeWalkFile(t, store.root, "alpha/attachment.md")
 	writeWalkFile(t, store.root, ".hidden/hidden.md")
 	for i := range 48 {
@@ -176,13 +177,7 @@ func serialReferenceWalk(s *Storage) ([]fiberFile, []looseFile, error) {
 		if err != nil {
 			return err
 		}
-		hasReportHTML := false
-		for _, e := range entries {
-			if !e.IsDir() && e.Name() == "report.html" {
-				hasReportHTML = true
-				break
-			}
-		}
+		reportName := companionName(entries)
 		for _, d := range entries {
 			fullPath := filepath.Join(dir, d.Name())
 			if d.Type()&os.ModeSymlink != 0 {
@@ -230,8 +225,8 @@ func serialReferenceWalk(s *Storage) ([]fiberFile, []looseFile, error) {
 				entryPoint = false
 			}
 			var reportPath string
-			if hasReportHTML {
-				reportPath = filepath.Join(dir, "report.html")
+			if reportName != "" {
+				reportPath = filepath.Join(dir, reportName)
 			}
 			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint, reportPath: reportPath})
 		}

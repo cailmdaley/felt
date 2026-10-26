@@ -21,7 +21,7 @@ Workers re-read the constitution at every dispatch, so keep refining it between 
 
 **`## Desired State` is the one fixed heading**, and the contract: invariants, the quality bar, and a fence around what to aim for and what to leave alone. Phrase done-conditions so they can be checked wherever the work allows — a grep that returns nothing, a test command, "a reviewer can follow the narrative cold" — since workers and their verifiers measure against them. Give verification its own `## Evidence` section only when it needs room (a harness, a measurement procedure).
 
-**Every later section is earned, and named for what it holds** — "Touch points", "Considered alternatives". If the honest name would be "Context" or "Notes", the contents belong elsewhere: link background where it's used, and leave chronology to git. If the work should produce something a human reads — findings, figures, comparisons — say so, and workers will keep a `report.html`.
+**Every later section is earned, and named for what it holds** — "Touch points", "Considered alternatives". If the honest name would be "Context" or "Notes", the contents belong elsewhere: link background where it's used, and leave chronology to git. If the work should produce something a human reads — findings, figures, comparisons — say so, and workers will keep an `artifact.html`.
 
 ## Principles
 

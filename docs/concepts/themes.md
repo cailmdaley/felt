@@ -21,7 +21,7 @@ Names are case-insensitive; spaces can stand in for hyphens.
 An unknown name uses Portolan and warns in the browser console.
 The reference CSS files live in `ui/src/board/workspace/themes/`.
 
-A sibling `theme.css`, beside the fiber's Markdown and `report.html`, layers on top of that bundled base.
+A sibling `theme.css`, beside the fiber's Markdown and `artifact.html`, layers on top of that bundled base.
 You can supply either declaration, or both.
 Shuttle fetches the stylesheet from the fiber's owning daemon through the same owner-routed file API as documents.
 It caches by ETag and checks for edits on the workspace's ordinary refresh cadence (at most once every 15 seconds while the channel is drawn).

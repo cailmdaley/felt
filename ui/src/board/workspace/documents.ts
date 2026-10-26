@@ -157,7 +157,7 @@ export function isDeclared(document: WorkspaceDocument): boolean {
 }
 
 function isReport(document: WorkspaceDocument): boolean {
-  return document.name.toLowerCase() === 'report.html'
+  return ['artifact.html', 'report.html'].includes(document.name.toLowerCase())
 }
 
 /** True when the document runs left of the fiber page: the body declares it. */
@@ -329,8 +329,9 @@ export function documentLabelMetadata(doc: WorkspaceDocument, label: string, cha
 export function defaultSelection(channel: Channel): DocKey {
   const chat = chatDocument(channel)
   if (chat) return chat.key
-  const reports = channel.documents.filter((document) => document.name.toLowerCase() === 'report.html')
-  const report = reports.find((document) => document.provenance.some((item) => item.kind === 'embed'))
+  const reports = channel.documents.filter(isReport)
+  const report = reports.find((document) => document.name.toLowerCase() === 'artifact.html')
+    ?? reports.find((document) => document.provenance.some((item) => item.kind === 'embed'))
     ?? reports.find((document) => !isDeclared(document)) ?? reports[0]
   const prose = channel.documents.find((document) => document.kind === 'fiber')
   const first = report ?? prose ?? channel.documents[0]

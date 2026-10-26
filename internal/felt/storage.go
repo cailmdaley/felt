@@ -1412,6 +1412,17 @@ type directoryEntriesCache struct {
 	readDir func(string) ([]os.DirEntry, error)
 }
 
+func companionName(entries []os.DirEntry) string {
+	for _, name := range []string{"artifact.html", "report.html"} {
+		for _, entry := range entries {
+			if !entry.IsDir() && entry.Name() == name {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
 // hasEntry shares each parent listing across concurrent ID resolutions.
 func (c *directoryEntriesCache) hasEntry(dir, name string) bool {
 	key := filepath.Clean(dir)
@@ -1474,8 +1485,15 @@ func (s *Storage) fiberFileWithReport(id, filePath string, entryPoint bool, cach
 	if err != nil {
 		return fiberFile{}, false
 	}
-	reportPath := filepath.Join(reportDir, "report.html")
-	if _, err := os.Lstat(reportPath); err != nil || !cache.hasEntry(reportDir, "report.html") {
+	reportName := ""
+	for _, name := range []string{"artifact.html", "report.html"} {
+		if _, err := os.Lstat(filepath.Join(reportDir, name)); err == nil && cache.hasEntry(reportDir, name) {
+			reportName = name
+			break
+		}
+	}
+	reportPath := filepath.Join(reportDir, reportName)
+	if reportName == "" {
 		reportPath = ""
 	}
 	return fiberFile{id: id, path: filePath, entryPoint: entryPoint, reportPath: reportPath}, true
@@ -1942,13 +1960,7 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 			return directory.err
 		}
 		entries := directory.entries
-		hasReportHTML := false
-		for _, e := range entries {
-			if !e.IsDir() && e.Name() == "report.html" {
-				hasReportHTML = true
-				break
-			}
-		}
+		reportName := companionName(entries)
 		for _, d := range entries {
 			fullPath := filepath.Join(dir, d.Name())
 			// Symlinked subdirectory: capture its logical position relative to
@@ -2010,8 +2022,8 @@ func (s *Storage) walkStoreOnce() ([]fiberFile, []looseFile, error) {
 				entryPoint = false
 			}
 			var reportPath string
-			if hasReportHTML {
-				reportPath = filepath.Join(dir, "report.html")
+			if reportName != "" {
+				reportPath = filepath.Join(dir, reportName)
 			}
 			files = append(files, fiberFile{id: id, path: fullPath, entryPoint: entryPoint, reportPath: reportPath})
 		}

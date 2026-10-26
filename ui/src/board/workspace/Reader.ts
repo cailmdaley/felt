@@ -511,7 +511,9 @@ export class Reader {
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     const chat = chatDocument(ch)
     const prose = proseDocument(ch)
-    const report = ch.documents.find(d => d.owner === ch.owner && d.path === `${prose?.path.slice(0, prose.path.lastIndexOf('/'))}/report.html`)
+    const dir = prose?.path.slice(0, prose.path.lastIndexOf('/'))
+    const report = ch.documents.find(d => d.owner === ch.owner && d.path === `${dir}/artifact.html`)
+      ?? ch.documents.find(d => d.owner === ch.owner && d.path === `${dir}/report.html`)
     const chatFrame = chat && this.host.get(chat.key)
     const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
     if (this.reportChip?.key !== chipKey) {
