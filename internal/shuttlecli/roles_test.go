@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -69,6 +70,9 @@ func TestShuttleRoleNewSharedCharter(t *testing.T) {
 		t.Fatalf("%s: %v", out, err)
 	}
 	charter := mustRead(t, loom, "roles/editor")
+	if !slices.Contains(charter.Tags, "role") {
+		t.Fatalf("charter lacks the role tag that `felt find -t role` lists: %v", charter.Tags)
+	}
 	if charter.Name != "Office editor" || !strings.Contains(charter.Body, before.Name) || !strings.Contains(charter.Body, "holders grow this charter") {
 		t.Fatalf("charter: %+v", charter)
 	}

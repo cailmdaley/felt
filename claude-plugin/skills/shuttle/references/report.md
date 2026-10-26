@@ -4,7 +4,7 @@ The report is the surface the human lands on to understand the work.
 The constitution opens on chat with a thumbnail and title for `report.html` in its header; clicking this report chip opens the report full-size.
 Keep that one living surface current, and link to depth rather than making the human choose among sent files. It is a **current-state document, rewritten each session** — the same rule as `outcome:` and `## Status`, extended to the surface that carries figures.
 
-Not every constitution wants one (see SKILL.md, "The fiber's surfaces"). When one exists, these rules bind.
+Not every constitution wants one: write it when the work produces something a human reads — findings, figures, comparisons. When one exists, these rules bind.
 
 ## Who reads it
 

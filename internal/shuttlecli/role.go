@@ -65,7 +65,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 						return fmt.Errorf("role %q has no charter at roles/%s", args[1], args[1])
 					}
 					charter := &felt.Felt{
-						ID: "roles/" + args[1], Name: newName,
+						ID: "roles/" + args[1], Name: newName, Tags: []string{"role"},
 						Body: fmt.Sprintf("The %s office serves the constitution %q. Its holders grow this charter with the office's remit, playbooks, and human gates.\n", newName, f.Name),
 					}
 					if err := createRoleCharter(roleStorage(st), charter); err != nil {

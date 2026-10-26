@@ -13,17 +13,13 @@ shuttle:
 
 After syncing, read it with `felt -C <store> show roles/<role>`. The role says what kind of work this is, not who you are: `shuttle.agent` decides which model runs, and the session ledger records who ran each session.
 
-**If there is no role, or the role doesn't fit the work**, find the charter that does. `felt find -t role` lists the offices across the whole store, and `roles/roles.md` maps kinds of work to them. Read the charters that look close, and work under the one whose remit matches what this task is really asking for. A quick task that closes in one sitting can borrow a charter's practice without being assigned to it. A constitution that hands off, recurs or is resumed is persistent responsibility, and gets a role:
+**If there is no role, or the role doesn't fit the work**, find the charter that does. `shuttle roles` lists the offices, and `roles/roles.md`, where the store keeps one, maps kinds of work to them. Read the charters that look close, and work under the one whose remit matches what this task is really asking for. A quick task that closes in one sitting can borrow a charter's practice without being assigned to it. A constitution that hands off, recurs or is resumed is persistent responsibility, and gets a role:
 
 ```bash
 shuttle role <task> surveyor
 ```
 
-When none fits, create one before substantive work. A role is cheap: a charter that starts with two sentences and its gates grows as holders fold in what they learn. Create it with `-C` pointed at the shared store, since a bare `felt add roles/…` from a project view files it inside the project, and add its row to `roles/roles.md`:
-
-```bash
-felt -C <store> add roles/editor "Editor · skills and docs" -t role -o "<one-line remit>"   # then write the charter body
-```
+When none fits, create one before substantive work. A role is cheap: a charter that starts with two sentences and its gates grows as holders fold in what they learn. `shuttle role <task> <role> --new "<Office name>"` creates the charter in the shared store's `roles/` and assigns it; then replace its placeholder body with the remit and gates, and add its row to `roles/roles.md` when the store keeps that map.
 
 One symptom shows a missing role: a `## Status` that has grown a register, recipes, or lessons that would hold on any task in that office. That material is a charter that never got written. Move it there, and leave Status the handoff.
 

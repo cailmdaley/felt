@@ -46,7 +46,7 @@ Freed, Σ_nl runs to the prior edge in a third of the mocks ([[bao-analysis/mock
 - **your own fields** — any frontmatter a project needs survives every edit (`--set key=value`, or edit the file). An `inputs:` entry with `from: <fiber>` declares a data-flow edge (`felt show <id> --consumers`).
 - **stamps** — `id:` (a ULID that survives moves), `created-at`, `updated-at`, `closed-at` are felt's; leave them alone.
 
-A bare `.felt/<slug>.md` at a store's root is the project's entry point. A project's `.felt` may be a symlink into a larger shared store: `felt ls` and `tree` stay in the project's view, `felt find` searches the whole store, and any id works with `show` and `edit`.
+A bare `.felt/<slug>.md` at a store's root is the project's entry point. A project's `.felt` may be a symlink into a larger shared store: `felt ls` and `tree` stay in the project's view, `felt find` searches the whole store, and any id works with `show` and `edit`. Linking a project into a store has a data-loss trap: follow <https://cailmdaley.github.io/felt/concepts/cross-project/>.
 
 ## Commands
 
