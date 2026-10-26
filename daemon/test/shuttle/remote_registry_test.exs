@@ -518,7 +518,12 @@ defmodule Shuttle.RemoteRegistryTest do
 
       entry = RemoteRegistry.snapshot(:reg_supervised, "candide")
       assert entry.recovery.last_action == "remote daemon alive; waiting for route"
-      assert [{"ssh", args}] = MockRunner.calls()
+
+      {"ssh", args} =
+        Enum.find(MockRunner.calls(), fn {command, args} ->
+          command == "ssh" and Enum.any?(args, &String.contains?(&1, "ps -u"))
+        end)
+
       refute List.last(args) =~ "tmux"
       refute List.last(args) =~ "shuttle-launch"
 
@@ -614,6 +619,17 @@ defmodule Shuttle.RemoteRegistryTest do
       unknown = RemoteRegistry.snapshot(:reg_unknown, "candide")
       assert unknown.recovery.state == :unreachable
       assert unknown.recovery.last_action == "daemon liveness uncertain; refusing restart"
+
+      {"ssh", args} =
+        Enum.find(MockRunner.calls(), fn {command, args} ->
+          command == "ssh" and Enum.any?(args, &String.contains?(&1, "ps -u"))
+        end)
+
+      assert {"daemon=unknown\n", 0} =
+               System.cmd("/bin/sh", [
+                 "-c",
+                 "id() { echo test; }; ps() { return 1; }; " <> List.last(args)
+               ])
 
       refute Enum.any?(MockRunner.calls(), fn {command, args} ->
                command == "ssh" and Enum.any?(args, &String.contains?(&1, "shuttle-launch"))
