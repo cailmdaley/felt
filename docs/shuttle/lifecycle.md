@@ -37,10 +37,8 @@ From there the worker:
    `shuttle handoff <fiber>` to continue, `shuttle close <fiber>` to stop for
    review, or `shuttle rest <fiber>` to stop with nothing to review.
 
-To continue, app workers run `env -u TMUX shuttle -C <felt-store> handoff
-<fiber>`, then finish the turn; to stop, they run
-`shuttle -C <felt-store> close <fiber>` and finish the turn without a handoff
-call. The daemon releases ownership once
+App workers run the same verbs and then finish the turn; their native
+conversation id identifies the fiber, so no fiber or store argument is needed. The daemon releases ownership once
 that turn is idle. A normal final reply without a handoff or a close keeps the
 conversation available for the human. Stop interrupts an app turn and releases
 ownership; Resume uses that same conversation, while New session explicitly
