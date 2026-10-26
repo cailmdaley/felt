@@ -276,6 +276,14 @@ several more. Such a host opts out with `"build_ui": false` in its
 {"name": "hub-a", "port": 4001, "checkout": "/home/op/dev/felt", "build_ui": false}
 ```
 
+A remote can also set `"build_wrap": "srun -p serial --cpus-per-task=8 --mem=16G --time=00:45:00"`
+to run its build through a scheduler. The optional string is a trusted shell
+command prefix: deployment runs `<build_wrap> bash -lc '<build>'` inside the
+SSH login shell. Only the build (including its checkout directory and version
+environment) is wrapped, for both checkout and `--ref` deployments. Git pull,
+worktree preparation, harness refresh, and daemon cycling stay outside the
+wrapper. This composes with `build_ui: false` and `SKIP_UI=1`.
+
 `bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
 For a `shipped` host the helper rsyncs the deploy host's own freshly-built
 `ui/dist` into that checkout and then builds it with `make build SKIP_UI=1`. The

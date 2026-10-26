@@ -1050,13 +1050,17 @@ func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, buildUI := range []string{"0", "1"} {
-		t.Run("build_ui="+buildUI, func(t *testing.T) {
+	for _, variant := range []struct{ ui, wrap string }{{"0", ""}, {"1", ""}, {"0", "wrapper"}, {"1", "wrapper"}} {
+		buildUI, wrap := variant.ui, variant.wrap
+		t.Run("build_ui="+buildUI+"/wrap="+wrap, func(t *testing.T) {
 			dir := t.TempDir()
 			events := filepath.Join(dir, "events")
 			harness := `fleet_dir() { printf '%s' "$CHECKOUT"; }
 fleet_ssh() { printf remote; }
 fleet_flags() { :; }
+fleet_build_wrap() { printf '%s' "$BUILD_WRAP"; }
+wrapper() { printf 'wrap\n' >> "$EVENTS"; "$@"; }
+export -f wrapper
 builds_ui() { [ "$BUILD_UI" = 1 ]; }
 say() { :; }
 ok() { :; }
@@ -1076,7 +1080,7 @@ respawn_launcher_restart_cmd() { :; }
 verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
 ` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "remote_host_cycle") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
 			cmd := exec.Command("bash", "-c", harness)
-			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
+			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "BUILD_WRAP="+wrap, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("remote deploy: %v\n%s", err, out)
 			}
@@ -1087,6 +1091,9 @@ verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
 			want := "git pull --ff-only -q\nmake build\nverified\n"
 			if buildUI == "0" {
 				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nverified\n"
+			}
+			if wrap != "" {
+				want = strings.Replace(want, "make build", "wrap\nmake build", 1)
 			}
 			if string(got) != want {
 				t.Fatalf("remote events = %q; want %q", got, want)

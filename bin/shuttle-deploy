@@ -32,6 +32,8 @@
 # not a deploy target and is skipped. "local" is always in the fleet; a missing
 # fleet file means local only. Portable to macOS bash 3.2 (no assoc arrays).
 #
+# `"build_wrap": "srun -p serial --cpus-per-task=8"` prefixes only the build
+# with that command and bash -lc; pull, preparation, refresh and cycle run outside it.
 # `"build_ui": false` marks a host that must not build the board bundle. On a
 # cluster login node `npm ci` against a network home filesystem costs minutes
 # and `vite build` several more, for a bundle that is identical everywhere. Such
@@ -233,7 +235,7 @@ FLEET_FILE="${SHUTTLE_REMOTES_FILE:-$HOME/.config/shuttle/remotes.json}"
 AGENTS_FILE="${SHUTTLE_AGENTS_FILE:-$HOME/.config/shuttle/agents.json}"
 
 # The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags,
-# build_ui ("1"/"0"). jq if it is installed, python3 otherwise — the file is read
+# build_ui ("1"/"0"), build_wrap. jq if it is installed, python3 otherwise — the file is read
 # on the deploy host only, so this needs no remote-side dependency. Both accept
 # either document shape the Go and Elixir readers accept: {"remotes": [...]} or a
 # bare list, and both must agree field for field: only a literal `false` turns
@@ -247,7 +249,7 @@ read_fleet() {
            | select((.checkout // "") != "")
            | [.name, (.ssh // .name), .checkout, (.auth // "pubkey"),
               ((.ssh_flags // []) | join(" ")),
-              (if .build_ui == false then "0" else "1" end)]
+              (if .build_ui == false then "0" else "1" end), (.build_wrap // "")]
            | @tsv' "$FLEET_FILE"
   elif command -v python3 >/dev/null 2>&1; then
     python3 - "$FLEET_FILE" <<'PY'
@@ -259,7 +261,7 @@ for r in (doc if isinstance(doc, list) else doc.get("remotes") or []):
     print("\t".join([r.get("name", ""), r.get("ssh") or r.get("name", ""),
                      r["checkout"], r.get("auth") or "pubkey",
                      " ".join(r.get("ssh_flags") or []),
-                     "0" if r.get("build_ui") is False else "1"]))
+                     "0" if r.get("build_ui") is False else "1", r.get("build_wrap") or ""]))
 PY
   else
     echo "shuttle-deploy: need jq or python3 to read $FLEET_FILE" >&2
@@ -278,6 +280,7 @@ fleet_dir() { # host → checkout dir (empty = unknown host)
 fleet_ssh()   { fleet_row "$1" | awk -F'\t' '{print $2}'; }   # ssh destination
 fleet_flags() { fleet_row "$1" | awk -F'\t' '{print $5}'; }   # extra ssh flags
 fleet_auth()  { fleet_row "$1" | awk -F'\t' '{print $4}'; }   # pubkey | interactive
+fleet_build_wrap() { fleet_row "$1" | awk -F'\t' '{print $7}'; }
 builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
 
 # Hosts whose ssh needs an interactive human credential (push-2FA, short-lived
@@ -956,6 +959,11 @@ deploy_remote() {
     skip_ui=1
   fi
   build_cmd="$(build_checkout_cmd "$dir" "$skip_ui")"
+  local wrap
+  wrap="$(fleet_build_wrap "$host")"
+  if [ -n "$wrap" ]; then
+    build_cmd="$wrap bash -lc $(shell_quote "$build_cmd")"
+  fi
   if [ -z "$DEPLOY_REF" ]; then
     build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
   fi

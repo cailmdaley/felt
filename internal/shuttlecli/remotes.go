@@ -388,10 +388,11 @@ type remoteSpec struct {
 	// minutes. bin/shuttle-deploy builds such a host with `make build SKIP_UI=1`
 	// and rsyncs the deploy host's own ui/dist into its checkout instead. Absent
 	// means true, so only a host that opts out carries the key.
-	Checkout string   `json:"checkout,omitempty"`
-	Auth     string   `json:"auth,omitempty"`
-	SSHFlags []string `json:"ssh_flags,omitempty"`
-	BuildUI  *bool    `json:"build_ui,omitempty"`
+	Checkout  string   `json:"checkout,omitempty"`
+	Auth      string   `json:"auth,omitempty"`
+	SSHFlags  []string `json:"ssh_flags,omitempty"`
+	BuildUI   *bool    `json:"build_ui,omitempty"`
+	BuildWrap string   `json:"build_wrap,omitempty"`
 
 	// Source says where a resolved remote came from: sourceConfigured for
 	// this file, sourceDiscovered for a tailnet peer the daemon found. Set by

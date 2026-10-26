@@ -308,7 +308,7 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	env := testEnv(t)
 	path := writeRemotesIn(t, env, `{"version":1,"remotes":[
 	  {"name":"hub-a","port":4001,"checkout":"/srv/felt","auth":"interactive",
-	   "ssh_flags":["-o","ClearAllForwardings=yes"],"build_ui":false}]}`)
+	   "ssh_flags":["-o","ClearAllForwardings=yes"],"build_ui":false,"build_wrap":"srun -p serial"}]}`)
 
 	doc, err := newApp(env).loadRemotesFileRaw()
 	if err != nil {
@@ -321,7 +321,7 @@ func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"checkout"`, `"auth"`, `"ssh_flags"`, `"build_ui": false`} {
+	for _, want := range []string{`"checkout"`, `"auth"`, `"ssh_flags"`, `"build_ui": false`, `"build_wrap": "srun -p serial"`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("round trip dropped %s:\n%s", want, raw)
 		}
