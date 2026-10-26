@@ -370,63 +370,23 @@ func TestSessionLayoutNoteNamesBothShapes(t *testing.T) {
 	}
 }
 
-func TestSessionAttentionWarnsOnFlatTreeAndOpenQueue(t *testing.T) {
+// A crowded queue, a sprawling root and an open container are the librarian's
+// to tend; session context stays an orientation and raises no Attention.
+func TestSessionLeavesTendingToTheLibrarian(t *testing.T) {
 	t.Parallel()
-	now := mustParseTime(t, "2026-05-26T12:00:00Z")
-	var felts []*felt.Felt
-	for i := 0; i < sessionTopLevelLimit+1; i++ {
-		felts = append(felts, &felt.Felt{
-			ID:        fmt.Sprintf("item-%02d", i),
-			Name:      fmt.Sprintf("Item %02d", i),
-			Status:    felt.StatusOpen,
-			CreatedAt: now.Add(-24 * time.Hour),
-		})
-	}
-
-	attention := buildSessionAttention(felts, now, "")
-	for _, want := range []string{
-		"## Attention",
-		"Top-level sprawl: 21 root-level fibers (21 without children)",
-		"Proactively nest leaf fibers under root buckets",
-		"do not leave obvious cleanup for the user",
-		"Open queue is large: 21 open fibers",
-		"Open/active are todo states",
-		"Start with: item-00, item-01, item-02",
-	} {
-		if !strings.Contains(attention, want) {
-			t.Fatalf("attention missing %q:\n%s", want, attention)
+	dir, storage := newStore(t)
+	created := mustParseTime(t, "2025-01-01T09:00:00Z")
+	for i := 0; i < 25; i++ {
+		f := &felt.Felt{ID: fmt.Sprintf("item-%02d", i), Name: "Item", Status: felt.StatusOpen, CreatedAt: created}
+		if err := storage.Write(f); err != nil {
+			t.Fatalf("Write: %v", err)
 		}
 	}
-}
-
-func TestSessionAttentionWarnsOnTrackedContainers(t *testing.T) {
-	t.Parallel()
-	now := mustParseTime(t, "2026-05-26T12:00:00Z")
-	felts := []*felt.Felt{
-		{
-			ID:        "root",
-			Name:      "Root container",
-			Status:    felt.StatusOpen,
-			CreatedAt: now.Add(-24 * time.Hour),
-		},
-		{
-			ID:        "root/child",
-			Name:      "Child",
-			Status:    felt.StatusClosed,
-			CreatedAt: now.Add(-24 * time.Hour),
-		},
+	if err := storage.Write(&felt.Felt{ID: "item-00/child", Name: "Child", Status: felt.StatusActive, CreatedAt: created}); err != nil {
+		t.Fatalf("Write: %v", err)
 	}
-
-	attention := buildSessionAttention(felts, now, "")
-	for _, want := range []string{
-		"Fix tracked containers: 1 open/active fiber has children",
-		"Open/active should mean todo, not documentation or importance",
-		"demote container fibers unless they represent current work",
-		"Review: root",
-	} {
-		if !strings.Contains(attention, want) {
-			t.Fatalf("attention missing %q:\n%s", want, attention)
-		}
+	if ctx := sessionContextFor(t, dir); strings.Contains(ctx, "Attention") {
+		t.Fatalf("session context raised tending notes:\n%s", ctx)
 	}
 }
 

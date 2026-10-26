@@ -20,10 +20,9 @@ func (a *app) sessionCmd() *cobra.Command {
 		Use:   "session",
 		Short: "Print the start-of-session context",
 		Long: `Prints what an agent is given at session start: the skill directive, up to
-five open or active fibers and five other recently updated ones, and an
-Attention list when the store needs tidying (top-level sprawl, open or active
-fibers with children, a broad active set, a long open queue, tracked fibers
-older than 30 days). felt hook session wraps the same text for harness hooks.`,
+five open or active fibers and five other recently updated ones, and one
+Attention line when fibers sit outside the directory layout, where felt cannot
+see them. felt hook session wraps the same text for harness hooks.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			fmt.Fprint(a.env.Stdout, a.buildSessionContext())
@@ -148,24 +147,15 @@ func (a *app) isClaudeTranscriptPath(transcriptPath string) bool {
 // SessionStart context
 // ----------------------------------------------------------------------------
 
-const sessionDirective = "**Activate the `felt` skill before any tool or action — every session, even when the user's request seems unrelated to felt.** The skill body carries the practice (philosophy, CLI, references). Reading this context is not the same as having the skill loaded."
+const sessionDirective = "**Activate the `felt` skill before any tool or action, every session.** This context lists fibers; the skill says what they mean."
 
 const sessionNoRepoNote = "*No felt repository in current directory. Start one with `felt init` when this conversation produces thinking worth keeping.*"
 
 const sessionNoTrackedNote = "*No active or open fibers.*"
 
-const (
-	// sessionActiveLimit is the Attention threshold for "active set is broad"
-	// — it gates the advisory note, not the display. Distinct from the display
-	// cap below.
-	sessionActiveLimit = 3
-	// sessionSectionLimit caps both recency sections: five in-flight fibers
-	// (active or open), then five fibers in every remaining status.
-	sessionSectionLimit  = 5
-	sessionOpenLimit     = 20
-	sessionTopLevelLimit = 20
-	sessionStaleAge      = 30 * 24 * time.Hour
-)
+// sessionSectionLimit caps both recency sections: five in-flight fibers
+// (active or open), then five fibers in every remaining status.
+const sessionSectionLimit = 5
 
 // buildSessionContext renders the markdown additionalContext text. Output is
 // pinned by internal/feltcli/hook_test.go — change it deliberately; a wording or layout
@@ -253,8 +243,11 @@ func (a *app) buildSessionContext() string {
 		sb.WriteString("\n")
 	}
 
-	if attention := buildSessionAttention(felts, time.Now(), layoutNote); attention != "" {
-		sb.WriteString(attention)
+	// Tending the store (queue size, sprawl, containers) is the librarian's
+	// office, not every session's; only fibers felt cannot see are flagged.
+	if layoutNote != "" {
+		sb.WriteString("## Attention\n\n")
+		sb.WriteString(layoutNote)
 		sb.WriteString("\n")
 	}
 
@@ -325,126 +318,6 @@ func sessionLayoutNote(issues []felt.CheckIssue) string {
 		return ""
 	}
 	return fmt.Sprintf("Fibers outside the directory layout, invisible to felt: %s; %s.", strings.Join(where, " and "), felt.LegacyFlatMigrationHint)
-}
-
-func buildSessionAttention(felts []*felt.Felt, now time.Time, layoutNote string) string {
-	childrenByParent := make(map[string]int)
-	for _, f := range felts {
-		parts := strings.Split(f.ID, "/")
-		for i := 1; i < len(parts); i++ {
-			childrenByParent[strings.Join(parts[:i], "/")]++
-		}
-	}
-
-	var active, open, staleTracked, trackedContainers, topLevel, topLevelLeaves []*felt.Felt
-	for _, f := range felts {
-		switch f.Status {
-		case felt.StatusActive:
-			active = append(active, f)
-			if isStaleSessionFiber(f, now) {
-				staleTracked = append(staleTracked, f)
-			}
-			if childrenByParent[f.ID] > 0 {
-				trackedContainers = append(trackedContainers, f)
-			}
-		case felt.StatusOpen:
-			open = append(open, f)
-			if isStaleSessionFiber(f, now) {
-				staleTracked = append(staleTracked, f)
-			}
-			if childrenByParent[f.ID] > 0 {
-				trackedContainers = append(trackedContainers, f)
-			}
-		}
-
-		if !strings.Contains(f.ID, "/") {
-			topLevel = append(topLevel, f)
-			if childrenByParent[f.ID] == 0 {
-				topLevelLeaves = append(topLevelLeaves, f)
-			}
-		}
-	}
-
-	sortFibersByCreatedAt(active)
-	sortFibersByCreatedAt(open)
-	sortFibersByCreatedAt(staleTracked)
-	sortFibersByCreatedAt(trackedContainers)
-	sortFibersByCreatedAt(topLevelLeaves)
-
-	var notes []string
-	if layoutNote != "" {
-		notes = append(notes, layoutNote)
-	}
-	if len(topLevel) > sessionTopLevelLimit {
-		notes = append(notes, fmt.Sprintf(
-			"Top-level sprawl: %d root-level fibers (%d without children). Proactively nest leaf fibers under root buckets or create broader categories; do not leave obvious cleanup for the user. Start with: %s.",
-			len(topLevel), len(topLevelLeaves), formatSessionExamples(topLevelLeaves),
-		))
-	}
-	if len(trackedContainers) > 0 {
-		notes = append(notes, fmt.Sprintf(
-			"Fix tracked containers: %d open/active %s %s children. Open/active should mean todo, not documentation or importance; demote container fibers unless they represent current work. Review: %s.",
-			len(trackedContainers), pluralize(len(trackedContainers), "fiber", "fibers"), pluralize(len(trackedContainers), "has", "have"), formatSessionExamples(trackedContainers),
-		))
-	}
-	if len(active) > sessionActiveLimit {
-		notes = append(notes, fmt.Sprintf(
-			"Active set is broad: %d active fibers. Keep active for current attention; close or demote stale work without waiting for user prompting. Start with: %s.",
-			len(active), formatSessionExamples(active),
-		))
-	}
-	if len(open) > sessionOpenLimit {
-		notes = append(notes, fmt.Sprintf(
-			"Open queue is large: %d open fibers. Open/active are todo states; close, demote, or consolidate stale intent proactively. Start with: %s.",
-			len(open), formatSessionExamples(open),
-		))
-	}
-	if len(staleTracked) > 0 {
-		notes = append(notes, fmt.Sprintf(
-			"Tracked fibers are old: %d open/active fibers are older than 30 days. Review status before trusting the queue. Start with: %s.",
-			len(staleTracked), formatSessionExamples(staleTracked),
-		))
-	}
-
-	if len(notes) == 0 {
-		return ""
-	}
-	if len(notes) > 3 {
-		notes = notes[:3]
-	}
-
-	var sb strings.Builder
-	sb.WriteString("## Attention\n\n")
-	for _, note := range notes {
-		sb.WriteString(note)
-		sb.WriteString("\n\n")
-	}
-	return sb.String()
-}
-
-func isStaleSessionFiber(f *felt.Felt, now time.Time) bool {
-	return !f.CreatedAt.IsZero() && now.Sub(f.CreatedAt) > sessionStaleAge
-}
-
-func sortFibersByCreatedAt(felts []*felt.Felt) {
-	sort.Slice(felts, func(i, j int) bool {
-		return felts[i].CreatedAt.Before(felts[j].CreatedAt)
-	})
-}
-
-func formatSessionExamples(felts []*felt.Felt) string {
-	if len(felts) == 0 {
-		return "none"
-	}
-	limit := len(felts)
-	if limit > 3 {
-		limit = 3
-	}
-	ids := make([]string, 0, limit)
-	for _, f := range felts[:limit] {
-		ids = append(ids, f.ID)
-	}
-	return strings.Join(ids, ", ")
 }
 
 func pluralize(count int, singular, plural string) string {
