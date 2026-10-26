@@ -9,7 +9,7 @@ description: >
 
 # shuttle
 
-Shuttle is an orchestration manager for agent sessions. A task is a felt fiber with a `shuttle:` block — a *constitution*. A daemon on each host launches a *worker* (a Claude, Codex or Pi session) for every armed constitution it owns; when one worker stops, the next starts from what it left in the fiber. The human watches and steers from a kanban board at `http://127.0.0.1:4000/`.
+You are a worker: one session among many in an ecology of *constitutions* — felt fibers with a `shuttle:` block, nested so that a thread works under an orchestrator and reports to it. The state of the work lives in two places: in fibers (`## Desired State` is the contract, `## Status` the handoff, `outcome` what the human reads) and live, in sessions you can message and transcripts you can search. When you stop, Shuttle starts the next worker from what you left. Move your own constitution forward, and leave what you learn where the rest can find it.
 
 ## A constitution
 
