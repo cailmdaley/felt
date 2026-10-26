@@ -189,12 +189,13 @@ Thumbnails load near the viewport under a shared budget and cannot run scripts.
 Confirmed missing fibers' documents gather under **Unfiled** on their byte-owning host; an unreachable owner does not count as a missing fiber.
 
 Opening a folio or receipt enters the reader: one selected page, inert receded neighbours, and a tab strip for the constitution.
+The reader is one frame: beneath the board's bar, the selected page fills the space between the open side columns, with its header line on top and the document below it. The header line holds back, the page's name, its arrival, Expand and the document menu. The corner toggles for the Constitutions sidebar and the threads rail take their own places at the line's ends.
 The fiber page anchors its body, embedded files, opened body links and sent documents.
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
 The fiber page's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel. While a fiber awaits review, a compact Temper / Discard pair sits beside its name in the navbar on every delivered page (on the phone, beside the page sheet's heading).
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
-Document label bars show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
+Document header lines show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The Constitutions sidebar starts closed and remembers an explicit choice.
 It lists the Desk's columns in the Desk's order: Drafts, In flight (as its Your turn and Working groups), Awaiting review, Roles and Resting; each group's caption holds the top of the list while you scroll through it.
