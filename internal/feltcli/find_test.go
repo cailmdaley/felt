@@ -47,9 +47,9 @@ func TestFindSearchesTheWholeStore(t *testing.T) {
 	}
 }
 
-// TestFindAcceptsSearchShapedFilters: -t and --body ask the same question a
-// query does, and reach just as far.
-func TestFindAcceptsSearchShapedFilters(t *testing.T) {
+// TestFindAcceptsSearchFiltersAndLegacyBodyFlag: query and tag filters reach the
+// enclosing store, while --body remains accepted for JSON body output.
+func TestFindAcceptsSearchFiltersAndLegacyBodyFlag(t *testing.T) {
 	t.Parallel()
 	for _, filter := range [][]string{
 		{"-t", "decision"},
@@ -67,6 +67,58 @@ func TestFindAcceptsSearchShapedFilters(t *testing.T) {
 				t.Fatalf("filter %v did not reach the enclosing store:\n%s", filter, out)
 			}
 		})
+	}
+}
+
+func TestFindSearchesBodiesByDefault(t *testing.T) {
+	t.Parallel()
+	loomProj, subProj := newCrossStoreFixture(t)
+	loom := felt.NewStorage(loomProj)
+	if err := loom.Write(&felt.Felt{
+		ID: "ai-futures/portolan/body-note", Name: "Quiet note",
+		Body: "Kinematic histories align here.", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("write body-only fiber: %v", err)
+	}
+
+	out, err := runCommand(t, subProj, "find", "kinematic align")
+	if err != nil {
+		t.Fatalf("find: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "ai-futures/portolan/body-note\n    Quiet note [body]") {
+		t.Fatalf("find did not return and mark its body-only hit:\n%s", out)
+	}
+
+	jsonOut, err := runCommand(t, subProj, "find", "--json", "kinematic align")
+	if err != nil {
+		t.Fatalf("find --json: %v\n%s", err, jsonOut)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &rows); err != nil {
+		t.Fatalf("find --json: %v\n%s", err, jsonOut)
+	}
+	if len(rows) != 1 || rows[0]["body"] != nil && rows[0]["body"] != "" {
+		t.Fatalf("default find JSON should omit body content: %#v", rows)
+	}
+
+	jsonWithBody, err := runCommand(t, subProj, "find", "--json", "--body", "kinematic align")
+	if err != nil {
+		t.Fatalf("find --json --body: %v\n%s", err, jsonWithBody)
+	}
+	rows = nil
+	if err := json.Unmarshal([]byte(jsonWithBody), &rows); err != nil {
+		t.Fatalf("find --json --body: %v\n%s", err, jsonWithBody)
+	}
+	if len(rows) != 1 || rows[0]["body"] != "Kinematic histories align here." {
+		t.Fatalf("--body did not include the matched fiber body: %#v", rows)
+	}
+
+	metadataOnly, err := runCommand(t, subProj, "find", "--no-body", "kinematic align")
+	if err != nil {
+		t.Fatalf("find --no-body: %v\n%s", err, metadataOnly)
+	}
+	if strings.Contains(metadataOnly, "body-note") {
+		t.Fatalf("find --no-body included a body-only hit:\n%s", metadataOnly)
 	}
 }
 

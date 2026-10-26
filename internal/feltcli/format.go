@@ -12,8 +12,9 @@ import (
 // Line 2: indented name with metadata (tags)
 //
 // collapsed is the number of matching descendants folded into this line by the
-// containment collapse (0 when nothing was folded).
-func formatFeltTwoLine(f *felt.Felt, collapsed int) string {
+// containment collapse (0 when nothing was folded). bodyOnly marks a hit whose
+// query needed the fiber body.
+func formatFeltTwoLine(f *felt.Felt, collapsed int, bodyOnly bool) string {
 	icon := felt.StatusIcon(f.Status)
 
 	line1 := fmt.Sprintf("%s %s\n", icon, f.ID)
@@ -21,6 +22,9 @@ func formatFeltTwoLine(f *felt.Felt, collapsed int) string {
 	metaStr := tagSuffix(f)
 	if collapsed > 0 {
 		metaStr += fmt.Sprintf(" (+%d matching %s; -v to expand)", collapsed, pluralize(collapsed, "descendant", "descendants"))
+	}
+	if bodyOnly {
+		metaStr += " [body]"
 	}
 
 	line2 := fmt.Sprintf("    %s%s\n", f.DisplayName(), metaStr)

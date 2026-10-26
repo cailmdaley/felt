@@ -103,7 +103,7 @@ Common paths:
   felt edit analysis/covariance -o "what was learned" -s closed
   felt ls                           open and active fibers in this view
   felt ls "query"                   search; closed matches are counted, not shown
-  felt ls "query" --body -r         regex, including bodies
+  felt ls "query" --no-body -r      regex, metadata only
   felt find "query"                 search the whole store
   felt show <id> -d summary         outcome, lede, back-references in this view
   felt show <id> --field key        one frontmatter key, shell-friendly

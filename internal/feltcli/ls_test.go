@@ -233,15 +233,82 @@ func TestLsBodySearchScansMarkdown(t *testing.T) {
 		}
 	}
 
-	out, err := runCommand(t, dir, "ls", "--body", "body-only needle")
+	out, err := runCommand(t, dir, "ls", "body-only needle")
 	if err != nil {
-		t.Fatalf("ls --body: %v\n%s", err, out)
+		t.Fatalf("ls: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "project/analysis") {
-		t.Fatalf("ls --body missing body match:\n%s", out)
+	if !strings.Contains(out, "project/analysis") || !strings.Contains(out, "[body]") {
+		t.Fatalf("ls missing or unmarked body match:\n%s", out)
 	}
 	if strings.Contains(out, "project/question") {
-		t.Fatalf("ls --body included non-match:\n%s", out)
+		t.Fatalf("ls included non-match:\n%s", out)
+	}
+
+	metadataOnly, err := runCommand(t, dir, "ls", "--no-body", "body-only needle")
+	if err != nil {
+		t.Fatalf("ls --no-body: %v\n%s", err, metadataOnly)
+	}
+	if strings.Contains(metadataOnly, "project/analysis") {
+		t.Fatalf("ls --no-body included body-only match:\n%s", metadataOnly)
+	}
+
+	jsonOut, err := runCommand(t, dir, "ls", "--json", "body-only needle")
+	if err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, jsonOut)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &rows); err != nil {
+		t.Fatalf("ls --json: %v\n%s", err, jsonOut)
+	}
+	if len(rows) != 1 || rows[0]["body"] != nil && rows[0]["body"] != "" {
+		t.Fatalf("default JSON search should omit body content: %#v", rows)
+	}
+
+	jsonWithBody, err := runCommand(t, dir, "ls", "--json", "--body", "body-only needle")
+	if err != nil {
+		t.Fatalf("ls --json --body: %v\n%s", err, jsonWithBody)
+	}
+	rows = nil
+	if err := json.Unmarshal([]byte(jsonWithBody), &rows); err != nil {
+		t.Fatalf("ls --json --body: %v\n%s", err, jsonWithBody)
+	}
+	if len(rows) != 1 || rows[0]["body"] != "The body-only needle lives here." {
+		t.Fatalf("--body did not include the matched fiber body: %#v", rows)
+	}
+}
+
+func TestLsSearchOrdersNameMetadataAndBodyHits(t *testing.T) {
+	t.Parallel()
+	dir, storage := newStore(t)
+	for _, fiber := range []*felt.Felt{
+		{ID: "a-body-hit", Name: "Body result", Body: "Needle appears here."},
+		{ID: "b-outcome-hit", Name: "Outcome result", Outcome: "Needle appears here."},
+		{ID: "c-slug-needle", Name: "Slug result"},
+		{ID: "d-title-hit", Name: "Needle title"},
+	} {
+		if err := storage.Write(fiber); err != nil {
+			t.Fatalf("Write(%s) error: %v", fiber.ID, err)
+		}
+	}
+
+	out, err := runCommand(t, dir, "ls", "-v", "needle")
+	if err != nil {
+		t.Fatalf("ls: %v\n%s", err, out)
+	}
+	wantOrder := []string{"c-slug-needle", "d-title-hit", "b-outcome-hit", "a-body-hit"}
+	previous := -1
+	for _, id := range wantOrder {
+		index := strings.Index(out, id+"\n")
+		if index <= previous {
+			t.Fatalf("search tiers are not ordered %v:\n%s", wantOrder, out)
+		}
+		previous = index
+	}
+	if !strings.Contains(out, "a-body-hit\n    Body result [body]") {
+		t.Fatalf("body-only hit is not marked:\n%s", out)
+	}
+	if strings.Contains(out, "b-outcome-hit\n    Outcome result [body]") {
+		t.Fatalf("metadata hit is marked as body-only:\n%s", out)
 	}
 }
 
@@ -264,9 +331,10 @@ func TestLsQueryMatchesEveryWord(t *testing.T) {
 		args       []string
 		want, deny []string
 	}{
-		{[]string{"ls", "-v", "email reply draft"}, []string{"email/reply-drafts"}, []string{"email/archive", "notes/draft"}},
-		{[]string{"ls", "-v", "--body", "email reply draft"}, []string{"email/reply-drafts", "email/archive"}, []string{"notes/draft"}},
-		{[]string{"find", "-v", "DRAFT   Email"}, []string{"email/reply-drafts"}, []string{"notes/draft"}},
+		{[]string{"ls", "-v", "email reply draft"}, []string{"email/reply-drafts", "email/archive"}, []string{"notes/draft"}},
+		{[]string{"ls", "-v", "--no-body", "email reply draft"}, []string{"email/reply-drafts"}, []string{"email/archive", "notes/draft"}},
+		{[]string{"find", "-v", "DRAFT   Email"}, []string{"email/reply-drafts", "email/archive"}, []string{"notes/draft"}},
+		{[]string{"find", "-v", "--no-body", "DRAFT   Email"}, []string{"email/reply-drafts"}, []string{"email/archive", "notes/draft"}},
 		{[]string{"ls", "-v", "-r", "email reply"}, nil, []string{"email/reply-drafts", "email/archive"}},
 	} {
 		out, err := runCommand(t, dir, tc.args...)

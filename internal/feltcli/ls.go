@@ -40,6 +40,16 @@ func listForOutput(storage *felt.Storage, hasFields []string, jsonMode bool) ([]
 	return storage.ListMetadata()
 }
 
+func listForSearch(storage *felt.Storage, hasFields []string, jsonMode bool, search lsSearch) ([]*felt.Felt, error) {
+	if search.readsBodies() {
+		if jsonMode {
+			return storage.ListWithModTime()
+		}
+		return storage.List()
+	}
+	return listForOutput(storage, hasFields, jsonMode)
+}
+
 // NewLsCmd builds the shared fiber-listing command for a Felt-compatible view.
 // It reads the store through env and writes to the output stream its root
 // command was given (the felt root sets it from env).
@@ -48,6 +58,7 @@ func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 	var lsTags []string
 	var lsRecent int
 	var lsBody bool
+	var lsNoBody bool
 	var lsExact bool
 	var lsRegex bool
 	var lsHasFields []string
@@ -61,8 +72,10 @@ func NewLsCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
 		Long: `Bare ls lists the open and active fibers in this view, oldest first. A query
 matches when every word in it occurs, as a case-insensitive substring, somewhere
 in the name, outcome, extra frontmatter text, or id; exact matches on name, id,
-or basename sort first. --body also searches bodies. -r matches the whole query
-as one regular expression, which is how to ask for a literal phrase.
+or basename sort first. Plain queries search bodies by default, placing name/slug
+hits before metadata hits and marking body-dependent hits; --no-body restores the
+metadata-only scope. --body is accepted for compatibility and includes bodies in
+--json output. -r matches the whole query as one regular expression.
 
 A filter (query, -t, --has-field, --ids-from) widens to every status and counts closed
 matches in a trailing hint instead of printing them, unless -s names the
@@ -74,7 +87,7 @@ them flat. --json is neither folded nor stripped of closed matches.
 ls never leaves this view. When this .felt is mounted inside a larger store,
 felt find searches the rest of it.`,
 		Example: `  felt ls                                 open and active fibers
-  felt ls covariance --body               search, bodies included
+  felt ls --no-body covariance            search, metadata only
   felt ls -t rule: -s all                 every fiber with a rule:* tag
   felt ls --json --json-field id,status   machine-readable, two fields`,
 		Args: cobra.MaximumNArgs(1),
@@ -95,14 +108,34 @@ felt find searches the rest of it.`,
 				return fmt.Errorf("--json-field requires --json")
 			}
 
+			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
+			// widen to all statuses. Bare `ls` stays open+active (actionable view).
+			statusExplicit := cmd.Flags().Changed("status")
+			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
+
+			// A search widens past open+active so untracked fibers can match, but a
+			// store accumulates far more closed work than live work and the closed
+			// matches bury the live ones. They're counted and offered instead of
+			// printed. -n is exempt: it sorts by closed-at precisely to surface
+			// what was recently finished.
+			suppressClosed := !statusExplicit && lsRecent == 0 &&
+				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || lsIDsFrom != "")
+
+			search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
+				lsTags, hasFields, anyFilters, lsExact, lsRegex, !lsNoBody, lsVerbose)
+			if err != nil {
+				return err
+			}
 			var felts []*felt.Felt
+			bodiesLoaded := false
 			idOrder := map[string]int(nil)
 			if lsIDsFrom == "" {
 				prefilterFields := hasFields
 				if len(anyFilters) > 0 {
 					prefilterFields = nil
 				}
-				felts, err = listForOutput(storage, prefilterFields, view.jsonOutput())
+				bodiesLoaded = search.readsBodies()
+				felts, err = listForSearch(storage, prefilterFields, view.jsonOutput(), search)
 			} else {
 				data, readErr := os.ReadFile(lsIDsFrom)
 				if readErr != nil {
@@ -123,26 +156,7 @@ felt find searches the rest of it.`,
 			if err != nil {
 				return err
 			}
-
-			// If any filter is active (tags, query, recent) and -s wasn't explicitly set,
-			// widen to all statuses. Bare `ls` stays open+active (actionable view).
-			statusExplicit := cmd.Flags().Changed("status")
-			hasFilters := len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || query != "" || lsRecent > 0 || lsIDsFrom != ""
-
-			// A search widens past open+active so untracked fibers can match, but a
-			// store accumulates far more closed work than live work and the closed
-			// matches bury the live ones. They're counted and offered instead of
-			// printed. -n is exempt: it sorts by closed-at precisely to surface
-			// what was recently finished.
-			suppressClosed := !statusExplicit && lsRecent == 0 &&
-				(query != "" || len(lsTags) > 0 || len(hasFields) > 0 || len(anyFilters) > 0 || lsIDsFrom != "")
-
-			search, err := compileSearch(query, lsStatus, !statusExplicit && hasFilters,
-				lsTags, hasFields, anyFilters, lsExact, lsRegex, lsBody, lsVerbose)
-			if err != nil {
-				return err
-			}
-			exactMatches, rest, err := search.match(storage, felts)
+			exactMatches, rest, bodyOnly, err := search.match(storage, felts, bodiesLoaded)
 			if err != nil {
 				return err
 			}
@@ -188,9 +202,11 @@ felt find searches the rest of it.`,
 					}
 				}
 				if lsBody {
-					filtered, err = hydrateBodies(storage, filtered)
-					if err != nil {
-						return err
+					if !bodiesLoaded {
+						filtered, err = hydrateBodies(storage, filtered)
+						if err != nil {
+							return err
+						}
 					}
 				} else {
 					for _, f := range filtered {
@@ -226,7 +242,7 @@ felt find searches the rest of it.`,
 				}
 			} else {
 				for _, f := range shown {
-					fmt.Fprint(out, formatFeltTwoLine(f, collapsed[f.ID]))
+					fmt.Fprint(out, formatFeltTwoLine(f, collapsed[f.ID], bodyOnly[f.ID]))
 				}
 			}
 
@@ -261,7 +277,8 @@ felt find searches the rest of it.`,
 	command.Flags().StringVarP(&lsStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	command.Flags().StringArrayVarP(&lsTags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
 	command.Flags().IntVarP(&lsRecent, "recent", "n", 0, "Show the N most recent, every status (by closed-at, else created-at)")
-	command.Flags().BoolVar(&lsBody, "body", false, "Also search bodies; with --json, include the body")
+	command.Flags().BoolVar(&lsBody, "body", false, "With --json, include bodies in results; body search is the default")
+	command.Flags().BoolVar(&lsNoBody, "no-body", false, "Search only names and metadata")
 	command.Flags().BoolVarP(&lsExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	command.Flags().BoolVarP(&lsRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	command.Flags().StringArrayVar(&lsHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
@@ -291,6 +308,10 @@ type lsSearch struct {
 	regex           bool
 	body            bool
 	verbose         bool
+}
+
+func (search lsSearch) readsBodies() bool {
+	return search.query != "" && search.body && !search.exact
 }
 
 // compile builds the predicate from one invocation's flag values. Both ls and
@@ -336,26 +357,32 @@ func compileSearch(query string, status string, widen bool, tags, hasFields, any
 // exact matches first, containment-collapsed, with the closed matches
 // partitioned out when the caller asks. It is the whole body of a search over
 // a store, so ls and find print the same shape from the same code.
-func (search lsSearch) run(storage *felt.Storage, felts []*felt.Felt, suppressClosed bool) (shown []*felt.Felt, collapsedCounts map[string]int, closed int, err error) {
-	exactMatches, filtered, err := search.match(storage, felts)
+func (search lsSearch) run(storage *felt.Storage, felts []*felt.Felt, suppressClosed, bodiesLoaded bool) (shown []*felt.Felt, collapsedCounts map[string]int, bodyOnly map[string]bool, closed int, err error) {
+	exactMatches, filtered, bodyOnly, err := search.match(storage, felts, bodiesLoaded)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, 0, err
 	}
 	shown, _, collapsedCounts, closed = finish(append(exactMatches, filtered...), exactMatches, suppressClosed, !search.verbose)
-	return shown, collapsedCounts, closed, nil
+	return shown, collapsedCounts, bodyOnly, closed, nil
 }
 
-// match splits one store's fibers into the exact name matches (printed first)
-// and the rest, reading bodies when --body asked for a body search.
-func (search lsSearch) match(storage *felt.Storage, felts []*felt.Felt) (exact, rest []*felt.Felt, err error) {
-	exact, rest, bodyCandidates := search.apply(felts)
-	if search.query != "" && !search.exact && search.body && len(bodyCandidates) > 0 {
-		rest, err = scanBodyMatches(storage, rest, bodyCandidates, search.re, search.terms, search.regex)
-		if err != nil {
-			return nil, nil, err
+// match orders name and slug matches before other metadata, then body-dependent
+// hits. Exact name and id matches remain pinned through containment collapse.
+func (search lsSearch) match(storage *felt.Storage, felts []*felt.Felt, bodiesLoaded bool) (exact, rest []*felt.Felt, bodyOnly map[string]bool, err error) {
+	exact, names, metadata, bodyCandidates := search.apply(felts)
+	rest = append(names, metadata...)
+	if search.readsBodies() && len(bodyCandidates) > 0 {
+		bodyMatches, scanErr := scanBodyMatches(storage, bodyCandidates, search.re, search.terms, search.regex, bodiesLoaded)
+		if scanErr != nil {
+			return nil, nil, nil, scanErr
 		}
+		bodyOnly = make(map[string]bool, len(bodyMatches))
+		for _, f := range bodyMatches {
+			bodyOnly[f.ID] = true
+		}
+		rest = append(append(names, metadata...), bodyMatches...)
 	}
-	return exact, rest, nil
+	return exact, rest, bodyOnly, nil
 }
 
 // finish turns the matches into what prints: the closed ones partitioned out
@@ -400,9 +427,9 @@ func matchesAnyFilter(f *felt.Felt, filters []string) bool {
 	return false
 }
 
-// apply splits felts into exact matches (printed first), ordinary matches,
-// and — with --body — the fibers whose body still has to be read.
-func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCandidates []*felt.Felt) {
+// apply splits name and slug hits from other metadata and the fibers whose
+// bodies still need scanning.
+func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, nameMatches, metadataMatches, bodyCandidates []*felt.Felt) {
 	query, queryLower, terms, re, effectiveStatus, hasFields := search.query, search.queryLower, search.terms, search.re, search.effectiveStatus, search.hasFields
 	anyFilters := search.anyFilters
 	tags, exact, regex, body := search.tags, search.exact, search.regex, search.body
@@ -467,8 +494,13 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 				continue
 			}
 
+			if matchesNameOrSlugQuery(f, terms, re, regex) {
+				nameMatches = append(nameMatches, f)
+				continue
+			}
+
 			if matchesQuery(f, terms, re, regex) {
-				filtered = append(filtered, f)
+				metadataMatches = append(metadataMatches, f)
 				continue
 			}
 
@@ -480,9 +512,9 @@ func (search lsSearch) apply(felts []*felt.Felt) (exactMatches, filtered, bodyCa
 			continue // no match
 		}
 
-		filtered = append(filtered, f)
+		metadataMatches = append(metadataMatches, f)
 	}
-	return exactMatches, filtered, bodyCandidates
+	return exactMatches, nameMatches, metadataMatches, bodyCandidates
 }
 
 // collapseByContainment folds matches that live under another match into their
@@ -700,6 +732,13 @@ func matchesQuery(f *felt.Felt, terms []string, re *regexp.Regexp, useRegex bool
 	return containsAllTerms(metadataText(f), terms)
 }
 
+func matchesNameOrSlugQuery(f *felt.Felt, terms []string, re *regexp.Regexp, useRegex bool) bool {
+	if useRegex {
+		return re.MatchString(f.DisplayName()) || re.MatchString(f.ID)
+	}
+	return containsAllTerms(strings.ToLower(f.DisplayName()+"\n"+f.ID), terms)
+}
+
 // metadataText is the lowercased text a plain query searches without --body.
 func metadataText(f *felt.Felt) string {
 	return strings.ToLower(f.DisplayName() + "\n" + f.ID + "\n" + f.SearchText())
@@ -715,29 +754,41 @@ func containsAllTerms(haystack string, terms []string) bool {
 	return true
 }
 
-// scanBodyMatches folds candidates whose body matches the query into filtered by
-// hydrating and scanning the markdown source of truth. Regex queries match the
-// body by pattern; plain terms must each occur somewhere in the body or the
-// metadata, so the words of one query may be split between them.
-func scanBodyMatches(storage *felt.Storage, filtered, candidates []*felt.Felt, re *regexp.Regexp, terms []string, useRegex bool) ([]*felt.Felt, error) {
-	fullCandidates, err := hydrateBodies(storage, candidates)
-	if err != nil {
-		return nil, err
+func containsAllTermsAcross(first, second string, terms []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(first, term) && !strings.Contains(second, term) {
+			return false
+		}
+	}
+	return true
+}
+
+// scanBodyMatches returns candidates whose bodies complete the query. Plain
+// terms may be split between metadata and body; regex queries match the body.
+func scanBodyMatches(storage *felt.Storage, candidates []*felt.Felt, re *regexp.Regexp, terms []string, useRegex, bodiesLoaded bool) ([]*felt.Felt, error) {
+	fullCandidates := candidates
+	if !bodiesLoaded {
+		var err error
+		fullCandidates, err = hydrateBodies(storage, candidates)
+		if err != nil {
+			return nil, err
+		}
 	}
 
+	var matches []*felt.Felt
 	for _, f := range fullCandidates {
-		var matches bool
+		var matched bool
 		if useRegex {
-			matches = re.MatchString(f.Body)
+			matched = re.MatchString(f.Body)
 		} else {
-			matches = containsAllTerms(metadataText(f)+"\n"+strings.ToLower(f.Body), terms)
+			matched = containsAllTermsAcross(metadataText(f), strings.ToLower(f.Body), terms)
 		}
-		if matches {
-			filtered = append(filtered, f)
+		if matched {
+			matches = append(matches, f)
 		}
 	}
 
-	return filtered, nil
+	return matches, nil
 }
 
 func hydrateBodies(storage *felt.Storage, felts []*felt.Felt) ([]*felt.Felt, error) {

@@ -52,7 +52,7 @@ A bare `.felt/<slug>.md` at a store's root is the project's entry point. A proje
 
 ```
 felt show <id>                              # read by address (-d compact | summary)
-felt find "word"                            # does a fiber on this exist? whole store; --body for bodies
+felt find "word"                            # does a fiber on this exist? whole store; body search is default
 felt tree -L 1                              # orient
 felt add <parent>/<slug> "name" -o "outcome" [-t tag] [-s open]
 felt edit <id> -s closed -o "what was learned"
@@ -61,6 +61,8 @@ felt sync / felt sync --push                # merge the store's upstream / publi
 ```
 
 `felt <verb> --help` has the rest. Edit bodies and long outcomes in the file itself (`.felt/<path>/<slug>.md`); put a multi-sentence outcome in a `|-` block scalar.
+
+Plain queries search bodies by default, placing name/slug hits before metadata hits and marking body-dependent hits; `--no-body` restores the metadata-only scope.
 
 ## Practice
 

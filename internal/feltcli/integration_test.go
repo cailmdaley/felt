@@ -201,12 +201,16 @@ func TestIntegration(t *testing.T) {
 		t.Fatalf("ls query should not match outcome before it exists, got: %s", out)
 	}
 	out = mustFelt(t, dir, "ls", "replacement")
+	if !strings.Contains(out, fiberID) || !strings.Contains(out, "[body]") {
+		t.Fatalf("ls query should match and mark body text by default, got: %s", out)
+	}
+	out = mustFelt(t, dir, "ls", "--no-body", "replacement")
 	if strings.Contains(out, fiberID) {
-		t.Fatalf("ls query without --body should not match body text, got: %s", out)
+		t.Fatalf("ls --no-body should not match body text, got: %s", out)
 	}
 	out = mustFelt(t, dir, "ls", "--body", "replacement")
 	if !strings.Contains(out, fiberID) {
-		t.Fatalf("ls query with --body should match body text, got: %s", out)
+		t.Fatalf("legacy --body should remain accepted, got: %s", out)
 	}
 	out = mustFelt(t, dir, "ls", "--json", "--body")
 	var listed []map[string]any

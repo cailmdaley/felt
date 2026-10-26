@@ -18,6 +18,7 @@ func (a *app) findCmd() *cobra.Command {
 	var findStatus string
 	var findTags []string
 	var findBody bool
+	var findNoBody bool
 	var findExact bool
 	var findRegex bool
 	var findHasFields []string
@@ -36,6 +37,9 @@ A query, -t, or --has-field is required. Every status is searched; closed
 matches are counted rather than printed unless -s asks for them. Matches under
 a matching ancestor fold into it (-v lists them flat), and --limit caps the
 enclosing store's block.
+
+Plain queries search bodies by default, placing name/slug hits before metadata
+hits and marking body-dependent hits; --no-body restores the metadata-only scope.
 
 --json is one array with a "store" field on each fiber, every match and status
 included; --limit caps it only when given.`,
@@ -60,7 +64,7 @@ included; --limit caps it only when given.`,
 			}
 
 			search, err := compileSearch(query, findStatus, !statusExplicit && hasFilters,
-				findTags, hasFields, nil, findExact, findRegex, findBody, findVerbose)
+				findTags, hasFields, nil, findExact, findRegex, !findNoBody, findVerbose)
 			if err != nil {
 				return err
 			}
@@ -69,16 +73,23 @@ included; --limit caps it only when given.`,
 			// human-facing trim removed.
 			suppressClosed := !statusExplicit && !a.json
 
-			felts, err := listForOutput(storage, nil, a.json)
+			bodiesLoaded := search.readsBodies()
+			felts, err := listForSearch(storage, nil, a.json, search)
 			if err != nil {
 				return err
 			}
-			shown, collapsed, closedSuppressed, err := search.run(storage, felts, suppressClosed)
+			shown, collapsed, bodyOnly, closedSuppressed, err := search.run(storage, felts, suppressClosed, bodiesLoaded)
 			if err != nil {
 				return err
+			}
+			if a.json && findBody && !bodiesLoaded {
+				shown, err = hydrateBodies(storage, shown)
+				if err != nil {
+					return err
+				}
 			}
 
-			outerShown, outerCollapsed, outerRoot, outerClosed, err := findOuterHits(storage, search, suppressClosed)
+			outerShown, outerCollapsed, outerBodyOnly, outerRoot, outerClosed, err := findOuterHits(storage, search, suppressClosed, a.json, findBody)
 			if err != nil {
 				return err
 			}
@@ -93,9 +104,7 @@ included; --limit caps it only when given.`,
 				for _, f := range outer {
 					hits = append(hits, findHit{Felt: f, Store: outerRoot})
 				}
-				// --body hydrates only the fibers it had to read to match, so
-				// without it the bodies present are an accident of the search.
-				// Emit all of them or none.
+				// Bodies participate in matching by default, but are an output opt-in.
 				if !findBody {
 					for _, hit := range hits {
 						hit.Body = ""
@@ -112,7 +121,7 @@ included; --limit caps it only when given.`,
 				}
 			}
 			for _, f := range shown {
-				fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, collapsed[f.ID]))
+				fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, collapsed[f.ID], bodyOnly[f.ID]))
 			}
 
 			if len(outerShown) > 0 {
@@ -128,7 +137,7 @@ included; --limit caps it only when given.`,
 				}
 				printed := limitOuter(outerShown, findLimit, true)
 				for _, f := range printed {
-					fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, outerCollapsed[f.ID]))
+					fmt.Fprint(a.env.Stdout, formatFeltTwoLine(f, outerCollapsed[f.ID], outerBodyOnly[f.ID]))
 				}
 				if remainder := len(outerShown) - len(printed); remainder > 0 {
 					fmt.Fprintf(a.env.Stdout, "… %d more — refine the query or pass --limit 0\n", remainder)
@@ -144,7 +153,8 @@ included; --limit caps it only when given.`,
 	command.GroupID = groupSearch
 	command.Flags().StringVarP(&findStatus, "status", "s", "", "Filter by status (open, active, closed, all)")
 	command.Flags().StringArrayVarP(&findTags, "tag", "t", nil, "Filter by tag (repeatable, AND; a trailing colon matches a prefix)")
-	command.Flags().BoolVar(&findBody, "body", false, "Also search bodies")
+	command.Flags().BoolVar(&findBody, "body", false, "With --json, include bodies in results; body search is the default")
+	command.Flags().BoolVar(&findNoBody, "no-body", false, "Search only names and metadata")
 	command.Flags().BoolVarP(&findExact, "exact", "e", false, "Only exact matches: name, id, or id basename, ignoring case")
 	command.Flags().BoolVarP(&findRegex, "regex", "r", false, "Treat the query as a case-insensitive regular expression")
 	command.Flags().StringArrayVar(&findHasFields, "has-field", nil, "Only fibers that have this top-level field (repeatable or comma-separated)")
@@ -198,15 +208,16 @@ func limitOuter(outer []*felt.Felt, limit int, apply bool) []*felt.Felt {
 // this store's own subtree — those fibers are already in the local block, and
 // printing them twice under two different ids is worse than not printing them
 // at all. A top-level store has no enclosing one and returns nothing.
-func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) ([]*felt.Felt, map[string]int, string, int, error) {
+func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed, jsonMode, includeBody bool) ([]*felt.Felt, map[string]int, map[string]bool, string, int, error) {
 	external := storage.ExternalRefs()
 	if external == nil {
-		return nil, nil, "", 0, nil
+		return nil, nil, nil, "", 0, nil
 	}
 	outerStorage := felt.NewStorage(external.ProjectDir())
-	felts, err := outerStorage.ListMetadata()
+	bodiesLoaded := search.readsBodies()
+	felts, err := listForSearch(outerStorage, nil, jsonMode, search)
 	if err != nil {
-		return nil, nil, "", 0, err
+		return nil, nil, nil, "", 0, err
 	}
 
 	prefix := external.Prefix()
@@ -218,9 +229,15 @@ func findOuterHits(storage *felt.Storage, search lsSearch, suppressClosed bool) 
 		outside = append(outside, f)
 	}
 
-	shown, collapsed, closed, err := search.run(outerStorage, outside, suppressClosed)
+	shown, collapsed, bodyOnly, closed, err := search.run(outerStorage, outside, suppressClosed, bodiesLoaded)
 	if err != nil {
-		return nil, nil, "", 0, err
+		return nil, nil, nil, "", 0, err
 	}
-	return shown, collapsed, external.Root(), closed, nil
+	if jsonMode && includeBody && !bodiesLoaded {
+		shown, err = hydrateBodies(outerStorage, shown)
+		if err != nil {
+			return nil, nil, nil, "", 0, err
+		}
+	}
+	return shown, collapsed, bodyOnly, external.Root(), closed, nil
 }

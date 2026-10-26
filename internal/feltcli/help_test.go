@@ -422,6 +422,14 @@ func TestHelpCommandLinesResolve(t *testing.T) {
 	})
 }
 
+func TestFindHelpDescribesDefaultBodySearch(t *testing.T) {
+	command := subcommand(t, helpTree(t), "find")
+	want := "Plain queries search bodies by default, placing name/slug hits before metadata hits and marking body-dependent hits; --no-body restores the metadata-only scope."
+	if got := strings.Join(strings.Fields(command.Long), " "); !strings.Contains(got, want) {
+		t.Fatalf("find help does not describe body search default:\n%s", command.Long)
+	}
+}
+
 // The extractor itself must see what a reader sees; pin the shapes it has to
 // handle so a quiet regression cannot turn the drift test into a no-op.
 func TestHelpInvocationExtraction(t *testing.T) {
@@ -479,7 +487,7 @@ Pipes: ` + "`felt ls | head -5`" + ` and ` + "`felt sync && felt ls -r`" + `.
 		t.Fatalf("bare flags outside invocations = %q, want %q", got, want)
 	}
 
-	bad := unknownFlags(subcommand(t, helpTree(t), "ls"), []string{"ls", "-rv", "-s", "all", "--body", "--json", "-C", "dir", "-q", "--bogus=1", "--", "--after"})
+	bad := unknownFlags(subcommand(t, helpTree(t), "ls"), []string{"ls", "-rv", "-s", "all", "--body", "--no-body", "--json", "-C", "dir", "-q", "--bogus=1", "--", "--after"})
 	if strings.Join(bad, " ") != "-q --bogus=1" {
 		t.Fatalf("unknownFlags(ls) = %v, want [-q --bogus=1]", bad)
 	}
