@@ -1218,6 +1218,50 @@ defmodule Shuttle.RemoteRegistryTest do
              "and still revive the daemon, got #{inspect(scripts)}"
     end
 
+    test "a live daemon behind a dead far-side transport gets the transport revived" do
+      MockClient.set("https://hub-a.example.ts.net/api/v1/state", {:error, :econnrefused})
+      MockRunner.set("ssh", [{"daemon=alive\n", 0}])
+
+      remote = %Remote{
+        name: "hub-a",
+        url: "https://hub-a.example.ts.net",
+        ssh: "hub-a-login",
+        poll_interval_ms: 1,
+        request_timeout_ms: 100,
+        stale_multiplier: 2,
+        tunnel: %{manager: :none, multiplex: false, label: nil}
+      }
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_alive_dead_transport,
+          remotes: [remote],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          restart_wait_ms: 60_000,
+          user_uid: "501"
+        )
+
+      Enum.each(1..4, fn _ ->
+        :ok = RemoteRegistry.poll_now(:reg_alive_dead_transport)
+        Process.sleep(2)
+      end)
+
+      scripts = for {"ssh", args} <- MockRunner.calls(), do: List.last(args)
+
+      assert Enum.any?(scripts, &String.contains?(&1, "tailscaled-launch")),
+             "ssh finding the daemon alive must still revive the far-side transport, got #{inspect(scripts)}"
+
+      refute Enum.any?(scripts, &String.contains?(&1, "shuttle-launch")),
+             "a live daemon is never restarted"
+
+      assert RemoteRegistry.snapshot(:reg_alive_dead_transport, "hub-a").recovery.last_action ==
+               "remote daemon alive; waiting for route"
+    end
+
     test "restarting a tunnelled remote touches only the daemon" do
       MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
       MockRunner.set("launchctl", [{"", 0}])

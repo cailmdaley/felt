@@ -629,13 +629,23 @@ defmodule Shuttle.RemoteRegistry do
             )
 
             if remote.tunnel.manager == :none do
-              with_recovery(entry, %{
-                recovery
-                | state: :reviving,
-                  step: :probe_after_restart,
-                  action_due_at: add_ms(now, state.restart_wait_ms),
-                  last_action: "remote daemon alive; waiting for route"
-              })
+              if remote_addressed?(remote) do
+                with_recovery(entry, %{
+                  recovery
+                  | state: :reviving,
+                    step: :revive_transport,
+                    action_due_at: now,
+                    last_action: "remote daemon alive; checking its transport"
+                })
+              else
+                with_recovery(entry, %{
+                  recovery
+                  | state: :reviving,
+                    step: :probe_after_restart,
+                    action_due_at: add_ms(now, state.restart_wait_ms),
+                    last_action: "remote daemon alive; waiting for route"
+                })
+              end
             else
               with_recovery(entry, %{
                 recovery
@@ -687,6 +697,25 @@ defmodule Shuttle.RemoteRegistry do
               )
             )
         end
+
+      :revive_transport ->
+        case revive_transport(remote, state.runner) do
+          {:error, reason} ->
+            Logger.warning(
+              "RemoteRegistry: #{remote.name} transport revive failed: #{format_error(reason)}"
+            )
+
+          _ ->
+            :ok
+        end
+
+        with_recovery(entry, %{
+          recovery
+          | state: :reviving,
+            step: :probe_after_restart,
+            action_due_at: add_ms(now, state.restart_wait_ms),
+            last_action: "remote daemon alive; waiting for route"
+        })
 
       :restart_remote ->
         case restart_remote(remote, state.runner) do
@@ -1111,15 +1140,29 @@ defmodule Shuttle.RemoteRegistry do
       # override) leaves this gate permanently false, and the transport-revive
       # step quietly never fires — the remote just reports stale, which is the
       # safe direction but not an obvious one.
-      transport =
-        ~s(if [ -s "$HOME/.local/state/tailscale/tailscaled.state" ] && ) <>
-          ~s([ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
-          ~s(! tmux has-session -t tailscaled 2>/dev/null; then ) <>
-          ~s("$HOME/.local/bin/tailscaled-launch"; fi)
-
-      "#{transport}; #{daemon}"
+      "#{transport_script()}; #{daemon}"
     else
       daemon
+    end
+  end
+
+  # Starts the far side's keep-alive tailscaled when it has run before and its
+  # tmux session is gone. A live session is left alone.
+  defp transport_script do
+    ~s(if [ -s "$HOME/.local/state/tailscale/tailscaled.state" ] && ) <>
+      ~s([ -x "$HOME/.local/bin/tailscaled-launch" ] && ) <>
+      ~s(! tmux has-session -t tailscaled 2>/dev/null; then ) <>
+      ~s("$HOME/.local/bin/tailscaled-launch"; fi)
+  end
+
+  # The daemon answers over ssh but not at its address, so the far side's
+  # mesh-VPN agent is the suspect; revive it without touching the daemon.
+  defp revive_transport(%Remote{} = remote, runner) do
+    case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), transport_script()),
+           stderr_to_stdout: true
+         ) do
+      {_out, 0} -> :ok
+      {out, code} -> {:error, {:ssh_transport_failed, code, trim_output(out)}}
     end
   end
 
