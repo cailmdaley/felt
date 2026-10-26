@@ -8,7 +8,8 @@ defmodule Shuttle.Env do
   `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
   `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. Executable lookup
   caches successful PATH resolutions for one minute; the runner invalidates and
-  retries a failed spawn. Other production reads use the global value.
+  retries a failed spawn. The VM's immutable home directory is cached too;
+  other production reads use the global value.
 
   Test builds (`config :shuttle, scoped_env: true`, read at compile time) first
   consult *scoped overrides*: values a test process registers for itself and
@@ -44,11 +45,14 @@ defmodule Shuttle.Env do
     key = executable_key(name)
 
     Shuttle.RuntimeCache.fetch(key, 60_000, fn ->
-      case get("PATH") do
-        nil ->
+      case {Path.type(name), get("PATH")} do
+        {:absolute, _} ->
+          System.find_executable(name)
+
+        {_, nil} ->
           nil
 
-        path ->
+        {_, path} ->
           case :os.find_executable(String.to_charlist(name), String.to_charlist(path)) do
             false -> nil
             found -> List.to_string(found)

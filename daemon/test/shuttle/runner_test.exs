@@ -53,6 +53,9 @@ defmodule Shuttle.RunnerTest do
 
     Shuttle.Test.Env.put_env("PATH", first)
     assert Shuttle.Env.find_executable(command) == nil
+    Shuttle.Test.Env.delete_env("PATH")
+    assert Shuttle.Env.find_executable(b) == b
+    assert {"second", 0} = Shuttle.Runner.Default.cmd(b, [], [])
   end
 
   test "a command that completes within its bound is unaffected" do

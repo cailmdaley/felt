@@ -64,9 +64,10 @@ defmodule Shuttle.EventStream do
   stream, correct rather than silently served stale.
 
   `session_activity/1` never enters this process's mailbox: the stream
-  publishes compact phase and open-turn maps to a protected ETS table named after the server
-  whenever a poll, catch-up read or seed settles, and readers compute phases
-  from that row. The poller calls it inside the owner-feed request, which must
+  publishes compact phase and open-turn maps to a protected ETS table named
+  after the server whenever a poll, catch-up read or seed settles.
+  Readers copy only the projection they need, without its retained event history.
+  The poller calls it inside the owner-feed request, which must
   wait neither on the filesystem nor behind a full reseed of a shrunken file.
   It is as fresh as the last poll, catch-up read or seed to complete.
   """
