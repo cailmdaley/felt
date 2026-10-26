@@ -21,6 +21,32 @@ defmodule Shuttle.DaemonHeartbeatTest do
   end
 
   describe "writing and the stop marker" do
+    test "steady-state writes don't walk parent directories", %{path: path} do
+      :ok = DaemonHeartbeat.write(path, booted_at: 1)
+      session = :trace.session_create(:heartbeat_dirs, self(), [])
+      on_exit(fn -> :trace.session_destroy(session) end)
+      :trace.function(session, {File, :mkdir_p, 1}, true, [:local])
+
+      task =
+        Task.async(fn ->
+          receive do
+            :write -> DaemonHeartbeat.write(path, booted_at: 2)
+          end
+        end)
+
+      :trace.process(session, task.pid, true, [:call])
+      send(task.pid, :write)
+      assert Task.await(task) == :ok
+      delivered = :trace.delivered(session, :all)
+      assert_receive {:trace_delivered, :all, ^delivered}
+      refute_receive {:trace, _, :call, {File, :mkdir_p, _}}, 0
+      assert {:ok, %{"booted_at" => 2}} = DaemonHeartbeat.read(path)
+
+      File.rm_rf!(Path.dirname(path))
+      :ok = DaemonHeartbeat.write(path, booted_at: 3)
+      assert {:ok, %{"booted_at" => 3}} = DaemonHeartbeat.read(path)
+    end
+
     test "write_async writes the record", %{path: path} do
       pid = DaemonHeartbeat.write_async(path, booted_at: 1, workers: ["a"])
       assert is_pid(pid)

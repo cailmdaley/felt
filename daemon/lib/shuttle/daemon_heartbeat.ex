@@ -238,9 +238,8 @@ defmodule Shuttle.DaemonHeartbeat do
 
     tmp = path <> ".tmp"
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         {:ok, body} <- Jason.encode(record),
-         :ok <- File.write(tmp, body),
+    with {:ok, body} <- Jason.encode(record),
+         :ok <- write_heartbeat(tmp, body),
          :ok <- File.rename(tmp, path) do
       :ok
     else
@@ -253,6 +252,16 @@ defmodule Shuttle.DaemonHeartbeat do
     error ->
       Logger.debug("daemon heartbeat write raised (#{path}): #{inspect(error)}")
       :ok
+  end
+
+  defp write_heartbeat(path, body) do
+    case File.write(path, body) do
+      {:error, :enoent} ->
+        with :ok <- File.mkdir_p(Path.dirname(path)), do: File.write(path, body)
+
+      result ->
+        result
+    end
   end
 
   @doc """
