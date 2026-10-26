@@ -64,7 +64,7 @@ defmodule Shuttle.EventStream do
   stream, correct rather than silently served stale.
 
   `session_activity/1` never enters this process's mailbox: the stream
-  publishes its waiting map to a protected ETS table named after the server
+  publishes compact phase and open-turn maps to a protected ETS table named after the server
   whenever a poll, catch-up read or seed settles, and readers compute phases
   from that row. The poller calls it inside the owner-feed request, which must
   wait neither on the filesystem nor behind a full reseed of a shrunken file.
@@ -91,8 +91,8 @@ defmodule Shuttle.EventStream do
     # a prepend. `seed_hook` runs between reading the live file and reading the
     # rotated one — the window a racing rotation lands in. Tests rotate there.
     # `clock` returns epoch ms; the waiting projection prunes and reads by it.
-    # `table` is the ETS table `session_activity/1` reads; `published` is the
-    # waiting map last written there.
+    # `table` holds compact reader projections; `published` tracks which
+    # waiting and binding maps produced them.
     defstruct [
       :events_file,
       :table,
@@ -163,16 +163,15 @@ defmodule Shuttle.EventStream do
   end
 
   @doc """
-  `Shuttle.WaitingTracker.phases/2` of the published waiting map, at the
-  stream's clock: `session => %{last_event_at: ms, phase: phase}` over every
+  The published phase map: `session => %{last_event_at: ms, phase: phase}` over every
   tracked harness session UUID. An ETS read, never a call, so it answers at once
   even while the stream is mid-reseed. A stream that is not running is `%{}`.
   """
   @spec session_activity(atom()) ::
           %{optional(String.t()) => %{last_event_at: integer(), phase: String.t()}}
   def session_activity(server \\ __MODULE__) when is_atom(server) do
-    case :ets.lookup(server, :waiting) do
-      [{:waiting, waiting, clock}] -> WaitingTracker.phases(waiting, clock.())
+    case :ets.lookup(server, :activity) do
+      [{:activity, phases}] -> phases
       [] -> %{}
     end
   rescue
@@ -188,14 +187,9 @@ defmodule Shuttle.EventStream do
           optional(String.t()) => %{at: integer(), harness: String.t() | nil}
         }
   def open_turns(server \\ __MODULE__) when is_atom(server) do
-    case :ets.lookup(server, :waiting) do
-      [{:waiting, waiting, _clock}] ->
-        for {id, %{turn: :open} = session} <- waiting,
-            into: %{},
-            do: {id, %{at: session.at, harness: session.harness}}
-
-      [] ->
-        %{}
+    case :ets.lookup(server, :open_turns) do
+      [{:open_turns, turns}] -> turns
+      [] -> %{}
     end
   rescue
     ArgumentError -> %{}
@@ -498,13 +492,21 @@ defmodule Shuttle.EventStream do
 
   defp schedule_poll(ms), do: Process.send_after(self(), :poll, ms)
 
-  # The waiting map `session_activity/1` reads, with the clock its phases are
-  # read against. Written only when the map changed.
+  # Publish reader-sized projections only when the underlying maps change.
+  # Event histories stay in this process, rather than being copied out of ETS
+  # on every poller and interrupt-watcher read.
   defp publish(%State{waiting: waiting, binding: binding, published: {waiting, binding}} = state),
     do: state
 
   defp publish(%State{table: table, waiting: waiting, binding: binding, clock: clock} = state) do
-    :ets.insert(table, [{:waiting, waiting, clock}, {:binding, binding}])
+    phases = WaitingTracker.phases(waiting, clock.())
+
+    turns =
+      for {id, %{turn: :open} = session} <- waiting,
+          into: %{},
+          do: {id, %{at: session.at, harness: session.harness}}
+
+    :ets.insert(table, [{:activity, phases}, {:open_turns, turns}, {:binding, binding}])
     %{state | published: {waiting, binding}}
   end
 end

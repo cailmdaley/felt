@@ -29,7 +29,8 @@ defmodule Shuttle.WaitingTracker do
               harness: nil,
               child_events: %{},
               events: %{},
-              sequence: 0
+              sequence: 0,
+              oldest_event_at: nil
   end
 
   @type sessions :: %{optional(String.t()) => %Session{}}
@@ -72,9 +73,16 @@ defmodule Shuttle.WaitingTracker do
   def prune(sessions, now) do
     cutoff = now - @max_age_ms
 
-    sessions
-    |> Map.reject(fn {_id, session} -> session.at < cutoff end)
-    |> Map.new(fn {id, session} -> {id, trim_events(session, cutoff)} end)
+    Enum.reduce(sessions, sessions, fn {id, session}, acc ->
+      cond do
+        session.at < cutoff ->
+          Map.delete(acc, id)
+
+        true ->
+          trimmed = trim_events(session, cutoff)
+          if trimmed == session, do: acc, else: Map.put(acc, id, trimmed)
+      end
+    end)
   end
 
   @doc "Replays unseen suffix events onto known facts without rewinding retained prefixes."
@@ -124,8 +132,17 @@ defmodule Shuttle.WaitingTracker do
 
   defp remember_event(session, event, now) do
     sequence = session.sequence + 1
-    events = Map.put(session.events, event_key(event), {sequence, event_at(event, now)})
-    %{session | events: events, sequence: sequence}
+    at = event_at(event, now)
+    events = Map.put(session.events, event_key(event), {sequence, at})
+
+    oldest =
+      cond do
+        is_integer(session.oldest_event_at) -> min(session.oldest_event_at, at)
+        map_size(session.events) == 0 and map_size(session.child_events) == 0 -> at
+        true -> nil
+      end
+
+    %{session | events: events, sequence: sequence, oldest_event_at: oldest}
   end
 
   defp transition(session, type, event, now) do
@@ -275,13 +292,22 @@ defmodule Shuttle.WaitingTracker do
     end
   end
 
+  defp trim_events(%{oldest_event_at: at} = session, cutoff)
+       when is_integer(at) and at >= cutoff, do: session
+
   defp trim_events(session, cutoff) do
-    %{
-      session
-      | child_events: Map.reject(session.child_events, fn {_id, at} -> at < cutoff end),
-        events: Map.reject(session.events, fn {_key, {_sequence, at}} -> at < cutoff end)
-    }
+    children = Map.reject(session.child_events, fn {_id, at} -> at < cutoff end)
+    events = Map.reject(session.events, fn {_key, {_sequence, at}} -> at < cutoff end)
+    oldest = Enum.reduce(children, nil, fn {_id, at}, oldest -> min_timestamp(oldest, at) end)
+
+    oldest =
+      Enum.reduce(events, oldest, fn {_key, {_seq, at}}, oldest -> min_timestamp(oldest, at) end)
+
+    %{session | child_events: children, events: events, oldest_event_at: oldest}
   end
+
+  defp min_timestamp(nil, at), do: at
+  defp min_timestamp(oldest, at), do: min(oldest, at)
 
   defp codex_event?(%{"harness" => "codex"}, _session), do: true
   defp codex_event?(_event, _session), do: false

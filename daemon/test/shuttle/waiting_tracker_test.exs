@@ -14,6 +14,35 @@ defmodule Shuttle.WaitingTrackerTest do
   defp phase(sessions, id, now \\ @now), do: Tracker.phases(sessions, now)[id].phase
   defp fold(events), do: Enum.reduce(events, %{}, &Tracker.apply_event(&2, &1, @now))
 
+  test "quiet ticks don't scan retained event histories before their first expiry" do
+    sessions =
+      Enum.reduce(1..5_000, %{}, fn n, sessions ->
+        Tracker.apply_event(
+          sessions,
+          event("pre_tool_use", "session-a", %{"id" => to_string(n)}),
+          @now
+        )
+      end)
+
+    {:reductions, before} = Process.info(self(), :reductions)
+    kept = Tracker.prune(sessions, @now + @hour)
+    {:reductions, after_prune} = Process.info(self(), :reductions)
+    assert after_prune - before < 1_000
+    assert kept == sessions
+    assert Tracker.prune(sessions, @now + 48 * @hour) == sessions
+    assert Tracker.prune(sessions, @now + 48 * @hour + 1) == %{}
+
+    newer =
+      Tracker.apply_event(
+        sessions,
+        event("stop", "session-a", %{"id" => "last", "timestamp" => @now + 1}),
+        @now
+      )
+
+    assert %{"session-a" => %{events: events}} = Tracker.prune(newer, @now + 48 * @hour + 1)
+    assert events == %{{:id, "last"} => {5_001, @now + 1}}
+  end
+
   test "session identity is required and does not depend on tmux naming" do
     sessions =
       %{}

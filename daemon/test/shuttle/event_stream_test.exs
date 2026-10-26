@@ -56,6 +56,26 @@ defmodule Shuttle.EventStreamTest do
 
   defp kinds(buckets), do: Enum.map(buckets, &{div(&1.m - @t0, @m), &1.k, &1.n})
 
+  test "phase readers copy compact projections, not retained event history", %{path: path} do
+    append(path, Enum.map(1..5_000, &ev("pre_tool_use", 0, %{"id" => to_string(&1)})))
+    name = :event_stream_compact_projection
+
+    start_supervised!(
+      {EventStream,
+       events_file: path, name: name, clock: fn -> @t0 end, poll_interval_ms: 3_600_000}
+    )
+
+    {:reductions, before} = Process.info(self(), :reductions)
+
+    assert EventStream.session_activity(name) == %{
+             "s1" => %{last_event_at: @t0, phase: "working"}
+           }
+
+    assert EventStream.open_turns(name) == %{"s1" => %{at: @t0, harness: nil}}
+    {:reductions, after_read} = Process.info(self(), :reductions)
+    assert after_read - before < 1_000
+  end
+
   test "seeds from the rotated file then the live one, and matches a fresh fold", %{path: path} do
     append(path <> ".1", [ev("notification", 0), ev("pre_tool_use", 1)])
     append(path, [ev("notification", 2), ev("post_tool_use", 5)])
