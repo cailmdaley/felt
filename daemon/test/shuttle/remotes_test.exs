@@ -346,6 +346,20 @@ defmodule Shuttle.RemotesTest do
       {:ok, socket: socket, home: home}
     end
 
+    test "cached selection never authorizes a changed socket ancestry", %{home: home, socket: socket} do
+      assert Remotes.default_tailscale_socket() == socket
+      assert {:ok, conn} = Remotes.connect_socket(socket, [:binary, active: false], 1_000)
+      :gen_tcp.close(conn)
+
+      File.chmod!(Path.join(home, ".local"), 0o777)
+      # Reconciliation reuses its verdict without walking Lustre directories.
+      assert Remotes.default_tailscale_socket() == socket
+      # A co-tenant could replace the socket after this permission change.
+      assert {:error, {:untrusted_socket, {:refused, ^socket, why}}} =
+               Remotes.connect_socket(socket, [:binary, active: false], 1_000)
+      assert why =~ "writable by group or others"
+    end
+
     # A layout under $HOME: the modes of .local, .local/state and
     # .local/state/tailscale, what sits at the socket path, whether .local/state
     # is a symlink into a private tree, and the OS. The socket is trusted only

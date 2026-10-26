@@ -471,7 +471,7 @@ defmodule Shuttle.TailnetPeers do
     deadline = deadline(@status_timeout_ms)
 
     result =
-      case :gen_tcp.connect({:local, socket}, 0, [:binary, active: false], @status_timeout_ms) do
+      case Remotes.connect_socket(socket, [:binary, active: false], @status_timeout_ms) do
         {:ok, conn} ->
           try do
             with :ok <- :gen_tcp.send(conn, request),

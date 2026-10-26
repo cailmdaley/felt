@@ -308,9 +308,42 @@ defmodule Shuttle.Remotes do
   """
   @spec default_tailscale_socket() :: String.t() | nil
   def default_tailscale_socket do
-    case default_tailscale_socket_check() do
+    key = {__MODULE__, :default_socket, default_socket_home(), Shuttle.Env.app(:os_type)}
+
+    case Shuttle.RuntimeCache.fetch(key, 60_000, &default_tailscale_socket_check/0) do
       {:ok, path} -> path
       _ -> nil
+    end
+  end
+
+  @doc false
+  # Selection is cached for reconciliation, never authorization. Every new
+  # connection to the default path checks the literal ancestry again.
+  def authorize_socket(path) do
+    home = default_socket_home()
+
+    if is_binary(home) and path == Path.join(home, @default_socket_path) do
+      case default_tailscale_socket_check() do
+        {:ok, ^path} -> :ok
+        refused -> {:error, {:untrusted_socket, refused}}
+      end
+    else
+      :ok
+    end
+  end
+
+  @doc false
+  def connect_socket(path, options, timeout) do
+    with :ok <- authorize_socket(path) do
+      :gen_tcp.connect({:local, path}, 0, options, timeout)
+    end
+  end
+
+  defp default_socket_home do
+    case Shuttle.Env.app(:tailscale_home) do
+      nil -> Shuttle.Env.get("HOME")
+      false -> nil
+      home -> home
     end
   end
 
@@ -332,12 +365,7 @@ defmodule Shuttle.Remotes do
   @spec default_tailscale_socket_check() ::
           {:ok, String.t()} | {:refused, String.t(), String.t()} | :absent
   def default_tailscale_socket_check do
-    home =
-      case Shuttle.Env.app(:tailscale_home) do
-        nil -> Shuttle.Env.get("HOME")
-        false -> nil
-        home -> home
-      end
+    home = default_socket_home()
 
     with "/" <> _ <- home,
          path = Path.join(home, @default_socket_path),

@@ -187,7 +187,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   defp dial(opts) do
     localapi_socket = Keyword.fetch!(opts, :localapi_socket)
 
-    case :gen_tcp.connect({:local, localapi_socket}, 0, @socket_options, @connect_timeout_ms) do
+    case Shuttle.Remotes.connect_socket(localapi_socket, @socket_options, @connect_timeout_ms) do
       {:ok, socket} ->
         dial_tls(socket, opts)
 
