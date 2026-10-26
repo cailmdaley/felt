@@ -24,9 +24,8 @@ defmodule Shuttle.FeltStores do
   @type store_list :: [String.t()]
 
   @expanded_cache_key {__MODULE__, :expanded_stores}
-  # How stale the poller lets the expansion get before re-walking it. The
-  # symlink topology changes about monthly and the walk costs ~1 s on a large
-  # store, so minutes of lag are free — and no request ever pays for it.
+  # The poller refreshes symlink topology on this cadence. Child-process
+  # discovery keeps metadata traversal outside the VM's CPU budget.
   @expansion_refresh_ms 300_000
 
   @doc """
@@ -35,7 +34,8 @@ defmodule Shuttle.FeltStores do
   A cache read — the walk runs in the poll cycle's Task
   (`refresh_expanded_stores/0`), never on a request process. The exception is a
   cold start: the first call for a given base list, which includes a
-  just-changed `SHUTTLE_STORES`/registry, so a config change takes effect at once.
+  just-changed `SHUTTLE_STORES`/registry. Discovery failures retain the last
+  good expansion (or the base stores on cold start) until a poll refresh.
   """
   @spec configured_stores() :: store_list()
   def configured_stores, do: cached_expansion(:infinity)
@@ -51,7 +51,7 @@ defmodule Shuttle.FeltStores do
   @spec refresh_expanded_stores() :: store_list()
   def refresh_expanded_stores, do: cached_expansion(@expansion_refresh_ms)
 
-  # Cached by base list, so a config change never serves the old expansion.
+  # Cached by base list, so a config change attempts discovery immediately.
   # `:infinity` sorts above every integer, so the read path takes the cached
   # branch whenever an entry for this base exists.
   #
@@ -73,12 +73,23 @@ defmodule Shuttle.FeltStores do
       {{:error, _reason}, :none} ->
         []
 
-      {{:ok, base}, _cached} ->
-        expanded = expand_with_symlinked_substores(base)
+      {{:ok, base}, cached} ->
+        expanded =
+          case expand_with_symlinked_substores(base) do
+            {:ok, expanded} -> expanded
+            {:error, _reason} -> cached_or_base(cached, base)
+          end
+
+        # Cache the attempt too: failed discovery retains the last good list,
+        # and only the poller's next refresh retries, never a request read.
         :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
   end
+
+  defp cached_or_base({_base, [], _walked_at}, base), do: base
+  defp cached_or_base({_base, expanded, _walked_at}, _base_stores), do: expanded
+  defp cached_or_base(:none, base), do: base
 
   @doc """
   The configured store list before symlink-substore expansion.
@@ -105,16 +116,27 @@ defmodule Shuttle.FeltStores do
   # listed once and no two stores enumerate the same fibers. Dangling symlinks and
   # links resolving back inside the linking store are skipped.
   defp expand_with_symlinked_substores(stores) do
-    discovered = Enum.flat_map(stores, &symlinked_substore_roots/1)
+    Enum.reduce_while(stores, {:ok, []}, fn store, {:ok, discovered} ->
+      case symlinked_substore_roots(store) do
+        {:ok, roots} -> {:cont, {:ok, discovered ++ roots}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, discovered} ->
+        expanded =
+          (stores ++ discovered)
+          |> Enum.map(&Shuttle.Env.expand/1)
+          # The poller skips stores whose `.felt` is a symlink. Prefer the
+          # real-directory store when two stores share a `.felt` realpath.
+          |> Enum.sort_by(&felt_symlink?/1)
+          |> Enum.uniq_by(&store_felt_realpath/1)
 
-    (stores ++ discovered)
-    |> Enum.map(&Shuttle.Env.expand/1)
-    # When two stores share a `.felt/` realpath, keep the REAL-directory store:
-    # `list_shuttle_fibers/2` returns `{:ok, []}` for a store whose `.felt/` is a
-    # symlink, so keeping that one would drop the realpath from dispatch (and the
-    # kanban) entirely. The sort is stable, so it only moves symlink stores last.
-    |> Enum.sort_by(&felt_symlink?/1)
-    |> Enum.uniq_by(&store_felt_realpath/1)
+        {:ok, expanded}
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   @doc """
@@ -153,47 +175,69 @@ defmodule Shuttle.FeltStores do
   # symlink during traversal — a substore link is *detected*, not *descended*, so
   # the walk cannot loop or wander into another store's tree. A root that lands
   # back inside the linking store is dropped (the store already enumerates it).
+  # Entries in directories at depth 0..16 are inspected, so links at find
+  # depth 17 are included. The cap bounds traversal of pathological trees.
+  @max_substore_scan_depth 16
+  @substore_scan_timeout_ms 60_000
+
   defp symlinked_substore_roots(store) do
-    walk_substore_roots(Path.join(store, ".felt"), store_felt_realpath(store), 0)
+    store_real = store_felt_realpath(store)
+
+    # Resolve the starting directory so a configured symlink-.felt view is
+    # scanned too. -P never follows any symlink encountered within that tree.
+    # find uses directory-entry types where available; per-entry metadata work
+    # stays in the child even on filesystems that require stat fallbacks.
+    args = [
+      "-P",
+      store_real,
+      "-maxdepth",
+      Integer.to_string(@max_substore_scan_depth + 1),
+      "-type",
+      "l",
+      "-print0"
+    ]
+
+    case substore_links(store_real, args) do
+      {output, 0} ->
+        roots =
+          output
+          |> String.split(<<0>>, trim: true)
+          |> Enum.flat_map(fn path ->
+            with {:ok, real} <- Shuttle.Realpath.resolve(path),
+                 ".felt" <- Path.basename(real),
+                 true <- File.dir?(real),
+                 false <- inside?(real, store_real) do
+              [Path.dirname(real)]
+            else
+              _ -> []
+            end
+          end)
+
+        {:ok, roots}
+
+      {_output, status} ->
+        {:error, status}
+    end
   end
 
-  # Real directory trees are finite (no symlink-following), so the recursion
-  # terminates on its own; the depth cap is a guard against a pathologically deep
-  # tree slowing the periodic expansion, not a correctness boundary.
-  @max_substore_scan_depth 16
+  # An absent `.felt` has no links. Check only the root, never each entry;
+  # other filesystem errors remain discovery failures rather than empty scans.
+  defp substore_links(dir, args) do
+    case File.stat(dir) do
+      {:error, reason} when reason in [:enoent, :enotdir] ->
+        {"", 0}
 
-  defp walk_substore_roots(_dir, _store_real, depth) when depth > @max_substore_scan_depth, do: []
+      {:ok, %File.Stat{type: :directory}} ->
+        runner().cmd("find", args,
+          stderr_to_stdout: false,
+          timeout_ms: @substore_scan_timeout_ms
+        )
 
-  defp walk_substore_roots(dir, store_real, depth) do
-    case File.ls(dir) do
-      {:ok, entries} ->
-        Enum.flat_map(entries, fn entry ->
-          path = Path.join(dir, entry)
+      {:ok, _stat} ->
+        {"", 0}
 
-          case File.lstat(path) do
-            # A symlink: a substore link iff it resolves to an external real
-            # `.felt` directory. Detected here, never descended.
-            {:ok, %File.Stat{type: :symlink}} ->
-              with {:ok, real} <- Shuttle.Realpath.resolve(path),
-                   ".felt" <- Path.basename(real),
-                   true <- File.dir?(real),
-                   false <- inside?(real, store_real) do
-                [Path.dirname(real)]
-              else
-                _ -> []
-              end
-
-            # A real subdirectory: recurse to reach nested mount points.
-            {:ok, %File.Stat{type: :directory}} ->
-              walk_substore_roots(path, store_real, depth + 1)
-
-            _ ->
-              []
-          end
-        end)
-
-      _ ->
-        []
+      {:error, reason} ->
+        {"", reason}
     end
   end
 
@@ -450,7 +494,7 @@ defmodule Shuttle.FeltStores do
   end
 
   # The command runner, behind the same config seam as `Shuttle.Felt` — these
-  # calls run from whatever process resolves a fiber (Poller, controllers), so
+  # calls discover substores or resolve fibers (Poller, controllers), so
   # injection is by config rather than a threaded opt. Tests set
   # `:shuttle, :felt_stores_runner` to a mock; production defaults to the
   # bounded runner.

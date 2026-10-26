@@ -141,7 +141,141 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
+  defmodule DiscoveryRunner do
+    @behaviour Shuttle.Runner
+
+    def cmd("find", ["-P", _dir, "-maxdepth", "17", "-type", "l", "-print0"] = args, opts) do
+      send(self(), {:discovery, args, opts})
+      Shuttle.Env.app(:discovery_result)
+    end
+  end
+
   describe "configured_stores/0 symlinked-substore discovery" do
+    test "real find discovers nested external .felt roots without descending links" do
+      store = tmp_dir()
+      project = tmp_dir()
+      hidden = tmp_dir()
+      gateway = tmp_dir()
+      nested = Path.join([store, ".felt", "real", "nested"])
+      internal = Path.join([store, ".felt", "internal", ".felt"])
+      File.mkdir_p!(nested)
+      File.mkdir_p!(internal)
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.mkdir_p!(Path.join(hidden, ".felt"))
+      File.write!(Path.join(nested, "companion.md"), "body")
+      # Newlines in link names require NUL-delimited child output.
+      File.ln_s!(Path.join(project, ".felt"), Path.join(nested, "project\nlink"))
+      File.ln_s!(internal, Path.join(nested, "inside"))
+      File.ln_s!(Path.join(hidden, ".felt"), Path.join(gateway, "hidden"))
+      File.ln_s!(gateway, Path.join(nested, "gateway"))
+      File.ln_s!(Path.join(project, "missing"), Path.join(nested, "dangling"))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+
+      # No injected runner: this exercises the platform's actual find binary.
+      assert [base, discovered] = FeltStores.configured_stores()
+      assert same_dir?(base, store)
+      assert same_dir?(discovered, project)
+    end
+
+    test "real find includes links at depth 17 but excludes depth 18" do
+      store = tmp_dir()
+      included = tmp_dir()
+      excluded = tmp_dir()
+      depth16 = Path.join([store, ".felt" | List.duplicate("dir", 16)])
+      File.mkdir_p!(Path.join(depth16, "deeper"))
+      File.mkdir_p!(Path.join(included, ".felt"))
+      File.mkdir_p!(Path.join(excluded, ".felt"))
+      File.ln_s!(Path.join(included, ".felt"), Path.join(depth16, "included"))
+      File.ln_s!(Path.join(excluded, ".felt"), Path.join([depth16, "deeper", "excluded"]))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+
+      assert [base, discovered] = FeltStores.configured_stores()
+      assert same_dir?(base, store)
+      assert same_dir?(discovered, included)
+    end
+
+    for status <- [1, 127, :timeout] do
+      @tag discovery_status: status
+      test "discovery failure #{inspect(status)} retains the last good expansion without request retries",
+           %{discovery_status: status} do
+        store = tmp_dir()
+        project = tmp_dir()
+        File.mkdir_p!(Path.join(store, ".felt"))
+        File.mkdir_p!(Path.join(project, ".felt"))
+        File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "project"]))
+        Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+        good = FeltStores.configured_stores()
+        assert [_, _] = good
+
+        key = Shuttle.Env.scope_key({FeltStores, :expanded_stores})
+        {base, expanded, walked_at} = :persistent_term.get(key)
+        :persistent_term.put(key, {base, expanded, walked_at - 600_000})
+        Shuttle.Test.Env.put_app_env(:felt_stores_runner, DiscoveryRunner)
+        # Even partial stdout from a failed child must not publish a partial list.
+        Shuttle.Test.Env.put_app_env(:discovery_result, {"partial\0", status})
+
+        assert FeltStores.refresh_expanded_stores() == good
+        assert_received {:discovery, _, opts}
+        assert opts[:timeout_ms] == 60_000
+        assert opts[:stderr_to_stdout] == false
+        assert FeltStores.configured_stores() == good
+        assert FeltStores.refresh_expanded_stores() == good
+        refute_received {:discovery, _, _}
+
+        # A subsequent poll refresh can recover and publish an empty discovery.
+        {base, expanded, walked_at} = :persistent_term.get(key)
+        :persistent_term.put(key, {base, expanded, walked_at - 600_000})
+        Shuttle.Test.Env.put_app_env(:discovery_result, {"", 0})
+        assert FeltStores.refresh_expanded_stores() == [store]
+        assert_received {:discovery, _, _}
+      end
+    end
+
+    test "real find scans a configured symlink-.felt root without following nested links" do
+      store = tmp_dir()
+      backing = tmp_dir()
+      project = tmp_dir()
+      File.mkdir_p!(Path.join([backing, ".felt", "nested"]))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.ln_s!(Path.join(backing, ".felt"), Path.join(store, ".felt"))
+      File.ln_s!(Path.join(project, ".felt"), Path.join([backing, ".felt", "nested", "project"]))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+
+      assert [discovered, base] = FeltStores.configured_stores()
+      assert same_dir?(discovered, project)
+      assert same_dir?(base, store)
+    end
+
+    test "a failed config-change discovery does not cache an empty expansion" do
+      Shuttle.Test.Env.delete_env("SHUTTLE_STORES")
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", Path.join(tmp_dir(), "absent.json"))
+      assert FeltStores.configured_stores() == []
+
+      store = tmp_dir()
+      File.mkdir_p!(Path.join(store, ".felt"))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+      Shuttle.Test.Env.put_app_env(:felt_stores_runner, DiscoveryRunner)
+      Shuttle.Test.Env.put_app_env(:discovery_result, {"timeout", :timeout})
+
+      assert FeltStores.configured_stores() == [store]
+      assert_received {:discovery, _, _}
+      assert FeltStores.configured_stores() == [store]
+      refute_received {:discovery, _, _}
+    end
+
+    test "cold discovery failure caches the base list rather than retrying on reads" do
+      store = tmp_dir()
+      File.mkdir_p!(Path.join(store, ".felt"))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+      Shuttle.Test.Env.put_app_env(:felt_stores_runner, DiscoveryRunner)
+      Shuttle.Test.Env.put_app_env(:discovery_result, {"timeout", :timeout})
+
+      assert FeltStores.configured_stores() == [store]
+      assert_received {:discovery, _, _}
+      assert FeltStores.configured_stores() == [store]
+      refute_received {:discovery, _, _}
+    end
+
     # The candide topology: a project's `.felt` symlinked into loom. The poller
     # enumerates a fiber only from the store it physically roots in, so the
     # project root must be a store. Following the loom symlink auto-discovers it,
