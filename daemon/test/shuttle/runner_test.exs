@@ -23,6 +23,38 @@ defmodule Shuttle.RunnerTest do
     assert File.read!(env_path) == ""
   end
 
+  @tag :tmp_dir
+  test "lookup reuses PATH results and a stale spawn retries once", %{tmp_dir: dir} do
+    first = Path.join(dir, "first")
+    second = Path.join(dir, "second")
+    File.mkdir_p!(first)
+    File.mkdir_p!(second)
+    command = "cached-tool"
+    a = Path.join(first, command)
+    b = Path.join(second, command)
+    File.write!(a, "#!/bin/sh\nprintf first")
+    File.write!(b, "#!/bin/sh\nprintf second")
+    File.chmod!(a, 0o755)
+    File.chmod!(b, 0o755)
+    Shuttle.Test.Env.put_env("PATH", first <> ":" <> second)
+
+    assert Shuttle.Env.find_executable(command) == a
+    File.rm!(a)
+    # A fresh lookup would return b; this proves the result was cached.
+    assert Shuttle.Env.find_executable(command) == a
+    assert {"second", 0} = Shuttle.Runner.Default.cmd(command, [], [])
+    assert Shuttle.Env.find_executable(command) == b
+
+    File.chmod!(b, 0o644)
+    assert {_message, 127} = Shuttle.Runner.Default.cmd(command, [], [])
+    File.chmod!(b, 0o755)
+    # Negative lookups aren't retained when a tool is installed or repaired.
+    assert {"second", 0} = Shuttle.Runner.Default.cmd(command, [], [])
+
+    Shuttle.Test.Env.put_env("PATH", first)
+    assert Shuttle.Env.find_executable(command) == nil
+  end
+
   test "a command that completes within its bound is unaffected" do
     assert {"hi\n", 0} = Shuttle.Runner.Default.cmd("echo", ["hi"], timeout_ms: 5_000)
   end

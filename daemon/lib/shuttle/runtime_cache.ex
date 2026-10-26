@@ -28,6 +28,9 @@ defmodule Shuttle.RuntimeCache do
 
   def delete(key), do: :ets.delete(@table, Shuttle.Env.scope_key(key))
 
+  # Missing executables must be discoverable as soon as they are installed.
+  defp put_scoped(_key, nil, _expires), do: nil
+
   defp put_scoped(key, value, expires) do
     :ets.insert(@table, {key, value, expires})
     value

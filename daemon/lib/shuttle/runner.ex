@@ -58,6 +58,13 @@ defmodule Shuttle.Runner do
         nil -> {"#{command}: command not found", 127}
         executable -> run_bounded(executable, command, args, opts, timeout_ms)
       end
+    rescue
+      error in ErlangError ->
+        case error.original do
+          :enoent -> {"#{command}: command not found", 127}
+          :eacces -> {"#{command}: permission denied", 126}
+          _ -> reraise error, __STACKTRACE__
+        end
     end
 
     defp run_bounded(executable, command, args, opts, timeout_ms) do
@@ -78,7 +85,7 @@ defmodule Shuttle.Runner do
       # Any raise here (bad option, unreadable cd, …) propagates to the caller
       # exactly as bare `System.cmd/3` would — only :enoent and the timeout are
       # softened into the tuple contract.
-      port = Port.open({:spawn_executable, executable}, port_opts)
+      port = open_port(executable, command, port_opts)
 
       # Request-style CLI adapters consume one newline-delimited JSON frame and
       # exit after writing their receipt. Keeping stdin open lets us continue
@@ -115,6 +122,20 @@ defmodule Shuttle.Runner do
       after
         if guard, do: send(guard, :released)
       end
+    end
+
+    # Retry only a failed spawn: no child has run, so retry cannot repeat work.
+    defp open_port(executable, command, port_opts) do
+      Port.open({:spawn_executable, executable}, port_opts)
+    rescue
+      error in ErlangError ->
+        if error.original in [:enoent, :eacces] do
+          Shuttle.Env.invalidate_executable(command)
+          resolved = Shuttle.Env.find_executable(command) || :erlang.error(:enoent)
+          Port.open({:spawn_executable, resolved}, port_opts)
+        else
+          reraise error, __STACKTRACE__
+        end
     end
 
     # An unlinked sentinel that reaps `os_pid`'s process group if `owner` dies

@@ -346,7 +346,10 @@ defmodule Shuttle.RemotesTest do
       {:ok, socket: socket, home: home}
     end
 
-    test "cached selection never authorizes a changed socket ancestry", %{home: home, socket: socket} do
+    test "cached selection never authorizes a changed socket ancestry", %{
+      home: home,
+      socket: socket
+    } do
       assert Remotes.default_tailscale_socket() == socket
       assert {:ok, conn} = Remotes.connect_socket(socket, [:binary, active: false], 1_000)
       :gen_tcp.close(conn)
@@ -357,6 +360,7 @@ defmodule Shuttle.RemotesTest do
       # A co-tenant could replace the socket after this permission change.
       assert {:error, {:untrusted_socket, {:refused, ^socket, why}}} =
                Remotes.connect_socket(socket, [:binary, active: false], 1_000)
+
       assert why =~ "writable by group or others"
     end
 

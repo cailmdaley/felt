@@ -6,8 +6,9 @@ defmodule Shuttle.Env do
   Production code calls `get/2`, `app/2`, `find_executable/1`,
   `home/0`, `expand/1` and `cmd/3` instead of `System.get_env/2`,
   `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
-  `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. In `:dev` and `:prod` each is a straight
-  passthrough to the global value.
+  `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. Executable lookup
+  caches successful PATH resolutions for one minute; the runner invalidates and
+  retries a failed spawn. Other production reads use the global value.
 
   Test builds (`config :shuttle, scoped_env: true`, read at compile time) first
   consult *scoped overrides*: values a test process registers for itself and
@@ -37,6 +38,39 @@ defmodule Shuttle.Env do
   @doc "Whether this build consults scoped overrides."
   def scoped?, do: @scoped
 
+  @doc "Executable lookup cached by name, PATH and relative-path working directory."
+  @spec find_executable(String.t()) :: String.t() | nil
+  def find_executable(name) do
+    key = executable_key(name)
+
+    Shuttle.RuntimeCache.fetch(key, 60_000, fn ->
+      case get("PATH") do
+        nil ->
+          nil
+
+        path ->
+          case :os.find_executable(String.to_charlist(name), String.to_charlist(path)) do
+            false -> nil
+            found -> List.to_string(found)
+          end
+      end
+    end)
+  end
+
+  @doc false
+  def invalidate_executable(name), do: Shuttle.RuntimeCache.delete(executable_key(name))
+
+  defp executable_key(name) do
+    path = get("PATH")
+
+    relative? =
+      Path.type(name) != :absolute and
+        (String.contains?(name, "/") or
+           Enum.any?(String.split(path || "", ":"), &(Path.type(&1) != :absolute)))
+
+    {__MODULE__, :executable, name, path, if(relative?, do: File.cwd!())}
+  end
+
   if @scoped do
     @max_walk 64
     @owner_key :"$shuttle_env_owner"
@@ -58,19 +92,6 @@ defmodule Shuttle.Env do
         {:ok, {:set, value}} -> value
         {:ok, :delete} -> default
         :error -> Application.get_env(:shuttle, key, default)
-      end
-    end
-
-    @doc """
-    `System.find_executable/1` against the caller's `PATH`: a scoped `PATH`
-    override is searched instead of the VM's.
-    """
-    @spec find_executable(String.t()) :: String.t() | nil
-    def find_executable(name) do
-      case lookup(:env, "PATH") do
-        {:ok, {:set, path}} -> find_on(name, path)
-        {:ok, :delete} -> nil
-        :error -> System.find_executable(name)
       end
     end
 
@@ -219,13 +240,6 @@ defmodule Shuttle.Env do
       end
     end
 
-    defp find_on(name, path) do
-      case :os.find_executable(String.to_charlist(name), String.to_charlist(path)) do
-        false -> nil
-        found -> List.to_string(found)
-      end
-    end
-
     defp walk([], _seen, _n), do: nil
     defp walk(_queue, _seen, n) when n >= @max_walk, do: nil
 
@@ -272,10 +286,6 @@ defmodule Shuttle.Env do
     @doc "`Application.get_env(:shuttle, key, default)`."
     @spec app(atom(), term()) :: term()
     def app(key, default \\ nil), do: Application.get_env(:shuttle, key, default)
-
-    @doc "`System.find_executable/1`."
-    @spec find_executable(String.t()) :: String.t() | nil
-    def find_executable(name), do: System.find_executable(name)
 
     @doc "`System.user_home!/0`."
     @spec home() :: String.t()
