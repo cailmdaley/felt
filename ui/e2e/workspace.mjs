@@ -242,7 +242,8 @@ test('Oversized embedded media fit report and constitution text columns', async 
     const css = getComputedStyle(parent)
     return { width: img.width, height: img.height, column: parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) }
   })
-  assert.ok(proseSize.width <= proseSize.column)
+  // img.width rounds to whole pixels; a percentage padding leaves the column fractional.
+  assert.ok(proseSize.width <= Math.ceil(proseSize.column), JSON.stringify(proseSize))
   assert.ok(Math.abs(proseSize.height / proseSize.width - .2) < .01)
   await choose(p, 'brief.md')
   const markdownImage = selected(p).locator('.kbn-detail-prose img')
@@ -250,7 +251,7 @@ test('Oversized embedded media fit report and constitution text columns', async 
   assert.ok(await markdownImage.evaluate(async img => {
     await img.decode()
     const parent = img.closest('.kbn-detail-prose'), css = getComputedStyle(parent)
-    return img.width <= parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight) && Math.abs(img.height / img.width - .2) < .01
+    return img.width <= Math.ceil(parent.clientWidth - parseFloat(css.paddingLeft) - parseFloat(css.paddingRight)) && Math.abs(img.height / img.width - .2) < .01
   }), 'Markdown deliverables fit their padded text column')
 })
 
@@ -414,12 +415,17 @@ test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize
   await p.locator('.ws-page.ws-expanded .ws-labelbar').dblclick()
   assert.equal(await p.locator('.ws-page.ws-expanded').count(), 0)
   await choose(p, 'brief.md')
-  const edge = selected(p).locator('.ws-edge-right')
-  const box = await edge.boundingBox()
-  const width = await selected(p).evaluate(el => el.getBoundingClientRect().width)
-  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-  await p.mouse.down(); await p.mouse.move(box.x - 120, box.y + box.height / 2); await p.mouse.up()
-  assert.notEqual(await selected(p).evaluate(el => el.getBoundingClientRect().width), width)
+  // One frame: the page fills the stage, and no corner toggle lands on the header line's contents.
+  const frame = await selected(p).evaluate(el => {
+    const box = r => { const b = r.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom } }
+    const stage = box(el.closest('.ws-stage')), page = box(el)
+    const parts = [...el.querySelectorAll('.ws-labelbar > :not([hidden])')].map(box).filter(b => b.r > b.l)
+    const toggles = [...document.querySelectorAll('.ws-reader > .ws-sidebar-toggle')].filter(t => getComputedStyle(t).display !== 'none').map(box)
+    const overlaps = toggles.flatMap(t => parts.filter(b => b.l < t.r && t.l < b.r && b.t < t.b && t.t < b.b))
+    return { fills: Math.abs(page.l - stage.l) < 1 && Math.abs(page.r - stage.r) < 1, overlaps: overlaps.length }
+  })
+  assert.ok(frame.fills, 'the selected page fills the stage')
+  assert.equal(frame.overlaps, 0, 'corner toggles keep their own places in the header line')
   await choose(p, 'calibration-report')
   await p.setViewportSize({ width: 1250, height: 760 })
   assert.ok(await iframe.evaluate(f => f === window.__reportFrame && f.contentWindow === window.__reportWindow), 'browser resize must retain the iframe')
@@ -859,42 +865,6 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
   assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
 })
 
-test('A click on the bare stage closes the reader to its origin; choosing a sent file stays inside; expanded, nothing', async p => {
-  await open(p); await reportReady(p)
-  await choose(p, 'brief.md')
-  await choose(p, 'readme.txt')
-  assert.ok(await p.locator('.kbn-reader-open').count(), 'choosing a sent file keeps the reader open')
-  // Expanded, the stage is the page's: a click below it does nothing.
-  await appFocus(p); await p.keyboard.press('Enter')
-  await poll(p, () => !!document.querySelector('.ws-expand-mode'))
-  const size = p.viewportSize()
-  await p.mouse.click(size.width / 2, size.height - 6)
-  assert.ok(await p.locator('.kbn-reader-open').count(), 'expanded, a stage click leaves the reader open')
-  await p.keyboard.press('Escape')
-  await poll(p, () => !document.querySelector('.ws-expand-mode'))
-  // A drag across the bare stage is not a click.
-  await p.mouse.move(size.width / 2, size.height - 8); await p.mouse.down(); await p.mouse.move(size.width / 2 + 60, size.height - 8, { steps: 4 }); await p.mouse.up()
-  assert.ok(await p.locator('.kbn-reader-open').count(), 'a drag on the stage leaves the reader open')
-  // A click that dismisses a popover does only that: the composer's model list closes, the reader stays.
-  await choose(p, 'Constitution')
-  await chatMenu(p, 'Settings')
-  await selected(p).locator('select[aria-label="Agent"]').click()
-  await p.locator('.ws-select-picker').waitFor()
-  await p.mouse.click(size.width / 2, size.height - 8)
-  await poll(p, () => !document.querySelector('.ws-select-picker'))
-  assert.ok(await p.locator('.kbn-reader-open').count(), 'dismissing the model list leaves the reader open')
-  // So does the bar's Find list, with the sidebar hidden.
-  await barFind(p).click(); await p.keyboard.type('mask')
-  await p.locator('.ws-switcher').waitFor()
-  await p.mouse.click(size.width / 2, size.height - 8)
-  await poll(p, () => !document.querySelector('.ws-switcher'))
-  assert.ok(await p.locator('.kbn-reader-open').count(), 'dismissing the Find list leaves the reader open')
-  // The bare stage beneath the page closes the reader back to the Desk, as Escape does.
-  await p.mouse.click(size.width / 2, size.height - 8)
-  await poll(p, () => !document.querySelector('.kbn-reader-open'))
-  assert.equal(await activeBarView(p), 'desk', 'the reader closes back to its origin view')
-})
-
 test('The sidebar edge resizes the column by drag and keys, persists per viewer, and resets on double-click', async p => {
   await open(p); await reportReady(p)
   const edge = p.getByRole('separator', { name: 'Resize constitutions' })
@@ -907,12 +877,12 @@ test('The sidebar edge resizes the column by drag and keys, persists per viewer,
   assert.equal(start.now, 384)
   assert.equal(await edge.getAttribute('aria-valuemin'), '320')
   assert.equal(await edge.getAttribute('aria-valuemax'), String(Math.floor(1440 * 0.4)))
-  // A drag reflows the stage live and keeps the page one gutter from the column.
+  // A drag reflows the stage live and keeps the page against the column.
   const box = await edge.boundingBox()
   await p.mouse.move(box.x + box.width / 2, 400); await p.mouse.down()
   await p.mouse.move(box.x + 80, 400, { steps: 4 })
   const live = await width()
-  assert.ok(live.sidebar > start.sidebar + 60 && Math.abs(live.gutter - 24) <= 4, `the stage follows the drag: ${JSON.stringify(live)}`)
+  assert.ok(live.sidebar > start.sidebar + 60 && Math.abs(live.gutter) <= 1, `the stage follows the drag: ${JSON.stringify(live)}`)
   await p.mouse.move(box.x + 2000, 400, { steps: 4 })
   await p.mouse.up()
   assert.equal((await width()).sidebar, Math.floor(1440 * 0.4), 'the drag stops at its share of the viewport')
@@ -932,7 +902,7 @@ test('The sidebar edge resizes the column by drag and keys, persists per viewer,
   assert.equal(await p.evaluate(() => localStorage.getItem('shuttle:workspace:sidebar-width')), null)
 }, undefined, 'true')
 
-for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps one gutter (${width})`, async p => {
+for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page fills the stage (${width})`, async p => {
   await open(p); await reportReady(p)
   const geometry = async () => p.evaluate(() => {
     const rect = el => el.getBoundingClientRect()
@@ -945,10 +915,9 @@ for (const width of [1000, 1440, 1920]) test(`Beside the sidebar the page keeps 
     await choose(p, label)
     await p.waitForTimeout(350)
     const at = await geometry()
-    // The pointer's parallax may drift the page a few pixels.
-    assert.ok(Math.abs(at.gutter - 24) <= 4, `${label}: the page sits one gutter from the sidebar: ${JSON.stringify(at)}`)
-    assert.ok(at.right >= 24, `${label}: the page shrinks before it crowds the stage's far edge: ${JSON.stringify(at)}`)
-    // Over the page's centre, unless the head's slot ends first; then as near it as the slot keeps the tile whole.
+    // One frame: the page meets the column and runs to the stage's far edge.
+    assert.ok(Math.abs(at.gutter) <= 1, `${label}: the page meets the sidebar: ${JSON.stringify(at)}`)
+    assert.ok(Math.abs(at.right) <= 1, `${label}: the page reaches the stage's far edge: ${JSON.stringify(at)}`)
     assert.notEqual(at.ground, 'rgba(0, 0, 0, 0)', 'the sidebar column has its own ground')
   }
 }, { width, height: 900 }, 'true')

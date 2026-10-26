@@ -90,8 +90,6 @@ const RAIL_STORAGE = 'shuttle:workspace:rail'
 const SIDEBAR_STEP = 16
 /** A latched swipe that neither moves nor releases for this long has lost its release. */
 const SWIPE_QUIET = 500
-/** Anything a click outside dismisses: anchored lists and menus, the switcher, the conversation menu. */
-const POPOVERS = '[data-anchored], .ws-menu, .ws-switcher, .kbn-conversation-menu'
 
 /** A single stage whose identity-keyed pages stay attached across channels. */
 export class Reader {
@@ -128,9 +126,7 @@ export class Reader {
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
   private swiping = false
   /** A press that began on the bare stage, which closes the reader if it ends there too. */
-  private stagePress: { id: number; x: number; y: number } | null = null
   /** Whether a popover was open when the current press began, before any outside-click handler closed it. */
-  private pressDismisses = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')
@@ -167,11 +163,8 @@ export class Reader {
   private readonly sidebarHandle = element('div', 'ws-sidebar-handle')
   /** The viewer's chosen width; absent, the measure's default. */
   private sidebarWidthChoice: number | null = null
-  private liveWidth: number | null = null
-  private cancelResize: (() => void) | null = null
   private cancelSidebarSlide: (() => void) | null = null
   private instantRaf = 0
-  private sizes: Record<string, number> = {}
   private readonly motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   private readonly phone = window.matchMedia(MOBILE_MEDIA)
 
@@ -252,7 +245,7 @@ export class Reader {
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
     this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
-    column.append(this.threadRail.breadcrumb, this.stage)
+    column.append(this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
     this.el.append(this.veil, this.navbar, this.sidebarToggle, this.railToggle, main, this.announcement, this.pageSheet.el)
@@ -267,11 +260,6 @@ export class Reader {
       onScroll: (key, y) => this.topbar.scroll(key, y),
       onSwipe: signal => this.swipe(signal),
     })
-    // Registered first on the window's capture phase, so it reads the page before any popover's own outside-click handler closes it.
-    window.addEventListener('pointerdown', this.notePopovers, true)
-    this.stage.addEventListener('pointerdown', this.stageDown)
-    this.stage.addEventListener('pointerup', this.stageUp)
-    this.stage.addEventListener('pointercancel', () => { this.stagePress = null })
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.layout(false))
     this.observer?.observe(this.stage)
@@ -286,7 +274,6 @@ export class Reader {
       if (e.button === 0 && (e.target as Element).closest('button')) e.preventDefault()
     })
     try {
-      this.sizes = JSON.parse(sessionStorage.getItem('shuttle:workspace:sizes') ?? '{}')
       const choice = localStorage.getItem(SIDEBAR_STORAGE)
       if (choice === 'true' || choice === 'false') this.sidebarChoice = choice === 'true'
       const rail = localStorage.getItem(RAIL_STORAGE)
@@ -308,7 +295,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.phoneRailPending = false; this.cancelResize?.(); if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
+    if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
     if (switching) this.parents.length = 0
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -342,7 +329,6 @@ export class Reader {
   select(key: DocKey): void {
     if (!this.channel?.documents.some(d => d.key === key) || key === this.selected) return
     this.cancelSwipe()
-    this.cancelResize?.()
     this.closeMenu()
     this.selected = key
     if (this.expanded) this.setExpanded(false)
@@ -359,7 +345,6 @@ export class Reader {
     this.phoneRailPending = false
     window.clearInterval(this.workerClock); this.workerClock = 0
     this.cancelSwipe()
-    this.cancelResize?.()
     this.setSidebarVisible(false, animate)
     if (this.expanded) this.setExpanded(false)
     this.active = false
@@ -566,11 +551,6 @@ export class Reader {
     frame.label.addEventListener('dblclick', e => {
       if (!(e.target as Element).closest('button,a') && frame.doc.key === this.selected) this.toggleExpand()
     })
-    for (const side of ['left', 'right'] as const) {
-      const edge = element('div', `ws-edge ws-edge-${side}`)
-      edge.addEventListener('pointerdown', e => this.resizeStart(e, frame, side))
-      frame.el.append(edge)
-    }
   }
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
@@ -597,8 +577,6 @@ export class Reader {
   }
   private preferredWidth(doc: WorkspaceDocument, max: number, height: number): number {
     if (this.phone.matches) return max
-    const saved = this.sizes[doc.key]
-    if (Number.isFinite(saved) && saved > 0) return Math.min(max, saved)
     // The chat is the widest page of the run: it takes the room the stage gives it, up to its measure.
     if (doc.kind === 'chat') return Math.min(max, this.measure('chat-width', 960))
     let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
@@ -619,11 +597,8 @@ export class Reader {
     const W = this.stage.clientWidth, H = this.stage.clientHeight
     if (!W || !H) return
     const inset = this.measure('stage-inset', 28), top = this.measure('stage-top', 10), gap = this.measure('gap', 24)
-    // Beside the sidebar the page keeps one page gap from the column and shrinks
-    // before that gutter grows; the right neighbour has the room left over.
-    // Without the sidebar the page is centred in the stage.
-    const docked = this.sidebarShown
-    const boxW = docked ? W - gap - inset : W - inset * 2, boxH = H - top - inset
+    // The selected page fills the stage: its header line and its document are the reader's only frame.
+    const boxW = W - inset * 2, boxH = H - top - inset
     if (!animate || this.motion.matches) {
       this.stage.classList.add('ws-instant')
       void this.stage.offsetWidth
@@ -632,21 +607,19 @@ export class Reader {
         this.instantRaf = requestAnimationFrame(() => this.stage.classList.remove('ws-instant'))
       })
     }
-    // Beside the threads rail the chat takes the stage up to it, leaving no gap for a neighbour.
-    const fill = this.railShown
-    let x = 0, centre = 0, selectedWidth = 0
+    let x = 0, centre = 0
     ch.documents.forEach(doc => {
       const f = this.host.get(doc.key)
       if (!f) return
       const sel = doc.key === this.selected
-      const width = sel && (this.expanded || ((doc.kind !== 'chat' || fill) && this.liveWidth === null && this.sizes[doc.key] === undefined)) ? boxW : sel && this.liveWidth !== null ? this.liveWidth : this.preferredWidth(doc, boxW, boxH)
+      const width = sel ? boxW : this.preferredWidth(doc, boxW, boxH)
       f.el.style.left = `${x}px`
       f.el.style.width = `${width}px`
       f.el.style.height = `${boxH}px`
-      if (sel) { centre = x + width / 2; selectedWidth = width }
+      if (sel) centre = x + width / 2
       x += width + gap
     })
-    const target = Math.round(docked ? gap - (centre - selectedWidth / 2) : W / 2 - centre)
+    const target = Math.round(W / 2 - centre)
     if (animate && !this.motion.matches && target !== this.trackX) this.opts.onCrossing?.(target - this.trackX)
     this.trackX = target
     if (!this.swiping) this.track.style.transform = `translateX(${target}px)`
@@ -676,7 +649,6 @@ export class Reader {
   }
   /** Expand takes the whole window: the board bar and the sidebar step aside until it is restored. */
   private toggleExpand(): void {
-    this.cancelResize?.()
     this.setExpanded(!this.expanded)
     this.paint(true)
   }
@@ -687,49 +659,6 @@ export class Reader {
     this.opts.onExpand?.(expanded)
     this.renderSidebar()
   }
-  private resizeStart(e: PointerEvent, frame: DocumentFrame, side: 'left' | 'right'): void {
-    if (this.phone.matches || this.expanded || frame.doc.key !== this.selected || e.button !== 0) return
-    e.preventDefault()
-    this.cancelResize?.()
-    const edge = e.currentTarget as HTMLElement
-    edge.setPointerCapture(e.pointerId)
-    const startX = e.clientX, width = frame.el.offsetWidth
-    let latched = false
-    this.stage.classList.add('ws-resizing')
-    const move = (ev: PointerEvent): void => {
-      const delta = (ev.clientX - startX) * (side === 'right' ? 1 : -1)
-      if (!latched && Math.abs(delta) < this.measure('drag-latch', 4)) return
-      latched = true
-      this.liveWidth = Math.max(Math.min(320, this.stage.clientWidth - 24), Math.min(this.stage.clientWidth - 24, width + delta * 2))
-      this.layout(false)
-    }
-    const finish = (commit: boolean): void => {
-      edge.removeEventListener('pointermove', move)
-      edge.removeEventListener('pointerup', up)
-      edge.removeEventListener('pointercancel', cancel)
-      window.removeEventListener('keydown', key, true)
-      this.cancelResize = null
-      if (commit && latched && this.liveWidth !== null) {
-        this.sizes[frame.doc.key] = this.liveWidth
-        try { sessionStorage.setItem('shuttle:workspace:sizes', JSON.stringify(this.sizes)) } catch { /* Storage is optional. */ }
-      }
-      this.liveWidth = null
-      this.stage.classList.remove('ws-resizing')
-      this.layout(false)
-      if (edge.hasPointerCapture(e.pointerId)) edge.releasePointerCapture(e.pointerId)
-    }
-    const up = (): void => finish(true)
-    const cancel = (): void => finish(false)
-    const key = (ev: KeyboardEvent): void => {
-      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(false) }
-    }
-    this.cancelResize = cancel
-    edge.addEventListener('pointermove', move)
-    edge.addEventListener('pointerup', up)
-    edge.addEventListener('pointercancel', cancel)
-    window.addEventListener('keydown', key, true)
-  }
-
   private openMenu(doc: WorkspaceDocument, anchor: HTMLElement): void {
     const same = this.menuAnchor === anchor
     this.closeMenu()
@@ -791,32 +720,6 @@ export class Reader {
     this.menu = null
     this.menuAnchor = null
     return true
-  }
-  /** The stage's bare ground, around the pages: not a page, a tile, the sidebar or the bar. */
-  private bareStage(target: EventTarget | null): boolean {
-    return target === this.stage || target === this.parallax || target === this.track
-  }
-  private readonly notePopovers = (): void => {
-    this.pressDismisses = !!document.querySelector(POPOVERS)
-  }
-  private readonly stageDown = (e: PointerEvent): void => {
-    // A press that dismisses an open popover or picker does only that.
-    this.stagePress = e.button === 0 && e.isPrimary && !this.phone.matches && !this.expanded && !this.pressDismisses && this.bareStage(e.target)
-      ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null
-  }
-  /**
-   * A click on the bare stage closes the reader back to its origin, as a click
-   * outside a modal does, by the same path as Escape. It must start and end on
-   * the stage, barely move, select no text and interrupt no resize; expanded,
-   * the stage is the page's and a click there does nothing.
-   */
-  private readonly stageUp = (e: PointerEvent): void => {
-    const press = this.stagePress
-    this.stagePress = null
-    if (!press || press.id !== e.pointerId || !this.active || this.expanded || this.cancelResize || !this.bareStage(e.target)) return
-    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > this.measure('drag-latch', 4)) return
-    if (window.getSelection()?.toString()) return
-    this.opts.onReturn()
   }
   private readonly pointerInput = (): void => { this.keyboardInput = false; this.el.classList.remove('ws-keyboard') }
   private readonly keyboardModality = (): void => { this.keyboardInput = true; this.el.classList.add('ws-keyboard') }
@@ -1079,8 +982,7 @@ export class Reader {
     if (intent === 'help') return false
     if (intent === 'back') {
       if (repeat) return true
-      if (this.cancelResize) this.cancelResize()
-      else if (this.picker.isOpen) this.picker.close(true)
+      if (this.picker.isOpen) this.picker.close(true)
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
       else this.back()
@@ -1199,7 +1101,6 @@ export class Reader {
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)
-    this.cancelResize?.()
     this.closeMenu()
     this.stopSwipe()
     this.clearSwipeWatchdog()
@@ -1218,7 +1119,6 @@ export class Reader {
     this.host.dispose()
     document.removeEventListener('keydown', this.keydown, true)
     document.removeEventListener('pointerdown', this.outside)
-    window.removeEventListener('pointerdown', this.notePopovers, true)
     document.removeEventListener('pointerdown', this.pointerInput, true)
     this.motion.removeEventListener('change', this.relayout)
     this.phone.removeEventListener('change', this.relayout)

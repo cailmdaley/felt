@@ -82,13 +82,14 @@
   --ws-radius: 10px;
   --ws-control-radius: 7px;
   --ws-control-height: 32px;
-  --ws-stage-inset: 28px;
-  /* Between the bar's map and the page's top edge; the page's sides and foot keep the stage inset. */
-  --ws-stage-gap: 12px;
+  /* The selected page meets the stage's edges: no margin frames it. */
+  --ws-stage-inset: 0px;
+  --ws-stage-gap: 0px;
   --ws-stage-top: var(--ws-stage-gap);
   --ws-neighbour-drop: 8px;
   --ws-phone-nav-height: 48px;
-  --ws-label-height: 40px;
+  /* The page's header line: the corner toggles' height with their inset above and below. */
+  --ws-label-height: calc(var(--ws-control-height) + 2 * var(--ws-corner-inset, 8px));
   --ws-dot-size: 8px;
   --ws-parking-x: -20000px;
   --ws-small-gap: 6px;

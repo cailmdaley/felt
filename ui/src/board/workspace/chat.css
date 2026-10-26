@@ -18,6 +18,8 @@
   min-height: 60px; padding: 6px 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
+/* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
+:where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
 /* One back control leads to the parent chat or the originating board view. */
 .ws-chat-lead { display: inline-flex; flex: none; align-items: center; gap: 2px; }
 .ws-chat .ws-chat-back {
@@ -165,7 +167,6 @@
 
 /* The chat's frame carries no label bar: the header line names the page and leads back. */
 .ws-chat-frame .ws-labelbar { display: none; }
-.ws-reader[data-page='chat'] .ws-stage-column > .ws-thread-breadcrumb { display: none; }
 
 /* Narrow cards give the name both metadata columns without hiding any action. */
 @container (max-width: 850px) {

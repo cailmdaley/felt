@@ -5,7 +5,7 @@ import { card } from '../testFixtures.js'
 import { ThreadRail } from './ThreadRail.js'
 import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 
-it('draws one-line state groups with parent-chain tooltips and navigates through dots and the breadcrumb', () => {
+it('draws one-line state groups with parent-chain tooltips and navigates through dots and the family head', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' })
   const child = card({ id: 'hub/child', orchestrator: root.id, status: 'active', name: 'Z working' })
@@ -39,7 +39,7 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   expect(rail.el.textContent).toContain('A resting')
   expect(rail.el.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('Z working')
   expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
-  rail.breadcrumb.querySelector<HTMLButtonElement>('button')!.click()
+  rail.el.querySelector<HTMLButtonElement>('.ws-thread-root .kbn-thread-row')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
   for (const current of [root, child, deep]) {
     rail.show(current, new ThreadIndex(all))
@@ -99,7 +99,7 @@ it('preserves focused rows and open groups across live repaints without stealing
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
 })
 
-it('draws no thread tree on the phone, keeping only the breadcrumb back to the orchestrator', () => {
+it('draws no thread tree on the phone, where the threads page carries the family', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: true }))
   try {
     const root = card({ id: 'hub', status: 'active' })
@@ -109,7 +109,7 @@ it('draws no thread tree on the phone, keeping only the breadcrumb back to the o
     rail.show(child, new ThreadIndex([root, child, deep]))
     expect(rail.el.hidden).toBe(true)
     expect(rail.el.querySelector('.kbn-thread-row')).toBeNull()
-    expect(rail.breadcrumb.hidden).toBe(false)
+    expect(rail.hasFamily).toBe(true)
   } finally { vi.unstubAllGlobals() }
 })
 
@@ -225,10 +225,8 @@ it("inside a deep thread keeps the whole family from its top-level constitution,
     tempered.open = false
     rail.show(seed, new ThreadIndex([chair, validation, { ...seed, outcome: 'news' }, cousin]))
     expect(rail.el.querySelector<HTMLDetailsElement>('details[data-thread-details="archived"]')!.open).toBe(false)
-    // The breadcrumb is the ancestry trail, the head first.
-    expect([...rail.breadcrumb.querySelectorAll('.ws-ancestry-link')].map(b => b.textContent)).toEqual(['Chair', 'Validation'])
-    expect(rail.breadcrumb.querySelector('.ws-ancestry-sep')?.textContent).toBe('/')
-    rail.breadcrumb.querySelector<HTMLButtonElement>('.ws-ancestry-link')!.click()
+    // The family's head heads the tree, one click back to the orchestrator.
+    rail.el.querySelector<HTMLButtonElement>('.ws-thread-root .kbn-thread-row')!.click()
     expect(open).toHaveBeenLastCalledWith(chair)
   } finally { vi.unstubAllGlobals() }
 })

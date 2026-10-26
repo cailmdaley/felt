@@ -1,7 +1,13 @@
-/* On the desktop the reader starts beneath the board's bar; its map of pages
-   floats above the centre column, and the pages start beneath it. */
+/* On the desktop the reader starts beneath the board's bar. Its frame is the
+   tab bar, the page's one header line and the document: the selected page
+   fills the stage beneath the bar, and the corner toggles take places at the
+   ends of its header line. */
 .ws-reader {
   --ws-corner-inset: 8px;
+  /* Room a header line keeps at each end for a toggle floating over the stage. */
+  --ws-toggle-room: calc(var(--ws-corner-inset) + var(--ws-control-height) + var(--ws-small-gap));
+  --ws-head-start: var(--ws-toggle-room);
+  --ws-head-end: var(--ws-small-gap);
   --ws-stage-top: var(--ws-stage-gap);
   position: fixed; inset: 0; top: var(--kbn-bar-bottom, 0px); z-index: var(--ws-reader-layer);
   display: flex; flex-direction: column; min-width: 0;
@@ -84,21 +90,22 @@
   position: relative; overflow-x: clip; overflow-y: visible; flex: 1; min-height: 0; min-width: 0;
   background: transparent; transform-origin: center 40%;
 }
-.ws-parallax { position: absolute; inset: 0; transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
+/* The page is pinned to the stage's edges, so it takes no pointer drift. */
+.ws-parallax { position: absolute; inset: 0; }
 .ws-track { position: absolute; left: 0; top: 0; height: 100%; width: 0; transition: transform var(--ws-crossing) var(--ws-ease); }
 .ws-page {
   position: absolute; top: var(--ws-stage-top); transform-origin: center;
   transition: left var(--ws-crossing) var(--ws-ease), width var(--ws-crossing) var(--ws-ease), height var(--ws-crossing) var(--ws-ease), transform var(--ws-crossing) var(--ws-ease), opacity var(--ws-crossing) var(--ws-ease);
 }
-.ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-radius); overflow: hidden; background: var(--ws-paper); box-shadow: var(--ws-float); }
-.ws-sheet::after { content: ''; position: absolute; inset: 0; border-radius: inherit; box-shadow: var(--ws-paper-light); pointer-events: none; }
+.ws-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--ws-paper); }
+/* The sidebar's or the rail's column already draws the hairline at the page's side. */
 .ws-content { position: relative; flex: 1; display: flex; min-height: 0; min-width: 0; overflow: hidden; background: var(--ws-paper); }
 .ws-content > * { flex: 1; min-height: 0; min-width: 0; }
 .ws-page.ws-receded { transform: translateY(var(--ws-neighbour-drop)) scale(var(--ws-receded-scale)); opacity: var(--ws-receded-opacity); cursor: pointer; }
 .ws-page.ws-receded.ws-text-page { opacity: var(--ws-receded-text-opacity); }
 .ws-page.ws-receded.ws-before { transform-origin: right center; mask-image: linear-gradient(90deg, transparent var(--ws-neighbour-edge), var(--ws-mask) var(--ws-neighbour-fade-end)); }
 .ws-page.ws-receded.ws-after { transform-origin: left center; mask-image: linear-gradient(270deg, transparent var(--ws-neighbour-edge), var(--ws-mask) var(--ws-neighbour-fade-end)); }
-.ws-page.ws-receded .ws-sheet { pointer-events: none; box-shadow: var(--ws-shadow-low); }
+.ws-page.ws-receded .ws-sheet { pointer-events: none; }
 .ws-page.ws-parked { left: var(--ws-parking-x) !important; transition: none; pointer-events: none; }
 .ws-page.ws-parked::after { content: ''; position: absolute; inset: 0; background: var(--ws-paper); z-index: 4; }
 .ws-stage.ws-instant .ws-track, .ws-stage.ws-instant .ws-page, .ws-stage.ws-resizing .ws-track, .ws-stage.ws-resizing .ws-page { transition: none; }
@@ -108,19 +115,20 @@
 .ws-stage.ws-resizing iframe { pointer-events: none; }
 .ws-labelbar {
   display: flex; align-items: center; flex: none; height: var(--ws-label-height); gap: var(--ws-small-gap);
-  padding: 0 var(--ws-small-gap) 0 var(--ws-inset); border-top: var(--ws-line-width) solid var(--ws-hairline);
+  padding: 0 var(--ws-head-end) 0 var(--ws-head-start); border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
   color: var(--ws-ink-muted); background: var(--ws-paper); font-size: var(--ws-small-size); user-select: none;
 }
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
+/* The header line's controls speak at the chrome's own size, as the corner toggles do. */
+.ws-labelbar .ws-icon-button { font: var(--ws-row-size)/1 var(--ws-serif); color: var(--ws-ink-muted); }
+/* Back is the phone's drawn chevron at the desktop's scale. */
+.ws-labelbar .ws-document-back { position: relative; overflow: hidden; text-indent: -9999px; }
+.ws-labelbar .ws-document-back::before { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
 .ws-label-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; }
 .ws-label-title.ws-declared-title { font: var(--ws-label-size)/1.2 var(--ws-serif); letter-spacing: 0; }
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-icon-button { width: var(--ws-control-height); height: var(--ws-control-height); flex: none; border-radius: var(--ws-control-radius); }
 .ws-icon-button:hover { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-edge { position: absolute; top: 0; bottom: 0; width: var(--ws-inset); cursor: ew-resize; z-index: 3; touch-action: none; display: none; }
-.ws-edge-left { left: calc(var(--ws-small-gap) * -1); }
-.ws-edge-right { right: calc(var(--ws-small-gap) * -1); }
-.ws-page.ws-selected:not(.ws-expanded) .ws-edge { display: block; }
 .ws-menu {
   position: fixed; z-index: 5; min-width: var(--ws-menu-width); max-width: min(var(--ws-menu-ceiling), calc(100vw - var(--ws-gap)));
   max-height: calc(100dvh - var(--ws-gap)); overflow: auto; padding: var(--ws-small-gap);
@@ -255,7 +263,7 @@
 .ws-sr-only { position: absolute; width: var(--ws-line-width); height: var(--ws-line-width); overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .ws-placeholder { background: var(--ws-paper); }
-.ws-media-poster { display: none; position: absolute; inset: 0 0 var(--ws-label-height); place-items: center; background: var(--ws-paper); color: var(--ws-ink-muted); font: var(--ws-heading-size)/1 var(--ws-serif); pointer-events: none; z-index: 5; }
+.ws-media-poster { display: none; position: absolute; inset: var(--ws-label-height) 0 0; place-items: center; background: var(--ws-paper); color: var(--ws-ink-muted); font: var(--ws-heading-size)/1 var(--ws-serif); pointer-events: none; z-index: 5; }
 .ws-media-page:is(.ws-receded,.ws-parked) .ws-media-poster { display: grid; }
 .ws-media-page:is(.ws-receded,.ws-parked) .ws-content { opacity: 0; pointer-events: none; }
 .ws-body-status { color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.45 var(--ws-serif); }
@@ -298,11 +306,8 @@
   .ws-veil { background: var(--ws-ground); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .ws-navbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0; column-gap: 0; height: auto; min-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) var(--ws-small-gap) 0; background: var(--ws-paper); align-items: center; transition: transform 180ms var(--ws-ease), margin-top 180ms var(--ws-ease); }
   .ws-topbar-hidden:not(:has(> .ws-menu)) .ws-navbar:not(:focus-within) { transform: translateY(-100%); margin-top: calc(-1 * var(--ws-phone-bar-height)); }
-  .ws-sheet { border: 0; border-radius: 0; box-shadow: none; }
   /* Hidden pages keep unscaled geometry on phones. */
   .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
-  .ws-page.ws-receded .ws-sheet { box-shadow: none; }
-  .ws-sheet::after { display: none; }
   .ws-labelbar { display: none; }
   .ws-media-poster { bottom: 0; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
@@ -317,7 +322,7 @@
   .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { text-align: center; flex: 1; height: var(--ws-phone-target); line-height: var(--ws-phone-target); padding: 0; }
-  .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle), .ws-page .ws-edge { display: none !important; }
+  .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle) { display: none !important; }
   .ws-phone-document-menu { display: flex; align-items: center; justify-content: center; width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-label-title { max-width: 50%; }
   .ws-prose, .ws-content .kbn-detail-prose { padding: 24px 16px 48px; }
@@ -333,7 +338,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .ws-track, .ws-page { transition: none !important; }
-  .ws-parallax { transform: none; }
   .ws-veil, .ws-navbar, .ws-stage-row, .ws-stage, .ws-sheet, .ws-sidebar .ws-constitution-card { transition: none !important; }
 }
 @media (prefers-reduced-transparency: reduce) {
@@ -342,6 +346,10 @@
 
 /* The threads rail's toggle mirrors the sidebar's in the opposite corner; hidden, the rail leaves the stage whole. */
 .ws-rail-toggle { left: auto; right: var(--ws-corner-inset); }
+/* A shown column holds its own toggle, so the header line starts or ends at the page's edge;
+   a toggle floating over the stage takes its place at that end of the line. */
+.ws-reader.ws-with-sidebar, .ws-reader.ws-expand-mode { --ws-head-start: var(--ws-inset); }
+.ws-reader.ws-rail-off:has(> .ws-rail-toggle:not([hidden])):not(.ws-expand-mode) { --ws-head-end: var(--ws-toggle-room); }
 .ws-rail-toggle[hidden] { display: none; }
 .ws-rail-off .ws-thread-rail { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {

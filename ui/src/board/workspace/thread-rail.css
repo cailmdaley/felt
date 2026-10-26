@@ -5,7 +5,7 @@
   background: var(--kbn-sheet); border-left: 1px solid var(--kbn-rule); color: var(--kbn-ink);
   font: var(--ws-label-size)/1.3 var(--ws-serif);
 }
-.ws-thread-rail[hidden], .ws-thread-breadcrumb[hidden] { display: none; }
+.ws-thread-rail[hidden] { display: none; }
 .ws-thread-scroll { flex: 1; min-height: 0; overflow: auto; padding: 12px 8px 16px 10px; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
 .ws-thread-heading { margin: 0; padding: 4px 8px; font: inherit; font-variant: small-caps; letter-spacing: .03em; color: var(--kbn-ink-muted); }
 .ws-thread-heading:focus { outline: none; }
@@ -44,7 +44,6 @@
 .ws-thread-tree .kbn-thread-row:hover, .ws-thread-tree .kbn-thread-row:focus-visible { background: var(--ws-hover); }
 .ws-thread-tree .kbn-thread-row.ws-thread-current { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-thread-tree .kbn-thread-item > .kbn-thread-pin { right: 4px; }
-.ws-thread-breadcrumb { padding: 8px 18px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-thread-rail { display: none; }
 }

@@ -4,7 +4,6 @@ import { threadItem } from '../ThreadPeek.js'
 import { deskColumn } from '../deskColumn.js'
 import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
-import { paintAncestry } from './ancestryTrail.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
@@ -19,7 +18,6 @@ import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
  */
 export class ThreadRail {
   readonly el = document.createElement('aside')
-  readonly breadcrumb = document.createElement('nav')
   private readonly scroller = document.createElement('div')
   readonly handle = document.createElement('div')
   private readonly tree = document.createElement('div')
@@ -42,7 +40,6 @@ export class ThreadRail {
     this.open = open; this.layout = layout
     this.el.className = 'ws-thread-rail'
     this.el.setAttribute('aria-label', 'Thread tree')
-    this.breadcrumb.className = 'ws-thread-breadcrumb'; this.breadcrumb.setAttribute('aria-label', 'Thread breadcrumb')
     // The rail shows and hides from the reader's corner toggle; its heading only names it.
     this.heading.className = 'ws-thread-heading'; this.heading.textContent = 'Threads'; this.heading.tabIndex = -1
     this.tree.className = 'ws-thread-tree'
@@ -127,7 +124,6 @@ export class ThreadRail {
     this.quiet = others.every(c => threadState(c) === 'archived')
     if (window.matchMedia(MOBILE_MEDIA).matches) {
       this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
-      this.paintBreadcrumb(ancestors)
       return
     }
     const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...[scope, ...descendants].map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
@@ -135,11 +131,7 @@ export class ThreadRail {
     this.signature = signature
     // A family that is only the open thread has nothing to show beside it.
     this.el.hidden = !this.hasFamily
-    this.paintBreadcrumb(ancestors)
     this.paint()
-  }
-  private paintBreadcrumb(ancestors: readonly KanbanCard[]): void {
-    paintAncestry(this.breadcrumb, ancestors.map(ancestor => ({ name: ancestor.name, open: () => this.open(ancestor) })))
   }
   private paint(): void {
     if (!this.card || !this.scope) return

@@ -282,9 +282,9 @@ export class DocumentHost {
     label.className = 'ws-labelbar'
     label.dataset.part = 'label-bar'
     const poster = doc.kind === 'audio' || doc.kind === 'video' ? createMediaPoster(doc.kind) : null
-    sheet.append(content)
+    // The label bar is the page's one header line, above the document.
+    sheet.append(label, content)
     if (poster) sheet.append(poster.el)
-    sheet.append(label)
     el.append(sheet)
     const frame: DocumentFrame = { el, sheet, content, label, doc, viewer: null }
     const state: FrameState = {
