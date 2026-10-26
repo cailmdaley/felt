@@ -263,6 +263,15 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert first.stale == false
       assert [%{"fiber" => %{"id" => "foo"}}] = first.fibers
       t1 = first.last_polled_at
+      encoded = :sys.get_state(pid).feeds["candide"].encoded_fibers
+      assert Jason.decode!(encoded) == first.fibers
+      # JSON whitespace is immaterial, but distinguishes reuse from encoding
+      # the rows again when the 304 arrives.
+      encoded = encoded <> " "
+
+      :sys.replace_state(pid, fn state ->
+        put_in(state.feeds["candide"].encoded_fibers, encoded)
+      end)
 
       Process.sleep(5)
 
@@ -276,6 +285,16 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert second.last_error == nil
       assert [%{"fiber" => %{"id" => "foo"}}] = second.fibers
       assert DateTime.compare(second.last_polled_at, t1) == :gt
+      assert encoded == :sys.get_state(pid).feeds["candide"].encoded_fibers
+      assert File.read!(Path.join(dir, "candide.json")) =~ encoded <> ","
+      persisted = dir |> Path.join("candide.json") |> File.read!() |> Jason.decode!()
+      assert persisted["fibers"] == second.fibers
+      assert persisted["last_polled_at"] == DateTime.to_iso8601(second.last_polled_at)
+
+      # Removing the disposable directory doesn't disable subsequent writes.
+      File.rm_rf!(dir)
+      :ok = RemoteFiberRegistry.refresh_now(pid)
+      assert File.regular?(Path.join(dir, "candide.json"))
     end
 
     test "a changed body busts the etag and delivers the new feed (200)", %{dir: dir} do

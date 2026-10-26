@@ -464,6 +464,7 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp initial_entry(%Remote{} = remote) do
     %{
       fibers: [],
+      encoded_fibers: nil,
       # The owner's store-registry origin block (felt stores, picker projects,
       # native-folder-picker flag), carried on the same feed so the local
       # `/api/v1/felt-stores` never has to fetch a loaded remote live.
@@ -522,6 +523,7 @@ defmodule Shuttle.RemoteFiberRegistry do
     %{
       entry
       | fibers: fibers,
+        encoded_fibers: nil,
         stores: stores,
         etag: etag,
         cache: cache,
@@ -601,24 +603,38 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp apply_and_persist(%State{} = state, name, entry, result, now) do
     updated = apply_result(entry, result, now)
 
-    if updated.last_polled_at != entry.last_polled_at do
-      persist(state.store_dir, name, updated)
-    end
+    if state.store_dir != nil and updated.last_polled_at != entry.last_polled_at do
+      updated = %{
+        updated
+        | encoded_fibers: updated.encoded_fibers || Jason.encode!(updated.fibers)
+      }
 
-    updated
+      persist(state.store_dir, name, updated)
+      updated
+    else
+      updated
+    end
   end
 
-  defp persist(dir, name, entry),
-    do: RegistryCommon.persist(dir, name, encode_entry(entry), "RemoteFiberRegistry")
+  defp persist(dir, name, entry) do
+    # A 304 changes the observation time, not the rows. Keep the large JSON
+    # fragment and encode only the small metadata, preserving the disk format.
+    metadata =
+      Jason.encode!(%{
+        "stores" => entry.stores,
+        "etag" => entry.etag,
+        "cache" => entry.cache,
+        "last_polled_at" => RegistryCommon.encode_dt(entry.last_polled_at)
+      })
 
-  defp encode_entry(entry) do
-    %{
-      "fibers" => entry.fibers,
-      "stores" => entry.stores,
-      "etag" => entry.etag,
-      "cache" => entry.cache,
-      "last_polled_at" => RegistryCommon.encode_dt(entry.last_polled_at)
-    }
+    encoded = [
+      "{\"fibers\":",
+      entry.encoded_fibers,
+      ",",
+      binary_part(metadata, 1, byte_size(metadata) - 1)
+    ]
+
+    RegistryCommon.persist(dir, name, encoded, "RemoteFiberRegistry")
   end
 
   # A restored entry carries its rows, its etag (so the first poll can 304

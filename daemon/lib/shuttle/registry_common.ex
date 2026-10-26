@@ -174,15 +174,29 @@ defmodule Shuttle.RegistryCommon do
   # because a cold cache costs one poll, while a crash here would take the
   # registry down.
 
-  @doc "Atomically write `encoded` as `<dir>/<name>.json`. `nil` dir → no-op."
-  @spec persist(String.t() | nil, String.t(), map(), String.t()) :: :ok
+  @doc "Atomically write a map or JSON iodata as `<dir>/<name>.json`. `nil` dir → no-op."
+  @spec persist(String.t() | nil, String.t(), map() | iodata(), String.t()) :: :ok
   def persist(nil, _name, _encoded, _label), do: :ok
 
   def persist(dir, name, encoded, label) do
-    File.mkdir_p!(dir)
     path = Path.join(dir, "#{safe_name(name)}.json")
     tmp = path <> ".tmp"
-    File.write!(tmp, Jason.encode!(encoded))
+    data = if is_map(encoded), do: Jason.encode_to_iodata!(encoded), else: encoded
+
+    # No ancestry walk on steady-state writes. Recreate a missing cache
+    # directory on demand, including after an operator deletes it at runtime.
+    case File.write(tmp, data) do
+      :ok ->
+        :ok
+
+      {:error, :enoent} ->
+        File.mkdir_p!(dir)
+        File.write!(tmp, data)
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "write file", path: tmp
+    end
+
     File.rename!(tmp, path)
     :ok
   rescue
