@@ -51,6 +51,31 @@ const fixtureFetch = (itemsBySession: Record<string, unknown[]>, requests: strin
     })
   })
 
+const sessionAndFilesFetch = (
+  itemsBySession: Record<string, unknown[]>,
+  files: () => unknown[],
+  requests: string[] = [],
+): typeof fetch => vi.fn<typeof fetch>(async (input) => {
+  const url = new URL(String(input))
+  requests.push(url.toString())
+  if (url.pathname.endsWith('/sent-files')) {
+    return new Response(JSON.stringify({ files: files() }), { headers: { ETag: `"files-${files().length}"` } })
+  }
+  const bytes = encoded(itemsBySession[url.searchParams.get('session') ?? ''] ?? [])
+  const offset = Number(url.searchParams.get('offset') ?? 0)
+  return new Response(bytes.slice(offset), {
+    status: 200,
+    headers: { 'x-transcript-offset': String(offset), 'x-transcript-byte-count': String(bytes.byteLength) },
+  })
+})
+
+const send = (fullPath: string, timestamp: number, sessionId = latestId): Record<string, unknown> => ({
+  fullPath,
+  basename: fullPath.split('/').pop(),
+  timestamp,
+  sessionId,
+})
+
 afterEach(() => {
   for (const band of bands) band.dispose()
   bands = []
@@ -107,6 +132,114 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
     expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
+  })
+  it('shows one sent image in the preview and full transcript, and opens it on its owner', async () => {
+    const uid = '01KTESTFIBER000000000000001'
+    const sentAt = Date.parse('2026-09-26T14:08:00Z')
+    const requests: string[] = []
+    const onFile = vi.fn()
+    const band = new TranscriptBand({
+      shuttleBase: 'http://localhost:4000',
+      fetch: sessionAndFilesFetch({ [latestId]: records('Open the plots.', 'The fit is stable.') }, () => [send('/tmp/plot.png', sentAt)], requests),
+      onFile,
+    })
+    bands.push(band)
+    document.body.append(band.el)
+    band.follow(target(latestId, { uid }))
+    await settle()
+
+    const preview = band.el.querySelector('.ws-transcript-exchange')!
+    const row = preview.querySelector<HTMLElement>('.ws-transcript-sent-file')!
+    expect(preview.querySelectorAll('.ws-transcript-sent-file')).toHaveLength(1)
+    expect(row.querySelector('img')?.getAttribute('src')).toContain('/api/v1/file?path=%2Ftmp%2Fplot.png&origin=candide')
+    expect(row.textContent).toContain('plot.png')
+    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('uid')).toBe(uid)
+    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('session')).toBe(latestId)
+    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('origin')).toBe('candide')
+
+    row.querySelector<HTMLButtonElement>('.ws-transcript-sent-file-item')!.click()
+    expect(onFile).toHaveBeenCalledExactlyOnceWith('/tmp/plot.png', 'plot.png', 'candide')
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    expect(band.el.querySelectorAll('.ws-transcript-pane .ws-transcript-sent-file')).toHaveLength(1)
+  })
+
+  it('keeps several files from one send in one row and names non-image kinds', async () => {
+    const sentAt = Date.parse('2026-09-26T14:08:00Z')
+    const files = [send('/tmp/fit.pdf', sentAt), send('/tmp/parameters.json', sentAt)]
+    const band = makeBand(sessionAndFilesFetch({ [latestId]: records('Read the fit.', 'It converged.') }, () => files))
+    band.follow(target(latestId, { uid: '01KTESTFIBER000000000000002' }))
+    await settle()
+
+    const rows = band.el.querySelectorAll('.ws-transcript-exchange .ws-transcript-sent-file')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].querySelectorAll('.ws-transcript-sent-file-item')).toHaveLength(2)
+    expect([...rows[0].querySelectorAll('.ws-transcript-sent-kind')].map((node) => node.textContent)).toEqual(['PDF', 'text'])
+    expect(rows[0].querySelector('img')).toBeNull()
+  })
+
+  it('shows each predecessor session’s receipts only in that session', async () => {
+    const uid = '01KTESTFIBER000000000000003'
+    const files = [
+      send('/tmp/current.pdf', Date.parse('2026-09-26T14:08:00Z'), latestId),
+      send('/tmp/earlier.pdf', Date.parse('2026-09-25T14:08:00Z'), earlierId),
+    ]
+    const band = makeBand(sessionAndFilesFetch({
+      [latestId]: records('Current prompt', 'Current answer.'),
+      [earlierId]: records('Earlier prompt', 'Earlier answer.'),
+    }, () => files))
+    band.follow(target(latestId, { uid }))
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-exchange .ws-transcript-sent-file')?.textContent).toContain('current.pdf')
+
+    band.read(target(earlierId, { uid }))
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-exchange .ws-transcript-sent-file')?.textContent).toContain('earlier.pdf')
+    expect(band.el.querySelector('.ws-transcript-exchange .ws-transcript-sent-file')?.textContent).not.toContain('current.pdf')
+  })
+
+  it('orders a send between the transcript steps around its timestamp', async () => {
+    const uid = '01KTESTFIBER000000000000004'
+    const time = (minute: number): string => `2026-09-26T14:${String(minute).padStart(2, '0')}:00.000Z`
+    const transcript = [
+      { type: 'user', timestamp: time(2), message: { content: 'Compare the bands.' } },
+      { type: 'assistant', timestamp: time(4), message: { model: 'claude-opus', content: [{ type: 'text', text: 'Before the figure.' }] } },
+      { type: 'assistant', timestamp: time(12), message: { model: 'claude-opus', content: [{ type: 'text', text: 'After the figure.' }] } },
+    ]
+    const band = makeBand(sessionAndFilesFetch({ [latestId]: transcript }, () => [send('/tmp/response.png', Date.parse(time(8)))]))
+    band.follow(target(latestId, { uid }))
+    await settle()
+
+    const preview = band.el.querySelector('.ws-transcript-exchange')!
+    const children = [...preview.children]
+    const before = children.findIndex((node) => node.textContent?.includes('Before the figure.'))
+    const file = children.findIndex((node) => node.classList.contains('ws-transcript-sent-file'))
+    const after = children.findIndex((node) => node.textContent?.includes('After the figure.'))
+    expect(before).toBeGreaterThanOrEqual(0)
+    expect(before).toBeLessThan(file)
+    expect(file).toBeLessThan(after)
+
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    const full = band.el.querySelector('.ws-transcript-pane [data-turn="0"]')!
+    const fullChildren = [...full.children]
+    expect(fullChildren.findIndex((node) => node.textContent?.includes('Before the figure.')))
+      .toBeLessThan(fullChildren.findIndex((node) => node.classList.contains('ws-transcript-sent-file')))
+    expect(fullChildren.findIndex((node) => node.classList.contains('ws-transcript-sent-file')))
+      .toBeLessThan(fullChildren.findIndex((node) => node.textContent?.includes('After the figure.')))
+  })
+
+  it('adds a send from the live feed without reloading the conversation', async () => {
+    vi.useFakeTimers()
+    const uid = '01KTESTFIBER000000000000005'
+    let files: unknown[] = []
+    const fetcher = sessionAndFilesFetch({ [latestId]: records('Watch the run.', 'Still working.') }, () => files)
+    const band = makeBand(fetcher)
+    band.follow(target(latestId, { uid, live: true }))
+    await microtasks()
+    expect(band.el.querySelector('.ws-transcript-sent-file')).toBeNull()
+    files = [send('/tmp/live.png', Date.now())]
+
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(band.el.querySelector('.ws-transcript-exchange .ws-transcript-sent-file')?.textContent).toContain('live.png')
   })
   it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
     const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()

@@ -563,6 +563,41 @@ defmodule ShuttleWeb.SentFilesControllerTest do
                json_response(conn, 200)
     end
 
+    test "session query preserves repeated paths for that conversation" do
+      earlier = "earlier-session"
+      current = "current-session"
+
+      path =
+        write_fixture([
+          event(%{
+            "sessionId" => earlier,
+            "timestamp" => 10,
+            "toolInput" => %{"files" => ["/tmp/reused.pdf"]}
+          }),
+          event(%{
+            "sessionId" => current,
+            "timestamp" => 20,
+            "toolInput" => %{"files" => ["/tmp/reused.pdf"]}
+          }),
+          event(%{
+            "sessionId" => earlier,
+            "timestamp" => 30,
+            "toolInput" => %{"files" => ["/tmp/reused.pdf"]}
+          })
+        ])
+
+      with_events_file(path)
+
+      conn = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}&session=#{earlier}")
+
+      assert %{"files" => files} = json_response(conn, 200)
+
+      assert Enum.map(files, &{&1["fullPath"], &1["timestamp"], &1["sessionId"]}) == [
+               {"/tmp/reused.pdf", 30, earlier},
+               {"/tmp/reused.pdf", 10, earlier}
+             ]
+    end
+
     test "carries an ETag and 304s an unchanged trail" do
       path = write_fixture([event(%{"toolInput" => %{"files" => ["/tmp/local.html"]}})])
       with_events_file(path)
@@ -670,14 +705,23 @@ defmodule ShuttleWeb.SentFilesControllerTest do
       body = ~s({"files":[{"fullPath":"/abs/on/candide.html","basename":"candide.html"}]})
       stub_forward("candide", "http://localhost:4001", {:ok, 200, "application/json", body})
 
-      conn = get(api_conn(), "/api/v1/sent-files?uid=#{@match_ulid}&origin=candide")
+      conn =
+        get(
+          api_conn(),
+          "/api/v1/sent-files?uid=#{@match_ulid}&session=native-session&origin=candide"
+        )
 
       assert conn.status == 200
       assert json_response(conn, 200) == Jason.decode!(body)
 
-      # origin stripped; uid crosses as a query param to the owner's /sent-files.
-      assert StubGetFileClient.last().url ==
-               "http://localhost:4001/api/v1/sent-files?uid=#{@match_ulid}"
+      # origin stripped; the owner receives the fiber and exact session filter.
+      forwarded = URI.parse(StubGetFileClient.last().url)
+      assert forwarded.path == "/api/v1/sent-files"
+
+      assert URI.decode_query(forwarded.query) == %{
+               "uid" => @match_ulid,
+               "session" => "native-session"
+             }
     end
 
     test "relays the remote's status verbatim" do

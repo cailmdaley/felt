@@ -520,7 +520,7 @@ export class Workspace {
     const dock = state && this.controls(state)
     if (!state || !dock) return page
     this.seatNav(state, dock)
-    dock.openFile = (path, title) => this.openFile(path, title)
+    dock.openFile = (path, title, owner) => this.openFile(path, title, owner)
     page.append(dock.el)
     queueMicrotask(() => dock.reseated())
     return page
@@ -548,7 +548,7 @@ export class Workspace {
       acts: chat ? undefined : dock?.head,
       shuttleBase: this.opts.shuttleBase,
       onFiber: id => { void this.openFiber(id, state.card.originId) },
-      onFile: (path, title) => this.openFile(path, title),
+      onFile: (path, title, owner?: string) => this.openFile(path, title, owner),
       holds: this.holds(state),
       onCard: card => { void this.openFiber(card.uid ?? card.id, card.originId) },
     })

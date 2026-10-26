@@ -19,6 +19,14 @@ export interface SentFile {
   sessionId?: string
 }
 
+/** One send call, grouped from its per-path receipts for a conversation row. */
+export interface SentFileSend {
+  id: string
+  sessionId: string
+  files: SentFile[]
+  timestamp?: number
+}
+
 /**
  * Coerce whatever `/api/v1/sent-files` returned into records this UI can use.
  *
@@ -36,7 +44,7 @@ export function normalizeSentFiles(raw: unknown): SentFile[] {
     if (!fullPath) continue
     const stamp = rec.timestamp
     const timestamp =
-      typeof stamp === 'number'
+      typeof stamp === 'number' && Number.isFinite(stamp)
         ? stamp
         : typeof stamp === 'string'
           ? Date.parse(stamp) || 0
@@ -52,4 +60,33 @@ export function normalizeSentFiles(raw: unknown): SentFile[] {
     })
   }
   return out
+}
+
+/** Group the fiber's receipts into sends made by one native session. */
+export function sentFileSends(files: readonly SentFile[], sessionId: string): SentFileSend[] {
+  const groups = new Map<string, SentFileSend>()
+  for (const file of files) {
+    if (file.sessionId !== sessionId) continue
+    const timestamp = file.timestamp > 0 ? file.timestamp : undefined
+    const key = timestamp === undefined
+      ? `${sessionId}:unknown:${file.fullPath}`
+      : `${sessionId}:${timestamp}`
+    let send = groups.get(key)
+    if (!send) {
+      send = {
+        id: key,
+        sessionId,
+        files: [],
+        ...(timestamp === undefined ? {} : { timestamp }),
+      }
+      groups.set(key, send)
+    }
+    if (!send.files.some((item) => item.fullPath === file.fullPath)) send.files.push(file)
+  }
+  return [...groups.values()]
+    .map((send) => ({
+      ...send,
+      files: [...send.files].sort((a, b) => a.basename.localeCompare(b.basename) || a.fullPath.localeCompare(b.fullPath)),
+    }))
+    .sort((a, b) => (a.timestamp ?? Number.POSITIVE_INFINITY) - (b.timestamp ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id))
 }

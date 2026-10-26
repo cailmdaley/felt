@@ -50,6 +50,10 @@ defmodule Shuttle.SentFiles do
   keeping the newest send, sorted newest-first, capped at `@cap`. An event from
   an unclaimed session matches its raw `sessionId`.
 
+  Callers may pass `:session_id` to read one conversation's sends. That view
+  matches the event's raw `sessionId` and preserves repeated sends of the same
+  path, so an older conversation keeps its own receipts.
+
   A `sent_files_cleared` event carries a fiber `uid` and an epoch-millisecond
   `timestamp`. Both views hide sends attributed to that UID at or before its
   latest clear, regardless of file order. An optional absolute `path` restricts
@@ -87,23 +91,30 @@ defmodule Shuttle.SentFiles do
 
   @doc """
   Return the sent-files trail for `uid` as a list of
-  `%{fullPath, basename, timestamp, sessionId}` maps — newest-first, deduped by
-  `fullPath`, capped.
+  `%{fullPath, basename, timestamp, sessionId}` maps — newest-first and capped.
+  By default entries are deduped by `fullPath`; with `:session_id`, only events
+  from that exact session are returned and repeated paths are preserved.
 
-  Opts (for tests): `:events_file` (path to the live JSONL stream; its rotated
-  sibling is that path plus `.1`), `:session_ledger_file` (path to the session
-  ledger), `:cap`, `:stream` (the `Shuttle.EventStream` process to read from).
+  Opts: `:session_id` (exact session to retain every send for); `:events_file`
+  (path to the live JSONL stream; its rotated sibling is that path plus `.1`),
+  `:session_ledger_file` (path to the session ledger), `:cap`, `:stream` (the
+  `Shuttle.EventStream` process to read from).
   """
   @spec for_uid(String.t(), keyword()) :: [map()]
   def for_uid(uid, opts \\ []) when is_binary(uid) do
     cap = Keyword.get(opts, :cap, @cap)
+    session_id = Keyword.get(opts, :session_id)
     session_uids = session_uids(opts)
 
-    opts
-    |> events()
-    |> uncleared(session_uids)
-    |> Enum.flat_map(&entries_for_event(&1, uid, session_uids))
-    |> dedupe_newest()
+    entries =
+      opts
+      |> events()
+      |> uncleared(session_uids)
+      |> Enum.flat_map(&entries_for_event(&1, uid, session_uids, session_id))
+
+    entries = if is_binary(session_id), do: entries, else: dedupe_newest(entries)
+
+    entries
     |> Enum.sort_by(& &1.timestamp, :desc)
     |> Enum.take(cap)
   end
@@ -252,8 +263,10 @@ defmodule Shuttle.SentFiles do
   # A projected event → the entries it contributes for `uid`; a non-matching
   # fiber contributes none. Timestamps are passed through as recorded, including
   # a missing one.
-  defp entries_for_event(event, uid, session_uids) do
-    if uid in event_uids(event, session_uids) do
+  defp entries_for_event(event, uid, session_uids, session_id) do
+    matches_session = is_nil(session_id) or event.session_id == session_id
+
+    if matches_session and uid in event_uids(event, session_uids) do
       for full_path <- event.paths do
         %{
           fullPath: full_path,

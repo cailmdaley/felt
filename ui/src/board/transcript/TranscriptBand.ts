@@ -1,8 +1,11 @@
-import { renderMarkdown } from '../utils.js'
+import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { sessionWhen } from '../sessionHistory.js'
 import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
-import { TranscriptModel, segments, type Step, type ToolStep, type Turn } from './model.js'
+import { fileKind } from '../attachments.js'
+import { sentFileSends, type SentFile } from '../sentFiles.js'
+import { TranscriptModel, segments, type SentFileNotice, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
+import { SentFilesFeed } from './sentFilesFeed.js'
 import { toolLabel } from './tools.js'
 import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
@@ -13,6 +16,7 @@ import './transcript.css'
 export interface TranscriptTarget {
   session: string
   host?: string
+  uid?: string
   agent?: string
   live: boolean
   tasks?: WorkerTask[]
@@ -29,7 +33,7 @@ export interface TranscriptBandOptions {
    */
   inline?: boolean
   /** Open a file the worker touched in the reader's file viewer. */
-  onFile?: (path: string, title?: string) => void
+  onFile?: (path: string, title?: string, owner?: string) => void
   /** Called whenever the usage facts are repainted: new usage, another session, or the cache estimate running out. */
   onFacts?: () => void
 }
@@ -59,6 +63,63 @@ function noticeRow(entry: Notice, tag: 'div' | 'li' = 'div'): HTMLElement {
     text.textContent = entry.text
     row.append(text)
   }
+  return row
+}
+
+function sentFileRow(
+  entry: SentFileNotice,
+  owner: string | undefined,
+  shuttleBase: string,
+  onFile: TranscriptBandOptions['onFile'],
+  tag: 'div' | 'li' = 'div',
+): HTMLElement {
+  const row = document.createElement(tag)
+  row.className = 'ws-transcript-msg ws-transcript-sent-file'
+  row.dataset.send = entry.id
+  if (entry.at !== undefined) {
+    const stamp = document.createElement('time')
+    stamp.dateTime = new Date(entry.at).toISOString()
+    const when = clock(entry.at)
+    stamp.textContent = when.text
+    stamp.title = when.title
+    row.append(stamp)
+  }
+
+  const files = document.createElement('div')
+  files.className = 'ws-transcript-sent-files'
+  for (const file of entry.files) {
+    const kind = fileKind(file.fullPath)
+    const kindLabel = ({ image: 'image', audio: 'audio', video: 'video', html: 'HTML', markdown: 'Markdown', text: 'text', pdf: 'PDF', other: 'file' } as const)[kind]
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.className = 'ws-transcript-sent-file-item'
+    item.dataset.path = file.fullPath
+    item.setAttribute('aria-label', `Open ${file.basename} (${kindLabel})`)
+    item.title = `${file.basename} · ${kindLabel}`
+    item.addEventListener('click', (event) => {
+      event.stopPropagation()
+      onFile?.(file.fullPath, file.basename, owner)
+    })
+    if (kind === 'image') {
+      const thumbnail = document.createElement('img')
+      thumbnail.className = 'ws-transcript-sent-thumb'
+      thumbnail.alt = ''
+      thumbnail.loading = 'lazy'
+      thumbnail.src = fileBytesUrl(shuttleBase, file.fullPath, owner ?? 'local')
+      item.append(thumbnail)
+    } else {
+      const badge = document.createElement('span')
+      badge.className = 'ws-transcript-sent-kind'
+      badge.textContent = kindLabel
+      item.append(badge)
+    }
+    const name = document.createElement('span')
+    name.className = 'ws-transcript-sent-name'
+    name.textContent = file.basename
+    item.append(name)
+    files.append(item)
+  }
+  row.append(files)
   return row
 }
 
@@ -475,7 +536,7 @@ export class TranscriptBand {
   /** Cache-read share, seated in settings for inline conversations. */
   get cacheShare(): HTMLElement { return this.hitFact }
   private readonly inline: boolean
-  private readonly onFile?: (path: string, title?: string) => void
+  private readonly onFile?: (path: string, title?: string, owner?: string) => void
   private readonly onFacts?: () => void
   private readonly inlineWorking: HTMLElement
   /** Messages sent from the composer that the transcript has not yet recorded, drawn after the last turn. */
@@ -511,6 +572,8 @@ export class TranscriptBand {
   private pinned = false
   private folded: boolean
   private feed: TranscriptFeed | null = null
+  private sentFilesFeed: SentFilesFeed | null = null
+  private sentFileNotices: SentFileNotice[] = []
   private readingPromise: Promise<boolean> | null = null
   private pollTimer: number | null = null
   private pollDelay = LIVE_POLL_MS
@@ -649,7 +712,7 @@ export class TranscriptBand {
     this.head.addEventListener('click', () => this.toggleFold())
     this.openButton.addEventListener('click', () => this.openFull())
     this.preview.addEventListener('click', (event) => {
-      if ((event.target as Element | null)?.closest('a')) return
+      if ((event.target as Element | null)?.closest('a, .ws-transcript-sent-file-item')) return
       if (window.getSelection?.()?.toString()) return
       this.openFull()
     })
@@ -732,6 +795,8 @@ export class TranscriptBand {
     this.renderFrame = this.layoutFrame = null
     this.feed?.dispose()
     this.feed = null
+    this.sentFilesFeed?.dispose()
+    this.sentFilesFeed = null
     this.readingPromise = null
     this.cancelPendingRender()
     this.observer?.disconnect()
@@ -756,6 +821,9 @@ export class TranscriptBand {
       this.clearLoadingTimer()
       this.feed?.dispose()
       this.feed = null
+      this.sentFilesFeed?.dispose()
+      this.sentFilesFeed = null
+      this.sentFileNotices = []
       this.readingPromise = null
       this.cancelPendingRender()
       this.clearView()
@@ -785,6 +853,9 @@ export class TranscriptBand {
     this.clearLoadingTimer()
     this.feed?.dispose()
     this.feed = null
+    this.sentFilesFeed?.dispose()
+    this.sentFilesFeed = null
+    this.sentFileNotices = []
     this.readingPromise = null
     this.cancelPendingRender()
     this.clearView()
@@ -803,6 +874,16 @@ export class TranscriptBand {
       onReset: () => this.resetFeedView(),
       onStatus: (status, detail) => this.statusChanged(status, detail),
     })
+    if (target.uid) {
+      this.sentFilesFeed = new SentFilesFeed({
+        shuttleBase: this.shuttleBase,
+        uid: target.uid,
+        session: target.session,
+        host: target.host,
+        fetch: this.fetcher,
+        onFiles: (files) => this.acceptSentFiles(target.session, files),
+      })
+    }
     this.paintHead()
     this.readIfVisible()
   }
@@ -816,7 +897,7 @@ export class TranscriptBand {
   }
 
   private sameTarget(a: TranscriptTarget, b: TranscriptTarget): boolean {
-    return a.session === b.session && a.host === b.host
+    return a.session === b.session && a.host === b.host && a.uid === b.uid
   }
 
   private readFolded(): boolean {
@@ -1013,7 +1094,12 @@ export class TranscriptBand {
     if (this.readingPromise) return this.readingPromise
     const feed = this.feed
     let shared!: Promise<boolean>
-    shared = feed.read().then((arrived) => {
+    const sentFilesFeed = this.sentFilesFeed
+    shared = Promise.all([
+      feed.read(),
+      sentFilesFeed?.read() ?? Promise.resolve(false),
+    ]).then(([transcriptArrived, sentFilesArrived]) => {
+      const arrived = transcriptArrived || sentFilesArrived
       if (this.readingPromise === shared) this.readingPromise = null
       if (this.feed === feed) this.hasReadCurrent = true
       if (this.feed === feed && this.canReadNow() && this.target?.live) {
@@ -1116,6 +1202,7 @@ export class TranscriptBand {
       if (this.disposed || !this.pendingEntries.length) return
       const before = this.model.turns.length
       this.model.append(this.pendingEntries)
+      this.model.placeSentFiles()
       this.pendingEntries = []
       const changes = this.model.takeChanges()
       this.confirmSent()
@@ -1145,9 +1232,37 @@ export class TranscriptBand {
     })
   }
 
+  private acceptSentFiles(session: string, files: SentFile[]): void {
+    if (this.disposed || this.target?.session !== session) return
+    const notices = sentFileSends(files, session).map((send): SentFileNotice => ({
+      ...send,
+      kind: 'sent-file',
+      ...(send.timestamp === undefined ? {} : { at: send.timestamp }),
+    }))
+    this.sentFileNotices = notices
+    this.model.setSentFiles(notices)
+    const changes = this.model.takeChanges()
+    if (!changes.turns.length) return
+    if (!this.hasInitialRender) {
+      this.initialReadyPending = true
+      this.renderInitialWhenDrained()
+      return
+    }
+    this.paintPreview()
+    if (this.fullRendered) {
+      for (const index of changes.turns) this.renderTurn(index)
+      this.updateEarlierButton()
+    }
+    this.paintHead()
+    this.scheduleLayout()
+    this.setNote(null)
+    if (this.findPattern) this.scheduleFindRefresh()
+  }
+
   private resetFeedView(): void {
     this.cancelPendingRender()
     this.model.reset()
+    this.model.setSentFiles(this.sentFileNotices)
     this.model.takeChanges()
     this.hasInitialRender = false
     this.hasReadCurrent = false
@@ -1232,6 +1347,10 @@ export class TranscriptBand {
     const agent = this.agentName()
     turn.steps.forEach((step, index) => {
       if (step.kind === 'thread-notice') { nodes.push(noticeRow(step, 'li')); return }
+      if (step.kind === 'sent-file') {
+        nodes.push(sentFileRow(step, this.target?.host, this.shuttleBase, this.onFile, 'li'))
+        return
+      }
       if (step.kind !== 'text') {
         const spawn = spawnMention(step)
         if (spawn) { const item = document.createElement('li'); item.append(spawn); nodes.push(item) }
@@ -1358,6 +1477,10 @@ export class TranscriptBand {
     parts.forEach((part, position) => {
       if (part.kind === 'thread-notice') {
         children.push(noticeRow(turn.steps[part.index] as Notice))
+        return
+      }
+      if (part.kind === 'sent-file') {
+        children.push(sentFileRow(turn.steps[part.index] as SentFileNotice, this.target?.host, this.shuttleBase, this.onFile))
         return
       }
       if (part.kind === 'text') {

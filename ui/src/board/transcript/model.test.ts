@@ -71,6 +71,40 @@ describe('TranscriptModel', () => {
     expect(model.takeChanges()).toEqual({ reset: false, turns: [0] })
   })
 
+  it('places current send rows at their timestamps and moves them when transcript turns arrive', () => {
+    const model = new TranscriptModel()
+    const send = (id: string, at: number) => ({
+      kind: 'sent-file' as const,
+      id,
+      sessionId: 'session',
+      at,
+      timestamp: at,
+      files: [{ fullPath: `/tmp/${id}.png`, basename: `${id}.png`, timestamp: at, sessionId: 'session' }],
+    })
+
+    model.setSentFiles([send('send-3', 3)])
+    expect(model.turns).toHaveLength(0)
+    model.append([
+      { kind: 'prompt', text: 'First prompt', images: 0, dispatch: false, at: 1 },
+      { kind: 'text', text: 'Before send', at: 2 },
+      { kind: 'text', text: 'After send', at: 4 },
+      { kind: 'prompt', text: 'Second prompt', images: 0, dispatch: false, at: 8 },
+      { kind: 'text', text: 'Second answer', at: 9 },
+    ])
+    model.placeSentFiles()
+
+    expect(model.turns.map((turn) => turn.steps.map((step) => step.kind))).toEqual([
+      ['text', 'sent-file', 'text'],
+      ['text'],
+    ])
+    expect(segments(model.turns[0].steps).map((part) => part.kind)).toEqual(['text', 'sent-file', 'text'])
+    expect(model.takeChanges()).toEqual({ reset: false, turns: [0, 1] })
+
+    model.setSentFiles([send('send-6', 6)])
+    expect(model.turns[0].steps.map((step) => step.kind)).toEqual(['text', 'text', 'sent-file'])
+    expect(model.takeChanges()).toEqual({ reset: false, turns: [0] })
+  })
+
   it('is invariant to splitting a record sequence across append calls', () => {
     fc.assert(fc.property(
       fc.array(entry, { maxLength: 40 }),

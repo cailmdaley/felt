@@ -1,10 +1,13 @@
 defmodule ShuttleWeb.SentFilesController do
   @moduledoc """
   The sent-files trail for a fiber: `GET /api/v1/sent-files?uid=…&origin=…`.
+  An optional `session` query parameter returns every send from that native
+  conversation, including repeated paths.
 
   Returns `{"files": [{"fullPath", "basename", "timestamp", "sessionId"}]}` —
-  newest-first, deduped by `fullPath`, capped — the artifacts a worker pushed
-  with `SendUserFile` on the card whose fiber id is `uid`. Source is the owning
+  newest-first and capped — the artifacts a worker pushed with `SendUserFile`
+  on the card whose fiber id is `uid`. Without `session`, entries are deduped
+  by `fullPath`; a session-scoped response preserves repeated sends. Source is the owning
   host's `events.jsonl` hook stream (`Shuttle.SentFiles`), the always-fresh
   ground truth (see finding 01KVC1N5XMAAMYXDAGR4V6QA9G).
 
@@ -63,17 +66,29 @@ defmodule ShuttleWeb.SentFilesController do
   alias ShuttleWeb.TemporalComposite, as: Composite
 
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
+    session_id = params["session"]
+
     case OriginRouter.route(Map.get(params, "origin")) do
       {:error, {:unknown_origin, origin}} ->
         ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
 
       {:remote, remote} ->
-        relay_bytes(conn, OriginRouter.forward_get(remote, "/api/v1/sent-files", %{"uid" => uid}))
+        query =
+          if is_binary(session_id),
+            do: %{"uid" => uid, "session" => session_id},
+            else: %{"uid" => uid}
+
+        relay_bytes(
+          conn,
+          OriginRouter.forward_get(remote, "/api/v1/sent-files", query)
+        )
 
       :local ->
-        validator = {uid, sent_files_tokens()}
+        validator = {uid, session_id, sent_files_tokens()}
 
-        json_with_validator(conn, validator, fn -> %{files: SentFiles.for_uid(uid)} end)
+        json_with_validator(conn, validator, fn ->
+          %{files: SentFiles.for_uid(uid, session_id: session_id)}
+        end)
     end
   end
 

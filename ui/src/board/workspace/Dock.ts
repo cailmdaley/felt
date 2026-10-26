@@ -45,6 +45,7 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
   return card.sessionUuid ? {
     session: card.sessionUuid,
     host: card.shuttleHost,
+    uid: card.uid,
     agent: card.workerAgent ?? card.shuttleAgent,
     live: hasLiveWorker(card),
     tasks: card.workerTasks,
@@ -470,7 +471,7 @@ export class Dock {
   private transcriptPane: HTMLElement | null = null
   private transcriptBand: TranscriptBand | null = null
   /** Opens a file the worker touched in the reader's file viewer; the workspace seats it. */
-  openFile?: (path: string, title?: string) => void
+  openFile?: (path: string, title?: string, owner?: string) => void
   /** The constitution page's entry point, shown while the nav carries one. */
   private constitutionButton: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
@@ -907,7 +908,7 @@ export class Dock {
     errorEl.setAttribute('role', 'alert')
     errorEl.style.display = 'none'
     // The band's usage facts feed the composer's Resume (its cache warmth), so the band comes first.
-    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title) => this.openFile?.(path, title), onFacts: () => this.composerPaint?.() })
+    if (shuttleManaged) this.transcriptBand = new TranscriptBand({ shuttleBase: this.shuttleBase, inline: true, onFile: (path, title, owner) => this.openFile?.(path, title, owner), onFacts: () => this.composerPaint?.() })
     const composer = shuttleManaged ? this.buildComposer(card) : null
     const meetingPane = this.buildTranscriptPane(card)
 
@@ -975,6 +976,7 @@ export class Dock {
           transcript.read({
             session: record.session,
             host: record.host ?? undefined,
+            uid: record.uid ?? card.uid,
             agent: record.agent ?? record.harness ?? undefined,
             live: record.session === (hasLiveWorker(card) ? card.sessionUuid : undefined),
             at: record.at,

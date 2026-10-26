@@ -1,4 +1,5 @@
 import type { Entry, ResultImage } from './records.js'
+import type { SentFile, SentFileSend } from '../sentFiles.js'
 
 export interface ToolStep {
   kind: 'tool'
@@ -10,7 +11,13 @@ export interface ToolStep {
   version: number
 }
 
-export type Step = ToolStep | Extract<Entry, { kind: 'text' | 'thinking' | 'event' | 'thread-notice' }>
+export interface SentFileNotice extends SentFileSend {
+  kind: 'sent-file'
+  at?: number
+  files: SentFile[]
+}
+
+export type Step = ToolStep | SentFileNotice | Extract<Entry, { kind: 'text' | 'thinking' | 'event' | 'thread-notice' }>
 
 export interface Turn {
   index: number
@@ -53,6 +60,7 @@ export class TranscriptModel {
   private readonly turnList: Turn[] = []
   private readonly tools = new Map<string, ToolReference>()
   private readonly notices = new Set<string>()
+  private sentFiles = new Map<string, SentFileNotice>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
   private facts: Pick<TranscriptStats, 'model' | 'context' | 'window' | 'cacheUntil' | 'cacheTtl' | 'sessionCache'> = {}
@@ -152,10 +160,41 @@ export class TranscriptModel {
     this.turnList.length = 0
     this.tools.clear()
     this.notices.clear()
+    this.sentFiles.clear()
     this.dirty.clear()
     this.resetRequested = true
     this.facts = {}
     this.hourCacheUntil = this.shortCacheUntil = undefined
+  }
+
+  /** Replace the external send rows with the current receipt set for this session. */
+  setSentFiles(entries: readonly SentFileNotice[]): void {
+    const next = new Map(entries.map((entry) => [entry.id, entry] as const))
+    if (sameSentFiles(this.sentFiles, next)) return
+    this.sentFiles = next
+    this.placeSentFiles()
+  }
+
+  /** Place receipt rows against the transcript's current turn boundaries. */
+  placeSentFiles(): void {
+    if (!this.sentFiles.size || !this.turnList.length) return
+    for (const turn of this.turnList) {
+      const remaining = turn.steps.filter((step) => step.kind !== 'sent-file')
+      if (remaining.length === turn.steps.length) continue
+      turn.steps.splice(0, turn.steps.length, ...remaining)
+      this.recomputeTurn(turn)
+      this.touch(turn)
+    }
+
+    for (const entry of [...this.sentFiles.values()].sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.id.localeCompare(b.id))) {
+      const turn = this.turnForSentFile(entry.at)
+      const index = entry.at === undefined
+        ? -1
+        : turn.steps.findIndex((step) => step.at !== undefined && step.at > entry.at!)
+      turn.steps.splice(index < 0 ? turn.steps.length : index, 0, entry)
+      this.recomputeTurn(turn)
+      this.touch(turn)
+    }
   }
 
   stats(): TranscriptStats {
@@ -205,6 +244,30 @@ export class TranscriptModel {
     return turn
   }
 
+  private turnForSentFile(at: number | undefined): Turn {
+    const last = this.currentTurn()
+    if (at === undefined || !this.turnList.length) return last ?? this.createTurn()
+    let candidate = this.turnList[0]
+    for (const turn of this.turnList) {
+      const start = turn.prompt?.at ?? turn.startedAt
+      if (start === undefined || start <= at) candidate = turn
+      else break
+    }
+    return candidate
+  }
+
+  private recomputeTurn(turn: Turn): void {
+    const times: number[] = []
+    if (turn.prompt?.at !== undefined) times.push(turn.prompt.at)
+    for (const step of turn.steps) {
+      if (step.at !== undefined) times.push(step.at)
+      if (step.kind === 'tool' && step.result?.at !== undefined) times.push(step.result.at)
+    }
+    turn.startedAt = times.length ? Math.min(...times) : undefined
+    turn.endedAt = times.length ? Math.max(...times) : undefined
+    turn.answer = turn.steps.reduce((answer, step, index) => step.kind === 'text' ? index : answer, -1)
+  }
+
   private touch(turn: Turn): void {
     turn.version++
     this.dirty.add(turn.index)
@@ -215,13 +278,14 @@ export class TranscriptModel {
 export type Segment =
   | { kind: 'text'; index: number }
   | { kind: 'thread-notice'; index: number }
+  | { kind: 'sent-file'; index: number }
   | { kind: 'steps'; start: number; end: number }
 
 export function segments(steps: readonly Step[]): Segment[] {
   const out: Segment[] = []
   let runStart = -1
   steps.forEach((step, index) => {
-    if (step.kind === 'text' || step.kind === 'thread-notice') {
+    if (step.kind === 'text' || step.kind === 'thread-notice' || step.kind === 'sent-file') {
       if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: index })
       runStart = -1
       out.push({ kind: step.kind, index })
@@ -229,4 +293,16 @@ export function segments(steps: readonly Step[]): Segment[] {
   })
   if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: steps.length })
   return out
+}
+
+function sameSentFiles(a: ReadonlyMap<string, SentFileNotice>, b: ReadonlyMap<string, SentFileNotice>): boolean {
+  if (a.size !== b.size) return false
+  for (const [id, left] of a) {
+    const right = b.get(id)
+    if (!right || left.at !== right.at || left.files.length !== right.files.length) return false
+    for (let index = 0; index < left.files.length; index++) {
+      if (left.files[index].fullPath !== right.files[index].fullPath || left.files[index].basename !== right.files[index].basename) return false
+    }
+  }
+  return true
 }

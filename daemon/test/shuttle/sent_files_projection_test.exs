@@ -83,6 +83,37 @@ defmodule Shuttle.SentFilesProjectionTest do
     end
   end
 
+  test "a session trail keeps repeated paths and excludes other sessions", %{
+    events: events,
+    ledger: ledger
+  } do
+    append(events, sent_line(ts: 10, session: "earlier", files: ["/tmp/reused.pdf"]))
+    append(events, sent_line(ts: 20, session: "current", files: ["/tmp/reused.pdf"]))
+
+    append(
+      events,
+      sent_line(ts: 30, session: "earlier", files: ["/tmp/reused.pdf", "/tmp/extra.png"])
+    )
+
+    name = start_stream(events)
+
+    for opts <- [followed(events, ledger, name), scanned(events, ledger)] do
+      assert [
+               %{fullPath: "/tmp/reused.pdf", timestamp: 30, sessionId: "earlier"},
+               %{fullPath: "/tmp/extra.png", timestamp: 30, sessionId: "earlier"},
+               %{fullPath: "/tmp/reused.pdf", timestamp: 10, sessionId: "earlier"}
+             ] = SentFiles.for_uid(@match_ulid, Keyword.put(opts, :session_id, "earlier"))
+
+      assert [%{fullPath: "/tmp/reused.pdf", timestamp: 20, sessionId: "current"}] =
+               SentFiles.for_uid(@match_ulid, Keyword.put(opts, :session_id, "current"))
+
+      assert [
+               %{fullPath: "/tmp/extra.png", timestamp: 30},
+               %{fullPath: "/tmp/reused.pdf", timestamp: 30}
+             ] = SentFiles.for_uid(@match_ulid, opts)
+    end
+  end
+
   test "clear survives in the rotated file and applies to a later ledger claim", %{
     events: events,
     ledger: ledger
