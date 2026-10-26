@@ -67,12 +67,17 @@ export function registerHeaderBarJourneys(test) {
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
-      for (const name of ['Close', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
-      const height = await header.evaluate(el => el.getBoundingClientRect().height)
-      assert.ok(Math.abs(height - 60) <= 1, `short title keeps the 60px header at ${width}: ${height}`)
+      for (const name of ['Close for review', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
+      // Two rows: the verbs sit beneath the title, and × leaves from the title row's end.
+      const rows = await header.evaluate(el => {
+        const box = sel => el.querySelector(sel).getBoundingClientRect()
+        return { title: box('.ws-chat-title'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), head: el.getBoundingClientRect() }
+      })
+      assert.ok(rows.verbs.top >= rows.title.bottom - 1, `verbs sit beneath the title at ${width}`)
+      assert.ok(rows.leave.bottom <= rows.verbs.top + 1 && rows.head.right - rows.leave.right < 80, `× ends the title row at ${width}`)
     }
   }, { width: 1440, height: 900 })
-  test('Measured header stacking keeps the full title and verbs with open desktop columns', async page => {
+  test('The two-row header keeps the full title and verbs with open desktop columns', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
@@ -86,7 +91,7 @@ export function registerHeaderBarJourneys(test) {
         const title = document.querySelector('.ws-selected .ws-chat-title')
         return title && title.clientWidth > 0 && title.scrollHeight <= title.clientHeight + 1
       })
-      assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= 2 * parseFloat(getComputedStyle(el).lineHeight) + 7))
+      assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= Number(getComputedStyle(el).webkitLineClamp) * parseFloat(getComputedStyle(el).lineHeight) + 7))
       for (const name of ['Rest', 'Temper', 'Discard']) {
         const verb = header.getByRole('button', { name, exact: true })
         assert.ok(await verb.isVisible())
@@ -98,7 +103,6 @@ export function registerHeaderBarJourneys(test) {
     }
     for (const width of [1440, 850, 701, 1440]) {
       await page.setViewportSize({ width, height: 900 }); await check()
-      await page.waitForFunction(stacked => document.querySelector('.ws-selected .ws-chat-head').dataset.stacked === String(stacked), width < 1000)
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-rail-open-narrow-desktop-light.png') })
     }
     await page.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)').click()
@@ -110,6 +114,23 @@ export function registerHeaderBarJourneys(test) {
       }
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
     }
+  }, { width: 1440, height: 900 })
+  test('× leaves the chat for the Desk and writes nothing', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+    })
+    await page.goto(url)
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    await header.waitFor()
+    const posts = () => page.evaluate(() => window.__harness.requests.filter(r => r.method !== 'GET').length)
+    const before = await posts()
+    await header.locator('.ws-chat-leave').click()
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).waitFor({ state: 'visible' })
+    await header.waitFor({ state: 'hidden' })
+    assert.equal(await posts(), before, '× sends no write')
   }, { width: 1440, height: 900 })
   test('Thread rows own Enter and Space while body focus keeps expand and paging shortcuts', async page => {
     await page.addInitScript(() => {
@@ -203,7 +224,7 @@ export function registerHeaderBarJourneys(test) {
       assert.notEqual(geometry.nowrap, 'nowrap')
       assert.ok(geometry.titleHeight <= geometry.lineHeight * 2 + 7, JSON.stringify(geometry))
       if (device === 'desktop') assert.ok(await header.locator('h1').evaluate(el => el.scrollHeight <= el.clientHeight + 1), 'the full title fits, not only the clamped box')
-      assert.ok(geometry.barHeight <= 90 && geometry.childrenInside, JSON.stringify(geometry))
+      assert.ok(geometry.barHeight <= (device === 'desktop' ? 130 : 90) && geometry.childrenInside, JSON.stringify(geometry))
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       const report = header.locator('.ws-report-chip')
       const reportTitle = await report.getAttribute('title')
@@ -229,7 +250,8 @@ export function registerHeaderBarJourneys(test) {
         }), { viewBox: '0 0 16 16', inheritsColor: true, width: 16, height: 16, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
-      const centers = await header.locator('.ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
+      // Desktop rows each share a centre: the title row's ×, then the verbs row.
+      const centers = await header.locator(device === 'desktop' ? '.ws-chat-acts .ws-header-icon:visible svg' : '.ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
       assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `header icons share one vertical center in ${device}/${scheme}: ${centers}`)
       await chat.locator('textarea').focus(); await chat.locator('textarea').blur()
       if (process.env.WORKSPACE_SHOTS) {

@@ -6,6 +6,8 @@
   --ws-chat-measure: 46rem;
   /* The column's side room: the measure centred, never less than the inset. */
   --ws-chat-gutter: max(28px, calc((100% - var(--ws-chat-measure)) / 2));
+  /* The header's own grid answers to the card's width. */
+  container-type: inline-size;
 }
 .ws-chat-page > .ws-chat {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
@@ -14,10 +16,18 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  flex: none; display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 10px; min-width: 0;
-  min-height: 60px; padding: 6px 16px; container-type: inline-size;
+  /* Two fixed rows: who this is and the way out; then the artifact, navigation and the lifecycle verbs. */
+  flex: none; display: grid; min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'lead identity leave' 'acts acts acts';
+  align-items: start; gap: 4px 10px;
+  padding: 6px 16px 8px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
+.ws-chat-head > .ws-chat-lead { grid-area: lead; align-self: center; }
+.ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
+.ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: center; }
+.ws-chat-head > .ws-chat-acts { grid-area: acts; }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
 :where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
 /* One back control leads to the parent chat or the originating board view. */
@@ -37,8 +47,9 @@
   overflow: hidden; overflow-wrap: anywhere;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
-.ws-chat-acts { position: relative; display: flex; flex: none; align-items: center; gap: 4px; min-height: 32px; }
-.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; margin: 0; }
+.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px; }
+/* The lifecycle group stands apart at the far end, behind a rule, each verb with its word. */
+.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; margin: 0 0 0 auto; padding-left: 12px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
 /* The lifecycle chip: the rail's state word in its tone, beside the name's first line. */
 .ws-chat-state {
@@ -79,9 +90,11 @@
 .ws-reader .ws-header-overflow .kbn-ctl-verdict { display: flex; gap: 8px; }
 .ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
 .ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--ws-label-size); }
-.ws-header-overflow .ws-header-icon::after { content: attr(aria-label); font-family: var(--ws-serif); }
-.ws-report-chip { display: flex; align-items: center; flex: none; padding: 0; border-radius: 5px; }
-.ws-report-preview { display: block; position: relative; overflow: hidden; width: 64px; height: 44px; flex: none; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
+.ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--ws-serif); }
+.ws-reader .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 10px 0 8px; }
+.ws-header-word { font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
+.ws-report-chip { display: flex; align-items: center; flex: none; padding: 0; margin-right: 8px; border-radius: 5px; }
+.ws-report-preview { display: block; position: relative; overflow: hidden; width: 104px; height: 64px; flex: none; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
 .ws-report-preview > .ws-thumbnail { width: 100%; height: 100%; }
 .ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
@@ -173,12 +186,15 @@
   .ws-chat-identity { grid-template-columns: auto 1fr; gap: 0 8px; }
   .ws-chat-title { grid-column: 1 / -1; font-size: var(--ws-prose-size); }
 }
+/* A card narrow enough to wrap the verbs: the name takes the label size, and the lifecycle group its own line, without the rule. */
+@container (max-width: 560px) {
+  .ws-chat-head { grid-template-areas: 'identity identity leave' 'lead acts acts'; }
+  .ws-chat-head > .ws-chat-lead { align-self: start; padding-top: 4px; }
+  /* × keeps the corner, so the name may take a third line. */
+  .ws-chat-title { font-size: var(--ws-label-size); -webkit-line-clamp: 3; }
+  .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }
+}
 
-.ws-chat-head[data-stacked='true'] { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 10px; }
-.ws-chat-head[data-stacked='true'] .ws-chat-identity { grid-column: 1 / -1; grid-row: 1; grid-template-columns: auto 1fr; }
-.ws-chat-head[data-stacked='true'] .ws-chat-title { grid-column: 1 / -1; font-size: var(--ws-label-size); }
-.ws-chat-head[data-stacked='true'] .ws-chat-lead { grid-column: 1; grid-row: 2; align-self: center; }
-.ws-chat-head[data-stacked='true'] .ws-chat-acts { grid-column: 2; grid-row: 2; justify-self: end; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
@@ -193,6 +209,11 @@
   .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
   .ws-chat-head { display: flex; flex-wrap: nowrap; gap: 5px; min-height: 56px; padding: 4px 6px; }
+  /* One row on a phone: the way out stays the last thing on the line. */
+  .ws-chat-head > .ws-chat-leave { order: 1; align-self: auto; }
+  .ws-chat-title { -webkit-line-clamp: 2; }
+  .ws-chat-acts { flex-wrap: nowrap; }
+  .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }
   .ws-chat-title { font-size: var(--ws-label-size); }
   .ws-chat-state { margin: 0; font-size: var(--ws-small-size); letter-spacing: 0; }
   .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); gap: 4px; white-space: nowrap; }

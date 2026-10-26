@@ -457,6 +457,8 @@ export class Dock {
   private headRoot: HTMLElement | null = null
   private header: HTMLElement | null = null
   private lead: HTMLElement | null = null
+  /** The header's ×: leaves the chat by the same way back as ‹, never a lifecycle write. */
+  private leave: HTMLButtonElement | null = null
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
   private card: KanbanCard | null = null
@@ -568,6 +570,12 @@ export class Dock {
     if (this.constitutionButton) this.constitutionButton.hidden = !this.openConstitution
     this.lead.replaceChildren(...back)
     this.lead.hidden = !back.length
+    if (this.leave) {
+      this.leave.hidden = !nav.origin
+      this.leave.onclick = nav.origin ? () => nav.origin!.open() : null
+      const label = nav.origin ? `Leave the chat for ${nav.origin.label}` : 'Leave the chat'
+      this.leave.title = label; this.leave.setAttribute('aria-label', label)
+    }
   }
 
   private later(fn: () => void, ms: number): number {
@@ -668,7 +676,7 @@ export class Dock {
     this.blockedDispatches.clear()
     this.root?.replaceChildren()
     this.headRoot?.replaceChildren()
-    this.header = this.lead = this.ancestry = null
+    this.header = this.lead = this.ancestry = this.leave = null
     this.drawerClose = null
   }
 
@@ -1037,8 +1045,13 @@ export class Dock {
       button.innerHTML = headerIcon(name)
       return button
     }
-    for (const [button, name, label] of [[review, 'close', 'Close'], [rest, 'rest', 'Rest'], [temper, 'temper', 'Temper'], [discard, 'discard', 'Discard']] as const) {
-      if (button) icon(button, name, label)
+    // Lifecycle verbs carry their word beside the icon; only navigation is drawn bare.
+    for (const [button, name, label] of [[review, 'close', 'Close for review'], [rest, 'rest', 'Rest'], [temper, 'temper', 'Temper'], [discard, 'discard', 'Discard']] as const) {
+      if (!button) continue
+      icon(button, name, label)
+      button.classList.add('ws-header-verb')
+      const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = label
+      button.append(word)
     }
     const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
       const button = ctlButton('', cls)
@@ -1121,18 +1134,13 @@ export class Dock {
     drawer.prepend(ancestry)
     const identity = document.createElement('div'); identity.className = 'ws-chat-identity'
     identity.append(title, lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
-    header.append(lead, identity, this.head)
+    const leave = this.leave = document.createElement('button')
+    leave.type = 'button'
+    leave.className = 'ws-header-icon ws-chat-leave'
+    leave.hidden = true
+    leave.innerHTML = headerIcon('leave')
+    header.append(lead, identity, leave, this.head)
     placeIcons()
-    // Measure the unstacked title so widening a stacked card can restore its bar.
-    const fitHeader = (): void => {
-      header.dataset.stacked = 'false'
-      if (isMobileViewport() || !header.clientWidth) return
-      header.dataset.stacked = String(title.scrollHeight > title.clientHeight + 1)
-    }
-    const headerSize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fitHeader)
-    headerSize?.observe(header)
-    headerSize?.observe(title)
-    this.composerDisposers.push(() => headerSize?.disconnect())
 
     const log = document.createElement('div')
     log.className = 'ws-chat-log'
@@ -1169,7 +1177,6 @@ export class Dock {
       review.hidden = !reviewable
       consoleItem.hidden = !this.workerPillFor(card)?.matches('a[href],button')
       sessionsSection.hidden = !card.uid
-      fitHeader()
     }
     this.actPaint()
   }

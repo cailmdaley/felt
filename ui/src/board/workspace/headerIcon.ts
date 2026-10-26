@@ -5,7 +5,8 @@ const shapes = {
   close: '<path d="m3 8 3 3 7-7"/>',
   rest: '<circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5"/>',
   temper: '<path d="M8 1.5 14.5 8 8 14.5 1.5 8Z"/>',
-  discard: '<path d="m4 4 8 8m0-8-8 8"/>',
+  discard: '<path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.75 9.5h6.5L12 4.5M6.75 7v4.5M9.25 7v4.5"/>',
+  leave: '<path d="m4 4 8 8m0-8-8 8"/>',
 } as const
 
 export type HeaderIcon = keyof typeof shapes

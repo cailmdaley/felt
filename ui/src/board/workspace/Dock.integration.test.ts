@@ -41,29 +41,33 @@ beforeEach(async () => {
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('header action placement', () => {
-  it('measures title overflow on header resize and restores an unstacked bar when it fits', () => {
-    const observers: Array<{ targets: Element[]; run: () => void; disconnect: ReturnType<typeof vi.fn> }> = []
-    vi.stubGlobal('ResizeObserver', class {
-      targets: Element[] = []
-      disconnect = vi.fn()
-      constructor(callback: () => void) { observers.push({ targets: this.targets, run: callback, disconnect: this.disconnect }) }
-      observe(el: Element): void { this.targets.push(el) }
-      unobserve(): void {}
-    })
-    band = dock.bandFor(task({ uid: 'measured', sessionUuid: 'measured' }))
-    const header = band.el.querySelector<HTMLElement>('.ws-chat-head')!
-    const title = header.querySelector('h1')!
-    Object.defineProperty(header, 'clientWidth', { value: 400 })
-    Object.defineProperty(title, 'clientHeight', { value: 50 })
-    let height = 75
-    Object.defineProperty(title, 'scrollHeight', { get: () => height })
-    const observer = observers.find(o => o.targets.includes(header))!
-    observer.run(); expect(header.dataset.stacked).toBe('true')
-    height = 50; observer.run(); expect(header.dataset.stacked).toBe('false')
-    height = 75; observer.run(); expect(header.dataset.stacked).toBe('true')
-    vi.stubGlobal('matchMedia', () => ({ matches: true }))
-    observer.run(); expect(header.dataset.stacked).toBe('false')
-    dock.reset(); expect(observer.disconnect).toHaveBeenCalled()
+  it('× leaves the chat by the origin and writes nothing', () => {
+    const transition = vi.fn()
+    dock.reset(); dock = new Dock('', saved, transition)
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 'leave' }))
+    document.body.append(band.el)
+    const leave = band.el.querySelector<HTMLButtonElement>('.ws-chat-head > .ws-chat-leave')!
+    expect(leave.hidden).toBe(true)
+    const origin = vi.fn()
+    band.setNav({ origin: { label: 'Desk', open: origin } })
+    expect(leave.hidden).toBe(false)
+    expect(leave.getAttribute('aria-label')).toBe('Leave the chat for Desk')
+    expect(leave.querySelector('svg path')!.getAttribute('d')).toBe('m4 4 8 8m0-8-8 8')
+    vi.mocked(fetch).mockClear()
+    leave.click()
+    expect(origin).toHaveBeenCalledTimes(1)
+    expect(transition).not.toHaveBeenCalled()
+    expect(saved).not.toHaveBeenCalled()
+    expect(writes()).toEqual([])
+    // No lifecycle verb is drawn as ×.
+    for (const verb of band.head.querySelectorAll('.kbn-ctl-verdict button svg path')) expect(verb.getAttribute('d')).not.toBe('m4 4 8 8m0-8-8 8')
+  })
+
+  it('draws each lifecycle verb with its word, apart from navigation', () => {
+    band = dock.bandFor(task({ status: 'active', sessionUuid: 'words' }))
+    const words = [...band.head.querySelectorAll('.kbn-ctl-verdict .ws-header-word')].map(w => w.textContent)
+    expect(words).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(band.head.querySelector('.ws-chat-constitution .ws-header-word, .ws-chat-console .ws-header-word, .ws-chat-settings .ws-header-word')).toBeNull()
   })
 
   it('keeps every lifecycle control in a narrow desktop card, overflowing only on phones', () => {
@@ -74,13 +78,13 @@ describe('header action placement', () => {
     Object.defineProperty(header, 'clientWidth', { value: 420 })
     const verbs = (): string[] => [...header.querySelectorAll('.kbn-ctl-verdict button')].map(b => b.getAttribute('aria-label')!)
     window.dispatchEvent(new Event('resize'))
-    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
     expect(header.dataset.compact).toBe('false')
     phone = true; window.dispatchEvent(new Event('resize'))
     expect(verbs()).toEqual([])
     expect(header.dataset.compact).toBe('true')
     phone = false; window.dispatchEvent(new Event('resize'))
-    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
   })
 })
 
@@ -98,6 +102,17 @@ describe('shared verdict controls', () => {
     expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([
       ['task-uid', 'tempered'], ['task-uid', 'composted'],
     ])
+    controls.reset()
+    await flush()
+  })
+
+  it('Close for review moves the card to Awaiting review and nothing else', async () => {
+    const transition = vi.fn()
+    const controls = new Dock('', saved, transition)
+    const band = controls.bandFor(task({ status: 'active', sessionUuid: 'review' }))
+    document.body.append(band.el)
+    band.head.querySelector<HTMLButtonElement>('.kbn-ctl-review')!.click()
+    expect(transition.mock.calls.map(([card, target]) => [card.uid, target])).toEqual([['task-uid', 'awaitingReview']])
     controls.reset()
     await flush()
   })
@@ -331,9 +346,9 @@ describe('state-shaped act zone', () => {
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
     expect(band.head.dataset.column).toBe('inFlight')
-    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(verbs()).toEqual(['Close', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
     expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
@@ -345,7 +360,7 @@ describe('state-shaped act zone', () => {
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
     const buttons = [...band.head.querySelectorAll<HTMLButtonElement>('button')]
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Constitution', 'Console', 'Settings', 'Close', 'Rest', 'Temper', 'Discard'])
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Constitution', 'Console', 'Settings', 'Close for review', 'Rest', 'Temper', 'Discard'])
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -358,7 +373,7 @@ describe('state-shaped act zone', () => {
       expect(svg.getAttribute('aria-hidden')).toBe('true')
       expect(svg.getAttribute('focusable')).toBe('false')
       expect(svg.querySelector('path, rect, circle')).not.toBeNull()
-      expect(button.textContent).toBe('')
+      expect(button.textContent).toBe(button.classList.contains('ws-header-verb') ? button.getAttribute('aria-label') : '')
       button.focus(); expect(document.activeElement).toBe(button)
     }
     expect(band.head.querySelector('details, summary, [role="dialog"], .ws-chat-fresh, .ws-chat-resume, .ws-chat-meeting')).toBeNull()
