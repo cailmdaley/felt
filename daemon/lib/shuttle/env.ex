@@ -71,6 +71,16 @@ defmodule Shuttle.Env do
     {__MODULE__, :executable, name, path, if(relative?, do: File.cwd!())}
   end
 
+  # The VM's user-home argument is immutable for its lifetime. Scoped HOME
+  # overrides are resolved before this fallback, never cached as global facts.
+  defp system_home do
+    Shuttle.RuntimeCache.fetch({__MODULE__, :system_home}, 86_400_000, &System.user_home!/0)
+  end
+
+  defp expand_home("~"), do: Path.expand(home())
+  defp expand_home("~/" <> rest), do: Path.expand(Path.join(home(), rest))
+  defp expand_home(path), do: Path.expand(path)
+
   if @scoped do
     @max_walk 64
     @owner_key :"$shuttle_env_owner"
@@ -100,7 +110,7 @@ defmodule Shuttle.Env do
     def home do
       case lookup(:env, "HOME") do
         {:ok, {:set, home}} -> home
-        _ -> System.user_home!()
+        _ -> system_home()
       end
     end
 
@@ -110,7 +120,7 @@ defmodule Shuttle.Env do
       case {path, lookup(:env, "HOME")} do
         {"~", {:ok, {:set, home}}} -> Path.expand(home)
         {"~/" <> rest, {:ok, {:set, home}}} -> Path.expand(Path.join(home, rest))
-        _ -> Path.expand(path)
+        _ -> expand_home(path)
       end
     end
 
@@ -289,11 +299,11 @@ defmodule Shuttle.Env do
 
     @doc "`System.user_home!/0`."
     @spec home() :: String.t()
-    def home, do: System.user_home!()
+    def home, do: system_home()
 
     @doc "`Path.expand/1`."
     @spec expand(Path.t()) :: String.t()
-    def expand(path), do: Path.expand(path)
+    def expand(path), do: expand_home(path)
 
     @doc "`System.cmd/3`."
     @spec cmd(String.t(), [String.t()], keyword()) :: {Collectable.t(), non_neg_integer()}

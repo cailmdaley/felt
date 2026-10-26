@@ -485,8 +485,7 @@ defmodule Shuttle.Remotes do
   defp read_document do
     path = config_path()
 
-    with true <- File.exists?(path),
-         {:ok, content} <- File.read(path),
+    with {:ok, content} <- File.read(path),
          {:ok, decoded} <- Jason.decode(content) do
       {:ok, decoded}
     else

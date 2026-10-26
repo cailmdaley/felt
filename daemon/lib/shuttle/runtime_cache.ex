@@ -20,13 +20,25 @@ defmodule Shuttle.RuntimeCache do
     key = Shuttle.Env.scope_key(key)
     now = System.monotonic_time(:millisecond)
 
-    case :ets.lookup(@table, key) do
+    case lookup(key) do
       [{^key, value, expires}] when expires > now -> value
       _ -> put_scoped(key, load.(), now + ttl_ms)
     end
   end
 
-  def delete(key), do: :ets.delete(@table, Shuttle.Env.scope_key(key))
+  # Boot-time configuration resolves paths and executables before the cache
+  # owner starts. Missing tables (including a supervisor restart) are misses.
+  defp lookup(key) do
+    :ets.lookup(@table, key)
+  rescue
+    ArgumentError -> []
+  end
+
+  def delete(key) do
+    :ets.delete(@table, Shuttle.Env.scope_key(key))
+  rescue
+    ArgumentError -> false
+  end
 
   # Missing executables must be discoverable as soon as they are installed.
   defp put_scoped(_key, nil, _expires), do: nil
@@ -34,5 +46,7 @@ defmodule Shuttle.RuntimeCache do
   defp put_scoped(key, value, expires) do
     :ets.insert(@table, {key, value, expires})
     value
+  rescue
+    ArgumentError -> value
   end
 end
