@@ -27,6 +27,37 @@ defmodule Shuttle.RunnerTest do
     assert {"hi\n", 0} = Shuttle.Runner.Default.cmd("echo", ["hi"], timeout_ms: 5_000)
   end
 
+  test "output at the byte ceiling is returned intact across port messages" do
+    assert {"12345678", 0} =
+             Shuttle.Runner.Default.cmd("bash", ["-c", "printf 1234; sleep 0.02; printf 5678"],
+               max_output_bytes: 8,
+               timeout_ms: 5_000
+             )
+  end
+
+  @tag :tmp_dir
+  test "overflowing output kills the real child and discards partial output", %{tmp_dir: root} do
+    pid_file = Path.join(root, "pid")
+
+    assert {message, :output_limit} =
+             Shuttle.Runner.Default.cmd(
+               "bash",
+               [
+                 "-c",
+                 "echo $$ > \"$PID_FILE\"; printf 1234; sleep 0.02; printf 5678; exec sleep 30"
+               ],
+               env: [{"PID_FILE", pid_file}],
+               max_output_bytes: 7,
+               timeout_ms: 2_000
+             )
+
+    assert message =~ "output byte limit"
+    refute message =~ "1234"
+    pid = pid_file |> File.read!() |> String.trim()
+    assert eventually_dead?(pid), "process #{pid} survived the output limit"
+    refute_receive _, 200
+  end
+
   test "input sends one frame without waiting for EOF" do
     assert {~s({"ok":true}\n), 0} =
              Shuttle.Runner.Default.cmd(

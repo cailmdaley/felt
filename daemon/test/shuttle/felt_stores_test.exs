@@ -150,7 +150,96 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
+  defmodule RaisingDiscoveryRunner do
+    @behaviour Shuttle.Runner
+
+    def cmd("find", _args, _opts) do
+      send(self(), :discovery_launch)
+      :erlang.error(Shuttle.Env.app(:discovery_launch_error))
+    end
+  end
+
   describe "configured_stores/0 symlinked-substore discovery" do
+    test "a changed base never inherits another base's expansion on discovery failure" do
+      old_store = tmp_dir()
+      project = tmp_dir()
+      current_store = tmp_dir()
+      File.mkdir_p!(Path.join(old_store, ".felt"))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.mkdir_p!(Path.join(current_store, ".felt"))
+      File.ln_s!(Path.join(project, ".felt"), Path.join([old_store, ".felt", "project"]))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", old_store)
+      assert [_, _] = FeltStores.configured_stores()
+
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", current_store)
+      Shuttle.Test.Env.put_app_env(:felt_stores_runner, DiscoveryRunner)
+      Shuttle.Test.Env.put_app_env(:discovery_result, {"failed", 1})
+
+      assert FeltStores.configured_stores() == [current_store]
+      assert_received {:discovery, _, _}
+      assert FeltStores.configured_stores() == [current_store]
+      refute_received {:discovery, _, _}
+      key = Shuttle.Env.scope_key({FeltStores, :expanded_stores})
+      assert {[^current_store], [^current_store], _} = :persistent_term.get(key)
+    end
+
+    for reason <- [:system_limit, :eagain, :emfile], warm? <- [false, true] do
+      @tag launch_error: reason, warm_cache: warm?
+      test "launch error #{reason} retains and caches the fallback (warm cache: #{warm?})",
+           %{launch_error: reason, warm_cache: warm?} do
+        store = tmp_dir()
+        project = tmp_dir()
+        File.mkdir_p!(Path.join(store, ".felt"))
+        File.mkdir_p!(Path.join(project, ".felt"))
+        File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "project"]))
+        Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+
+        expected =
+          if warm? do
+            good = FeltStores.configured_stores()
+            assert [_, _] = good
+            key = Shuttle.Env.scope_key({FeltStores, :expanded_stores})
+            {base, expanded, walked_at} = :persistent_term.get(key)
+            :persistent_term.put(key, {base, expanded, walked_at - 600_000})
+            good
+          else
+            [store]
+          end
+
+        Shuttle.Test.Env.put_app_env(:felt_stores_runner, RaisingDiscoveryRunner)
+        Shuttle.Test.Env.put_app_env(:discovery_launch_error, reason)
+        assert FeltStores.refresh_expanded_stores() == expected
+        assert_received :discovery_launch
+        assert FeltStores.configured_stores() == expected
+        assert FeltStores.refresh_expanded_stores() == expected
+        refute_received :discovery_launch
+      end
+    end
+
+    test "oversized real child output retains the expansion and never publishes a truncated scan" do
+      store = tmp_dir()
+      project = tmp_dir()
+      File.mkdir_p!(Path.join(store, ".felt"))
+      File.mkdir_p!(Path.join(project, ".felt"))
+      File.ln_s!(Path.join(project, ".felt"), Path.join([store, ".felt", "project"]))
+      Shuttle.Test.Env.put_env("SHUTTLE_STORES", store)
+      good = FeltStores.configured_stores()
+      assert [_, _] = good
+      key = Shuttle.Env.scope_key({FeltStores, :expanded_stores})
+      {base, expanded, walked_at} = :persistent_term.get(key)
+      :persistent_term.put(key, {base, expanded, walked_at - 600_000})
+
+      # A real process through Runner.Default, with more than the 4 MiB ceiling.
+      Shuttle.Test.FakeCli.install!(%{
+        "find" => "#!/bin/sh\ndd if=/dev/zero bs=1048576 count=5 2>/dev/null\n"
+      })
+
+      assert FeltStores.refresh_expanded_stores() == good
+      assert FeltStores.configured_stores() == good
+      assert {^base, ^good, attempted_at} = :persistent_term.get(key)
+      assert attempted_at > walked_at - 600_000
+    end
+
     test "real find discovers nested external .felt roots without descending links" do
       store = tmp_dir()
       project = tmp_dir()

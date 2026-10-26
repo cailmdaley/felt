@@ -13,13 +13,17 @@ defmodule Shuttle.Runner do
   world didn't answer" match `:timeout` explicitly (a timeout is never
   evidence of absence — see `Shuttle.FeltStores`).
 
+  `max_output_bytes: n` bounds collected output (including stderr when merged).
+  The default is `:infinity`. Exceeding the ceiling kills the child, discards
+  partial output and returns `{message, :output_limit}`, never truncated success.
+
   `timeout_ms: :infinity` is for completion-owned local mutations: neither a
   deadline nor caller death SIGKILLs them, so they can release filesystem locks.
   Their network phases must carry their own deadlines.
   """
 
   @callback cmd(String.t(), [String.t()], keyword()) ::
-              {String.t(), non_neg_integer() | :timeout}
+              {String.t(), non_neg_integer() | :timeout | :output_limit}
 
   defmodule Default do
     @behaviour Shuttle.Runner
@@ -104,7 +108,10 @@ defmodule Shuttle.Runner do
           else: System.monotonic_time(:millisecond) + timeout_ms
 
       try do
-        collect(port, os_pid, command, args, timeout_ms, deadline, [])
+        collect(port, os_pid, command, args, timeout_ms, deadline, {
+          [],
+          Keyword.get(opts, :max_output_bytes, :infinity)
+        })
       after
         if guard, do: send(guard, :released)
       end
@@ -125,15 +132,22 @@ defmodule Shuttle.Runner do
       end)
     end
 
-    defp collect(port, os_pid, command, args, timeout_ms, deadline, acc) do
+    defp collect(port, os_pid, command, args, timeout_ms, deadline, {acc, byte_budget}) do
       remaining =
         if deadline == :infinity,
           do: :infinity,
           else: max(deadline - System.monotonic_time(:millisecond), 0)
 
       receive do
+        {^port, {:data, data}} when byte_budget != :infinity and byte_size(data) > byte_budget ->
+          if os_pid, do: reap(os_pid)
+          safe_close(port)
+          flush_port(port)
+          {"#{command} exceeded output byte limit", :output_limit}
+
         {^port, {:data, data}} ->
-          collect(port, os_pid, command, args, timeout_ms, deadline, [acc | [data]])
+          budget = if byte_budget == :infinity, do: :infinity, else: byte_budget - byte_size(data)
+          collect(port, os_pid, command, args, timeout_ms, deadline, {[acc | [data]], budget})
 
         {^port, {:exit_status, status}} ->
           {IO.iodata_to_binary(acc), status}

@@ -35,7 +35,8 @@ defmodule Shuttle.FeltStores do
   (`refresh_expanded_stores/0`), never on a request process. The exception is a
   cold start: the first call for a given base list, which includes a
   just-changed `SHUTTLE_STORES`/registry. Discovery failures retain the last
-  good expansion (or the base stores on cold start) until a poll refresh.
+  expansion for the same base, or the current base stores if none is cached,
+  until a poll refresh.
   """
   @spec configured_stores() :: store_list()
   def configured_stores, do: cached_expansion(:infinity)
@@ -80,16 +81,15 @@ defmodule Shuttle.FeltStores do
             {:error, _reason} -> cached_or_base(cached, base)
           end
 
-        # Cache the attempt too: failed discovery retains the last good list,
+        # Cache the attempt too: failed discovery retains the same base's list,
         # and only the poller's next refresh retries, never a request read.
         :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
   end
 
-  defp cached_or_base({_base, [], _walked_at}, base), do: base
-  defp cached_or_base({_base, expanded, _walked_at}, _base_stores), do: expanded
-  defp cached_or_base(:none, base), do: base
+  defp cached_or_base({base, expanded, _walked_at}, base), do: expanded
+  defp cached_or_base(_cached, base), do: base
 
   @doc """
   The configured store list before symlink-substore expansion.
@@ -179,6 +179,7 @@ defmodule Shuttle.FeltStores do
   # depth 17 are included. The cap bounds traversal of pathological trees.
   @max_substore_scan_depth 16
   @substore_scan_timeout_ms 60_000
+  @substore_scan_max_output_bytes 4 * 1024 * 1024
 
   defp symlinked_substore_roots(store) do
     store_real = store_felt_realpath(store)
@@ -230,7 +231,8 @@ defmodule Shuttle.FeltStores do
       {:ok, %File.Stat{type: :directory}} ->
         runner().cmd("find", args,
           stderr_to_stdout: false,
-          timeout_ms: @substore_scan_timeout_ms
+          timeout_ms: @substore_scan_timeout_ms,
+          max_output_bytes: @substore_scan_max_output_bytes
         )
 
       {:ok, _stat} ->
@@ -239,6 +241,11 @@ defmodule Shuttle.FeltStores do
       {:error, reason} ->
         {"", reason}
     end
+  rescue
+    # Port launch resource failures are unknown discovery, not an empty tree.
+    # Keep the same fallback and retry cadence as a failed child process.
+    error in [ErlangError, SystemLimitError, ArgumentError] ->
+      {Exception.message(error), :launch_failed}
   end
 
   defp inside?(path, prefix), do: path == prefix or String.starts_with?(path, prefix <> "/")
