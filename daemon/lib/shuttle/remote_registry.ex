@@ -54,10 +54,8 @@ defmodule Shuttle.RemoteRegistry do
   @default_backoff_schedule_ms [30_000, 120_000, 600_000, 1_800_000]
   @ssh_connect_timeout_s 8
 
-  # States where the recovery cascade is not actively driving the remote:
-  # passive HTTP polling is the only activity. Everything else (:degraded,
-  # :reviving, :unreachable) is mid-cascade — the state machine owns the
-  # probes, so the passive poll stays out of the way.
+  # These states have no recovery step in flight; their probes use the normal
+  # cadence. The other states also keep this cadence between recovery actions.
   @cascade_inactive [:healthy, :tripped]
 
   # A tripped remote is known-dead; probing it at the healthy cadence
@@ -220,10 +218,9 @@ defmodule Shuttle.RemoteRegistry do
   end
 
   @doc """
-  Manually resets a tripped circuit breaker, flipping the remote back
-  to `:degraded` so the recovery cascade runs once more. Because the
-  attempt counter is preserved, another full-cascade failure re-trips
-  immediately — one manual reset buys exactly one cascade.
+  Restarts recovery for a tripped, degraded or unreachable remote. The
+  attempt counter is preserved, so a failed cascade can trip the breaker
+  immediately; one reset buys one new attempt.
 
   Operators reach this through `shuttle reset <remote>` (see
   the `shuttle daemon` shim), which POSTs `/api/v1/remotes/:name/reset`
@@ -231,7 +228,7 @@ defmodule Shuttle.RemoteRegistry do
   with RELEASE_DISTRIBUTION=none (rel/env.sh.eex), so there is no remote
   console to call this from directly.
 
-  Returns `{:error, :not_tripped}` when the remote isn't tripped and
+  Returns `{:error, :not_tripped}` when recovery is not waiting for an operator and
   `{:error, :unknown_remote}` when the name isn't configured.
   """
   @spec reset_breaker(String.t()) :: :ok | {:error, :not_tripped | :unknown_remote}
@@ -326,8 +323,9 @@ defmodule Shuttle.RemoteRegistry do
       nil ->
         {:reply, {:error, :unknown_remote}, state}
 
-      %{recovery: %Recovery{state: :tripped} = recovery} = entry ->
-        Logger.info("RemoteRegistry: #{name} circuit breaker manually reset; re-running cascade")
+      %{recovery: %Recovery{state: recovery_state} = recovery} = entry
+      when recovery_state in [:tripped, :degraded, :unreachable] ->
+        Logger.info("RemoteRegistry: #{name} recovery manually reset; re-running cascade")
 
         entry =
           with_recovery(entry, %{
@@ -336,7 +334,7 @@ defmodule Shuttle.RemoteRegistry do
               step: :bounce_tunnel,
               action_due_at: state.clock.(),
               next_retry_at: nil,
-              last_action: "circuit breaker manually reset; re-running recovery cascade"
+              last_action: "recovery manually reset; re-running cascade"
           })
 
         {:reply, :ok, %{state | snapshots: Map.put(state.snapshots, name, entry)}}
@@ -449,6 +447,9 @@ defmodule Shuttle.RemoteRegistry do
       recovery_action_due?(recovery, now) ->
         run_recovery_step(entry, state, now)
 
+      should_poll?(entry, state, now_ms) and recovery.state not in @cascade_inactive ->
+        passive_probe(entry, state.client, now)
+
       should_poll?(entry, state, now_ms) ->
         normal_probe(entry, state.client, state, now)
 
@@ -464,10 +465,6 @@ defmodule Shuttle.RemoteRegistry do
   # `:tripped` keeps the cheap passive polling — decimated to the
   # tripped-poll floor — so the registry still observes the remote and
   # auto-heals on a successful probe; only recovery *actions* stop.
-  defp should_poll?(%{recovery: %Recovery{state: recovery_state}}, _state, _now_ms)
-       when recovery_state not in @cascade_inactive,
-       do: false
-
   defp should_poll?(
          %{
            recovery: %Recovery{state: recovery_state},
@@ -496,6 +493,21 @@ defmodule Shuttle.RemoteRegistry do
       {:error, reason} ->
         Logger.debug("RemoteRegistry: poll failed for #{remote.name}: #{inspect(reason)}")
         normal_failure_entry(entry, reason, state.failure_threshold, now)
+    end
+  end
+
+  # Recovery actions are bounded and often wait several seconds between SSH,
+  # restart and route checks. Keep observing the remote during those waits;
+  # a successful request ends the cascade immediately, while a failed request
+  # refreshes staleness without changing the scheduled recovery action.
+  defp passive_probe(%{remote: %Remote{} = remote} = entry, client, now) do
+    case fetch_snapshot(remote, client) do
+      {:ok, snapshot} ->
+        success_entry(entry, snapshot, now)
+
+      {:error, reason} ->
+        Logger.debug("RemoteRegistry: passive poll failed for #{remote.name}: #{inspect(reason)}")
+        failure_entry(entry, reason, now)
     end
   end
 
@@ -647,6 +659,18 @@ defmodule Shuttle.RemoteRegistry do
                 last_action: "remote daemon not running; restarting"
             })
 
+          {:ok, %{daemon: :unknown}} ->
+            with_recovery(
+              failure_entry(entry, :daemon_liveness_uncertain, now),
+              enter_unreachable(
+                recovery,
+                "daemon liveness uncertain; refusing restart",
+                :daemon_liveness_uncertain,
+                state.backoff_schedule_ms,
+                now
+              )
+            )
+
           {:error, reason} ->
             Logger.warning(
               "RemoteRegistry: #{remote.name} SSH health check failed: #{format_error(reason)}"
@@ -679,6 +703,21 @@ defmodule Shuttle.RemoteRegistry do
                     do: "remote daemon responding; waiting",
                     else: "restarted remote daemon"
                   ),
+                next_retry_at: nil
+            })
+
+          {:error, {:ssh_restart_failed, :timeout, _output} = reason} ->
+            Logger.warning(
+              "RemoteRegistry: #{remote.name} SSH restart timed out; probing before declaring unreachable"
+            )
+
+            with_recovery(entry, %{
+              recovery
+              | state: :reviving,
+                step: :probe_after_restart,
+                action_due_at: now,
+                last_error: reason,
+                last_action: "SSH restart timed out; re-probing route",
                 next_retry_at: nil
             })
 
@@ -965,32 +1004,41 @@ defmodule Shuttle.RemoteRegistry do
     end
   end
 
-  # Where the remote daemon answers liveness on its own host: its unix socket
-  # when the fleet names one, else its loopback port. `/api/v1/version` is the
-  # probe because it answers immediately while the daemon is still booting;
-  # `/api/v1/state` can block for minutes on a loaded host, and a probe that
-  # times out there gets a booting daemon restarted before it finishes. `remote_socket` is already free of
-  # whitespace and `:`; single-quoting keeps any other shell metacharacter inert.
-  defp remote_liveness_target(%Remote{remote_socket: socket}) when is_binary(socket),
-    do: "--unix-socket '#{String.replace(socket, "'", ~S('\''))}' http://localhost/api/v1/version"
-
-  defp remote_liveness_target(%Remote{remote_port: port}),
-    do: "http://127.0.0.1:#{port}/api/v1/version"
-
-  # Recovery uses SSH to separate transport failure from daemon liveness. Any
-  # HTTP response, including an error status during boot, proves the listener is
-  # alive. Allow slow startup and loaded hosts time to answer before calling it
-  # absent; ordinary snapshot freshness remains governed by the poll timeout.
-  @recovery_http_timeout_s 15
+  # A failed HTTP request is ambiguous on loaded hosts. Inspect the remote user's
+  # process table instead: any live BEAM is enough to refuse a restart, and a
+  # successful same-user scan with no BEAM proves the daemon is absent. If the
+  # process scan itself fails, the result is uncertain and never authorizes a
+  # restart. This avoids depending on a heartbeat path that may be overridden
+  # in the daemon's service environment.
+  defp daemon_liveness_script do
+    """
+    daemon_state() {
+      uid=$(id -un) || return 2
+      processes=$(ps -u "$uid" -o comm= 2>/dev/null) || return 2
+      if printf '%s' "$processes" | grep -Eq '(^|/)beam.smp$'; then
+        printf alive
+      else
+        printf dead
+      fi
+    }
+    """
+    |> String.trim()
+  end
 
   defp ssh_check(%Remote{} = remote, runner) do
     script =
-      "if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_liveness_target(remote)} >/dev/null 2>&1; " <>
-        "then echo daemon=alive; else echo daemon=not_running; fi"
+      daemon_liveness_script() <>
+        "\nstate=$(daemon_state) || { echo daemon=unknown; exit 0; }; echo daemon=$state"
 
     case runner.cmd("ssh", ssh_args(Remote.ssh_host(remote), script), stderr_to_stdout: true) do
       {out, 0} ->
-        daemon = if String.contains?(out, "daemon=alive"), do: :alive, else: :not_running
+        daemon =
+          cond do
+            String.contains?(out, "daemon=alive") -> :alive
+            String.contains?(out, "daemon=dead") -> :not_running
+            true -> :unknown
+          end
+
         {:ok, %{daemon: daemon}}
 
       {out, code} ->
@@ -1015,7 +1063,11 @@ defmodule Shuttle.RemoteRegistry do
            stderr_to_stdout: true
          ) do
       {out, 0} ->
-        if String.contains?(out, "daemon=responding"), do: :responding, else: :ok
+        cond do
+          String.contains?(out, "daemon=responding") -> :responding
+          String.contains?(out, "daemon=uncertain") -> {:error, :daemon_liveness_uncertain}
+          true -> :ok
+        end
 
       {out, code} ->
         {:error, {:ssh_restart_failed, code, trim_output(out)}}
@@ -1033,12 +1085,12 @@ defmodule Shuttle.RemoteRegistry do
   # started on it as a side effect of a daemon restart.
   defp restart_script(%Remote{} = remote) do
     daemon =
-      """
-      if curl --silent --show-error --max-time #{@recovery_http_timeout_s} #{remote_liveness_target(remote)} >/dev/null 2>&1; then echo daemon=responding; else
-      repo=$(head -n 1 "$HOME/.shuttle/repo" 2>/dev/null || true); if [ -n "$repo" ] && [ -x "$repo/bin/shuttle-launch" ]; then SHUTTLE_DIR="$repo" "$repo/bin/shuttle-launch"; else "$HOME/.local/bin/shuttle-launch"; fi
-      fi
-      """
-      |> String.trim()
+      daemon_liveness_script() <>
+        "\ncase $(daemon_state) in\n" <>
+        "  alive) echo daemon=responding ;;\n" <>
+        "  dead) repo=$(head -n 1 \"$HOME/.shuttle/repo\" 2>/dev/null || true); launcher=\"$HOME/.local/bin/shuttle-launch\"; if [ -n \"$repo\" ] && [ -x \"$repo/bin/shuttle-launch\" ]; then launcher=\"$repo/bin/shuttle-launch\"; fi; if grep -q 'RECOVERY=1' \"$launcher\" 2>/dev/null; then SHUTTLE_DIR=\"$repo\" \"$launcher\" --recover; else echo daemon=uncertain; exit 0; fi ;;\n" <>
+        "  *) echo daemon=uncertain ;;\n" <>
+        "esac"
 
     if remote_addressed?(remote) do
       # The gate is the far side's own state file, not the script being

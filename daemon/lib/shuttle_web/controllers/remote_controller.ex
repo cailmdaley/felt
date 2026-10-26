@@ -2,15 +2,13 @@ defmodule ShuttleWeb.RemoteController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/remotes/:name/reset
 
-  Resets a remote's tripped circuit breaker — the human "go" that lets the
-  RemoteRegistry run its recovery cascade once more after `trip_threshold`
-  failed revive attempts. The attempt counter is preserved, so one reset buys
-  exactly one cascade (see `Shuttle.RemoteRegistry.reset_breaker/2`). The CLI
-  verb `shuttle reset <remote>` posts here.
+  Restarts a remote's recovery cascade when it is tripped, degraded or
+  unreachable. The attempt counter is preserved, so a reset buys one attempt.
+  The CLI verb `shuttle reset <remote>` posts here.
 
   Returns: 200  %{ok: true, remote: name}
            404  %{error: "unknown_remote"} when the name isn't configured
-           409  %{error: "not_tripped"} when the breaker isn't tripped
+           409  %{error: "not_tripped"} when no recovery action is waiting
            503  %{error: "registry_unavailable"} when no RemoteRegistry runs
   """
 

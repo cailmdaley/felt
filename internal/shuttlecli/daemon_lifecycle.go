@@ -141,7 +141,7 @@ func (a *app) shuttleDaemonReleaseCmd() *cobra.Command {
 func (a *app) shuttleDaemonResetCmd() *cobra.Command {
 	shuttleDaemonResetCmd := &cobra.Command{
 		Use:   "reset <remote>",
-		Short: "Reset a remote daemon's circuit breaker",
+		Short: "Restart recovery for a remote daemon",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			remote := strings.TrimSpace(args[0])
@@ -156,7 +156,7 @@ func (a *app) shuttleDaemonResetCmd() *cobra.Command {
 			if _, err := a.daemonLifecyclePost(settings, path, nil); err != nil {
 				return fmt.Errorf("reset failed: %w", err)
 			}
-			fmt.Fprintf(a.env.Stdout, "circuit breaker reset for %s — recovery cascade re-running\n", remote)
+			fmt.Fprintf(a.env.Stdout, "recovery restarted for %s — cascade running\n", remote)
 			return nil
 		},
 	}

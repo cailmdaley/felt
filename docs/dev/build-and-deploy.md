@@ -302,8 +302,8 @@ human is only one of them:
   again. `trip_cooldown_schedule_ms` (default 15min, 30min, then hourly)
   widens the gap with each successive trip.
 - **`shuttle daemon reset <remote>`** or `POST /api/v1/remotes/:name/reset` —
-  forces a cascade now instead of waiting out the cooldown. One reset buys
-  exactly one cascade, and it 409s if the breaker isn't currently tripped.
+  restarts recovery immediately for a tripped, degraded or unreachable remote.
+  One reset buys one attempt, and it 409s when no recovery action is waiting.
 
 **The daemon serves its own web UI at `http://127.0.0.1:4000/`** — the Desk
 kanban with Stash/Capture, Chronicle, and Board on hotkeys 1–3. Board is a

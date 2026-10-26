@@ -12,6 +12,7 @@
 #                           an enabled/active service, or create tmux session
 #                           "shuttle-daemon" running `shuttle-launch --loop`
 #   shuttle-launch --tmux   select tmux explicitly, disabling a competing service
+#   shuttle-launch --recover start a dead daemon without stopping an existing owner
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
 # Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
@@ -30,6 +31,11 @@
 # daemon answers instead of repeatedly attempting to bind its endpoint.
 
 set -u
+
+case "${1:-}" in
+  ""|--loop|--tmux|--recover) ;;
+  *) echo "shuttle-launch: unknown mode '$1'" >&2; exit 2 ;;
+esac
 
 # Guarantee the canonical CLI dir is on PATH for the daemon we launch. The
 # daemon shells out to both `felt` and `shuttle`; on a fresh Debian-family host
@@ -142,6 +148,40 @@ if [ "${1:-}" = "--loop" ]; then
   done
 fi
 
+# Recovery is requested by another daemon after it has found this user's BEAM
+# process absent. Recheck the configured endpoint and ask an installed owner to
+# start itself without a stop signal or stop marker. A race with another start
+# remains safe because `shuttle daemon start` holds the endpoint claim.
+if [ "${1:-}" = "--recover" ]; then
+  if shuttle daemon status >/dev/null 2>&1; then
+    echo "shuttle-launch: daemon already answers; recovery left it alone"
+    exit 0
+  fi
+  if command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user show-environment >/dev/null 2>&1 \
+    && { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null \
+      || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
+    systemctl --user start shuttle-daemon.service \
+      || { echo "shuttle-launch: systemctl --user start shuttle-daemon failed" >&2; exit 1; }
+    echo "shuttle-launch: requested recovery start through its systemd user unit"
+    exit 0
+  fi
+  if command -v launchctl >/dev/null 2>&1 \
+    && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
+    launchctl kickstart "gui/$(id -u)/io.shuttle.daemon" \
+      || { echo "shuttle-launch: launchctl kickstart io.shuttle.daemon failed" >&2; exit 1; }
+    echo "shuttle-launch: requested recovery start through its launchd agent"
+    exit 0
+  fi
+  if shuttle daemon loop-present >/dev/null 2>&1; then
+    echo "shuttle-launch: existing respawn loop will retry the daemon"
+    exit 0
+  fi
+  RECOVERY=1
+else
+  RECOVERY=0
+fi
+
 # Normal revival and deploy use the same verified live-loop preference.
 if [ -z "${1:-}" ] && shuttle daemon loop-present >/dev/null 2>&1; then
   set -- --tmux
@@ -166,7 +206,7 @@ fi
 # install`: a systemd user unit or a launchd agent) is revived through that
 # supervisor. A respawn loop beside it would be a second supervisor started
 # with a different environment than the unit's.
-if [ "${1:-}" != "--tmux" ] && command -v systemctl >/dev/null 2>&1 \
+if [ "$RECOVERY" -eq 0 ] && [ "${1:-}" != "--tmux" ] && command -v systemctl >/dev/null 2>&1 \
   && systemctl --user show-environment >/dev/null 2>&1 \
   && { systemctl --user is-enabled --quiet shuttle-daemon.service 2>/dev/null \
     || systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; }; then
@@ -175,7 +215,7 @@ if [ "${1:-}" != "--tmux" ] && command -v systemctl >/dev/null 2>&1 \
   echo "shuttle-launch: restarted the daemon through its systemd user unit"
   exit 0
 fi
-if [ "${1:-}" != "--tmux" ] && command -v launchctl >/dev/null 2>&1 \
+if [ "$RECOVERY" -eq 0 ] && [ "${1:-}" != "--tmux" ] && command -v launchctl >/dev/null 2>&1 \
   && launchctl print "gui/$(id -u)/io.shuttle.daemon" >/dev/null 2>&1; then
   launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" \
     || { echo "shuttle-launch: launchctl kickstart io.shuttle.daemon failed" >&2; exit 1; }
@@ -211,9 +251,11 @@ data_dir=""
 if command -v shuttle >/dev/null 2>&1; then
   data_dir=$(SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle host --json 2>/dev/null | sed -n 's/.*"data_dir": *"\([^"]*\)".*/\1/p' | head -n 1)
 fi
-touch "${data_dir:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null
-tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t "$SESSION" 2>/dev/null
-tmux kill-session -t "$SESSION" 2>/dev/null
+if [ "$RECOVERY" -eq 0 ]; then
+  touch "${data_dir:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null
+  tmux -S "$HOME/.shuttle/tmux.sock" kill-session -t "$SESSION" 2>/dev/null
+  tmux kill-session -t "$SESSION" 2>/dev/null
+fi
 tmux new-session -d -s "$SESSION" \
   "exec env SHUTTLE_RESPAWN_LOOP=1 SHUTTLE_DIR='$REPO' '$SELF' --loop" \
   || { echo "shuttle-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }

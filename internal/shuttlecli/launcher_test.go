@@ -103,3 +103,61 @@ exec /bin/sleep 0.02
 		t.Fatalf("daemon CLI calls = %q, want %q", got, want)
 	}
 }
+
+func TestShuttleLaunchRecoveryDoesNotStopOrMarkAnExistingOwner(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shuttle-launch is a POSIX shell script")
+	}
+	root := t.TempDir()
+	releaseLauncher := filepath.Join(root, "bin", "rel", "bin", "shuttled")
+	if err := os.MkdirAll(filepath.Dir(releaseLauncher), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(releaseLauncher, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env := testEnv(t)
+	home := filepath.Join(root, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("HOME", home)
+	env.Set("SHUTTLE_DIR", root)
+	env.Set("SHUTTLE_TEST_CALLS", filepath.Join(root, "calls"))
+	sysenvtest.FakeCommand(t, env, "shuttle", `#!/bin/sh
+case "$*" in
+  "daemon status"|"daemon loop-present") exit 1 ;;
+  *) echo "unexpected shuttle argv: $*" >&2; exit 2 ;;
+esac
+`)
+	sysenvtest.FakeCommand(t, env, "tmux", `#!/bin/sh
+printf '%s\n' "$*" >> "$SHUTTLE_TEST_CALLS"
+case "$*" in *kill-session*) exit 99 ;; esac
+exit 0
+`)
+	sysenvtest.FakeCommand(t, env, "systemctl", "#!/bin/sh\nexit 1\n")
+	sysenvtest.FakeCommand(t, env, "launchctl", "#!/bin/sh\nexit 1\n")
+	script, err := os.ReadFile("../../bin/shuttle-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := filepath.Join(root, "shuttle-launch")
+	if err := os.WriteFile(launcher, script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := env.Command("/bin/sh", launcher, "--recover").CombinedOutput()
+	if err != nil {
+		t.Fatalf("recovery launch failed: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".shuttle", "heartbeat.stopped")); !os.IsNotExist(err) {
+		t.Fatalf("recovery wrote stop marker: stat err=%v", err)
+	}
+	calls, err := os.ReadFile(filepath.Join(root, "calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(calls), "kill-session") {
+		t.Fatalf("recovery killed an existing session: %s", calls)
+	}
+}

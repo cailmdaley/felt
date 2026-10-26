@@ -266,7 +266,7 @@ configured stores; they refuse guessed paths and duplicate matches.
 | `shuttle daemon stop` | Stop the local daemon and mark the shutdown as intentional |
 | `shuttle daemon status` | Print daemon state; exits 2 when the daemon is down |
 | `shuttle daemon release` | Release the boot quarantine |
-| `shuttle daemon reset <remote>` | Reset a remote's circuit breaker |
+| `shuttle daemon reset <remote>` | Restart recovery for a tripped, degraded or unreachable remote |
 | `shuttle daemon install [options]` | Install the per-user keep-alive supervisor; `--stores` pins its store list, `--codex-socket` persists an explicit Codex endpoint (`--codex-socket=` clears it) |
 | `shuttle daemon uninstall [--label <name>]` | Remove the per-user keep-alive supervisor |
 | `shuttle version` | Print the running daemon version or, when it is down, the local Mix release version |

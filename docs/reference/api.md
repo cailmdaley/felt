@@ -714,7 +714,7 @@ here" rather than as a missing file.
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
-| `POST /remotes/:name/reset` | Reset a remote's tripped circuit breaker, forcing a cascade now rather than waiting out the trip cooldown — one reset buys exactly one cascade, and it 409s when the breaker is not tripped |
+| `POST /remotes/:name/reset` | Restart recovery for a tripped, degraded or unreachable remote; one reset buys one attempt, and it 409s when no recovery action is waiting |
 
 `codex_backend` is a cached, bounded-read health object with `state` (`starting`, `ready`, or `waiting`), `endpoint`, `error`, and `next_attempt_at` (UTC timestamp or null).
 Its reconciliation runs off the request path and independently of worker boot quarantine.

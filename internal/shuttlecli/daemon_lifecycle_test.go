@@ -215,7 +215,7 @@ func TestDaemonResetEscapesRemoteName(t *testing.T) {
 	env := testEnv(t)
 	env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
 	out, _, err := executeIn(t, env, t.TempDir(), "daemon", "reset", "one/two")
-	if err != nil || !posted || !strings.Contains(out, "circuit breaker reset for one/two") {
+	if err != nil || !posted || !strings.Contains(out, "recovery restarted for one/two") {
 		t.Fatalf("reset output=%q posted=%t err=%v", out, posted, err)
 	}
 }
