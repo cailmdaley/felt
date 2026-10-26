@@ -89,7 +89,7 @@ These are the stable styling tokens:
 | `--ws-serif`, `--ws-mono`, `--ws-mono-tracking` | Prose/name stack, metadata stack and tracking |
 | `--ws-heading-size`, `--ws-section-size`, `--ws-lede-size`, `--ws-prose-size` | Fiber title, section, outcome and body sizes |
 | `--ws-row-size`, `--ws-label-size`, `--ws-note-size`, `--ws-small-size`, `--ws-chrome-size` | Row titles, controls, secondary lines, metadata and the reader's base text |
-| `--ws-radius`, `--ws-control-radius`, `--ws-line-width`, `--ws-float` | Frame shape, control shape, borders and elevation shadow |
+| `--ws-radius`, `--ws-control-radius`, `--ws-line-width`, `--ws-float` | Popover and menu shape, control shape, borders and elevation shadow |
 
 The default scale has seven steps: 11 px mono metadata, 14 px secondary lines, 15 px controls and labels, 16 px row titles, 18 px prose, 21 px titles and outcomes, and 34 px fiber titles. `--ws-chrome-size` follows the label step and `--ws-lede-size` the section step unless a theme sets them.
 Themes can restyle those fonts and sizes through the variables above; act zones keep Shuttle's default typography.
@@ -105,8 +105,8 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 | Selector | Part |
 |---|---|
 | `[data-part='veil']` | Still backdrop beneath the reader |
-| `[data-part='label-bar']` | Bottom document label and its controls |
-| `[data-part='page-frame']` | Paper sheet enclosing content and label |
+| `[data-part='label-bar']` | The page's header line: back, name, arrival and its controls |
+| `[data-part='page-frame']` | The page's paper, filling the stage beneath its header line |
 | `[data-part='fiber-header']` | Fiber status header |
 | `[data-part='fiber-title']` | Constitution title |
 | `[data-part='act']` | Scope limit, **not** a styling hook; composer, verdicts and workers |
@@ -130,7 +130,7 @@ These hooks are stable; renaming or removing one is a theme-breaking change.
 The same CSS is used on reader and compact channel roots.
 Keep card and row ornamentation light, preserve their density and touch targets, and don't use pseudo-elements that intercept clicks or cover controls.
 Thumbnail paper and text faces can be styled; the HTML, PDF and image contents of loaded previews keep their own appearance.
-On the phone, bundled themes remove frame radius, clip paths, borders and shadows so pages stay edge to edge.
+The page frame meets the stage's edges at every width: a theme gives it ground, grain and ink, never a radius, clip path, border or shadow.
 
 ## Pigments
 

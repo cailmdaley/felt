@@ -194,12 +194,6 @@
   :scope[data-part="folio"][data-density="full"],
   :scope[data-part="folio"][data-density="compact"] { padding: 14px 0; }
   :scope[data-part="folio"][data-density="line"] { padding: 4px 0; }
-  [data-part="page-frame"] {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    clip-path: none;
-  }
   [data-part="phone-topbar"] {
     color: var(--ws-ink);
     background-color: var(--ws-paper);

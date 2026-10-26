@@ -309,7 +309,7 @@
   /* Hidden pages keep unscaled geometry on phones. */
   .ws-page.ws-receded, .ws-page.ws-receded:is(.ws-text-page, .ws-before, .ws-after) { transform: none; opacity: 1; mask-image: none; }
   .ws-labelbar { display: none; }
-  .ws-media-poster { bottom: 0; }
+  .ws-media-poster { inset: 0; }
   /* The top bar's right end: the worker's dot alone, in a full target. */
   .ws-nav-trail { gap: 0; align-self: center; }
   .ws-reader .ws-navbar .ws-head-worker .kbn-card-worker { width: var(--ws-phone-target); height: var(--ws-phone-target); margin: 0; padding: 0; justify-content: center; align-items: center; }

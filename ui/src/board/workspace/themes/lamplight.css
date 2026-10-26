@@ -74,8 +74,6 @@
     linear-gradient(90deg, var(--ws-chart-grid-minor) 1px, transparent 1px);
   background-size: auto, auto, 96px 96px, auto, 96px 96px, 96px 96px, 24px 24px, 24px 24px;
   background-position: 0 0, 0 0, -48px -48px, 0 0, 0 0, 0 0, 0 0, 0 0;
-  border-color: var(--ws-hairline-soft);
-  box-shadow: var(--ws-float);
 }
 [data-part="page-frame"] .ws-content,
 [data-part="prose"],
@@ -204,12 +202,6 @@
   :scope[data-part="folio"][data-density="full"],
   :scope[data-part="folio"][data-density="compact"] { padding: 14px 0; }
   :scope[data-part="folio"][data-density="line"] { padding: 4px 0; }
-  [data-part="page-frame"] {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    clip-path: none;
-  }
   [data-part="phone-topbar"] {
     color: var(--ws-ink);
     background-color: var(--ws-paper);

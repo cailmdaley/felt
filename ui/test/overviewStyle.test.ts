@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const read = (path: string): string => readFileSync(new URL(`../src/board/${path}`, import.meta.url), 'utf8')
@@ -73,6 +73,11 @@ describe('workspace palette follows the Desk', () => {
     // The selected page is one frame: the sheet draws no box of its own, and its header line is ruled beneath.
     expect(reader).not.toMatch(/\.ws-sheet\s*\{[^}]*(box-shadow|border|border-radius):/)
     expect(reader).toMatch(/\.ws-labelbar\s*\{[^}]*border-bottom:/)
+    // No theme draws a box back onto the page frame.
+    for (const file of readdirSync(new URL('../src/board/workspace/themes/', import.meta.url)).filter(f => f.endsWith('.css'))) {
+      const theme = strip(read(`workspace/themes/${file}`))
+      for (const [, body] of theme.matchAll(/\[data-part="page-frame"\]\s*\{([^}]*)\}/g)) expect(body, file).not.toMatch(/(^|[\s;])(clip-path|box-shadow|border(-[a-z]+)*|outline)\s*:/)
+    }
     for (const sheet of [reader, css]) expect(sheet).toMatch(/prefers-reduced-transparency: reduce[^]*backdrop-filter: none/)
   })
 })

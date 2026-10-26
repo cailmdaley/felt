@@ -125,8 +125,6 @@ export class Reader {
   private readonly stopSwipe: () => void
   private swipeSettle: ReturnType<typeof setTimeout> | null = null
   private swiping = false
-  /** A press that began on the bare stage, which closes the reader if it ends there too. */
-  /** Whether a popover was open when the current press began, before any outside-click handler closed it. */
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
   private readonly announcement = element('div', 'ws-sr-only')

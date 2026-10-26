@@ -72,12 +72,6 @@
     linear-gradient(var(--ws-blueprint-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--ws-blueprint-grid) 1px, transparent 1px);
   background-size: 24px 24px;
-  clip-path: polygon(
-    0 var(--ws-page-cut), var(--ws-page-cut) 0,
-    calc(100% - var(--ws-page-cut)) 0, 100% var(--ws-page-cut),
-    100% calc(100% - var(--ws-page-cut)), calc(100% - var(--ws-page-cut)) 100%,
-    var(--ws-page-cut) 100%, 0 calc(100% - var(--ws-page-cut))
-  );
 }
 
 [data-part="fiber-header"] {
@@ -206,12 +200,6 @@
   :scope[data-part="folio"][data-density="full"],
   :scope[data-part="folio"][data-density="compact"] { padding: 14px 0; }
   :scope[data-part="folio"][data-density="line"] { padding: 4px 0; }
-  [data-part="page-frame"] {
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    clip-path: none;
-  }
   [data-part="phone-topbar"] {
     color: var(--ws-ink);
     background-color: var(--ws-paper);
