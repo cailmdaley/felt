@@ -28,6 +28,8 @@ There is no shared routing plug: each controller decides for itself. The
 per-controller `@moduledoc` says which, and is the thing to read when this table
 is not enough.
 
+`GET /api/v1/debug/profile?seconds=N` is host-scoped and peer-gated; it blocks for 1–300 seconds (default 30), returns OS CPU, VM microstates, process reductions and layered file/port-call attribution, and rejects concurrent profiles with 409.
+
 ## Write plane
 
 | Route | Routing | Purpose |

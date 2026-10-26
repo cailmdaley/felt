@@ -40,7 +40,7 @@ defmodule Shuttle.MixProject do
       # :inets — FileController's If-Modified-Since parsing calls
       # :httpd_util.convert_request_date/1; without the app in the release the
       # module is absent and the first conditional GET crashes.
-      extra_applications: [:logger, :inets]
+      extra_applications: [:logger, :inets, :runtime_tools]
     ]
   end
 

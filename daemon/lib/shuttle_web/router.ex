@@ -14,6 +14,7 @@ defmodule ShuttleWeb.Router do
   scope "/api/v1", ShuttleWeb do
     pipe_through(:api)
 
+    get("/debug/profile", ProfileController, :show)
     post("/dispatch", DispatchController, :create)
     # Images pasted into the composer, written on the host owning the fiber
     # (owner-routed) so the directive can name their paths.
