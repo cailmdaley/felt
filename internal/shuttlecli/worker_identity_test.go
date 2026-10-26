@@ -243,3 +243,55 @@ func TestWorkerLedgerPathRequiresMatchingUID(t *testing.T) {
 		t.Fatal("relative ledger path accepted")
 	}
 }
+
+// A Codex worker's tools run in a shared App Server whose environment may carry
+// another worker's tmux pane and dispatch path. Plain exit verbs, implicit or
+// naming the worker's own fiber, act on the native thread's fiber and never
+// end the inherited terminal, so workers need no environment scrubbing.
+func TestCodexWorkerExitsPlainlyUnderInheritedTerminal(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"handoff", "close", "rest"} {
+		for _, explicit := range []bool{false, true} {
+			name := verb + "/implicit"
+			if explicit {
+				name = verb + "/explicit"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				env := testEnv(t)
+				storeDir, st := newStore(t)
+				seedShuttleRole(t, st, "other", felt.StatusActive, oneshot(), nil)
+				seedShuttleRole(t, st, "mine", felt.StatusActive, oneshot(), nil)
+				other, mine := mustRead(t, st, "other"), mustRead(t, st, "mine")
+				env.Set("CODEX_THREAD_ID", "app-thread")
+				env.Set("SHUTTLE_HOST", "test-host")
+				env.Set("SHUTTLE_FIBER_PATH", other.Path)
+				kills, _ := stubWorkerExitTmux(t, env, shuttleTmuxSessionName(other.ID, other.UID), other.Path)
+				writeMessageIdentityLedger(t, env, []SessionProvenance{
+					{Kind: "dispatch", Host: "test-host", Harness: "codex", Session: "app-thread", Fiber: mine.ID, UID: mine.UID, FiberPath: mine.Path, At: 1},
+				})
+				project := t.TempDir()
+				args := []string{verb}
+				if explicit {
+					args = []string{"-C", storeDir, verb, "mine"}
+				}
+				if verb == "rest" {
+					args = append(args, "--local")
+				}
+				if out, err := runIn(t, env, project, args...); err != nil {
+					t.Fatalf("%v: %v\n%s", args, err, out)
+				}
+				if _, err := os.Stat(kills); !os.IsNotExist(err) {
+					t.Fatal("codex exit killed the inherited terminal")
+				}
+				if f := mustRead(t, st, "other"); f.Status != felt.StatusActive || workerHasHandoff(f) {
+					t.Fatal("inherited fiber mutated")
+				}
+				f := mustRead(t, st, "mine")
+				if verb == "close" && f.Status != felt.StatusClosed || verb == "rest" && !horizonStashed(f) || verb == "handoff" && !workerHasHandoff(f) {
+					t.Fatal("own fiber not updated")
+				}
+			})
+		}
+	}
+}
