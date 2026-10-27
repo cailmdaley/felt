@@ -89,7 +89,7 @@
   color: var(--ws-ink-muted); cursor: pointer;
 }
 .ws-reader .ws-header-icon[hidden] { display: none; }
-:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
 .ws-header-overflow { display: flex; align-items: center; gap: 8px; }
@@ -102,6 +102,14 @@
 .ws-header-word { font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
 /* A Desk row's menu lists the same verbs, drawn as the header draws them. */
 .kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
+/* Its plain items (Open terminal, Move…) keep the verbs' height, type and word column. */
+.kbn-verb-menu .kbn-verb-menu-plain {
+  display: block; width: 100%; height: 36px; box-sizing: border-box; padding: 0 10px 0 31px; margin: 0;
+  border: 0; border-radius: var(--ws-control-radius); background: transparent; text-align: left;
+  font: var(--ws-label-size)/1 var(--ws-serif); color: var(--ws-ink-muted); cursor: pointer;
+}
+.kbn-verb-menu .kbn-verb-menu-plain:is(:hover, :focus) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
+.kbn-verb-menu .kbn-verb-menu-plain:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
 .kbn-verb-menu .kbn-verb-menu-rule { border: 0; border-top: 1px solid var(--ws-hairline); margin: 4px 2px; }
 /* The artifact: a page the height of the header's two lines, the one click to the artifact. */
 .ws-report-chip { display: grid; flex: none; padding: 0; margin: 0; border-radius: 5px; }

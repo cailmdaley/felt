@@ -96,8 +96,16 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       if (!action.disabled) items.push(item)
       continue
     }
-    if (menu.classList.contains('kbn-verb-menu') && !menu.querySelector('.kbn-verb-menu-rule')) {
-      const rule = document.createElement('hr'); rule.className = 'kbn-verb-menu-rule'; menu.append(rule)
+    if (menu.classList.contains('kbn-verb-menu')) {
+      // Beneath the verbs, a plain item is drawn in the verbs' type, its word aligned with theirs.
+      if (!menu.querySelector('.kbn-verb-menu-rule')) {
+        const rule = document.createElement('hr'); rule.className = 'kbn-verb-menu-rule'; menu.append(rule)
+      }
+      item.classList.add('kbn-verb-menu-plain')
+      item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
+      menu.append(item)
+      if (!action.disabled) items.push(item)
+      continue
     }
     Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: '16px', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
     item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })

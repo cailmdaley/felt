@@ -2,7 +2,7 @@ import { installFrontierDetails } from './DeskFrontier.js'
 import { responseThreadIndex, ThreadIndex } from './threads.js'
 import { stateDot } from './stateDot.js'
 import type { FiberSend } from './fiberSends.js'
-import { markVerdictHost } from './workspace/Verdicts.js'
+import { markVerdictHost, type Verdict } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
 import { dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
 import {
@@ -142,6 +142,8 @@ interface KanbanSurfaceRendererOptions {
   getLatestReport?: (card: KanbanCard) => FiberSend | undefined
   /** Opens the Rest popover on the card's own Rest affordance. */
   onRest?: (card: KanbanCard) => void
+  /** A verdict through the same undo window the header and keys use. */
+  verdict?: (card: KanbanCard, verdict: Verdict) => void
   /** Resolve the owning host's registry default for agent labels. */
   getFleetDefaultAgent?: (origin: string) => string
   /** A card held still under the thumb — the touch reading of the drag. The
@@ -1574,14 +1576,19 @@ export class KanbanSurfaceRenderer {
     el.addEventListener('contextmenu', event => {
       if ((event.target as HTMLElement).closest('a[href]')) return
       event.preventDefault(); event.stopPropagation()
+      // Android follows a touch long press with its own contextmenu; the press already opened the menu.
+      if (performance.now() - longPressedAt < 1000) return
       this.openRowMenu(el, card, stale, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
     })
     el.addEventListener('keydown', event => {
       if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+      // A sub-line names another node; the row's menu is not its menu.
+      if ((event.target as HTMLElement).closest('.kbn-family-asks')) return
       event.preventDefault(); event.stopPropagation()
       this.openRowMenu(el, card, stale)
     })
-    attachLongPress(el, { onFire: () => this.openRowMenu(el, card, stale) })
+    let longPressedAt = -Infinity
+    attachLongPress(el, { onFire: () => { longPressedAt = performance.now(); this.openRowMenu(el, card, stale) } })
   }
 
   /** The line's actions: the header's verbs for this card, then what only a live worker or a held launch offers. */
@@ -1591,7 +1598,9 @@ export class KanbanSurfaceRenderer {
       dress: (item: HTMLButtonElement) => { dressVerb(item, verb) },
       run: () => {
         if (verb === 'rest') { this.o.onRest?.(card); return }
-        void this.o.transition(card, verb === 'review' ? 'awaitingReview' : verb === 'temper' ? 'tempered' : 'composted')
+        const verdict: Verdict = verb === 'review' ? 'awaitingReview' : verb === 'temper' ? 'tempered' : 'composted'
+        if (this.o.verdict) this.o.verdict(card, verdict)
+        else void this.o.transition(card, verdict)
         // The menu handed focus back to the line; a verdict's undo, drawn on the line, takes it.
         if (document.activeElement === anchor) anchor.querySelector<HTMLElement>('.ws-verdict-undo button')?.focus()
       },

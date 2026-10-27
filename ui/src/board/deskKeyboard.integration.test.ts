@@ -121,6 +121,33 @@ describe('Desk row menu', () => {
     expect(inside.workspace.isActive).toBe(false)
     press('z')
   })
+  it('Close for review from the menu enters the same undo window as the header and keys', () => {
+    const live = card({ id: 'live', uid: 'live', shuttleKind: 'oneshot', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+    draw(response({ now: { drafts: [], inFlight: [live], awaitingReview: [] } }))
+    vi.stubGlobal('confirm', () => true)
+    rightClick(document.querySelector<HTMLElement>('[data-card-uid="live"]')!)
+    const review = items().find(i => i.getAttribute('aria-label') === 'Close for review')!
+    review.click()
+    expect(menu()).toBeNull()
+    expect(document.querySelector('[data-card-uid="live"] .ws-verdict-undo')?.textContent).toMatch(/undo/)
+    press('z')
+  })
+  it('a sub-line opens neither the row menu nor the browser menu', () => {
+    const waiting = { status: 'active' as const, workerState: 'running' as const, runtimePhase: 'waiting' as const }
+    const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot', ...waiting })
+    const kids = ['a', 'b'].map(k => card({ id: `family/${k}`, uid: `family-${k}`, orchestrator: 'family', ...waiting }))
+    draw(response({ now: { drafts: [], inFlight: [root], awaitingReview: [] }, threads: kids }))
+    const line = document.querySelector<HTMLElement>('.kbn-family-ask')!
+    expect(line).not.toBeNull()
+    const name = line.querySelector<HTMLButtonElement>('.kbn-family-ask-name')!
+    name.focus()
+    expect(press('F10', { shiftKey: true }, name).defaultPrevented).toBe(false)
+    expect(menu()).toBeNull()
+    const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 })
+    line.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+    expect(menu()).toBeNull()
+  })
   it('never offers family expansion or folding in the row menu', () => {
     const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
     const child = card({ id: 'family/child', orchestrator: 'family', status: 'active' })

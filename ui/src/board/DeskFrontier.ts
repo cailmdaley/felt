@@ -65,7 +65,9 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     line.setAttribute('role', 'listitem')
     // A sub-line is its own node: nothing on it reaches the row's click, drag, selection or long press.
     line.addEventListener('click', event => { event.stopPropagation(); if (!(event.target as HTMLElement).closest('button')) open(other) })
-    for (const type of ['pointerdown', 'mousedown', 'touchstart', 'contextmenu'] as const) line.addEventListener(type, event => event.stopPropagation())
+    for (const type of ['pointerdown', 'mousedown', 'touchstart'] as const) line.addEventListener(type, event => event.stopPropagation())
+    // No menu of its own, and not the row's: neither the row's nor the browser's.
+    line.addEventListener('contextmenu', event => { event.preventDefault(); event.stopPropagation() })
     line.addEventListener('dragstart', event => { event.preventDefault(); event.stopPropagation() })
     const name = document.createElement('button'); name.type = 'button'; name.className = 'kbn-family-ask-name'
     name.textContent = other.name

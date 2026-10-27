@@ -399,6 +399,7 @@ export class KanbanModal {
       getLastResponse: () => this.lastResponse,
       stopDragAutoScroll: () => this.stopDragAutoScroll(),
       transition: (card, target) => this.transition(card, target),
+      verdict: (card, verdict) => { if (this.workspace) this.workspace.queueVerdict(card, verdict); else this.transition(card, verdict) },
       setSurface: (card, horizon, opts) => this.setSurface(card, horizon, opts),
       makeSeat: (card, anchor) => this.makeSeat(card, anchor),
       openDetail: (card, forceRail) => { this.openDocumentChannel(card); if (forceRail) this.workspace?.forceThreadRail() },
