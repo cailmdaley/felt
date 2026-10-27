@@ -767,13 +767,25 @@ defmodule Shuttle.Test.FeltStoreRunner do
             index -> Enum.at(args, index + 1)
           end
 
+        # Like tmux without a UTF-8 locale, control characters in the format
+        # (a tab) come out as `_`.
         output =
           sessions
           |> MapSet.to_list()
           |> Enum.map(fn name ->
-            if is_binary(format) and format =~ "session_attached",
-              do: name <> "\t" <> if(MapSet.member?(attached, name), do: "1", else: "0"),
-              else: name
+            case format do
+              nil ->
+                name
+
+              format ->
+                format
+                |> String.replace("\#{session_name}", name)
+                |> String.replace(
+                  "\#{session_attached}",
+                  if(MapSet.member?(attached, name), do: "1", else: "0")
+                )
+                |> String.replace(~r/[\x00-\x1f]/, "_")
+            end
           end)
           |> Enum.join("\n")
 

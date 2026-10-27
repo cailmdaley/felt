@@ -17,23 +17,43 @@ defmodule Shuttle.CodexTerminal do
   Returns the viewers closed.
   """
   def sweep(runner) do
-    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}\t\#{session_attached}"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.flat_map(fn line ->
-          case String.split(String.trim(line), "\t") do
-            ["codex-terminal-" <> id = tmux, "0"] -> [{id, tmux}]
-            _ -> []
-          end
+    case attachments(runner) do
+      {:ok, sessions} ->
+        sessions
+        |> Enum.flat_map(fn
+          {"codex-terminal-" <> id = tmux, 0} -> [{id, tmux}]
+          _ -> []
         end)
         |> Enum.filter(fn {id, tmux} -> retire_leftover(runner, id, tmux) end)
         |> Enum.map(&elem(&1, 1))
 
-      _ ->
+      :error ->
         []
+    end
+  end
+
+  # `{name, attached clients}` for every tmux session. The count leads and a
+  # space separates it from the name: tmux escapes control characters such as
+  # a tab to `_` when the daemon runs without a UTF-8 locale (launchd).
+  defp attachments(runner) do
+    case runner.cmd("tmux", ["ls", "-F", "\#{session_attached} \#{session_name}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        {:ok,
+         output
+         |> String.split("\n", trim: true)
+         |> Enum.flat_map(fn line ->
+           with [count, name] <- String.split(line, " ", parts: 2),
+                {attached, ""} <- Integer.parse(count) do
+             [{name, attached}]
+           else
+             _ -> []
+           end
+         end)}
+
+      _ ->
+        :error
     end
   end
 
@@ -60,11 +80,9 @@ defmodule Shuttle.CodexTerminal do
 
   @doc "True only when tmux confirms the session exists with no client attached."
   def detached?(runner, tmux) do
-    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}\t\#{session_attached}"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} -> Enum.any?(String.split(output, "\n"), &(String.trim(&1) == tmux <> "\t0"))
-      _ -> false
+    case attachments(runner) do
+      {:ok, sessions} -> {tmux, 0} in sessions
+      :error -> false
     end
   end
 
