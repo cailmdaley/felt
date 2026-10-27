@@ -574,3 +574,8 @@
   background: color-mix(in srgb, var(--kbn-owed-bright) 58%, transparent);
 }
 
+
+.ws-transcript-sent-files:has(.ws-transcript-sent-inline) { flex: 1; }
+.ws-transcript-sent-inline { display: block; width: 100%; padding: 0; overflow: hidden; }
+.ws-transcript-sent-inline .ws-transcript-sent-thumb { width: 100%; height: min(50vw, 360px); object-fit: contain; }
+.ws-transcript-sent-inline .ws-transcript-sent-name { display: block; padding: 4px 8px; }

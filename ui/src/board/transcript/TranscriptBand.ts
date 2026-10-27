@@ -101,6 +101,7 @@ function sentFileRow(
       onFile?.(file.fullPath, file.basename, owner)
     })
     if (kind === 'image') {
+      if (entry.files.length === 1) item.classList.add('ws-transcript-sent-inline')
       const thumbnail = document.createElement('img')
       thumbnail.className = 'ws-transcript-sent-thumb'
       thumbnail.alt = ''
@@ -516,24 +517,17 @@ function measureClamp(text: HTMLElement, unclamped: boolean): void {
   else text.removeAttribute('aria-label')
 }
 
-/**
- * The newest message's reading offset: its top when it is taller than
- * the window, otherwise as far down as the content goes.
- */
-function latestOffset(scroller: HTMLElement): number {
-  const messages = scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')
-  const last = messages[messages.length - 1]
-  const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-  const top = last
-    ? scroller.scrollTop + last.getBoundingClientRect().top - scroller.getBoundingClientRect().top - ANCHOR_MARGIN
-    : max
-  return Math.max(0, Math.min(top, max))
-}
-
-function anchorLatest(scroller: HTMLElement): number {
-  const settled = latestOffset(scroller)
-  scroller.scrollTop = settled
-  return settled
+/** Preserve a visible message through DOM reconciliation and height changes above it. */
+function preserveReadingPosition(scroller: HTMLElement, render: () => void): void {
+  const edge = scroller.getBoundingClientRect().top
+  const anchor = [...scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => node.getBoundingClientRect().bottom > edge)
+  const top = anchor?.getBoundingClientRect().top
+  const send = anchor?.dataset.send
+  const key = anchor?.dataset.readingKey
+  render()
+  const restored = anchor?.isConnected && (!key || anchor.dataset.readingKey === key) ? anchor
+    : [...scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => key ? node.dataset.readingKey === key : send && node.dataset.send === send)
+  if (restored && top !== undefined) scroller.scrollTop += restored.getBoundingClientRect().top - top
 }
 
 /**
@@ -593,9 +587,7 @@ export class TranscriptBand {
   private previewTexts = new Map<number, Message>()
   private previewTurn = -1
   private previewKey = ''
-  private previewAnchor = 0
   private previewFollowing = true
-  private fullAnchor = 0
   private fullFollowing = true
   private messageToReveal: string | null = null
   private fullOpen = false
@@ -752,13 +744,13 @@ export class TranscriptBand {
     this.preview.addEventListener('scroll', () => {
       if (!this.preview.clientHeight) return
       this.previewScroll = this.preview.scrollTop
-      this.previewFollowing = this.preview.scrollTop >= this.previewAnchor - FOLLOW_SLACK
+      this.previewFollowing = this.preview.scrollTop >= this.preview.scrollHeight - this.preview.clientHeight - FOLLOW_SLACK
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
     }, { passive: true })
     this.scroller.addEventListener('scroll', () => {
       if (!this.scroller.clientHeight) return
       this.fullScroll = this.scroller.scrollTop
-      this.fullFollowing = this.scroller.scrollTop >= this.fullAnchor - FOLLOW_SLACK
+      this.fullFollowing = this.scroller.scrollTop >= this.scroller.scrollHeight - this.scroller.clientHeight - FOLLOW_SLACK
     }, { passive: true })
     close.addEventListener('click', () => this.closeFull())
     this.pane.addEventListener('click', (event) => event.stopPropagation())
@@ -873,7 +865,8 @@ export class TranscriptBand {
     if (previous && this.sameTarget(previous, target)) {
       const becameParked = previous.live && !target.live
       this.paintHead()
-      this.updateLiveMarks()
+      this.preservePositions(() => this.updateLiveMarks())
+      this.scheduleLayout()
       if (becameParked) this.finishLiveSession()
       else if (!previous.live && target.live) {
         this.pollDelay = LIVE_POLL_MS
@@ -1250,19 +1243,22 @@ export class TranscriptBand {
         return
       }
       const after = this.model.turns.length
-      this.paintPreview()
-      if (this.fullRendered) {
-        if (before === 0 && after > 0) this.visibleStart = Math.max(0, after - (this.inline ? INLINE_TURNS : INITIAL_TURNS))
-        for (const index of changes.turns) {
-          if (index >= this.visibleStart) this.renderTurn(index)
+      const render = () => {
+        this.paintPreview()
+        if (this.fullRendered) {
+          if (before === 0 && after > 0) this.visibleStart = Math.max(0, after - (this.inline ? INLINE_TURNS : INITIAL_TURNS))
+          for (const index of changes.turns) {
+            if (index >= this.visibleStart) this.renderTurn(index)
+          }
+          // The turn that was last loses its live marks once another follows it.
+          if (after > before && before > 0) {
+            const previous = this.views.get(before - 1)
+            if (previous) this.updateTurnView(previous, this.model.turns[before - 1])
+          }
+          this.updateEarlierButton()
         }
-        // The turn that was last loses its live marks once another follows it.
-        if (after > before && before > 0) {
-          const previous = this.views.get(before - 1)
-          if (previous) this.updateTurnView(previous, this.model.turns[before - 1])
-        }
-        this.updateEarlierButton()
       }
+      this.preservePositions(render)
       this.paintHead()
       this.scheduleLayout()
       this.setNote(null)
@@ -1286,15 +1282,26 @@ export class TranscriptBand {
       this.renderInitialWhenDrained()
       return
     }
-    this.paintPreview()
-    if (this.fullRendered) {
-      for (const index of changes.turns) this.renderTurn(index)
-      this.updateEarlierButton()
-    }
+    this.preservePositions(() => {
+      this.paintPreview()
+      if (this.fullRendered) {
+        for (const index of changes.turns) this.renderTurn(index)
+        this.updateEarlierButton()
+      }
+    })
     this.paintHead()
     this.scheduleLayout()
     this.setNote(null)
     if (this.findPattern) this.scheduleFindRefresh()
+  }
+
+  private preservePositions(render: () => void): void {
+    const full = () => this.fullRendered && !this.fullFollowing
+      ? preserveReadingPosition(this.scroller, render) : render()
+    if (!this.previewFollowing) preserveReadingPosition(this.preview, full)
+    else full()
+    if (!this.fullFollowing) this.fullScroll = this.scroller.scrollTop
+    if (!this.previewFollowing) this.previewScroll = this.preview.scrollTop
   }
 
   private resetFeedView(): void {
@@ -1367,7 +1374,6 @@ export class TranscriptBand {
       this.previewTurn = turn.index
       this.previewPrompt = null
       this.previewTexts.clear()
-      this.previewFollowing = true
     }
     const live = this.target?.live === true
     const last = [...turn.steps].reverse().find(step => step.kind !== 'sent-file')
@@ -1380,6 +1386,7 @@ export class TranscriptBand {
     if (turn.prompt) {
       this.previewPrompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you', 'li')
       paintPrompt(this.previewPrompt, turn.prompt)
+      this.previewPrompt.node.dataset.readingKey = `${turn.index}:prompt`
       nodes.push(this.previewPrompt.node)
     }
     const agent = this.agentName()
@@ -1400,6 +1407,7 @@ export class TranscriptBand {
         this.previewTexts.set(index, message)
       }
       paintText(message, agent, step)
+      message.node.dataset.readingKey = `${turn.index}:text:${turn.steps.slice(0, index).filter(step => step.kind === 'text').length}`
       nodes.push(message.node)
     })
     if (working) nodes.push(this.working)
@@ -1425,6 +1433,12 @@ export class TranscriptBand {
 
   private openFull(): void {
     if (this.disposed || this.fullOpen || !this.target) return
+    const edge = this.preview.getBoundingClientRect().top
+    const visible = [...this.preview.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => node.getBoundingClientRect().bottom > edge)
+    const key = visible?.dataset.readingKey
+    const send = visible?.dataset.send
+    const offset = visible ? visible.getBoundingClientRect().top - edge : 0
+    const transfer = !this.previewFollowing && (key || send)
     this.fullOpen = true
     const host = this.el.closest<HTMLElement>('.ws-content')
     this.pane.classList.toggle('ws-transcript-pane-inline', !host)
@@ -1433,6 +1447,14 @@ export class TranscriptBand {
     this.openButton.setAttribute('aria-expanded', 'true')
     this.fullFollowing = true
     if (this.hasInitialRender) this.renderFull()
+    if (transfer) {
+      const match = [...this.scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => key ? node.dataset.readingKey === key : node.dataset.send === send)
+      if (match) {
+        this.scroller.scrollTop += match.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - offset
+        this.fullScroll = this.scroller.scrollTop
+        this.fullFollowing = false
+      }
+    }
     this.scroller.focus({ preventScroll: true })
     this.scheduleLayout()
     this.readIfVisible()
@@ -1507,6 +1529,7 @@ export class TranscriptBand {
     if (turn.prompt) {
       view.prompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you')
       paintPrompt(view.prompt, turn.prompt)
+      view.prompt.node.dataset.readingKey = `${turn.index}:prompt`
       children.push(view.prompt.node)
     }
     const agent = this.agentName()
@@ -1529,6 +1552,7 @@ export class TranscriptBand {
           view.texts.set(part.index, message)
         }
         paintText(message, agent, step)
+        message.node.dataset.readingKey = `${turn.index}:text:${turn.steps.slice(0, part.index).filter(step => step.kind === 'text').length}`
         children.push(message.node)
         return
       }
@@ -1960,7 +1984,7 @@ export class TranscriptBand {
         if (view.prompt) measureClamp(view.prompt.prose, view.prompt.unclamped)
       }
       if (!this.preview.hidden && !this.body.hidden && this.previewFollowing && this.preview.clientHeight) {
-        this.previewAnchor = this.previewScroll = anchorLatest(this.preview)
+        this.previewScroll = this.preview.scrollTop = this.preview.scrollHeight
       }
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
       if (this.fullOpen && this.messageToReveal !== null) {
@@ -1980,7 +2004,6 @@ export class TranscriptBand {
         if (match) {
           this.list.querySelector('.ws-transcript-outcome')?.remove()
           this.messageToReveal = null
-          this.fullAnchor = latestOffset(this.scroller)
           this.fullFollowing = false
           this.scroller.scrollTop += match.node.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - ANCHOR_MARGIN
           this.fullScroll = this.scroller.scrollTop
@@ -1990,13 +2013,12 @@ export class TranscriptBand {
           outcome.node.classList.add('ws-transcript-outcome')
           paintText(outcome, 'Outcome', { kind: 'text', text: source })
           this.list.append(outcome.node)
-          this.fullAnchor = latestOffset(this.scroller)
           this.fullFollowing = false
           this.scroller.scrollTop += outcome.node.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top - ANCHOR_MARGIN
           this.fullScroll = this.scroller.scrollTop
         }
       }
-      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullAnchor = this.fullScroll = anchorLatest(this.scroller)
+      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullScroll = this.scroller.scrollTop = this.scroller.scrollHeight
     })
   }
 }

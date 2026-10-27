@@ -74,6 +74,8 @@ if (workspaceFixture && search.has('long-title')) {
 if (workspaceFixture) {
   const examples = ['.png', '.html'].map(ext => workspaceFixture.receipts.find(file => String(file.fullPath).endsWith(ext))).filter(file => file !== undefined)
   for (const file of examples) workspaceFixture.receipts.push({ ...file, timestamp: now - 88_000, sessionId: WORKSPACE_LATEST_SESSION })
+  const image = examples.find(file => String(file.fullPath).endsWith('.png'))
+  if (image) workspaceFixture.receipts.push({ ...image, timestamp: now - 100_000, sessionId: WORKSPACE_LATEST_SESSION })
 }
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)

@@ -151,6 +151,7 @@ describe('TranscriptBand', () => {
     const preview = band.el.querySelector('.ws-transcript-exchange')!
     const row = preview.querySelector<HTMLElement>('.ws-transcript-sent-file')!
     expect(preview.querySelectorAll('.ws-transcript-sent-file')).toHaveLength(1)
+    expect(row.querySelector<HTMLImageElement>('.ws-transcript-sent-inline img')?.loading).toBe('lazy')
     expect(row.querySelector('img')?.getAttribute('src')).toContain('/api/v1/file?path=%2Ftmp%2Fplot.png&origin=candide')
     expect(row.textContent).toContain('plot.png')
     expect(new URL(requests.find((url) => url.includes('/sent-files/session?'))!).searchParams.get('uid')).toBe(uid)
@@ -173,6 +174,7 @@ describe('TranscriptBand', () => {
     const rows = band.el.querySelectorAll('.ws-transcript-exchange .ws-transcript-sent-file')
     expect(rows).toHaveLength(1)
     expect(rows[0].querySelectorAll('.ws-transcript-sent-file-item')).toHaveLength(2)
+    expect(rows[0].querySelector('.ws-transcript-sent-inline')).toBeNull()
     expect([...rows[0].querySelectorAll('.ws-transcript-sent-kind')].map((node) => node.textContent)).toEqual(['PDF', 'text'])
     expect(rows[0].querySelector('img')).toBeNull()
   })
@@ -241,6 +243,39 @@ describe('TranscriptBand', () => {
     await vi.advanceTimersByTimeAsync(4000)
     expect(band.el.querySelector('.ws-transcript-exchange .ws-transcript-sent-file')?.textContent).toContain('live.png')
   })
+  it('keeps a visible message fixed across a send refresh, and follows the bottom when pinned', async () => {
+    const items = [
+      ...records('First', 'First answer'),
+      ...records('Second', 'Second answer').map(item => ({ ...item as object, timestamp: '2026-09-26T15:00:00Z' })),
+      ...records('Third', 'Third answer').map(item => ({ ...item as object, timestamp: '2026-09-26T16:00:00Z' })),
+    ]
+    const band = makeBand(sessionAndFilesFetch({ [latestId]: items }, () => []))
+    band.follow(target(latestId, { uid: '01KTESTFIBER000000000000001' }))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    const scroller = band.el.querySelector<HTMLElement>('.ws-transcript-scroll')!
+    Object.defineProperties(scroller, { clientHeight: { value: 100 }, scrollHeight: { get: () => scroller.querySelectorAll('.ws-transcript-msg').length * 100 } })
+    const rect = (top: number) => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: top, toJSON: () => ({}) })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (!this.classList.contains('ws-transcript-msg')) return rect(0)
+      const parent = this.closest<HTMLElement>('.ws-transcript-scroll, .ws-transcript-preview')
+      const index = parent ? [...parent.querySelectorAll('.ws-transcript-msg')].indexOf(this) : 0
+      return rect(index * 100 - (parent?.scrollTop ?? 0))
+    })
+    scroller.scrollTop = 250
+    scroller.dispatchEvent(new Event('scroll'))
+    const anchor = [...scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => node.getBoundingClientRect().bottom > 0)!
+    const before = anchor.getBoundingClientRect().top
+    const refresh = band as unknown as { acceptSentFiles: (session: string, files: unknown[]) => void }
+    refresh.acceptSentFiles(latestId, [send('/tmp/above.pdf', Date.parse('2026-09-26T14:10:00Z')), send('/tmp/below.pdf', Date.parse('2026-09-26T16:10:00Z'))])
+    expect(anchor.getBoundingClientRect().top).toBe(before)
+    scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight
+    scroller.dispatchEvent(new Event('scroll'))
+    refresh.acceptSentFiles(latestId, [send('/tmp/above.pdf', Date.parse('2026-09-26T14:10:00Z')), send('/tmp/below.pdf', Date.parse('2026-09-26T16:10:00Z')), send('/tmp/new.pdf', Date.parse('2026-09-26T16:20:00Z'))])
+    await tick()
+    expect(scroller.scrollTop).toBeGreaterThanOrEqual(scroller.scrollHeight - scroller.clientHeight)
+  })
+
   it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
     const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()
     const band = makeBand(fixtureFetch({ [latestId]: items }))
