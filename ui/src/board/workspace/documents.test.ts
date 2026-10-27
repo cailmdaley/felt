@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
+  leadReceipt, channelLead, buildChannel, defaultSelection, docKey, documentKind, documentLabels, documentLabelMetadata, fallbackSelection,
   fiberKey, normalizeAbsolutePath, parseDocKey, proseDocument, type ChannelInput, type WorkspaceDocument,
 } from './documents.js'
 
@@ -263,4 +263,16 @@ describe('selection and labels', () => {
     ])
     expect(new Set(documentLabels(documents)).size).toBe(documents.length)
   })
+})
+
+
+it('chooses the own companion ahead of newer nested receipts, then the newest receipt', () => {
+  const files = ['/fiber/checks/artifact.html', '/fiber/report.html', '/fiber/artifact.html', '/other.txt']
+  const choose = (values: string[]) => leadReceipt(values, '/fiber', x => x)
+  expect(choose(files)).toBe('/fiber/artifact.html')
+  expect(choose(files.filter(x => x !== '/fiber/artifact.html'))).toBe('/fiber/report.html')
+  expect(choose([files[0], files[3]])).toBe(files[0])
+  const channel = buildChannel({ ...base, body: '', sent: [{ path: 'checks/artifact.html', time: 3 }, { path: 'artifact.html', time: 1 }] })
+  expect(channelLead(channel)?.path).toBe('/store/project/task/artifact.html')
+  expect(defaultSelection(channel)).toBe(channelLead(channel)?.key)
 })

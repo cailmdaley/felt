@@ -4,12 +4,11 @@ import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
-import { isAgentCard } from '../KanbanModalShared.js'
 import { deskColumn } from '../deskColumn.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
 import { Thumbnail, pumpThumbnails } from './Thumbnail.js'
-import { docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
+import { leadReceipt, docKey, parseDocKey, documentKind, documentLabels, type DocKey } from './documents.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { ChannelThemes } from './ChannelThemes.js'
 import './tokens.css'
@@ -22,6 +21,7 @@ export interface OverviewOptions {
   cards(): KanbanCard[]
   onOpen(card: KanbanCard, doc?: DocKey): void
   onConversation?(card: KanbanCard): void
+  hasConversation?(card: KanbanCard): boolean
   onEscapeHome?(): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
@@ -653,9 +653,7 @@ export class Overview {
       el, open, conversation, stack, name, fresh, outcome, marks, count, when }
     open.addEventListener('click', () => {
       const current = this.folios.get(uid) ?? folio
-      const lead = current.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
-        ?? current.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
-        ?? current.receipts[0]
+      const lead = leadReceipt(current.receipts, current.card.fiberDir, r => r.fullPath, r => r.owner === current.card.originId)
       void this.open(current.card, lead?.key)
     })
     conversation.addEventListener('click', event => {
@@ -673,14 +671,11 @@ export class Overview {
     text(folio.when, age(folio.latest))
     folio.open.title = folio.card.path || folio.uid
     folio.el.dataset.depth = String(Math.max(1, Math.min(3, folio.receipts.length)))
-    const surface = folio.card.workerSurface ?? folio.card.shuttleSurface
-    folio.conversation.hidden = !isAgentCard(folio.card) || !(surface === 'app' && folio.card.sessionUuid || folio.card.tmuxSession)
+    folio.conversation.hidden = !this.opts.hasConversation?.(folio.card)
     folio.fresh.hidden = folio.latest <= Math.max(this.seen, this.visits.get(folio.uid) ?? 0)
     folio.el.classList.toggle('ws-overview-unseen', !folio.fresh.hidden)
     folio.el.classList.toggle('ws-overview-seen', folio.fresh.hidden)
-    const lead = folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
-      ?? folio.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
-      ?? folio.receipts[0]
+    const lead = leadReceipt(folio.receipts, folio.card.fiberDir, r => r.fullPath, r => r.owner === folio.card.originId)
     const key = `folio:${folio.uid}:${lead?.key ?? 'prose'}`
     if (folio.thumb?.key !== key) {
       if (folio.thumb) this.removeThumbnail(folio.thumb)

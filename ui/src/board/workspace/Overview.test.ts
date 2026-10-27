@@ -81,7 +81,7 @@ beforeEach(() => {
     : url.includes('/api/v1/file?') && /\.html/.test(decodeURIComponent(url)) ? new Response('<p>Preview text</p>') : new Response('', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
   onOpen = vi.fn(); onConversation = vi.fn(); onOrder = vi.fn()
-  overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onConversation, onOrder })
+  overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onConversation, onOrder, hasConversation: card => !!card.tmuxSession })
   document.body.append(overview.el)
 })
 afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); resetDocumentResources(); resetLanes() })
@@ -448,6 +448,15 @@ describe('Overview stable lenses, visits, and DOM', () => {
     lens('projects'); expect(groups()).toEqual(['science / shear'])
     cards = [{ ...known[0], path: '.felt/research/new/alpha/alpha.md' }]; overview.cardsChanged()
     expect(groups()).toEqual(['science / shear'])
+  })
+
+  it('opens and previews the fiber artifact ahead of a newer nested artifact', async () => {
+    feed.files = [receipt('alpha', '/notes/alpha/checks/artifact.html', now()), receipt('alpha', '/notes/alpha/artifact.html', now() - 1000)]
+    await refresh(); activate(); await settle()
+    folioOpen('alpha').click(); await settle()
+    expect(onOpen).toHaveBeenCalledWith(cards[0], docKey('host-a', '/notes/alpha/artifact.html', 'host-a'))
+    const iframe = folio('alpha').querySelector<HTMLIFrameElement>('iframe')!
+    await vi.waitFor(() => expect(iframe.srcdoc).toContain('/api/v1/file-assets/host-a/notes/alpha/artifact.html'))
   })
 
   it('preserves mounted report-lead thumbnails through polls, Find, and hide/show, including sheet/ribbon scroll', async () => {

@@ -39,3 +39,13 @@ for (const phone of [false, true]) it(`pops nested files then chat then orchestr
   reader.back(); expect(reader.document?.kind).toBe('chat'); expect(onReturn).not.toHaveBeenCalled()
   reader.back(); expect(onOrchestrator).toHaveBeenCalledOnce(); expect(onReturn).toHaveBeenCalledOnce()
 })
+
+
+it('opens the fiber artifact instead of a newer nested artifact', () => {
+  setup()
+  const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/notes/alpha/alpha.md', fiberDir: '/notes/alpha', body: '', isConstitution: true, conversation: true,
+    sent: [{ path: 'checks/artifact.html', time: 2 }, { path: 'artifact.html', time: 1 }] })
+  reader.show(channel, chatDocument(channel)!.key, 'Board', alpha)
+  reader.el.querySelector<HTMLButtonElement>('.ws-report-chip')!.click()
+  expect(reader.document?.path).toBe('/notes/alpha/artifact.html')
+})

@@ -74,6 +74,18 @@ export function normalizeAbsolutePath(path: string, base = '/'): string {
   return `/${parts.join('/')}`
 }
 
+/** Choose the fiber's own companion before the newest receipt. Candidates are newest first. */
+export function leadReceipt<T>(receipts: readonly T[], fiberDir: string | undefined, path: (receipt: T) => string, own: (receipt: T) => boolean = () => true): T | undefined {
+  if (fiberDir !== undefined) {
+    for (const name of ['artifact.html', 'report.html']) {
+      const target = normalizeAbsolutePath(name, fiberDir)
+      const match = receipts.find(receipt => own(receipt) && normalizeAbsolutePath(path(receipt), fiberDir) === target)
+      if (match) return match
+    }
+  }
+  return receipts[0]
+}
+
 function resolveOwner(owner: string | undefined, fiberOwner: string): string {
   return !owner || owner === 'local' ? fiberOwner : owner
 }
@@ -206,6 +218,16 @@ export function chatDocument(channel: Channel): WorkspaceDocument | undefined {
   return channel.documents.find(d => d.kind === 'chat')
 }
 
+/** The channel's own companion or newest sent document. */
+export function channelLead(channel: Channel): WorkspaceDocument | undefined {
+  const prose = proseDocument(channel)
+  const dir = prose?.path.slice(0, prose.path.lastIndexOf('/')) || '/'
+  const files = channel.documents.filter(d => d.kind !== 'fiber' && d.kind !== 'chat')
+  const sent = files.filter(d => lastSent(d) !== undefined).sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0))
+  const companions = files.filter(d => d.owner === channel.owner && isReport(d) && normalizeAbsolutePath(d.path.slice(0, d.path.lastIndexOf('/')) || '/') === normalizeAbsolutePath(dir))
+  return leadReceipt([...sent, ...companions.filter(d => !sent.includes(d))], dir, d => d.path, d => d.owner === channel.owner)
+}
+
 /** Build one owner-aware row, retaining receipt history without mutating inputs. */
 export function buildChannel(input: ChannelInput): Channel {
   const extracted = extractEmbeds(input.body)
@@ -330,9 +352,9 @@ export function defaultSelection(channel: Channel): DocKey {
   const chat = chatDocument(channel)
   if (chat) return chat.key
   const reports = channel.documents.filter(isReport)
-  const report = reports.find((document) => document.name.toLowerCase() === 'artifact.html')
-    ?? reports.find((document) => document.provenance.some((item) => item.kind === 'embed'))
-    ?? reports.find((document) => !isDeclared(document)) ?? reports[0]
+  const report = channelLead(channel)
+    ?? reports.find(document => document.provenance.some(item => item.kind === 'embed'))
+    ?? reports.find(document => !isDeclared(document)) ?? reports[0]
   const prose = channel.documents.find((document) => document.kind === 'fiber')
   const first = report ?? prose ?? channel.documents[0]
   if (!first) throw new Error('Cannot select a document from an empty constitution')

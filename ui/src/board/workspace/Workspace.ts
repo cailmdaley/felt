@@ -13,7 +13,7 @@ import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { buildChannel, normalizeAbsolutePath, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
@@ -137,6 +137,7 @@ export class Workspace {
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
       onEscapeHome: opts.onEscapeHome,
       onConversation: card => { this.dock.openConversation(card) },
+      hasConversation: card => !!this.dock.workerPillFor(card)?.matches('a[href],button'),
       onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
       focusFind: () => opts.focusFind?.() ?? false,
       readLately: () => this.readLatelyCards(),
@@ -658,8 +659,7 @@ export class Workspace {
     if (this.disposed || epoch !== this.routeEpoch || this.current !== state || !this.isActive) return
     if (state.questionLanding) {
       state.questionLanding = false
-      const report = state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'artifact.html')
-        ?? state.channel.documents.find(doc => doc.path.split('/').at(-1)?.toLowerCase() === 'report.html')
+      const report = channelLead(state.channel)
       state.selected = this.landing(state.channel) ?? report?.key
     }
     this.show(state, loadedBefore)
@@ -682,8 +682,7 @@ export class Workspace {
   private knownReport(state: ChannelState): DocKey | undefined {
     const card = state.card
     const receipts = this.overview.unfiledReceipts(state.channel.uid).filter(file => (file.host ?? card.originId) === card.originId)
-    const report = receipts.find(file => file.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
-      ?? receipts.find(file => file.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
+    const report = leadReceipt(receipts, card.fiberDir, file => file.fullPath)
     return report ? docKey(card.originId, report.fullPath, card.originId, card.fiberDir) : undefined
   }
   /** The page on screen: the selection when the channel lists it, else the chat, else the fiber's own page. */

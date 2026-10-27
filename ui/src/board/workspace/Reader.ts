@@ -11,7 +11,7 @@ import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { chatDocument, proseDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, chatDocument, proseDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
@@ -519,10 +519,7 @@ export class Reader {
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
     const chat = chatDocument(ch)
-    const prose = proseDocument(ch)
-    const dir = prose?.path.slice(0, prose.path.lastIndexOf('/'))
-    const report = ch.documents.find(d => d.owner === ch.owner && d.path === `${dir}/artifact.html`)
-      ?? ch.documents.find(d => d.owner === ch.owner && d.path === `${dir}/report.html`)
+    const report = channelLead(ch)
     const chatFrame = chat && this.host.get(chat.key)
     const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
     if (this.reportChip?.key !== chipKey) {
