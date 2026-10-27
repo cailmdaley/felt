@@ -91,6 +91,16 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
         link.title = 'Constitution unavailable in the current read model'
       }
     }
+    for (const group of root.querySelectorAll<HTMLElement>('[data-spawn-preview]')) {
+      const visible = !!group.querySelector('.ws-transcript-spawn-chip:not([hidden])')
+      group.hidden = !visible
+      if (visible && group.parentElement?.tagName !== 'LI') {
+        const item = document.createElement('li')
+        group.replaceWith(item); item.append(group)
+      } else if (!visible && group.parentElement?.tagName === 'LI') {
+        group.parentElement.replaceWith(group)
+      }
+    }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     const texts: Text[] = []
     while (walker.nextNode()) {

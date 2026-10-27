@@ -52,7 +52,7 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 	if child.Status != felt.StatusActive || !child.HasTag("constitution") || child.Body != "Measure the covariance\n\n## Desired State\n\n## Status" {
 		t.Fatalf("child = %+v", child)
 	}
-	out, err = runIn(t, env, dir, "thread", "hub", "Other ask", "--slug", "explicit", "--disabled", "--host", "other", "--project-dir", pdir, "--agent", "codex-sol", "--role", "editor")
+	out, stderr, err := executeIn(t, env, dir, "thread", "hub", "Other ask", "--slug", "explicit", "--disabled", "--host", "other", "--project-dir", pdir, "--agent", "codex-sol", "--role", "editor")
 	if err != nil {
 		t.Fatalf("%v %s", err, out)
 	}
@@ -60,6 +60,9 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 		t.Fatal(out)
 	}
 	child = mustRead(t, st, "hub/explicit")
+	if !strings.Contains(stderr, "Thread UID: hub/explicit "+child.UID+"\n") {
+		t.Fatalf("stderr = %q", stderr)
+	}
 	b, _, _ = shuttle.BlockOf(child)
 	if child.Status != felt.StatusOpen || b.Host != "other" || b.Agent != "codex-sol" || b.Role != "editor" || b.Surface != "cli" {
 		t.Fatalf("child/block = %+v %+v", child, b)

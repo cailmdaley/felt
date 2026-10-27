@@ -15,10 +15,10 @@ afterEach(() => {
   document.body.replaceChildren()
 })
 
-function makeBand(items: unknown[]): TranscriptBand {
+function makeBand(items: unknown[], inline = true): TranscriptBand {
   const bytes = new TextEncoder().encode(items.map(item => JSON.stringify(item)).join('\n') + '\n')
   const fetcher = vi.fn<typeof fetch>(async () => new Response(bytes, { status: 200, headers: { 'x-transcript-offset': '0', 'x-transcript-byte-count': String(bytes.byteLength) } }))
-  const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fetcher, inline: true })
+  const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fetcher, inline })
   bands.push(band); document.body.append(band.el)
   band.follow({ session, host: 'host-b', agent: 'claude-opus', live: false, at: Date.parse('2026-10-22T22:40:00Z') })
   return band
@@ -162,4 +162,37 @@ it('does not attribute another command’s IDs to a spawn', async () => {
   tool.message.content[0].input.command = 'felt ls --ids && shuttle thread project-x "New child"'
   const band = makeBand(items); await settle()
   expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
+})
+
+
+it('rejects JSON from mixed commands and ambiguous output', async () => {
+  for (const [command, output] of [
+    ['shuttle thread project-x "New child" --json && felt ls --json', '{"id":"project-x/other"}'],
+    ['shuttle thread project-x "New child" --json', '{"id":"project-x/other"}\n{"id":"project-x/new-child"}'],
+  ]) {
+    const items = spawnRecords(output)
+    const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
+    tool.message.content[0].input.command = command
+    const band = makeBand(items); await settle()
+    expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
+  }
+})
+
+it('uses the plain output UID across a move even when the leaf is ambiguous', async () => {
+  const band = makeBand(spawnRecords('Thread UID: project-x/new-child 01ABCDEFGHJKMNPQRSTVWXYZ12\nproject-x/new-child'))
+  await settle()
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  mentions.update([{ ...row('project-x/moved/new-child', 'Working', 'working'), uid: '01ABCDEFGHJKMNPQRSTVWXYZ12' }, row('other/new-child', 'Working', 'working')])
+  expect(band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')?.dataset.constitution).toBe('project-x/moved/new-child')
+})
+
+it('creates a preview list item only while a spawn resolves', async () => {
+  const band = makeBand(spawnRecords('project-x/new-child'), false); await settle()
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  mentions.update([])
+  expect(band.el.querySelector('li:has([data-spawn-preview])')).toBeNull()
+  mentions.update([row('project-x/new-child', 'Working', 'working')])
+  expect(band.el.querySelector('li:has([data-spawn-preview])')).not.toBeNull()
+  mentions.update([])
+  expect(band.el.querySelector('li:has([data-spawn-preview])')).toBeNull()
 })

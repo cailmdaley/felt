@@ -195,6 +195,7 @@ uses a daemon when reachable; without --take creation can work offline.`,
 			if a.json {
 				return a.outputJSON(map[string]string{"id": child.ID, "uid": child.UID})
 			}
+			fmt.Fprintf(a.env.Stderr, "Thread UID: %s %s\n", child.ID, child.UID)
 			fmt.Fprintln(a.env.Stdout, child.ID)
 			return nil
 		},

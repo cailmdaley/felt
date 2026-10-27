@@ -336,8 +336,12 @@ function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
   if (!invocations.length) return []
   const output = step.result.text
   const ids: { id: string; uid?: string }[] = []
+  const segments = command.replace(/2>&1/g, '').split(/(?:&&|\|\||[;|])/).map(part => part.trim()).filter(Boolean)
   if (/\s--json(?:\s|$|[;&|])/.test(command)) {
-    const objects = output.matchAll(/\{[^{}]*"id"\s*:\s*"[^"\n]+"[^{}]*\}/g)
+    // Only a single thread and silent directory changes can attribute JSON to it.
+    if (invocations.length !== 1 || segments.some(part => !/^(?:(?:\S*\/)?shuttle\s+thread\b|cd\s+)/.test(part))) return []
+    const objects = [...output.matchAll(/\{[^{}]*"id"\s*:\s*"[^"\n]+"[^{}]*\}/g)]
+    if (objects.length !== 1) return []
     for (const object of objects) {
       try {
         const parsed = inputObject(JSON.parse(object[0]))
@@ -347,11 +351,13 @@ function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
     }
   } else {
     // Combined stdout cannot identify which command emitted a bare path.
-    const segments = command.split(/(?:&&|\|\||[;|])/).map(part => part.trim()).filter(Boolean)
     if (segments.some(part => !/^(?:(?:\S*\/)?shuttle\s+thread\b|cd\s+|felt\s+nest\b|tail\s+-\d+\b)/.test(part))) return []
     const lines = output.split(/\r?\n/).map(line => line.trim())
     for (const id of lines) {
-      if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(id)) ids.push({ id })
+      if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(id)) {
+        const uid = lines.map(line => line.match(/^Thread UID: (\S+) ([0-9A-HJKMNP-TV-Z]{26})$/)).find(match => match?.[1] === id)?.[2]
+        ids.push({ id, uid })
+      }
       if (ids.length === invocations.length) break
     }
   }
@@ -1380,7 +1386,7 @@ export class TranscriptBand {
       }
       if (step.kind !== 'text') {
         const spawns = spawnMentions(step, this.target?.host)
-        if (spawns.length) { const item = document.createElement('li'); item.className = 'ws-transcript-spawns'; item.append(...spawns); nodes.push(item) }
+        if (spawns.length) { const group = document.createElement('span'); group.className = 'ws-transcript-spawns'; group.dataset.spawnPreview = ''; group.hidden = true; group.append(...spawns); nodes.push(group) }
         return
       }
       let message = this.previewTexts.get(index)
