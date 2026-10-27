@@ -52,7 +52,6 @@ defmodule Shuttle.Poller do
   @default_full_scan_min_interval_ms 600_000
   @default_full_scan_timeout_ms 900_000
   @poll_stall_margin_ms 1_000
-  @default_max_concurrent_workers 10
   @default_heartbeat_interval_ms 5_000
   # THE boot-quarantine default: a freshly (re)started daemon parks every
   # autonomous dispatch until a human releases it (POST
@@ -701,7 +700,7 @@ defmodule Shuttle.Poller do
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms),
       max_concurrent_workers:
         Keyword.get_lazy(opts, :max_concurrent_workers, fn ->
-          Shuttle.Host.max_concurrent_workers(@default_max_concurrent_workers)
+          Shuttle.Host.max_concurrent_workers(:infinity)
         end),
       heartbeat_interval_ms:
         Keyword.get(opts, :heartbeat_interval_ms, @default_heartbeat_interval_ms),
@@ -4586,6 +4585,10 @@ defmodule Shuttle.Poller do
           do: session
     end
   end
+
+  # A host runs as many workers as its fibers ask for unless host.json caps
+  # it; `:infinity` orders above every integer, so the slot checks hold as is.
+  defp available_slots(%State{max_concurrent_workers: :infinity}), do: :infinity
 
   defp available_slots(%State{} = state) do
     max(state.max_concurrent_workers - map_size(state.running), 0)

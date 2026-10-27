@@ -121,11 +121,11 @@ defmodule Shuttle.Host do
 
   @doc """
   The most workers this daemon runs at once, from host.json
-  `"max_concurrent_workers"` (a positive integer), falling back to `default`.
-  Daemon-only (the Go reader ignores the key).
+  `"max_concurrent_workers"` (a positive integer), falling back to `default`
+  (`:infinity` for no cap). Daemon-only (the Go reader ignores the key).
   """
-  @spec max_concurrent_workers(pos_integer()) :: pos_integer()
-  def max_concurrent_workers(default) when is_integer(default) and default > 0 do
+  @spec max_concurrent_workers(pos_integer() | :infinity) :: pos_integer() | :infinity
+  def max_concurrent_workers(default) when default == :infinity or (is_integer(default) and default > 0) do
     path = config_path()
 
     case read_document(path) do

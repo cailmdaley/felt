@@ -124,7 +124,7 @@ defmodule Shuttle.Poller.Snapshot do
         |> StandingRoles.standing_role_snapshots(now, state)
         |> with_office(state),
       claimed_count: map_size(state.running),
-      max_concurrent: state.max_concurrent_workers,
+      max_concurrent: if(state.max_concurrent_workers == :infinity, do: nil, else: state.max_concurrent_workers),
       # The refresh's hit/miss/eviction/entry counts plus the feed envelope's
       # freshness fields (its `entries` is the live cache size; the stats'
       # count from the last refresh is the one reported here).

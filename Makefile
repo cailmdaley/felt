@@ -343,7 +343,7 @@ status:
 	@PATH="$(INSTALL_DIR):$$PATH" shuttle snapshot 2>/dev/null | python3 -c "import json,sys; o=json.load(sys.stdin); \
 	  print('felt_stores:', o.get('felt_stores','MISSING')); \
 	  print('running:', [e.get('fiber_id') for e in o.get('eligible',[])]); \
-	  print('claimed:', o.get('claimed_count'),'/',o.get('max_concurrent'))" \
+	  print('claimed:', o.get('claimed_count'),'/',o.get('max_concurrent') or 'no cap')" \
 	  2>/dev/null || echo "(daemon not responding)"
 
 clean:

@@ -203,6 +203,9 @@ defmodule Shuttle.HostTest do
         File.write!(file, body)
         assert Host.max_concurrent_workers(10) == want, body
       end
+
+      File.write!(file, ~s({"class":"shared-multi-user"}))
+      assert Host.max_concurrent_workers(:infinity) == :infinity
     end
 
     test "rejects a zero, negative or non-integer override", %{host_file: file} do

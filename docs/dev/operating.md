@@ -230,8 +230,9 @@ Dispatch sanity ladder:
 4. Fiber is `active` and armed, but in neither `eligible[]` nor
    `pending_launch`, and the snapshot's `claimed_count` equals
    `max_concurrent`? → the host is at its worker cap and the fiber launches
-   when a slot frees. The cap defaults to 10; raise it per host with host.json
-   `"max_concurrent_workers": <n>` and a restart.
+   when a slot frees. There is no cap unless host.json sets
+   `"max_concurrent_workers": <n>` (a restart applies it); `max_concurrent`
+   is null on an uncapped host.
 5. `shuttle` sees it but daemon doesn't → daemon binary is stale.
    `make restart` (then `shuttle daemon release`).
 6. Daemon sees it but agent never appears → check the resolved agent's `cli`
