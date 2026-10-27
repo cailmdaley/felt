@@ -14,8 +14,10 @@ interface BoardInternals {
   workspace: Workspace
   deskEl: HTMLElement
   lensCycleId: string | null
+  activeViewId: 'desk' | 'chronicle' | 'shelf'
+  deskKeyboard: { selection: { uid: string; origin: string } | null }
   workspaceColumn(card: typeof head): Array<{ card: typeof head }>
-  setView(view: 'desk' | 'chronicle'): void
+  setView(view: 'desk' | 'chronicle' | 'shelf'): void
   openDocumentChannel(card: typeof head): void
 }
 let board: KanbanModal
@@ -247,6 +249,102 @@ describe('Desk constitution keys', () => {
 })
 
 describe('Desk keyboard selection', () => {
+  it.each([
+    ['desk', 'desk'], ['desk', 'chronicle'], ['desk', 'shelf'],
+    ['overview', 'desk'], ['overview', 'chronicle'], ['overview', 'shelf'],
+    ['reader', 'desk'], ['reader', 'chronicle'], ['reader', 'shelf'],
+  ] as const)('%s switches with the numbered view key and keeps Desk selection when returning', async (from, to) => {
+    press('j'); expect(selected()).toBe('review')
+    expect(inside.deskKeyboard.selection?.uid).toBe('review')
+    if (from === 'overview') inside.setView('shelf')
+    if (from === 'reader') {
+      press('Enter')
+      expect(inside.workspace.isActive).toBe(true)
+    }
+    const key = to === 'desk' ? '1' : to === 'chronicle' ? '2' : '3'
+    expect(press(key).defaultPrevented).toBe(true)
+    expect(inside.activeViewId).toBe(to)
+    if (to === 'desk') expect(selected()).toBe('review')
+    if (from === 'reader') expect(inside.workspace.isActive).toBe(false)
+    await Promise.resolve()
+  })
+
+  it('Escape returns an empty Overview and a root Reader to Desk, while peeling Overview layers first', async () => {
+    inside.setView('shelf')
+    expect(press('Escape').defaultPrevented).toBe(true)
+    expect(inside.activeViewId).toBe('desk')
+
+    inside.setView('shelf')
+    const latest = document.querySelector<HTMLDetailsElement>('.ws-overview-latest')!
+    latest.open = true
+    expect(press('Escape').defaultPrevented).toBe(true)
+    expect(latest.open).toBe(false)
+    expect(inside.activeViewId).toBe('shelf')
+
+    inside.setView('desk')
+    press('j'); press('Enter')
+    expect(inside.workspace.isActive).toBe(true)
+    expect(press('Escape').defaultPrevented).toBe(true)
+    expect(inside.workspace.isActive).toBe(false)
+    expect(inside.activeViewId).toBe('desk')
+    await Promise.resolve()
+  })
+
+  it('1 and root Escape return to Desk without replacing its selection with the Reader card', async () => {
+    press('j'); expect(selected()).toBe('review')
+    inside.setView('shelf')
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(true)
+    expect(press('1').defaultPrevented).toBe(true)
+    expect(inside.activeViewId).toBe('desk')
+    expect(inside.deskKeyboard.selection?.uid).toBe('review')
+    expect(selected()).toBe('review')
+
+    inside.setView('shelf')
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(true)
+    expect(press('Escape').defaultPrevented).toBe(true)
+    expect(inside.activeViewId).toBe('desk')
+    expect(selected()).toBe('review')
+  })
+
+  it('Escape from a Reader sidebar row returns to Desk and preserves its selection', async () => {
+    press('j'); expect(selected()).toBe('review')
+    inside.setView('shelf')
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(true)
+    const row = document.querySelector<HTMLElement>('.ws-sidebar .ws-channel-row')
+    expect(row).not.toBeNull()
+    row!.focus()
+    expect(press('Escape', {}, row!).defaultPrevented).toBe(true)
+    expect(inside.workspace.isActive).toBe(false)
+    expect(inside.activeViewId).toBe('desk')
+    expect(inside.deskKeyboard.selection?.uid).toBe('review')
+    expect(selected()).toBe('review')
+  })
+
+  it.each([
+    ['h', {}], ['ArrowLeft', {}], ['‹', {}], ['ArrowLeft', { altKey: true }],
+  ] as const)('%s back keeps its non-Desk origin; only root Escape goes to Desk', async (key, init) => {
+    inside.setView('shelf')
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(true)
+    expect(press(key, init).defaultPrevented).toBe(true)
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(inside.workspace.isActive).toBe(false)
+    expect(inside.activeViewId).toBe('shelf')
+
+    inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
+    for (let i = 0; i < 100; i++) await Promise.resolve()
+    expect(press('Escape').defaultPrevented).toBe(true)
+    expect(inside.workspace.isActive).toBe(false)
+    expect(inside.activeViewId).toBe('desk')
+  })
+
   it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
     press('j')
     press('s')

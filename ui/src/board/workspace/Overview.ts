@@ -20,6 +20,7 @@ export interface OverviewOptions {
   themes?: ChannelThemes
   cards(): KanbanCard[]
   onOpen(card: KanbanCard, doc?: DocKey): void
+  onEscapeHome?(): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
   /** Summon the board bar's Find, which filters the sheet on the desktop; false leaves `/` to the sheet's own field. */
@@ -893,9 +894,22 @@ export class Overview {
     if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')) return
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
+    if (intent === 'back') {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!this.handleEscapeLayer()) this.opts.onEscapeHome?.()
+      return
+    }
     event.preventDefault()
     if (intent === 'find') { if (!this.opts.focusFind?.()) this.find.focus({ preventScroll: true }) }
     else this.moveSelection(intent)
+  }
+  /** Close the nearest Overview layer before the page itself is left. */
+  handleEscapeLayer(): boolean {
+    if (this.latest.open) { this.latest.open = false; return true }
+    const expanded = [...this.changeRows.values()].find(row => row.expanded)
+    if (expanded) { expanded.expanded = false; this.render(); return true }
+    return false
   }
   private renderRibbon(): void {
     const documents = new Map<DocKey, Receipt>()

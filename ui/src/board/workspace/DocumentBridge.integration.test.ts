@@ -164,8 +164,8 @@ describe('minified production document keyboard bridge', () => {
     }))
     for (const key of ['x', 't', 'z', '.', 'c', 'r', 'p', ',', '>', 'Enter', 'o']) send(key)
     expect(app).not.toHaveBeenCalled()
-    send('ArrowDown'); send('ArrowLeft', { altKey: true })
-    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'back'])
+    send('ArrowDown'); send('ArrowLeft', { altKey: true }); send('1'); send('2'); send('3')
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['scrollDown', 'back', 'desk', 'chronicle', 'board'])
   })
 
   it('does not forward an untrusted library-generated key event', async () => {
@@ -202,18 +202,21 @@ describe('minified production document keyboard bridge', () => {
   it('gives report document and load-time window handlers first refusal', async () => {
     reportHtml = `<html><head><script>
       window.documentDialog = true; window.windowDialog = true;
+      window.consumeOne = true; window.consumeTwo = true;
       document.addEventListener('keydown', function(e) {
         if (window.documentDialog && e.key === 'Escape') e.preventDefault();
+        if (window.consumeOne && e.key === '1') e.preventDefault();
         if (e.key === 'h') e.stopPropagation();
       });
       window.addEventListener('load', function() {
         window.addEventListener('keydown', function(e) {
           if (window.windowDialog && e.key === 'Escape') e.preventDefault();
+          if (window.consumeTwo && e.key === '2') e.preventDefault();
         });
       }, {once: true});
     </script></head><body>Dialog report</body></html>`
     const frame = await report()
-    const win = frame.contentWindow! as Window & { documentDialog: boolean; windowDialog: boolean }
+    const win = frame.contentWindow! as Window & { documentDialog: boolean; windowDialog: boolean; consumeOne: boolean; consumeTwo: boolean }
     press(frame, 'Escape')
     expect(messages).not.toHaveBeenCalled()
     win.documentDialog = false
@@ -222,8 +225,15 @@ describe('minified production document keyboard bridge', () => {
     win.windowDialog = false
     press(frame, 'h')
     expect(messages).not.toHaveBeenCalled()
+    press(frame, '1')
+    expect(messages).not.toHaveBeenCalled()
+    press(frame, '2')
+    expect(messages).not.toHaveBeenCalled()
     press(frame, 'Escape')
     expect(app).toHaveBeenCalledExactlyOnceWith('back', expect.objectContaining({ key: 'Escape' }))
+    win.consumeOne = false; win.consumeTwo = false
+    press(frame, '1'); press(frame, '2'); press(frame, '3')
+    expect(app.mock.calls.map(([intent]) => intent)).toEqual(['back', 'desk', 'chronicle', 'board'])
   })
 
   it('exits native fullscreen without forwarding, then sends Reveal Escape through the board chain', async () => {

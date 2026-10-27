@@ -39,6 +39,7 @@ export interface WorkspaceOptions {
   onVisibility(active: boolean): void
   deskColumn?(card: KanbanCard): SidebarEntry[]
   onReturnCard?(card: KanbanCard): void
+  onEscapeHome?(): void
   /** A history entry addressed a board view or channel origin; switch to it without pushing. */
   onView?(view: WorkspaceView): void
   dock: Dock
@@ -134,6 +135,7 @@ export class Workspace {
       themes: this.themes,
       cards: opts.cards,
       onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
+      onEscapeHome: opts.onEscapeHome,
       onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
       focusFind: () => opts.focusFind?.() ?? false,
       readLately: () => this.readLatelyCards(),
@@ -176,6 +178,7 @@ export class Workspace {
       onNavigate: (source, href) => this.openRelative(source, href),
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.returnToOrigin(),
+      onEscapeHome: opts.onEscapeHome,
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
@@ -247,6 +250,8 @@ export class Workspace {
     if (this.current) this.opts.onReturnCard?.(this.current.card)
     this.history.leave()
   }
+  /** Escape at the Reader's root returns to Desk, regardless of its origin view. */
+  escapeHome(): void { this.history.view('#/desk') }
   /** Opens over the Desk without navigating or waking the reader. */
   findConstitution(): void {
     this.picker.show(this.root)
@@ -373,6 +378,7 @@ export class Workspace {
     this.overview.setVisible(false)
     this.depth.setActive(this.isActive)
   }
+  handleOverviewEscapeLayer(): boolean { return this.overview.handleEscapeLayer() }
 
   /** View keys park the reader; Board restores its last unreturned channel. */
   suspend(view: 'desk' | 'chronicle'): void {

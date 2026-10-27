@@ -562,6 +562,7 @@ export class KanbanModal {
         this.workspaceReturnFocus = null
         this.deskKeyboard?.select({ uid: card.uid ?? card.id, origin: card.originId }, false)
       },
+      onEscapeHome: () => this.workspace?.escapeHome(),
       onView: (view) => this.setView(view === 'board' ? 'shelf' : view, false),
       dock: this.dock,
       find: this.findEl ?? undefined,
@@ -897,7 +898,11 @@ export class KanbanModal {
    * Switch the page. Idempotent — re-selecting the active view is a no-op, so
    * a stray click or repeated hotkey never tears a view down and back up.
    */
-  private setView(id: BoardViewId, navigate = true): void {
+  private setView(id: BoardViewId, navigate = true, forceHome = false): void {
+    if (forceHome && id === 'desk' && this.workspace?.isActive) {
+      this.workspace.escapeHome()
+      return
+    }
     // With the reader open the bar marks the view it came from: that tab, or
     // its key, closes the reader back to it; any other switches and closes.
     if (navigate && this.workspace?.isActive && id === this.activeViewId) {
@@ -1125,14 +1130,14 @@ export class KanbanModal {
    * key was consumed.
    */
   private handleViewHotkey(e: KeyboardEvent): boolean {
-    if (e.metaKey || e.ctrlKey || e.altKey) return false
-    const match = listViews().find((v) => v.hotkey === e.key)
-    if (!match && e.key !== DESK_HOTKEY) return false
+    const surface = this.workspace?.isActive ? 'reader' : this.activeViewId === 'shelf' ? 'overview' : 'desk'
+    const intent = keyIntent(e, surface)
+    if (intent !== 'desk' && intent !== 'chronicle' && intent !== 'board') return false
     if (keystrokeIsSpokenFor()) return false
-    const id: BoardViewId = match ? match.id : 'desk'
+    const id: BoardViewId = intent === 'desk' ? 'desk' : intent === 'chronicle' ? 'chronicle' : 'shelf'
     e.preventDefault()
     e.stopPropagation()
-    this.setView(id)
+    this.setView(id, true, intent === 'desk')
     return true
   }
 
@@ -2262,6 +2267,10 @@ export class KanbanModal {
     }
     if (this.handleSettingsHotkey(e)) return
     if (this.handleViewHotkey(e)) return
+    if (e.key === 'Escape' && this.activeViewId === 'shelf' && !keystrokeIsSpokenFor()) {
+      if (this.workspace?.handleOverviewEscapeLayer()) { e.preventDefault(); e.stopPropagation(); return }
+      e.preventDefault(); e.stopPropagation(); this.setView('desk'); return
+    }
     // Chronicle keeps its own record search in its head; `/` reaches the bar's Find there too.
     if (this.activeViewId === 'chronicle' && !keystrokeIsSpokenFor() && keyIntent(e, 'desk') === 'find' && this.focusFind()) {
       e.preventDefault(); e.stopPropagation()

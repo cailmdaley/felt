@@ -22,8 +22,15 @@ describe('shared keyboard table', () => {
     }
     expect(misses).toEqual([])
   })
-  it.each(['1', '2', '3', 'Tab'])('leaves chassis key %s alone', key => {
-    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) expect(keyIntent(event(key), surface)).toBeNull()
+  it('routes 1·2·3 to the same view intents on every surface, without forwarding them into documents', () => {
+    const intents = ['desk', 'chronicle', 'board'] as const
+    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+      for (const [index, intent] of intents.entries()) expect(keyIntent(event(String(index + 1)), surface)).toBe(intent)
+    }
+    expect(DOCUMENT_KEY_INTENTS).toContain('desk')
+    expect(DOCUMENT_KEY_INTENTS).toContain('chronicle')
+    expect(DOCUMENT_KEY_INTENTS).toContain('board')
+    expect(keyIntent(event('Tab'), 'desk')).toBeNull()
   })
   it.each(['input', 'textarea', 'select'])('ignores typing in %s, including reader Alt-arrows', tag => {
     const field = document.createElement(tag)

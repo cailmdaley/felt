@@ -1,12 +1,12 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'sidebar', 'find', 'help',
+  'back', 'sidebar', 'find', 'help', 'desk', 'chronicle', 'board',
 ]
 export interface KeyBinding {
   keys: readonly string[]
@@ -42,6 +42,7 @@ export const DESK_REGION_SELECTORS = ['[data-column="drafts"]', '[data-column="i
  * not physical keys. Reader Alt-arrows remain guarded inside editable targets. */
 export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
   desk: [
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
     bind(['/'], 'find', 'Find a card or constitution'),
     bind(['h', 'ArrowLeft'], 'left', 'Previous column / region'), bind(['l', 'ArrowRight'], 'right', 'Next column / region'),
     bind(['j', 'ArrowDown'], 'down', 'Next card'), bind(['k', 'ArrowUp'], 'up', 'Previous card'),
@@ -50,12 +51,14 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['Escape'], 'back', 'Clear selection'), bind(['?'], 'help', 'Keyboard help'),
   ],
   overview: [
-    bind(['/'], 'find', 'Find work or files'),
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
+    bind(['/'], 'find', 'Find work or files'), bind(['Escape'], 'back', 'Return to Desk when nothing is open'),
     bind(['h', 'ArrowLeft'], 'left', 'Move left'), bind(['l', 'ArrowRight'], 'right', 'Move right'),
     bind(['j', 'ArrowDown'], 'down', 'Move down'), bind(['k', 'ArrowUp'], 'up', 'Move up'),
     bind(['g'], 'first', 'First folio'), bind(['G'], 'last', 'Last folio'), bind(['Enter', 'o'], 'open', 'Open constitution'), bind(['?'], 'help', 'Keyboard help'),
   ],
   reader: [
+    bind(['1'], 'desk', 'Switch to Desk'), bind(['2'], 'chronicle', 'Switch to Chronicle'), bind(['3'], 'board', 'Switch to Board'),
     bind(['p'], 'audioPlay', 'Audio: play / pause'),
     bind(['['], 'audioBack', 'Audio: back 5 seconds'),
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),

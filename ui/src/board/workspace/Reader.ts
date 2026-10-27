@@ -37,6 +37,7 @@ export interface ReaderOptions {
   onNavigate?(source: WorkspaceDocument, href: string): void
   onCrossing?(travel: number): void
   onReturn(): void
+  onEscapeHome?(): void
   workerPill?(card: KanbanCard): HTMLElement | null
   onVerdict?(verdict: Verdict): void
   onCompose?(): void
@@ -216,8 +217,8 @@ export class Reader {
     this.sidebarPicker = new ConstitutionPicker({
       ...pickerOptions, cards: () => this.sidebarCards(), revealCurrent: true,
       find: opts.find, active: () => this.active && this.sidebarShown,
-      // Escape on a card leaves the reader, as it does anywhere else in it.
-      onEscape: () => { this.handleIntent('back') },
+      // Escape on a sidebar row follows the reader's back chain.
+      onEscape: () => { this.handleIntent('back', false, true) },
       renderCard: card => this.sidebarCard(card), group: opts.sidebarBand,
       revision: sidebarRevision,
       onRow: (el, card) => {
@@ -407,12 +408,15 @@ export class Reader {
     this.opts.onSelect(key)
   }
   /** One level up: a file's parent, the chat, the orchestrator, then the origin view. */
-  back(): void {
+  back(escape = false): void {
     const parent = this.parents.pop()
     const landing = this.channel && (chatDocument(this.channel) ?? proseDocument(this.channel))
     if (parent) this.opts.onSelect(parent)
     else if (landing && this.selected !== landing.key) this.opts.onSelect(landing.key)
-    else if (!this.opts.onOrchestrator?.()) this.opts.onReturn()
+    else if (!this.opts.onOrchestrator?.()) {
+      if (escape && this.opts.onEscapeHome) this.opts.onEscapeHome()
+      else this.opts.onReturn()
+    }
   }
   closeSettings(after: () => void): void {
     if (this.pageSheet.isOpen) this.pageSheet.close(after)
@@ -974,18 +978,18 @@ export class Reader {
     // Native controls own activation and composite navigation.
     if (!forward && !e.metaKey && !e.ctrlKey) return
     const intent = keyIntent(e, 'reader')
-    if (intent && this.handleIntent(intent, e.repeat)) {
+    if (intent && this.handleIntent(intent, e.repeat, e.key === 'Escape')) {
       e.preventDefault(); e.stopImmediatePropagation()
     }
   }
-  private handleIntent(intent: KeyIntent, repeat = false): boolean {
+  private handleIntent(intent: KeyIntent, repeat = false, escape = false): boolean {
     if (intent === 'help') return false
     if (intent === 'back') {
       if (repeat) return true
       if (this.picker.isOpen) this.picker.close(true)
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
-      else this.back()
+      else this.back(escape)
       return true
     }
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false
