@@ -4,6 +4,8 @@ import { threadItem } from '../ThreadPeek.js'
 import { deskColumn } from '../deskColumn.js'
 import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
+import { documentLabelMetadata, lastSent, type Channel, type DocKey } from './documents.js'
+import { sentDocuments, sentFileRow } from './SentFiles.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
@@ -11,7 +13,10 @@ const MIN_WIDTH = 220, MAX_WIDTH = 640, STEP = 16
 import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 
 /**
- * A view of the open constitution's whole family, from the top-level
+ * The reader's right-hand column: the open constitution's threads above, its
+ * sent files beneath, each region scrolling on its own.
+ *
+ * The threads region is a view of the open constitution's whole family, from the top-level
  * constitution down: inside a thread the same family stays, the open thread
  * marked in place and its ancestry's groups opened, so siblings and cousins
  * stay one click away. Navigation never changes containment.
@@ -22,13 +27,23 @@ export class ThreadRail {
   readonly handle = document.createElement('div')
   private readonly tree = document.createElement('div')
   private readonly heading = document.createElement('h2')
+  private readonly files = document.createElement('section')
+  private readonly filesHeading = document.createElement('h2')
+  private readonly fileList = document.createElement('div')
   private signature = ''
+  private filesSignature = ''
   private width: number | null = null
   private card: KanbanCard | null = null
-  /** Every thread in the family besides the open one is archived: the rail has nothing that asks for the eye. */
-  quiet = false
+  /** Every thread in the family besides the open one is archived. */
+  private familyQuiet = false
   /** Family presence is independent of the viewport's rail presentation. */
   hasFamily = false
+  /** The open conversation has sent at least one file. */
+  hasFiles = false
+  /** The rail has something to draw: threads beside the open one, or sent files. */
+  get present(): boolean { return this.hasFamily || this.hasFiles }
+  /** Nothing in the rail asks for the eye: no sent files, and every other thread archived. */
+  get quiet(): boolean { return this.familyQuiet && !this.hasFiles }
   /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
   /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
@@ -44,12 +59,16 @@ export class ThreadRail {
     this.heading.className = 'ws-thread-heading'; this.heading.textContent = 'Threads'; this.heading.tabIndex = -1
     this.tree.className = 'ws-thread-tree'
     this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.heading, this.tree)
+    this.filesHeading.className = 'ws-thread-heading'; this.filesHeading.textContent = 'Sent files'; this.filesHeading.tabIndex = -1
+    this.fileList.className = 'ws-rail-file-list'
+    this.files.className = 'ws-rail-files'; this.files.setAttribute('aria-label', 'Sent files')
+    this.files.append(this.filesHeading, this.fileList)
     this.handle.className = 'ws-thread-handle'; this.handle.setAttribute('role', 'separator'); this.handle.setAttribute('aria-orientation', 'vertical')
     this.handle.setAttribute('aria-label', 'Resize thread tree'); this.handle.title = 'Drag to resize · double-click to reset'; this.handle.tabIndex = 0
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
     this.handle.addEventListener('keydown', e => this.resizeKey(e))
     this.handle.addEventListener('dblclick', () => this.setWidth(null, true))
-    this.el.append(this.handle, this.scroller)
+    this.el.append(this.handle, this.scroller, this.files)
     try {
       const stored = Number(localStorage.getItem(WIDTH_STORAGE))
       if (Number.isFinite(stored) && stored > 0) this.width = stored
@@ -121,17 +140,49 @@ export class ThreadRail {
     const descendants = index.subtree(scope)
     const others = [scope, ...descendants].filter(c => !(c.id === card.id && c.originId === card.originId))
     this.hasFamily = others.length > 0
-    this.quiet = others.every(c => threadState(c) === 'archived')
+    this.familyQuiet = others.every(c => threadState(c) === 'archived')
+    this.applyPresence()
     if (window.matchMedia(MOBILE_MEDIA).matches) {
-      this.el.hidden = true; this.tree.replaceChildren(); this.signature = ''
+      this.tree.replaceChildren(); this.signature = ''
       return
     }
     const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...[scope, ...descendants].map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
-    // A family that is only the open thread has nothing to show beside it.
-    this.el.hidden = !this.hasFamily
     this.paint()
+  }
+  /**
+   * The open conversation's sent files, newest first, repainted only when a
+   * row would change; a click opens the file in the reader.
+   */
+  showFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void): void {
+    const docs = sentDocuments(channel)
+    this.hasFiles = docs.length > 0
+    this.applyPresence()
+    if (window.matchMedia(MOBILE_MEDIA).matches) { this.fileList.replaceChildren(); this.filesSignature = ''; return }
+    const signature = JSON.stringify([channel.uid, channel.owner, ...docs.map(doc => [doc.key, documentLabelMetadata(doc, doc.name, channel.owner).title, lastSent(doc), fresh.has(doc.key), doc.key === selected])])
+    if (signature === this.filesSignature) return
+    this.filesSignature = signature
+    const active = document.activeElement
+    const focus = active instanceof HTMLElement && this.fileList.contains(active) ? active.dataset.key : undefined
+    if (!docs.length) {
+      const empty = document.createElement('p'); empty.className = 'ws-rail-files-empty'; empty.textContent = 'No files sent yet.'
+      this.fileList.replaceChildren(empty)
+    } else this.fileList.replaceChildren(...docs.map(doc => sentFileRow(channel, doc, selected, fresh, choose, 'ws-rail-file')))
+    if (focus !== undefined) {
+      const target = [...this.fileList.querySelectorAll<HTMLElement>('.ws-rail-file')].find(el => el.dataset.key === focus)
+      ;(target ?? this.filesHeading).focus({ preventScroll: true })
+    }
+  }
+  /** Bring the sent files into view and give their heading focus. */
+  focusFiles(): void {
+    this.fileList.scrollTop = 0
+    this.filesHeading.focus({ preventScroll: true })
+  }
+  /** A rail with nothing to draw hides; the threads region stands only for a family. */
+  private applyPresence(): void {
+    this.el.hidden = window.matchMedia(MOBILE_MEDIA).matches || !this.present
+    this.scroller.hidden = !this.hasFamily
   }
   private paint(): void {
     if (!this.card || !this.scope) return

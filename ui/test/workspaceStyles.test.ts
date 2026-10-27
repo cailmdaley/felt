@@ -1,4 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs'
+import postcss from 'postcss'
 import { describe, expect, it } from 'vitest'
 
 const read = (name: string): string => readFileSync(new URL(`../src/board/workspace/${name}`, import.meta.url), 'utf8')
@@ -22,6 +23,21 @@ describe('workspace style contracts', () => {
         expect(declaration[1], `${path}: ${declaration[0]}`).not.toMatch(/\b\d+(?:\.\d+)?(?:px|rem)\b/)
       }
     }
+  })
+  it('scrolls the rail\'s two regions on their own: threads capped at their content, sent files taking the rest', () => {
+    const rules = new Map<string, Map<string, string>>()
+    postcss.parse(read('thread-rail.css')).walkRules(rule => {
+      for (const selector of rule.selectors) {
+        const decls = rules.get(selector) ?? new Map<string, string>()
+        rule.walkDecls(d => { decls.set(d.prop, d.value) })
+        rules.set(selector, decls)
+      }
+    })
+    const threads = rules.get('.ws-thread-scroll')!, files = rules.get('.ws-rail-files')!, list = rules.get('.ws-rail-file-list')!
+    for (const scroller of [threads, list]) { expect(scroller.get('overflow')).toBe('auto'); expect(scroller.get('min-height')).toBe('0') }
+    expect(threads.get('flex')).toBe('0 1 auto'); expect(threads.get('max-height')).toMatch(/%$/)
+    expect(files.get('flex')).toBe('1 1 0'); expect(files.get('min-height')).toBe('0')
+    expect(rules.get('.ws-thread-rail')!.get('flex-direction')).toBe('column')
   })
   it('leaves the reader sidebar rows to the sidebar: no theme styles them', () => {
     const themes = readdirSync(new URL('../src/board/workspace/themes/', import.meta.url)).filter(name => name.endsWith('.css'))

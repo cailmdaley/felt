@@ -636,6 +636,24 @@ describe('workspace reader integration', () => {
     expect(reader.classList.contains('ws-with-rail')).toBe(true)
     expect(reader.classList.contains('ws-zen')).toBe(false)
   })
+  it('lists a lone constitution\'s sent files in the rail, opens one on click, and brings them back from the menu', async () => {
+    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
+    workspace.open(cards[0], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    const rail = reader().querySelector<HTMLElement>('.ws-thread-rail')!
+    expect(rail.querySelector<HTMLElement>('.ws-thread-scroll')!.hidden).toBe(true)
+    const rows = [...rail.querySelectorAll<HTMLButtonElement>('.ws-rail-file')]
+    expect(rows.map(row => row.dataset.key)).toEqual(['host-a:/notes/alpha/table.html', 'host-a:/notes/alpha/report.html'])
+    rows[0].click(); await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
+    expect(rail.querySelector('.ws-rail-file[aria-current="page"]')?.getAttribute('data-key')).toBe('host-a:/notes/alpha/table.html')
+    document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!.click()
+    expect(reader().classList.contains('ws-with-rail')).toBe(false)
+    workspace.reader.showSentFiles()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    expect(document.activeElement?.textContent).toBe('Sent files')
+    expect(reader().querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).not.toBe(true)
+  })
   it('persists hiding a quiet rail across forced openings, navigation and reader recreation', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:rail', 'true')

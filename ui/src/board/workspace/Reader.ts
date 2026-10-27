@@ -185,7 +185,7 @@ export class Reader {
     this.sidebarToggle.title = 'Constitutions · s'
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
-    this.railToggle.title = 'Threads · ⌘|'
+    this.railToggle.title = 'Threads and files · ⌘|'
     this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="10" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>'
     this.returnButton = button('ws-return', '‹', () => this.back(), 'Back one level')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
@@ -436,8 +436,14 @@ export class Reader {
     const threads = this.phone.matches && card ? phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))) : null
     this.pageSheet.show(opener, threads, content)
   }
+  /** On the desktop the sent files live in the rail; the phone, which has none, opens its sheet. */
   showSentFiles(): void {
     this.closeMenu()
+    if (!this.phone.matches) {
+      if (!this.railOpen) this.setRailVisible(true)
+      this.threadRail.focusFiles()
+      return
+    }
     this.el.append(this.pageSheet.el)
     const opener = this.phone.matches ? this.navbar.querySelector<HTMLElement>('.ws-phone-document-menu') : this.host.get(this.selected ?? '')?.label.querySelector<HTMLElement>('.ws-menu-button')
     this.pageSheet.show(opener ?? this.railToggle)
@@ -518,6 +524,9 @@ export class Reader {
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
+    const present = this.threadRail.present
+    this.threadRail.showFiles(ch, this.selected ?? '', fresh, key => this.openDocument(key))
+    if (present !== this.threadRail.present) { this.paintRail(); this.layout(false) }
     const chat = chatDocument(ch)
     const report = channelLead(ch)
     const chatFrame = chat && this.host.get(chat.key)
@@ -807,7 +816,7 @@ export class Reader {
   private get railOpen(): boolean {
     return this.railChoice ?? !this.threadRail.quiet
   }
-  /** Whether the threads rail stands beside the stage: wanted, with threads to show, off the phone. */
+  /** Whether the rail stands beside the stage: wanted, with threads or files to show, off the phone. */
   private get railShown(): boolean {
     return !this.phone.matches && this.railOpen && !this.threadRail.el.hidden
   }
@@ -816,14 +825,14 @@ export class Reader {
     this.el.classList.toggle('ws-zen', !this.phone.matches && !this.el.classList.contains('ws-with-sidebar') && !this.el.classList.contains('ws-with-rail'))
   }
   private paintRail(): void {
-    const has = this.threadRail.hasFamily
+    const has = this.threadRail.present
     const open = this.phone.matches ? this.pageSheet.isOpen : this.railOpen
     this.el.classList.toggle('ws-rail-off', !open)
     this.el.classList.toggle('ws-with-rail', this.railShown)
     this.paintZen()
     this.railToggle.hidden = !has
     this.railToggle.setAttribute('aria-expanded', String(open))
-    this.railToggle.setAttribute('aria-label', open ? 'Hide threads' : 'Show threads')
+    this.railToggle.setAttribute('aria-label', open ? 'Hide threads and files' : 'Show threads and files')
   }
   private stagePlaces(): { page: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
@@ -1002,7 +1011,7 @@ export class Reader {
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'sidebar') this.toggleSidebar()
-    else if (intent === 'rail') { if (this.threadRail.hasFamily) this.toggleRail() }
+    else if (intent === 'rail') { if (this.threadRail.present) this.toggleRail() }
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }
       else if (this.sidebarShown) this.sidebarPicker.focus()
