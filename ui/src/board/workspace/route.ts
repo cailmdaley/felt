@@ -95,6 +95,7 @@ export class WorkspaceHistory {
   }
 
   get originView(): WorkspaceOriginView { return this.routeOrigin }
+  get returnsToBase(): boolean { return this.current?.kind === 'channel' && this.base && this.depth > 0 }
   get parents(): DocKey[] { return readRouteState(window.history.state)?.parents ?? [] }
 
   start(): void {

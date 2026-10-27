@@ -1438,6 +1438,73 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-return')?.textContent).toBe('‹')
   })
 
+  it('restores the Board return for a file route after reload', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    await feedNamesReport()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'board', base: true } })
+
+    workspace.dispose()
+    document.body.replaceChildren()
+    const onView = vi.fn()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, onView,
+      dock: new Dock('', changed),
+    })
+    workspace.mountOverview(document.body)
+    await flush()
+    expect(onView).toHaveBeenCalledWith('board')
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+
+    const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
+    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await returned
+    await flush()
+    expect(window.location.hash).toBe('#/board')
+    expect(workspace.overview.el.hidden).toBe(false)
+  })
+
+  it('restores the Board return after reloading a nested file route', async () => {
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    await feedNamesReport()
+    const reportKey = docKey('host-a', '/notes/alpha/report.html', 'host-a')
+    const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
+    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
+    await flush()
+    expect(workspace.reader.host.get(tableKey)).toBeTruthy()
+    workspace.reader.openDocument(tableKey)
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { parents: [reportKey] } })
+
+    workspace.dispose()
+    document.body.replaceChildren()
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility,
+      dock: new Dock('', changed),
+    })
+    workspace.mountOverview(document.body)
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
+
+    workspace.reader.back()
+    await flush()
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
+    const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
+    workspace.reader.back()
+    await returned
+    await flush()
+    expect(window.location.hash).toBe('#/board')
+    expect(workspace.overview.el.hidden).toBe(false)
+  })
+
   it('restores overview scroll after returning from a channel opened on the Board', async () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
