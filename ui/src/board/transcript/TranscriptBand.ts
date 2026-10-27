@@ -1128,10 +1128,15 @@ export class TranscriptBand {
     const feed = this.feed
     let shared!: Promise<boolean>
     const sentFilesFeed = this.sentFilesFeed
-    shared = Promise.all([
-      feed.read(),
-      sentFilesFeed?.read() ?? Promise.resolve(false),
-    ]).then(([transcriptArrived, sentFilesArrived]) => {
+    let sentFilesArrived = false
+    void sentFilesFeed?.read().then(arrived => {
+      sentFilesArrived = arrived
+      if (arrived && this.feed === feed && this.canReadNow() && this.target?.live) {
+        this.pollDelay = LIVE_POLL_MS
+        this.schedulePoll(this.pollDelay)
+      }
+    })
+    shared = feed.read().then((transcriptArrived) => {
       const arrived = transcriptArrived || sentFilesArrived
       if (this.readingPromise === shared) this.readingPromise = null
       if (this.feed === feed) this.hasReadCurrent = true
@@ -1365,7 +1370,7 @@ export class TranscriptBand {
       this.previewFollowing = true
     }
     const live = this.target?.live === true
-    const last = turn.steps[turn.steps.length - 1]
+    const last = [...turn.steps].reverse().find(step => step.kind !== 'sent-file')
     const working = live && (!last || last.kind !== 'text')
     const key = `${turn.index}:${turn.version}:${working}:${this.agentName()}`
     if (key === this.previewKey) return
@@ -1941,7 +1946,7 @@ export class TranscriptBand {
       return
     }
     this.pendingHit = { query: text, at }
-    this.read({ session: hit.session, agent: hit.harness || undefined, live: false, ...(at === undefined ? {} : { at }) })
+    this.read({ session: hit.session, uid: this.target?.uid, host: this.target?.host, agent: hit.harness || undefined, live: false, ...(at === undefined ? {} : { at }) })
   }
 
   /** After a paint: measure prompt clamps, then keep each window on the newest message while its reader follows. */

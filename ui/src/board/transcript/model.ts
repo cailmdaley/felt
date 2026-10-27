@@ -177,21 +177,18 @@ export class TranscriptModel {
 
   /** Place receipt rows against the transcript's current turn boundaries. */
   placeSentFiles(): void {
-    if (!this.sentFiles.size || !this.turnList.length) return
-    for (const turn of this.turnList) {
-      const remaining = turn.steps.filter((step) => step.kind !== 'sent-file')
-      if (remaining.length === turn.steps.length) continue
-      turn.steps.splice(0, turn.steps.length, ...remaining)
-      this.recomputeTurn(turn)
-      this.touch(turn)
-    }
-
+    if (!this.turnList.length) return
+    const desired: Step[][] = this.turnList.map(turn => turn.steps.filter(step => step.kind !== 'sent-file'))
     for (const entry of [...this.sentFiles.values()].sort((a, b) => (a.at ?? 0) - (b.at ?? 0) || a.id.localeCompare(b.id))) {
       const turn = this.turnForSentFile(entry.at)
-      const index = entry.at === undefined
-        ? -1
-        : turn.steps.findIndex((step) => step.at !== undefined && step.at > entry.at!)
-      turn.steps.splice(index < 0 ? turn.steps.length : index, 0, entry)
+      const steps = desired[turn.index]
+      const index = entry.at === undefined ? -1 : steps.findIndex(step => step.at !== undefined && step.at > entry.at!)
+      steps.splice(index < 0 ? steps.length : index, 0, entry)
+    }
+    for (const turn of this.turnList) {
+      const steps = desired[turn.index]
+      if (steps.length === turn.steps.length && steps.every((step, i) => step === turn.steps[i])) continue
+      turn.steps.splice(0, turn.steps.length, ...steps)
       this.recomputeTurn(turn)
       this.touch(turn)
     }

@@ -71,6 +71,10 @@ if (workspaceFixture && search.has('long-title')) {
   const fiber = workspaceFixture.feed.fibers.find(row => (row.fiber as Record<string, unknown>).id === WORKSPACE_ID)!.fiber as Record<string, unknown>
   fiber.name = LONG_WORKSPACE_NAME
 }
+if (workspaceFixture) {
+  const examples = ['.png', '.html'].map(ext => workspaceFixture.receipts.find(file => String(file.fullPath).endsWith(ext))).filter(file => file !== undefined)
+  for (const file of examples) workspaceFixture.receipts.push({ ...file, timestamp: now - 88_000, sessionId: WORKSPACE_LATEST_SESSION })
+}
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 // `manyFiles` lengthens the open constitution's sent-files trail so the rail's file region has to scroll.
@@ -1468,7 +1472,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/fibers/work/arxiv/daily-digest?body=true')) {
     return json({ fibers: [{ fiber: { body: MOCK_DIGEST_BODY, outcome: 'Digest delivered.' } }] })
   }
-  if (url.includes('/api/v1/sent-files?')) {
+  if (url.includes('/api/v1/sent-files?') || url.includes('/api/v1/sent-files/session?')) {
     const uid = new URL(url, 'http://harness').searchParams.get('uid')
     if (workspaceFixture) return json({ files: workspaceFixture.receipts.filter(file => file.uid === uid) })
     if (docsExample) return json({ files: [] })

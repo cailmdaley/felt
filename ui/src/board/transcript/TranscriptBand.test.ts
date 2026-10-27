@@ -58,7 +58,7 @@ const sessionAndFilesFetch = (
 ): typeof fetch => vi.fn<typeof fetch>(async (input) => {
   const url = new URL(String(input))
   requests.push(url.toString())
-  if (url.pathname.endsWith('/sent-files')) {
+  if (url.pathname.endsWith('/sent-files/session')) {
     return new Response(JSON.stringify({ files: files() }), { headers: { ETag: `"files-${files().length}"` } })
   }
   const bytes = encoded(itemsBySession[url.searchParams.get('session') ?? ''] ?? [])
@@ -153,9 +153,9 @@ describe('TranscriptBand', () => {
     expect(preview.querySelectorAll('.ws-transcript-sent-file')).toHaveLength(1)
     expect(row.querySelector('img')?.getAttribute('src')).toContain('/api/v1/file?path=%2Ftmp%2Fplot.png&origin=candide')
     expect(row.textContent).toContain('plot.png')
-    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('uid')).toBe(uid)
-    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('session')).toBe(latestId)
-    expect(new URL(requests.find((url) => url.includes('/sent-files?'))!).searchParams.get('origin')).toBe('candide')
+    expect(new URL(requests.find((url) => url.includes('/sent-files/session?'))!).searchParams.get('uid')).toBe(uid)
+    expect(new URL(requests.find((url) => url.includes('/sent-files/session?'))!).searchParams.get('session')).toBe(latestId)
+    expect(new URL(requests.find((url) => url.includes('/sent-files/session?'))!).searchParams.get('origin')).toBe('candide')
 
     row.querySelector<HTMLButtonElement>('.ws-transcript-sent-file-item')!.click()
     expect(onFile).toHaveBeenCalledExactlyOnceWith('/tmp/plot.png', 'plot.png', 'candide')

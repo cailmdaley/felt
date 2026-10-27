@@ -18,6 +18,7 @@ export class SentFilesFeed {
   private readonly fetcher: typeof fetch
   private readonly onFiles: (files: SentFile[]) => void
   private etag: string | undefined
+  private lastFiles: string | undefined
   private inFlight: Promise<boolean> | null = null
   private epoch = 0
   private disposed = false
@@ -55,7 +56,7 @@ export class SentFilesFeed {
     const headers = this.etag ? { 'If-None-Match': this.etag } : undefined
     let response: Response
     try {
-      response = await this.fetcher(`${this.shuttleBase}/api/v1/sent-files?${params}`, { cache: 'no-store', headers })
+      response = await this.fetcher(`${this.shuttleBase}/api/v1/sent-files/session?${params}`, { cache: 'no-store', headers })
     } catch {
       return false
     }
@@ -69,7 +70,12 @@ export class SentFilesFeed {
       if (!Array.isArray(rawFiles)) return false
       if (!this.active(epoch)) return false
       this.etag = response.headers.get('ETag') ?? undefined
-      this.onFiles(normalizeSentFiles(rawFiles))
+      const files = normalizeSentFiles(rawFiles)
+      const signature = JSON.stringify(files
+        .filter(file => file.sessionId === this.session))
+      if (signature === this.lastFiles) return false
+      this.lastFiles = signature
+      this.onFiles(files)
       return true
     } catch {
       return false

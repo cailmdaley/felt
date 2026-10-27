@@ -103,6 +103,11 @@ describe('TranscriptModel', () => {
     model.setSentFiles([send('send-6', 6)])
     expect(model.turns[0].steps.map((step) => step.kind)).toEqual(['text', 'text', 'sent-file'])
     expect(model.takeChanges()).toEqual({ reset: false, turns: [0] })
+    model.placeSentFiles()
+    expect(model.takeChanges()).toEqual({ reset: false, turns: [] })
+    model.setSentFiles([])
+    expect(model.turns.flatMap(turn => turn.steps).some(step => step.kind === 'sent-file')).toBe(false)
+    expect(model.takeChanges()).toEqual({ reset: false, turns: [0] })
   })
 
   it('is invariant to splitting a record sequence across append calls', () => {

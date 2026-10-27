@@ -26,11 +26,11 @@ describe('untrusted markdown', () => {
     expect(html).toContain('href="#part"')
   })
 
-  it('renders images as escaped alt text rather than image elements', () => {
+  it('omits untrusted images', () => {
     const html = renderMarkdown('![map <b>detail</b>](https://example.test/map.png)', { untrusted: true })
 
     expect(html).not.toContain('<img')
-    expect(html).toContain('[image: map detail]')
+    expect(html).not.toContain('map detail')
   })
 
   it('leaves existing callers on the trusted rendering path', () => {

@@ -724,6 +724,30 @@ defmodule ShuttleWeb.SentFilesControllerTest do
              }
     end
 
+    test "relays conditional receipt requests and the owner's validator" do
+      stub_forward(
+        "candide",
+        "http://localhost:4001",
+        {:ok, 304, [{"etag", ~s(W/"receipt")}], "application/json", ""}
+      )
+
+      conn =
+        api_conn()
+        |> put_req_header("if-none-match", ~s(W/"receipt"))
+        |> get("/api/v1/sent-files?uid=#{@match_ulid}&session=native-session&origin=candide")
+
+      assert conn.status == 304
+      assert get_resp_header(conn, "etag") == [~s(W/"receipt")]
+      assert {"if-none-match", ~s(W/"receipt")} in StubGetFileClient.last().headers
+    end
+
+    test "rejects invalid explicit session filters" do
+      for query <- ["", "&session=", "&session%5B%5D=x"] do
+        conn = get(api_conn(), "/api/v1/sent-files/session?uid=#{@match_ulid}#{query}")
+        assert conn.status == 400
+      end
+    end
+
     test "relays the remote's status verbatim" do
       stub_forward(
         "candide",

@@ -17,7 +17,7 @@ defmodule ShuttleWeb.SentFilesController do
   `events.jsonl`; a remote-owned fiber forwards to the owning daemon's identical
   `/sent-files` (origin stripped) over the SSH tunnel — only that daemon tails
   its own host's `events.jsonl` — and relays its JSON verbatim
-  (`OriginRouter.forward_get/4`).
+  (`OriginRouter.forward_file_get/4`).
 
   A missing `uid` is a 400; a missing/empty events file yields `{"files": []}`,
   not a 500.
@@ -27,24 +27,15 @@ defmodule ShuttleWeb.SentFilesController do
   reads only appended bytes. That, not the ETag below, keeps reader polls and
   unconditional remote requests affordable.
 
-  **The local leg carries a weak `ETag`** over the request and both sources'
-  change tokens: the `events.jsonl` pair and the session ledger. The ledger
-  matters for native sessions whose event predates the fiber↔session claim.
-  Each source's rotated sibling is included because the reader reads it. The
-  document reader refreshes the trail whenever either source changes. The REMOTE leg stays unconditional: `OriginRouter.forward_get/4`
-  forwards no request headers and drops response headers, so a client's
-  `If-None-Match` never reaches the owning daemon and its `ETag` never comes
-  back — which is exactly why the reader itself, not the conditional request,
-  has to be the cheap thing. `events.jsonl` is the live hook stream for every
-  session on the host, so its token moves every few seconds and a 304 could
-  never have defended this endpoint anyway.
+  Both legs preserve conditional requests and weak ETags over the request and
+  the event stream and session ledger change tokens.
   """
 
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
     only: [
-      relay_bytes: 2,
+      relay_file_bytes: 2,
       relay_json: 2,
       integer_param: 3,
       json_with_validator: 3,
@@ -65,30 +56,42 @@ defmodule ShuttleWeb.SentFilesController do
 
   alias ShuttleWeb.TemporalComposite, as: Composite
 
+  def show_session(conn, %{"session" => session} = params)
+      when is_binary(session) and session != "",
+      do: show(conn, params)
+
+  def show_session(conn, _params), do: bad_param(conn, "session")
+
   def show(conn, %{"uid" => uid} = params) when is_binary(uid) and uid != "" do
     session_id = params["session"]
 
-    case OriginRouter.route(Map.get(params, "origin")) do
-      {:error, {:unknown_origin, origin}} ->
-        ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
+    if Map.has_key?(params, "session") and (not is_binary(session_id) or session_id == "") do
+      bad_param(conn, "session")
+    else
+      case OriginRouter.route(Map.get(params, "origin")) do
+        {:error, {:unknown_origin, origin}} ->
+          ShuttleWeb.RelayHelpers.unknown_origin(conn, origin)
 
-      {:remote, remote} ->
-        query =
-          if is_binary(session_id),
-            do: %{"uid" => uid, "session" => session_id},
-            else: %{"uid" => uid}
+        {:remote, remote} ->
+          query =
+            if is_binary(session_id),
+              do: %{"uid" => uid, "session" => session_id},
+              else: %{"uid" => uid}
 
-        relay_bytes(
-          conn,
-          OriginRouter.forward_get(remote, "/api/v1/sent-files", query)
-        )
+          headers = Enum.map(get_req_header(conn, "if-none-match"), &{"if-none-match", &1})
 
-      :local ->
-        validator = {uid, session_id, sent_files_tokens()}
+          relay_file_bytes(
+            conn,
+            OriginRouter.forward_file_get(remote, "/api/v1/sent-files", query, headers)
+          )
 
-        json_with_validator(conn, validator, fn ->
-          %{files: SentFiles.for_uid(uid, session_id: session_id)}
-        end)
+        :local ->
+          validator = {uid, session_id, sent_files_tokens()}
+
+          json_with_validator(conn, validator, fn ->
+            %{files: SentFiles.for_uid(uid, session_id: session_id)}
+          end)
+      end
     end
   end
 

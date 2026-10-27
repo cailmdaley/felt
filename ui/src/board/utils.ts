@@ -176,7 +176,7 @@ function renderLink(href: string, text: string): string {
 
 function renderImage(href: string, alt: string | undefined): string {
   const cleanAlt = (alt || '').replace(/<[^>]*>/g, '')
-  if (untrustedEnabled) return `[image: ${escapeHtml(cleanAlt)}]`
+  if (untrustedEnabled) return ''
   return `<img src="${escapeHtml(href)}" alt="${escapeHtml(cleanAlt)}" loading="lazy" />`
 }
 
