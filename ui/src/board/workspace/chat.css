@@ -78,6 +78,7 @@
 
 /* One context figure and the cache's warmth; cache-read share lives in settings. */
 .ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-label-size); color: var(--ws-ink-muted); }
+.ws-chat .ws-chat-head .ws-transcript-meter .ws-transcript-fact { font-size: inherit; line-height: 1.5; }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
