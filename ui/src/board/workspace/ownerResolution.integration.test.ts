@@ -28,7 +28,7 @@ let workspace: Workspace | undefined
 let reads: ReturnType<typeof vi.fn<(url: string) => Promise<Response>>>
 let opens: ReturnType<typeof vi.fn<(card: KanbanCard, doc?: string) => void>>
 const fiberReads = (): string[] => reads.mock.calls.map(([url]) => url).filter(url => url.includes('/api/v1/fibers/'))
-const folio = (uid: string): HTMLButtonElement | null => overview!.el.querySelector(`.ws-overview-folio[data-uid="${uid}"]`)
+const folio = (uid: string): HTMLButtonElement | null => overview!.el.querySelector(`.ws-overview-folio[data-uid="${uid}"] .ws-overview-folio-open`)
 function sheet(): Overview {
   overview = new Overview({ shuttleBase: '', cards: () => cards, onOpen: opens })
   document.body.append(overview.el)
@@ -284,7 +284,7 @@ describe('Workspace owner integration', () => {
     let healthy = false
     reads.mockImplementation(async url => url.includes('/sent-files/all/') ? json({ files }) : healthy ? json(envelope('alpha')) : json({}, 503))
     reader().mountOverview(document.body); await settle()
-    overview!.el.querySelector<HTMLButtonElement>('.ws-overview-folio')!.click(); await settle()
+    overview!.el.querySelector<HTMLButtonElement>('.ws-overview-folio-open')!.click(); await settle()
     expect(workspace!.isActive).toBe(true)
     expect(overview!.hasMetadata(overview!.orderedCards()[0])).toBe(false)
     healthy = true; overview!.refresh(); await settle()

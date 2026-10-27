@@ -133,6 +133,8 @@ export class Reader {
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
   private currentCard: KanbanCard | null = null
+  private origin = 'Desk'
+  private returnAtOrigin = false
   /** The constitution last open in each sidebar column, for this session. */
   private readonly groupMemory = new Map<string, string>()
   private selected: DocKey | null = null
@@ -291,7 +293,7 @@ export class Reader {
   restoreAncestry(parents: DocKey[]): void { this.parents.splice(0, this.parents.length, ...parents) }
 
   /** Show the selected page; settled body and receipt reads enable the files sheet. */
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready, returnAtOrigin = false): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
     if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
@@ -300,6 +302,8 @@ export class Reader {
     this.channelReady = ready
     this.settleRun(settled)
     this.channel = channel
+    this.origin = origin
+    this.returnAtOrigin = returnAtOrigin
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
@@ -412,6 +416,7 @@ export class Reader {
     const parent = this.parents.pop()
     const landing = this.channel && (chatDocument(this.channel) ?? proseDocument(this.channel))
     if (parent) this.opts.onSelect(parent)
+    else if (this.returnAtOrigin && this.origin === 'Board' && this.document && this.document.kind !== 'chat' && this.document.kind !== 'fiber') this.opts.onReturn()
     else if (landing && this.selected !== landing.key) this.opts.onSelect(landing.key)
     else if (!this.opts.onOrchestrator?.()) {
       if (escape && this.opts.onEscapeHome) this.opts.onEscapeHome()

@@ -61,6 +61,7 @@ interface ChannelState {
   selected?: DocKey
   questionLanding?: boolean
   routedFile?: DocKey
+  returnAtOrigin?: boolean
   loaded: boolean
   /** The run is final: body and receipts are both in, or the body read failed. The strip waits for it. */
   runFinal: boolean
@@ -134,8 +135,9 @@ export class Workspace {
       shuttleBase: opts.shuttleBase,
       themes: this.themes,
       cards: opts.cards,
-      onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card)),
+      onOpen: (card, doc) => this.open(card, 'Board', doc, this.overview.hasMetadata(card), true, true),
       onEscapeHome: opts.onEscapeHome,
+      onConversation: card => { this.dock.openConversation(card) },
       onOrder: () => { this.reader?.refreshChannels(); this.picker?.refresh(); if (this.barPicker?.isOpen) this.barPicker.refresh() },
       focusFind: () => opts.focusFind?.() ?? false,
       readLately: () => this.readLatelyCards(),
@@ -292,7 +294,7 @@ export class Workspace {
     return true
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true, returnAtOrigin = false): void {
     const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
     if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
       const column = fromDeskColumn && !outsideColumn && origin === 'Desk' ? this.opts.deskColumn?.(card) : undefined
@@ -303,6 +305,7 @@ export class Workspace {
     const id = cardIdentity(card)
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
+    state.returnAtOrigin = returnAtOrigin
     this.overview.opened(card, state.metadataKnown)
     this.history.enter(state.channel.uid, state.channel.owner, doc ?? (chatDocument(state.channel)?.key ?? state.selected), viewForOrigin(origin))
   }
@@ -696,7 +699,7 @@ export class Workspace {
     this.lastRenderedFamilyRevision = threadFamilyRevision(state.card, this.opts.threadIndex?.() ?? new ThreadIndex(cards))
     const selected = this.shown(state)
     this.refreshProse(state)
-    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
+    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal, state.returnAtOrigin)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
     const dock = chatDocument(ch) && this.controls(state)
@@ -750,7 +753,7 @@ export class Workspace {
     const key = docKey(owner ?? state.card.originId, path, state.card.originId, state.card.fiberDir)
     if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title, owner })
     this.rebuild(state)
-    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal)
+    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal, state.returnAtOrigin)
     this.reader.openDocument(key)
     if (hash) this.reader.host.navigateFragment(key, hash)
     void this.readFileMetadata(state).then(() => {

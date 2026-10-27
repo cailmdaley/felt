@@ -1152,6 +1152,21 @@ describe('workspace reader integration', () => {
     // A constitution opens on its chat, which holds the controls; its fiber page holds none.
     expect(document.querySelector('.ws-selected .ws-chat-page .ws-dock')).not.toBeNull()
     expect(document.querySelector('.ws-fiber-prose .ws-dock')).toBeNull()
+
+    workspace.returnToOrigin()
+    await flush()
+    workspace.mountOverview(document.body)
+    workspace.showBoard()
+    await flush()
+    const chat = document.querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
+    expect(chat.hidden).toBe(false)
+    openWorker.mockClear()
+    chat.click()
+    expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
+    openWorker.mockClear()
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true, cancelable: true }))
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true, cancelable: true }))
+    expect(openWorker).toHaveBeenCalledWith('terminal-alpha', 'daemon-a')
   })
 
   it('keeps reordered tab DOM, labels, and selection aligned with the active fiber', async () => {
@@ -1427,12 +1442,14 @@ describe('workspace reader integration', () => {
     workspace.mountOverview(document.body)
     workspace.showBoard()
     await flush()
+    await feedNamesReport()
     workspace.overview.opened(cards[0])
     const overview = workspace.overview.el
     overview.scrollTop = 432
-    overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    overview.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
     await flush()
     expect(workspace.reader.isActive).toBe(true)
+    expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     expect(overview.hidden).toBe(true)
 
     overview.scrollTop = 0
@@ -1450,7 +1467,7 @@ describe('workspace reader integration', () => {
     workspace.showBoard()
     await flush()
     workspace.overview.opened(cards[0])
-    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"]')!.click()
+    workspace.overview.el.querySelector<HTMLButtonElement>('.ws-overview-folio[data-uid="alpha"] .ws-overview-folio-open')!.click()
     await flush()
     expect(workspace.reader.isActive).toBe(true)
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')

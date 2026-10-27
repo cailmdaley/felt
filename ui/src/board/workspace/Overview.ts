@@ -4,6 +4,7 @@ import { inLane } from '../requestLanes.js'
 import { keyIntent, type KeyIntent } from '../keymap.js'
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { cardFromCompositeEntry, inFlightBand } from '../KanbanReadModel.js'
+import { isAgentCard } from '../KanbanModalShared.js'
 import { deskColumn } from '../deskColumn.js'
 import { normalizeShelfFiles, type ShelfFile } from '../views/shelfData.js'
 import { LOAD_POLICY } from '../views/shelfLoad.js'
@@ -20,6 +21,7 @@ export interface OverviewOptions {
   themes?: ChannelThemes
   cards(): KanbanCard[]
   onOpen(card: KanbanCard, doc?: DocKey): void
+  onConversation?(card: KanbanCard): void
   onEscapeHome?(): void
   /** Full lens order, independent of Find; suitable for reader channel stepping. */
   onOrder?(cards: KanbanCard[]): void
@@ -115,7 +117,9 @@ interface Folio {
   host: string
   /** Placed before board metadata named it; its first real card sets the groups. */
   provisional: boolean
-  el: HTMLButtonElement
+  el: HTMLElement
+  open: HTMLButtonElement
+  conversation: HTMLButtonElement
   stack: HTMLElement
   name: HTMLElement
   fresh: HTMLElement
@@ -626,8 +630,9 @@ export class Overview {
   }
 
   private createFolio(uid: string, card: KanbanCard): Folio {
-    const el = button('ws-overview-folio'); el.dataset.uid = uid; el.dataset.part = 'folio'
+    const el = node('article', 'ws-overview-folio'); el.dataset.uid = uid; el.dataset.part = 'folio'
     el.dataset.wsThemeBoundary = ''
+    const open = button('ws-overview-folio-open')
     const stack = node('div', 'ws-overview-stack')
     const tx = node('div', 'ws-overview-folio-text')
     const title = node('div', 'ws-overview-folio-title')
@@ -639,10 +644,25 @@ export class Overview {
     const marks = node('span', 'ws-overview-hostmarks')
     const count = node('span', '')
     const when = node('span', 'ws-overview-when')
-    footer.append(marks, count, when); tx.append(title, outcome, footer); el.append(stack, tx)
+    const conversation = button('ws-overview-folio-conversation')
+    conversation.textContent = 'Chat'
+    conversation.setAttribute('aria-label', 'Open conversation')
+    conversation.title = 'Open conversation'
+    footer.append(marks, count, conversation, when); tx.append(title, outcome); open.append(stack, tx); el.append(open, footer)
     const folio: Folio = { uid, card, receipts: [], latest: 0, recent: 'Earlier', project: projectOf(card), host: card.originId, provisional: true,
-      el, stack, name, fresh, outcome, marks, count, when }
-    el.addEventListener('click', () => { void this.open(folio.card) })
+      el, open, conversation, stack, name, fresh, outcome, marks, count, when }
+    open.addEventListener('click', () => {
+      const current = this.folios.get(uid) ?? folio
+      const lead = current.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'artifact.html')
+        ?? current.receipts.find(r => r.fullPath.split('/').at(-1)?.toLowerCase() === 'report.html')
+        ?? current.receipts[0]
+      void this.open(current.card, lead?.key)
+    })
+    conversation.addEventListener('click', event => {
+      event.stopPropagation()
+      const current = this.folios.get(uid)
+      if (current && !current.conversation.hidden) this.opts.onConversation?.(current.card)
+    })
     return folio
   }
   private updateFolio(folio: Folio): void {
@@ -651,8 +671,10 @@ export class Overview {
     text(folio.outcome, folio.card.outcome ?? '')
     text(folio.count, `${folio.receipts.length} ${folio.receipts.length === 1 ? 'document' : 'documents'}`)
     text(folio.when, age(folio.latest))
-    folio.el.title = folio.card.path || folio.uid
+    folio.open.title = folio.card.path || folio.uid
     folio.el.dataset.depth = String(Math.max(1, Math.min(3, folio.receipts.length)))
+    const surface = folio.card.workerSurface ?? folio.card.shuttleSurface
+    folio.conversation.hidden = !isAgentCard(folio.card) || !(surface === 'app' && folio.card.sessionUuid || folio.card.tmuxSession)
     folio.fresh.hidden = folio.latest <= Math.max(this.seen, this.visits.get(folio.uid) ?? 0)
     folio.el.classList.toggle('ws-overview-unseen', !folio.fresh.hidden)
     folio.el.classList.toggle('ws-overview-seen', folio.fresh.hidden)
@@ -858,7 +880,7 @@ export class Overview {
     return [...this.changesEl.querySelectorAll<HTMLButtonElement>('.ws-overview-change-open'),
       ...(this.latest.open ? this.ribbon.querySelectorAll<HTMLButtonElement>('.ws-overview-rib') : []),
       ...this.readList.querySelectorAll<HTMLButtonElement>('.ws-overview-read-item'),
-      ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio')].filter(el => !el.closest('[hidden]'))
+      ...this.groupsEl.querySelectorAll<HTMLButtonElement>('.ws-overview-folio-open')].filter(el => !el.closest('[hidden]'))
   }
   private paintSelection(): void {
     for (const el of this.el.querySelectorAll('.ws-key-selected')) el.classList.remove('ws-key-selected')
@@ -870,6 +892,12 @@ export class Overview {
     const current = this.selection && candidates.includes(this.selection) ? this.selection : null
     let next = current ?? candidates[0]
     if (intent === 'open') { current?.click(); return }
+    if (intent === 'conversation') {
+      const folio = current?.closest<HTMLElement>('.ws-overview-folio')
+      const row = folio && this.folios.get(folio.dataset.uid ?? '')
+      if (current?.matches('.ws-overview-folio-open') && row && !row.conversation.hidden) this.opts.onConversation?.(row.card)
+      return
+    }
     if (intent === 'first' || intent === 'last') {
       next = (intent === 'first' ? candidates[0] : candidates.at(-1)) ?? next
     } else if (current) {
@@ -894,6 +922,7 @@ export class Overview {
     if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.closest?.('button, a, [role="button"], [role="tab"]')) return
     const intent = keyIntent(event, 'overview')
     if (!intent || intent === 'help') return
+    if (intent === 'conversation' && !this.selection?.matches('.ws-overview-folio-open')) return
     if (intent === 'back') {
       event.preventDefault()
       event.stopPropagation()

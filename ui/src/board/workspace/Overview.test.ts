@@ -29,6 +29,7 @@ let overview: Overview
 let cards: KanbanCard[]
 let feed: { files: unknown[]; origins?: Record<string, unknown> }
 let onOpen = vi.fn<(card: KanbanCard, doc?: string) => void>()
+let onConversation = vi.fn<(card: KanbanCard) => void>()
 let onOrder = vi.fn<(cards: KanbanCard[]) => void>()
 let fetchMock: ReturnType<typeof vi.fn>
 let frames: Map<number, FrameRequestCallback>
@@ -45,7 +46,8 @@ const draw = (): void => {
   for (const frame of current) frame(performance.now())
 }
 const refresh = async (): Promise<void> => { overview.refresh(); await settle() }
-const folio = (uid: string): HTMLButtonElement => overview.el.querySelector<HTMLButtonElement>(`.ws-overview-folio[data-uid="${uid}"]`)!
+const folio = (uid: string): HTMLElement => overview.el.querySelector<HTMLElement>(`.ws-overview-folio[data-uid="${uid}"]`)!
+const folioOpen = (uid: string): HTMLButtonElement => folio(uid).querySelector<HTMLButtonElement>('.ws-overview-folio-open')!
 const name = (uid: string): string => folio(uid).querySelector('.ws-overview-folio-title')!.textContent!
 const groups = (): string[] => [...overview.el.querySelectorAll('.ws-overview-group')].filter(el => !(el as HTMLElement).hidden).map(el => el.querySelector('h2')!.firstChild!.textContent!)
 const lens = (value: string): void => {
@@ -78,8 +80,8 @@ beforeEach(() => {
     ? new Response(JSON.stringify(feed), { status: 200 })
     : url.includes('/api/v1/file?') && /\.html/.test(decodeURIComponent(url)) ? new Response('<p>Preview text</p>') : new Response('', { status: 404 }))
   vi.stubGlobal('fetch', fetchMock)
-  onOpen = vi.fn(); onOrder = vi.fn()
-  overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onOrder })
+  onOpen = vi.fn(); onConversation = vi.fn(); onOrder = vi.fn()
+  overview = new Overview({ shuttleBase: 'http://daemon', cards: () => cards, onOpen, onConversation, onOrder })
   document.body.append(overview.el)
 })
 afterEach(() => { overview?.dispose(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); resetDocumentResources(); resetLanes() })
@@ -125,6 +127,49 @@ describe('Overview receipt membership and identity', () => {
     first.click(); await settle()
     expect(onOpen).toHaveBeenCalledWith(cards[0], docKey('host-a', '/notes/alpha/report.html', 'host-a'))
     expect(folio('alpha').querySelector<HTMLElement>('.ws-overview-fresh')!.hidden).toBe(true)
+  })
+
+  it('opens a folio on its lead file instead of its conversation', async () => {
+    feed.files = [receipt('alpha', '/notes/alpha/older.txt', now() - 1000), receipt('alpha', '/notes/alpha/report.html')]
+    await refresh()
+    folioOpen('alpha').click()
+    await settle()
+    expect(onOpen).toHaveBeenCalledWith(cards[0], docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    expect(onConversation).not.toHaveBeenCalled()
+  })
+
+  it('opens the selected folio file with Enter or o', async () => {
+    feed.files = [receipt('alpha', '/notes/alpha/report.html')]
+    await refresh()
+    for (const key of ['Enter', 'o']) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true, cancelable: true }))
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      expect(onOpen).toHaveBeenLastCalledWith(cards[0], docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+    }
+    expect(onOpen).toHaveBeenCalledTimes(2)
+  })
+
+  it('offers Chat beside an agent folio and opens it with c or . on the selected folio', async () => {
+    const agent = { ...cards[0], shuttleKind: 'oneshot' as const, tmuxSession: 'worker-alpha' }
+    cards = [agent, cards[1]]
+    feed.files = [receipt('alpha', '/notes/alpha/report.html')]
+    overview.cardsChanged()
+    await refresh()
+
+    const chat = folio('alpha').querySelector<HTMLButtonElement>('.ws-overview-folio-conversation')!
+    expect(chat.hidden).toBe(false)
+    expect(chat.getAttribute('aria-label')).toBe('Open conversation')
+    chat.click()
+    expect(onConversation).toHaveBeenLastCalledWith(agent)
+
+    onConversation.mockClear()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'G', bubbles: true, cancelable: true }))
+    expect(folioOpen('alpha').classList.contains('ws-key-selected')).toBe(true)
+    for (const key of ['c', '.']) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      expect(onConversation).toHaveBeenLastCalledWith(agent)
+    }
+    expect(onConversation).toHaveBeenCalledTimes(2)
   })
 
   it('shelves the constitutions read lately, most recent first, each opening in the reader, and hides an empty shelf', async () => {
