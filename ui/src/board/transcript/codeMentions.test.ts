@@ -121,3 +121,45 @@ it('draws nothing when a spawn result is missing or failed', async () => {
   expect(failed.el.textContent).not.toContain('project-x/new-child')
   expect(failed.el.textContent).not.toContain('shuttle thread')
 })
+
+it.each([
+  'Wall time: 1.2 seconds\nOutput:\n{\n  "id": "project-x/json-child",\n  "uid": "01ABCDEFGHJKMNPQRSTVWXYZ12"\n}',
+  'warning: remote unavailable\n{\n  "id": "project-x/json-child",\n  "uid": "01ABCDEFGHJKMNPQRSTVWXYZ12"\n}',
+])('reads indented JSON after a tool header or warning', async output => {
+  const items = spawnRecords(output)
+  const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
+  tool.message.content[0].input.command += ' --json'
+  const band = makeBand(items); await settle()
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  mentions.update([{ ...row('project-x/moved/json-child', 'Working', 'working'), uid: '01ABCDEFGHJKMNPQRSTVWXYZ12' }])
+  expect(band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')?.dataset.constitution).toBe('project-x/moved/json-child')
+})
+
+it('resolves an older plain spawn after nesting only when its leaf is unique', async () => {
+  const band = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  mentions.update([row('project-x/nested/new-child', 'Working', 'working')])
+  const chip = band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip')!
+  expect(chip.dataset.constitution).toBe('project-x/nested/new-child')
+  // A fresh unresolved chip must not guess between duplicate leaves.
+  const other = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const otherMentions = mentionRuntime(other.el, vi.fn()); runtimes.push(otherMentions)
+  otherMentions.update([row('a/new-child', 'Working', 'working'), row('b/new-child', 'Working', 'working')])
+  expect(other.el.querySelector('.ws-transcript-spawn-chip:not([hidden])')).toBeNull()
+})
+
+it('does not treat a search for shuttle thread as a spawn', async () => {
+  const items = spawnRecords('project-x/new-child')
+  const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
+  tool.message.content[0].input.command = "grep -l 'shuttle thread' files"
+  const band = makeBand(items); await settle()
+  expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
+})
+
+it('does not attribute another command’s IDs to a spawn', async () => {
+  const items = spawnRecords('project-x/other\nproject-x/new-child')
+  const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
+  tool.message.content[0].input.command = 'felt ls --ids && shuttle thread project-x "New child"'
+  const band = makeBand(items); await settle()
+  expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
+})

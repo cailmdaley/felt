@@ -327,27 +327,39 @@ function buildToolInput(step: ToolStep): HTMLElement {
   return detail
 }
 
-function spawnIds(output: string): string[] {
-  const trimmed = output.trim()
-  if (!trimmed) return []
-  try {
-    const parsed: unknown = JSON.parse(trimmed)
-    const id = inputString(inputObject(parsed)?.id)
-    return id ? [id] : []
-  } catch {
-    return [...new Set(trimmed.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/\s/.test(line)))]
-  }
-}
-
 function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
-  if (step.kind !== 'tool') return []
+  if (step.kind !== 'tool' || !step.result || step.result.isError) return []
   const input = inputObject(step.input)
   const command = inputString(input?.command) ?? inputString(input?.cmd) ?? inputString(step.input) ?? ''
-  if (!/\bshuttle\s+thread\b/.test(command) || !step.result || step.result.isError) return []
-  return spawnIds(step.result.text).map(id => {
+  // Match an executable command at a shell boundary, not a quoted search phrase.
+  const invocations = [...command.matchAll(/(?:^|[;&|]\s*)(?:\S*\/)?shuttle\s+thread\b/g)]
+  if (!invocations.length) return []
+  const output = step.result.text
+  const ids: { id: string; uid?: string }[] = []
+  if (/\s--json(?:\s|$|[;&|])/.test(command)) {
+    const objects = output.matchAll(/\{[^{}]*"id"\s*:\s*"[^"\n]+"[^{}]*\}/g)
+    for (const object of objects) {
+      try {
+        const parsed = inputObject(JSON.parse(object[0]))
+        const id = inputString(parsed?.id), uid = inputString(parsed?.uid)
+        if (id) ids.push({ id, uid })
+      } catch { /* Ignore non-JSON output. */ }
+    }
+  } else {
+    // Combined stdout cannot identify which command emitted a bare path.
+    const segments = command.split(/(?:&&|\|\||[;|])/).map(part => part.trim()).filter(Boolean)
+    if (segments.some(part => !/^(?:(?:\S*\/)?shuttle\s+thread\b|cd\s+|felt\s+nest\b|tail\s+-\d+\b)/.test(part))) return []
+    const lines = output.split(/\r?\n/).map(line => line.trim())
+    for (const id of lines) {
+      if (/^[\w.-]+(?:\/[\w.-]+)+$/.test(id)) ids.push({ id })
+      if (ids.length === invocations.length) break
+    }
+  }
+  return ids.map(({ id, uid }) => {
     const chip = document.createElement('a')
     chip.className = 'ws-constitution-chip ws-transcript-spawn-chip'
-    chip.dataset.constitutionIdentity = id
+    chip.dataset.constitutionIdentity = uid ?? id
+    chip.dataset.spawnId = id
     chip.dataset.spawnChip = ''
     if (origin) chip.dataset.origin = origin
     chip.hidden = true
@@ -1368,7 +1380,7 @@ export class TranscriptBand {
       }
       if (step.kind !== 'text') {
         const spawns = spawnMentions(step, this.target?.host)
-        if (spawns.length) { const item = document.createElement('li'); item.append(...spawns); nodes.push(item) }
+        if (spawns.length) { const item = document.createElement('li'); item.className = 'ws-transcript-spawns'; item.append(...spawns); nodes.push(item) }
         return
       }
       let message = this.previewTexts.get(index)
@@ -1515,7 +1527,8 @@ export class TranscriptBand {
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
       children.push(group.button)
       if (!group.expanded) for (const step of turn.steps.slice(part.start, part.end)) {
-        children.push(...spawnMentions(step, this.target?.host))
+        const spawns = spawnMentions(step, this.target?.host)
+        if (spawns.length) { const group = document.createElement('span'); group.className = 'ws-transcript-spawns'; group.append(...spawns); children.push(group) }
       }
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)

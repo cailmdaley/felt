@@ -42,9 +42,9 @@ describe('pigment on the Desk is state', () => {
   it('uses gold for human turns, blue for work, muted for starting, and paper for quiet dots', () => {
     const dots = sheet('stateDot.css')
     expect(rule(dots, '.constitution-state-dot')['--state-dot']).toBe('var(--kbn-paper)')
-    expect(rule(dots, ".constitution-state-dot[data-turn='working']")['--state-dot']).toBe('var(--kbn-agent)')
-    expect(rule(dots, ".constitution-state-dot:is([data-turn='idle'], [data-turn='question'])")['--state-dot']).toBe('var(--kbn-owed-bright)')
-    expect(rule(dots, ".constitution-state-dot:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked'])")['--state-dot']).toBe('var(--kbn-ink-muted)')
+    expect(rule(dots, ":is(.constitution-state-dot, .ws-transcript-spawn-chip)[data-turn='working']")['--state-dot']).toBe('var(--kbn-agent)')
+    expect(rule(dots, ":is(.constitution-state-dot, .ws-transcript-spawn-chip):is([data-turn='idle'], [data-turn='question'])")['--state-dot']).toBe('var(--kbn-owed-bright)')
+    expect(rule(dots, ":is(.constitution-state-dot, .ws-transcript-spawn-chip):is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked'])")['--state-dot']).toBe('var(--kbn-ink-muted)')
   })
 })
 

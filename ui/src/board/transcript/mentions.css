@@ -37,18 +37,5 @@
   font: .9em/1.5 var(--ws-serif);
 }
 .ws-transcript-spawn-chip[hidden] { display: none; }
-.ws-transcript-spawn-chip::before {
-  width: 7px;
-  height: 7px;
-  flex-basis: 7px;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent);
-}
-.ws-transcript-spawn-chip[data-turn='working']::before {
-  background: var(--kbn-agent);
-  animation: kbn-worker-breathe 2.4s ease-in-out infinite;
-}
-.ws-transcript-spawn-chip[data-turn='none']::before { background: var(--kbn-paper); }
-.ws-transcript-spawn-chip:is([data-turn='idle'], [data-turn='question'])::before { background: var(--kbn-owed-bright); }
-.ws-transcript-spawn-chip:is([data-turn='starting'], [data-turn='no-signal'], [data-turn='blocked'])::before { background: var(--kbn-ink-muted); }
-[inert] .ws-transcript-spawn-chip::before { animation: none; }
-@media (prefers-reduced-motion: reduce) { .ws-transcript-spawn-chip::before { animation: none !important; } }
+ .ws-transcript-spawns { align-self: flex-start; }
+.ws-transcript-spawns:not(:has(.ws-transcript-spawn-chip:not([hidden]))) { display: none; }

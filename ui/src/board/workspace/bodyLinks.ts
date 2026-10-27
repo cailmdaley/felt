@@ -37,6 +37,11 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     const matches = (byId.get(value) ?? []).filter(row => !origin || row.origin === origin)
     return matches.length === 1 ? matches[0] : undefined
   }
+  const uniqueLeaf = (id: string, origin?: string): ConstitutionMention | undefined => {
+    const leaf = id.split('/').pop()
+    const matches = [...new Set([...byId.values()].flat())].filter(row => row.id.split('/').pop() === leaf && (!origin || row.origin === origin))
+    return matches.length === 1 ? matches[0] : undefined
+  }
   const resolve = (candidate: string): ConstitutionMention | undefined => {
     if (candidate.startsWith('[[')) return Object.hasOwn(targets, candidate) ? exact(targets[candidate]) : undefined
     return exact(candidate)
@@ -67,7 +72,8 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       const identity = link.dataset.constitutionIdentity
       const candidate = identity ?? `[[${link.dataset.fiber ?? ''}]]`
       candidates.add(candidate)
-      const row = identity ? exact(identity, link.dataset.origin) : resolve(candidate)
+      const spawnId = link.dataset.spawnId
+      const row = identity ? exact(identity, link.dataset.origin) ?? (spawnId ? exact(spawnId, link.dataset.origin) ?? uniqueLeaf(spawnId, link.dataset.origin) : undefined) : resolve(candidate)
       if (row) paint(link, row, link.dataset.wikilinkRaw ?? candidate)
       else if (identity) {
         delete link.dataset.constitution

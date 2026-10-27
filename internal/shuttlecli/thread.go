@@ -35,7 +35,7 @@ its owning daemon. The source is armed for a fresh worker. If migration fails,
 the child stays created but disabled. --take cannot be combined with --disabled
 or a host different from the caller's.
 
---json prints an object with the new id. Creation writes locally; publish the
+--json prints an object with the new id and uid. Creation writes locally; publish the
 fiber with felt sync --push so its owner can dispatch it. Remote path validation
 uses a daemon when reachable; without --take creation can work offline.`,
 		Args: cobra.ExactArgs(2),
@@ -193,7 +193,7 @@ uses a daemon when reachable; without --take creation can work offline.`,
 				}
 			}
 			if a.json {
-				return a.outputJSON(map[string]string{"id": child.ID})
+				return a.outputJSON(map[string]string{"id": child.ID, "uid": child.UID})
 			}
 			fmt.Fprintln(a.env.Stdout, child.ID)
 			return nil

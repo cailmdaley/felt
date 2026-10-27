@@ -32,7 +32,8 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 		t.Fatalf("%v %s", err, out)
 	}
 	var result struct {
-		ID string `json:"id"`
+		ID  string `json:"id"`
+		UID string `json:"uid"`
 	}
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
@@ -41,6 +42,9 @@ func TestThreadInheritanceAndOverrides(t *testing.T) {
 		t.Fatalf("id = %q", result.ID)
 	}
 	child := mustRead(t, st, result.ID)
+	if result.UID != child.UID || result.UID == "" {
+		t.Fatalf("uid = %q, child uid = %q", result.UID, child.UID)
+	}
 	b, _, _ := shuttle.BlockOf(child)
 	if b.Host != "testhost" || b.ProjectDir != pdir || b.Role != "analyst" || b.Agent != "claude-opus" || b.Kind != "oneshot" {
 		t.Fatalf("block = %+v", b)
