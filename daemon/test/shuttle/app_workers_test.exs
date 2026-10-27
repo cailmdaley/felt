@@ -114,6 +114,12 @@ defmodule Shuttle.AppWorkersTest do
     def state(_), do: Agent.get(__MODULE__, & &1.state)
   end
 
+  # The App fake with one thread, "busy", in a running turn.
+  defmodule BusyApp do
+    def state("busy"), do: :running
+    def state(id), do: Shuttle.AppWorkersTest.App.state(id)
+  end
+
   defmodule ContextRunner do
     def cmd("felt", ["session"], opts) do
       send(Shuttle.Env.app(:context_test_pid), {:context_command, opts})
@@ -2237,6 +2243,112 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
     assert {:interrupt, "app-session-1"} in App.calls()
   end
+
+  for completion <- [:closed, :rest, :none] do
+    test "terminal worker after #{completion}: viewer follows the assignment, App Server untouched" do
+      completion = unquote(completion)
+      terminal_fiber("tests/app")
+      {:ok, session} = dispatch("tests/app")
+      tmux = WorkerBackend.tmux(session)
+      assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Runner,
+          name: nil,
+          felt_stores: [Runner.felt_root()],
+          poll_interval_ms: 60_000
+        )
+
+      await_boot_cycle!(poller)
+      assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+
+      case completion do
+        :closed ->
+          end_assignment(:closed)
+
+        :rest ->
+          end_assignment(:handoff)
+
+          Runner.set_fiber(
+            "tests/app",
+            Map.put(Runner.fiber("tests/app"), "horizon", "stashed")
+          )
+
+        :none ->
+          :ok
+      end
+
+      before = :sys.get_state(poller).poll_cycles
+      send(poller, :run_poll_cycle)
+      eventually(fn -> :sys.get_state(poller).poll_cycles > before end)
+
+      if completion == :none do
+        assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
+        assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
+        assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+      else
+        assert Poller.worker_status(poller, "tests/app") == nil
+        assert Shuttle.Tmux.session_status(Runner, tmux) == :gone
+        # The conversation keeps its identity for attach and resume.
+        assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
+                 AppWorkers.get("app-session-1")
+      end
+
+      refute Enum.any?(App.calls(), &match?({:interrupt, _}, &1))
+      refute Enum.any?(Runner.commands(), &app_server_command?/1)
+    end
+  end
+
+  test "sweep closes only detached viewers of retired, quiet conversations" do
+    write = fn id, active ->
+      :ok =
+        AppWorkers.put(%{
+          "session_uuid" => id,
+          "thread_id" => id,
+          "active" => active,
+          "surface" => "cli",
+          "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id),
+          "backend_host" => Poller.own_host_id(),
+          "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+        })
+    end
+
+    viewers =
+      for id <- ~w(retired attached busy owned unknown) do
+        tmux = Shuttle.CodexTerminal.tmux_name(id)
+        Runner.add_tmux_session(tmux)
+        {id, tmux}
+      end
+      |> Map.new()
+
+    write.("retired", false)
+    write.("attached", false)
+    write.("busy", false)
+    write.("owned", true)
+    Runner.attach_tmux_client(viewers["attached"])
+    Runner.add_tmux_session("shuttle-codex-0123456789abcdef")
+
+    App.set(:state, :idle)
+
+    Env.put_app_env(:codex_app_client, BusyApp)
+
+    assert Shuttle.CodexTerminal.sweep(Runner) == [viewers["retired"]]
+
+    for {id, tmux} <- viewers do
+      expected = if id == "retired", do: :gone, else: :alive
+      assert Shuttle.Tmux.session_status(Runner, tmux) == expected, id
+    end
+
+    assert Shuttle.Tmux.session_status(Runner, "shuttle-codex-0123456789abcdef") == :alive
+    assert {:ok, %{"active" => false}} = AppWorkers.get("retired")
+    assert Shuttle.CodexTerminal.sweep(Runner) == []
+  end
+
+  defp app_server_command?({"tmux", args}),
+    do: Enum.any?(args, &(is_binary(&1) and String.starts_with?(&1, "shuttle-codex-")))
+
+  defp app_server_command?(_), do: false
 
   defp end_assignment(completion \\ :handoff) do
     if completion == :handoff do

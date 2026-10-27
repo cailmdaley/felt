@@ -4027,7 +4027,15 @@ defmodule Shuttle.Poller do
     state = %{state | orphans: []}
     state = reconcile_fiber_closures(state)
     state = reconcile_missing_running_sessions(state)
+    sweep_codex_viewers(state)
     SessionReconciliation.reconcile_orphaned_sessions(state, sessions, listings_ok?)
+  end
+
+  defp sweep_codex_viewers(%State{} = state) do
+    case Shuttle.CodexTerminal.sweep(state.runner) do
+      [] -> :ok
+      closed -> Logger.info("Closed leftover Codex viewers: #{Enum.join(closed, ", ")}")
+    end
   end
 
   defp reconcile_fiber_closures(%State{running: running} = state) when map_size(running) == 0 do
@@ -4044,7 +4052,7 @@ defmodule Shuttle.Poller do
 
           retired? =
             app? and
-              Shuttle.WorkerBackend.retire_assignment(meta.session, fiber) ==
+              Shuttle.WorkerBackend.retire_assignment(state_acc.runner, meta.session, fiber) ==
                 :retired
 
           cond do

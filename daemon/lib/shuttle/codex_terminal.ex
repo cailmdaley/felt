@@ -5,6 +5,51 @@ defmodule Shuttle.CodexTerminal do
 
   def tmux_name(id), do: "codex-terminal-" <> id
 
+  @doc """
+  Close leftover viewers of conversations Shuttle no longer owns.
+
+  A viewer is leftover when its ownership record is inactive (the assignment
+  was retired or stopped), no client is attached to it, and its thread has no
+  running turn. An attached viewer may be the human reading or replying, and a
+  running turn may be one they started there; both wait for a later sweep. An
+  active record, a missing or unreadable record, or an unconfirmed thread state
+  keeps the viewer. The App Server and the conversation are never touched.
+  Returns the viewers closed.
+  """
+  def sweep(runner) do
+    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}\t\#{session_attached}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.flat_map(fn line ->
+          case String.split(String.trim(line), "\t") do
+            ["codex-terminal-" <> id = tmux, "0"] -> [{id, tmux}]
+            _ -> []
+          end
+        end)
+        |> Enum.filter(fn {id, tmux} -> retire_leftover(runner, id, tmux) end)
+        |> Enum.map(&elem(&1, 1))
+
+      _ ->
+        []
+    end
+  end
+
+  defp retire_leftover(runner, id, tmux) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
+           true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
+           state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
+           {_, 0} <- Tmux.stop(runner, tmux) do
+        true
+      else
+        _ -> false
+      end
+    end)
+  end
+
   def prepare(id, opts \\ []) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
 

@@ -317,6 +317,16 @@ defmodule Shuttle.Test.FeltStoreRunner do
     end)
   end
 
+  # A client attached to `session`, as `tmux ls -F '#{session_attached}'` reports.
+  def attach_tmux_client(session),
+    do:
+      Agent.update(
+        server(),
+        &Map.update(&1, :tmux_attached, MapSet.new([session]), fn set ->
+          MapSet.put(set, session)
+        end)
+      )
+
   def remove_tmux_session(session) do
     Agent.update(server(), fn state ->
       state
@@ -741,8 +751,25 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {"error connecting to /tmp/tmux-501/default (No such file or directory)", 1}
 
       command == "tmux" and hd(args) == "ls" ->
-        sessions = Agent.get(server(), & &1.tmux_sessions)
-        output = sessions |> MapSet.to_list() |> Enum.join("\n")
+        {sessions, attached} =
+          Agent.get(server(), &{&1.tmux_sessions, Map.get(&1, :tmux_attached, MapSet.new())})
+
+        format =
+          case Enum.find_index(args, &(&1 == "-F")) do
+            nil -> nil
+            index -> Enum.at(args, index + 1)
+          end
+
+        output =
+          sessions
+          |> MapSet.to_list()
+          |> Enum.map(fn name ->
+            if is_binary(format) and format =~ "session_attached",
+              do: name <> "\t" <> if(MapSet.member?(attached, name), do: "1", else: "0"),
+              else: name
+          end)
+          |> Enum.join("\n")
+
         {output, 0}
 
       # `shuttle mark-runtime <id> [--handed-off-at ts] [--dispatched-at ts]

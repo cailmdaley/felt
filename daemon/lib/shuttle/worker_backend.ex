@@ -57,17 +57,34 @@ defmodule Shuttle.WorkerBackend do
     end
   end
 
-  @doc "Release a finished assignment without ending or reloading its conversation."
-  def retire_assignment(session, fiber) do
+  @doc """
+  Release a finished assignment without ending or reloading its conversation.
+
+  Retiring also closes the assignment's terminal viewer, as a Claude worker's
+  exit verb ends its own tmux session: the turn is already idle or unloaded,
+  and the thread's identity and rollout stay with the App Server, so attach or
+  resume can open a new viewer later. A viewer that fails to stop is left for
+  `Shuttle.CodexTerminal.sweep/1`.
+  """
+  def retire_assignment(runner, session, fiber) do
     with id when is_binary(id) <- AppWorkers.id(session),
          {:ok, record} <- AppWorkers.get(id),
          state <- AppWorkers.state(id),
          true <- completed?(state, fiber, assignment_start(record)),
-         :ok <- AppWorkers.deactivate(id) do
+         :ok <- retire(runner, session, id) do
       :retired
     else
       _ -> :retained
     end
+  end
+
+  defp retire(runner, session, id) do
+    :global.trans({{Shuttle.CodexTerminal, id}, self()}, fn ->
+      with :ok <- AppWorkers.deactivate(id) do
+        stop_viewer(runner, session)
+        :ok
+      end
+    end)
   end
 
   # A confirmed unloaded/missing thread has no running turn. Idle alone is
