@@ -16,19 +16,19 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  /* Two columns. The left holds two lines: the title between ‹ and ×, then everything else centred;
-     the artifact spans both lines at the right, full height, and its column is absent without one. */
+  /* Two columns. The left holds two lines: the title between ‹ and ×, then everything else left-aligned under it;
+     the artifact spans both lines, full height, and × closes the row at the right edge. */
   --ws-head-pad: 8px;
   flex: none; display: grid; min-width: 0;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: 'lead identity leave chip' 'acts acts acts chip';
+  grid-template-areas: 'lead identity chip leave' 'acts acts chip leave';
   align-items: start; gap: 2px 10px;
   padding: var(--ws-head-pad) 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
 .ws-chat-head > .ws-chat-lead { grid-area: lead; align-self: center; }
 .ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
-.ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: center; }
+.ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
 .ws-chat-head > .ws-report-chip { grid-area: chip; align-self: stretch; }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
@@ -52,7 +52,7 @@
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
 /* The second line: state, meter, navigation and the lifecycle group, centred with even gaps; it may wrap into two centred lines. */
-.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 14px; min-height: 36px; }
+.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 2px 14px; min-height: 36px; }
 /* The lifecycle group is set apart by a rule and its tone, not by distance. */
 .ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 14px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
