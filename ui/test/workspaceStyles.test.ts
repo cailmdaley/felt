@@ -39,6 +39,11 @@ describe('workspace style contracts', () => {
     expect(files.get('flex')).toBe('1 1 0'); expect(files.get('min-height')).toBe('0')
     expect(rules.get('.ws-thread-rail')!.get('flex-direction')).toBe('column')
   })
+  it('keeps the ready PDF thumbnail glyph visible', () => {
+    const hidden = read('thumbnail.css').split('}').filter(rule => /display:\s*none/.test(rule)).join('}')
+    expect(read('thumbnail.css').length).toBeGreaterThan(0)
+    expect(hidden).not.toContain('.kbn-thumbnail-pdf')
+  })
   it('leaves the reader sidebar rows to the sidebar: no theme styles them', () => {
     const themes = readdirSync(new URL('../src/board/workspace/themes/', import.meta.url)).filter(name => name.endsWith('.css'))
     expect(themes.length).toBeGreaterThan(0)
