@@ -520,8 +520,8 @@ export class Reader {
       this.reportChip?.view.dispose(); this.reportChip = null
       if (chipKey && report) this.reportChip = { key: chipKey, view: new ReportChip(this.opts.shuttleBase, report, () => this.openDocument(report.key)) }
     }
-    const acts = chatFrame?.content.querySelector('.ws-chat-acts')
-    if (acts && this.reportChip && this.reportChip.view.el.parentElement !== acts) acts.prepend(this.reportChip.view.el)
+    const head = chatFrame?.content.querySelector('.ws-chat-head')
+    if (head && this.reportChip && this.reportChip.view.el.parentElement !== head) head.append(this.reportChip.view.el)
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page

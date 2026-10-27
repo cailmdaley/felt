@@ -16,18 +16,21 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  /* Two fixed rows: who this is and the way out; then the artifact, navigation and the lifecycle verbs. */
+  /* Two columns. The left holds two lines: the title between ‹ and ×, then everything else centred;
+     the artifact spans both lines at the right, full height, and its column is absent without one. */
+  --ws-head-pad: 8px;
   flex: none; display: grid; min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: 'lead identity leave' 'acts acts acts';
-  align-items: start; gap: 4px 10px;
-  padding: 6px 16px 8px; container-type: inline-size;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: 'lead identity leave chip' 'acts acts acts chip';
+  align-items: start; gap: 2px 10px;
+  padding: var(--ws-head-pad) 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
 }
 .ws-chat-head > .ws-chat-lead { grid-area: lead; align-self: center; }
 .ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
 .ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
+.ws-chat-head > .ws-report-chip { grid-area: chip; align-self: stretch; }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
 :where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
 /* One back control leads to the parent chat or the originating board view. */
@@ -39,7 +42,8 @@
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-chat-identity { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 0 10px; }
+.ws-chat-identity { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0 10px; }
+.ws-chat-identity > .ws-chat-title { flex: 1; }
 /* The name wraps to two lines; a measured overflow puts actions beneath it. */
 .ws-chat-title {
   min-width: 0; margin: 0; padding-block: 3px;
@@ -47,16 +51,18 @@
   overflow: hidden; overflow-wrap: anywhere;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
-.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 4px; min-height: 32px; }
-/* The lifecycle group stands apart at the far end, behind a rule, each verb with its word. */
-.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 4px; margin: 0 0 0 auto; padding-left: 12px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
+/* The second line: state, meter, navigation and the lifecycle group, centred with even gaps; it may wrap into two centred lines. */
+.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 2px 14px; min-height: 36px; }
+/* The lifecycle group is set apart by a rule and its tone, not by distance. */
+.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 14px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
-/* The lifecycle chip: the rail's state word in its tone, beside the name's first line. */
+.ws-chat-standing { display: inline-flex; flex: none; align-items: center; gap: 12px; }
+/* The lifecycle chip: the rail's state word in its tone, at the line's one text size. */
 .ws-chat-state {
   --tone: var(--ws-ink-muted);
-  flex: none; min-width: 10ch; padding: 1px 0;
+  flex: none; min-width: 10ch; padding: 1px 0; text-align: center;
   color: var(--tone);
-  font: 500 var(--ws-small-size)/1.5 var(--ws-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
+  font: 500 var(--ws-label-size)/1.5 var(--ws-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
 }
 .ws-chat-state[hidden] { display: none; }
 .ws-chat-state[data-state='question'] { --tone: var(--ws-state-question); }
@@ -71,7 +77,7 @@
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
 
 /* One context figure and the cache's warmth; cache-read share lives in settings. */
-.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-small-size); color: var(--ws-ink-muted); }
+.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-label-size); color: var(--ws-ink-muted); }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
@@ -91,10 +97,11 @@
 .ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
 .ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--ws-label-size); }
 .ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--ws-serif); }
-.ws-reader .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 10px 0 8px; }
+.ws-reader .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
 .ws-header-word { font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
-.ws-report-chip { display: flex; align-items: center; flex: none; padding: 0; margin-right: 8px; border-radius: 5px; }
-.ws-report-preview { display: block; position: relative; overflow: hidden; width: 104px; height: 64px; flex: none; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
+/* The artifact: a page the height of the header's two lines, the one click to the artifact. */
+.ws-report-chip { display: grid; flex: none; padding: 0; margin: 0; border-radius: 5px; }
+.ws-report-preview { display: block; position: relative; overflow: hidden; align-self: stretch; min-height: 84px; aspect-ratio: 3 / 2; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
 .ws-report-preview > .ws-thumbnail { width: 100%; height: 100%; }
 .ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
@@ -188,7 +195,10 @@
 }
 /* A card narrow enough to wrap the verbs: the name takes the label size, and the lifecycle group its own line, without the rule. */
 @container (max-width: 560px) {
-  .ws-chat-head { grid-template-areas: 'identity identity leave' 'lead acts acts'; }
+  /* The title takes the whole width; the artifact, at the phone's size, ends the second line under ×. */
+  .ws-chat-head { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'identity identity leave' 'lead acts chip'; }
+  .ws-chat-head > .ws-report-chip { align-self: center; justify-self: center; }
+  .ws-chat-head .ws-report-preview { align-self: center; height: 40px; min-height: 0; }
   .ws-chat-head > .ws-chat-lead { align-self: start; padding-top: 4px; }
   /* × keeps the corner, so the name may take a third line. */
   .ws-chat-title { font-size: var(--ws-label-size); -webkit-line-clamp: 3; }
@@ -215,12 +225,16 @@
   .ws-chat-acts { flex-wrap: nowrap; }
   .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }
   .ws-chat-title { font-size: var(--ws-label-size); }
-  .ws-chat-state { margin: 0; font-size: var(--ws-small-size); letter-spacing: 0; }
-  .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); gap: 4px; white-space: nowrap; }
+  .ws-chat-state { margin: 0; padding: 0; line-height: 1.2; letter-spacing: 0; }
+  .ws-chat .ws-transcript-meter { gap: 4px; white-space: nowrap; }
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
-  .ws-chat-head .ws-report-chip { width: 44px; min-height: var(--ws-phone-target); gap: 0; padding: 0; }
-  .ws-report-preview { width: 44px; height: 40px; }
+  .ws-chat-head .ws-report-chip { width: 44px; min-height: var(--ws-phone-target); gap: 0; padding: 0; align-items: center; }
+  .ws-report-preview { width: 44px; height: 40px; min-height: 0; aspect-ratio: auto; }
+  .ws-chat-standing { gap: 6px; }
+  /* The phone's one row: the state and meter sit under the name, not beside it. */
+  .ws-chat-identity { flex-direction: column; align-items: flex-start; gap: 0; }
+  .ws-chat-state, .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); }
   .ws-header-overflow { flex-wrap: wrap; }
   /* Folded, the composer is one row, the field and its one verb; it opens on focus or while a meeting is armed. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }

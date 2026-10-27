@@ -1088,33 +1088,6 @@ export class Dock {
         this.closeSettings(() => button.click())
       }, { capture: true })
     }
-    let iconLayout = -1
-    const placeIcons = (): void => {
-      const layout = isMobileViewport() ? 0 : 2
-      if (layout === iconLayout) return
-      iconLayout = layout
-      const active = document.activeElement
-      const focused = active instanceof HTMLElement && [constitutionItem, consoleItem, settingsItem, verdict].some(control => control.contains(active)) ? active : null
-      if (this.header) this.header.dataset.compact = String(layout < 2)
-      const place = (parent: HTMLElement, controls: HTMLElement[]): void => {
-        let next: HTMLElement | null = null
-        for (let i = controls.length - 1; i >= 0; i--) {
-          const control = controls[i]
-          if (control.parentElement !== parent || control.nextElementSibling !== next) parent.insertBefore(control, next)
-          next = control
-        }
-      }
-      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : [])
-      place(this.head, layout === 0 ? [settingsItem] : [constitutionItem, consoleItem, settingsItem, verdict])
-      if (focused) {
-        const target = focused.checkVisibility() ? focused : settingsItem
-        if (document.activeElement !== target) target.focus({ preventScroll: true })
-      }
-    }
-    this.head.replaceChildren()
-    window.addEventListener('resize', placeIcons)
-    this.composerDisposers.push(() => window.removeEventListener('resize', placeIcons))
-
     const header = this.header = document.createElement('header')
     header.className = 'ws-chat-head'
     header.dataset.part = 'chat-header'
@@ -1132,14 +1105,45 @@ export class Dock {
     lifecycle.className = 'ws-chat-state'
     lifecycle.dataset.part = 'lifecycle'
     drawer.prepend(ancestry)
+    const status = document.createElement('span'); status.className = 'ws-chat-standing'
+    status.append(lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
     const identity = document.createElement('div'); identity.className = 'ws-chat-identity'
-    identity.append(title, lifecycle, ...(this.transcriptBand ? [this.transcriptBand.meter] : []))
+    identity.append(title, status)
     const leave = this.leave = document.createElement('button')
     leave.type = 'button'
     leave.className = 'ws-header-icon ws-chat-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
     header.append(lead, identity, leave, this.head)
+    let iconLayout = -1
+    const placeIcons = (): void => {
+      const layout = isMobileViewport() ? 0 : 2
+      if (layout === iconLayout) return
+      iconLayout = layout
+      const active = document.activeElement
+      const focused = active instanceof HTMLElement && [constitutionItem, consoleItem, settingsItem, verdict].some(control => control.contains(active)) ? active : null
+      if (this.header) this.header.dataset.compact = String(layout < 2)
+      const place = (parent: HTMLElement, controls: HTMLElement[]): void => {
+        let next: HTMLElement | null = null
+        for (let i = controls.length - 1; i >= 0; i--) {
+          const control = controls[i]
+          if (control.parentElement !== parent || control.nextElementSibling !== next) parent.insertBefore(control, next)
+          next = control
+        }
+      }
+      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : [])
+      // The state and meter ride the title's line on a phone; on desktop they open the second line.
+      place(identity, layout === 0 ? [title, status] : [title])
+      place(this.head, layout === 0 ? [settingsItem] : [status, constitutionItem, consoleItem, settingsItem, verdict])
+      if (focused) {
+        const target = focused.checkVisibility() ? focused : settingsItem
+        if (document.activeElement !== target) target.focus({ preventScroll: true })
+      }
+    }
+    this.head.replaceChildren()
+    window.addEventListener('resize', placeIcons)
+    this.composerDisposers.push(() => window.removeEventListener('resize', placeIcons))
+
     placeIcons()
 
     const log = document.createElement('div')

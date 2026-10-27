@@ -68,13 +68,23 @@ export function registerHeaderBarJourneys(test) {
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
       for (const name of ['Close for review', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
-      // Two rows: the verbs sit beneath the title, and × leaves from the title row's end.
+      // Two columns: the verbs sit beneath the title on a centred line, × ends the title line, and the artifact spans both lines at the right.
       const rows = await header.evaluate(el => {
-        const box = sel => el.querySelector(sel).getBoundingClientRect()
-        return { title: box('.ws-chat-title'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), head: el.getBoundingClientRect() }
+        const box = sel => el.querySelector(sel)?.getBoundingClientRect() ?? null
+        return { title: box('.ws-chat-title'), acts: box('.ws-chat-acts'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), chip: box('.ws-report-chip'), head: el.getBoundingClientRect() }
       })
       assert.ok(rows.verbs.top >= rows.title.bottom - 1, `verbs sit beneath the title at ${width}`)
-      assert.ok(rows.leave.bottom <= rows.verbs.top + 1 && rows.head.right - rows.leave.right < 80, `× ends the title row at ${width}`)
+      assert.ok(rows.leave.bottom <= rows.verbs.top + 1, `× ends the title line at ${width}`)
+      const edge = rows.chip ? rows.chip.left : rows.head.right
+      assert.ok(edge - rows.leave.right < 80, `× is the last thing on the title line at ${width}`)
+      if (rows.chip) {
+        assert.ok(rows.chip.top <= rows.title.top + 1 && rows.chip.bottom >= rows.verbs.bottom - 1, `the artifact spans both lines at ${width}`)
+        assert.ok(rows.chip.left >= rows.acts.right - 1, `the second line keeps clear of the artifact at ${width}`)
+      }
+      const slack = { left: rows.acts.left, right: rows.acts.right }
+      const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
+      const left = Math.min(...line.map(b => b.left)) - slack.left, right = slack.right - Math.max(...line.map(b => b.right))
+      assert.ok(Math.abs(left - right) <= 2, `the second line is centred (${left.toFixed(1)} vs ${right.toFixed(1)}) at ${width}`)
     }
   }, { width: 1440, height: 900 })
   test('The two-row header keeps the full title and verbs with open desktop columns', async page => {

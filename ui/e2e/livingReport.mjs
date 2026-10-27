@@ -50,7 +50,7 @@ export function registerLivingReportJourneys(test) {
       const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
       const settingsBox = await selected(page).getByRole('button', { name: 'Settings', exact: true }).boundingBox()
       assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'the chip stays within the bar on every device')
-      assert.ok(dockBox.x + dockBox.width <= settingsBox.x, 'the chip precedes the icons')
+      assert.ok(dockBox.x >= settingsBox.x + settingsBox.width, 'the chip follows the icons at the header\'s end')
       assert.equal(await selected(page).locator('.ws-transcript-find').count(), 0, 'the conversation has no local Find or reserved band')
       const composerBox = await selected(page).locator('textarea').boundingBox()
       assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
