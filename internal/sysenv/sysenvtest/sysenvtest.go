@@ -100,7 +100,10 @@ func LinkScript(t testing.TB, path, script string) {
 	if source, err := cachedScript(script); err == nil && os.Link(source, path) == nil {
 		return
 	}
-	if err := os.WriteFile(path, []byte(script), 0o555); err != nil {
+	unlock := lockScriptWrite()
+	err := os.WriteFile(path, []byte(script), 0o555)
+	unlock()
+	if err != nil {
 		t.Fatalf("writing %s: %v", path, err)
 	}
 }
@@ -121,22 +124,28 @@ func cachedScript(script string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	unlock := lockScriptWrite()
 	tmp, err := os.CreateTemp(dir, ".script-*")
 	if err != nil {
+		unlock()
 		return "", err
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.WriteString(script); err != nil {
 		tmp.Close()
+		unlock()
 		return "", err
 	}
 	if err := tmp.Chmod(0o555); err != nil {
 		tmp.Close()
+		unlock()
 		return "", err
 	}
 	if err := tmp.Close(); err != nil {
+		unlock()
 		return "", err
 	}
+	unlock()
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return "", err
 	}
