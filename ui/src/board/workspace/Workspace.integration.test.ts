@@ -654,6 +654,32 @@ describe('workspace reader integration', () => {
     expect(document.activeElement?.textContent).toBe('Sent files')
     expect(reader().querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).not.toBe(true)
   })
+  it('re-reads the rail\'s default on every channel: files open it, a quiet family without them leaves it closed', async () => {
+    workspace.dispose()
+    const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
+      card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
+    const feed = [cards[0], thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }), thread({ id: 'lone', status: 'active' })]
+    bodyCards = feed
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    workspace.open(feed[1], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(false)
+    expect(reader().querySelectorAll('.ws-rail-file')).toHaveLength(0)
+    workspace.open(feed[0], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    // With neither threads nor files the rail has nothing to draw: the menu entry opens the sheet and stores no rail choice.
+    workspace.open(feed[3], 'Desk'); await flush()
+    expect(reader().querySelector<HTMLElement>('.ws-thread-rail')!.hidden).toBe(true)
+    const showModal = vi.fn()
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
+    try {
+      workspace.reader.showSentFiles()
+      expect(showModal).toHaveBeenCalledOnce()
+    } finally { delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal }
+    expect(localStorage.getItem('shuttle:workspace:rail')).toBeNull()
+  })
   it('persists hiding a quiet rail across forced openings, navigation and reader recreation', async () => {
     workspace.dispose()
     localStorage.setItem('shuttle:workspace:rail', 'true')

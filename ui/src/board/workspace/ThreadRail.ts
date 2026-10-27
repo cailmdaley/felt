@@ -160,7 +160,7 @@ export class ThreadRail {
     this.hasFiles = docs.length > 0
     this.applyPresence()
     if (window.matchMedia(MOBILE_MEDIA).matches) { this.fileList.replaceChildren(); this.filesSignature = ''; return }
-    const signature = JSON.stringify([channel.uid, channel.owner, ...docs.map(doc => [doc.key, documentLabelMetadata(doc, doc.name, channel.owner).title, lastSent(doc), fresh.has(doc.key), doc.key === selected])])
+    const signature = JSON.stringify([channel.uid, channel.owner, new Date().toDateString(), ...docs.map(doc => [doc.key, documentLabelMetadata(doc, doc.name, channel.owner).title, lastSent(doc), fresh.has(doc.key), doc.key === selected])])
     if (signature === this.filesSignature) return
     this.filesSignature = signature
     const active = document.activeElement
@@ -173,6 +173,13 @@ export class ThreadRail {
       const target = [...this.fileList.querySelectorAll<HTMLElement>('.ws-rail-file')].find(el => el.dataset.key === focus)
       ;(target ?? this.filesHeading).focus({ preventScroll: true })
     }
+  }
+  /** A conversation with no constitution card has no family to draw. */
+  clearFamily(): void {
+    this.card = null; this.scope = null; this.index = null
+    this.hasFamily = false; this.familyQuiet = true
+    this.tree.replaceChildren(); this.signature = ''
+    this.applyPresence()
   }
   /** Bring the sent files into view and give their heading focus. */
   focusFiles(): void {

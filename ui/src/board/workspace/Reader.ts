@@ -132,6 +132,7 @@ export class Reader {
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
   private channel: Channel | null = null
+  private fresh: ReadonlySet<DocKey> = new Set()
   private currentCard: KanbanCard | null = null
   private origin = 'Desk'
   private returnAtOrigin = false
@@ -306,8 +307,7 @@ export class Reader {
     this.returnAtOrigin = returnAtOrigin
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
-    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-    if (this.currentCard) this.threadRail.show(this.currentCard, index)
+    this.feedFamily()
     this.paintRail()
     if (this.phoneRailPending && this.phone.matches && settled) { this.phoneRailPending = false; this.openPhonePage() }
     if (this.currentCard) { this.opts.themes?.bind(this.el, this.currentCard, 'reader'); this.rememberStop() }
@@ -436,10 +436,10 @@ export class Reader {
     const threads = this.phone.matches && card ? phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))) : null
     this.pageSheet.show(opener, threads, content)
   }
-  /** On the desktop the sent files live in the rail; the phone, which has none, opens its sheet. */
+  /** On the desktop the sent files live in the rail; the phone, which has none, and a rail with nothing to draw open the sheet. */
   showSentFiles(): void {
     this.closeMenu()
-    if (!this.phone.matches) {
+    if (!this.phone.matches && this.threadRail.present) {
       if (!this.railOpen) this.setRailVisible(true)
       this.threadRail.focusFiles()
       return
@@ -524,9 +524,8 @@ export class Reader {
     })
     const fresh = this.seen.observe(ch, this.selected ?? '', this.channelReady)
     this.pageSheet.update(ch, this.selected ?? '', fresh)
-    const present = this.threadRail.present
-    this.threadRail.showFiles(ch, this.selected ?? '', fresh, key => this.openDocument(key))
-    if (present !== this.threadRail.present) { this.paintRail(); this.layout(false) }
+    this.fresh = fresh
+    this.feedFiles()
     const chat = chatDocument(ch)
     const report = channelLead(ch)
     const chatFrame = chat && this.host.get(chat.key)
@@ -654,8 +653,23 @@ export class Reader {
       frame.el.style.setProperty('--ws-neighbour-fade-end', `${end}%`)
     }
   }
+  /** The rail's threads region: the open card's family, or none. */
+  private feedFamily(): void {
+    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()))
+    else this.threadRail.clearFamily()
+  }
+  /** The rail's files region; a change in what the rail holds can change whether it stands open. */
+  private feedFiles(): void {
+    if (!this.channel) return
+    const before = [this.threadRail.present, this.threadRail.quiet, this.railShown].join()
+    this.threadRail.showFiles(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
+    this.paintRail()
+    if (before !== [this.threadRail.present, this.threadRail.quiet, this.railShown].join()) this.layout(false)
+  }
   private readonly relayout = (): void => {
     invalidateWorkspaceMeasures(this.el)
+    // The rail empties itself on the phone; back on the desktop it is drawn again.
+    if (this.active) { this.feedFamily(); this.feedFiles() }
     if (!this.phone.matches) { this.pageSheet.close(); this.el.classList.remove('ws-topbar-hidden') }
     this.applySidebarWidth()
     this.renderSidebar()
