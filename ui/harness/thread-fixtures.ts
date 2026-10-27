@@ -1,6 +1,6 @@
 import { WORKSPACE_HOST, WORKSPACE_ID, WORKSPACE_UID, type WorkspaceExample } from './workspace-fixtures.js'
 
-/** Frontier stories: quiet ancestry, an awake root, an orphan, and an entirely quiet tree. */
+/** Family stories: a question under quiet ancestry, a working root over an asker, an orphan, and an entirely quiet tree. */
 export function addFrontierFixtures(example: WorkspaceExample, now: number): void {
   example.feed.fibers = []
   const rows: Array<{ id: string; name: string; parent?: string; status: string; phase?: string; horizon?: string; tempered?: boolean; pinned?: boolean }> = [

@@ -18,23 +18,22 @@ function renderer(): KanbanSurfaceRenderer {
 }
 
 describe('verdict actions ride cards awaiting review and in flight', () => {
-  it('renders Temper and Discard on review and in-flight cards, never drafts', () => {
+  it('offers the header verbs on review and in-flight cards, none on a plain note', () => {
     const data = response({ now: {
       drafts: [card({ id: 'draft' })],
       inFlight: [card({ id: 'flight', status: 'active', shuttleKind: 'oneshot' })],
-      awaitingReview: [card({ id: 'review', status: 'closed' })],
+      awaitingReview: [card({ id: 'review', status: 'closed', shuttleKind: 'oneshot' })],
     } })
     const surfaces = renderer()
     const root = surfaces.renderNowSection(data.now, data.staleness)
     document.body.append(root)
     try {
       for (const id of ['draft', 'flight', 'review']) {
-        const trigger = root.querySelector<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-card-menu`)!
-        expect(trigger.textContent).toBe('•••')
-        expect(trigger.parentElement!.lastElementChild).toBe(trigger)
-        trigger.click()
+        expect(root.querySelector(`[data-fiber-id="${id}"] .kbn-card-menu`)).toBeNull()
+        root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
         const actions = document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
-        expect([...actions].map(button => button.textContent)).toEqual(id === 'draft' ? [] : ['Temper', 'Discard'])
+        // The header's verbs for each place: work in flight can also be closed for review; a plain note takes none.
+        expect([...actions].map(button => button.textContent)).toEqual({ draft: [], flight: ['Close for review', 'Temper', 'Discard'], review: ['Temper', 'Discard'] }[id])
         expect([...actions].every(button => button.type === 'button')).toBe(true)
         surfaces.closeMenu()
       }

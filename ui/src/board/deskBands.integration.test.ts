@@ -90,7 +90,7 @@ describe('In flight bands', () => {
     const worker = data.now.inFlight[0]
     const root = renderer(data, vi.fn(), openWorker).renderNowSection(data.now, {})
     document.body.append(root)
-    root.querySelector<HTMLButtonElement>('.kbn-card-menu')!.click()
+    root.querySelector<HTMLElement>('.kbn-card')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     const terminal = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent === 'Open terminal')!
     expect(terminal).toBeDefined()
     terminal.click()

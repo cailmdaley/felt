@@ -77,66 +77,63 @@ function activate(button: HTMLButtonElement, key: 'Enter' | ' '): void {
   if (!down.defaultPrevented && !up.defaultPrevented) button.click()
 }
 
-describe('Desk action menu keyboard controls', () => {
-  const trigger = () => document.querySelector<HTMLButtonElement>('[data-card-uid="review"] .kbn-card-menu')!
+describe('Desk row menu', () => {
+  const row = () => document.querySelector<HTMLElement>('[data-card-uid="review"]')!
   const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
   const items = () => [...menu()!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-  it.each(['Enter', ' '] as const)('%s opens the menu natively, arrows select, Escape restores the trigger, and a native activation gives a verdict', key => {
+  const rightClick = (el: HTMLElement) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }))
+  it('a row carries no menu control; right-click opens the header verbs, drawn as the header draws them', () => {
+    expect(document.querySelector('.kbn-card-menu')).toBeNull()
+    rightClick(row())
+    // The header's verbs, then what only the Desk adds: the touch path to a move.
+    expect(items().map(i => i.textContent)).toEqual(['Rest', 'Temper', 'Discard', 'Move…'])
+    expect(items().slice(0, 3).map(i => [...i.classList].filter(c => c.startsWith('kbn-ctl-') || c.startsWith('ws-header')))).toEqual([
+      ['kbn-ctl-rest', 'ws-header-icon', 'ws-header-verb'], ['kbn-ctl-temper', 'ws-header-icon', 'ws-header-verb'], ['kbn-ctl-discard', 'ws-header-icon', 'ws-header-verb']])
+    expect(items().slice(0, 3).every(i => i.querySelector('svg') && i.querySelector('.ws-header-word'))).toBe(true)
+    expect(menu()!.classList.contains('kbn-verb-menu')).toBe(true)
+  })
+  it.each(['Enter', ' '] as const)('Shift+F10 on the selected row opens it; arrows select, Escape restores the row, and %s gives a verdict', key => {
     press('j')
-    const row = document.querySelector<HTMLElement>('.kbn-key-selected')!
-    row.focus()
-    expect(press('Tab', {}, row).defaultPrevented).toBe(true)
-    expect(document.activeElement).toBe(row.querySelector('.constitution-state-dot'))
-    press('Tab', {}, document.activeElement!)
-    expect(document.activeElement).toBe(trigger())
-    expect(trigger().textContent).toBe('•••')
-    activate(trigger(), key)
-    expect(trigger().getAttribute('aria-expanded')).toBe('true')
-    expect(items().map(i => i.textContent)).toEqual(['Temper', 'Discard', 'Rest'])
+    const selectedRow = document.querySelector<HTMLElement>('.kbn-key-selected')!
+    expect(selectedRow).toBe(row())
+    selectedRow.focus()
+    expect(press('F10', { shiftKey: true }, selectedRow).defaultPrevented).toBe(true)
+    expect(row().getAttribute('aria-expanded')).toBe('true')
     expect(document.activeElement).toBe(items()[0])
     press('ArrowDown', {}, document.activeElement!)
     expect(document.activeElement).toBe(items()[1])
     press('End', {}, document.activeElement!)
-    expect(document.activeElement).toBe(items()[2])
+    expect(document.activeElement).toBe(items()[3])
     press('Home', {}, document.activeElement!)
     expect(document.activeElement).toBe(items()[0])
-    press('ArrowUp', {}, document.activeElement!)
-    expect(document.activeElement).toBe(items()[2])
     // Desk verb shortcuts do not act through the open menu.
     press('x', {}, document.activeElement!)
     expect(document.querySelector('.ws-verdict-undo')).toBeNull()
     press('Escape', {}, document.activeElement!)
     expect(menu()).toBeNull()
-    expect(document.activeElement).toBe(trigger())
-    expect(trigger().getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(row())
     expect(selected()).toBe('review')
-    activate(trigger(), key)
-    activate(items()[0], key)
+    press('ContextMenu', {}, row())
+    activate(items()[1], key)
     expect(menu()).toBeNull()
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Undo verdict on review')
     expect(document.querySelector('[data-card-uid="review"] .ws-verdict-undo')?.textContent).toBe('Tempered·undo z')
     expect(inside.workspace.isActive).toBe(false)
     press('z')
   })
-  it('never offers family expansion or folding in the card menu', () => {
+  it('never offers family expansion or folding in the row menu', () => {
     const root = card({ id: 'family', uid: 'family', shuttleKind: 'oneshot' })
     const child = card({ id: 'family/child', orchestrator: 'family', status: 'active' })
     draw(response({ now: { drafts: [root], inFlight: [], awaitingReview: [] }, threads: [child] }))
-    const row = document.querySelector<HTMLElement>('[data-card-uid="family"]')!
-    const button = row.querySelector<HTMLButtonElement>('.kbn-card-menu')!
-    press('j')
-    expect(selected()).toBe('family')
-    activate(button, 'Enter')
-    expect(document.querySelector('[role="menu"]')?.textContent ?? '').not.toMatch(/Expand family|Fold family/)
-    expect(row.querySelector('.kbn-thread-peek')).toBeNull()
+    rightClick(document.querySelector<HTMLElement>('[data-card-uid="family"]')!)
+    expect(menu()?.textContent ?? '').not.toMatch(/Expand family|Fold family/)
     expect(inside.workspace.isActive).toBe(false)
   })
   it('Tab dismisses the menu and a repaint removes its portal', () => {
-    trigger().click()
+    rightClick(row())
     press('Tab', {}, document.activeElement!)
     expect(menu()).toBeNull()
-    expect(document.activeElement).toBe(trigger())
-    trigger().click()
+    rightClick(row())
     draw(data())
     expect(menu()).toBeNull()
   })
@@ -192,10 +189,9 @@ describe('Rest controls', () => {
     expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ action: 'rest', fiber: 'finished', origin: 'remote', until: '' })
   })
 
-  it('a Desk card carries a Rest affordance that opens the same popover', () => {
+  it("a Desk card's menu carries a Rest that opens the same popover", () => {
     draw(response({ now: { drafts: [], inFlight: [], awaitingReview: [card({ id: 'review', uid: 'review', status: 'closed', shuttleKind: 'oneshot' }), card({ id: 'note', uid: 'note', status: 'closed' })] } }))
-    const button = document.querySelector<HTMLButtonElement>('[data-card-uid="review"] .kbn-card-menu')!
-    button.click()
+    document.querySelector<HTMLElement>('[data-card-uid="review"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     const rest = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Rest')!
     expect(rest).toBeDefined()
     activate(rest, 'Enter')

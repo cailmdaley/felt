@@ -56,12 +56,13 @@ describe('a family of many threads is still one row', () => {
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
   const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} }).renderNowSection(board.now, {})
-  it('a root in Your turn over ten working threads is the root, with the workers as words', () => {
+  it('a root in Your turn over ten working threads is the root, with the workers as a blue number', () => {
     const board = buildKanbanResponseFromComposite(family('waiting', 'working', 10))
     const desk = draw(board)
     expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
     expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx')
-    expect(desk.querySelector('.kbn-thread-count')!.textContent).toBe('10 working')
+    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('10')
+    expect(desk.querySelector('.kbn-count-needs')).toBeNull()
     expect(desk.querySelector('.kbn-family-asks')).toBeNull()
   })
   it('a working root over twelve askers leads with the first, lists three, and folds nine', () => {
@@ -72,7 +73,9 @@ describe('a family of many threads is still one row', () => {
     expect(desk.querySelector('.kbn-card-crumb')!.textContent).toBe('cmbx /\u00a0')
     expect([...desk.querySelectorAll('.kbn-family-ask-name')].map(el => el.textContent)).toEqual(['cmbx/t1', 'cmbx/t2', 'cmbx/t3'])
     expect(desk.querySelector('.kbn-family-more')!.textContent).toBe('+8 more')
-    expect(desk.querySelector('.kbn-thread-count')!.textContent).toBe('1 working')
+    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('1')
+    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('11')
+    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('1 working, 11 needing you elsewhere in this family')
   })
 })
 

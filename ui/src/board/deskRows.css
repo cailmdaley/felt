@@ -49,22 +49,6 @@
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
 .kbn-col-list .kbn-card--meeting .kbn-meeting { grid-column: 1 / -1; }
 
-/* A native button at the same right edge in every column, never a reveal. */
-.kbn-card-menu {
-  flex: 0 0 auto;
-  margin-left: auto;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--kbn-ink-muted);
-  font: inherit;
-  font-size: 11px;
-  letter-spacing: 1px;
-  cursor: pointer;
-}
-.kbn-card-menu:hover { background: color-mix(in srgb, var(--kbn-ink) 7%, transparent); }
-.kbn-card-menu:focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 2px; }
 .kbn-cluster-item-verdicts { position: relative; margin-left: auto; }
 .kbn-cluster-item-verdicts[data-verdict-pending] { min-width: 10.5rem; min-height: 19px; }
 
@@ -107,7 +91,6 @@
   .kbn-folio .kbn-folio-count { font-family: inherit; font-size: 14px; color: var(--kbn-ink-muted); }
   .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { gap: 5px; padding: 0; }
   .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
-  .kbn-card-menu { min-width: 28px; min-height: 28px; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }

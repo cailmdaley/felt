@@ -4,6 +4,7 @@ import { stateDot } from './stateDot.js'
 import type { FiberSend } from './fiberSends.js'
 import { markVerdictHost } from './workspace/Verdicts.js'
 import { openActionMenu, type ConversationAction } from './conversationMenu.js'
+import { dressVerb, lifecycleVerbsFor, verbSpec } from './workspace/lifecycleVerbs.js'
 import {
   ascByKey,
   civilWeekday,
@@ -68,20 +69,6 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
 /** The phone's tab for each Now column: one plain word. */
 const FOLIO_LABELS: Record<NowColumnKind, string> = { drafts: 'Drafts', inFlight: 'Live', awaitingReview: 'Review' }
 
-type VerdictTarget = 'tempered' | 'composted'
-
-/**
- * The verdicts a card takes where it sits. Work in flight and awaiting review
- * take both. A constitution at rest takes both too — putting it down was not
- * a verdict, and it can be judged from there — except a standing one, whose
- * Temper would accept a run it has not made: it can only be discarded.
- * Drafts take none, and only Shuttle-managed fibers have a verdict to take.
- */
-export function verdictTargets(card: KanbanCard, place: NowColumnKind | 'resting'): VerdictTarget[] {
-  if (place === 'awaitingReview' || place === 'inFlight') return ['tempered', 'composted']
-  if (place !== 'resting' || !isAgentCard(card) || card.shuttleSeat === true) return []
-  return card.shuttleKind === 'standing' ? ['composted'] : ['tempered', 'composted']
-}
 
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
@@ -1110,8 +1097,8 @@ export class KanbanSurfaceRenderer {
     const end = document.createElement('span')
     end.className = 'kbn-cluster-item-verdicts'
     markVerdictHost(end, card)
-    end.append(this.cardMenu(card, 'resting', isStale))
     el.append(end)
+    this.installRowMenu(el, card, isStale)
     installFrontierDetails(el, end, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
 
     el.addEventListener('click', (e) => {
@@ -1516,7 +1503,7 @@ export class KanbanSurfaceRenderer {
    * Render one Desk row — a line in a thread list, not a slip of paper.
    *
    * At a glance a row carries only what decides where to look next: whose
-   * hand it is in (the dot), the title, the awake-descendant count,
+   * hand it is in (the dot), the title, its family's counts,
    * and the action menu. The document workspace holds the
    * outcome, question, path, agent, due, warnings and the report itself.
    *
@@ -1542,20 +1529,14 @@ export class KanbanSurfaceRenderer {
     const lensSuffix = lensState.ghost ? ' — resting, shown for this cycle' : ''
     el.setAttribute('aria-label', `${card.name}${agentName ? ` — ${agentName}` : ''} — ${COLUMN_TITLES[kind]}${lensSuffix}${ariaSuffix}`)
     // Touch has no drag-and-drop backend, and a draggable card fights the
-    // finger that is trying to scroll past it. Holding the card still is the
-    // touch path to the same transitions (`onCardLongPress`).
+    // finger that is trying to scroll past it. Holding the card still opens
+    // its menu, whose Move… is the touch path to the same transitions.
     el.draggable = !isStale && !coarsePointer()
     el.dataset.fiberId = card.id
     el.dataset.cardUid = card.uid ?? card.id
     el.dataset.cardOrigin = card.originId
 
     if (!isStale) this.installDraggable(el, card, true)
-    // THE TOUCH READING OF THE DRAG. A card held still under the thumb offers
-    // the places a drag would accept — the only way to move a card on a phone,
-    // and a harmless extra beside the drag everywhere else. What the press
-    // raises is the board's business (`onCardLongPress`); the renderer only
-    // reports that it happened, and on which element to hang the menu.
-    this.installLongPressMove(el, card)
 
     const glyph = stateDot(card, this.o.openDetail)
     const name = document.createElement('span')
@@ -1572,7 +1553,7 @@ export class KanbanSurfaceRenderer {
 
     el.append(meta)
     installFrontierDetails(el, meta, card, threadIndexFor(this.o.getLastResponse()), this.o.openDetail)
-    meta.append(this.cardMenu(card, kind, isStale))
+    this.installRowMenu(el, card, isStale)
 
     el.addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('a, button, textarea')) return
@@ -1582,36 +1563,53 @@ export class KanbanSurfaceRenderer {
     return el
   }
 
-  /** The same quiet action control ends every Desk line, including Resting. */
-  private cardMenu(card: KanbanCard, place: NowColumnKind | 'resting', stale: boolean): HTMLButtonElement {
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'kbn-card-menu'
-    button.textContent = '•••'
-    button.title = `Actions for ${card.name}`
-    button.setAttribute('aria-label', button.title)
-    button.setAttribute('aria-haspopup', 'menu')
-    button.setAttribute('aria-expanded', 'false')
-    button.addEventListener('pointerdown', event => event.stopPropagation())
-    button.addEventListener('click', event => {
-      event.stopPropagation()
-      this.closeMenu()
-      const actions: ConversationAction[] = (stale ? [] : verdictTargets(card, place)).map(target => ({
-        label: target === 'tempered' ? 'Temper' : 'Discard',
-        run: () => { void this.o.transition(card, target) },
-      }))
-      if (card.held && this.o.releaseQuarantine) {
-        actions.push({ label: 'Release boot quarantine', run: () => { void this.o.releaseQuarantine!(card.shuttleHost) } })
-      }
-      if (card.tmuxSession && this.o.openWorker) {
-        actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
-      }
-      if (place !== 'resting' && !stale && isAgentCard(card) && this.o.onRest) {
-        actions.push({ label: 'Rest', run: () => this.o.onRest?.(card) })
-      }
-      this.dismissCardMenu = openActionMenu(button, actions, `Actions for ${card.name}`)
+  /**
+   * A Desk line's actions live in a context menu, not a control: right-click,
+   * a long press, or the context-menu key (Shift+F10) on the focused line. Its
+   * verbs are the opened card's header verbs, drawn the same way from one
+   * definition (`lifecycleVerbs`).
+   */
+  private installRowMenu(el: HTMLElement, card: KanbanCard, stale: boolean): void {
+    el.setAttribute('aria-haspopup', 'menu')
+    el.addEventListener('contextmenu', event => {
+      if ((event.target as HTMLElement).closest('a[href]')) return
+      event.preventDefault(); event.stopPropagation()
+      this.openRowMenu(el, card, stale, event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
     })
-    return button
+    el.addEventListener('keydown', event => {
+      if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+      event.preventDefault(); event.stopPropagation()
+      this.openRowMenu(el, card, stale)
+    })
+    attachLongPress(el, { onFire: () => this.openRowMenu(el, card, stale) })
+  }
+
+  /** The line's actions: the header's verbs for this card, then what only a live worker or a held launch offers. */
+  rowActions(card: KanbanCard, stale: boolean, anchor: HTMLElement): ConversationAction[] {
+    const actions: ConversationAction[] = stale ? [] : lifecycleVerbsFor(card, !!this.o.onRest).map(verb => ({
+      label: verbSpec(verb).label,
+      dress: (item: HTMLButtonElement) => { dressVerb(item, verb) },
+      run: () => {
+        if (verb === 'rest') { this.o.onRest?.(card); return }
+        void this.o.transition(card, verb === 'review' ? 'awaitingReview' : verb === 'temper' ? 'tempered' : 'composted')
+        // The menu handed focus back to the line; a verdict's undo, drawn on the line, takes it.
+        if (document.activeElement === anchor) anchor.querySelector<HTMLElement>('.ws-verdict-undo button')?.focus()
+      },
+    }))
+    if (card.held && this.o.releaseQuarantine) {
+      actions.push({ label: 'Release boot quarantine', run: () => { void this.o.releaseQuarantine!(card.shuttleHost) } })
+    }
+    if (card.tmuxSession && this.o.openWorker) {
+      actions.push({ label: 'Open terminal', run: () => this.o.openWorker!(card.tmuxSession!, card.shuttleHost) })
+    }
+    const move = this.o.onCardLongPress
+    if (!stale && move) actions.push({ label: 'Move…', run: () => move(card, anchor) })
+    return actions
+  }
+
+  private openRowMenu(el: HTMLElement, card: KanbanCard, stale: boolean, point?: { x: number; y: number }): void {
+    this.closeMenu()
+    this.dismissCardMenu = openActionMenu(el, this.rowActions(card, stale, el), `Actions for ${card.name}`, point)
   }
 
   private dismissCardMenu?: () => void

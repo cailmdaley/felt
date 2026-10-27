@@ -1,6 +1,10 @@
 import { claudeAppRoute, claudeWebLink } from './sessionHistory'
 
-export interface ConversationAction { label: string; href?: string; run?: () => void; disabled?: boolean }
+export interface ConversationAction {
+  label: string; href?: string; run?: () => void; disabled?: boolean
+  /** Draws the item as a control drawn elsewhere (a header verb); the menu then styles it by that control's classes. */
+  dress?: (item: HTMLButtonElement) => void
+}
 
 /** Offer only destinations that can open this recorded conversation. */
 export function conversationActions(webLink: string | null | undefined, desktop: boolean, terminal?: () => void): ConversationAction[] {
@@ -84,6 +88,17 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
     item.textContent = action.label
     item.setAttribute('role', 'menuitem')
     item.tabIndex = -1
+    if (action.dress && item instanceof HTMLButtonElement) {
+      action.dress(item)
+      menu.classList.add('kbn-verb-menu')
+      item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
+      menu.append(item)
+      if (!action.disabled) items.push(item)
+      continue
+    }
+    if (menu.classList.contains('kbn-verb-menu') && !menu.querySelector('.kbn-verb-menu-rule')) {
+      const rule = document.createElement('hr'); rule.className = 'kbn-verb-menu-rule'; menu.append(rule)
+    }
     Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: '16px', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
     item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })
     item.addEventListener('blur', () => { item.style.background = 'transparent' })

@@ -83,23 +83,26 @@
 .ws-transcript-head .ws-transcript-meter { display: contents; }
 
 /* Immediate actions use a shared stroke-icon grid and native keyboard focus. */
-.ws-reader .ws-header-icon {
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon {
   display: inline-grid; place-items: center; flex: none; width: 32px; height: 36px; padding: 0; margin: 0;
   border: 0 !important; border-radius: var(--ws-control-radius); background: transparent;
   color: var(--ws-ink-muted); cursor: pointer;
 }
 .ws-reader .ws-header-icon[hidden] { display: none; }
-.ws-reader .ws-header-icon:hover:not(:disabled), .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
-.ws-reader .ws-header-icon:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
 .ws-header-overflow { display: flex; align-items: center; gap: 8px; }
 .ws-header-overflow:empty { display: none; }
 .ws-reader .ws-header-overflow .kbn-ctl-verdict { display: flex; gap: 8px; }
 .ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
 .ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--ws-label-size); }
 .ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--ws-serif); }
-.ws-reader .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
 .ws-header-word { font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
+/* A Desk row's menu lists the same verbs, drawn as the header draws them. */
+.kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
+.kbn-verb-menu .kbn-verb-menu-rule { border: 0; border-top: 1px solid var(--ws-hairline); margin: 4px 2px; }
 /* The artifact: a page the height of the header's two lines, the one click to the artifact. */
 .ws-report-chip { display: grid; flex: none; padding: 0; margin: 0; border-radius: 5px; }
 .ws-report-preview { display: block; position: relative; overflow: hidden; align-self: stretch; min-height: 84px; aspect-ratio: 3 / 2; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }

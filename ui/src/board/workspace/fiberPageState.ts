@@ -15,12 +15,21 @@ export function onDesk(card: KanbanCard): boolean {
 export function restReachable(card: KanbanCard): boolean {
   return isAgentCard(card)
 }
-/** Temper and Discard reach every fiber on the Desk's lifecycle that has no
- *  verdict yet: a draft, work in flight, or work awaiting review. */
-export function verdictReachable(card: KanbanCard): boolean {
-  if (!onDesk(card)) return false
+/** The verdicts a card takes: every fiber on the Desk's lifecycle with no
+ *  verdict yet (a draft, work in flight or awaiting review) takes both. A
+ *  constitution at rest takes both too, since putting it down was not a
+ *  verdict, except a standing one, whose Temper would accept a run it has not
+ *  made: it can only be discarded. A seat at rest takes none. */
+export function verdictsFor(card: KanbanCard): Array<'temper' | 'discard'> {
+  if (!onDesk(card)) return []
   const column = deskColumn(card)
-  return column === 'drafts' || column === 'roles' || column === 'inFlight' || column === 'awaitingReview'
+  if (column === 'drafts' || column === 'roles' || column === 'inFlight' || column === 'awaitingReview') return ['temper', 'discard']
+  if ((column !== 'resting' && column !== 'scheduled') || !isAgentCard(card) || card.shuttleSeat === true) return []
+  return card.shuttleKind === 'standing' ? ['discard'] : ['temper', 'discard']
+}
+/** Whether a card takes any verdict. */
+export function verdictReachable(card: KanbanCard): boolean {
+  return verdictsFor(card).length > 0
 }
 /** Work still on its way, a draft or in flight, can be moved to Awaiting review. */
 export function reviewReachable(card: KanbanCard): boolean {
@@ -51,7 +60,7 @@ export interface ConstitutionActions {
 export function constitutionAction(intent: KeyIntent, card: KanbanCard | null | undefined, actions: ConstitutionActions): boolean {
   if (!card) return false
   if (intent === 'temper' || intent === 'discard') {
-    if (!verdictReachable(card)) return false
+    if (!verdictsFor(card).includes(intent)) return false
     actions.verdict(card, intent === 'temper' ? 'tempered' : 'composted')
   } else if (intent === 'toReview') {
     if (!reviewReachable(card)) return false

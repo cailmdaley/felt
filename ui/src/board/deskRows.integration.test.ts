@@ -47,14 +47,14 @@ describe('a Resting line takes its verdicts', () => {
     const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(data.stash, {})
     document.body.append(root)
     const labels = (id: string) => {
-      root.querySelector<HTMLButtonElement>(`[data-fiber-id="${id}"] .kbn-card-menu`)!.click()
+      root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
       const menu = document.querySelector('[role="menu"]')!
       const labels = [...menu.querySelectorAll('button:not(:disabled)')].map(b => b.textContent)
       menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
       return labels
     }
-    expect(labels('once')).toEqual(['Temper', 'Discard'])
-    expect(labels('standing')).toEqual(['Discard'])
+    expect(labels('once')).toEqual(['Rest', 'Temper', 'Discard'])
+    expect(labels('standing')).toEqual(['Rest', 'Discard'])
     expect(labels('todo')).toEqual([])
     expect(root.querySelector<HTMLElement>('[data-fiber-id="once"] .kbn-cluster-item-verdicts')?.dataset.verdictKey).toBeTruthy()
   })
@@ -74,7 +74,7 @@ describe('a Resting line takes its verdicts', () => {
     const o = options(data)
     const root = new KanbanSurfaceRenderer(o).renderStashSection(data.stash, {})
     document.body.append(root)
-    root.querySelector<HTMLButtonElement>('[data-fiber-id="once"] .kbn-card-menu')!.click()
+    root.querySelector<HTMLElement>('[data-fiber-id="once"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Discard')!.click()
     expect(o.transition).toHaveBeenCalledWith(expect.objectContaining({ id: 'once' }), 'composted')
     expect(o.openDetail).not.toHaveBeenCalled()

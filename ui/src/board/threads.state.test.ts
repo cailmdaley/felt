@@ -83,7 +83,7 @@ describe('a family sits where the most urgent need in its tree puts it', () => {
   })
   it('the root leads when it holds the winning need itself, and its kin follow in tree order', () => {
     expect(place([root({ runtimePhase: 'waiting' }), yours('a'), yours('b'), working('w')]))
-      .toEqual({ lead: 'cmbx', need: 'yours', askers: ['cmbx', 'cmbx/a', 'cmbx/b'], others: { yours: 0, review: 0, working: 1 } })
+      .toEqual({ lead: 'cmbx', need: 'yours', askers: ['cmbx', 'cmbx/a', 'cmbx/b'], others: { yours: 2, review: 0, working: 1 } })
   })
   it('Working lists no sub-lines: the other workers are a count', () => {
     expect(place([root(), working('a'), working('b')])).toEqual({ lead: 'cmbx', need: 'working', askers: ['cmbx'], others: { yours: 0, review: 0, working: 2 } })

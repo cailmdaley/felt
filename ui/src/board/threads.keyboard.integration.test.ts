@@ -74,13 +74,12 @@ it('a poll preserves card selection without exposing pinned or waiting subentrie
   expect(document.querySelector('[data-card-uid="ask-uid"]')).toBeNull()
   press('j'); expect(selected()).toBe('after-uid')
 })
-it('Tab reaches the count and action menu without hidden family stops', () => {
+it('Tab reaches the dot and the count, with no menu control and no hidden family stops', () => {
   press('j'); row().focus(); press('Tab', row())
   expect(document.activeElement).toBe(row().querySelector('.constitution-state-dot'))
   press('Tab', document.activeElement!)
   expect(document.activeElement).toBe(row().querySelector('.kbn-thread-count'))
-  press('Tab', document.activeElement!)
-  expect(document.activeElement).toBe(row().querySelector('.kbn-card-menu'))
+  expect(row().querySelector('.kbn-card-menu')).toBeNull()
 })
 it('the count explicitly shows the rail and its toggle persists the next hide', async () => {
   row().querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()

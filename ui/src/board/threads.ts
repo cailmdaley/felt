@@ -16,8 +16,6 @@ export const THREAD_LABEL: Record<ThreadState, string> = {
  */
 export type FamilyNeed = 'yours' | 'review' | 'working'
 const FAMILY_NEEDS: readonly FamilyNeed[] = ['yours', 'review', 'working']
-/** Each need as the row's tail words it: `2 working · 1 to review`. */
-export const NEED_WORD: Readonly<Record<FamilyNeed, string>> = { yours: 'waiting', review: 'to review', working: 'working' }
 export interface Family {
   root: KanbanCard
   /** The row: the node that set the family's column, the root when the tree is quiet. */
@@ -26,7 +24,7 @@ export interface Family {
   need: FamilyNeed | null
   /** Every node sharing a need of the human's, lead first; the lead alone for Working and a quiet tree. */
   askers: KanbanCard[]
-  /** Nodes elsewhere in the tree by need, the row's own need counted only for Working's other workers. */
+  /** Every node of the tree but the row, by need. */
   others: Record<FamilyNeed, number>
 }
 const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
@@ -175,10 +173,9 @@ export class ThreadIndex {
       if (need === 'yours') askers.sort((a, b) => Number(turnOf(b).turn === 'question') - Number(turnOf(a).turn === 'question'))
       const lead = need === 'working' && needs[0] !== 'working' && this.state(root) === 'working' && !root.held ? root : askers[0]
       const others: Record<FamilyNeed, number> = { yours: 0, review: 0, working: 0 }
-      for (const n of needs) if (n && n !== need) others[n]++
+      nodes.forEach((node, n) => { const each = needs[n]; if (each && node !== lead) others[each]++ })
       // Working asks nothing of the human: its other workers are a count, not lines.
       const shown = need === 'working' ? [lead] : askers
-      if (need === 'working') others.working = askers.filter(card => card !== lead).length
       const family: Family = { root, lead, need, askers: shown, others }
       for (const node of nodes) this.families.set(this.key(node), family)
     }

@@ -21,7 +21,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { restReachable, reviewReachable, verdictReachable } from './fiberPageState.js'
+import { dressVerb, lifecycleVerbsFor } from './lifecycleVerbs.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -1048,12 +1048,8 @@ export class Dock {
       return button
     }
     // Lifecycle verbs carry their word beside the icon; only navigation is drawn bare.
-    for (const [button, name, label] of [[review, 'close', 'Close for review'], [rest, 'rest', 'Rest'], [temper, 'temper', 'Temper'], [discard, 'discard', 'Discard']] as const) {
-      if (!button) continue
-      icon(button, name, label)
-      button.classList.add('ws-header-verb')
-      const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = label
-      button.append(word)
+    for (const [button, verb] of [[review, 'review'], [rest, 'rest'], [temper, 'temper'], [discard, 'discard']] as const) {
+      if (button) dressVerb(button, verb)
     }
     const item = (label: string, name: HeaderIcon, cls: string, run: () => void): HTMLButtonElement => {
       const button = ctlButton('', cls)
@@ -1174,13 +1170,12 @@ export class Dock {
       lifecycle.classList.toggle('ws-chat-state-live', hasLiveWorker(card))
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent
-      const reachable = verdictReachable(card)
-      const restable = !!this.onRest && restReachable(card)
-      const reviewable = reviewReachable(card)
-      verdict.hidden = !reachable && !restable && !reviewable
-      if (rest) rest.hidden = !restable
-      temper.hidden = discard.hidden = !reachable
-      review.hidden = !reviewable
+      const offered = lifecycleVerbsFor(card, !!this.onRest)
+      verdict.hidden = !offered.length
+      if (rest) rest.hidden = !offered.includes('rest')
+      temper.hidden = !offered.includes('temper')
+      discard.hidden = !offered.includes('discard')
+      review.hidden = !offered.includes('review')
       consoleItem.hidden = !this.workerPillFor(card)?.matches('a[href],button')
       sessionsSection.hidden = !card.uid
     }
