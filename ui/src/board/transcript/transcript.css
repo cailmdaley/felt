@@ -505,7 +505,6 @@
 }
 .ws-transcript-thread-notice time { font: var(--ws-small-size) var(--ws-mono); }
 .ws-transcript-thread-notice p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.ws-transcript-spawn { margin: 6px 0; padding: 8px 10px; border-radius: var(--ws-control-radius); background: var(--ws-hover); color: var(--ws-ink-soft); font: var(--ws-small-size)/1.5 var(--ws-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ws-transcript-sent-file {
   display: flex;
   align-items: center;

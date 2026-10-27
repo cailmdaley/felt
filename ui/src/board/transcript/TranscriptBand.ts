@@ -327,17 +327,32 @@ function buildToolInput(step: ToolStep): HTMLElement {
   return detail
 }
 
-function spawnMention(step: Step): HTMLElement | null {
-  if (step.kind !== 'tool') return null
+function spawnIds(output: string): string[] {
+  const trimmed = output.trim()
+  if (!trimmed) return []
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    const id = inputString(inputObject(parsed)?.id)
+    return id ? [id] : []
+  } catch {
+    return [...new Set(trimmed.split(/\r?\n/).map(line => line.trim()).filter(line => line && !/\s/.test(line)))]
+  }
+}
+
+function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
+  if (step.kind !== 'tool') return []
   const input = inputObject(step.input)
   const command = inputString(input?.command) ?? inputString(input?.cmd) ?? inputString(step.input) ?? ''
-  if (!/\bshuttle\s+thread\b/.test(command)) return null
-  // A command is code: it reads as typed, and fiber ids in it never become chips.
-  const row = document.createElement('pre')
-  row.className = 'ws-transcript-spawn'
-  row.dataset.mentionIgnore = ''
-  row.textContent = [command, step.result?.text].filter(Boolean).join('\n')
-  return row
+  if (!/\bshuttle\s+thread\b/.test(command) || !step.result || step.result.isError) return []
+  return spawnIds(step.result.text).map(id => {
+    const chip = document.createElement('a')
+    chip.className = 'ws-constitution-chip ws-transcript-spawn-chip'
+    chip.dataset.constitutionIdentity = id
+    chip.dataset.spawnChip = ''
+    if (origin) chip.dataset.origin = origin
+    chip.hidden = true
+    return chip
+  })
 }
 
 function setKicker(kicker: HTMLElement, author: string, speaker: Speaker, time?: number): void {
@@ -1352,8 +1367,8 @@ export class TranscriptBand {
         return
       }
       if (step.kind !== 'text') {
-        const spawn = spawnMention(step)
-        if (spawn) { const item = document.createElement('li'); item.append(spawn); nodes.push(item) }
+        const spawns = spawnMentions(step, this.target?.host)
+        if (spawns.length) { const item = document.createElement('li'); item.append(...spawns); nodes.push(item) }
         return
       }
       let message = this.previewTexts.get(index)
@@ -1500,8 +1515,7 @@ export class TranscriptBand {
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
       children.push(group.button)
       if (!group.expanded) for (const step of turn.steps.slice(part.start, part.end)) {
-        const spawn = spawnMention(step)
-        if (spawn) children.push(spawn)
+        children.push(...spawnMentions(step, this.target?.host))
       }
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)

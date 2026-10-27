@@ -1,11 +1,12 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { threadState, THREAD_LABEL } from '../threads.js'
+import { turnOf, type Turn } from '../turn.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
 
-export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; outcome: string; origin: string }
+export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; turn?: Turn; outcome: string; origin: string }
 export function constitutionMentions(cards: readonly KanbanCard[]): ConstitutionMention[] {
   return cards.filter(card => !!card.shuttleKind && !card.isCycle).map(card => {
-    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: THREAD_LABEL[threadState(card)], outcome: card.outcome ?? '' }
+    return { id: card.id, uid: card.uid, name: card.name, origin: card.originId, state: THREAD_LABEL[threadState(card)], turn: turnOf(card).turn, outcome: card.outcome ?? '' }
   })
 }
 
@@ -49,12 +50,15 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     link.dataset.constitution = row.id
     link.dataset.origin = row.origin
     link.dataset.state = row.state
+    if (row.turn) link.dataset.turn = row.turn
+    else delete link.dataset.turn
     if (link.getAttribute('href') !== '#constitution') link.href = '#constitution'
-    const label = `${row.name} · ${row.state}`
+    const label = link.hasAttribute('data-spawn-chip') ? row.name : `${row.name} · ${row.state}`
     if (link.textContent !== label) link.textContent = label
+    link.hidden = false
     const title = `${row.id}\n${row.state}${row.outcome ? '\n' + row.outcome : ''}`
     if (link.title !== title) link.title = title
-    link.setAttribute('aria-label', label)
+    link.setAttribute('aria-label', link.hasAttribute('data-spawn-chip') ? `Open ${row.name} — ${row.state.toLowerCase()}` : label)
   }
   const scan = (): void => {
     if (disposed) return
@@ -68,6 +72,12 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       else if (identity) {
         delete link.dataset.constitution
         delete link.dataset.state
+        delete link.dataset.turn
+        if (link.hasAttribute('data-spawn-chip')) {
+          link.hidden = true
+          link.removeAttribute('href'); link.removeAttribute('aria-label'); link.removeAttribute('role'); link.removeAttribute('tabindex')
+          continue
+        }
         link.classList.add('ws-constitution-chip-missing')
         link.removeAttribute('href'); link.removeAttribute('aria-label'); link.removeAttribute('role'); link.removeAttribute('tabindex')
         link.setAttribute('aria-disabled', 'true')
