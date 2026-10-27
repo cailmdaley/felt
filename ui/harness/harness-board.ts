@@ -73,6 +73,14 @@ if (workspaceFixture && search.has('long-title')) {
 }
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
+// `manyFiles` lengthens the open constitution's sent-files trail so the rail's file region has to scroll.
+if (workspaceFixture && search.has('manyFiles')) {
+  const first = workspaceFixture.receipts[0], dir = String(first.fullPath).slice(0, String(first.fullPath).lastIndexOf('/'))
+  for (let i = 1; i <= 28; i++) {
+    const fullPath = `${dir}/sweep/scan-${String(i).padStart(2, '0')}.png`
+    workspaceFixture.receipts.push({ ...first, fullPath, basename: fullPath.split('/').at(-1), timestamp: now - (40 + i * 7) * 60_000, sessionId: `many-files-${i}` })
+  }
+}
 const nativeWorkspaceFiles = workspaceFixture ? installWorkspaceNativeURLs(workspaceFixture) : null
 if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').forEach(element => element.remove())
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()

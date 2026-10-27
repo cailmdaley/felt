@@ -6,8 +6,17 @@ export function sentDocuments(channel: Channel): WorkspaceDocument[] {
     .sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0) || a.key.localeCompare(b.key))
 }
 
+const FULL: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
+
+/** A narrow column's stamp: the time today, the date otherwise, the year only when it differs. */
+export function compactStamp(at: number, now = Date.now()): string {
+  const when = new Date(at), today = new Date(now)
+  if (when.toDateString() === today.toDateString()) return when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  return when.toLocaleDateString(undefined, when.getFullYear() === today.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
 /** One sent file: its title, last send time, a `new` mark until read, and the current page marked. */
-export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void, className: string): HTMLButtonElement {
+export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void, className: string, compact = false): HTMLButtonElement {
   const row = document.createElement('button')
   row.type = 'button'; row.className = className; row.dataset.key = doc.key
   const label = document.createElement('span')
@@ -16,7 +25,8 @@ export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: 
   const at = lastSent(doc)
   if (at !== undefined) {
     time.dateTime = new Date(at).toISOString()
-    time.textContent = new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+    time.textContent = compact ? compactStamp(at) : new Date(at).toLocaleString(undefined, FULL)
+    if (compact) time.title = new Date(at).toLocaleString(undefined, FULL)
   } else time.textContent = 'Date unknown'
   row.append(label, time)
   if (fresh.has(doc.key)) {

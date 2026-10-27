@@ -2,7 +2,7 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { buildChannel, docKey } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
-import { sentFiles } from './SentFiles.js'
+import { compactStamp, sentFiles } from './SentFiles.js'
 
 beforeEach(() => {
   const values = new Map<string, string>()
@@ -32,4 +32,10 @@ it('marks a resend after the last look and clears it only when that file is read
   expect(sentFiles(updated, '', fresh, vi.fn()).querySelector('.ws-sent-new')).not.toBeNull()
   expect(seen.observe(updated, key).has(key)).toBe(false)
   expect(seen.observe(updated, first.documents[0].key).has(key)).toBe(false)
+})
+it('stamps a narrow column compactly: the time today, the date this year, the year otherwise', () => {
+  const now = new Date(2026, 9, 27, 15, 0).getTime()
+  expect(compactStamp(new Date(2026, 9, 27, 9, 5).getTime(), now)).toBe(new Date(2026, 9, 27, 9, 5).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
+  expect(compactStamp(new Date(2026, 2, 3, 9, 5).getTime(), now)).toBe(new Date(2026, 2, 3).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }))
+  expect(compactStamp(new Date(2025, 2, 3).getTime(), now)).toMatch(/2025/)
 })

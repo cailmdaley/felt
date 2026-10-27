@@ -50,15 +50,23 @@ async function chatMenu(p, label) {
   await choose(p, 'Chat')
   await headerAction(p, ['Settings', 'Sessions'].includes(label) ? 'Settings' : label)
 }
+/** Sent-file rows: the desktop rail's region beneath the threads, or the phone's sheet. */
 async function sentFiles(p) {
-  if (await p.locator('.ws-page-sheet[open]').count()) return
+  if (p.viewportSize().width > 700) {
+    if (await p.locator('.ws-reader.ws-rail-off').count()) await p.locator('.ws-rail-toggle').click()
+    await p.locator('.ws-rail-files').waitFor()
+    return p.locator('.ws-rail-files .ws-rail-file')
+  }
+  const rows = p.locator('.ws-page-sheet[open] .ws-sent-file')
+  if (await p.locator('.ws-page-sheet[open]').count()) return rows
   const chat = await isSelected(p, 'Chat')
-  if (!chat && p.viewportSize().width <= 700) {
+  if (!chat) {
     const menu = p.locator('.ws-navbar .ws-phone-document-menu')
     await menu.focus(); await menu.click()
-  } else await selected(p).getByRole('button', { name: chat ? 'Settings' : 'Document menu', exact: true }).click()
+  } else await selected(p).getByRole('button', { name: 'Settings', exact: true }).click()
   if (!chat) await p.getByRole('button', { name: 'Sent files', exact: true }).click()
   await p.locator('.ws-page-sheet[open]').waitFor()
+  return rows
 }
 
 test('The layout-shift guard ignores hidden geometry but catches visible movement', async p => {
@@ -148,8 +156,8 @@ async function choose(p, label) {
   } else if (label === 'calibration-report' && await isSelected(p, 'Chat')) {
     await selected(p).locator('.ws-report-chip').click()
   } else {
-    await sentFiles(p)
-    await p.locator(`.ws-page-sheet[open] .ws-sent-file[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`).click()
+    const rows = await sentFiles(p)
+    await rows.and(p.locator(`[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`)).click()
     await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
   }
   await pageFor(p, label).and(p.locator('.ws-selected')).waitFor()
@@ -942,8 +950,7 @@ for (const reducedMotion of ['reduce', 'no-preference']) test(`Receipt arrivals 
     }
   })
   await p.clock.fastForward(15001)
-  await sentFiles(p)
-  const first = p.locator('.ws-page-sheet .ws-sent-file').first()
+  const first = (await sentFiles(p)).first()
   assert.match(await first.getAttribute('data-key'), /brief.md$/)
   assert.equal(await first.locator('.ws-sent-new').count(), 1)
   await p.keyboard.press('Escape'); await poll(p, () => !document.querySelector('.ws-page-sheet').open)
@@ -1620,8 +1627,7 @@ test('A live-arriving image opens at full resolution from Sent files', async p =
     }
   })
   await p.clock.fastForward(15001)
-  await sentFiles(p)
-  const imageCard = p.locator('.ws-page-sheet[open] .ws-sent-file[data-key$="/live-arrival.png"]')
+  const imageCard = (await sentFiles(p)).and(p.locator('[data-key$="/live-arrival.png"]'))
   await imageCard.waitFor()
   await imageCard.locator('.ws-sent-new').waitFor()
   await imageCard.click()

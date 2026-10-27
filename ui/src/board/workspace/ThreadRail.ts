@@ -168,7 +168,7 @@ export class ThreadRail {
     if (!docs.length) {
       const empty = document.createElement('p'); empty.className = 'ws-rail-files-empty'; empty.textContent = 'No files sent yet.'
       this.fileList.replaceChildren(empty)
-    } else this.fileList.replaceChildren(...docs.map(doc => sentFileRow(channel, doc, selected, fresh, choose, 'ws-rail-file')))
+    } else this.fileList.replaceChildren(...docs.map(doc => sentFileRow(channel, doc, selected, fresh, choose, 'ws-rail-file', true)))
     if (focus !== undefined) {
       const target = [...this.fileList.querySelectorAll<HTMLElement>('.ws-rail-file')].find(el => el.dataset.key === focus)
       ;(target ?? this.filesHeading).focus({ preventScroll: true })

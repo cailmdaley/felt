@@ -76,7 +76,7 @@ try {
     await selected().getByRole('button', { name: 'Document menu', exact: true }).click()
     await p.getByRole('button', { name: 'Sent files', exact: true }).click()
     const filename = `take-${String(step + 1).padStart(2, '0')}.${step % 2 ? 'wav' : 'mp3'}`
-    await p.locator(`.ws-page-sheet[open] .ws-sent-file[data-key$="/${filename}"]`).click()
+    await p.locator(`.ws-rail-files .ws-rail-file[data-key$="/${filename}"]`).click()
     await selected().locator('.ws-audio-page[data-waveform="decoded"]').waitFor()
     await p.clock.runFor(3_000)
     await p.waitForTimeout(300)
