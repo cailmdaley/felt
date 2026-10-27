@@ -229,7 +229,7 @@ export function registerHeaderBarJourneys(test) {
       const report = header.locator('.ws-report-chip')
       const reportTitle = await report.getAttribute('title')
       assert.ok(reportTitle?.length)
-      assert.equal(await report.getAttribute('aria-label'), `Read report: ${reportTitle}`)
+      assert.equal(await report.getAttribute('aria-label'), `Read artifact: ${reportTitle}`)
       assert.equal(await report.locator('.ws-report-title').count(), 0)
       assert.equal(await report.evaluate(el => [...el.childNodes].filter(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim()).length), 0, 'the chip has no text label')
       if (device === 'phone') {
