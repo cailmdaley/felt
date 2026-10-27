@@ -53,6 +53,8 @@ async function chatMenu(p, label) {
 /** Sent-file rows: the desktop rail's region beneath the threads, or the phone's sheet. */
 async function sentFiles(p) {
   if (p.viewportSize().width > 700) {
+    const sheet = p.locator('.ws-page-sheet[open]')
+    if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
     if (await p.locator('.ws-reader.ws-rail-off').count()) await p.locator('.ws-rail-toggle').click()
     await p.locator('.ws-rail-files').waitFor()
     return p.locator('.ws-rail-files .ws-rail-file')
