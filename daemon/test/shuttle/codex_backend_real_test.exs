@@ -131,7 +131,7 @@ defmodule Shuttle.CodexBackendRealTest do
              })
 
     session = AppWorkers.ref(id)
-    assert :retained = WorkerBackend.retire_assignment(session, %{})
+    assert :retained = WorkerBackend.retire_assignment(Shuttle.Runner.Default, session, %{})
 
     fiber = %{
       "shuttle" => %{
@@ -141,7 +141,7 @@ defmodule Shuttle.CodexBackendRealTest do
       }
     }
 
-    assert :retired = WorkerBackend.retire_assignment(session, fiber)
+    assert :retired = WorkerBackend.retire_assignment(Shuttle.Runner.Default, session, fiber)
     assert {:ok, %{"id" => ^id}} = CodexApp.read_thread(id)
     assert :idle = CodexApp.state(id)
     IO.puts("REAL_CODEX completed_assignment=#{id} conversation_still_loaded=true")
@@ -156,7 +156,7 @@ defmodule Shuttle.CodexBackendRealTest do
 
     assert :not_loaded = await_unloaded(id, System.monotonic_time(:millisecond) + 5_000)
     assert :not_loaded = WorkerBackend.observe(session)
-    assert :retired = WorkerBackend.retire_assignment(session, %{})
+    assert :retired = WorkerBackend.retire_assignment(Shuttle.Runner.Default, session, %{})
     assert {:ok, %{"active" => false, "thread_id" => ^id}} = AppWorkers.get(id)
     IO.puts("REAL_CODEX unloaded_assignment=#{id} retired_without_handoff=true")
 

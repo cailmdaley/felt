@@ -69,22 +69,42 @@ defmodule Shuttle.WorkerBackend do
   def retire_assignment(runner, session, fiber) do
     with id when is_binary(id) <- AppWorkers.id(session),
          {:ok, record} <- AppWorkers.get(id),
-         state <- AppWorkers.state(id),
-         true <- completed?(state, fiber, assignment_start(record)),
-         :ok <- retire(runner, session, id) do
+         true <- completed?(AppWorkers.state(id), fiber, assignment_start(record)),
+         :ok <- retire(runner, session, id, fiber) do
       :retired
     else
       _ -> :retained
     end
   end
 
-  defp retire(runner, session, id) do
-    :global.trans({{Shuttle.CodexTerminal, id}, self()}, fn ->
-      with :ok <- AppWorkers.deactivate(id) do
-        stop_viewer(runner, session)
-        :ok
-      end
-    end)
+  # Under the terminal lock, without waiting for it: a viewer being prepared or
+  # stopped elsewhere retires on a later poll. The state is read again inside
+  # the lock so a turn started meanwhile keeps its assignment. An attached
+  # viewer may be the human reading or replying; it is left to the sweep.
+  defp retire(runner, session, id, fiber) do
+    :global.trans(
+      {{Shuttle.CodexTerminal, id}, self()},
+      fn ->
+        with {:ok, record} <- AppWorkers.get(id),
+             true <- completed?(AppWorkers.state(id), fiber, assignment_start(record)),
+             :ok <- AppWorkers.deactivate(id) do
+          case tmux(session) do
+            nil ->
+              :ok
+
+            terminal ->
+              if Shuttle.CodexTerminal.detached?(runner, terminal),
+                do: Shuttle.Tmux.stop(runner, terminal)
+          end
+
+          :ok
+        else
+          _ -> :retained
+        end
+      end,
+      [node()],
+      0
+    )
   end
 
   # A confirmed unloaded/missing thread has no running turn. Idle alone is

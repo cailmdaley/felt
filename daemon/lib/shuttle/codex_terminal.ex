@@ -37,17 +37,35 @@ defmodule Shuttle.CodexTerminal do
     end
   end
 
+  # The poller never waits on the terminal lock: a viewer being prepared or
+  # stopped elsewhere is left for the next sweep.
   defp retire_leftover(runner, id, tmux) do
-    :global.trans({{__MODULE__, id}, self()}, fn ->
-      with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
-           true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
-           state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
-           {_, 0} <- Tmux.stop(runner, tmux) do
-        true
-      else
-        _ -> false
-      end
-    end)
+    :global.trans(
+      {{__MODULE__, id}, self()},
+      fn ->
+        with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
+             true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
+             state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
+             true <- detached?(runner, tmux),
+             {_, 0} <- Tmux.stop(runner, tmux) do
+          true
+        else
+          _ -> false
+        end
+      end,
+      [node()],
+      0
+    ) == true
+  end
+
+  @doc "True only when tmux confirms the session exists with no client attached."
+  def detached?(runner, tmux) do
+    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}\t\#{session_attached}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} -> Enum.any?(String.split(output, "\n"), &(String.trim(&1) == tmux <> "\t0"))
+      _ -> false
+    end
   end
 
   def prepare(id, opts \\ []) do

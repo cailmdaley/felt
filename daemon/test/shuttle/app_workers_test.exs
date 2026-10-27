@@ -2345,6 +2345,52 @@ defmodule Shuttle.AppWorkersTest do
     assert Shuttle.CodexTerminal.sweep(Runner) == []
   end
 
+  test "retire leaves an attached viewer to the sweep, which waits for it to detach" do
+    terminal_fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    tmux = WorkerBackend.tmux(session)
+    Runner.attach_tmux_client(tmux)
+    end_assignment(:closed)
+
+    assert :retired = WorkerBackend.retire_assignment(Runner, session, Runner.fiber("tests/app"))
+    assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
+    assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+    assert Shuttle.CodexTerminal.sweep(Runner) == []
+
+    Runner.detach_tmux_client(tmux)
+    assert Shuttle.CodexTerminal.sweep(Runner) == [tmux]
+    assert Shuttle.Tmux.session_status(Runner, tmux) == :gone
+  end
+
+  test "retire keeps the assignment when a turn starts before it takes the lock" do
+    terminal_fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    tmux = WorkerBackend.tmux(session)
+    end_assignment(:closed)
+    App.set(:state, :running)
+
+    assert :retained = WorkerBackend.retire_assignment(Runner, session, Runner.fiber("tests/app"))
+    assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
+    assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+  end
+
+  test "sweep keeps a retired viewer whose thread state is unknown" do
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => "quiet",
+        "thread_id" => "quiet",
+        "active" => false,
+        "surface" => "cli",
+        "terminal_tmux" => "codex-terminal-quiet",
+        "backend_host" => Poller.own_host_id(),
+        "backend_endpoint" => "/elsewhere/app-server.sock"
+      })
+
+    Runner.add_tmux_session("codex-terminal-quiet")
+    assert Shuttle.CodexTerminal.sweep(Runner) == []
+    assert Shuttle.Tmux.session_status(Runner, "codex-terminal-quiet") == :alive
+  end
+
   defp app_server_command?({"tmux", args}),
     do: Enum.any?(args, &(is_binary(&1) and String.starts_with?(&1, "shuttle-codex-")))
 

@@ -327,6 +327,13 @@ defmodule Shuttle.Test.FeltStoreRunner do
         end)
       )
 
+  def detach_tmux_client(session),
+    do:
+      Agent.update(
+        server(),
+        &Map.update(&1, :tmux_attached, MapSet.new(), fn set -> MapSet.delete(set, session) end)
+      )
+
   def remove_tmux_session(session) do
     Agent.update(server(), fn state ->
       state
