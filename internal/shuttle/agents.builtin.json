@@ -62,6 +62,16 @@
     "aliases": ["gpt-sol", "gpt-6-sol"]
   },
   {
+    "id": "codex-terra",
+    "cli": "codex",
+    "model": "gpt-terra",
+    "extra_flags": "--approve-for-me",
+    "effort_levels": ["low", "medium", "high", "xhigh", "max"],
+    "default_effort": "medium",
+    "cost_class": "standard",
+    "aliases": ["gpt-terra", "gpt-6.1-terra"]
+  },
+  {
     "id": "codex-luna",
     "cli": "codex",
     "model": "gpt-luna",
@@ -90,6 +100,17 @@
     "effort_levels": ["low", "medium", "high", "max"],
     "default_effort": "max",
     "cost_class": "economy"
+  },
+  {
+    "id": "pi-openai-terra",
+    "cli": "pi",
+    "provider": "openai",
+    "model": "gpt-6.1-terra",
+    "requires_model": true,
+    "effort_levels": ["low", "medium", "high", "max"],
+    "default_effort": "medium",
+    "cost_class": "standard",
+    "aliases": ["pi-terra"]
   },
   {
     "id": "pi-haiku",

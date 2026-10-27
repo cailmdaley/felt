@@ -193,7 +193,7 @@ A view-only TUI attach supplies no context override.
 
 The Go registry owns `developer_instructions` on base agent records and projects it through both `shuttle agents resolve --json` and `shuttle show --json`; the daemon consumes that resolved field.
 For example, a custom record can carry `"developer_instructions": "Keep the verification evidence."` alongside `"extra_flags": "--approve-for-me"`.
-The shipped `codex-sol`, `codex-luna`, and `codex-astra` records use models `gpt-sol`, `gpt-luna`, and `gpt-astra`, default efforts `low`, `max`, and `medium`, and `--approve-for-me`.
+The shipped `codex-terra`, `codex-sol`, `codex-luna`, and `codex-astra` records use models `gpt-terra`, `gpt-sol`, `gpt-luna`, and `gpt-astra`, default efforts `medium`, `low`, `max`, and `medium`, and `--approve-for-me`.
 Model families resolve through the Go CLI's model catalog; effort overrides remain registry-owned.
 The managed renderer maps `--approve-for-me` and `--not-so-yolo` to `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, and `sandbox: workspace-write`.
 It maps `--dangerously-bypass-approvals-and-sandbox` to `approvalPolicy: never` and `sandbox: danger-full-access`.
