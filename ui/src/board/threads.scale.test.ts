@@ -48,6 +48,34 @@ function counted<T extends object>(target: T, names: readonly (keyof T)[], run: 
 /** Growing the input fourfold grows linear work about fourfold; a quadratic regression gives about sixteen. */
 const LINEAR = 6
 
+describe('a family of many threads is still one row', () => {
+  // A root in Your turn over ten working threads; a working root over twelve threads in Your turn.
+  const family = (rootPhase: string, threadPhase: string, n: number) => parseCompositeFeed({ host: 'owner', fibers: [['cmbx', null, rootPhase], ...Array.from({ length: n }, (_, k) => [`cmbx/t${k}`, 'cmbx', threadPhase])]
+    .map(([id, parent, phase]) => ({ origin: 'owner', felt_store: '/store', path: `${id}.md`, orchestrator: parent,
+      fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
+      runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
+  const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
+    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} }).renderNowSection(board.now, {})
+  it('a root in Your turn over ten working threads is the root, with the workers as words', () => {
+    const board = buildKanbanResponseFromComposite(family('waiting', 'working', 10))
+    const desk = draw(board)
+    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
+    expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx')
+    expect(desk.querySelector('.kbn-thread-count')!.textContent).toBe('10 working')
+    expect(desk.querySelector('.kbn-family-asks')).toBeNull()
+  })
+  it('a working root over twelve askers leads with the first, lists three, and folds nine', () => {
+    const board = buildKanbanResponseFromComposite(family('working', 'waiting', 12))
+    const desk = draw(board)
+    expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
+    expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx/t0')
+    expect(desk.querySelector('.kbn-card-crumb')!.textContent).toBe('cmbx /\u00a0')
+    expect([...desk.querySelectorAll('.kbn-family-ask-name')].map(el => el.textContent)).toEqual(['cmbx/t1', 'cmbx/t2', 'cmbx/t3'])
+    expect(desk.querySelector('.kbn-family-more')!.textContent).toBe('+8 more')
+    expect(desk.querySelector('.kbn-thread-count')!.textContent).toBe('1 working')
+  })
+})
+
 describe('thread read model at fleet scale', () => {
   for (const [name, shape] of [['one deep chain', chain()], ['groups of twenty', groups()]] as const) {
     it(`builds ${N} constitutions as ${name} without per-card graph rebuilds`, () => {
@@ -62,7 +90,9 @@ describe('thread read model at fleet scale', () => {
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
         stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
-      expect(desk.querySelectorAll('.kbn-thread-count').length).toBeGreaterThan(0)
+      // Each tree is one row; a family's many askers fold to three sub-lines and a `+N more`.
+      expect(desk.querySelectorAll('.kbn-card')).toHaveLength(threadIndexFor(board).frontier().filter(c => board.now.inFlight.includes(c)).length)
+      for (const asks of desk.querySelectorAll('.kbn-family-asks')) expect(asks.querySelectorAll('.kbn-family-ask').length).toBeLessThanOrEqual(3)
       expect(desk.querySelector('.kbn-thread-tree')).toBeNull()
       expect(threadIndexFor(board)).toBe(threadIndexFor(board))
       expect(threadIndexBuilds()).toBe(before + 1)
@@ -76,12 +106,12 @@ describe('thread read model at fleet scale', () => {
     }
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })
-  it('projects and counts the frontier in linear work for a deep chain', () => {
+  it('projects the frontier and reads every family in linear work for a deep chain', () => {
     const work = (size: number) => counted(Map.prototype, ['get', 'set', 'has', 'delete'], () => {
       const board = buildKanbanResponseFromComposite(feed(chain(size)))
       const index = threadIndexFor(board)
       index.frontier()
-      for (const card of boardCards(board)) index.awakeCounts(card)
+      for (const card of boardCards(board)) index.family(card)
     })
     expect(work(N) / work(N / 4)).toBeLessThan(LINEAR)
   })

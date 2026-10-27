@@ -30,8 +30,8 @@ describe('the Desk reads at the board label size', () => {
     expect(px(rule(deskRows, '.kbn-now-board .kbn-col-title')['font-size'])).toBeLessThan(38)
   })
 
-  it('draws quiet ancestry smaller than the name and keeps it on one line', () => {
-    const row = rule(frontier, '.kbn-card-ancestry')
+  it('draws a thread crumb smaller than the name and keeps it on one line', () => {
+    const row = rule(frontier, '.kbn-card-crumb')
     expect(px(row['font-size'])).toBeLessThan(14)
     expect(row['white-space']).toBe('nowrap')
     expect(row.color).toBe('var(--kbn-ink-muted)')

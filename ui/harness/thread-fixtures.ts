@@ -65,3 +65,44 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
     example.bodies[id] = `## Desired State\n\n${name}.\n\n## Status\n\nEvidence ready.`
   }
 }
+
+/**
+ * One Desk row per family, placed by the most urgent need in its tree: a root
+ * in Your turn over ten workers, a working root over four askers and another
+ * over seven, a resting root whose only life is a thread, and a root awaiting
+ * review while its threads work.
+ */
+export function addFamilyFixtures(example: WorkspaceExample, now: number): void {
+  example.feed.fibers = []
+  type Row = { id: string; name: string; parent?: string; status: string; phase?: string; horizon?: string; ask?: boolean; age?: number }
+  const rows: Row[] = [
+    { id: 'cmbx', name: 'CMB-lensing cross-correlation', status: 'active', phase: 'waiting', age: 14 },
+    ...Array.from({ length: 10 }, (_, n): Row => ({ id: `cmbx/patch-${n + 1}`, name: `Reconstruct patch ${n + 1}`, parent: 'cmbx', status: 'active', phase: 'working' })),
+    { id: 'shear', name: 'Cosmic shear null tests', status: 'active', phase: 'working' },
+    { id: 'shear/psf', name: 'Choose the PSF leakage model', parent: 'shear', status: 'active', phase: 'attention', ask: true, age: 3 },
+    { id: 'shear/bmodes', name: 'B-mode covariance', parent: 'shear', status: 'active', phase: 'waiting', age: 9 },
+    { id: 'shear/blinding', name: 'Blinding scheme', parent: 'shear', status: 'active', phase: 'waiting', age: 22 },
+    { id: 'shear/masks', name: 'Mask apodisation', parent: 'shear', status: 'active', phase: 'waiting', age: 41 },
+    { id: 'kinlens', name: 'Kinematic lensing pilot', status: 'open', horizon: 'stashed' },
+    { id: 'kinlens/rotation', name: 'Rotation-curve priors', parent: 'kinlens', status: 'open', horizon: 'stashed' },
+    { id: 'kinlens/rotation/fit', name: 'Fit the Tully-Fisher scatter', parent: 'kinlens/rotation', status: 'active', phase: 'working' },
+    { id: 'pipeline', name: 'Pipeline orchestration', status: 'closed' },
+    { id: 'pipeline/slurm', name: 'SLURM allocation sizing', parent: 'pipeline', status: 'active', phase: 'working' },
+    { id: 'pipeline/containers', name: 'Container rebuild', parent: 'pipeline', status: 'active', phase: 'working' },
+    { id: 'survey', name: 'Survey footprint audit', status: 'active', phase: 'working' },
+    ...Array.from({ length: 7 }, (_, n): Row => ({ id: `survey/tile-${n + 1}`, name: `Tile ${n + 1} depth check`, parent: 'survey', status: 'active', phase: 'waiting', age: 5 + n * 6 })),
+  ]
+  for (const row of rows) {
+    const at = new Date(now - (row.age ?? 30) * 60000)
+    example.feed.fibers.push({
+      origin: WORKSPACE_HOST, felt_store: '/fixture-store/workspace', path: `${row.id}/constitution.md`, orchestrator: row.parent,
+      fiber: { id: row.id, uid: row.id, name: row.name, status: row.status, horizon: row.horizon,
+        created_at: new Date(now - 3600000).toISOString(),
+        closed_at: row.status === 'closed' ? new Date(now - 60000).toISOString() : undefined,
+        shuttle: { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
+          ask: row.ask ? { text: 'Which leakage model?', at: at.toISOString() } : undefined } },
+      runtime: row.phase ? { state: 'running', phase: row.phase, session_uuid: `session-${row.id}`, last_activity_at: at.getTime() } : null,
+    })
+    example.bodies[row.id] = `## Desired State\n\n${row.name}.\n\n## Status\n\nFamily fixture.`
+  }
+}

@@ -62,3 +62,42 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     } finally { vi.unstubAllGlobals() }
   })
 })
+
+describe('a family sits where the most urgent need in its tree puts it', () => {
+  const root = (over: Partial<KanbanCard> = {}) => thread({ id: 'cmbx', status: 'active', workerState: 'running', runtimePhase: 'working', ...over })
+  const kid = (id: string, over: Partial<KanbanCard>) => thread({ id: `cmbx/${id}`, orchestrator: 'cmbx', status: 'active', ...over })
+  const working = (id: string) => kid(id, { workerState: 'running', runtimePhase: 'working' })
+  const yours = (id: string) => kid(id, { workerState: 'running', runtimePhase: 'waiting' })
+  const review = (id: string) => kid(id, { status: 'closed' })
+  const place = (cards: KanbanCard[]) => {
+    const index = new ThreadIndex(cards), rows = index.frontier()
+    expect(rows).toHaveLength(1)
+    const family = index.family(rows[0])
+    return { lead: rows[0].id, need: family.need, askers: family.askers.map(c => c.id), others: family.others }
+  }
+  it('Your turn outranks a verdict, which outranks a live worker', () => {
+    expect(place([root(), review('r'), yours('y')])).toMatchObject({ lead: 'cmbx/y', need: 'yours', others: { review: 1, working: 1 } })
+    expect(place([root(), review('r'), working('w')])).toMatchObject({ lead: 'cmbx/r', need: 'review', others: { yours: 0, working: 2 } })
+    expect(place([root({ workerState: undefined, runtimePhase: undefined, status: 'open', effectiveHorizon: 'stashed' }), working('w')]))
+      .toMatchObject({ lead: 'cmbx/w', need: 'working', others: { working: 0 } })
+  })
+  it('the root leads when it holds the winning need itself, and its kin follow in tree order', () => {
+    expect(place([root({ runtimePhase: 'waiting' }), yours('a'), yours('b'), working('w')]))
+      .toEqual({ lead: 'cmbx', need: 'yours', askers: ['cmbx', 'cmbx/a', 'cmbx/b'], others: { yours: 0, review: 0, working: 1 } })
+  })
+  it('Working lists no sub-lines: the other workers are a count', () => {
+    expect(place([root(), working('a'), working('b')])).toEqual({ lead: 'cmbx', need: 'working', askers: ['cmbx'], others: { yours: 0, review: 0, working: 2 } })
+  })
+  it('an armed root without a worker still leads a tree whose only life is a working thread', () => {
+    expect(place([root({ workerState: undefined, runtimePhase: undefined }), working('w')])).toMatchObject({ lead: 'cmbx', need: 'working', others: { working: 1 } })
+  })
+  it('a quiet tree is its root, wherever the root rests', () => {
+    expect(place([root({ status: 'open', effectiveHorizon: 'stashed', workerState: undefined, runtimePhase: undefined }), kid('d', { status: 'open' })]))
+      .toEqual({ lead: 'cmbx', need: null, askers: ['cmbx'], others: { yours: 0, review: 0, working: 0 } })
+  })
+  it('every node of the tree reads the same family', () => {
+    const cards = [root(), yours('y'), working('w')]
+    const index = new ThreadIndex(cards)
+    for (const c of cards) expect(index.family(c).lead.id).toBe('cmbx/y')
+  })
+})

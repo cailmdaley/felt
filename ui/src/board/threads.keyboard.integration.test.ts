@@ -17,7 +17,7 @@ interface Internals {
 let board: KanbanModal, inside: Internals
 let mobile = false
 const head = card({ id: 'hub', uid: 'hub-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
-const ask = card({ id: 'hub/ask', uid: 'ask-uid', orchestrator: 'hub-uid', status: 'active', ask: { text: 'Which cut?', at: '2026-07-02T12:00:00Z' }, tags: ['pinned'] })
+const ask = card({ id: 'hub/work', uid: 'ask-uid', orchestrator: 'hub-uid', status: 'active', workerState: 'running', runtimePhase: 'working', tags: ['pinned'] })
 const after = card({ id: 'after', uid: 'after-uid', status: 'active', workerState: 'running', runtimePhase: 'working' })
 const data = () => response({ now: { drafts: [], inFlight: [head, after], awaitingReview: [] }, threads: [ask] })
 function draw(): void { inside.lastResponse = data(); inside.render(inside.lastResponse) }

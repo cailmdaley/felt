@@ -19,8 +19,6 @@ export interface KanbanCard {
   /** Thread results and messages waiting for its next worker while it has none. */
   pendingResults?: number
   threadSummary?: { unfinished: number; waiting: number; working: number; toReview: number; drafts: number; archived: number }
-  awakeDescendants?: number
-  waitingDescendants?: number
   id: string
   /** Intrinsic frontmatter ULID when present. */
   uid?: string

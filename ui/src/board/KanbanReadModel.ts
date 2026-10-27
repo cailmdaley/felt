@@ -81,7 +81,7 @@ export function projectDeskFrontier(response: KanbanResponse): KanbanResponse {
   const cards = candidates.filter(card => { const key = threadKey(card); if (seen.has(key)) return false; seen.add(key); return true });
   const index = new ThreadIndex(cards);
   const visible = new Set(index.frontier());
-  const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, ...index.awakeCounts(card), threadSummary: index.summary(card) }));
+  const rows = cards.filter(card => visible.has(card)).map(card => ({ ...card, threadSummary: index.summary(card) }));
   const at = (column: string) => rows.filter(card => deskColumn(card) === column);
   const now = { drafts: at('drafts').sort(byCreatedAtDesc), inFlight: at('inFlight').sort(byInFlightBand), awaitingReview: at('awaitingReview').sort(byClosedAtDesc) };
   const stash = at('resting'), roles = at('roles');
@@ -282,10 +282,7 @@ function assembleSurfaces(
   const allCards = classified.map(row => row.card);
   const threadIndex = new ThreadIndex(allCards);
   const frontier = new Set(threadIndex.frontier());
-  for (const card of allCards) {
-    card.threadSummary = threadIndex.summary(card);
-    Object.assign(card, threadIndex.awakeCounts(card));
-  }
+  for (const card of allCards) card.threadSummary = threadIndex.summary(card);
   // Keep every non-row available to the constitution view and its rail.
   const threads = allCards.filter(card => !frontier.has(card));
   for (const { card, column } of classified) {

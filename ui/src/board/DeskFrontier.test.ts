@@ -7,13 +7,13 @@ import { card } from './testFixtures.js'
 const now = Date.parse('2026-07-02T12:00:00Z')
 it.each([
   ['waiting', 7, '7m'], ['identity_pending', 4, '4m'], ['waiting', 420, '7h'], ['working', 11, '11m'],
-])('keeps the %s age before the awake count and menu without a state word or dot', (phase, minutes, elapsed) => {
+])('keeps the %s age before the family tail and menu without a state word or dot', (phase, minutes, elapsed) => {
   const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: phase, lastActivityAt: now - minutes * 60000, workerStartedAt: now - minutes * 60000 })
-  const child = card({ id: 'hub/ask', orchestrator: parent.id, status: 'active', ask: { text: 'Which?', at: '2026-07-02T12:00:00Z' } })
+  const child = card({ id: 'hub/work', orchestrator: parent.id, status: 'active', workerState: 'running', runtimePhase: 'working' })
   const host = document.createElement('div'), end = document.createElement('div'), menu = document.createElement('button')
   menu.className = 'kbn-card-menu'; menu.textContent = '•••'; end.append(menu); host.append(end)
   installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
-  expect([...end.children].map(el => el.className)).toEqual(['kbn-row-elapsed', 'kbn-thread-count kbn-thread-count-waiting', 'kbn-card-menu'])
+  expect([...end.children].map(el => el.className)).toEqual(['kbn-row-elapsed', 'kbn-thread-count', 'kbn-card-menu'])
   const age = end.querySelector('.kbn-row-elapsed')!
   expect(age.textContent).toBe(elapsed)
   expect(age.childElementCount).toBe(0)

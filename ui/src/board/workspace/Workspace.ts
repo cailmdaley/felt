@@ -330,17 +330,12 @@ export class Workspace {
       ...inColumn('resting'),
     ]
   }
-  /** An awake ancestor holds a folded thread's place in the Desk order. */
+  /** A family's Desk row holds every node's place in the Desk order. */
   private sidebarRoot(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
-    if (!index) return card
-    let root = index.card(card)
-    for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) {
-      if (index.awake(parent)) root = parent
-    }
-    return root
+    return index ? index.family(index.card(card)).lead : card
   }
-  /** A frontier card earns its own column; a folded thread follows its awake ancestor. */
+  /** A family's row earns its own column; every other node of the family follows that row. */
   private sidebarPlace(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
     return deskColumn(root)

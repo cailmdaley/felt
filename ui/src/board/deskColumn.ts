@@ -17,9 +17,9 @@ export function deskColumn(card: KanbanCard) {
 const LIFECYCLE: readonly string[] = ['drafts', 'inFlight', 'awaitingReview', 'tempered', 'composted']
 /**
  * The lifecycle column a card holds on its own account, or null when it rests
- * (Resting, the timeline, the Roles). A root promoted onto the Desk for its
- * threads is drawn in the column they ask for; this is where a move, a launch
- * or a verdict on the root itself starts from.
+ * (Resting, the timeline, the Roles). A family's Desk row is the node whose
+ * own column this is, so a move, a launch or a verdict from the row starts
+ * here.
  */
 export function ownColumn(card: KanbanCard): ColumnKind | null {
   const column = deskColumn(card)

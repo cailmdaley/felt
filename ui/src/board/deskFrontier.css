@@ -1,7 +1,21 @@
-.kbn-card-ancestry { flex-basis: 100%; grid-column: 2 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--kbn-ink-muted); font-size: calc(11px * var(--kbn-type-scale, 1)); line-height: 1.3; }
-.kbn-card-ancestry button { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
-.kbn-card-ancestry button:hover { color: var(--kbn-ink); }
+/* A thread's row names its family quietly, before its own title. */
+.kbn-card-crumb { white-space: nowrap; font-size: calc(12px * var(--kbn-type-scale, 1)); font-weight: 400; color: var(--kbn-ink-muted); }
+.kbn-card-crumb-root { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.kbn-card-crumb button { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
+.kbn-card-crumb button:hover { color: var(--kbn-ink); }
 .kbn-thread-count { flex: none; font: inherit; font-size: calc(12px * var(--kbn-type-scale, 1)); white-space: nowrap; color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 0 3px; cursor: pointer; }
-.kbn-thread-count-waiting { color: var(--kbn-owed-ink); font-weight: 700; }
+.kbn-thread-count:hover { color: var(--kbn-ink); }
 .kbn-row-elapsed { flex: none; font: 400 calc(10.5px * var(--kbn-type-scale, 1))/1 var(--font-mono, 'JetBrains Mono', monospace); font-variant-numeric: oldstyle-nums tabular-nums; text-transform: uppercase; color: var(--kbn-ink-muted); white-space: nowrap; }
-.kbn-thread-count:focus-visible, .kbn-card-ancestry button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+/* The others asking the same thing: one indented line each, under the title. */
+.kbn-family-asks { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; gap: 1px; margin-top: 3px; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
+.kbn-family-ask { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 6px; }
+.kbn-family-ask .constitution-state-dot { transform: scale(0.8); }
+.kbn-family-ask-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; font-size: calc(12.5px * var(--kbn-type-scale, 1)); line-height: 1.5; color: var(--kbn-ink-soft); background: transparent; border: 0; padding: 0; cursor: pointer; }
+.kbn-family-ask-name:hover { color: var(--kbn-ink); }
+.kbn-family-more { align-self: flex-start; font: inherit; font-size: calc(12px * var(--kbn-type-scale, 1)); color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 0 0 0 6px; cursor: pointer; }
+.kbn-family-more:hover { color: var(--kbn-ink); }
+.kbn-thread-count:focus-visible, .kbn-card-crumb button:focus-visible, .kbn-family-ask-name:focus-visible, .kbn-family-more:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-card-crumb-root { max-width: 7.5em; }
+  .kbn-family-ask-name, .kbn-family-more { min-height: 30px; font-size: 14px; }
+}

@@ -10,6 +10,25 @@ export const waitingWords = (n: number): string => `${n} waiting for its next wo
 export const THREAD_LABEL: Record<ThreadState, string> = {
   waiting: 'Waiting', 'to-review': 'To review', working: 'Working', drafts: 'Drafts', roles: 'Roles', resting: 'Resting', archived: 'Archived',
 }
+/**
+ * What a family needs from the human, most urgent first. Its one Desk row
+ * sits where the most urgent need anywhere in the tree puts it.
+ */
+export type FamilyNeed = 'yours' | 'review' | 'working'
+const FAMILY_NEEDS: readonly FamilyNeed[] = ['yours', 'review', 'working']
+/** Each need as the row's tail words it: `2 working · 1 to review`. */
+export const NEED_WORD: Readonly<Record<FamilyNeed, string>> = { yours: 'waiting', review: 'to review', working: 'working' }
+export interface Family {
+  root: KanbanCard
+  /** The row: the node that set the family's column, the root when the tree is quiet. */
+  lead: KanbanCard
+  /** The family's most urgent need, or null when the tree asks nothing and the root rests where it rests. */
+  need: FamilyNeed | null
+  /** Every node sharing a need of the human's, lead first; the lead alone for Working and a quiet tree. */
+  askers: KanbanCard[]
+  /** Nodes elsewhere in the tree by need, the row's own need counted only for Working's other workers. */
+  others: Record<FamilyNeed, number>
+}
 const STATE_ORDER: readonly ThreadState[] = ['waiting', 'to-review', 'working', 'drafts', 'roles', 'resting', 'archived']
 /**
  * A thread's state: the Desk column it would sit in (`deskColumn`), with
@@ -49,7 +68,7 @@ export class ThreadIndex {
   private readonly states = new Map<string, ThreadState>()
   private readonly ancestryTitles = new Map<string, string>()
   private readonly sums = new Map<string, ThreadSummary>()
-  private readonly awakeSums = new Map<string, { awakeDescendants: number; waitingDescendants: number }>()
+  private readonly families = new Map<string, Family>()
   /** A UID proves mirrored identity; without it, host/store/path stays distinct. */
   private readonly firstOf = new Map<string, string>()
 
@@ -87,6 +106,7 @@ export class ThreadIndex {
       else this.kids.set(ownerKey, [this.cards.get(key)!])
     }
     this.summarize()
+    this.gather()
   }
 
   /** A malformed feed can name a loop; the edge that closes it is dropped, so every walk ends. */
@@ -120,11 +140,7 @@ export class ThreadIndex {
       const children = this.kids.get(key)
       if (!children) continue
       const sum = { ...EMPTY }
-      const awakeSum = { awakeDescendants: 0, waitingDescendants: 0 }
       for (const child of children) {
-        const belowAwake = this.awakeCounts(child)
-        awakeSum.awakeDescendants += belowAwake.awakeDescendants + Number(this.awake(child))
-        awakeSum.waitingDescendants += belowAwake.waitingDescendants + Number(this.awake(child) && turnOf(child).yours)
         const childKey = this.key(child), below = this.sums.get(childKey) ?? EMPTY
         sum.unfinished += below.unfinished; sum.waiting += below.waiting; sum.working += below.working
         sum.toReview += below.toReview; sum.drafts += below.drafts; sum.archived += below.archived
@@ -139,8 +155,40 @@ export class ThreadIndex {
         }
       }
       this.sums.set(key, sum)
-      this.awakeSums.set(key, awakeSum)
     }
+  }
+
+  /**
+   * One family per tree, placed by what the whole tree needs from the human:
+   * Your turn, then a verdict, then a live worker; a quiet tree is its root.
+   * Every node of the tree reads the same family.
+   */
+  private gather(): void {
+    for (const rootKey of this.states.keys()) {
+      if (this.parents.has(rootKey)) continue
+      const root = this.cards.get(rootKey)!
+      const nodes = [root, ...this.subtree(root)]
+      const needs = nodes.map(node => this.need(node))
+      const need = FAMILY_NEEDS.find(n => needs.includes(n)) ?? null
+      const askers = need ? nodes.filter((_, n) => needs[n] === need) : [root]
+      // A question leads Your turn, as it leads the band; tree order otherwise.
+      if (need === 'yours') askers.sort((a, b) => Number(turnOf(b).turn === 'question') - Number(turnOf(a).turn === 'question'))
+      const lead = need === 'working' && needs[0] !== 'working' && this.state(root) === 'working' && !root.held ? root : askers[0]
+      const others: Record<FamilyNeed, number> = { yours: 0, review: 0, working: 0 }
+      for (const n of needs) if (n && n !== need) others[n]++
+      // Working asks nothing of the human: its other workers are a count, not lines.
+      const shown = need === 'working' ? [lead] : askers
+      if (need === 'working') others.working = askers.filter(card => card !== lead).length
+      const family: Family = { root, lead, need, askers: shown, others }
+      for (const node of nodes) this.families.set(this.key(node), family)
+    }
+  }
+  /** What one node asks of the human, if anything: an armed thread without a worker asks nothing. */
+  private need(card: KanbanCard): FamilyNeed | null {
+    const state = this.state(card)
+    if (state === 'waiting') return 'yours'
+    if (state === 'to-review') return 'review'
+    return state === 'working' && hasLiveWorker(card) ? 'working' : null
   }
 
   /** The card for a fiber named by uid, or by id when felt gave it none. */
@@ -170,23 +218,15 @@ export class ThreadIndex {
     return result
   }
   summary(card: KanbanCard): ThreadSummary { return this.sums.get(this.key(card)) ?? EMPTY }
-  /** Awake is an observed worker, a human turn, or a pending verdict; armed alone isn't awake. */
-  awake(card: KanbanCard): boolean {
-    return hasLiveWorker(card) || turnOf(card).yours || this.state(card) === 'to-review'
+  /** The family a node belongs to: its tree's root, the row that stands for it, and who in it is asking. */
+  family(card: KanbanCard): Family {
+    return this.families.get(this.key(card)) ?? { root: card, lead: card, need: null, askers: [card], others: { yours: 0, review: 0, working: 0 } }
   }
-  /** Topmost awake nodes, or the root alone when the entire tree is quiet. */
+  /** The Desk's rows: each family's lead, once, in root order. */
   frontier(): KanbanCard[] {
     const rows: KanbanCard[] = []
-    const pending = [...this.states.keys()].filter(key => !this.parents.has(key)).map(key => this.cards.get(key)!).reverse()
-    while (pending.length) {
-      const card = pending.pop()!
-      if (this.awake(card) || (!this.parentOf(card) && !this.awakeCounts(card).awakeDescendants)) rows.push(card)
-      else for (const child of [...this.children(card)].reverse()) pending.push(child)
-    }
+    for (const key of this.states.keys()) if (!this.parents.has(key)) rows.push(this.families.get(key)!.lead)
     return rows
-  }
-  awakeCounts(card: KanbanCard): { awakeDescendants: number; waitingDescendants: number } {
-    return this.awakeSums.get(this.key(card)) ?? { awakeDescendants: 0, waitingDescendants: 0 }
   }
   /** Cached parent-chain tooltips keep deep rail rendering linear in graph reads. */
   ancestryTitle(card: KanbanCard): string {
