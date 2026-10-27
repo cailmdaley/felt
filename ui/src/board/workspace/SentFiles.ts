@@ -38,8 +38,26 @@ export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: 
   return row
 }
 
+/** Sent files shown before the rest fold behind a "Show N more" toggle. */
+export const SENT_FILES_SHOWN = 4
+
+/**
+ * Fold every row past the newest four behind a toggle that expands in place.
+ * `expanded` is the caller's memory of the toggle, `toggle` repaints on a flip.
+ */
+export function foldSentFiles(rows: HTMLElement[], expanded: boolean, toggle: (expanded: boolean) => void, className: string): HTMLElement[] {
+  if (rows.length <= SENT_FILES_SHOWN) return rows
+  const more = rows.length - SENT_FILES_SHOWN
+  const button = document.createElement('button')
+  button.type = 'button'; button.className = className; button.dataset.part = 'sent-files-more'
+  button.textContent = expanded ? 'Show fewer' : `Show ${more} more`
+  button.setAttribute('aria-expanded', String(expanded))
+  button.addEventListener('click', () => toggle(!expanded))
+  return [...(expanded ? rows : rows.slice(0, SENT_FILES_SHOWN)), button]
+}
+
 /** The page sheet's list of sent files; reading a file clears its new mark. */
-export function sentFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void): HTMLElement {
+export function sentFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void, expanded = false, toggle: (expanded: boolean) => void = (): void => {}): HTMLElement {
   const section = document.createElement('section')
   section.className = 'ws-sent-files'
   section.setAttribute('aria-label', 'Sent files')
@@ -50,10 +68,11 @@ export function sentFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet
   if (!files.length) {
     const empty = document.createElement('p'); empty.textContent = 'No files sent yet.'; section.append(empty)
   }
-  for (const doc of files) {
+  const rows = files.map(doc => {
     const row = sentFileRow(channel, doc, selected, fresh, choose, 'ws-sent-file')
     row.dataset.part = 'page-sheet-row'
-    section.append(row)
-  }
+    return row
+  })
+  section.append(...foldSentFiles(rows, expanded, toggle, 'ws-sent-files-more'))
   return section
 }

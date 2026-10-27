@@ -1010,7 +1010,7 @@ export class Dock {
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-foot ws-chat-status'
     foot.append(errorEl, statusEl)
-    const verdict = this.verdictControlsFor(card, (): HTMLElement => rest?.closest('dialog') ? settingsItem : rest!)
+    const verdict = this.verdictControlsFor(card, (): HTMLElement => rest?.closest('.ws-settings-menu') ? settingsItem : rest!)
     verdict.setAttribute('role', 'group')
     verdict.setAttribute('aria-label', 'Verdict')
     // The undo window stays visible beside the header controls.
@@ -1063,7 +1063,7 @@ export class Dock {
       if (this.openSettings) this.openSettings(drawer, settingsItem)
       else drawer.hidden = !drawer.hidden
     })
-    settingsItem.setAttribute('aria-haspopup', 'dialog')
+    settingsItem.setAttribute('aria-haspopup', 'true')
     settingsItem.setAttribute('aria-expanded', 'false')
     const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
@@ -1081,7 +1081,7 @@ export class Dock {
     // A phone action leaves the sheet before opening a page or a confirmation.
     for (const button of [constitutionItem, consoleItem, ...verdict.querySelectorAll('button')]) {
       button.addEventListener('click', event => {
-        if (!button.closest('dialog[open]') || !this.closeSettings) return
+        if (!button.closest('.ws-settings-menu:not([hidden])') || !this.closeSettings) return
         event.stopImmediatePropagation()
         this.closeSettings(() => button.click())
       }, { capture: true })

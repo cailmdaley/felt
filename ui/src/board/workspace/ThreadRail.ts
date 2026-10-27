@@ -5,7 +5,7 @@ import { deskColumn } from '../deskColumn.js'
 import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
 import { turnOf } from '../turn.js'
 import { documentLabelMetadata, lastSent, type Channel, type DocKey } from './documents.js'
-import { sentDocuments, sentFileRow } from './SentFiles.js'
+import { foldSentFiles, sentDocuments, sentFileRow } from './SentFiles.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
@@ -32,12 +32,16 @@ export class ThreadRail {
   private readonly fileList = document.createElement('div')
   private signature = ''
   private filesSignature = ''
+  private filesExpanded = false
+  private lastFiles: { channel: Channel; selected: DocKey; fresh: ReadonlySet<DocKey>; choose: (key: DocKey) => void } | null = null
   private width: number | null = null
   private card: KanbanCard | null = null
   /** Every thread in the family besides the open one is archived. */
   private familyQuiet = false
   /** Family presence is independent of the viewport's rail presentation. */
   hasFamily = false
+  /** Another thread in the family waits on the human: a question, or something blocked. */
+  needsHuman = false
   /** The open conversation has sent at least one file. */
   hasFiles = false
   /** The rail has something to draw: threads beside the open one, or sent files. */
@@ -141,6 +145,7 @@ export class ThreadRail {
     const others = [scope, ...descendants].filter(c => !(c.id === card.id && c.originId === card.originId))
     this.hasFamily = others.length > 0
     this.familyQuiet = others.every(c => threadState(c) === 'archived')
+    this.needsHuman = others.some(c => threadState(c) === 'waiting' && ['question', 'blocked'].includes(turnOf(c).turn))
     this.applyPresence()
     if (window.matchMedia(MOBILE_MEDIA).matches) {
       this.tree.replaceChildren(); this.signature = ''
@@ -158,9 +163,10 @@ export class ThreadRail {
   showFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void): void {
     const docs = sentDocuments(channel)
     this.hasFiles = docs.length > 0
+    this.lastFiles = { channel, selected, fresh, choose }
     this.applyPresence()
     if (window.matchMedia(MOBILE_MEDIA).matches) { this.fileList.replaceChildren(); this.filesSignature = ''; return }
-    const signature = JSON.stringify([channel.uid, channel.owner, new Date().toDateString(), ...docs.map(doc => [doc.key, documentLabelMetadata(doc, doc.name, channel.owner).title, lastSent(doc), fresh.has(doc.key), doc.key === selected])])
+    const signature = JSON.stringify([channel.uid, channel.owner, new Date().toDateString(), this.filesExpanded, ...docs.map(doc => [doc.key, documentLabelMetadata(doc, doc.name, channel.owner).title, lastSent(doc), fresh.has(doc.key), doc.key === selected])])
     if (signature === this.filesSignature) return
     this.filesSignature = signature
     const active = document.activeElement
@@ -168,7 +174,14 @@ export class ThreadRail {
     if (!docs.length) {
       const empty = document.createElement('p'); empty.className = 'ws-rail-files-empty'; empty.textContent = 'No files sent yet.'
       this.fileList.replaceChildren(empty)
-    } else this.fileList.replaceChildren(...docs.map(doc => sentFileRow(channel, doc, selected, fresh, choose, 'ws-rail-file', true)))
+    } else {
+      const rows = docs.map(doc => sentFileRow(channel, doc, selected, fresh, choose, 'ws-rail-file', true))
+      this.fileList.replaceChildren(...foldSentFiles(rows, this.filesExpanded, expanded => {
+        this.filesExpanded = expanded
+        const last = this.lastFiles
+        if (last) this.showFiles(last.channel, last.selected, last.fresh, last.choose)
+      }, 'ws-rail-files-more'))
+    }
     if (focus !== undefined) {
       const target = [...this.fileList.querySelectorAll<HTMLElement>('.ws-rail-file')].find(el => el.dataset.key === focus)
       ;(target ?? this.filesHeading).focus({ preventScroll: true })
@@ -177,7 +190,7 @@ export class ThreadRail {
   /** A conversation with no constitution card has no family to draw. */
   clearFamily(): void {
     this.card = null; this.scope = null; this.index = null
-    this.hasFamily = false; this.familyQuiet = true
+    this.hasFamily = false; this.familyQuiet = true; this.needsHuman = false
     this.tree.replaceChildren(); this.signature = ''
     this.applyPresence()
   }

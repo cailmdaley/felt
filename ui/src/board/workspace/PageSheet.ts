@@ -4,12 +4,11 @@ import './page-sheet.css'
 
 const HISTORY_KEY = 'shuttlePageSheet'
 
-/** Threads and dated sends, with modal focus containment and a browser-Back entry. */
+/** The phone's threads panel: the family, then its sent files, with modal focus containment and a browser-Back entry. */
 export class PageSheet {
   readonly el = document.createElement('dialog')
   private readonly body = document.createElement('div')
   private readonly threads = document.createElement('div')
-  private readonly settings = document.createElement('div')
   private readonly list = document.createElement('div')
   private readonly heading = document.createElement('h2')
   private readonly token = `files:${Math.random().toString(36).slice(2)}`
@@ -17,6 +16,7 @@ export class PageSheet {
   private opener: HTMLElement | null = null
   private afterClose: (() => void) | null = null
   private pendingBack = false
+  private expanded = false
 
   private readonly onChoose: (key: DocKey) => void
   private readonly onVisibility: () => void
@@ -31,10 +31,8 @@ export class PageSheet {
     close.setAttribute('aria-label', 'Close sent files'); close.addEventListener('click', () => this.close())
     const head = document.createElement('div'); head.className = 'ws-page-sheet-head'; head.append(this.heading)
     this.body.className = 'ws-page-sheet-body'
-    this.settings.className = 'ws-sheet-settings'
-    this.settings.dataset.part = 'act'
     this.threads.className = 'ws-page-sheet-threads'
-    this.body.append(this.settings, this.threads, this.list); panel.append(close, head, this.body); this.el.append(panel)
+    this.body.append(this.threads, this.list); panel.append(close, head, this.body); this.el.append(panel)
     this.el.addEventListener('click', event => { if (event.target === this.el) this.close() })
     this.el.addEventListener('cancel', event => { event.preventDefault(); this.close() })
     let start: number | null = null
@@ -50,23 +48,21 @@ export class PageSheet {
     this.model = { channel, selected, fresh }
     if (this.isOpen) this.render()
   }
-  show(opener: HTMLElement, threads: HTMLElement | null = null, settings: HTMLElement | null = null): void {
+  show(opener: HTMLElement, threads: HTMLElement | null = null): void {
     if (this.isOpen || this.pendingBack || !this.model) return
     this.opener = opener
     this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
-    this.settings.replaceChildren(...(settings ? [settings] : []))
-    if (settings) settings.hidden = false
-    this.heading.textContent = settings ? 'Settings' : threads ? 'Threads and sent files' : 'Sent files'
+    this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
     this.el.setAttribute('aria-label', this.heading.textContent)
-    this.el.querySelector('button')?.setAttribute('aria-label', settings ? 'Close settings' : 'Close sent files')
+    this.el.querySelector('button')?.setAttribute('aria-label', 'Close threads and files')
     window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
   }
   private render(): void {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
-    const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)))
-    if (this.threads.hidden && !this.settings.childElementCount) files.querySelector('h3')?.remove()
+    const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)), this.expanded, expanded => { this.expanded = expanded; this.render() })
+    if (this.threads.hidden) files.querySelector('h3')?.remove()
     this.list.replaceChildren(files)
   }
   private open(): void {

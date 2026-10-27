@@ -1,0 +1,9 @@
+.ws-settings-menu {
+  position: fixed; inset: auto; margin: 0; z-index: 30; left: var(--ws-menu-left); top: var(--ws-menu-top);
+  width: var(--ws-menu-width); max-height: var(--ws-menu-height); overflow: auto; overscroll-behavior: contain;
+  box-sizing: border-box; padding: 12px 16px; color: var(--ws-ink);
+  background: var(--ws-paper); border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-control-radius); box-shadow: var(--ws-float);
+}
+.ws-settings-menu[hidden] { display: none; }
+.ws-settings-menu:focus { outline: none; }

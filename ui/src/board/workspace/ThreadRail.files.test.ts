@@ -69,3 +69,31 @@ it('updates live as files arrive, keeping a focused row focused', () => {
   expect(rows.map(r => r.dataset.key)).toEqual(['host-a:/b.png', 'host-a:/a.png'])
   expect(document.activeElement).toBe(rows[1])
 })
+
+it('shows the newest four sent files, then folds the rest behind a toggle that expands in place', () => {
+  const root = card({ id: 'solo' }), rail = new ThreadRail(vi.fn(), vi.fn())
+  rail.show(root, new ThreadIndex([root]))
+  const sent = (n: number): { path: string; time: number }[] => Array.from({ length: n }, (_, i) => ({ path: `/f${i}.png`, time: i + 1 }))
+  const rows = (): string[] => [...rail.el.querySelectorAll<HTMLElement>('.ws-rail-file')].map(row => row.dataset.key!)
+  rail.showFiles(buildChannel({ ...input, sent: sent(4) }), '', new Set(), vi.fn())
+  expect(rows()).toHaveLength(4)
+  expect(rail.el.querySelector('.ws-rail-files-more')).toBeNull()
+  const channel = buildChannel({ ...input, sent: sent(9) })
+  rail.showFiles(channel, '', new Set(), vi.fn())
+  expect(rows()).toEqual([8, 7, 6, 5].map(i => docKey('host-a', `/f${i}.png`, 'host-a')))
+  const more = rail.el.querySelector<HTMLButtonElement>('.ws-rail-files-more')!
+  expect(more.textContent).toBe('Show 5 more')
+  more.click()
+  expect(rows()).toHaveLength(9)
+  expect(rail.el.querySelector('.ws-rail-files-more')!.textContent).toBe('Show fewer')
+})
+
+it('marks a family waiting on the human', () => {
+  const root = card({ id: 'hub' }), rail = new ThreadRail(vi.fn(), vi.fn())
+  const quiet = card({ id: 'hub/quiet', orchestrator: root.id, status: 'closed' })
+  rail.show(root, new ThreadIndex([root, quiet]))
+  expect(rail.needsHuman).toBe(false)
+  const asking = card({ id: 'hub/asking', orchestrator: root.id, status: 'active', ask: { text: 'which cut?', at: '2026-01-01T00:00:00Z' } })
+  rail.show(root, new ThreadIndex([root, quiet, asking]))
+  expect(rail.needsHuman).toBe(true)
+})

@@ -62,7 +62,7 @@ export function registerHeaderBarJourneys(test) {
     }
     // The family's active thread exercises Close as well as the verdicts.
     await page.setViewportSize({ width: 1440, height: 900 })
-    await page.getByRole('button', { name: 'Show threads', exact: true }).click()
+    await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
     await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 701]) {
@@ -185,7 +185,7 @@ export function registerHeaderBarJourneys(test) {
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
       const header = page.locator('.ws-selected .ws-chat-head')
       const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
-      const show = async () => { if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click() }
+      const show = async () => { if (device === 'phone') await page.locator('.ws-rail-toggle').click() }
       const first = () => family.locator(':scope > *').first()
       const rootButton = () => device === 'phone' ? first() : first().locator('.kbn-thread-row')
       for (const name of ['Response analysis', 'Choose the response cut']) {
@@ -289,11 +289,11 @@ export function registerHeaderBarJourneys(test) {
       await sheet.waitFor({ state: 'hidden' })
       assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
       // Overflow actions leave the modal before opening a confirmation or undo window.
-      if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click()
+      await header.getByRole('button', { name: 'Settings', exact: true }).click()
       await chat.getByRole('button', { name: 'Rest', exact: true }).click()
       const rest = page.locator('.kbn-rest-popover')
       await rest.waitFor()
-      assert.equal(await page.locator('.ws-page-sheet[open]').count(), 0)
+      assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       assert.equal(await rest.getAttribute('aria-modal'), 'true')
       assert.equal(await rest.evaluate(el => el.contains(document.activeElement)), true)
       await page.keyboard.press('Escape'); await rest.waitFor({ state: 'hidden' })

@@ -24,6 +24,7 @@ import { stateDot } from '../stateDot.js'
 import { type Verdict } from './Verdicts.js'
 import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeSettleTime, type SwipeSignal } from './PhoneGestures.js'
 import { PageSheet } from './PageSheet.js'
+import { SettingsMenu } from './SettingsMenu.js'
 import { ReportChip } from './ReportChip.js'
 import { phoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
@@ -128,6 +129,7 @@ export class Reader {
   private swiping = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
+  private readonly settingsMenu: SettingsMenu
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly observer: ResizeObserver | null
   private readonly labels = new WeakMap<DocumentFrame, { glyph: HTMLElement; title: HTMLElement; provenance: HTMLElement; expand: HTMLButtonElement }>()
@@ -186,8 +188,8 @@ export class Reader {
     this.sidebarToggle.title = 'Constitutions · s'
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
-    this.railToggle.title = 'Threads and files · ⌘|'
-    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="10" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M10 2.5v11"/></svg>'
+    this.railToggle.title = 'Threads and sent files · ⌘|'
+    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M2.5 3.5h11M5.5 8h8M5.5 12.5h8M3 8h.01M3 12.5h.01"/></svg>'
     this.returnButton = button('ws-return', '‹', () => this.back(), 'Back one level')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
@@ -205,6 +207,7 @@ export class Reader {
     this.navbar = element('nav', 'ws-navbar')
     this.navbar.dataset.part = 'phone-topbar'
     this.navbar.append(this.lead, trail)
+    this.settingsMenu = new SettingsMenu()
     this.pageSheet = new PageSheet(opts.shuttleBase, key => this.openDocument(key), () => this.paintRail())
     this.announcement.setAttribute('aria-live', 'polite')
     this.announcement.setAttribute('aria-atomic', 'true')
@@ -297,7 +300,7 @@ export class Reader {
   show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready, returnAtOrigin = false): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
-    if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide() }
+    if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.hide() }
     if (switching) this.parents.length = 0
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
@@ -423,18 +426,11 @@ export class Reader {
       else this.opts.onReturn()
     }
   }
-  closeSettings(after: () => void): void {
-    if (this.pageSheet.isOpen) this.pageSheet.close(after)
-    else after()
-  }
+  closeSettings(after: () => void): void { this.settingsMenu.close(after) }
+  /** The settings dropdown under its ⚙, kept inside its chat's protected styling boundary. */
   showSettings(content: HTMLElement, opener: HTMLElement): void {
     this.closeMenu()
-    // Keep the settings controls in their chat's protected styling boundary.
-    opener.closest('.ws-chat')?.append(this.pageSheet.el)
-    const card = this.currentCard
-    const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
-    const threads = this.phone.matches && card ? phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))) : null
-    this.pageSheet.show(opener, threads, content)
+    this.settingsMenu.show(content, opener, opener.closest<HTMLElement>('.ws-chat') ?? this.el)
   }
   /** On the desktop the sent files live in the rail; the phone, which has none, and a rail with nothing to draw open the sheet. */
   showSentFiles(): void {
@@ -846,7 +842,8 @@ export class Reader {
     this.paintZen()
     this.railToggle.hidden = !has
     this.railToggle.setAttribute('aria-expanded', String(open))
-    this.railToggle.setAttribute('aria-label', open ? 'Hide threads and files' : 'Show threads and files')
+    this.railToggle.setAttribute('aria-label', open ? 'Hide threads and sent files' : 'Show threads and sent files')
+    this.railToggle.toggleAttribute('data-attention', has && (this.threadRail.needsHuman || this.fresh.size > 0))
   }
   private stagePlaces(): { page: number; sidebar: number } {
     const page = this.selected ? this.host.get(this.selected)?.el.getBoundingClientRect().left ?? 0 : 0
@@ -989,7 +986,7 @@ export class Reader {
     this.sidebarPicker.refresh(this.sidebarShown)
   }
   private readonly keydown = (e: KeyboardEvent): void => {
-    if (this.pageSheet.isOpen) return
+    if (this.pageSheet.isOpen || this.settingsMenu.isOpen) return
     this.keyboardModality()
     if (!this.active || e.isComposing || e.defaultPrevented || blockingDialogOpen()) return
     if ((e.key === 'Enter' || e.key === 'Escape') && (this.picker.el.contains(e.target as Node) || this.sidebarPicker.el.contains(e.target as Node))) return
@@ -1137,6 +1134,7 @@ export class Reader {
     this.stopSwipe()
     this.clearSwipeWatchdog()
     this.pageSheet.dispose()
+    this.settingsMenu.dispose()
     this.observer?.disconnect()
     window.removeEventListener('resize', this.relayout)
     cancelAnimationFrame(this.instantRaf)

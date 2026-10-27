@@ -43,7 +43,7 @@ async function headerAction(p, label) {
   await button.click()
 }
 async function chatMenu(p, label) {
-  const sheet = p.locator('.ws-page-sheet[open]')
+  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
   if (['Settings', 'Sessions'].includes(label) && await sheet.count()) {
     await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }); return
   }
@@ -53,7 +53,7 @@ async function chatMenu(p, label) {
 /** Sent-file rows: the desktop rail's region beneath the threads, or the phone's sheet. */
 async function sentFiles(p) {
   if (p.viewportSize().width > 700) {
-    const sheet = p.locator('.ws-page-sheet[open]')
+    const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
     if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
     if (await p.locator('.ws-reader.ws-rail-off').count()) await p.locator('.ws-rail-toggle').click()
     await p.locator('.ws-rail-files').waitFor()
@@ -65,7 +65,7 @@ async function sentFiles(p) {
   if (!chat) {
     const menu = p.locator('.ws-navbar .ws-phone-document-menu')
     await menu.focus(); await menu.click()
-  } else await selected(p).getByRole('button', { name: 'Settings', exact: true }).click()
+  } else await p.locator('.ws-rail-toggle').click()
   if (!chat) await p.getByRole('button', { name: 'Sent files', exact: true }).click()
   await p.locator('.ws-page-sheet[open]').waitFor()
   return rows
@@ -142,7 +142,7 @@ test('The large transcript pages earlier turns inline, retains them across files
 })
 
 async function choose(p, label) {
-  const sheet = p.locator('.ws-page-sheet[open]')
+  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
   if (await sheet.count() && ['Chat', 'Constitution', 'calibration-report'].includes(label)) {
     await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' })
   }
@@ -175,7 +175,7 @@ const barFind = p => p.locator('.kbn-viewtabs-find input')
 // Leave the reader: the phone's back chevron, or on the desktop the bar's
 // origin tab (the view the reader was opened from), which closes it back there.
 async function leave(p) {
-  const sheet = p.locator('.ws-page-sheet[open]')
+  const sheet = p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])')
   if (await sheet.count()) { await p.keyboard.press('Escape'); await sheet.waitFor({ state: 'hidden' }) }
   if (p.viewportSize().width <= 700) {
     for (let step = 0; step < 32 && await p.locator('.kbn-reader-open').count(); step++) {
@@ -1209,7 +1209,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await effort.click()
     const picker = selected(p).locator('.ws-select-picker')
     const first = await anchoredInView(p, picker, effort, 'Effort list (expanded)')
-    await selected(p).locator('.ws-page-sheet-body').evaluate(el => { el.scrollTop += 20 })
+    await selected(p).locator('.ws-settings-menu').evaluate(el => { el.scrollTop += 20 })
     await p.waitForTimeout(100)
     const after = await anchoredInView(p, picker, effort, 'Effort list (scrolled)')
     assert.ok(Math.abs((after.box.y - after.anchor.y) - (first.box.y - first.anchor.y)) <= 1, 'the list follows its select through a scroll')
@@ -1236,9 +1236,9 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   assert.ok(bar.height <= title.height + 12, `one row: navbar ${bar.height}px for a ${title.height}px title`)
   await choose(p, 'Chat')
   await headerAction(p, 'Settings')
-  await p.locator('.ws-sent-file').first().waitFor()
+  await p.locator('.ws-settings-menu:not([hidden])').waitFor()
   for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    const box = await p.locator(`.ws-page-sheet[open] .kbn-ctl-verdict ${verb}`).boundingBox()
+    const box = await p.locator(`.ws-settings-menu:not([hidden]) .kbn-ctl-verdict ${verb}`).boundingBox()
     assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
   }
 }, { width: 844, height: 390 }, 'false', 'reduce', true)
@@ -2220,7 +2220,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
       assert.ok(box.x >= 0 && box.x + box.width <= viewport.width)
       if (device === 'phone') assert.ok(box.height >= 44)
     }
-    if (device === 'phone') { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' }) }
+    if (device === 'phone') { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])').waitFor({ state: 'hidden' }) }
     await shot('awaiting-review')
     await appFocus(p); await p.keyboard.press('t')
     const line = selected(p).locator('.ws-chat-acts > .ws-verdict-undo')
@@ -2775,7 +2775,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
     assert.ok(await selected(p).locator(control).isVisible())
     if (!phone) await still(p, `hovering ${control}`, () => selected(p).locator(control).hover(), { allow: [`.ws-selected ${control}`] })
   }
-  if (phone) { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' }) }
+  if (phone) { await p.keyboard.press('Escape'); await p.locator('.ws-page-sheet[open], .ws-settings-menu:not([hidden])').waitFor({ state: 'hidden' }) }
   const flightField = selected(p).locator('.kbn-detail-directive')
   await flightField.click()
   assert.deepEqual(unexpected(await layoutShift(p, { regions: ['.ws-selected .ws-chat-head'], act: () => p.keyboard.type(' compare the corrected masks at high ell against the previous run and the run before it') })), [], 'in-flight typing leaves the header as it is')
