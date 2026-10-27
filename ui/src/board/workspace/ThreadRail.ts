@@ -163,6 +163,7 @@ export class ThreadRail {
   showFiles(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>, choose: (key: DocKey) => void): void {
     const docs = sentDocuments(channel)
     this.hasFiles = docs.length > 0
+    if (this.lastFiles && (this.lastFiles.channel.uid !== channel.uid || this.lastFiles.channel.owner !== channel.owner)) this.filesExpanded = false
     this.lastFiles = { channel, selected, fresh, choose }
     this.applyPresence()
     if (window.matchMedia(MOBILE_MEDIA).matches) { this.fileList.replaceChildren(); this.filesSignature = ''; return }
@@ -180,6 +181,7 @@ export class ThreadRail {
         this.filesExpanded = expanded
         const last = this.lastFiles
         if (last) this.showFiles(last.channel, last.selected, last.fresh, last.choose)
+        this.fileList.querySelector<HTMLElement>('[data-part="sent-files-more"]')?.focus({ preventScroll: true })
       }, 'ws-rail-files-more'))
     }
     if (focus !== undefined) {

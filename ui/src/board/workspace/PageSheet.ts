@@ -45,6 +45,7 @@ export class PageSheet {
   }
   get isOpen(): boolean { return this.el.open }
   update(channel: Channel, selected: DocKey, fresh: ReadonlySet<DocKey>): void {
+    if (this.model && (this.model.channel.uid !== channel.uid || this.model.channel.owner !== channel.owner)) this.expanded = false
     this.model = { channel, selected, fresh }
     if (this.isOpen) this.render()
   }
@@ -61,7 +62,7 @@ export class PageSheet {
   private render(): void {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
-    const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)), this.expanded, expanded => { this.expanded = expanded; this.render() })
+    const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)), this.expanded, expanded => { this.expanded = expanded; this.render(); this.list.querySelector<HTMLElement>('[data-part="sent-files-more"]')?.focus({ preventScroll: true }) })
     if (this.threads.hidden) files.querySelector('h3')?.remove()
     this.list.replaceChildren(files)
   }

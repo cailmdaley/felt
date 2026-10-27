@@ -402,11 +402,11 @@ export class Reader {
   /** The phone's sheet leads with the whole family, then its sent files. */
   private openPhonePage(): void {
     const card = this.currentCard
-    if (!this.runSettled || !card) return
+    if (!this.runSettled) return
     this.closeMenu()
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     this.el.append(this.pageSheet.el)
-    this.pageSheet.show(this.railToggle, phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
+    this.pageSheet.show(this.railToggle, !card ? null : phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
   }
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {

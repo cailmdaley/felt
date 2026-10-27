@@ -78,6 +78,8 @@ export class SettingsMenu {
   }
   private readonly keydown = (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return
+    // An open select list inside the menu takes its own Escape first.
+    if ((event.target as Element | null)?.closest?.('.ws-select-picker, [role="listbox"]')) return
     event.preventDefault(); event.stopPropagation()
     this.dismiss(true)
   }
