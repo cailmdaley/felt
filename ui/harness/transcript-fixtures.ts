@@ -133,7 +133,13 @@ function largeTranscript(now: number): string {
  * taller than the page's transcript window.
  */
 function liveTranscript(now: number, updates: number): string {
-  const records = [user(now, -30_000, 'Run the remaining validation batches and report each one as it lands.')]
+  const records = [
+    user(now, -30_000, 'Run the remaining validation batches and report each one as it lands.'),
+    // A thread spawned above everything that follows: its chip resolves against the board's read model.
+    assistant(now, -29_000, [{ type: 'tool_use', id: 'fixture-live-spawn', name: 'Bash', input: { command: 'shuttle thread research/workspace "Validate the mask"' } }]),
+    user(now, -28_800, [{ type: 'tool_result', tool_use_id: 'fixture-live-spawn', content: 'research/workspace/mask-validation\nThread UID: research/workspace/mask-validation 01KVBR4J9EZGYPJ07734SY90P1' }]),
+    assistant(now, -28_500, [{ type: 'text', text: 'Spawned the mask validation as a thread; the batches follow.' }]),
+  ]
   for (let index = 0; index < Math.max(0, Math.min(20, updates)); index++) {
     const update = index + 1
     const at = index * 6000

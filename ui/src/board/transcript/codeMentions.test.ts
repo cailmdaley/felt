@@ -186,13 +186,16 @@ it('uses the plain output UID across a move even when the leaf is ambiguous', as
   expect(band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')?.dataset.constitution).toBe('project-x/moved/new-child')
 })
 
-it('creates a preview list item only while a spawn resolves', async () => {
+it('shows the preview spawn row, a list item kept in place, only while its spawn resolves', async () => {
   const band = makeBand(spawnRecords('project-x/new-child'), false); await settle()
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  const group = band.el.querySelector<HTMLElement>('[data-spawn-preview]')!
+  expect(group.tagName).toBe('LI')
   mentions.update([])
-  expect(band.el.querySelector('li:has([data-spawn-preview])')).toBeNull()
+  expect(group.hidden).toBe(true)
   mentions.update([row('project-x/new-child', 'Working', 'working')])
-  expect(band.el.querySelector('li:has([data-spawn-preview])')).not.toBeNull()
+  expect(group.hidden).toBe(false)
   mentions.update([])
-  expect(band.el.querySelector('li:has([data-spawn-preview])')).toBeNull()
+  expect(group.hidden).toBe(true)
+  expect(band.el.querySelector('[data-spawn-preview]')).toBe(group)
 })

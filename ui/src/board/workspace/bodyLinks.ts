@@ -46,24 +46,31 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     if (candidate.startsWith('[[')) return Object.hasOwn(targets, candidate) ? exact(targets[candidate]) : undefined
     return exact(candidate)
   }
+  // Each write only when it changes something: a poll repaints every chip, and an unchanged chip must stay untouched.
+  const setData = (link: HTMLElement, key: string, value: string | undefined): void => {
+    if (value === undefined) { if (key in link.dataset) delete link.dataset[key] }
+    else if (link.dataset[key] !== value) link.dataset[key] = value
+  }
+  const setAttr = (link: Element, name: string, value: string | null): void => {
+    if (value === null) { if (link.hasAttribute(name)) link.removeAttribute(name) }
+    else if (link.getAttribute(name) !== value) link.setAttribute(name, value)
+  }
   const paint = (link: HTMLAnchorElement, row: ConstitutionMention, source: string): void => {
-    link.classList.add('ws-constitution-chip')
-    link.classList.remove('ws-constitution-chip-missing')
-    link.removeAttribute('aria-disabled')
-    link.dataset.mentionSource ??= source
-    link.dataset.constitutionIdentity = row.uid ?? row.id
-    link.dataset.constitution = row.id
-    link.dataset.origin = row.origin
-    link.dataset.state = row.state
-    if (row.turn) link.dataset.turn = row.turn
-    else delete link.dataset.turn
-    if (link.getAttribute('href') !== '#constitution') link.href = '#constitution'
+    if (!link.classList.contains('ws-constitution-chip')) link.classList.add('ws-constitution-chip')
+    if (link.classList.contains('ws-constitution-chip-missing')) link.classList.remove('ws-constitution-chip-missing')
+    setAttr(link, 'aria-disabled', null)
+    if (link.dataset.mentionSource === undefined) link.dataset.mentionSource = source
+    setData(link, 'constitutionIdentity', row.uid ?? row.id)
+    setData(link, 'constitution', row.id)
+    setData(link, 'origin', row.origin)
+    setData(link, 'state', row.state)
+    setData(link, 'turn', row.turn || undefined)
+    setAttr(link, 'href', '#constitution')
     const label = link.hasAttribute('data-spawn-chip') ? row.name : `${row.name} · ${row.state}`
     if (link.textContent !== label) link.textContent = label
-    link.hidden = false
-    const title = `${row.id}\n${row.state}${row.outcome ? '\n' + row.outcome : ''}`
-    if (link.title !== title) link.title = title
-    link.setAttribute('aria-label', link.hasAttribute('data-spawn-chip') ? `Open ${row.name} — ${row.state.toLowerCase()}` : label)
+    if (link.hidden) link.hidden = false
+    setAttr(link, 'title', `${row.id}\n${row.state}${row.outcome ? '\n' + row.outcome : ''}`)
+    setAttr(link, 'aria-label', link.hasAttribute('data-spawn-chip') ? `Open ${row.name} — ${row.state.toLowerCase()}` : label)
   }
   const scan = (): void => {
     if (disposed) return
@@ -92,14 +99,8 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       }
     }
     for (const group of root.querySelectorAll<HTMLElement>('[data-spawn-preview]')) {
-      const visible = !!group.querySelector('.ws-transcript-spawn-chip:not([hidden])')
-      group.hidden = !visible
-      if (visible && group.parentElement?.tagName !== 'LI') {
-        const item = document.createElement('li')
-        group.replaceWith(item); item.append(group)
-      } else if (!visible && group.parentElement?.tagName === 'LI') {
-        group.parentElement.replaceWith(group)
-      }
+      const hidden = !group.querySelector('.ws-transcript-spawn-chip:not([hidden])')
+      if (group.hidden !== hidden) group.hidden = hidden
     }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     const texts: Text[] = []

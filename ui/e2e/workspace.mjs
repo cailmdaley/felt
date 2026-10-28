@@ -179,6 +179,52 @@ test('The chat never moves under a reader through live polls and snapshot refres
   assert.deepEqual(writes.filter(write => Math.abs(write.to - write.from) < 0.5), [], 'no refresh rewrites the position it already has: each write would stop a scroll in flight')
 })
 
+test('A refresh never changes a painted frame of the chat: no jolt, no pass through the top, nothing above the reader rebuilt', async p => {
+  await p.goto(`${url}&transcript=live`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Chat')
+  const scroller = selected(p).locator('.ws-transcript-scroll')
+  await scroller.getByText(/Run the remaining validation batches/).waitFor()
+  // Let the live fixture grow to its full length, then wait for the spawned thread's chip to resolve.
+  for (let i = 0; i < 22; i++) { await p.clock.fastForward(3100); await frames(p) }
+  await scroller.locator('.ws-transcript-spawn-chip:not([hidden])').first().waitFor()
+  const log = await scroller.evaluate(s => {
+    s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2)
+    const edge = () => s.getBoundingClientRect().top
+    const chip = s.querySelector('.ws-transcript-spawn-chip:not([hidden])')
+    const anchor = [...s.querySelectorAll('.ws-transcript-msg')].find(node => node.getBoundingClientRect().top > edge() + 40)
+    if (!(chip.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) throw new Error('the spawn chip must sit above the reader')
+    const log = { anchor: anchor.dataset.readingKey, frames: [], removed: [] }
+    // Every frame: where the message under the reader sits, and where the scroller is.
+    const sample = () => {
+      const current = document.querySelector('.ws-selected .ws-transcript-scroll')
+      const node = current?.querySelector(`[data-reading-key="${CSS.escape(log.anchor)}"]`)
+      log.frames.push({ same: current === s, top: node ? node.getBoundingClientRect().top - current.getBoundingClientRect().top : null, scrollTop: current?.scrollTop ?? null })
+      requestAnimationFrame(sample)
+    }
+    requestAnimationFrame(sample)
+    // A node above the reader taken out of the document is a subtree torn down and rebuilt.
+    new MutationObserver(records => {
+      for (const record of records) for (const node of record.removedNodes) {
+        if (node instanceof Element && !node.isConnected && (node.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING || record.target.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) log.removed.push(`${record.target.className} − ${node.className}`)
+      }
+    }).observe(s, { childList: true, subtree: true })
+    window.__jolt = log
+    return null
+  })
+  await frames(p)
+  // Live reads every 3 s and the board's 15 s snapshot poll, over three snapshot cycles.
+  for (let i = 0; i < 15; i++) { await p.clock.fastForward(3100); await frames(p) }
+  const { frames: seen, removed } = await p.evaluate(() => window.__jolt)
+  assert.ok(seen.length > 30, `sampled every frame (${seen.length})`)
+  assert.ok(seen.every(frame => frame.same), 'the chat keeps its scroller element')
+  assert.ok(seen.every(frame => frame.scrollTop > 0), 'the chat never passes through the top while the reader is parked mid-transcript')
+  const start = seen[0].top
+  const worst = Math.max(...seen.map(frame => Math.abs(frame.top - start)))
+  assert.ok(worst <= 1, `the message under the reader holds on every frame (moved up to ${worst}px)`)
+  assert.deepEqual(removed, [], 'no refresh removes anything above the reader')
+})
+
 test('The large transcript pages earlier turns inline, retains them across files and leaves the board live', async p => {
   await p.goto(`${url}&transcript=large`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()

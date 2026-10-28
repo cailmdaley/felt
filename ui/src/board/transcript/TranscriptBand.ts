@@ -156,6 +156,8 @@ interface Message {
 interface TurnView {
   index: number
   node: HTMLLIElement
+  /** Rows drawn from a step's data (notices, sent files, spawn chips), kept while that data holds. */
+  kept: Map<string, Kept>
   prompt?: Message
   texts: Map<number, Message>
   groups: Map<number, StepGroup>
@@ -328,7 +330,8 @@ function buildToolInput(step: ToolStep): HTMLElement {
   return detail
 }
 
-function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
+/** The constitutions a `shuttle thread` step created, read from its command and output. */
+function spawnIds(step: Step): { id: string; uid?: string }[] {
   if (step.kind !== 'tool' || !step.result || step.result.isError) return []
   const input = inputObject(step.input)
   const command = inputString(input?.command) ?? inputString(input?.cmd) ?? inputString(step.input) ?? ''
@@ -362,6 +365,11 @@ function spawnMentions(step: Step, origin?: string): HTMLAnchorElement[] {
       if (ids.length === invocations.length) break
     }
   }
+  return ids
+}
+
+/** One hidden chip per spawned constitution; the mention scan shows each once the read model knows it. */
+function spawnChips(ids: { id: string; uid?: string }[], origin?: string): HTMLAnchorElement[] {
   return ids.map(({ id, uid }) => {
     const chip = document.createElement('a')
     chip.className = 'ws-constitution-chip ws-transcript-spawn-chip'
@@ -532,6 +540,59 @@ function settleScrollAtEnd(scroller: HTMLElement): number {
   return settleScroll(scroller, scroller.scrollHeight - scroller.clientHeight)
 }
 
+/** A node drawn from data, and the data it was drawn from. */
+interface Kept { signature: string; node: HTMLElement }
+
+/**
+ * The node for `key`, kept from the last paint while its signature holds.
+ * A refresh that redraws an unchanged row would hand the reader a new node
+ * whose decorations (constitution chips) resolve only after the reading
+ * position was measured, so the view jumps by their height.
+ */
+function keep(cache: Map<string, Kept>, used: Set<string>, key: string, signature: string, make: () => HTMLElement): HTMLElement {
+  used.add(key)
+  const kept = cache.get(key)
+  if (kept?.signature === signature) return kept.node
+  const node = make()
+  cache.set(key, { signature, node })
+  return node
+}
+
+function prune(cache: Map<string, Kept>, used: Set<string>): void {
+  for (const key of cache.keys()) if (!used.has(key)) cache.delete(key)
+}
+
+/** The spawn chips of one folded step run, or null when it created no constitutions. */
+function keepSpawns(cache: Map<string, Kept>, used: Set<string>, step: Step, index: number, origin: string | undefined, tag: 'span' | 'li'): HTMLElement | null {
+  const ids = spawnIds(step)
+  if (!ids.length) return null
+  return keep(cache, used, `spawns:${index}`, JSON.stringify([ids, origin]), () => {
+    const group = document.createElement(tag)
+    group.className = 'ws-transcript-spawns'
+    if (tag === 'li') { group.dataset.spawnPreview = ''; group.hidden = true }
+    group.append(...spawnChips(ids, origin))
+    return group
+  })
+}
+
+/**
+ * Make `parent`'s children exactly `children`, moving only the nodes out of
+ * place: a node that stays is never detached, so nothing the reader sees is
+ * torn down and rebuilt by a refresh that changed nothing.
+ */
+export function placeChildren(parent: Element, children: readonly Node[]): void {
+  let cursor = parent.firstChild
+  for (const child of children) {
+    if (child === cursor) { cursor = cursor.nextSibling; continue }
+    parent.insertBefore(child, cursor)
+  }
+  while (cursor) {
+    const next = cursor.nextSibling
+    parent.removeChild(cursor)
+    cursor = next
+  }
+}
+
 /** Preserve a visible message through DOM reconciliation and height changes above it. */
 function preserveReadingPosition(scroller: HTMLElement, render: () => void): void {
   const edge = scroller.getBoundingClientRect().top
@@ -600,6 +661,7 @@ export class TranscriptBand {
   private readonly list: HTMLOListElement
   private previewPrompt: Message | null = null
   private previewTexts = new Map<number, Message>()
+  private previewKept = new Map<string, Kept>()
   private previewTurn = -1
   private previewKey = ''
   private previewFollowing = true
@@ -1389,6 +1451,7 @@ export class TranscriptBand {
       this.previewTurn = turn.index
       this.previewPrompt = null
       this.previewTexts.clear()
+      this.previewKept.clear()
     }
     const live = this.target?.live === true
     const last = [...turn.steps].reverse().find(step => step.kind !== 'sent-file')
@@ -1405,15 +1468,20 @@ export class TranscriptBand {
       nodes.push(this.previewPrompt.node)
     }
     const agent = this.agentName()
+    const used = new Set<string>()
     turn.steps.forEach((step, index) => {
-      if (step.kind === 'thread-notice') { nodes.push(noticeRow(step, 'li')); return }
+      if (step.kind === 'thread-notice') {
+        nodes.push(keep(this.previewKept, used, `notice:${index}`, JSON.stringify(step), () => noticeRow(step, 'li')))
+        return
+      }
       if (step.kind === 'sent-file') {
-        nodes.push(sentFileRow(step, this.target?.host, this.shuttleBase, this.onFile, 'li'))
+        const owner = this.target?.host
+        nodes.push(keep(this.previewKept, used, `sent:${index}`, JSON.stringify([step, owner]), () => sentFileRow(step, owner, this.shuttleBase, this.onFile, 'li')))
         return
       }
       if (step.kind !== 'text') {
-        const spawns = spawnMentions(step, this.target?.host)
-        if (spawns.length) { const group = document.createElement('span'); group.className = 'ws-transcript-spawns'; group.dataset.spawnPreview = ''; group.hidden = true; group.append(...spawns); nodes.push(group) }
+        const spawns = keepSpawns(this.previewKept, used, step, index, this.target?.host, 'li')
+        if (spawns) nodes.push(spawns)
         return
       }
       let message = this.previewTexts.get(index)
@@ -1426,7 +1494,8 @@ export class TranscriptBand {
       nodes.push(message.node)
     })
     if (working) nodes.push(this.working)
-    this.exchange.replaceChildren(...nodes)
+    prune(this.previewKept, used)
+    placeChildren(this.exchange, nodes)
     this.preview.hidden = nodes.length === 0
   }
 
@@ -1536,7 +1605,7 @@ export class TranscriptBand {
     const node = document.createElement('li')
     node.className = 'ws-transcript-turn'
     node.dataset.turn = String(index)
-    return { index, node, texts: new Map(), groups: new Map(), rows: new Map(), expandedRows: new Set() }
+    return { index, node, kept: new Map(), texts: new Map(), groups: new Map(), rows: new Map(), expandedRows: new Set() }
   }
 
   private updateTurnView(view: TurnView, turn: Turn): void {
@@ -1550,13 +1619,17 @@ export class TranscriptBand {
     const agent = this.agentName()
     const parts = segments(turn.steps)
     const isLastTurn = view.index === this.model.turns.length - 1
+    const used = new Set<string>()
     parts.forEach((part, position) => {
       if (part.kind === 'thread-notice') {
-        children.push(noticeRow(turn.steps[part.index] as Notice))
+        const notice = turn.steps[part.index] as Notice
+        children.push(keep(view.kept, used, `notice:${part.index}`, JSON.stringify(notice), () => noticeRow(notice)))
         return
       }
       if (part.kind === 'sent-file') {
-        children.push(sentFileRow(turn.steps[part.index] as SentFileNotice, this.target?.host, this.shuttleBase, this.onFile))
+        const sent = turn.steps[part.index] as SentFileNotice
+        const owner = this.target?.host
+        children.push(keep(view.kept, used, `sent:${part.index}`, JSON.stringify([sent, owner]), () => sentFileRow(sent, owner, this.shuttleBase, this.onFile)))
         return
       }
       if (part.kind === 'text') {
@@ -1576,14 +1649,15 @@ export class TranscriptBand {
       this.paintGroupSummary(group, turn, part.start, part.end, trailing)
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
       children.push(group.button)
-      if (!group.expanded) for (const step of turn.steps.slice(part.start, part.end)) {
-        const spawns = spawnMentions(step, this.target?.host)
-        if (spawns.length) { const group = document.createElement('span'); group.className = 'ws-transcript-spawns'; group.append(...spawns); children.push(group) }
+      if (!group.expanded) for (let index = part.start; index < part.end; index++) {
+        const spawns = keepSpawns(view.kept, used, turn.steps[index], index, this.target?.host, 'span')
+        if (spawns) children.push(spawns)
       }
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
     })
-    view.node.replaceChildren(...children)
+    prune(view.kept, used)
+    placeChildren(view.node, children)
     this.markView(view)
   }
 
@@ -1619,14 +1693,22 @@ export class TranscriptBand {
     pieces.push(...[...labels].map(([name, count]) => `${name} ${count}`))
     const lastTool = steps.filter((step): step is ToolStep => step.kind === 'tool').at(-1)
     const pending = trailing && this.target?.live === true && !!lastTool && !lastTool.result
-    group.button.replaceChildren(document.createTextNode(`${group.expanded ? '▾' : '▸'} ${pieces.join(' · ')}`))
-    if (pending) {
+    const label = `${group.expanded ? '▾' : '▸'} ${pieces.join(' · ')}`
+    const painted = group.button.firstChild
+    if (painted?.nodeType === Node.TEXT_NODE) { if (painted.nodeValue !== label) painted.nodeValue = label }
+    else group.button.replaceChildren(document.createTextNode(label))
+    const mark = group.button.querySelector('.ws-transcript-pending')
+    if (pending && !mark) {
       const mark = document.createElement('span')
       mark.className = 'ws-transcript-pending'
       mark.setAttribute('aria-label', 'tool running')
       group.button.append(document.createTextNode(' '), mark)
+    } else if (!pending && mark) {
+      mark.previousSibling?.remove()
+      mark.remove()
     }
-    group.button.setAttribute('aria-expanded', String(group.expanded))
+    const expanded = String(group.expanded)
+    if (group.button.getAttribute('aria-expanded') !== expanded) group.button.setAttribute('aria-expanded', expanded)
   }
 
   private reconcileGroup(view: TurnView, group: StepGroup, turn: Turn, start: number, end: number): void {
