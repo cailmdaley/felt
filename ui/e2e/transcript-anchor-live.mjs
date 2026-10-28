@@ -34,6 +34,7 @@ const log = await page.evaluate(async ({ seconds }) => {
   const edge = () => s.getBoundingClientRect().top
   const anchor = [...s.querySelectorAll('.ws-transcript-msg')].find(n => n.getBoundingClientRect().bottom > edge() + 40)
   const key = anchor?.dataset.readingKey
+  const t0 = performance.now()
   const describe = n => {
     if (!(n instanceof Element)) n = n?.parentElement
     if (!n) return '?'
@@ -46,10 +47,16 @@ const log = await page.evaluate(async ({ seconds }) => {
     for (const r of records) mutations.push(`${r.type}:${describe(r.target)}${r.type === 'childList' ? ` +${r.addedNodes.length}-${r.removedNodes.length}` : r.attributeName ? `@${r.attributeName}` : ''}`)
   })
   observer.observe(document.querySelector('.ws-transcript') ?? s, { subtree: true, childList: true, attributes: true, characterData: true })
+  // Any write of the position, even of its current value, stops a scroll in flight.
+  const writes = []
+  const native = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')
+  Object.defineProperty(s, 'scrollTop', { configurable: true, get() { return native.get.call(this) }, set(value) {
+    writes.push({ t: Math.round(performance.now() - t0), from: native.get.call(this), to: value })
+    native.set.call(this, value)
+  } })
   let scrollEvents = 0
   s.addEventListener('scroll', () => scrollEvents++, { passive: true })
   const samples = []
-  const t0 = performance.now()
   let first = null
   while (performance.now() - t0 < seconds * 1000) {
     const live = key ? s.querySelector(`[data-reading-key="${CSS.escape(key)}"]`) : anchor
@@ -68,7 +75,7 @@ const log = await page.evaluate(async ({ seconds }) => {
     await new Promise(r => setTimeout(r, 250))
   }
   observer.disconnect()
-  return { key, first, samples }
+  return { key, first, samples, writes }
 }, { seconds })
 
 const moved = (x, y) => x !== null && y !== null && Math.abs(x - y) > 1
@@ -77,10 +84,12 @@ const summary = {
   card: card ?? uid, key: log.key, samples: log.samples.length,
   maxDrift: Math.max(...log.samples.map(x => x.anchorTop === null ? Infinity : Math.abs(x.anchorTop - log.first))),
   moves: moves.map(m => ({ t: m.t, anchorTop: m.anchorTop, screenTop: m.screenTop, scrollerTop: m.scrollerTop, scrollTop: m.scrollTop, scrollHeight: m.scrollHeight, mutations: m.mutations })),
+  writes: log.writes.length,
+  idleWrites: log.writes.filter(w => Math.abs(w.to - w.from) < 0.5).length,
   lost: log.samples.filter(x => x.anchorTop === null).length,
   errors,
 }
-await writeFile(out, JSON.stringify({ summary, samples: log.samples }, null, 2))
+await writeFile(out, JSON.stringify({ summary, samples: log.samples, writes: log.writes }, null, 2))
 console.log(JSON.stringify(summary, null, 2))
 await page.close()
 await browser.close()
