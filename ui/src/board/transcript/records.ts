@@ -110,11 +110,16 @@ function event(label: string, fields: { detail?: string; text?: string } = {}, t
   return at({ kind: 'event' as const, label, ...fields }, time)
 }
 
+// Claude Code's own caveat after a peer message, in its known phrasings.
+const PEER_CAVEAT = /\n\s*(?:This came from another Claude session|That "other Claude session" is)[^\n]*(?:permission laundering|teammate)[\s\S]*$/
+
 function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entry | null {
   const text = raw
     .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '')
-    // Claude Code heads a relayed session message with a line of its own.
-    .replace(/^\s*Another Claude session sent a message:\s*(?=<)/, '')
+    // Claude Code heads a relayed session message with a line of its own and
+    // closes it with a paragraph of advice to the model; neither is the message.
+    .replace(/^\s*Another Claude session sent a message:\s*/, '')
+    .replace(PEER_CAVEAT, '')
     .trim()
   if (!text) return null
 
