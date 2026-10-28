@@ -59,6 +59,11 @@ describe('the Desk draws each family once, in the column of its most urgent need
     expect(ids(desk(b))).toStrictEqual(['hub/prompt'])
     expect(ids(threadIndexFor(b).family(b.now.inFlight[0]).askers)).toStrictEqual(['hub/prompt', 'hub/idle'])
   })
+  it('a root that asks leads its row over a thread\'s question, so it is never both crumb and sub-line', () => {
+    const b = board([{ id: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/idle', parent: 'hub', status: 'active', phase: 'waiting' }, { id: 'hub/prompt', parent: 'hub', status: 'open', phase: 'attention' }])
+    expect(ids(desk(b))).toStrictEqual(['hub'])
+    expect(ids(threadIndexFor(b).family(b.now.inFlight[0]).askers)).toStrictEqual(['hub', 'hub/prompt', 'hub/idle'])
+  })
   it('a missing orchestrator is an ordinary root with path-only ancestry', () => {
     const b = board([{ id: 'gone/folder/child', parent: 'missing-uid', status: 'active', ask: true }, { id: 'gone/folder/child/deep', parent: 'gone/folder/child', status: 'closed' }])
     expect(ids(desk(b))).toStrictEqual(['gone/folder/child'])

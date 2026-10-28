@@ -169,8 +169,10 @@ export class ThreadIndex {
       const needs = nodes.map(node => this.need(node))
       const need = FAMILY_NEEDS.find(n => needs.includes(n)) ?? null
       const askers = need ? nodes.filter((_, n) => needs[n] === need) : [root]
-      // A question leads Your turn, as it leads the band; tree order otherwise.
-      if (need === 'yours') askers.sort((a, b) => Number(turnOf(b).turn === 'question') - Number(turnOf(a).turn === 'question'))
+      // The root names its family whenever it asks, so it is never both crumb and sub-line;
+      // among threads a question leads Your turn, as it leads the band; tree order otherwise.
+      const rank = (node: KanbanCard): number => node === root ? 0 : need === 'yours' && turnOf(node).turn === 'question' ? 1 : 2
+      askers.sort((a, b) => rank(a) - rank(b))
       const lead = need === 'working' && needs[0] !== 'working' && this.state(root) === 'working' && !root.held ? root : askers[0]
       const others: Record<FamilyNeed, number> = { yours: 0, review: 0, working: 0 }
       nodes.forEach((node, n) => { const each = needs[n]; if (each && node !== lead) others[each]++ })
