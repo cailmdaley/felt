@@ -280,4 +280,24 @@ describe.skipIf(!executablePath)('media preferences hold from the first script, 
       }
     }, 60_000)
   }
+
+  it('another attached client leaves a conversation dialog to its owner', async () => {
+    vi.stubEnv('SHARED_BROWSER', '')
+    const owner = await getBrowser({ sharedBrowser: real })
+    const tab = await owner.newPage()
+    const observer = await getBrowser({ sharedBrowser: real })
+    try {
+      const dialog = tab.waitForEvent('dialog')
+      const answer = tab.evaluate(() => confirm('Keep the owner in charge?'))
+      const prompt = await dialog
+      // A foreign client must neither dismiss nor race this owner's answer.
+      await new Promise(resolve => setImmediate(resolve))
+      await prompt.accept()
+      expect(await answer).toBe(true)
+    } finally {
+      await observer.close()
+      await owner.close()
+      vi.unstubAllEnvs()
+    }
+  }, 30_000)
 })

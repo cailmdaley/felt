@@ -10,8 +10,11 @@ export async function sharedBrowserAvailable(sharedBrowser = defaultSharedBrowse
 export async function getBrowser({ args = [], executablePath, sharedBrowser = defaultSharedBrowser() } = {}) {
   const shared = await sharedBrowserAvailable(sharedBrowser)
   const browser = shared
-    ? await chromium.connectOverCDP(await sharedBrowser.endpoint())
+    ? await chromium.connectOverCDP(await sharedBrowser.endpoint(), { noDefaults: true })
     : await launchLocalBrowser(args, executablePath)
+  // CDP also attaches other clients' pages. Their owner handles dialogs;
+  // Playwright's automatic dismissal would race that owner's response.
+  if (shared) for (const context of browser.contexts()) context.on('dialog', () => {})
   const contexts = new Set()
   let closed = false
 
