@@ -2889,13 +2889,31 @@ async function still(p, label, act, { allow = [], ...options } = {}) {
   const shifts = await layoutShift(p, { regions: ['body'], act, allow, ...options })
   assert.deepEqual(shifts, [], `${label} moved something: ${JSON.stringify(shifts, null, 1)}`)
 }
-const repaint = p => p.evaluate(() => window.__harness.modal.fetchAndRender())
-const flipWorker = p => p.evaluate(async () => {
-  const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
-  row.runtime.phase = row.runtime.phase === 'waiting' ? 'working' : 'waiting'
-  row.runtime.last_activity_at = Date.now() - 120000
-  await window.__harness.modal.fetchAndRender()
-})
+async function repaint(p) {
+  try {
+    await p.evaluate(() => {
+      // Keep the refresh reachable while CDP observes its completion across GC.
+      const state = window.__harness.pendingRefresh = { pending: window.__harness.modal.fetchAndRender(), done: false, error: null }
+      state.pending.then(() => { state.done = true }, error => {
+        state.error = { name: error?.name ?? 'Error', message: error?.message ?? String(error), stack: error?.stack }
+        state.done = true
+      })
+    })
+    await p.waitForFunction(() => window.__harness.pendingRefresh?.done, undefined, { timeout: 15000 })
+    const failure = await p.evaluate(() => window.__harness.pendingRefresh.error)
+    if (failure) throw Object.assign(new Error(failure.message), failure)
+  } finally {
+    await p.evaluate(() => { delete window.__harness.pendingRefresh })
+  }
+}
+async function flipWorker(p) {
+  await p.evaluate(() => {
+    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Remote covariance review')
+    row.runtime.phase = row.runtime.phase === 'waiting' ? 'working' : 'waiting'
+    row.runtime.last_activity_at = Date.now() - 120000
+  })
+  await repaint(p)
+}
 
 // `r` focuses the composer where it stands; a field out of view scrolls its
 // page only as far as its top, so the kicker stays whole.
@@ -2975,17 +2993,22 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await still(p, 'hovering a sidebar card', () => p.locator('.ws-sidebar .kbn-card').nth(1).hover())
   await still(p, 'a sidebar poll repaint', () => repaint(p))
   await choose(p, 'calibration-report')
-  assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-selected'], act: () => p.evaluate(async () => {
-    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
-    row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
-    await window.__harness.modal.fetchAndRender()
-  }), settle: 100 }), [], 'a worker starting leaves the open report still')
+  assert.deepEqual(await layoutShift(p, { regions: ['.kbn-viewtabs', '.ws-selected'], act: async () => {
+    await p.evaluate(() => {
+      const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
+      row.runtime = { state: 'running', phase: 'working', tmux_session: 'calibration-shuttle', last_activity_at: Date.now(), started_at: Date.now() - 60000 }
+    })
+    await repaint(p)
+  }, settle: 100 }), [], 'a worker starting leaves the open report still')
   await composerKeyStaysPut(p); await fieldBlur(p)
   await still(p, 'hovering Settings', () => selected(p).locator('.ws-chat-settings').hover(), { allow: ['.ws-chat-settings'] })
-  await still(p, 'a chat worker-state change', () => p.evaluate(async () => {
-    const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
-    row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000; await window.__harness.modal.fetchAndRender()
-  }), { allow: ['.kbn-card-worker', '.ws-chat-state'], settle: 100 })
+  await still(p, 'a chat worker-state change', async () => {
+    await p.evaluate(() => {
+      const row = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Calibrate the shear response')
+      row.runtime.phase = 'waiting'; row.runtime.last_activity_at = Date.now() - 120000
+    })
+    await repaint(p)
+  }, { allow: ['.kbn-card-worker', '.ws-chat-state'], settle: 100 })
   await still(p, 'a sidebar worker-state change', () => flipWorker(p), { allow: ['.kbn-card-worker', '.ws-worker-control', '.ws-sidebar-index'], settle: 100 })
 }, viewport)
 async function fieldBlur(p) { await selected(p).locator('textarea').evaluate(el => el.blur()) }
