@@ -270,6 +270,32 @@ describe('TranscriptBand', () => {
     expect([...pane.querySelectorAll('.ws-transcript-msg-agent')].find(node => node.textContent?.includes('After the receipt.'))).toBe(after)
   })
 
+  it('keeps both halves of an expanded group open when a receipt lands inside its run', async () => {
+    const split = groupedTranscript()
+    split.splice(2, 1,
+      { type: 'assistant', timestamp: '2026-09-26T14:04:00.000Z', message: { model: 'claude-opus', content: [{ type: 'tool_use', id: 'call-a', name: 'Bash', input: { command: 'python validate.py --batch 1' } }] } },
+      { type: 'assistant', timestamp: '2026-09-26T14:04:30.000Z', message: { model: 'claude-opus', content: [{ type: 'tool_use', id: 'call-b', name: 'Bash', input: { command: 'python validate.py --batch 2' } }] } },
+    )
+    const band = makeBand(fixtureFetch({ [latestId]: split }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+    const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+    pane.querySelector<HTMLButtonElement>('.ws-transcript-steps')!.click()
+    const tools = [...pane.querySelectorAll<HTMLElement>('.ws-transcript-tool')]
+    expect(tools).toHaveLength(2)
+
+    const internal = band as unknown as { acceptSentFiles: (session: string, files: unknown[]) => void }
+    internal.acceptSentFiles(latestId, [send('/tmp/mid-run.pdf', Date.parse('2026-09-26T14:04:10Z'))])
+    await settle()
+
+    const groups = [...pane.querySelectorAll<HTMLButtonElement>('.ws-transcript-steps')]
+    expect(groups).toHaveLength(2)
+    expect(groups.map(g => g.getAttribute('aria-expanded'))).toEqual(['true', 'true'])
+    expect([...pane.querySelectorAll('.ws-transcript-tool')]).toEqual(tools)
+  })
+
   it('repaints a changed send with the same id and prunes it when that step disappears', async () => {
     const band = makeBand(fixtureFetch({ [latestId]: groupedTranscript() }))
     band.follow(target(latestId))

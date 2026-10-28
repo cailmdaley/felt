@@ -164,6 +164,8 @@ interface TurnView {
   groups: Map<string, StepGroup>
   rows: Map<string, StepRow>
   expandedRows: Set<string>
+  /** The group each step was drawn in last paint, so a run split by a receipt keeps its open half open. */
+  memberOf: Map<string, string>
 }
 
 const PAGE_SIZE = 150
@@ -1635,7 +1637,7 @@ export class TranscriptBand {
     const node = document.createElement('li')
     node.className = 'ws-transcript-turn'
     node.dataset.turn = String(index)
-    return { index, node, kept: new Map(), texts: new Map(), groups: new Map(), rows: new Map(), expandedRows: new Set() }
+    return { index, node, kept: new Map(), texts: new Map(), groups: new Map(), rows: new Map(), expandedRows: new Set(), memberOf: new Map() }
   }
 
   private updateTurnView(view: TurnView, turn: Turn): void {
@@ -1653,6 +1655,7 @@ export class TranscriptBand {
     const used = new Set<string>()
     const usedTexts = new Set<string>()
     const usedGroups = new Set<string>()
+    const memberOf = new Map<string, string>()
     parts.forEach((part, position) => {
       if (part.kind === 'thread-notice') {
         const notice = turn.steps[part.index] as Notice
@@ -1681,7 +1684,10 @@ export class TranscriptBand {
       }
       const identity = this.stepIdentity(turn.steps[part.start])
       usedGroups.add(identity)
+      const split = !view.groups.has(identity) && view.groups.get(view.memberOf.get(identity) ?? '')
       const group = this.groupFor(view, identity)
+      if (split) { group.expanded = split.expanded; group.count = split.count }
+      for (let index = part.start; index < part.end; index++) memberOf.set(this.stepIdentity(turn.steps[index]), identity)
       const trailing = isLastTurn && position === parts.length - 1
       this.paintGroupSummary(group, turn, part.start, part.end, trailing)
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
@@ -1694,6 +1700,7 @@ export class TranscriptBand {
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
     })
+    view.memberOf = memberOf
     for (const identity of view.texts.keys()) if (!usedTexts.has(identity)) view.texts.delete(identity)
     for (const identity of view.groups.keys()) if (!usedGroups.has(identity)) view.groups.delete(identity)
     const currentSteps = new Set(turn.steps.map(step => this.stepIdentity(step)))
