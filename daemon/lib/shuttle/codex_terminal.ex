@@ -9,51 +9,25 @@ defmodule Shuttle.CodexTerminal do
   Close leftover viewers of conversations Shuttle no longer owns.
 
   A viewer is leftover when its ownership record is inactive (the assignment
-  was retired or stopped), no client is attached to it, and its thread has no
-  running turn. An attached viewer may be the human reading or replying, and a
-  running turn may be one they started there; both wait for a later sweep. An
-  active record, a missing or unreadable record, or an unconfirmed thread state
-  keeps the viewer. The App Server and the conversation are never touched.
-  Returns the viewers closed.
+  was retired or stopped) and its thread has no running turn. An active record,
+  a missing or unreadable record, or an unconfirmed thread state keeps the
+  viewer. The App Server and the conversation are never touched. Returns the
+  viewers closed, including those with attached clients.
   """
   def sweep(runner) do
-    case attachments(runner) do
-      {:ok, sessions} ->
-        sessions
+    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
+      {output, 0} ->
+        output
+        |> String.split("\n", trim: true)
         |> Enum.flat_map(fn
-          {"codex-terminal-" <> id = tmux, 0} -> [{id, tmux}]
+          "codex-terminal-" <> id = tmux -> [{id, tmux}]
           _ -> []
         end)
         |> Enum.filter(fn {id, tmux} -> retire_leftover(runner, id, tmux) end)
         |> Enum.map(&elem(&1, 1))
 
-      :error ->
-        []
-    end
-  end
-
-  # `{name, attached clients}` for every tmux session. The count leads and a
-  # space separates it from the name: tmux escapes control characters such as
-  # a tab to `_` when the daemon runs without a UTF-8 locale (launchd).
-  defp attachments(runner) do
-    case runner.cmd("tmux", ["ls", "-F", "\#{session_attached} \#{session_name}"],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        {:ok,
-         output
-         |> String.split("\n", trim: true)
-         |> Enum.flat_map(fn line ->
-           with [count, name] <- String.split(line, " ", parts: 2),
-                {attached, ""} <- Integer.parse(count) do
-             [{name, attached}]
-           else
-             _ -> []
-           end
-         end)}
-
       _ ->
-        :error
+        []
     end
   end
 
@@ -66,7 +40,6 @@ defmodule Shuttle.CodexTerminal do
         with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
              true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
              state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
-             true <- detached?(runner, tmux),
              {_, 0} <- Tmux.stop(runner, tmux) do
           true
         else
@@ -76,14 +49,6 @@ defmodule Shuttle.CodexTerminal do
       [node()],
       0
     ) == true
-  end
-
-  @doc "True only when tmux confirms the session exists with no client attached."
-  def detached?(runner, tmux) do
-    case attachments(runner) do
-      {:ok, sessions} -> {tmux, 0} in sessions
-      :error -> false
-    end
   end
 
   def prepare(id, opts \\ []) do

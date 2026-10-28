@@ -2300,7 +2300,7 @@ defmodule Shuttle.AppWorkersTest do
     end
   end
 
-  test "sweep closes only detached viewers of retired, quiet conversations" do
+  test "sweep closes viewers of retired, quiet conversations even when attached" do
     write = fn id, active ->
       :ok =
         AppWorkers.put(%{
@@ -2327,16 +2327,18 @@ defmodule Shuttle.AppWorkersTest do
     write.("busy", false)
     write.("owned", true)
     Runner.attach_tmux_client(viewers["attached"])
+    Runner.attach_tmux_client(viewers["owned"])
     Runner.add_tmux_session("shuttle-codex-0123456789abcdef")
 
     App.set(:state, :idle)
 
     Env.put_app_env(:codex_app_client, BusyApp)
 
-    assert Shuttle.CodexTerminal.sweep(Runner) == [viewers["retired"]]
+    assert Enum.sort(Shuttle.CodexTerminal.sweep(Runner)) ==
+             Enum.sort([viewers["retired"], viewers["attached"]])
 
     for {id, tmux} <- viewers do
-      expected = if id == "retired", do: :gone, else: :alive
+      expected = if id in ["retired", "attached"], do: :gone, else: :alive
       assert Shuttle.Tmux.session_status(Runner, tmux) == expected, id
     end
 
@@ -2345,7 +2347,7 @@ defmodule Shuttle.AppWorkersTest do
     assert Shuttle.CodexTerminal.sweep(Runner) == []
   end
 
-  test "retire leaves an attached viewer to the sweep, which waits for it to detach" do
+  test "retire closes an attached viewer of a retired assignment" do
     terminal_fiber("tests/app")
     {:ok, session} = dispatch("tests/app")
     tmux = WorkerBackend.tmux(session)
@@ -2354,12 +2356,8 @@ defmodule Shuttle.AppWorkersTest do
 
     assert :retired = WorkerBackend.retire_assignment(Runner, session, Runner.fiber("tests/app"))
     assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
-    assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
-    assert Shuttle.CodexTerminal.sweep(Runner) == []
-
-    Runner.detach_tmux_client(tmux)
-    assert Shuttle.CodexTerminal.sweep(Runner) == [tmux]
     assert Shuttle.Tmux.session_status(Runner, tmux) == :gone
+    assert Shuttle.CodexTerminal.sweep(Runner) == []
   end
 
   test "retire keeps the assignment when a turn starts before it takes the lock" do

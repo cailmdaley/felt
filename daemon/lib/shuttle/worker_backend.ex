@@ -79,8 +79,7 @@ defmodule Shuttle.WorkerBackend do
 
   # Under the terminal lock, without waiting for it: a viewer being prepared or
   # stopped elsewhere retires on a later poll. The state is read again inside
-  # the lock so a turn started meanwhile keeps its assignment. An attached
-  # viewer may be the human reading or replying; it is left to the sweep.
+  # the lock so a turn started meanwhile keeps its assignment.
   defp retire(runner, session, id, fiber) do
     :global.trans(
       {{Shuttle.CodexTerminal, id}, self()},
@@ -93,8 +92,7 @@ defmodule Shuttle.WorkerBackend do
               :ok
 
             terminal ->
-              if Shuttle.CodexTerminal.detached?(runner, terminal),
-                do: Shuttle.Tmux.stop(runner, terminal)
+              Shuttle.Tmux.stop(runner, terminal)
           end
 
           :ok

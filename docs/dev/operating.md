@@ -57,6 +57,7 @@ Shuttle ensures the dependency on every daemon host, including hosts with networ
 No separate operator bootstrap is required.
 Install Codex 0.162.1 or a compatible binary on the host's login-shell `PATH`, keep its normal persistent authentication/configuration, and start Shuttle.
 The dependency reconciles even while worker dispatch is held by boot quarantine; starting it creates no model turn.
+When an assignment retires, Shuttle closes its terminal viewer even if a client is attached; the conversation remains in the App Server and `shuttle attach` can reopen it.
 
 The default control endpoint is `/tmp/shuttle-codex-<euid>-<host-hash>/control.sock`, where `host-hash` is the first 16 lowercase SHA-256 hexadecimal characters of the actual OS hostname.
 `HOME`, `CODEX_HOME`, `TMPDIR`, and `XDG_RUNTIME_DIR` don't change it.
