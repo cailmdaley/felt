@@ -215,8 +215,11 @@ test('A refresh never changes a painted frame of the chat: no jolt, no pass thro
     return null
   })
   await frames(p)
+  const shot = async label => { if (process.env.WORKSPACE_SHOTS) await scroller.screenshot({ path: `${process.env.WORKSPACE_SHOTS}/jolt-${label}.png` }) }
+  await shot('before-polls')
   // Live reads every 3 s and the board's 15 s snapshot poll, over three snapshot cycles.
   for (let i = 0; i < 15; i++) { await p.clock.fastForward(3100); await frames(p) }
+  await shot('after-polls')
   const { frames: seen, removed, touched } = await p.evaluate(() => window.__jolt)
   assert.ok(seen.length > 30, `sampled every frame (${seen.length})`)
   assert.ok(seen.every(frame => frame.same), 'the chat keeps its scroller element')
