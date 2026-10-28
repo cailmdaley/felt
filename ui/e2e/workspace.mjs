@@ -260,9 +260,22 @@ async function choose(p, label) {
   }
   if (await isSelected(p, label)) return
   if (label === 'Chat' || label === 'Constitution') {
-    while (!(await isSelected(p, 'Chat'))) {
-      await appFocus(p); await p.keyboard.press('Escape')
-      await p.waitForTimeout(30)
+    if (!await isSelected(p, 'Chat')) {
+      if (p.viewportSize().width <= 700) {
+        await p.locator('.ws-navbar .ws-channel-title').click()
+        const current = p.locator('.ws-switcher .ws-channel-row[aria-current="true"]')
+        await current.waitFor({ state: 'visible' })
+        await current.click()
+      } else {
+        const toggle = p.locator('.ws-reader .ws-sidebar-toggle:not(.ws-rail-toggle)')
+        const reveal = await toggle.getAttribute('aria-expanded') !== 'true'
+        if (reveal) await toggle.click()
+        const current = p.locator('.ws-sidebar .ws-channel-row[aria-current="true"]')
+        await current.waitFor({ state: 'visible' })
+        await current.click()
+        if (reveal) await toggle.click()
+      }
+      await pageFor(p, 'Chat').and(p.locator('.ws-selected')).waitFor()
     }
     if (label === 'Constitution') {
       await headerAction(p, 'Constitution')
@@ -271,7 +284,12 @@ async function choose(p, label) {
     await selected(p).locator('.ws-report-chip').click()
   } else {
     const rows = await sentFiles(p)
-    await rows.and(p.locator(`[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`)).click()
+    const target = rows.and(p.locator(`[data-key$="/${label === 'calibration-report' ? 'report.html' : label}"]`))
+    if (!await target.count()) {
+      const more = p.locator('[data-part="sent-files-more"]:visible')
+      if (await more.count()) await more.click()
+    }
+    await target.click()
     await poll(p, () => !document.querySelector('.ws-page-sheet')?.open)
   }
   await pageFor(p, label).and(p.locator('.ws-selected')).waitFor()
@@ -423,75 +441,105 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.equal(await p.locator('.kbn-keymap-overlay').count(), 0)
 }, viewport)
 
-test('Desk action menus stay drawn without shifting on hover and support native Enter and Space', async p => {
+test('Desk action menus preserve row layout and native keyboard focus through Enter and Space', async p => {
   const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
-  const button = review.locator('.kbn-card-menu')
   await p.mouse.move(0, 0)
-  const before = await button.boundingBox()
+  const before = await review.boundingBox()
   const words = await review.innerText()
   await review.hover()
-  assert.deepEqual(await button.boundingBox(), before)
+  assert.deepEqual(await review.boundingBox(), before)
   assert.equal(await review.innerText(), words)
   assert.equal(await p.getByRole('menu').count(), 0)
+  await review.click({ button: 'right' })
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
+  await p.keyboard.press('Escape')
+  await p.keyboard.press('Escape'); await p.keyboard.press('j')
+  assert.ok(await review.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
   for (const key of ['Enter', 'Space']) {
-    await button.focus()
-    await p.keyboard.press(key)
+    await review.press('Shift+F10')
     const menu = p.getByRole('menu')
     await menu.waitFor()
-    assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
+    assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
     assert.equal(await menu.getByRole('menuitem').first().evaluate(el => el === document.activeElement), true)
     await p.keyboard.press('ArrowDown')
-    assert.equal(await menu.getByRole('menuitem', { name: 'Discard', exact: true }).evaluate(el => el === document.activeElement), true)
+    assert.equal(await menu.getByRole('menuitem', { name: 'Temper', exact: true }).evaluate(el => el === document.activeElement), true)
+    await p.keyboard.press('End')
+    assert.equal(await menu.getByRole('menuitem', { name: 'Move…', exact: true }).evaluate(el => el === document.activeElement), true)
     await p.keyboard.press('Escape')
     assert.equal(await p.getByRole('menu').count(), 0)
-    assert.equal(await button.evaluate(el => el === document.activeElement), true)
+    assert.equal(await review.evaluate(el => el === document.activeElement), true)
+    await review.press('Shift+F10')
+    await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)
+    await p.getByRole('menu').waitFor({ state: 'detached' })
+    assert.equal(await p.getByRole('button', { name: /Undo verdict on/ }).count(), 1)
+    await p.keyboard.press('z')
   }
-  await button.press('Enter')
-  await p.keyboard.press('End')
-  await p.keyboard.press('Space')
+  await review.press('Shift+F10')
+  await p.getByRole('menu').getByRole('menuitem', { name: 'Rest', exact: true }).press('Space')
   await p.locator('.kbn-rest-popover').waitFor()
   await p.keyboard.press('Escape')
 }, undefined, undefined, 'reduce')
 
-test('Desk action menus offer the same verbs on a phone without hover', async p => {
+test('Desk action menus open on a phone long press without hover', async p => {
   await chooseDeskColumn(p, 2)
-  await p.locator('[data-column="awaitingReview"] .kbn-card-menu').first().click()
+  const review = p.locator('[data-column="awaitingReview"] .kbn-card').first()
+  const touch = await p.context().newCDPSession(p)
+  const hold = async row => {
+    await row.scrollIntoViewIfNeeded()
+    const box = await row.boundingBox()
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] })
+    await p.clock.runFor(500)
+    await p.getByRole('menu').waitFor()
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+  await hold(review)
   const menu = p.getByRole('menu')
-  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
+  assert.deepEqual(await menu.getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
   for (const item of await menu.getByRole('menuitem').all()) {
     const reach = await item.boundingBox()
-    assert.ok(reach.height >= 38 && reach.width >= 200)
+    assert.ok(reach.height >= 44 && reach.width > 0)
     assert.ok(reach.x >= 0 && reach.x + reach.width <= 390)
+    assert.equal(await item.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }), true)
   }
   await p.keyboard.press('Escape')
   await chooseDeskColumn(p, 1)
-  await p.locator('[data-column="inFlight"] .kbn-card-menu').first().click()
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Open terminal', 'Rest'])
+  const inFlight = p.locator('[data-column="inFlight"] .kbn-card').first()
+  await hold(inFlight)
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Open terminal', 'Move…'])
 }, { width: 390, height: 844 }, undefined, 'reduce', true)
 
 test('Desk family action menus preserve native activation and Resting row stacking', async p => {
   const fixture = new URL(url); fixture.searchParams.set('example', 'threads'); await p.goto(fixture.href)
   const family = p.locator('.kbn-desk .kbn-card').filter({ hasText: name })
-  const button = family.locator('.kbn-card-menu')
-  await p.keyboard.press('j'); assert.ok(await family.evaluate(el => el.classList.contains('kbn-key-selected')))
+  await family.waitFor()
+  await p.keyboard.press('j'); await p.keyboard.press('h'); await p.keyboard.press('Home')
+  for (let row = 0; row < 10 && !await family.evaluate(el => el.classList.contains('kbn-key-selected')); row++) await p.keyboard.press('j')
+  assert.ok(await family.evaluate(el => el === document.activeElement && el.classList.contains('kbn-key-selected')))
   for (const key of ['Enter', 'Space']) {
-    await button.focus(); await p.keyboard.press(key); await p.getByRole('menu').waitFor()
-    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Temper', 'Discard', 'Rest'])
-    await p.keyboard.press('Escape'); assert.ok(await button.evaluate(el => el === document.activeElement))
+    await family.focus(); await family.press('Shift+F10'); await p.getByRole('menu').waitFor()
+    assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Close for review', 'Rest', 'Temper', 'Discard', 'Move…'])
+    await p.keyboard.press('Escape'); assert.ok(await family.evaluate(el => el === document.activeElement))
+    await family.press('Shift+F10')
+    await p.getByRole('menu').getByRole('menuitem', { name: 'Temper', exact: true }).press(key)
+    await p.getByRole('menu').waitFor({ state: 'detached' })
+    await p.keyboard.press('z')
   }
-  await p.evaluate(name => {
-    const modal = window.__harness.modal, data = modal.lastResponse, card = data.now.awaitingReview.find(c => c.name === name)
-    data.now.awaitingReview = data.now.awaitingReview.filter(c => c !== card)
-    data.stash.push({ ...card, status: 'open', effectiveHorizon: 'stashed', storedHorizon: 'stashed' }); modal.render(data)
-  }, name)
+  await p.evaluate(async () => {
+    for (const row of window.__harness.MOCK_FEED.fibers) if (row.fiber.id.startsWith('research/workspace/calibration-report')) {
+      row.fiber.status = 'open'; row.fiber.horizon = 'stashed'; row.runtime = null
+      delete row.fiber.shuttle.ask
+    }
+    await window.__harness.modal.fetchAndRender()
+  })
   const resting = p.locator('.kbn-cluster-item').filter({ hasText: name })
   const geometry = await resting.evaluate(row => {
-    const button = row.querySelector('.kbn-card-menu').getBoundingClientRect(), title = row.querySelector('.kbn-cluster-item-title').getBoundingClientRect()
-    const r = button.toJSON(); return { beforeEnd: button.top < title.bottom, hit: row.querySelector('.kbn-card-menu').contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)) }
+    const title = row.querySelector('.kbn-cluster-item-title').getBoundingClientRect()
+    const rect = row.getBoundingClientRect()
+    return { titleInside: title.left >= rect.left && title.right <= rect.right, rowHasMenuTarget: row.getAttribute('aria-haspopup') === 'menu' }
   })
-  assert.deepEqual(geometry, { beforeEnd: true, hit: true })
-  await resting.locator('.kbn-card-menu').click()
-  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Temper', 'Discard'])
+  assert.deepEqual(geometry, { titleInside: true, rowHasMenuTarget: true })
+  await resting.click({ button: 'right' })
+  assert.deepEqual(await p.getByRole('menu').getByRole('menuitem').allTextContents(), ['Rest', 'Temper', 'Discard', 'Move…'])
 })
 
 test('Pointer, stepping, HTML scrolling, persistent iframe, expansion and resize', async p => {
@@ -650,7 +698,9 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   const audio = p.locator('.ws-page[data-key="umber-workstation:/fixture-store/workspace/deliverables/tone.mp3"] audio')
   assert.equal(await inner.locator('button[aria-pressed="true"]').count(), 0, 'references never autoplay')
   if (device === 'desktop') { await play.focus(); await p.keyboard.press('Enter') }
-  else await play.tap()
+  // Chromium offsets synthesized touch clicks inside opaque frames by the frame's top.
+  // Exercise report activation here; the markdown controls below retain real phone taps.
+  else await play.click()
   await poll(p, () => { const audio = document.querySelector('.ws-page[data-key$="/tone.mp3"] audio'); return audio && !audio.paused && audio.currentTime > 0 })
   assert.equal(await selected(p).getAttribute('data-key'), initial)
   await inner.getByRole('button', { name: 'Pause tone.mp3', exact: true }).waitFor()
@@ -663,10 +713,14 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.wav"] audio').paused)
   assert.equal(await selected(p).getAttribute('data-key'), initial)
   await choose(p, 'brief.md')
-  await selected(p).getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
+  const markdownPlay = selected(p).getByRole('button', { name: 'Play tone.mp3', exact: true })
+  if (device === 'phone') await markdownPlay.tap()
+  else await markdownPlay.click()
   await poll(p, () => !document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
   assert.equal(await isSelected(p, 'brief.md'), true)
-  await selected(p).getByRole('button', { name: 'Pause tone.mp3', exact: true }).click()
+  const markdownPause = selected(p).getByRole('button', { name: 'Pause tone.mp3', exact: true })
+  if (device === 'phone') await markdownPause.tap()
+  else await markdownPause.click()
   await poll(p, () => document.querySelector('.ws-page[data-key$="/tone.mp3"] audio').paused)
   await selected(p).getByRole('button', { name: 'Play tone.mp3', exact: true }).click()
   await choose(p, 'tone.mp3')
@@ -907,7 +961,7 @@ test('Desk-opened channel reload and Back restore its Desk origin in the bar', a
   await deskOrigin()
   await leave(p)
   await poll(p, () => document.querySelectorAll('.ws-page.ws-selected').length === 0)
-  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
+  await p.locator('.ws-page.ws-selected:visible').waitFor({ state: 'hidden' })
   assert.equal(await activeBarView(p), 'desk', 'the origin tab closes the reader back to the Desk')
 })
 
@@ -984,7 +1038,7 @@ for (const [origin, { other, open: openFrom }] of Object.entries(origins)) test(
   await barTab(p, other).click()
   await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.deepEqual(await state(), { open: false, view: other, selected: [other] }, `another tab (${other}) switches view and closes the reader`)
-  assert.equal(await p.locator('.ws-page.ws-selected:visible').count(), 0)
+  await p.locator('.ws-page.ws-selected:visible').waitFor({ state: 'hidden' })
 })
 
 test('The sidebar edge resizes the column by drag and keys, persists per viewer, and resets on double-click', async p => {
@@ -1168,7 +1222,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
   for (const scrollTop of [200, 400, 1e6]) for (const { caption, holds } of await stuck(scrollTop)) assert.ok(holds, `${caption} sticks only inside its own group`)
 }, { width: 1440, height: 360 }, 'true')
 
-test('Wide reader takes the Desk column as cards, steps visibly, and returns selection to the current card', async p => {
+test('Wide reader steps through Desk cards, preserves selection on Escape, and returns the current card through its origin tab', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
@@ -1194,6 +1248,12 @@ test('Wide reader takes the Desk column as cards, steps visibly, and returns sel
   await p.keyboard.press('Escape')
   await poll(p, () => document.querySelectorAll('.ws-sidebar-source').length === 0)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), name, 'Escape keeps the original Desk selection')
+  await open(p)
+  await p.keyboard.press('j')
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
+  await barTab(p, 'desk').click()
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next)
 }, undefined, 'true')
 
@@ -1279,7 +1339,7 @@ for (const theme of [null, 'night-chart']) test(`Verdict verbs wear one pigment 
     await p.keyboard.press('z')
     await p.goto(url)
     const card = p.locator('.kbn-desk .kbn-card').filter({ hasText: name })
-    await card.locator('.kbn-card-menu').click()
+    await card.click({ button: 'right' })
     const desk = [await verdictLook(p.getByRole('menuitem', { name: 'Temper', exact: true })), await verdictLook(p.getByRole('menuitem', { name: 'Discard', exact: true }))]
     assert.ok(desk.every(look => look.ratio >= 4.5), 'Desk menu verdict labels stay legible')
   }
@@ -1453,8 +1513,7 @@ for (const surface of ['Desk', 'fiber']) test(`${surface} verdict buttons delay 
   const controls = surface === 'Desk'
     ? p.getByRole('menu')
     : selected(p).locator('.ws-chat-acts')
-  // A Desk row offers its verdicts through the persistent action button.
-  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-menu').click()
+  if (surface === 'Desk') await p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).click({ button: 'right' })
   await controls.getByRole(surface === 'Desk' ? 'menuitem' : 'button', { name: /Discard/ }).click()
   const host = surface === 'Desk' ? p.locator('.kbn-desk .kbn-card').filter({ hasText: name }).locator('.kbn-card-meta') : controls
   assert.equal(await host.locator(':scope > .ws-verdict-undo').count(), 1, 'the undo line takes the controls\' place')
@@ -1700,12 +1759,17 @@ test('Overview media thumbnails show duration and a paused first video frame', a
   assert.ok(await videoCard.locator('video').evaluate(v => v.muted && !v.controls && v.paused && v.currentTime === 0 && v.closest('[inert]')))
 })
 
-test('Resent report is one document with three receipts', async p => {
+test('Resent report is one document with four receipts', async p => {
   await open(p)
   assert.equal(await pageFor(p, 'calibration-report').count(), 1)
   await selected(p).getByRole('button', { name: 'Document menu', exact: true }).click()
-  await p.getByText('Receipts (3)', { exact: true }).click()
-  assert.equal(await p.locator('.ws-receipts > div').count(), 3)
+  // The harness also sends the report from the current transcript session.
+  await p.getByText('Receipts (4)', { exact: true }).click()
+  const receipts = p.locator('.ws-receipts > div')
+  assert.equal(await receipts.count(), 4)
+  const sessions = (await receipts.allTextContents()).map(text => text.split(' · ').at(-1))
+  assert.equal(new Set(sessions).size, 4, 'each send keeps its distinct receipt')
+  for (const session of ['workspace-send-older', 'workspace-send-middle', 'workspace-send-latest']) assert.ok(sessions.includes(session))
 })
 
 test('Text, markdown, code, image, archive and missing-file cause', async p => {
@@ -2011,11 +2075,12 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     assert.equal(await selected(p).locator('.ws-labelbar').isVisible(), false)
     await choose(p, 'Chat')
     const url = p.url()
-    const opener = selected(p).getByRole('button', { name: 'Settings', exact: true })
+    const opener = p.locator('.ws-rail-toggle')
     await opener.click()
-    const sheet = p.getByRole('dialog', { name: 'Settings', exact: true })
+    const sheet = p.getByRole('dialog', { name: 'Sent files', exact: true })
     await sheet.waitFor()
     assert.equal(p.url(), url, 'sheet is a same-address history layer')
+    await sheet.locator('[data-part="sent-files-more"]').click()
     assert.ok(await sheet.locator('.ws-sent-file').count() >= 12)
     assert.ok(await sheet.locator('.ws-sent-file time').first().getAttribute('datetime'))
     for (let i = 0; i < 22; i++) {
@@ -2034,7 +2099,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 390, height: 844 }
     await choose(p, 'Chat'); await opener.click(); await p.mouse.click(10, 10)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
     await opener.click()
-    const grabber = await sheet.getByRole('button', { name: 'Close settings' }).boundingBox()
+    const grabber = await sheet.getByRole('button', { name: 'Close threads and files' }).boundingBox()
     await swipe(p, grabber.x + grabber.width / 2, grabber.y + 20, grabber.x + grabber.width / 2, grabber.y + 90)
     await poll(p, () => !document.querySelector('.ws-page-sheet').open)
     await leave(p)
@@ -2809,7 +2874,7 @@ for (const theme of ['portolan', 'blueprint', 'laboratory-paper', 'night-chart']
     assert.deepEqual(await frame.evaluate(el => { const s = getComputedStyle(el); return [s.borderRadius, s.clipPath, s.boxShadow, s.borderTopWidth] }), ['0px', 'none', 'none', '0px'])
     assert.ok(await p.locator('[data-part="phone-topbar"]').isVisible())
     await choose(p, 'Chat')
-    await selected(p).getByRole('button', { name: 'Settings', exact: true }).click()
+    await p.locator('.ws-rail-toggle').click()
     assert.ok(await p.locator('[data-part="page-sheet-panel"]').isVisible())
     assert.ok(await p.locator('[data-part="page-sheet-row"]').count() > 1)
     assert.equal(await p.locator('[data-part="page-sheet-panel"]').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()), await p.locator('.ws-reader').evaluate(el => getComputedStyle(el).getPropertyValue('--ws-paper').trim()))
@@ -2976,7 +3041,7 @@ try {
         if (window === window.top) localStorage.setItem('shuttle:workspace:sidebar', choice)
       }, sidebarChoice)
       await page.goto(url, { timeout: 15000 })
-      await page.locator('.kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor({ timeout: 15000 })
+      await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).waitFor({ state: 'attached', timeout: 15000 })
       await run(page)
     } catch (error) { failure = error; await mkdir(shots, { recursive: true }); await page.screenshot({ path: resolve(shots, 'failure-' + name.replace(/[^a-z0-9]+/gi, '-').slice(0, 100) + '.png') }).catch(() => {}) }
     finally {

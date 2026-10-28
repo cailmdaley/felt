@@ -41,7 +41,10 @@ export function registerLivingReportJourneys(test) {
       const errors = []
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
-      await page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
+      await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+      // The family card opens its waiting thread; return to the report's owning constitution.
+      await selected(page).getByRole('button', { name: 'Return to Response analysis', exact: true }).click()
+      await selected(page).getByRole('button', { name: 'Return to Calibrate the shear response', exact: true }).click()
       await selected(page).locator('textarea').waitFor()
       await page.locator('.ws-report-chip .ws-thumbnail').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
@@ -172,7 +175,7 @@ export function registerLivingReportJourneys(test) {
   for (const hasTouch of [false, true]) {
     test(`Persistent rail (${hasTouch ? 'coarse' : 'fine'} pointer)`, async page => {
       await page.goto(url)
-      const enter = () => page.getByRole('button', { name: 'Open Calibrate the shear response — no worker', exact: true }).click()
+      const enter = () => page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
       await enter()
       await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
       assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)

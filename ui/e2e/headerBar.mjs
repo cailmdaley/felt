@@ -6,6 +6,13 @@ import { getBrowser } from './browser.mjs'
 
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
+async function openRoot(page) {
+  await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+  const header = page.locator('.ws-selected .ws-chat-head')
+  // A family's Desk row opens its frontier; these journeys exercise the root.
+  for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== title; depth++) await header.locator('.ws-chat-back').click()
+  await header.getByRole('heading', { name: title, exact: true }).waitFor()
+}
 export function registerHeaderBarJourneys(test) {
   test('Header breakpoint crossings preserve visible focus and hand overflow focus to Settings', async page => {
     await page.addInitScript(() => {
@@ -14,7 +21,7 @@ export function registerHeaderBarJourneys(test) {
       localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     const settings = header.getByRole('button', { name: 'Settings', exact: true })
     const resize = async (width, compact) => {
@@ -46,7 +53,7 @@ export function registerHeaderBarJourneys(test) {
       localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     for (const width of [1440, 850, 701]) {
       await page.setViewportSize({ width, height: 900 })
@@ -68,38 +75,44 @@ export function registerHeaderBarJourneys(test) {
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
       for (const name of ['Close for review', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
-      // Two columns: the verbs sit beneath the title on a centred line, × ends the title line, and the artifact spans both lines at the right.
+      // The actions start at the left beneath the title; the artifact spans
+      // both rows, with the leave control at the header's far right.
       const rows = await header.evaluate(el => {
         const box = sel => el.querySelector(sel)?.getBoundingClientRect() ?? null
         return { title: box('.ws-chat-title'), acts: box('.ws-chat-acts'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), chip: box('.ws-report-chip'), head: el.getBoundingClientRect() }
       })
       assert.ok(rows.verbs.top >= rows.title.bottom - 1, `verbs sit beneath the title at ${width}`)
-      assert.ok(rows.leave.bottom <= rows.verbs.top + 1, `× ends the title line at ${width}`)
-      const edge = rows.chip ? rows.chip.left : rows.head.right
-      assert.ok(edge - rows.leave.right < 80, `× is the last thing on the title line at ${width}`)
+      assert.ok(rows.leave.top < rows.title.bottom && rows.leave.bottom > rows.title.top, `× stays beside the title at ${width}`)
+      assert.ok(rows.head.right - rows.leave.right < 80, `× ends the header at ${width}`)
       if (rows.chip) {
         assert.ok(rows.chip.top <= rows.title.top + 1 && rows.chip.bottom >= rows.verbs.bottom - 1, `the artifact spans both lines at ${width}`)
         assert.ok(rows.chip.left >= rows.acts.right - 1, `the second line keeps clear of the artifact at ${width}`)
       }
       const slack = { left: rows.acts.left, right: rows.acts.right }
       const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
-      const left = Math.min(...line.map(b => b.left)) - slack.left, right = slack.right - Math.max(...line.map(b => b.right))
-      assert.ok(Math.abs(left - right) <= 2, `the second line is centred (${left.toFixed(1)} vs ${right.toFixed(1)}) at ${width}`)
+      const left = Math.min(...line.map(b => b.left)) - slack.left
+      assert.ok(Math.abs(left) <= 2, `the second line starts at the left (${left.toFixed(1)}) at ${width}`)
+      assert.ok(Math.max(...line.map(b => b.right)) <= slack.right + 1, `actions stay within their row at ${width}`)
     }
   }, { width: 1440, height: 900 })
-  test('The two-row header keeps the full title and verbs with open desktop columns', async page => {
+  test('The header keeps its clamped title and every verb inside open desktop columns', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     const check = async () => {
       await page.waitForFunction(() => {
         const title = document.querySelector('.ws-selected .ws-chat-title')
-        return title && title.clientWidth > 0 && title.scrollHeight <= title.clientHeight + 1
+        const header = title?.closest('header'), box = header?.getBoundingClientRect()
+        return title && box && title.clientWidth > 0 &&
+          [...header.querySelectorAll('.kbn-ctl-verdict button')].filter(button => button.checkVisibility()).every(button => {
+            const b = button.getBoundingClientRect()
+            return b.left >= box.left && b.right <= box.right && b.top >= box.top && b.bottom <= box.bottom
+          })
       })
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= Number(getComputedStyle(el).webkitLineClamp) * parseFloat(getComputedStyle(el).lineHeight) + 7))
       for (const name of ['Rest', 'Temper', 'Discard']) {
@@ -132,7 +145,7 @@ export function registerHeaderBarJourneys(test) {
       localStorage.setItem('shuttle:workspace:rail', 'false')
     })
     await page.goto(url)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     await header.waitFor()
     const posts = () => page.evaluate(() => window.__harness.requests.filter(r => r.method !== 'GET').length)
@@ -149,7 +162,7 @@ export function registerHeaderBarJourneys(test) {
       localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url)
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+    await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     const row = name => page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name })
     for (const key of ['Enter', 'Space']) {
@@ -182,7 +195,7 @@ export function registerHeaderBarJourneys(test) {
         localStorage.setItem('shuttle:workspace:rail', 'true')
       }, scheme)
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+      await openRoot(page)
       const header = page.locator('.ws-selected .ws-chat-head')
       const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
       const show = async () => { if (device === 'phone') await page.locator('.ws-rail-toggle').click() }
@@ -203,7 +216,7 @@ export function registerHeaderBarJourneys(test) {
         await header.getByRole('heading', { name: title, exact: true }).waitFor()
         await show()
         assert.equal(await rootButton().getAttribute('aria-current'), 'page')
-        if (device === 'phone') await page.getByRole('button', { name: 'Close settings', exact: true }).click()
+        if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
       }
     }, viewport)
     for (const scheme of ['light', 'dark']) test(`One header bar (${device}, ${scheme}): long name, immediate icons and unified settings`, async page => {
@@ -215,7 +228,7 @@ export function registerHeaderBarJourneys(test) {
         localStorage.setItem('shuttle:workspace:rail', 'false')
       }, scheme)
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+      await openRoot(page)
       const chat = page.locator('.ws-page.ws-selected')
       const header = chat.locator('.ws-chat-head')
       await chat.locator('.ws-transcript-context:not([hidden])').waitFor()
@@ -274,10 +287,9 @@ export function registerHeaderBarJourneys(test) {
         }
       }
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
-      const sheet = page.getByRole('dialog', { name: 'Settings', exact: true })
+      const sheet = page.getByRole('group', { name: 'Settings', exact: true })
       await sheet.waitFor()
       assert.ok(await sheet.locator('.kbn-ctl-history').count())
-      assert.ok(await sheet.locator('.ws-sent-file time').count())
       assert.ok(await sheet.locator('.ws-transcript-hit:not([hidden])').count())
       assert.match(await sheet.locator('.ws-transcript-hit').innerText(), /% cached/)
       if (device === 'phone') {
@@ -285,10 +297,17 @@ export function registerHeaderBarJourneys(test) {
         assert.ok(await sheet.getByRole('button', { name: 'Temper', exact: true }).isVisible())
         assert.ok(await sheet.getByRole('button', { name: 'Discard', exact: true }).isVisible())
       }
-      await sheet.getByRole('button', { name: 'Close settings', exact: true }).click()
+      await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })
       assert.equal(await header.getByRole('button', { name: 'Settings', exact: true }).evaluate(el => el === document.activeElement), true)
-      // Overflow actions leave the modal before opening a confirmation or undo window.
+      const threads = page.getByRole('button', { name: 'Show threads and sent files', exact: true })
+      await threads.click()
+      const files = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-sent-files' : '.ws-rail-files')
+      await files.waitFor()
+      assert.ok(await files.locator('time').count(), 'sent files carry timestamps in the threads view')
+      if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
+      else await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
+      // Overflow actions leave settings before opening a confirmation or undo window.
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
       await chat.getByRole('button', { name: 'Rest', exact: true }).click()
       const rest = page.locator('.kbn-rest-popover')

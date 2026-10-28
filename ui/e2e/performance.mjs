@@ -1,10 +1,9 @@
-// Repeatable cold Desk/chat budgets against the file:// board harness.
-// Run after `npm run harness:board` with `node e2e/performance.mjs`.
+// Cold app transfer/lazy-loading and file:// harness snapshot/transcript budgets.
+// Run after `npm run build && npm run harness:board` with `node e2e/performance.mjs`.
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
-import { mkdir, readdir, stat } from 'node:fs/promises'
-import net from 'node:net'
-import { resolve, join } from 'node:path'
+import { mkdir, readFile, readdir, stat } from 'node:fs/promises'
+import { createServer } from 'node:http'
+import { resolve, join, extname, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 
@@ -271,19 +270,32 @@ async function measureChangedTranscriptPoll() {
 }
 
 async function measureColdApp() {
-  const portProbe = net.createServer()
-  await new Promise(resolve => portProbe.listen(0, '127.0.0.1', resolve))
-  const address = portProbe.address()
-  const port = typeof address === 'object' && address ? address.port : 0
-  await new Promise(resolve => portProbe.close(resolve))
-  const vite = spawn(process.execPath, [resolve('node_modules/vite/bin/vite.js'), 'preview', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { stdio: 'ignore' })
-  let ready = false
+  const dist = resolve('dist')
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
+    '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.otf': 'font/otf' }
+  // Plug.Static prefers the build's Brotli files, then gzip. Vite preview
+  // recompresses dynamically, so its transfer sizes differ from the shipped assets.
+  const server = createServer(async (request, response) => {
+    try {
+      const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname)
+      const path = resolve(dist, `.${pathname === '/' ? '/index.html' : pathname}`)
+      if (!path.startsWith(`${dist}${sep}`)) { response.writeHead(404).end(); return }
+      const accepted = request.headers['accept-encoding'] ?? ''
+      let bytes, encoding
+      for (const [name, suffix] of [['br', '.br'], ['gzip', '.gz'], [undefined, '']]) {
+        if (name && !accepted.split(',').some(value => value.trim() === name)) continue
+        try { bytes = await readFile(`${path}${suffix}`); encoding = name; break }
+        catch (error) { if (error.code !== 'ENOENT') throw error }
+      }
+      if (!bytes) { response.writeHead(404).end(); return }
+      response.writeHead(200, { 'Content-Type': types[extname(path)] ?? 'application/octet-stream',
+        'Content-Length': bytes.length, Vary: 'Accept-Encoding', ...(encoding ? { 'Content-Encoding': encoding } : {}) })
+      response.end(bytes)
+    } catch { response.writeHead(404).end() }
+  })
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const port = server.address().port
   try {
-    for (let i = 0; i < 50; i++) {
-      try { await fetch(`http://127.0.0.1:${port}/`); ready = true; break }
-      catch { await new Promise(resolve => setTimeout(resolve, 100)) }
-    }
-    assert.equal(ready, true, 'Vite preview starts for cold app measurement')
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' })
     await page.route('**/api/v1/**', route => {
       const path = new URL(route.request().url()).pathname
@@ -346,8 +358,7 @@ async function measureColdApp() {
     if (process.env.REPORT_ONLY !== '1') assert.ok(initialTransferBytes < 300_000, 'cold Desk initial resources stay below 300 KB transferred')
     await page.close()
   } finally {
-    vite.kill('SIGTERM')
-    await new Promise(resolve => vite.once('exit', resolve))
+    await new Promise(resolve => server.close(resolve))
   }
 }
 

@@ -30,7 +30,8 @@
 .ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
 .ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
-.ws-chat-head > .ws-report-chip { grid-area: chip; align-self: stretch; }
+/* A definite width keeps the spanning thumbnail's aspect ratio out of the grid's row sizing. */
+.ws-chat-head > .ws-report-chip { grid-area: chip; align-self: stretch; width: 126px; }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
 :where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
 /* One back control leads to the parent chat or the originating board view. */
@@ -51,10 +52,10 @@
   overflow: hidden; overflow-wrap: anywhere;
   color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
 }
-/* The second line: state, meter, navigation and the lifecycle group, centred with even gaps; it may wrap into two centred lines. */
-.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 2px 14px; min-height: 36px; }
+/* State, meter, navigation and lifecycle actions start at the left and wrap within the card. */
+.ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; min-width: 0; align-items: center; justify-content: flex-start; gap: 2px 14px; min-height: 36px; }
 /* The lifecycle group is set apart by a rule and its tone, not by distance. */
-.ws-chat-acts > .kbn-ctl-verdict { display: flex; align-items: center; gap: 6px; margin: 0; padding-left: 14px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
+.ws-chat-acts > .kbn-ctl-verdict { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: 6px; margin: 0; padding-left: 14px; border-left: var(--ws-line-width) solid var(--ws-hairline-soft); }
 .ws-chat-acts > .kbn-ctl-verdict[hidden] { display: none; }
 .ws-chat-standing { display: inline-flex; flex: none; align-items: center; gap: 12px; }
 /* The lifecycle chip: the rail's state word in its tone, at the line's one text size. */
@@ -209,7 +210,7 @@
 @container (max-width: 560px) {
   /* The title takes the whole width; the artifact, at the phone's size, ends the second line under ×. */
   .ws-chat-head { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: 'identity identity leave' 'lead acts chip'; }
-  .ws-chat-head > .ws-report-chip { align-self: center; justify-self: center; }
+  .ws-chat-head > .ws-report-chip { align-self: center; justify-self: center; width: 60px; }
   .ws-chat-head .ws-report-preview { align-self: center; height: 40px; min-height: 0; }
   .ws-chat-head > .ws-chat-lead { align-self: start; padding-top: 4px; }
   /* × keeps the corner, so the name may take a third line. */
@@ -219,6 +220,7 @@
 
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .kbn-verb-menu [role='menuitem'] { min-height: 44px; height: 44px; }
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
   .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
