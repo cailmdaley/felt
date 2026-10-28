@@ -466,8 +466,8 @@ function paintPrompt(message: Message, prompt: Prompt): void {
     })
   }
   if (prompt.dispatch) {
-    kicker.tabIndex = 0
-    kicker.setAttribute('role', 'button')
+    setAttr(kicker, 'tabindex', '0')
+    setAttr(kicker, 'role', 'button')
     paintBrief(message)
   } else if (kicker.dataset.toggle) {
     for (const name of ['aria-expanded', 'role', 'tabindex']) kicker.removeAttribute(name)
@@ -502,27 +502,27 @@ function paintPrompt(message: Message, prompt: Prompt): void {
   }
   text.classList.toggle('ws-transcript-prompt-dispatch', prompt.dispatch)
   text.classList.toggle('ws-transcript-unclamped', message.unclamped)
-  text.setAttribute('aria-expanded', String(message.unclamped))
+  setAttr(text, 'aria-expanded', String(message.unclamped))
   if (!message.images) {
     message.images = document.createElement('span')
     message.images.className = 'ws-transcript-prompt-images'
     message.node.append(message.images)
   }
   message.images.textContent = Array.from({ length: prompt.images }, () => '[image]').join(' ')
-  message.images.hidden = prompt.images === 0
+  setHidden(message.images, prompt.images === 0)
 }
 
 function paintBrief(message: Message): void {
   message.node.classList.toggle('ws-transcript-brief-open', message.unclamped)
   message.prose.classList.toggle('ws-transcript-unclamped', message.unclamped)
-  message.kicker.setAttribute('aria-expanded', String(message.unclamped))
+  setAttr(message.kicker, 'aria-expanded', String(message.unclamped))
 }
 
 function measureClamp(text: HTMLElement, unclamped: boolean): void {
   const overflow = !unclamped && text.scrollHeight > text.clientHeight
-  text.classList.toggle('ws-transcript-overflowing', overflow)
-  if (overflow) text.setAttribute('aria-label', 'Expand prompt')
-  else text.removeAttribute('aria-label')
+  if (text.classList.contains('ws-transcript-overflowing') !== overflow) text.classList.toggle('ws-transcript-overflowing', overflow)
+  if (overflow) setAttr(text, 'aria-label', 'Expand prompt')
+  else if (text.hasAttribute('aria-label')) text.removeAttribute('aria-label')
 }
 
 /**
@@ -538,6 +538,15 @@ function settleScroll(scroller: HTMLElement, top: number): number {
 /** Put a scroller at its bottom, where a reader following new messages sits, only when that moves it. */
 function settleScrollAtEnd(scroller: HTMLElement): number {
   return settleScroll(scroller, scroller.scrollHeight - scroller.clientHeight)
+}
+
+/** Set an attribute only when it changes, so a refresh that changed nothing writes nothing. */
+function setAttr(node: Element, name: string, value: string): void {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value)
+}
+
+function setHidden(node: HTMLElement, hidden: boolean): void {
+  if (node.hidden !== hidden) node.hidden = hidden
 }
 
 /** A node drawn from data, and the data it was drawn from. */
@@ -1043,7 +1052,7 @@ export class TranscriptBand {
     this.liveDot.hidden = !target?.live
     this.liveLabel.hidden = !target?.live
     this.paintFacts()
-    this.latestButton.hidden = !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest))
+    setHidden(this.latestButton, !(this.pinned && this.latest && target && !this.sameTarget(target, this.latest)))
     // With no session to read, the line keeps only the session list.
     this.head.hidden = this.openButton.hidden = !target
     this.el.hidden = this.inline ? !target : !target && !this.pinned && !this.sessions
@@ -1091,7 +1100,7 @@ export class TranscriptBand {
     if (!this.inline) return
     const turn = this.model.turns.at(-1)
     const last = turn?.steps.at(-1)
-    this.inlineWorking.hidden = !(this.target?.live && this.hasInitialRender && (!last || last.kind !== 'text'))
+    setHidden(this.inlineWorking, !(this.target?.live && this.hasInitialRender && (!last || last.kind !== 'text')))
   }
 
   /**
@@ -1464,7 +1473,7 @@ export class TranscriptBand {
     if (turn.prompt) {
       this.previewPrompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you', 'li')
       paintPrompt(this.previewPrompt, turn.prompt)
-      this.previewPrompt.node.dataset.readingKey = `${turn.index}:prompt`
+      setAttr(this.previewPrompt.node, 'data-reading-key', `${turn.index}:prompt`)
       nodes.push(this.previewPrompt.node)
     }
     const agent = this.agentName()
@@ -1490,7 +1499,7 @@ export class TranscriptBand {
         this.previewTexts.set(index, message)
       }
       paintText(message, agent, step)
-      message.node.dataset.readingKey = `${turn.index}:text:${turn.steps.slice(0, index).filter(step => step.kind === 'text').length}`
+      setAttr(message.node, 'data-reading-key', `${turn.index}:text:${turn.steps.slice(0, index).filter(step => step.kind === 'text').length}`)
       nodes.push(message.node)
     })
     if (working) nodes.push(this.working)
@@ -1613,7 +1622,7 @@ export class TranscriptBand {
     if (turn.prompt) {
       view.prompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you')
       paintPrompt(view.prompt, turn.prompt)
-      view.prompt.node.dataset.readingKey = `${turn.index}:prompt`
+      setAttr(view.prompt.node, 'data-reading-key', `${turn.index}:prompt`)
       children.push(view.prompt.node)
     }
     const agent = this.agentName()
@@ -1640,7 +1649,7 @@ export class TranscriptBand {
           view.texts.set(part.index, message)
         }
         paintText(message, agent, step)
-        message.node.dataset.readingKey = `${turn.index}:text:${turn.steps.slice(0, part.index).filter(step => step.kind === 'text').length}`
+        setAttr(message.node, 'data-reading-key', `${turn.index}:text:${turn.steps.slice(0, part.index).filter(step => step.kind === 'text').length}`)
         children.push(message.node)
         return
       }
