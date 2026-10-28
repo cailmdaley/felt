@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -25,7 +24,7 @@ func (a *app) spawnIdleWatcher(recordPath string) error {
 		return err
 	}
 	defer logFile.Close()
-	cmd := exec.Command(exe, "idle-watch", recordPath)
+	cmd := a.env.Command(exe, "idle-watch", recordPath)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, logFile, logFile
 	cmd.Dir = filepath.Dir(recordPath)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
