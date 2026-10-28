@@ -156,6 +156,56 @@ func TestMessageToLiveFiberSendsToItsWorker(t *testing.T) {
 	}
 }
 
+func TestMessageToRemoteLiveFiberSucceedsWhenLocalAskCleanupCannotResolveIt(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	ownHost(t, env, "sender-node")
+	project, _ := newStore(t)
+	env.Chdir(project)
+	store := writeMessageTargetFiber(t, map[string]any{
+		"kind": "oneshot", "host": "worker-node", "agent": "claude-opus", "project_dir": t.TempDir(),
+		"ask":     map[string]any{"text": "Already answered?", "at": "2026-10-28T10:00:00Z"},
+		"runtime": map[string]any{"session_uuid": messageTargetSession},
+	})
+	isolateMessageFiberStore(env, store)
+	ledger, _ := json.Marshal(sessionLedgerResponse{
+		Records: []SessionProvenance{{Fiber: "work/worker", UID: messageTargetFiberUID, Session: messageTargetSession, Host: "worker-node", Harness: "claude", At: 1, Kind: "dispatch"}},
+		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
+	})
+	peers, _ := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
+	deliver, _ := dormantDeliverStub(http.StatusConflict, `{"delivery":"context","queued":false,"live":true}`)
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/deliver":     deliver,
+		"/api/v1/peers":       jsonBody(string(peers)),
+		sessionsCompositePath: jsonBody(string(ledger)),
+		"/api/v1/messages": func(w http.ResponseWriter, r *http.Request) {
+			var posted messaging.Request
+			if err := json.NewDecoder(r.Body).Decode(&posted); err != nil {
+				t.Errorf("decode direct message: %v", err)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(messaging.Receipt{
+				MessageID: posted.MessageID, Address: posted.Address,
+				Status: messaging.StatusAccepted, Transport: "claude-native",
+			})
+		},
+	})
+
+	// The shared store resolves the remote fiber, but this checkout's project
+	// scope cannot load it after delivery.
+	app := newApp(env)
+	stdout, stderr, err := runMessage(t, app, "work/worker", "steer now")
+	if err != nil {
+		t.Fatalf("successful delivery was reported as failure: %v", err)
+	}
+	if strings.Contains(stderr, "couldn't clear the fiber's outstanding question") {
+		t.Fatalf("remote fiber received a local cleanup warning: %q", stderr)
+	}
+	if !strings.HasPrefix(stdout, "accepted ") {
+		t.Fatalf("receipt = %q", stdout)
+	}
+}
+
 func TestMessageToFiberWithoutShuttleBlockIsStillAnError(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

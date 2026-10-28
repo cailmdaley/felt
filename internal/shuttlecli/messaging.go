@@ -289,10 +289,12 @@ exit 1 means rejected, unknown, or another command error.`,
 				return deliveryErr
 			}
 			if receipt.Idle != nil && receipt.Idle.State != messaging.IdleWatching && receipt.Status != messaging.StatusRejected {
-				return fmt.Errorf("message %s delivered, but the idle subscription failed: %s", id, receipt.Idle.Detail)
+				fmt.Fprintf(a.env.Stderr, "message delivered; idle subscription %s: %s\n", receipt.Idle.State, receipt.Idle.Detail)
 			}
 			if !messageOpts.requestJSON && len(args) > 0 && receipt.Status != messaging.StatusSubscribed {
-				return a.clearMessagedFiberAsk(args[0])
+				if err := a.clearMessagedFiberAsk(args[0]); err != nil {
+					fmt.Fprintf(a.env.Stderr, "message delivered; couldn't clear the fiber's outstanding question: %v\n", err)
+				}
 			}
 			return nil
 		},

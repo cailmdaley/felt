@@ -68,6 +68,12 @@ func (a *app) clearMessagedFiberAsk(target string) error {
 	if err != nil || len(lookup.Fibers) != 1 || lookup.refused() {
 		return nil
 	}
+	// Fiber-addressed messages can target work owned by another host. Its
+	// question is cleared by the owner daemon after delivery; trying to resolve
+	// that fiber in this checkout can fail even though the message succeeded.
+	if a.ensureOwnedHere(lookup.Fibers[0], target) != nil {
+		return nil
+	}
 	f, st, _, err := a.shuttleResolveFiberRef(lookup.Fibers[0].ID, true)
 	if err != nil {
 		return err

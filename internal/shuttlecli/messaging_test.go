@@ -135,6 +135,40 @@ func TestBuildMessageRequestDefaultsToWake(t *testing.T) {
 	}
 }
 
+func TestAcceptedMessageRemainsSuccessfulWhenIdleSubscriptionFails(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request messaging.Request
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode message: %v", err)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(messaging.Receipt{
+			MessageID: request.MessageID,
+			Address:   request.Address,
+			Status:    messaging.StatusAccepted,
+			Transport: "claude-native",
+			Idle:      &messaging.IdleSubscription{State: messaging.IdleUnsupported, Detail: "watcher unavailable"},
+		})
+	}))
+
+	var stdout, stderr bytes.Buffer
+	env.Stdout, env.Stderr = &stdout, &stderr
+	app := newApp(env)
+	opts := messageOptions{wake: true, notifyIdle: true}
+	cmd := app.messageCmd(&opts)
+	if err := cmd.RunE(cmd, []string{"shuttle://node/claude/session-1", "do this"}); err != nil {
+		t.Fatalf("accepted delivery became a CLI failure: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "accepted shuttle://node/claude/session-1") {
+		t.Fatalf("accepted receipt missing: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "message delivered; idle subscription unsupported: watcher unavailable") {
+		t.Fatalf("subscription warning missing: %q", stderr.String())
+	}
+}
+
 func TestMessageCobraWakeFlags(t *testing.T) {
 	t.Parallel()
 	a := newApp(testEnv(t))
