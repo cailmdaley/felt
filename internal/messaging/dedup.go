@@ -36,7 +36,9 @@ func requestHash(r Request) string {
 		Wake                bool
 		Attachments         []Attachment `json:"attachments,omitempty"`
 		ReplyTo             string       `json:"reply_to,omitempty"`
-	}{r.Address, r.Text, r.From, r.Wake, r.Attachments, r.ReplyTo})
+		NotifyWhenIdle      bool         `json:"notify_when_idle,omitempty"`
+		NotifyWake          bool         `json:"notify_wake,omitempty"`
+	}{r.Address, r.Text, r.From, r.Wake, r.Attachments, r.ReplyTo, r.NotifyWhenIdle, r.NotifyWake})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }

@@ -355,7 +355,7 @@ delivery. A failed wake remains a failure in the receipt and is
 never silently downgraded to context-only delivery. The address selects the
 owner strictly; an unknown host is refused rather than attempted locally. Its
 receipt reports the furthest observed submission stage (`accepted`,
-`context_added`, `submitted`, `queued`, `unknown`, or `rejected`), transport, and detail;
+`context_added`, `submitted`, `queued`, `subscribed`, `unknown`, or `rejected`), transport, and detail;
 it does not claim that the recipient acted on the message. For Claude-native
 delivery, `queued` means the receiver queues it behind its current turn,
 `submitted` means the transcript shows it admitted as a user turn, and `accepted`
@@ -363,6 +363,13 @@ means a correlated real assistant reply appears. Hook-mailbox `queued` is
 context-only and starts no turn. With `wake: true`, only Claude-native
 `queued`/`submitted` receipts are valid; `context_added` is never a wake result.
 Native admission alone never means a model reply.
+
+`notify_when_idle: true` subscribes `from`, which must be a `shuttle://`
+address, to one idle notice from the receiver; `notify_wake: true` makes that
+notice wake the subscriber. With it, `text` may be empty: the receipt is then
+`subscribed` and nothing is delivered. Every receipt for such a request carries
+`idle: {state, signal, detail}`, with `state` `watching` or `unsupported`. See
+`shuttle message --notify-when-idle` in the CLI reference.
 
 A processed delivery returns HTTP 200 for any receipt status, including
 `rejected` and `unknown`. HTTP 400 corresponds to `invalid_address`,

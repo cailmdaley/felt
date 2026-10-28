@@ -704,6 +704,28 @@ defmodule ShuttleWeb.MessagingControllerTest do
                     %{"reply_to" => "work/fiber", "from" => "shuttle://peer/pi/A"}}
   end
 
+  test "an idle subscription may omit text and reaches the owner's frame", %{host: host} do
+    request = %{
+      "address" => "shuttle://#{host}/codex/native%2Fid",
+      "text" => "",
+      "from" => "shuttle://peer/pi/A",
+      "wake" => false,
+      "notify_when_idle" => true,
+      "notify_wake" => true,
+      "message_id" => "idle-sub"
+    }
+
+    assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+
+    assert_receive {:local_message_frame, %{"notify_when_idle" => true, "notify_wake" => true}}
+
+    for bad <- [%{"notify_when_idle" => "yes"}, %{"notify_when_idle" => false}] do
+      assert api_conn()
+             |> post("/api/v1/messages", Jason.encode!(Map.merge(request, bad)))
+             |> json_response(400)
+    end
+  end
+
   test "reply targets reject nonstrings and control characters", %{host: host} do
     for reply_to <- [nil, 12, %{}, "work\nfiber", String.duplicate("x", 1025)] do
       request = %{

@@ -25,7 +25,7 @@ defmodule Shuttle.Messaging do
   @max_attachments 8
   @max_attachment_bytes 20 * 1024 * 1024
   @max_frame_bytes 32 * 1024 * 1024
-  @receipt_statuses ~w(accepted context_added submitted queued unknown rejected)
+  @receipt_statuses ~w(accepted context_added submitted queued subscribed unknown rejected)
   @part_pattern ~r/\A[a-z0-9._-]+\z/
   def peers(local? \\ false) do
     if local? do
@@ -490,8 +490,12 @@ defmodule Shuttle.Messaging do
           String.contains?(text, <<0>>) ->
         {:error, 400, "text must be a string of at most #{@max_text_bytes} bytes without NUL"}
 
-      text == "" and attachments == [] ->
+      text == "" and attachments == [] and Map.get(payload, "notify_when_idle") != true ->
         {:error, 400, "text or attachments must be non-empty"}
+
+      not is_boolean(Map.get(payload, "notify_when_idle", false)) or
+          not is_boolean(Map.get(payload, "notify_wake", false)) ->
+        {:error, 400, "notify_when_idle and notify_wake must be booleans"}
 
       not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) ->
         {:error, 400, "from must be a string of at most 1024 bytes without control characters"}
@@ -509,7 +513,16 @@ defmodule Shuttle.Messaging do
       true ->
         raw =
           payload
-          |> Map.take(["address", "text", "from", "reply_to", "wake", "message_id"])
+          |> Map.take([
+            "address",
+            "text",
+            "from",
+            "reply_to",
+            "wake",
+            "message_id",
+            "notify_when_idle",
+            "notify_wake"
+          ])
           |> Map.put("wake", wake)
 
         raw = if attachments == [], do: raw, else: Map.put(raw, "attachments", attachments)

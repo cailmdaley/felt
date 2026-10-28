@@ -38,6 +38,8 @@ type messageOptions struct {
 	id          string
 	requestJSON bool
 	attachments []string
+	notifyIdle  bool
+	notifyWake  bool
 }
 
 const maxMessageReceiptBytes = 512 << 10
@@ -186,7 +188,10 @@ exit 1 means rejected, unknown, or another command error.`,
 			if len(args) < 1 || len(args) > 2 {
 				return fmt.Errorf("expected an address and text, '-' for stdin, or --file <path>")
 			}
-			if messageOpts.file == "" && len(args) != 2 && len(messageOpts.attachments) == 0 {
+			if messageOpts.notifyWake && !messageOpts.notifyIdle {
+				return fmt.Errorf("--notify-wake requires --notify-when-idle")
+			}
+			if messageOpts.file == "" && len(args) != 2 && len(messageOpts.attachments) == 0 && !messageOpts.notifyIdle {
 				return fmt.Errorf("expected text, '-' for stdin, --file <path>, or --attach <path>")
 			}
 			if messageOpts.file != "" && len(args) == 2 {
@@ -199,12 +204,16 @@ exit 1 means rejected, unknown, or another command error.`,
 			if err != nil {
 				return err
 			}
-			if !messageOpts.requestJSON && !messageOpts.local {
+			notifyOnly := request.NotifyWhenIdle && request.Text == "" && len(request.Attachments) == 0
+			if !messageOpts.requestJSON && !messageOpts.local && !notifyOnly {
 				queued, err := a.queueForNextWorker(request)
 				if err != nil {
 					return err
 				}
 				if queued != nil {
+					if request.NotifyWhenIdle {
+						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — no live worker to watch; the message waits for the next one\n")
+					}
 					return a.printNextWorkerReceipt(queued)
 				}
 			}
@@ -226,6 +235,7 @@ exit 1 means rejected, unknown, or another command error.`,
 				if hostErr != nil {
 					return hostErr
 				}
+				messaging.SpawnIdleWatcher = a.spawnIdleWatcher
 				receipt, err = messaging.Send(cmd.Context(), a.env, host, request)
 				originalDetail := receipt.Detail
 				receipt = a.enrichUnavailableSession(request, receipt)
@@ -265,11 +275,23 @@ exit 1 means rejected, unknown, or another command error.`,
 				}
 			} else {
 				fmt.Fprintf(a.env.Stdout, "%s %s (%s)\n", receipt.Status, receipt.Address, receipt.MessageID)
+				if receipt.Idle != nil {
+					fmt.Fprintf(a.env.Stderr, "idle subscription: %s", receipt.Idle.State)
+					if receipt.Idle.Signal != "" {
+						fmt.Fprintf(a.env.Stderr, " via %s", receipt.Idle.Signal)
+					}
+					fmt.Fprintf(a.env.Stderr, " — %s\n", receipt.Idle.Detail)
+				} else if request.NotifyWhenIdle && receipt.Status != messaging.StatusRejected {
+					fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — the owning host's shuttle predates --notify-when-idle\n")
+				}
 			}
 			if deliveryErr := messageReceiptError(id, receipt, err); deliveryErr != nil {
 				return deliveryErr
 			}
-			if !messageOpts.requestJSON && len(args) > 0 {
+			if receipt.Idle != nil && receipt.Idle.State != messaging.IdleWatching && receipt.Status != messaging.StatusRejected {
+				return fmt.Errorf("message %s delivered, but the idle subscription failed: %s", id, receipt.Idle.Detail)
+			}
+			if !messageOpts.requestJSON && len(args) > 0 && receipt.Status != messaging.StatusSubscribed {
 				return a.clearMessagedFiberAsk(args[0])
 			}
 			return nil
@@ -279,6 +301,8 @@ exit 1 means rejected, unknown, or another command error.`,
 	shuttleMessageCmd.Flags().StringArrayVar(&messageOpts.attachments, "attach", nil, "copy a file to the recipient's host (repeat for multiple files)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.wake, "wake", true, "request that the native harness wake the addressed session (use --wake=false for context only)")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.contextOnly, "context-only", false, "deliver context without starting or steering a model turn")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyIdle, "notify-when-idle", false, "get one notice (as context) when the receiver next goes idle or exits; text is optional")
+	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyWake, "notify-wake", false, "with --notify-when-idle, have the notice start a turn here")
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.from, "from", "", "label the sender (default: detected harness thread or external)")
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.id, "message-id", "", "supply an idempotency key for a safe retry")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.local, "local", false, "send through this host's native adapter without daemon routing")
@@ -290,7 +314,7 @@ exit 1 means rejected, unknown, or another command error.`,
 
 func messageReceiptError(id string, receipt messaging.Receipt, err error) error {
 	switch receipt.Status {
-	case messaging.StatusAccepted, messaging.StatusSubmitted, messaging.StatusQueued, messaging.StatusContextAdded:
+	case messaging.StatusAccepted, messaging.StatusSubmitted, messaging.StatusQueued, messaging.StatusContextAdded, messaging.StatusSubscribed:
 		return nil
 	case messaging.StatusUnknown, messaging.StatusRejected:
 		if err != nil {
@@ -328,7 +352,11 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 		}
 	}
 	from := a.resolveMessageSender(o.from)
-	return messaging.Request{Address: args[0], Text: text, From: from, ReplyTo: a.messageReplyTarget(from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments}, nil
+	request := messaging.Request{Address: args[0], Text: text, From: from, ReplyTo: a.messageReplyTarget(from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments, NotifyWhenIdle: o.notifyIdle, NotifyWake: o.notifyWake}
+	if o.notifyIdle && text == "" && len(attachments) == 0 {
+		request.Wake = false
+	}
+	return request, nil
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
@@ -507,7 +535,7 @@ func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) 
 		return messaging.Receipt{}, fmt.Errorf("daemon returned a mismatched or incomplete message receipt; delivery is unknown")
 	}
 	switch receipt.Status {
-	case messaging.StatusQueued, messaging.StatusAccepted, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusUnknown, messaging.StatusRejected:
+	case messaging.StatusQueued, messaging.StatusAccepted, messaging.StatusContextAdded, messaging.StatusSubmitted, messaging.StatusSubscribed, messaging.StatusUnknown, messaging.StatusRejected:
 	default:
 		return messaging.Receipt{}, fmt.Errorf("daemon returned an unsupported receipt status %q; delivery is unknown", receipt.Status)
 	}

@@ -76,6 +76,15 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 		return rejected(req, "none", err.Error()), err
 	}
 	return withDedup(ctx, env, req, func(sendCtx context.Context) dedupSendResult {
+		if req.NotifyWhenIdle && req.Text == "" && len(req.Attachments) == 0 {
+			sub := subscribeIdle(env, addr, req)
+			receipt := Receipt{MessageID: req.MessageID, Address: req.Address, Status: StatusSubscribed, Transport: "idle-watch", Detail: sub.Detail, Idle: sub}
+			if sub.State != IdleWatching {
+				receipt.Status = StatusRejected
+				return dedupSendResult{Receipt: receipt, Err: errCode("unsupported", "%s", sub.Detail)}
+			}
+			return dedupSendResult{Receipt: receipt}
+		}
 		if err := sendCtx.Err(); err != nil {
 			receipt := rejected(req, "validation", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
@@ -107,6 +116,9 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 			result.Receipt, result.Err = a.send(sendCtx, env, addr, delivery)
 		}
 		result.Receipt.Files = files
+		if req.NotifyWhenIdle && result.Receipt.Status != StatusRejected {
+			result.Receipt.Idle = subscribeIdle(env, addr, req)
+		}
 		return result
 	})
 }
@@ -122,7 +134,19 @@ func validateRequest(host string, r Request) error {
 	if r.MessageID == "" || len(r.MessageID) > 256 || hasControl(r.MessageID) {
 		return errCode("invalid_request", "invalid message_id")
 	}
-	if (r.Text == "" && len(r.Attachments) == 0) || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
+	if r.NotifyWake && !r.NotifyWhenIdle {
+		return errCode("invalid_request", "notify_wake requires notify_when_idle")
+	}
+	if r.NotifyWhenIdle {
+		from, err := ParseAddress(r.From)
+		if err != nil {
+			return errCode("invalid_request", "notify_when_idle needs a sender address to notify; from %q is not one", r.From)
+		}
+		if from == a {
+			return errCode("invalid_request", "notify_when_idle cannot target the subscribing session itself")
+		}
+	}
+	if (r.Text == "" && len(r.Attachments) == 0 && !r.NotifyWhenIdle) || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
 		return errCode("invalid_request", "text must be at most 65536 bytes and may be empty only with attachments")
 	}
 	if len(r.From) > 1024 || hasControl(r.From) {

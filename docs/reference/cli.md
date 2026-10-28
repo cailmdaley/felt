@@ -246,7 +246,7 @@ constitution open; activating it could launch another worker.
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
-| `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
+| `shuttle message <target> [text\|-]` | Send to a full address, a unique native session ID, or a fiber path, slug, or UID, which resolves to its recorded worker session (`--attach`, `--file`, `--context-only`, `--notify-when-idle`, `--notify-wake`, `--from`, `--message-id`, `--json`). Session IDs resolve through live discovery and the session ledger; ambiguous IDs list their candidate addresses. `-` and `--file -` read multiline text; repeat `--attach <path>` to include binary files. Receipts print the resolved canonical address and message ID for a safe explicit retry |
 | `shuttle transcript <session-id>` | Print the native transcript path when local, or verify and materialize an exact remote copy in the managed cache; inspect it with the harness's ordinary `jq`/`rg` recipes (`--json` for metadata and paths) |
 | `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
 | `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
@@ -350,6 +350,25 @@ An active Codex turn accepts it through native steering; an idle loaded thread r
 tool; Pi offers it before the next agent turn. `--wake` remains an explicit alias
 for the default; `--wake=false` is equivalent to `--context-only`.
 
+`--notify-when-idle` subscribes the sending session to one notice when the
+receiver next ends a turn with nothing queued or running, or exits. A receiver
+that is idle already answers at once, giving the time its last turn ended.
+Text is optional: with text, the message is delivered and then the subscription
+is made; without it, the receipt is `subscribed`. The notice arrives as context
+from the receiver's address; `--notify-wake` has it start a turn instead. The
+sender must have a session address (`--from`, or the detected harness session).
+The owning host records the subscription under `$SHUTTLE_DATA_DIR/idle/` and a
+detached `shuttle idle-watch` observes it. Claude receivers subscribe through
+Claude Code's native inbox (`notify_when_idle` / `peer_idle_notice`), and a
+turn whose Stop hook left background tasks running waits on to the next quiet
+stop. Codex and Pi receivers are watched through the host's hook event stream:
+a `stop` with no background tasks and no further activity within 2 s is idle,
+and `session_end` is an exit. Hook events do not see input queued inside the
+harness. After 12 hours, Claude Code's own subscription lifetime, the notice
+says the subscription expired and makes no claim about the receiver. The
+receipt's `idle` object gives `state` (`watching` or `unsupported`), the
+`signal`, and a detail. Idle means the turn ended, not that the work is done.
+
 Shuttle routes to the configured owner host and its live harness integration.
 Claude uses its receiver-registered native inbox; Codex uses the owning App
 Server; Pi uses the Felt extension's native endpoint. Existing Confer Pi workers
@@ -420,6 +439,7 @@ has enabled or trusted them; discovery reflects receiver registration.
 | `context_added` | Codex acknowledged adding persistent context; no turn started |
 | `accepted` | Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
 | `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
+| `subscribed` | `--notify-when-idle` with no text: the subscription is recorded and watched; nothing was delivered |
 | `rejected` | The request or receiving transport refused delivery |
 
 No receipt proves that a model read, acted on, or integrated the message.

@@ -54,15 +54,20 @@ type Request struct {
 	Wake        bool         `json:"wake"`
 	MessageID   string       `json:"message_id"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	// NotifyWhenIdle subscribes From to one notice when the receiver next
+	// goes idle or exits; NotifyWake has that notice start a turn there.
+	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`
+	NotifyWake     bool `json:"notify_wake,omitempty"`
 }
 
 type Receipt struct {
-	MessageID string         `json:"message_id"`
-	Address   string         `json:"address"`
-	Status    string         `json:"status"`
-	Transport string         `json:"transport"`
-	Detail    string         `json:"detail,omitempty"`
-	Files     []ReceivedFile `json:"files,omitempty"`
+	MessageID string            `json:"message_id"`
+	Address   string            `json:"address"`
+	Status    string            `json:"status"`
+	Transport string            `json:"transport"`
+	Detail    string            `json:"detail,omitempty"`
+	Files     []ReceivedFile    `json:"files,omitempty"`
+	Idle      *IdleSubscription `json:"idle,omitempty"`
 }
 
 type Attachment struct {
