@@ -490,6 +490,9 @@ defmodule Shuttle.RemoteRegistry do
       {:ok, snapshot} ->
         success_entry(entry, snapshot, now)
 
+      {:busy, reason} ->
+        busy_entry(entry, reason, now)
+
       {:error, reason} ->
         Logger.debug("RemoteRegistry: poll failed for #{remote.name}: #{inspect(reason)}")
         normal_failure_entry(entry, reason, state.failure_threshold, now)
@@ -504,6 +507,9 @@ defmodule Shuttle.RemoteRegistry do
     case fetch_snapshot(remote, client) do
       {:ok, snapshot} ->
         success_entry(entry, snapshot, now)
+
+      {:busy, reason} ->
+        busy_entry(entry, reason, now)
 
       {:error, reason} ->
         Logger.debug("RemoteRegistry: passive poll failed for #{remote.name}: #{inspect(reason)}")
@@ -601,6 +607,9 @@ defmodule Shuttle.RemoteRegistry do
           {:ok, snapshot} ->
             Logger.info("RemoteRegistry: #{remote.name} recovered after tunnel bounce")
             success_entry(entry, snapshot, now)
+
+          {:busy, reason} ->
+            busy_entry(entry, reason, now)
 
           {:error, reason} ->
             Logger.warning(
@@ -773,6 +782,9 @@ defmodule Shuttle.RemoteRegistry do
             Logger.info("RemoteRegistry: #{remote.name} recovered after remote restart")
             success_entry(entry, snapshot, now)
 
+          {:busy, reason} ->
+            busy_entry(entry, reason, now)
+
           {:error, reason} ->
             Logger.warning(
               "RemoteRegistry: #{remote.name} still unhealthy after remote restart: #{format_error(reason)}"
@@ -795,6 +807,9 @@ defmodule Shuttle.RemoteRegistry do
           {:ok, snapshot} ->
             Logger.info("RemoteRegistry: #{remote.name} recovered during backoff probe")
             success_entry(entry, snapshot, now)
+
+          {:busy, reason} ->
+            busy_entry(entry, reason, now)
 
           {:error, reason} when recovery.attempt >= state.trip_threshold ->
             # N full cascade attempts have failed: trip the breaker.
@@ -828,7 +843,7 @@ defmodule Shuttle.RemoteRegistry do
 
           {:error, reason} ->
             Logger.warning(
-              "RemoteRegistry: #{remote.name} backoff probe failed; restarting recovery cascade"
+              "RemoteRegistry: #{remote.name} backoff probe failed; restarting recovery cascade: #{format_error(reason)}"
             )
 
             with_recovery(
@@ -886,9 +901,38 @@ defmodule Shuttle.RemoteRegistry do
             {:error, :malformed_json}
         end
 
+      {:error, {:http_status, 503, body}} ->
+        case busy_response(body) do
+          {:busy, reason} -> {:busy, reason}
+          :other -> {:error, {:http_status, 503}}
+        end
+
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  defp busy_response(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"error" => error} = payload} when error in ["poller_unavailable", "booting"] ->
+        detail = Map.get(payload, "reason")
+        {:busy, if(is_binary(detail), do: "#{error}: #{detail}", else: error)}
+
+      _ ->
+        :other
+    end
+  end
+
+  defp busy_response(_), do: :other
+
+  defp busy_entry(entry, reason, now) do
+    if entry.last_error != reason do
+      Logger.warning("RemoteRegistry: #{entry.remote.name} answered while unavailable: #{reason}")
+    else
+      Logger.debug("RemoteRegistry: #{entry.remote.name} remains unavailable: #{reason}")
+    end
+
+    %{entry | last_attempt_at: now, stale: true, last_error: reason, recovery: %Recovery{}}
   end
 
   defp success_entry(%{remote: remote}, snapshot, now) do
@@ -921,7 +965,8 @@ defmodule Shuttle.RemoteRegistry do
     recovery =
       if failures >= threshold do
         Logger.warning(
-          "RemoteRegistry: #{entry.remote.name} degraded after #{failures} consecutive failures; starting recovery"
+          "RemoteRegistry: #{entry.remote.name} degraded after #{failures} consecutive failures " <>
+            "(last error: #{inspect(reason)}); starting recovery"
         )
 
         %{
@@ -1393,6 +1438,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def get(url, timeout_ms) when is_binary(url) and is_integer(timeout_ms) do
     case request(:get, url, [], nil, timeout_ms) do
       {:ok, 200, _headers, body} -> {:ok, body}
+      {:ok, 503, _headers, body} -> {:error, {:http_status, 503, body}}
       {:ok, status, _headers, _body} -> {:error, {:http_status, status}}
       {:error, _reason} = error -> error
     end

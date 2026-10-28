@@ -1,6 +1,7 @@
 defmodule Shuttle.RemoteRegistryTest do
   # group: Shuttle.TailnetPeers keeps its peers in an ETS table named after the module, which Remotes.configured/0 reads when :remotes is unset
   use ExUnit.Case, async: true, group: :tailnet_peers
+  import ExUnit.CaptureLog
 
   alias Shuttle.Remote
   alias Shuttle.RemoteRegistry
@@ -329,6 +330,163 @@ defmodule Shuttle.RemoteRegistryTest do
   # ── Failure paths ──
 
   describe "transient failures" do
+    test "a responding but busy daemon keeps its snapshot and never starts recovery" do
+      url = "http://localhost:4001/api/v1/state"
+      snapshot = snapshot_with_running(["work/current"])
+      MockClient.set(url, {:ok, snapshot})
+      {clock, advance} = fake_clock()
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_busy,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          clock: clock
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_busy)
+      previous = RemoteRegistry.snapshot(:reg_busy, "candide")
+      advance.(3)
+
+      MockClient.set(
+        url,
+        {:error,
+         {:http_status, 503, ~s({"error":"poller_unavailable","reason":"Poller call timed out"})}}
+      )
+
+      log = capture_log(fn -> :ok = RemoteRegistry.poll_now(:reg_busy) end)
+      entry = RemoteRegistry.snapshot(:reg_busy, "candide")
+
+      assert entry.snapshot == Jason.decode!(snapshot)
+      assert entry.stale
+      assert entry.last_polled_at == previous.last_polled_at
+      assert entry.last_error == "poller_unavailable: Poller call timed out"
+      assert entry.recovery.state == :healthy
+      assert log =~ "poller_unavailable: Poller call timed out"
+      assert MockRunner.calls() == []
+    end
+
+    test "degradation warning includes the failure reason" do
+      MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_warning_reason,
+          remotes: [candide_remote()],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1
+        )
+
+      log = capture_log(fn -> :ok = RemoteRegistry.poll_now(:reg_warning_reason) end)
+      assert log =~ "last error: :econnrefused"
+    end
+
+    test "booting 503 keeps the snapshot and does not count as a remote failure" do
+      url = "http://localhost:4001/api/v1/state"
+      snapshot = snapshot_with_running(["work/current"])
+      MockClient.set(url, {:ok, snapshot})
+      {clock, advance} = fake_clock()
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_booting_busy,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          clock: clock
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_booting_busy)
+      previous = RemoteRegistry.snapshot(:reg_booting_busy, "candide")
+      advance.(3)
+      MockClient.set(url, {:error, {:http_status, 503, ~s({"error":"booting","ready":false})}})
+      :ok = RemoteRegistry.poll_now(:reg_booting_busy)
+
+      entry = RemoteRegistry.snapshot(:reg_booting_busy, "candide")
+      assert entry.snapshot == Jason.decode!(snapshot)
+      assert entry.last_polled_at == previous.last_polled_at
+      assert entry.last_error == "booting"
+      assert entry.recovery.state == :healthy
+      assert MockRunner.calls() == []
+    end
+
+    test "a busy response during recovery cancels the cascade and retains the last snapshot" do
+      url = "http://localhost:4001/api/v1/state"
+      snapshot = snapshot_with_running(["work/current"])
+      MockClient.set(url, {:ok, snapshot})
+      MockRunner.set("launchctl", [{"", 0}])
+      {clock, advance} = fake_clock()
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_busy_recovery,
+          remotes: [candide_remote(poll_interval_ms: 1)],
+          client: MockClient,
+          runner: MockRunner,
+          auto_poll: false,
+          tick_interval_ms: 60_000,
+          failure_threshold: 1,
+          bounce_wait_ms: 1,
+          clock: clock,
+          user_uid: "501"
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_busy_recovery)
+      previous = RemoteRegistry.snapshot(:reg_busy_recovery, "candide")
+      advance.(3)
+      MockClient.set(url, {:error, :econnrefused})
+      :ok = RemoteRegistry.poll_now(:reg_busy_recovery)
+      advance.(3)
+      :ok = RemoteRegistry.poll_now(:reg_busy_recovery)
+      advance.(3)
+
+      MockClient.set(
+        url,
+        {:error, {:http_status, 503, ~s({"error":"poller_unavailable","reason":"timed out"})}}
+      )
+
+      :ok = RemoteRegistry.poll_now(:reg_busy_recovery)
+
+      entry = RemoteRegistry.snapshot(:reg_busy_recovery, "candide")
+      assert entry.snapshot == Jason.decode!(snapshot)
+      assert entry.last_polled_at == previous.last_polled_at
+      assert entry.last_error == "poller_unavailable: timed out"
+      assert entry.recovery.state == :healthy
+      assert Enum.count(MockRunner.calls(), fn {command, _} -> command == "launchctl" end) == 1
+      refute Enum.any?(MockRunner.calls(), fn {command, _} -> command == "ssh" end)
+    end
+
+    test "an unrecognized 503 body remains a normal HTTP failure" do
+      MockClient.set(
+        "http://localhost:4001/api/v1/state",
+        {:error, {:http_status, 503, "not-json"}}
+      )
+
+      {:ok, _pid} =
+        RemoteRegistry.start_link(
+          name: :reg_503_garbage,
+          remotes: [candide_remote()],
+          client: MockClient,
+          auto_poll: false,
+          tick_interval_ms: 60_000
+        )
+
+      :ok = RemoteRegistry.poll_now(:reg_503_garbage)
+      entry = RemoteRegistry.snapshot(:reg_503_garbage, "candide")
+      assert entry.stale
+      assert entry.last_error == {:http_status, 503}
+    end
+
     test "non-200 response marks the remote stale with last_error set" do
       MockClient.set(
         "http://localhost:4001/api/v1/state",

@@ -38,10 +38,10 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     def init(opts), do: opts
 
     @impl true
-    def call(conn, body: body) do
+    def call(conn, opts) do
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.send_resp(200, body)
+      |> Plug.Conn.send_resp(Keyword.get(opts, :status, 200), Keyword.fetch!(opts, :body))
     end
   end
 
@@ -69,6 +69,21 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     assert String.contains?(body, "cmbx — analysis hub")
     refute String.contains?(body, "Ã¢")
     assert {:ok, %{"fibers" => [%{"name" => "cmbx — analysis hub"}]}} = Jason.decode(body)
+  end
+
+  test "get/2 preserves the body of a 503 response" do
+    {:ok, server} =
+      Bandit.start_link(
+        plug: {EchoPlug, body: @utf8_body, status: 503},
+        port: 0,
+        ip: {127, 0, 0, 1}
+      )
+
+    {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+    on_exit(fn -> Process.exit(server, :normal) end)
+
+    assert Default.get("http://127.0.0.1:#{port}/api/v1/state", @http_timeout_ms) ==
+             {:error, {:http_status, 503, @utf8_body}}
   end
 
   describe "the fleet proxy" do
