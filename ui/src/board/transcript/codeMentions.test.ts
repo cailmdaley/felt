@@ -199,3 +199,18 @@ it('shows the preview spawn row, a list item kept in place, only while its spawn
   expect(group.hidden).toBe(true)
   expect(band.el.querySelector('[data-spawn-preview]')).toBe(group)
 })
+
+it('keeps a resolved spawn chip in place when a receipt lands earlier in its turn', async () => {
+  const band = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+  mentions.update([row('project-x/new-child', 'Working', 'working')])
+  const chip = band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')!
+  expect(chip).not.toBeNull()
+  // A receipt timed before the spawn splices in ahead of it, shifting the spawn's step index.
+  const accept = (band as unknown as { acceptSentFiles(session: string, files: unknown[]): void }).acceptSentFiles.bind(band)
+  accept(session, [{ fullPath: '/tmp/early.png', basename: 'early.png', timestamp: Date.parse('2026-10-22T22:40:30Z'), sessionId: session }])
+  await settle()
+  expect(band.el.querySelector('.ws-transcript-sent-file')).not.toBeNull()
+  expect(chip.isConnected).toBe(true)
+  expect(chip.hidden).toBe(false)
+})

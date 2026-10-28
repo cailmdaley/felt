@@ -83,19 +83,17 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       const row = identity ? exact(identity, link.dataset.origin) ?? (spawnId ? exact(spawnId, link.dataset.origin) ?? uniqueLeaf(spawnId, link.dataset.origin) : undefined) : resolve(candidate)
       if (row) paint(link, row, link.dataset.wikilinkRaw ?? candidate)
       else if (identity) {
-        delete link.dataset.constitution
-        delete link.dataset.state
-        delete link.dataset.turn
+        for (const key of ['constitution', 'state', 'turn']) setData(link, key, undefined)
+        for (const name of ['href', 'aria-label', 'role', 'tabindex']) setAttr(link, name, null)
         if (link.hasAttribute('data-spawn-chip')) {
-          link.hidden = true
-          link.removeAttribute('href'); link.removeAttribute('aria-label'); link.removeAttribute('role'); link.removeAttribute('tabindex')
+          if (!link.hidden) link.hidden = true
           continue
         }
-        link.classList.add('ws-constitution-chip-missing')
-        link.removeAttribute('href'); link.removeAttribute('aria-label'); link.removeAttribute('role'); link.removeAttribute('tabindex')
-        link.setAttribute('aria-disabled', 'true')
-        if (link.textContent !== link.dataset.mentionSource) link.textContent = link.dataset.mentionSource ?? identity
-        link.title = 'Constitution unavailable in the current read model'
+        if (!link.classList.contains('ws-constitution-chip-missing')) link.classList.add('ws-constitution-chip-missing')
+        setAttr(link, 'aria-disabled', 'true')
+        const source = link.dataset.mentionSource ?? identity
+        if (link.textContent !== source) link.textContent = source
+        setAttr(link, 'title', 'Constitution unavailable in the current read model')
       }
     }
     for (const group of root.querySelectorAll<HTMLElement>('[data-spawn-preview]')) {

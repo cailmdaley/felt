@@ -558,7 +558,10 @@ interface Kept { signature: string; node: HTMLElement }
  * whose decorations (constitution chips) resolve only after the reading
  * position was measured, so the view jumps by their height.
  */
-function keep(cache: Map<string, Kept>, used: Set<string>, key: string, signature: string, make: () => HTMLElement): HTMLElement {
+function keep(cache: Map<string, Kept>, used: Set<string>, identity: string, signature: string, make: () => HTMLElement): HTMLElement {
+  // Keyed by the step's own id, not its place: a receipt spliced in mid-turn must not rebuild what follows it.
+  let key = identity
+  for (let n = 1; used.has(key); n++) key = `${identity}#${n}`
   used.add(key)
   const kept = cache.get(key)
   if (kept?.signature === signature) return kept.node
@@ -572,10 +575,10 @@ function prune(cache: Map<string, Kept>, used: Set<string>): void {
 }
 
 /** The spawn chips of one folded step run, or null when it created no constitutions. */
-function keepSpawns(cache: Map<string, Kept>, used: Set<string>, step: Step, index: number, origin: string | undefined, tag: 'span' | 'li'): HTMLElement | null {
+function keepSpawns(cache: Map<string, Kept>, used: Set<string>, step: Step, origin: string | undefined, tag: 'span' | 'li'): HTMLElement | null {
   const ids = spawnIds(step)
-  if (!ids.length) return null
-  return keep(cache, used, `spawns:${index}`, JSON.stringify([ids, origin]), () => {
+  if (!ids.length || step.kind !== 'tool') return null
+  return keep(cache, used, `spawns:${step.id}`, JSON.stringify([ids, origin]), () => {
     const group = document.createElement(tag)
     group.className = 'ws-transcript-spawns'
     if (tag === 'li') { group.dataset.spawnPreview = ''; group.hidden = true }
@@ -1480,16 +1483,16 @@ export class TranscriptBand {
     const used = new Set<string>()
     turn.steps.forEach((step, index) => {
       if (step.kind === 'thread-notice') {
-        nodes.push(keep(this.previewKept, used, `notice:${index}`, JSON.stringify(step), () => noticeRow(step, 'li')))
+        nodes.push(keep(this.previewKept, used, `notice:${step.id}`, JSON.stringify(step), () => noticeRow(step, 'li')))
         return
       }
       if (step.kind === 'sent-file') {
         const owner = this.target?.host
-        nodes.push(keep(this.previewKept, used, `sent:${index}`, JSON.stringify([step, owner]), () => sentFileRow(step, owner, this.shuttleBase, this.onFile, 'li')))
+        nodes.push(keep(this.previewKept, used, `sent:${step.id}`, JSON.stringify([step, owner]), () => sentFileRow(step, owner, this.shuttleBase, this.onFile, 'li')))
         return
       }
       if (step.kind !== 'text') {
-        const spawns = keepSpawns(this.previewKept, used, step, index, this.target?.host, 'li')
+        const spawns = keepSpawns(this.previewKept, used, step, this.target?.host, 'li')
         if (spawns) nodes.push(spawns)
         return
       }
@@ -1632,13 +1635,13 @@ export class TranscriptBand {
     parts.forEach((part, position) => {
       if (part.kind === 'thread-notice') {
         const notice = turn.steps[part.index] as Notice
-        children.push(keep(view.kept, used, `notice:${part.index}`, JSON.stringify(notice), () => noticeRow(notice)))
+        children.push(keep(view.kept, used, `notice:${notice.id}`, JSON.stringify(notice), () => noticeRow(notice)))
         return
       }
       if (part.kind === 'sent-file') {
         const sent = turn.steps[part.index] as SentFileNotice
         const owner = this.target?.host
-        children.push(keep(view.kept, used, `sent:${part.index}`, JSON.stringify([sent, owner]), () => sentFileRow(sent, owner, this.shuttleBase, this.onFile)))
+        children.push(keep(view.kept, used, `sent:${sent.id}`, JSON.stringify([sent, owner]), () => sentFileRow(sent, owner, this.shuttleBase, this.onFile)))
         return
       }
       if (part.kind === 'text') {
@@ -1658,9 +1661,10 @@ export class TranscriptBand {
       this.paintGroupSummary(group, turn, part.start, part.end, trailing)
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
       children.push(group.button)
-      if (!group.expanded) for (let index = part.start; index < part.end; index++) {
-        const spawns = keepSpawns(view.kept, used, turn.steps[index], index, this.target?.host, 'span')
-        if (spawns) children.push(spawns)
+      // An open run shows its commands instead; its chips stay kept for when it folds again.
+      for (let index = part.start; index < part.end; index++) {
+        const spawns = keepSpawns(view.kept, used, turn.steps[index], this.target?.host, 'span')
+        if (spawns && !group.expanded) children.push(spawns)
       }
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
