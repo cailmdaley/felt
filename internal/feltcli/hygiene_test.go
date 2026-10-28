@@ -46,7 +46,7 @@ var allowedIdentifierContexts = []string{
 // so example payloads need no per-file exemption. Kept for the next one.
 var allowedFiles = map[string]bool{}
 
-func TestNoPersonalIdentifiersInSource(t *testing.T) {
+func TestHygieneNoPersonalIdentifiersInSource(t *testing.T) {
 	t.Parallel()
 	root := repoRoot(t)
 

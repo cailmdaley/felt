@@ -248,7 +248,7 @@ plugin-hooks-test:
 # source. Fleet members belong in ~/.config/shuttle/remotes.json, not in the repo.
 # Runs as part of `make go-test` too; this target is for a quick standalone check.
 lint-personal:
-	go test ./internal/feltcli -run TestNoPersonalIdentifiersInSource
+	go test ./internal/feltcli -run TestHygieneNoPersonalIdentifiersInSource
 
 # ── daemon lifecycle ──────────────────────────────────────────────────────
 all: restart

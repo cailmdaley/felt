@@ -517,6 +517,21 @@ function measureClamp(text: HTMLElement, unclamped: boolean): void {
   else text.removeAttribute('aria-label')
 }
 
+/**
+ * Put a scroller at `top` only when that moves it. Any write of the position,
+ * even of the value it already holds, stops a smooth or momentum scroll in
+ * flight, so a refresh that changed nothing must leave it untouched.
+ */
+function settleScroll(scroller: HTMLElement, top: number): number {
+  if (Math.abs(top - scroller.scrollTop) >= 0.5) scroller.scrollTop = top
+  return scroller.scrollTop
+}
+
+/** Put a scroller at its bottom, where a reader following new messages sits, only when that moves it. */
+function settleScrollAtEnd(scroller: HTMLElement): number {
+  return settleScroll(scroller, scroller.scrollHeight - scroller.clientHeight)
+}
+
 /** Preserve a visible message through DOM reconciliation and height changes above it. */
 function preserveReadingPosition(scroller: HTMLElement, render: () => void): void {
   const edge = scroller.getBoundingClientRect().top
@@ -527,7 +542,7 @@ function preserveReadingPosition(scroller: HTMLElement, render: () => void): voi
   render()
   const restored = anchor?.isConnected && (!key || anchor.dataset.readingKey === key) ? anchor
     : [...scroller.querySelectorAll<HTMLElement>('.ws-transcript-msg')].find(node => key ? node.dataset.readingKey === key : send && node.dataset.send === send)
-  if (restored && top !== undefined) scroller.scrollTop += restored.getBoundingClientRect().top - top
+  if (restored && top !== undefined) settleScroll(scroller, scroller.scrollTop + restored.getBoundingClientRect().top - top)
 }
 
 /**
@@ -786,7 +801,7 @@ export class TranscriptBand {
       this.resizer = new ResizeObserver(() => {
         if (this.disposed || !this.preview.clientHeight) return
         if (this.previewFollowing) this.scheduleLayout()
-        else if (this.preview.scrollTop !== this.previewScroll) this.preview.scrollTop = this.previewScroll
+        else settleScroll(this.preview, this.previewScroll)
       })
       this.resizer.observe(this.preview)
     }
@@ -1468,13 +1483,13 @@ export class TranscriptBand {
   reseated(): void {
     if (this.disposed) return
     if (this.inline) {
-      if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
+      if (!this.fullFollowing) settleScroll(this.scroller, this.fullScroll)
     } else if (this.fullOpen) {
       const host = this.el.closest<HTMLElement>('.ws-content')
       if (host && this.pane.parentElement !== host) host.append(this.pane)
-      if (!this.fullFollowing) this.scroller.scrollTop = this.fullScroll
+      if (!this.fullFollowing) settleScroll(this.scroller, this.fullScroll)
     }
-    if (!this.previewFollowing) this.preview.scrollTop = this.previewScroll
+    if (!this.previewFollowing) settleScroll(this.preview, this.previewScroll)
     this.scheduleLayout()
   }
 
@@ -1984,7 +1999,7 @@ export class TranscriptBand {
         if (view.prompt) measureClamp(view.prompt.prose, view.prompt.unclamped)
       }
       if (!this.preview.hidden && !this.body.hidden && this.previewFollowing && this.preview.clientHeight) {
-        this.previewScroll = this.preview.scrollTop = this.preview.scrollHeight
+        this.previewScroll = settleScrollAtEnd(this.preview)
       }
       this.preview.classList.toggle('ws-transcript-scrolled', this.preview.scrollTop > 0)
       if (this.fullOpen && this.messageToReveal !== null) {
@@ -2018,7 +2033,7 @@ export class TranscriptBand {
           this.fullScroll = this.scroller.scrollTop
         }
       }
-      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullScroll = this.scroller.scrollTop = this.scroller.scrollHeight
+      if (this.fullOpen && this.fullFollowing && this.scroller.clientHeight) this.fullScroll = settleScrollAtEnd(this.scroller)
     })
   }
 }

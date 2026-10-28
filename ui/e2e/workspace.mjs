@@ -123,6 +123,62 @@ test('The chat follows a live transcript by byte offset', async p => {
   assert.ok(Number(new URL(requests.at(-1).url, 'file:///').searchParams.get('offset')) > 0)
 })
 
+test('The chat never moves under a reader through live polls and snapshot refreshes, and follows at the bottom', async p => {
+  await p.goto(`${url}&transcript=live`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Chat')
+  const scroller = selected(p).locator('.ws-transcript-scroll')
+  await scroller.getByText(/Run the remaining validation batches/).waitFor()
+  const geometry = () => scroller.evaluate(s => ({ top: s.scrollTop, height: s.scrollHeight, bottom: s.scrollHeight - s.clientHeight - s.scrollTop }))
+  // Pinned to the bottom, the view follows each live update as it lands (the fixture grows for 20 reads).
+  for (let i = 0; i < 4; i++) {
+    const before = await geometry()
+    await p.clock.fastForward(3100)
+    await p.waitForFunction(height => document.querySelector('.ws-selected .ws-transcript-scroll').scrollHeight > height, before.height, { timeout: 5000 })
+    await frames(p)
+    const after = await geometry()
+    assert.ok(after.bottom <= 2, `follows the newest message (${after.bottom}px short of the bottom)`)
+  }
+  // The board's snapshot feed changes the worker's checklist between polls.
+  const setTasks = tasks => p.evaluate(tasks => {
+    const entry = window.__harness.MOCK_FEED.fibers.find(row => row.runtime?.tmux_session === 'fixture-transcript-worker')
+    entry.runtime.tasks = tasks
+  }, tasks)
+  // Parked mid-transcript: count every write of the scroller's position.
+  await scroller.evaluate(s => {
+    s.scrollTop = Math.round((s.scrollHeight - s.clientHeight) / 2)
+    const native = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')
+    window.__scrollWrites = []
+    Object.defineProperty(s, 'scrollTop', { configurable: true, get() { return native.get.call(this) }, set(value) {
+      window.__scrollWrites.push({ from: native.get.call(this), to: value })
+      native.set.call(this, value)
+    } })
+  })
+  await frames(p)
+  const anchorTop = () => scroller.evaluate(s => {
+    const edge = s.getBoundingClientRect().top
+    window.__anchor ??= [...s.querySelectorAll('.ws-transcript-msg')].find(node => node.getBoundingClientRect().top > edge + 40)
+    const key = window.__anchor.dataset.readingKey
+    const node = window.__anchor.isConnected ? window.__anchor : s.querySelector(`[data-reading-key="${CSS.escape(key)}"]`)
+    return node.getBoundingClientRect().top
+  })
+  const start = await anchorTop()
+  const checklists = [
+    [{ id: '1', subject: 'Validate the batches', status: 'in_progress', activeForm: 'Validating the batches' }],
+    [{ id: '1', subject: 'Validate the batches', status: 'completed' }, { id: '2', subject: 'Write the report', status: 'in_progress', activeForm: 'Writing the report' }, { id: '3', subject: 'Review the figures', status: 'pending' }],
+    [],
+  ]
+  for (const tasks of checklists) {
+    await setTasks(tasks)
+    // Several live transcript polls and one snapshot poll of the board.
+    for (let i = 0; i < 5; i++) { await p.clock.fastForward(3100); await frames(p) }
+    const drift = await anchorTop() - start
+    assert.ok(Math.abs(drift) <= 1, `the message under the reader stays put (moved ${drift}px)`)
+  }
+  const writes = await p.evaluate(() => window.__scrollWrites)
+  assert.deepEqual(writes.filter(write => Math.abs(write.to - write.from) < 0.5), [], 'no refresh rewrites the position it already has: each write would stop a scroll in flight')
+})
+
 test('The large transcript pages earlier turns inline, retains them across files and leaves the board live', async p => {
   await p.goto(`${url}&transcript=large`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()

@@ -56,7 +56,7 @@ Before opening a PR, verify:
 - `bash scripts/test-plugin-hooks.sh` passes
 - No personal hostnames, usernames, or absolute home paths (`/Users/...`) in
   tracked source, docs, or skills — `go test ./internal/feltcli -run
-  TestNoPersonalIdentifiersInSource` enforces the list. Fleet data belongs in
+  TestHygieneNoPersonalIdentifiersInSource` enforces the list. Fleet data belongs in
   `~/.config/shuttle/remotes.json`; test files and `testdata/` are exempt.
 - `~/loom` is not a personal path here: it is the deliberate running example for
   a cross-project store (see the docs site). Leave it in place; substitute your
