@@ -593,8 +593,11 @@ function keepSpawns(cache: Map<string, Kept>, used: Set<string>, step: Step, ori
  * torn down and rebuilt by a refresh that changed nothing.
  */
 export function placeChildren(parent: Element, children: readonly Node[]): void {
+  const wanted = new Set(children)
   let cursor = parent.firstChild
   for (const child of children) {
+    // A leaving node is removed where it stands, so the ones after it stay put.
+    while (cursor && !wanted.has(cursor)) { const next = cursor.nextSibling; parent.removeChild(cursor); cursor = next }
     if (child === cursor) { cursor = cursor.nextSibling; continue }
     parent.insertBefore(child, cursor)
   }
