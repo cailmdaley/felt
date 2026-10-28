@@ -678,7 +678,7 @@ export class TranscriptBand {
   private readonly earlierButton: HTMLButtonElement
   private readonly list: HTMLOListElement
   private previewPrompt: Message | null = null
-  private previewTexts = new Map<number, Message>()
+  private previewTexts = new Map<string, Message>()
   private previewKept = new Map<string, Kept>()
   private previewTurn = -1
   private previewKey = ''
@@ -1495,7 +1495,8 @@ export class TranscriptBand {
     }
     const agent = this.agentName()
     const used = new Set<string>()
-    turn.steps.forEach((step, index) => {
+    const usedTexts = new Set<string>()
+    turn.steps.forEach((step) => {
       if (step.kind === 'thread-notice') {
         nodes.push(keep(this.previewKept, used, `notice:${step.id}`, JSON.stringify(step), () => noticeRow(step, 'li')))
         return
@@ -1510,16 +1511,19 @@ export class TranscriptBand {
         if (spawns) nodes.push(spawns)
         return
       }
-      let message = this.previewTexts.get(index)
+      const identity = this.stepIdentity(step)
+      usedTexts.add(identity)
+      let message = this.previewTexts.get(identity)
       if (!message) {
         message = createMessage('agent', 'li')
-        this.previewTexts.set(index, message)
+        this.previewTexts.set(identity, message)
       }
       paintText(message, agent, step)
-      setAttr(message.node, 'data-reading-key', `${turn.index}:text:${turn.steps.slice(0, index).filter(step => step.kind === 'text').length}`)
+      setAttr(message.node, 'data-reading-key', `${turn.index}:text:${identity}`)
       nodes.push(message.node)
     })
     if (working) nodes.push(this.working)
+    for (const identity of this.previewTexts.keys()) if (!usedTexts.has(identity)) this.previewTexts.delete(identity)
     prune(this.previewKept, used)
     placeChildren(this.exchange, nodes)
     this.preview.hidden = nodes.length === 0

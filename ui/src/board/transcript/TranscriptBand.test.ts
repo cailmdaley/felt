@@ -377,6 +377,52 @@ describe('TranscriptBand', () => {
     expect(scroller.scrollTop).toBeGreaterThanOrEqual(scroller.scrollHeight - scroller.clientHeight)
   })
 
+  it('opens the full pane at the same message when the preview is scrolled', async () => {
+    const items: unknown[] = [
+      { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Check the fixture.' } },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        type: 'assistant', timestamp: new Date(Date.parse('2026-09-26T14:03:00Z') + index * 60_000).toISOString(),
+        message: { model: 'claude-opus', content: [{ type: 'text', text: `Answer ${index + 1}.` }] },
+      })),
+    ]
+    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    band.follow(target(latestId))
+    await settle()
+
+    const preview = band.el.querySelector<HTMLElement>('.ws-transcript-preview')!
+    const previewMessages = [...preview.querySelectorAll<HTMLElement>('.ws-transcript-msg')]
+    Object.defineProperties(preview, {
+      clientHeight: { value: 200 },
+      scrollHeight: { value: 700 },
+    })
+    const scroller = (band as unknown as { scroller: HTMLElement }).scroller
+    Object.defineProperties(scroller, {
+      clientHeight: { value: 200 },
+      scrollHeight: { value: 900 },
+    })
+    const rect = (top: number) => ({ top, bottom: top + 80, left: 0, right: 100, width: 100, height: 80, x: 0, y: top, toJSON: () => ({}) })
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === preview || this === scroller) return rect(100)
+      if (!this.classList.contains('ws-transcript-msg')) return rect(0)
+      const parent = this.closest<HTMLElement>('.ws-transcript-scroll, .ws-transcript-preview')
+      const messages = parent ? [...parent.querySelectorAll<HTMLElement>('.ws-transcript-msg')] : []
+      return rect(100 + messages.indexOf(this) * 100 - (parent?.scrollTop ?? 0))
+    })
+    preview.scrollTop = 200
+    preview.dispatchEvent(new Event('scroll'))
+    const anchor = previewMessages.find(node => node.getBoundingClientRect().bottom > preview.getBoundingClientRect().top)!
+    const readingKey = anchor.dataset.readingKey!
+    const top = anchor.getBoundingClientRect().top
+
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+
+    const fullAnchor = scroller.querySelector<HTMLElement>(`[data-reading-key="${readingKey}"]`)
+    expect(fullAnchor?.textContent).toBe(anchor.textContent)
+    expect(fullAnchor?.getBoundingClientRect().top).toBe(top)
+    expect(scroller.scrollTop).toBeGreaterThan(0)
+  })
+
   it('opens an outcome at its message outside the initial turn window, before the feed loads', async () => {
     const items = Array.from({ length: 6 }, (_, index) => records(`Prompt ${index}`, `Answer ${index}`)).flat()
     const band = makeBand(fixtureFetch({ [latestId]: items }))
