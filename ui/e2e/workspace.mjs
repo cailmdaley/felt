@@ -261,7 +261,7 @@ async function choose(p, label) {
   if (await isSelected(p, label)) return
   if (label === 'Chat' || label === 'Constitution') {
     if (!await isSelected(p, 'Chat')) {
-      if (p.viewportSize().width <= 700) {
+      if (await p.locator('.ws-navbar .ws-channel-title').isVisible()) {
         await p.locator('.ws-navbar .ws-channel-title').click()
         const current = p.locator('.ws-switcher .ws-channel-row[aria-current="true"]')
         await current.waitFor({ state: 'visible' })
