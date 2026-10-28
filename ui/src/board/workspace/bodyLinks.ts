@@ -3,6 +3,8 @@ import { threadState, THREAD_LABEL } from '../threads.js'
 import { turnOf, type Turn } from '../turn.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
 
+export const MENTION_LAYOUT_EVENT = 'shuttle:mention-layout'
+
 export interface ConstitutionMention { id: string; uid?: string; name: string; state: string; turn?: Turn; outcome: string; origin: string }
 export function constitutionMentions(cards: readonly KanbanCard[]): ConstitutionMention[] {
   return cards.filter(card => !!card.shuttleKind && !card.isCycle).map(card => {
@@ -32,7 +34,7 @@ export function resolveConstitutionCandidates(candidates: readonly string[], row
 /** Dependency-free: the same scanner runs inside opaque report frames. */
 export function mentionRuntime(root: HTMLElement, open: (id: string, origin: string) => void, request?: (candidates: string[]) => void) {
   let byId = new Map<string, ConstitutionMention[]>(), targets: Record<string, string> = Object.create(null)
-  let scheduled = false, disposed = false, requested = ''
+  let scheduled = false, disposed = false, requested = '', layoutChanged = false
   const exact = (value: string, origin?: string): ConstitutionMention | undefined => {
     const matches = (byId.get(value) ?? []).filter(row => !origin || row.origin === origin)
     return matches.length === 1 ? matches[0] : undefined
@@ -48,18 +50,18 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
   }
   // Each write only when it changes something: a poll repaints every chip, and an unchanged chip must stay untouched.
   const setData = (link: HTMLElement, key: string, value: string | undefined): void => {
-    if (value === undefined) { if (key in link.dataset) delete link.dataset[key] }
-    else if (link.dataset[key] !== value) link.dataset[key] = value
+    if (value === undefined) { if (key in link.dataset) { delete link.dataset[key]; layoutChanged = true } }
+    else if (link.dataset[key] !== value) { link.dataset[key] = value; layoutChanged = true }
   }
   const setAttr = (link: Element, name: string, value: string | null): void => {
-    if (value === null) { if (link.hasAttribute(name)) link.removeAttribute(name) }
-    else if (link.getAttribute(name) !== value) link.setAttribute(name, value)
+    if (value === null) { if (link.hasAttribute(name)) { link.removeAttribute(name); layoutChanged = true } }
+    else if (link.getAttribute(name) !== value) { link.setAttribute(name, value); layoutChanged = true }
   }
   const paint = (link: HTMLAnchorElement, row: ConstitutionMention, source: string): void => {
-    if (!link.classList.contains('ws-constitution-chip')) link.classList.add('ws-constitution-chip')
-    if (link.classList.contains('ws-constitution-chip-missing')) link.classList.remove('ws-constitution-chip-missing')
+    if (!link.classList.contains('ws-constitution-chip')) { link.classList.add('ws-constitution-chip'); layoutChanged = true }
+    if (link.classList.contains('ws-constitution-chip-missing')) { link.classList.remove('ws-constitution-chip-missing'); layoutChanged = true }
     setAttr(link, 'aria-disabled', null)
-    if (link.dataset.mentionSource === undefined) link.dataset.mentionSource = source
+    if (link.dataset.mentionSource === undefined) { link.dataset.mentionSource = source; layoutChanged = true }
     setData(link, 'constitutionIdentity', row.uid ?? row.id)
     setData(link, 'constitution', row.id)
     setData(link, 'origin', row.origin)
@@ -67,13 +69,14 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     setData(link, 'turn', row.turn || undefined)
     setAttr(link, 'href', '#constitution')
     const label = link.hasAttribute('data-spawn-chip') ? row.name : `${row.name} · ${row.state}`
-    if (link.textContent !== label) link.textContent = label
-    if (link.hidden) link.hidden = false
+    if (link.textContent !== label) { link.textContent = label; layoutChanged = true }
+    if (link.hidden) { link.hidden = false; layoutChanged = true }
     setAttr(link, 'title', `${row.id}\n${row.state}${row.outcome ? '\n' + row.outcome : ''}`)
     setAttr(link, 'aria-label', link.hasAttribute('data-spawn-chip') ? `Open ${row.name} — ${row.state.toLowerCase()}` : label)
   }
   const scan = (): void => {
     if (disposed) return
+    layoutChanged = false
     const candidates = new Set<string>()
     for (const link of root.querySelectorAll<HTMLAnchorElement>('a[data-constitution-identity],a.kbn-wikilink')) {
       const identity = link.dataset.constitutionIdentity
@@ -86,19 +89,19 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
         for (const key of ['constitution', 'state', 'turn']) setData(link, key, undefined)
         for (const name of ['href', 'aria-label', 'role', 'tabindex']) setAttr(link, name, null)
         if (link.hasAttribute('data-spawn-chip')) {
-          if (!link.hidden) link.hidden = true
+          if (!link.hidden) { link.hidden = true; layoutChanged = true }
           continue
         }
-        if (!link.classList.contains('ws-constitution-chip-missing')) link.classList.add('ws-constitution-chip-missing')
+        if (!link.classList.contains('ws-constitution-chip-missing')) { link.classList.add('ws-constitution-chip-missing'); layoutChanged = true }
         setAttr(link, 'aria-disabled', 'true')
         const source = link.dataset.mentionSource ?? identity
-        if (link.textContent !== source) link.textContent = source
+        if (link.textContent !== source) { link.textContent = source; layoutChanged = true }
         setAttr(link, 'title', 'Constitution unavailable in the current read model')
       }
     }
     for (const group of root.querySelectorAll<HTMLElement>('[data-spawn-preview]')) {
       const hidden = !group.querySelector('.ws-transcript-spawn-chip:not([hidden])')
-      if (group.hidden !== hidden) group.hidden = hidden
+      if (group.hidden !== hidden) { group.hidden = hidden; layoutChanged = true }
     }
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
     const texts: Text[] = []
@@ -129,13 +132,14 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
         end = match.index! + (match[1] ? match[0].length : raw.length)
         changed = true
       }
-      if (changed) { fragment.append(text.slice(end)); node.replaceWith(fragment) }
+      if (changed) { fragment.append(text.slice(end)); node.replaceWith(fragment); layoutChanged = true }
     }
     const list = [...candidates], key = JSON.stringify(list)
     if (request && key !== requested) {
       requested = key
       queueMicrotask(() => { if (!disposed) request(list) })
     }
+    if (layoutChanged) root.dispatchEvent(new Event('shuttle:mention-layout', { bubbles: true }))
   }
   const click = (event: Event): void => {
     const target = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[data-constitution-identity]')

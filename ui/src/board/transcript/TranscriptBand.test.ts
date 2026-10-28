@@ -76,6 +76,16 @@ const send = (fullPath: string, timestamp: number, sessionId = latestId): Record
   sessionId,
 })
 
+const groupedTranscript = (): unknown[] => [
+  { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Check the fixture.' } },
+  { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'Before the receipt.' }] } },
+  { type: 'assistant', timestamp: '2026-09-26T14:04:00.000Z', message: { model: 'claude-opus', content: [
+    { type: 'tool_use', id: 'call-a', name: 'Bash', input: { command: 'python validate.py --batch 1' } },
+    { type: 'tool_use', id: 'call-b', name: 'Bash', input: { command: 'python validate.py --batch 2' } },
+  ] } },
+  { type: 'assistant', timestamp: '2026-09-26T14:05:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'After the receipt.' }] } },
+]
+
 afterEach(() => {
   for (const band of bands) band.dispose()
   bands = []
@@ -227,6 +237,97 @@ describe('TranscriptBand', () => {
       .toBeLessThan(fullChildren.findIndex((node) => node.classList.contains('ws-transcript-sent-file')))
     expect(fullChildren.findIndex((node) => node.classList.contains('ws-transcript-sent-file')))
       .toBeLessThan(fullChildren.findIndex((node) => node.textContent?.includes('After the figure.')))
+  })
+
+  it('keeps text and an expanded group intact when a receipt is spliced before them', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: groupedTranscript() }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+
+    const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+    const before = [...pane.querySelectorAll<HTMLElement>('.ws-transcript-msg-agent')].find(node => node.textContent?.includes('Before the receipt.'))!
+    const after = [...pane.querySelectorAll<HTMLElement>('.ws-transcript-msg-agent')].find(node => node.textContent?.includes('After the receipt.'))!
+    const group = pane.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+    group.click()
+    const tools = [...pane.querySelectorAll<HTMLElement>('.ws-transcript-tool')]
+    expect(tools).toHaveLength(2)
+    group.focus()
+    expect(document.activeElement).toBe(group)
+
+    const internal = band as unknown as { acceptSentFiles: (session: string, files: unknown[]) => void }
+    internal.acceptSentFiles(latestId, [send('/tmp/mid-turn.pdf', Date.parse('2026-09-26T14:03:30Z'))])
+    expect(document.activeElement).toBe(group)
+    await settle()
+
+    expect(pane.querySelector('.ws-transcript-sent-file')?.textContent).toContain('mid-turn.pdf')
+    expect(pane.querySelector('.ws-transcript-steps')).toBe(group)
+    expect(group.getAttribute('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(group)
+    expect([...pane.querySelectorAll('.ws-transcript-tool')]).toEqual(tools)
+    expect([...pane.querySelectorAll('.ws-transcript-msg-agent')].find(node => node.textContent?.includes('Before the receipt.'))).toBe(before)
+    expect([...pane.querySelectorAll('.ws-transcript-msg-agent')].find(node => node.textContent?.includes('After the receipt.'))).toBe(after)
+  })
+
+  it('repaints a changed send with the same id and prunes it when that step disappears', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: groupedTranscript() }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+
+    const internal = band as unknown as {
+      acceptSentFiles: (session: string, files: unknown[]) => void
+      views: Map<number, { kept: Map<string, unknown> }>
+    }
+    const timestamp = Date.parse('2026-09-26T14:03:30Z')
+    internal.acceptSentFiles(latestId, [send('/tmp/original.pdf', timestamp)])
+    await settle()
+    const first = band.el.querySelector<HTMLElement>('.ws-transcript-sent-file')!
+    const id = first.dataset.send!
+    expect(first.textContent).toContain('original.pdf')
+
+    internal.acceptSentFiles(latestId, [send('/tmp/revised.pdf', timestamp)])
+    await settle()
+    const revised = band.el.querySelector<HTMLElement>('.ws-transcript-sent-file')!
+    expect(revised).not.toBe(first)
+    expect(revised.dataset.send).toBe(id)
+    expect(revised.textContent).toContain('revised.pdf')
+    expect(first.isConnected).toBe(false)
+
+    internal.acceptSentFiles(latestId, [])
+    await settle()
+    expect(band.el.querySelector('.ws-transcript-sent-file')).toBeNull()
+    expect(internal.views.get(0)?.kept.has(`sent:${id}`)).toBe(false)
+  })
+
+  it('prunes text, group, and expanded-row caches when their steps disappear', async () => {
+    const band = makeBand(fixtureFetch({ [latestId]: groupedTranscript() }))
+    band.follow(target(latestId))
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-steps')!.click()
+
+    const internal = band as unknown as {
+      model: { turns: Array<{ steps: unknown[] }> }
+      views: Map<number, { texts: Map<string, unknown>; groups: Map<string, unknown>; rows: Map<string, unknown>; expandedRows: Set<string> }>
+      renderTurn: (index: number) => void
+    }
+    const view = internal.views.get(0)!
+    expect(view.texts.size).toBe(2)
+    expect(view.groups.size).toBe(1)
+    expect(view.rows.size).toBe(2)
+    expect(view.expandedRows.size).toBe(2)
+
+    internal.model.turns[0].steps.splice(1)
+    internal.renderTurn(0)
+
+    expect(view.texts.size).toBe(1)
+    expect(view.groups.size).toBe(0)
+    expect(view.rows.size).toBe(0)
+    expect(view.expandedRows.size).toBe(0)
   })
 
   it('adds a send from the live feed without reloading the conversation', async () => {

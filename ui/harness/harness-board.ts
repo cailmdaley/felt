@@ -77,6 +77,10 @@ if (workspaceFixture) {
   const image = examples.find(file => String(file.fullPath).endsWith('.png'))
   if (image) workspaceFixture.receipts.push({ ...image, timestamp: now - 100_000, sessionId: WORKSPACE_LATEST_SESSION })
 }
+if (workspaceFixture && transcriptScenario === 'live') {
+  const pdf = workspaceFixture.receipts.find(file => String(file.fullPath).endsWith('response.pdf'))
+  if (pdf) workspaceFixture.receipts.push({ ...pdf, timestamp: now + 17_000, sessionId: WORKSPACE_LATEST_SESSION })
+}
 if (workspaceFixture && example === 'threads') addThreadFixtures(workspaceFixture, now, search.has('manyThreads'))
 if (workspaceFixture && example === 'frontier') addFrontierFixtures(workspaceFixture, now)
 if (workspaceFixture && example === 'families') addFamilyFixtures(workspaceFixture, now)

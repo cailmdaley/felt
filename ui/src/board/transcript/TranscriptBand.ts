@@ -11,6 +11,7 @@ import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
 import { TaskChecklist, type WorkerTask } from './tasks.js'
 import { findMatches, markTerms, nearestMatch, queryTerms, snippetTerms, termPattern, unmark, type Match, type TranscriptHit } from './find.js'
+import { MENTION_LAYOUT_EVENT } from '../workspace/bodyLinks.js'
 import './transcript.css'
 
 export interface TranscriptTarget {
@@ -159,10 +160,10 @@ interface TurnView {
   /** Rows drawn from a step's data (notices, sent files, spawn chips), kept while that data holds. */
   kept: Map<string, Kept>
   prompt?: Message
-  texts: Map<number, Message>
-  groups: Map<number, StepGroup>
-  rows: Map<number, StepRow>
-  expandedRows: Set<number>
+  texts: Map<string, Message>
+  groups: Map<string, StepGroup>
+  rows: Map<string, StepRow>
+  expandedRows: Set<string>
 }
 
 const PAGE_SIZE = 150
@@ -636,6 +637,8 @@ export class TranscriptBand {
   private readonly shuttleBase: string
   private readonly fetcher?: typeof fetch
   private readonly model = new TranscriptModel()
+  private readonly stepIdentities = new WeakMap<Step, string>()
+  private nextStepIdentity = 0
   private readonly previewTasks = new TaskChecklist()
   private readonly fullTasks = new TaskChecklist()
   private readonly views = new Map<number, TurnView>()
@@ -711,6 +714,7 @@ export class TranscriptBand {
   private pendingHit: { query: string; at?: number } | null = null
   private findFrame: number | null = null
   private readonly visibilityListener = (): void => this.visibilityChanged()
+  private readonly mentionLayoutListener = (): void => this.scheduleLayout()
   private observer: IntersectionObserver | null = null
   private resizer: ResizeObserver | null = null
   private previewScroll = 0
@@ -727,6 +731,7 @@ export class TranscriptBand {
     this.el.className = this.inline ? 'ws-transcript ws-transcript-inline' : 'ws-transcript'
     this.el.hidden = true
     this.el.addEventListener('click', (event) => event.stopPropagation())
+    this.el.addEventListener(MENTION_LAYOUT_EVENT, this.mentionLayoutListener)
 
     const headRow = document.createElement('div')
     headRow.className = 'ws-transcript-headrow'
@@ -792,6 +797,7 @@ export class TranscriptBand {
     this.pane.className = 'ws-transcript-pane'
     this.pane.setAttribute('aria-label', 'Transcript')
     this.pane.hidden = true
+    this.pane.addEventListener(MENTION_LAYOUT_EVENT, this.mentionLayoutListener)
     const panelHead = document.createElement('header')
     panelHead.className = 'ws-transcript-panel-head'
     const title = document.createElement('span')
@@ -921,6 +927,8 @@ export class TranscriptBand {
     this.resizer?.disconnect()
     this.resizer = null
     document.removeEventListener('visibilitychange', this.visibilityListener)
+    this.el.removeEventListener(MENTION_LAYOUT_EVENT, this.mentionLayoutListener)
+    this.pane.removeEventListener(MENTION_LAYOUT_EVENT, this.mentionLayoutListener)
     if (this.findFrame !== null) cancelAnimationFrame(this.findFrame)
     this.findFrame = null
     this.pane.remove()
@@ -1388,10 +1396,13 @@ export class TranscriptBand {
   }
 
   private preservePositions(render: () => void): void {
+    const active = document.activeElement
+    const focused = this.el.contains(active) || this.pane.contains(active) ? active as HTMLElement : null
     const full = () => this.fullRendered && !this.fullFollowing
       ? preserveReadingPosition(this.scroller, render) : render()
     if (!this.previewFollowing) preserveReadingPosition(this.preview, full)
     else full()
+    if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
     if (!this.fullFollowing) this.fullScroll = this.scroller.scrollTop
     if (!this.previewFollowing) this.previewScroll = this.preview.scrollTop
   }
@@ -1624,6 +1635,7 @@ export class TranscriptBand {
   }
 
   private updateTurnView(view: TurnView, turn: Turn): void {
+    const focused = view.node.contains(document.activeElement) ? document.activeElement as HTMLElement : null
     const children: Node[] = []
     if (turn.prompt) {
       view.prompt ??= createMessage(turn.prompt.dispatch ? 'dispatch' : 'you')
@@ -1635,6 +1647,8 @@ export class TranscriptBand {
     const parts = segments(turn.steps)
     const isLastTurn = view.index === this.model.turns.length - 1
     const used = new Set<string>()
+    const usedTexts = new Set<string>()
+    const usedGroups = new Set<string>()
     parts.forEach((part, position) => {
       if (part.kind === 'thread-notice') {
         const notice = turn.steps[part.index] as Notice
@@ -1649,17 +1663,21 @@ export class TranscriptBand {
       }
       if (part.kind === 'text') {
         const step = turn.steps[part.index] as Text
-        let message = view.texts.get(part.index)
+        const identity = this.stepIdentity(step)
+        usedTexts.add(identity)
+        let message = view.texts.get(identity)
         if (!message) {
           message = createMessage('agent')
-          view.texts.set(part.index, message)
+          view.texts.set(identity, message)
         }
         paintText(message, agent, step)
-        setAttr(message.node, 'data-reading-key', `${turn.index}:text:${turn.steps.slice(0, part.index).filter(step => step.kind === 'text').length}`)
+        setAttr(message.node, 'data-reading-key', `${turn.index}:text:${identity}`)
         children.push(message.node)
         return
       }
-      const group = this.groupFor(view, part.start)
+      const identity = this.stepIdentity(turn.steps[part.start])
+      usedGroups.add(identity)
+      const group = this.groupFor(view, identity)
       const trailing = isLastTurn && position === parts.length - 1
       this.paintGroupSummary(group, turn, part.start, part.end, trailing)
       if (group.expanded) this.reconcileGroup(view, group, turn, part.start, part.end)
@@ -1672,13 +1690,29 @@ export class TranscriptBand {
       if (group.expanded && group.list) children.push(group.list)
       if (group.expanded && group.more && !group.more.hidden) children.push(group.more)
     })
+    for (const identity of view.texts.keys()) if (!usedTexts.has(identity)) view.texts.delete(identity)
+    for (const identity of view.groups.keys()) if (!usedGroups.has(identity)) view.groups.delete(identity)
+    const currentSteps = new Set(turn.steps.map(step => this.stepIdentity(step)))
+    for (const identity of view.rows.keys()) if (!currentSteps.has(identity)) view.rows.delete(identity)
+    for (const identity of view.expandedRows) if (!currentSteps.has(identity)) view.expandedRows.delete(identity)
     prune(view.kept, used)
     placeChildren(view.node, children)
+    if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true })
     this.markView(view)
   }
 
-  private groupFor(view: TurnView, start: number): StepGroup {
-    let group = view.groups.get(start)
+  private stepIdentity(step: Step): string {
+    // Receipt rows can splice before a step without changing the step itself.
+    let identity = this.stepIdentities.get(step)
+    if (!identity) {
+      identity = `step:${++this.nextStepIdentity}`
+      this.stepIdentities.set(step, identity)
+    }
+    return identity
+  }
+
+  private groupFor(view: TurnView, identity: string): StepGroup {
+    let group = view.groups.get(identity)
     if (group) return group
     const button = createButton('ws-transcript-steps', '')
     button.setAttribute('aria-expanded', 'false')
@@ -1688,7 +1722,7 @@ export class TranscriptBand {
       const turn = this.model.turns[view.index]
       if (turn) this.updateTurnView(view, turn)
     })
-    view.groups.set(start, created)
+    view.groups.set(identity, created)
     return created
   }
 
@@ -1741,43 +1775,43 @@ export class TranscriptBand {
     const shown = available.slice(0, group.count)
     // Opening a run opens what is in it: thinking reads as text, a tool shows
     // its input and output. Each row still folds on its own line.
-    shown.forEach((_, relative) => { if (!view.rows.has(start + relative)) view.expandedRows.add(start + relative) })
-    const wanted = shown.map((step, relative) => this.getStepRow(view, step, start + relative).node)
-    const children = [...group.list.children]
-    const prefix = children.length <= wanted.length && children.every((child, index) => child === wanted[index])
-    if (prefix) {
-      for (let i = children.length; i < wanted.length; i++) group.list.append(wanted[i])
-    } else group.list.replaceChildren(...wanted)
+    shown.forEach(step => {
+      const identity = this.stepIdentity(step)
+      if (!view.rows.has(identity)) view.expandedRows.add(identity)
+    })
+    const wanted = shown.map(step => this.getStepRow(view, step).node)
+    placeChildren(group.list, wanted)
     const remaining = Math.max(0, available.length - shown.length)
     group.more.hidden = remaining === 0
     group.more.textContent = `▾ ${remaining} more steps`
   }
 
-  private getStepRow(view: TurnView, step: Step, index: number): StepRow {
+  private getStepRow(view: TurnView, step: Step): StepRow {
+    const identity = this.stepIdentity(step)
     const version = step.kind === 'tool' ? step.version : 0
-    const cached = view.rows.get(index)
+    const cached = view.rows.get(identity)
     if (cached?.version === version) return cached
-    const row = this.createStepRow(view, step, index)
+    const row = this.createStepRow(view, step, identity)
     row.version = version
-    view.rows.set(index, row)
+    view.rows.set(identity, row)
     return row
   }
 
-  private createStepRow(view: TurnView, step: Step, index: number): StepRow {
+  private createStepRow(view: TurnView, step: Step, identity: string): StepRow {
     const node = document.createElement('li')
-    if (step.kind === 'tool') return this.createToolRow(view, node, step, index)
+    if (step.kind === 'tool') return this.createToolRow(view, node, step, identity)
     if (step.kind === 'thinking') {
       node.className = 'ws-transcript-think'
       const button = createButton('ws-transcript-expand', 'Thinking')
       const text = document.createElement('div')
       text.className = 'ws-transcript-thinking-text'
       text.textContent = step.text
-      text.hidden = !view.expandedRows.has(index)
+      text.hidden = !view.expandedRows.has(identity)
       button.setAttribute('aria-expanded', String(!text.hidden))
       button.addEventListener('click', () => {
-        const expanded = view.expandedRows.has(index)
-        if (expanded) view.expandedRows.delete(index)
-        else view.expandedRows.add(index)
+        const expanded = view.expandedRows.has(identity)
+        if (expanded) view.expandedRows.delete(identity)
+        else view.expandedRows.add(identity)
         text.hidden = expanded
         button.setAttribute('aria-expanded', String(!expanded))
       })
@@ -1789,16 +1823,16 @@ export class TranscriptBand {
     const text = step.text
     const label = [step.label, step.detail].filter(Boolean).join(' · ')
     const button = createButton('ws-transcript-expand', label)
-    button.setAttribute('aria-expanded', String(view.expandedRows.has(index)))
+    button.setAttribute('aria-expanded', String(view.expandedRows.has(identity)))
     const content = document.createElement('div')
     content.className = 'ws-transcript-event-text'
     content.textContent = text ?? ''
-    content.hidden = !view.expandedRows.has(index) || !text
+    content.hidden = !view.expandedRows.has(identity) || !text
     button.addEventListener('click', () => {
       if (!text) return
-      const expanded = view.expandedRows.has(index)
-      if (expanded) view.expandedRows.delete(index)
-      else view.expandedRows.add(index)
+      const expanded = view.expandedRows.has(identity)
+      if (expanded) view.expandedRows.delete(identity)
+      else view.expandedRows.add(identity)
       content.hidden = expanded
       button.setAttribute('aria-expanded', String(!expanded))
     })
@@ -1806,10 +1840,10 @@ export class TranscriptBand {
     return { version: 0, node }
   }
 
-  private createToolRow(view: TurnView, node: HTMLLIElement, step: ToolStep, index: number): StepRow {
+  private createToolRow(view: TurnView, node: HTMLLIElement, step: ToolStep, identity: string): StepRow {
     node.className = 'ws-transcript-tool'
     const line = createButton('ws-transcript-tool-line', '')
-    line.setAttribute('aria-expanded', String(view.expandedRows.has(index)))
+    line.setAttribute('aria-expanded', String(view.expandedRows.has(identity)))
     const name = document.createElement('span')
     name.className = 'ws-transcript-tool-name'
     const summary = document.createElement('span')
@@ -1823,9 +1857,9 @@ export class TranscriptBand {
     node.append(line)
     const row: StepRow = { version: step.version, node, mark }
     line.addEventListener('click', () => {
-      const expanded = view.expandedRows.has(index)
-      if (expanded) view.expandedRows.delete(index)
-      else view.expandedRows.add(index)
+      const expanded = view.expandedRows.has(identity)
+      if (expanded) view.expandedRows.delete(identity)
+      else view.expandedRows.add(identity)
       line.setAttribute('aria-expanded', String(!expanded))
       if (!row.detail && !expanded) {
         row.detail = buildToolInput(step)
@@ -1835,7 +1869,7 @@ export class TranscriptBand {
       if (!expanded) this.buildToolResult(row, step)
       this.refreshToolRow(row, step)
     })
-    if (view.expandedRows.has(index)) {
+    if (view.expandedRows.has(identity)) {
       row.detail = buildToolInput(step)
       node.append(row.detail)
       this.buildToolResult(row, step)
@@ -1925,12 +1959,14 @@ export class TranscriptBand {
     this.previewKey = ''
     this.paintPreview()
     for (const view of this.views.values()) {
-      for (const [index, row] of view.rows) {
-        const step = this.model.turns[view.index]?.steps[index]
-        if (step?.kind === 'tool') this.refreshToolRow(row, step)
-      }
       const turn = this.model.turns[view.index]
-      if (turn) this.updateTurnView(view, turn)
+      if (turn) {
+        this.updateTurnView(view, turn)
+        for (const step of turn.steps) {
+          const row = view.rows.get(this.stepIdentity(step))
+          if (step.kind === 'tool' && row) this.refreshToolRow(row, step)
+        }
+      }
     }
   }
 
@@ -2002,7 +2038,8 @@ export class TranscriptBand {
     this.renderTurn(match.turn)
     this.markAll()
     const view = this.views.get(match.turn)
-    const message = match.step === undefined ? view?.prompt : view?.texts.get(match.step)
+    const step = match.step === undefined ? undefined : this.model.turns[match.turn]?.steps[match.step]
+    const message = match.step === undefined ? view?.prompt : step ? view?.texts.get(this.stepIdentity(step)) : undefined
     if (!message) return
     this.unfold(message)
     this.fullFollowing = false
@@ -2031,9 +2068,13 @@ export class TranscriptBand {
   /** Bring every drawn message of a turn up to date with the words being sought. */
   private markView(view: TurnView): void {
     const current = this.matches[this.currentMatch]
-    const stands = (step?: number): boolean => !!current && current.turn === view.index && current.step === step
-    if (view.prompt) this.markMessage(view.prompt, stands(undefined))
-    for (const [step, message] of view.texts) this.markMessage(message, stands(step))
+    const turn = this.model.turns[view.index]
+    const currentStep = current?.turn === view.index && current.step !== undefined ? turn?.steps[current.step] : undefined
+    const currentIdentity = currentStep ? this.stepIdentity(currentStep) : undefined
+    if (view.prompt) this.markMessage(view.prompt, !!current && current.turn === view.index && current.step === undefined)
+    for (const [identity, message] of view.texts) {
+      this.markMessage(message, !!current && current.turn === view.index && identity === currentIdentity)
+    }
   }
 
   private markMessage(message: Message, current: boolean): void {
@@ -2105,14 +2146,14 @@ export class TranscriptBand {
         let match: Message | undefined
         for (let turnIndex = this.model.turns.length - 1; this.hasInitialRender && turnIndex >= 0 && !match; turnIndex--) {
           const turn = this.model.turns[turnIndex]
-          const stepIndex = turn.steps.findIndex(step => step.kind === 'text' && step.text.trim() === source)
-          if (stepIndex < 0) continue
+          const step = turn.steps.find(step => step.kind === 'text' && step.text.trim() === source)
+          if (!step || step.kind !== 'text') continue
           const previousStart = this.visibleStart
           this.visibleStart = Math.min(previousStart, turnIndex)
           for (let index = this.visibleStart; index < previousStart; index++) this.renderTurn(index)
           this.renderTurn(turnIndex)
           this.updateEarlierButton()
-          match = this.views.get(turnIndex)?.texts.get(stepIndex)
+          match = this.views.get(turnIndex)?.texts.get(this.stepIdentity(step))
         }
         if (match) {
           this.list.querySelector('.ws-transcript-outcome')?.remove()

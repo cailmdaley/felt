@@ -214,3 +214,41 @@ it('keeps a resolved spawn chip in place when a receipt lands earlier in its tur
   expect(chip.isConnected).toBe(true)
   expect(chip.hidden).toBe(false)
 })
+
+it('reuses a resolved spawn chip when its group expands and folds again', async () => {
+  const band = makeBand(spawnRecords('project-x/new-child\nThread UID: project-x/new-child 01KTESTFIBER000000000000001'))
+  await settle()
+  const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
+  const mentions = mentionRuntime(pane, vi.fn()); runtimes.push(mentions)
+  mentions.update([row('project-x/new-child', 'Working', 'working')])
+  const chip = pane.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')!
+  const group = pane.querySelector<HTMLButtonElement>('.ws-transcript-steps')!
+  expect(chip).not.toBeNull()
+
+  group.click()
+  expect(chip.isConnected).toBe(false)
+  group.click()
+
+  expect(pane.querySelector('.ws-transcript-spawn-chip')).toBe(chip)
+  expect(chip.hidden).toBe(false)
+})
+
+it('keeps a bottom-following transcript at the bottom when a spawn chip resolves', async () => {
+  const band = makeBand(spawnRecords('project-x/new-child\nThread UID: project-x/new-child 01KTESTFIBER000000000000001'))
+  await settle()
+  const scroller = band.el.querySelector<HTMLElement>('.ws-transcript-scroll')!
+  const chip = band.el.querySelector<HTMLElement>('.ws-transcript-spawn-chip')!
+  Object.defineProperties(scroller, {
+    clientHeight: { value: 100 },
+    scrollHeight: { get: () => chip.hidden ? 1000 : 1050 },
+  })
+  scroller.scrollTop = scroller.scrollHeight - scroller.clientHeight
+  scroller.dispatchEvent(new Event('scroll'))
+  const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
+
+  mentions.update([row('project-x/new-child', 'Working', 'working')])
+  await settle()
+
+  expect(chip.hidden).toBe(false)
+  expect(scroller.scrollTop).toBe(scroller.scrollHeight - scroller.clientHeight)
+})

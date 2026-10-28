@@ -194,6 +194,10 @@ test('A refresh never changes a painted frame of the chat: no jolt, no pass thro
     const chip = s.querySelector('.ws-transcript-spawn-chip:not([hidden])')
     const anchor = [...s.querySelectorAll('.ws-transcript-msg')].find(node => node.getBoundingClientRect().top > edge() + 40)
     if (!(chip.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) throw new Error('the spawn chip must sit above the reader')
+    const notice = s.querySelector('.ws-transcript-thread-notice')
+    const sent = [...s.querySelectorAll('.ws-transcript-sent-file')].find(row => row.textContent.includes('response.pdf'))
+    if (!notice || !(notice.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) throw new Error('the thread notice must sit above the reader')
+    if (!sent || !(sent.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING)) throw new Error('the sent file must sit above the reader')
     const log = { anchor: anchor.dataset.readingKey, frames: [], removed: [], touched: [] }
     // Every frame: where the message under the reader sits, and where the scroller is.
     const sample = () => {

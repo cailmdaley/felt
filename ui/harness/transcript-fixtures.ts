@@ -152,6 +152,7 @@ function liveTranscript(now: number, updates: number): string {
           `Batch ${update} covers twelve more fixture bins; the largest deviation is 0.${update}%, inside the stated tolerance, so the measured values stand.`,
       }]),
     )
+    if (update === 3) records.push(user(now, 16_500, '[Shuttle message thread-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc]\nthread research/workspace/mask-validation asked: Compare the next batch against the same mask.'))
   }
   return records.join('')
 }
