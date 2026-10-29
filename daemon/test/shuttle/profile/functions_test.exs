@@ -33,9 +33,10 @@ defmodule Shuttle.Profile.FunctionsTest do
 
       result = Functions.finish(session, state)
       assert result["available"]
-      assert result["semantics"]["inclusive"]
+      assert result["semantics"]["includes_uninstrumented_callees"]
+      assert result["semantics"]["excludes_instrumented_callees"]
+      refute result["semantics"]["covers_total_vm_cpu"]
       assert result["semantics"]["cpu_excludes_wait"]
-      assert result["semantics"]["totals_are_additive"] == false
 
       assert %{"function" => "Jason.encode!/1", "calls" => calls} =
                Enum.find(result["functions"], &(&1["function"] == "Jason.encode!/1"))
@@ -43,6 +44,53 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert calls == 1
       assert Enum.any?(result["top_process_functions"], &(&1["pid"] == inspect(worker)))
       assert is_binary(Jason.encode!(result))
+    after
+      :trace.session_destroy(session)
+      Process.exit(collector, :kill)
+    end
+  end
+
+  test "nested instrumented Jason wrappers exclude the inner function cost" do
+    collector = spawn(fn -> receive do: (:stop -> :ok) end)
+    session = :trace.session_create(:profile_functions_nested, collector, [])
+
+    try do
+      state = Functions.start(session)
+      test_pid = self()
+
+      {worker, monitor} =
+        spawn_monitor(fn ->
+          send(test_pid, {:worker_ready, self()})
+
+          receive do
+            :go -> Jason.encode_to_iodata!(%{"probe" => Enum.to_list(1..100)})
+          end
+        end)
+
+      assert_receive {:worker_ready, ^worker}
+      :trace.process(session, worker, true, [:call])
+      send(worker, :go)
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}
+
+      result = Functions.finish(session, state)
+
+      outer =
+        Enum.find(
+          result["top_process_functions"],
+          &(&1["function"] == "Jason.encode_to_iodata!/1")
+        )
+
+      inner =
+        Enum.find(
+          result["top_process_functions"],
+          &(&1["function"] == "Jason.encode_to_iodata!/2")
+        )
+
+      assert outer["calls"] == 1
+      assert outer["allocated_words"] == 0
+      assert inner["calls"] == 1
+      assert inner["allocated_words"] > 0
+      assert result["semantics"]["excludes_instrumented_callees"]
     after
       :trace.session_destroy(session)
       Process.exit(collector, :kill)
@@ -84,6 +132,9 @@ defmodule Shuttle.Profile.FunctionsTest do
     result = Functions.finish(session, state)
     assert result["available"] == false
     assert result["reason"] == "trace_session_unavailable"
+    assert result["semantics"]["includes_uninstrumented_callees"]
+    assert result["semantics"]["excludes_instrumented_callees"]
+    refute result["semantics"]["covers_total_vm_cpu"]
     assert is_binary(Jason.encode!(result))
     Process.exit(tracer, :kill)
   end

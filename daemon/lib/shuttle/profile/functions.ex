@@ -2,10 +2,10 @@ defmodule Shuttle.Profile.Functions do
   @moduledoc """
   Collects bounded counters for selected dispatcher and serialization functions.
 
-  Function counters are inclusive: a caller's time and allocations include the
-  work of functions it calls. They are diagnostics and must not be summed as a
-  measure of total VM work. Call time excludes waiting. Instrumentation adds
-  overhead; exclude this window from steady-state rates.
+  Counters include uninstrumented callees and exclude calls to other
+  instrumented functions. They do not cover total VM CPU. Call time excludes
+  waiting. Instrumentation adds overhead; exclude this window from steady-state
+  rates.
   """
 
   @functions [
@@ -92,10 +92,11 @@ defmodule Shuttle.Profile.Functions do
         %{
           "available" => true,
           "semantics" => %{
-            "inclusive" => true,
+            "includes_uninstrumented_callees" => true,
+            "excludes_instrumented_callees" => true,
+            "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
-            "instrumentation_overhead" => "included; exclude profile windows from steady rates",
-            "totals_are_additive" => false
+            "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           },
           "functions" => totals,
           "skipped_functions" => Enum.map(skipped, &mfa_string/1),
@@ -116,10 +117,11 @@ defmodule Shuttle.Profile.Functions do
           "top_process_functions" => [],
           "process_function_limit" => @max_rows,
           "semantics" => %{
-            "inclusive" => true,
+            "includes_uninstrumented_callees" => true,
+            "excludes_instrumented_callees" => true,
+            "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
-            "instrumentation_overhead" => "included; exclude profile windows from steady rates",
-            "totals_are_additive" => false
+            "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           }
         }
     end

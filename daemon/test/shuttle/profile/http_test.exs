@@ -98,6 +98,50 @@ defmodule Shuttle.Profile.HTTPTest do
     assert Enum.any?(rows, &(&1["remote_ip"] == "<unknown>"))
   end
 
+  test "sums submillisecond request durations without truncation" do
+    {:ok, profile} = HTTP.start()
+    request = conn("/fast", "GET", 200, {127, 0, 0, 1}, [], %{})
+    native_half_ms = System.convert_time_unit(500, :microsecond, :native)
+
+    workers =
+      for _ <- 1..2 do
+        spawn_monitor(fn ->
+          :telemetry.execute(@start, %{}, %{conn: request})
+          :telemetry.execute(@stop, %{duration: native_half_ms}, %{conn: request})
+        end)
+      end
+
+    for {pid, monitor} <- workers do
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
+    end
+
+    assert [%{"count" => 2, "duration_ms" => 1.0}] = HTTP.finish(profile)["groups"]
+  end
+
+  test "caps header text by bytes and returns JSON-safe values" do
+    {:ok, profile} = HTTP.start()
+    combining = String.duplicate("a\u0301", 50)
+    invalid = <<"bad", 255>>
+
+    for {value, index} <- Enum.with_index([combining, invalid]) do
+      request =
+        conn("/header/#{index}", "GET", 200, {127, 0, 0, 1}, [{"x-forwarded-for", value}], %{})
+
+      :telemetry.execute(@start, %{}, %{conn: request})
+      :telemetry.execute(@stop, %{duration: 1}, %{conn: request})
+    end
+
+    result = HTTP.finish(profile)
+    assert is_binary(Jason.encode!(result))
+
+    for row <- result["groups"] do
+      header = row["forwarded_for_untrusted"]
+      assert byte_size(header) <= 128
+      assert String.valid?(header)
+      assert header == "<invalid>"
+    end
+  end
+
   test "bounds events waiting in the collector mailbox" do
     {:ok, profile} = HTTP.start()
     conn = conn("/queued", "GET", 200, {127, 0, 0, 1}, [], %{})
@@ -135,7 +179,7 @@ defmodule Shuttle.Profile.HTTPTest do
     :telemetry.execute(@start, %{}, %{conn: request})
     Process.sleep(50)
     :telemetry.execute(@start, %{}, %{conn: request})
-    :telemetry.execute(@stop, %{}, %{conn: request})
+    :telemetry.execute(@stop, %{duration: nil}, %{conn: request, options: [log: false]})
 
     result = HTTP.finish(profile)
     assert [%{"count" => 1, "duration_ms" => duration}] = result["groups"]

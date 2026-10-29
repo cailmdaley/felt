@@ -270,10 +270,15 @@ defmodule Shuttle.Profile.HTTP do
     do: native_ms(duration)
 
   defp duration_ms(_), do: nil
-  defp native_ms(value), do: System.convert_time_unit(value, :native, :millisecond) * 1.0
+  defp native_ms(value), do: value / System.convert_time_unit(1, :millisecond, :native)
 
   defp bounded(nil), do: ""
-  defp bounded(value) when is_binary(value), do: String.slice(value, 0, @text_limit)
+
+  defp bounded(value) when is_binary(value) do
+    value = binary_part(value, 0, min(byte_size(value), @text_limit))
+    if String.valid?(value), do: value, else: "<invalid>"
+  end
+
   defp bounded(value), do: value |> to_string() |> bounded()
 
   defp format_ip(nil), do: ""
