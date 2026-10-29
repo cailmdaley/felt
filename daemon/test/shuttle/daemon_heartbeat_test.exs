@@ -191,19 +191,9 @@ defmodule Shuttle.DaemonHeartbeatTest do
       assert reason =~ "-60001ms old"
     end
 
-    test "recorded workers must all be live; extra live workers do not matter" do
-      assert {:release, _} = judge(hb(%{"workers" => ["a"]}), %{live: ["a", "b"]})
-      assert {:hold, reason} = judge(hb(%{"workers" => ["a", "c"]}), %{live: ["a"]})
-      assert reason =~ "gone: c"
-    end
-
-    test "a recorded app worker holds, since adoption cannot observe it" do
-      assert {:hold, reason} =
-               judge(hb(%{"workers" => ["a", "b"]}), %{live: ["a", "b"], app: ["b"]})
-
-      assert reason =~ "app workers"
-      # A live app worker the heartbeat never recorded is not part of the proof.
-      assert {:release, _} = judge(hb(%{"workers" => ["a"]}), %{live: ["a", "b"], app: ["b"]})
+    test "a fast crash releases even when recorded terminal or app workers are gone" do
+      assert {:release, _} = judge(hb(%{"workers" => ["a", "c"]}), %{live: ["a"]})
+      assert {:release, _} = judge(hb(%{"workers" => ["a", "b"]}), %{live: [], app: ["b"]})
     end
 
     test "a heartbeat written before this machine booted holds" do

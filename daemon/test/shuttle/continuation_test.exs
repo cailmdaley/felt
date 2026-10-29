@@ -6,6 +6,18 @@ defmodule Shuttle.ContinuationTest do
 
   alias Shuttle.Test.RecordingRunner
 
+  test "restoration requires a dispatched conversation without a newer clean handoff" do
+    runtime = %{"dispatched_at" => "2026-06-21T12:00:00Z", "session_uuid" => "worker"}
+    fiber = fn fields -> %{"shuttle" => %{"runtime" => fields}} end
+    assert Continuation.restoration?(fiber.(runtime))
+    refute Continuation.restoration?(fiber.(Map.delete(runtime, "session_uuid")))
+    refute Continuation.restoration?(fiber.(Map.delete(runtime, "dispatched_at")))
+
+    refute Continuation.restoration?(
+             fiber.(Map.put(runtime, "handed_off_at", "2026-06-21T12:00:00Z"))
+           )
+  end
+
   # Non-zero exit — proves the writers are best-effort (return {:error,_}, no raise).
   defmodule FailingRunner do
     @behaviour Shuttle.Runner

@@ -3080,13 +3080,8 @@ defmodule Shuttle.PollerTest do
 
   # ── Boot quarantine ──
   #
-  # Restart is not dispatch authority: a just-(re)started daemon grants NO
-  # autonomous dispatches of any kind (the crash-loop incident: each restart's
-  # first poll dispatched every active, host-owned, workerless fiber). While
-  # quarantined, the autonomous tick parks EVERY dispatchable candidate —
-  # resumes included, since classifying on cached rows let stale rows escape;
-  # release is pure manual. config/test.exs disables the quarantine globally,
-  # so these tests opt back in via `boot_quarantine: true`.
+  # Fresh work holds after restart; interrupted workers restore from durable
+  # markers without releasing the fresh-work quarantine.
 
   test "boot quarantine parks fresh launches and surfaces them as pending_launch" do
     fiber_id = "tests/quarantine-fresh"
@@ -3130,14 +3125,7 @@ defmodule Shuttle.PollerTest do
     refute Map.has_key?(Snapshot.put_held(%{fiber: %{"id" => "tests/not-held"}}, index), :held)
   end
 
-  test "boot quarantine parks an on-disk resume marker the daemon never observed running" do
-    # A dispatched_at with no newer handed_off_at LOOKS like a dirty-death
-    # resume, but the quarantine gate keys off runtime observation
-    # (`was_running`), NOT the on-disk marker. This daemon never saw a live
-    # worker for the fiber (no adopted session), so its marker is exactly the
-    # stale-row case the earlier resume exemption let escape: it is parked, not
-    # dispatched. Only work the daemon actually observed running auto-resumes
-    # (see the was-running test below).
+  test "boot quarantine restores a dead worker from its durable marker" do
     fiber_id = "tests/quarantine-dirty-resume"
     MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
     MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
@@ -3154,19 +3142,16 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # Parked like any other candidate — no session spawned, quarantine intact.
     assert_eventually(fn ->
-      assert [%{fiber_id: ^fiber_id, reason: "boot quarantine — awaiting release"}] =
-               Poller.snapshot(poller).pending_launch
+      assert Poller.snapshot(poller).pending_launch == []
+
+      assert Enum.any?(MockRunner.commands(), fn
+               {"tmux", ["new-session" | _]} -> true
+               _ -> false
+             end)
     end)
 
-    snap = Poller.snapshot(poller)
-    assert snap.boot_quarantine == true
-    assert snap.eligible == []
-
-    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
-             cmd == "tmux" and hd(args) == "new-session"
-           end)
+    assert Poller.snapshot(poller).boot_quarantine
   end
 
   test "boot quarantine does NOT park work it observed running; a was-running fiber re-dispatches on exit" do
@@ -3545,6 +3530,15 @@ defmodule Shuttle.PollerTest do
     assert snap.pending_launch == []
   end
 
+  test "a fast crash with dead recorded workers releases fresh work" do
+    fresh_id = fresh_candidate!("tests/hb-dead-workers")
+    write_heartbeat!(%{"workers" => ["tests/hb-ghost"]})
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_dead_workers)
+    sync_poll_cycle!(poller)
+    assert_launched!(fresh_id)
+    refute hb_snapshot(poller).boot_quarantine
+  end
+
   test "an idle fast bounce (no workers recorded) auto-releases" do
     # Nothing was running and the previous incarnation had been released, so
     # an empty recorded set is continuous.
@@ -3686,11 +3680,6 @@ defmodule Shuttle.PollerTest do
        "booted_at" => 103_000,
        "boots" => [403_000, 303_000, 203_000, 103_000]
      }},
-    # Fresh and loop-free, but the workers it vouched for are not in tmux — so
-    # something ended them too, and this is not the fast bounce it looks like.
-    # Continuity is established by adoption, never by trusting the file.
-    {"a heartbeat whose recorded workers are gone",
-     heartbeat: %{"workers" => ["tests/hb-ghost"]}},
     {"a missing heartbeat file (fail closed)", heartbeat: :missing},
     # A kill mid-write is exactly what this daemon is exposed to, so the parse
     # has to survive garbage — and a file that says the right keys with the

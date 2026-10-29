@@ -163,9 +163,10 @@ defmodule Shuttle.WaitingTracker do
     )
   end
 
+  # Opening or resuming a conversation does not start a model turn.
   defp do_transition(session, "session_start", event, now) do
     touch(session, event, now,
-      turn: :open,
+      turn: :closed,
       bg: 0,
       kids: 0,
       pending: false,

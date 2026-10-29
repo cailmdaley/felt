@@ -261,40 +261,12 @@ defmodule Shuttle.Poller do
       # the fiber leaving the active candidate set. NOT persisted — a restart is a
       # clean slate (and re-adopts live workers rather than re-dispatching).
       resume_loop: %{},
-      # Boot quarantine: a daemon restart is NOT dispatch authority for a FRESH
-      # launch. An overloaded login node once crashed the daemon repeatedly, and
-      # each restart's first poll dispatched every active, host-owned,
-      # workerless fiber — ~8 token-burning fresh launches in 4 minutes, several
-      # redundant. While true, the autonomous tick parks every *genuinely-fresh*
-      # candidate (`parked_launches`) and dispatches nothing fresh; release is
-      # PURE MANUAL — `release_boot_quarantine/0` / POST
-      # /api/v1/quarantine/release — with no stabilization timer.
-      #
-      # In-flight work this daemon OBSERVED running under its own uptime is NOT
-      # held: a candidate whose runtime key is in `was_running` (adopted at boot,
-      # or dispatched/claimed since) is the sanctioned continuation of work that
-      # was demonstrably alive moments ago, so it re-dispatches normally even
-      # while quarantined (resume-vs-fresh unchanged — `continuation.ex` still
-      # decides). Only NEVER-seen candidates are parked. The predicate is
-      # runtime-observation, never on-disk markers, so a stale `dispatched_at`
-      # can never masquerade as a resume and dispatch FRESH.
-      #
-      # Human force-dispatch bypasses (and does not clear) the quarantine. Set at
-      # init from the `:boot_quarantine` opt / app config (default true;
-      # config/test.exs disables it).
-      #
-      # ONE automatic exit exists, it is not a timer, and it is per-host opt-in
-      # (`quarantine_auto_release` below): a daemon that was killed HARD (an
-      # rlimit SIGKILL) and is back within seconds releases itself at boot when
-      # it can prove the bounce (`Shuttle.DaemonHeartbeat.verdict/2`, read
-      # before adoption and judged after it): the heartbeat is this machine's,
-      # from another VM, fresh and released, the recorded workers are still
-      # live BY THIS DAEMON'S OWN observation, and the previous incarnation was
-      # not in a crash loop. It fails closed. Every SIGTERM'd restart — each
-      # deploy and operator restart — touches the stop marker
-      # (`Shuttle.Application.prep_stop/1`, and the stop scripts before they
-      # signal) and so holds, as do an unreleased hold, a real gap, a crash
-      # loop, or no evidence at all: a restart is not dispatch authority.
+      # Boot quarantine holds fresh autonomous work after restart. Durable
+      # interrupted-worker markers authorize restoration on every boot.
+      # Due standing runs and observed workers also pass through. Human force
+      # bypasses the hold; contract and reconciliation holds stay independent.
+      # Host opt-in permits fresh work after a healthy released daemon's fast
+      # crash boot. Stop markers, stale evidence and churn keep fresh work held.
       boot_quarantine: false,
       # Where this daemon records its own liveness, how often, when THIS
       # incarnation booted (epoch ms), and the ring of recent boot times carried
@@ -2852,31 +2824,9 @@ defmodule Shuttle.Poller do
     Enum.filter(candidates, &eligible?(&1, state))
   end
 
-  # Boot quarantine gate on the autonomous tick (see the State field comment):
-  # a just-restarted daemon grants no *fresh* autonomous dispatch, but never
-  # strands in-flight work it observed running, and never holds a due standing
-  # role (cron is the human's pre-given "go"; see the split below). Splits the dispatchable set by
-  # `was_running` (runtime keys this daemon saw alive under its own uptime —
-  # adopted at boot, or dispatched/claimed since):
-  #
-  #   - Members re-dispatch: they are the sanctioned continuation of work that
-  #     was demonstrably alive moments ago, so they flow out as the returned
-  #     dispatchable list and the reduce launches them (resume-vs-fresh is
-  #     `Dispatcher.check_resume_intent/2`'s). Once running they leave the
-  #     candidate set, so there is no repeated dispatch.
-  #   - Non-members park into `parked_launches` for the snapshot's
-  #     `pending_launch` rows (and the board's `held` indicator).
-  #
-  # The predicate is runtime-observation, never on-disk markers: classifying on
-  # cached `dispatched_at`/`handed_off_at` rows would let a stale dirty-death
-  # row slip the gate and dispatch FRESH. A fiber the daemon never saw running
-  # is parked no matter what its markers say. The parked map is rebuilt from the
-  # current fresh set each cycle (a fiber that closes/pauses/reclassifies as
-  # was-running drops out on its own); `parked_at` is preserved for fibers that
-  # stay parked. Only this tick path is gated: the explicit `{:dispatch, …}` call
-  # (kanban force-dispatch, claim) never routes here. Called only while
-  # quarantined OR contract-skewed (`apply_poll_cycle`'s cond clears the
-  # parked map on the other branches).
+  # Durable interrupted-worker markers authorize restoration across daemon
+  # restarts. Dispatcher re-fetches the fiber before restoring its conversation.
+  # Fresh work stays parked; due standing runs carry scheduled authorization.
   defp park_autonomous_launches(dispatchable, %State{} = state) do
     now = DateTime.utc_now()
 
@@ -2889,7 +2839,8 @@ defmodule Shuttle.Poller do
     {resume, fresh} =
       Enum.split_with(dispatchable, fn fiber ->
         MapSet.member?(state.was_running, runtime_key_for_fiber(fiber)) or
-          (state.contract_check.ok and StandingRoles.standing_role_due?(fiber))
+          (state.contract_check.ok and
+             (Shuttle.Continuation.restoration?(fiber) or StandingRoles.standing_role_due?(fiber)))
       end)
 
     parked =
@@ -3683,6 +3634,11 @@ defmodule Shuttle.Poller do
            # message into the prompt at launch and honors resume_mode.
            user_message: Keyword.get(opts, :user_message),
            resume_mode: Keyword.get(opts, :resume_mode),
+           restoration:
+             not Keyword.get(opts, :force, false) and
+               is_nil(Keyword.get(opts, :user_message)) and
+               is_nil(Keyword.get(opts, :resume_mode)) and
+               Shuttle.Continuation.restoration?(fiber),
            threads: cached_thread_inputs(state)
          ) do
       {:ok, session} ->

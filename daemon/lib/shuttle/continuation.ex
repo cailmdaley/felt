@@ -190,6 +190,13 @@ defmodule Shuttle.Continuation do
     end
   end
 
+  @doc "True when durable runtime markers identify an interrupted worker to restore."
+  @spec restoration?(map()) :: boolean()
+  def restoration?(fiber) do
+    not clean_handoff_since_dispatch?(fiber) and
+      is_binary(resumable_session_id(fiber))
+  end
+
   # Nested-only. A non-map `runtime:` (degenerate/null) reads as absent —
   # no flat fallback (see the moduledoc's "Reading: nested only" section).
   defp runtime_field(shuttle, key) do

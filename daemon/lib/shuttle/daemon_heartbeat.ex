@@ -15,11 +15,12 @@ defmodule Shuttle.DaemonHeartbeat do
 
   It is wrong for a restart nobody asked for and nothing was stale across. A
   host that hard-caps every process at some number of CPU-seconds SIGKILLs the
-  beam mid-flight and a supervisor respawns it seconds later; the workers keep
-  running (tmux owns them, and `SessionReconciliation.adopt_orphans/1`
-  re-adopts them), but all *new* work silently stops until a person notices.
+  beam mid-flight and a supervisor respawns it seconds later. Workers that
+  survived are adopted; interrupted workers restore their conversations.
+  Fresh work can resume automatically when the prior daemon was healthy and
+  released, regardless of whether its workers survived.
 
-  Only such a host gains from an automatic release, so it is opt-in per host:
+  Automatic release is opt-in per host:
   host.json `"quarantine_auto_release": true` (`Shuttle.Host`). Off, the
   heartbeat is still written but `Shuttle.Poller` never asks for a verdict.
 
@@ -101,15 +102,7 @@ defmodule Shuttle.DaemonHeartbeat do
      contention, while staying far too short to cover any restart a human
      would call an outage.
 
-  5. **Worker continuity** — every runtime key the heartbeat recorded as live
-     is live NOW, as established by this boot's adoption, never by trusting
-     the file. Workers recorded and gone means something ended the workers
-     too: not a fast bounce. `Shuttle.Poller` asks for a verdict only once
-     adoption's tmux scan has completed (`adopted?`). App workers do not count
-     as observed: adoption re-adopts them from their own JSON record, so a
-     recorded app worker holds.
-
-  6. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
+  5. **Not a crash loop** — a crash loop *also* has a fresh heartbeat, so
      condition 4 cannot see it. Two brakes, coarse and fine:
 
        * the previous incarnation lived at least 90_000 ms
@@ -335,11 +328,9 @@ defmodule Shuttle.DaemonHeartbeat do
   claims:
 
     * `:now_ms` — wall clock, epoch ms;
-    * `:live` — the runtime keys reconciliation/adoption has just found live;
     * `:host` — this daemon's `own_host_id`;
     * `:node` — this machine's OS node name (`node_name/0`);
     * `:os_pid` — this beam's OS pid (`System.pid/0`);
-    * `:app` — the live keys whose worker is an app conversation (optional);
     * `:stopped_at_s` — the stop marker's mtime, epoch seconds (`stopped_at_s/1`;
       optional, `nil` when there is none);
     * `:machine_booted_at_ms` — when this machine booted (`machine_booted_at_ms/0`;
@@ -357,11 +348,9 @@ defmodule Shuttle.DaemonHeartbeat do
   def verdict({:error, reason}, _observed),
     do: {:hold, "no usable daemon heartbeat (#{inspect(reason)})"}
 
-  def verdict({:ok, hb}, %{now_ms: now_ms, live: live_workers} = observed) do
+  def verdict({:ok, hb}, %{now_ms: now_ms} = observed) do
     age_ms = now_ms - hb["at"]
     previous_run_ms = hb["at"] - hb["booted_at"]
-    recorded = MapSet.new(hb["workers"] || [])
-    live = MapSet.new(live_workers)
     recent_boots = 1 + Enum.count(hb["boots"] || [], &(now_ms - &1 <= @crash_loop_window_ms))
 
     cond do
@@ -392,22 +381,6 @@ defmodule Shuttle.DaemonHeartbeat do
       predates_machine_boot?(hb["at"], Map.get(observed, :machine_booted_at_ms)) ->
         {:hold, "daemon heartbeat predates this machine's boot"}
 
-      not MapSet.subset?(recorded, live) ->
-        missing = recorded |> MapSet.difference(live) |> Enum.sort()
-
-        {:hold, "workers recorded live in the heartbeat are gone: #{Enum.join(missing, ", ")}"}
-
-      # An app conversation's liveness is not observed by adoption: the daemon
-      # re-adopts it from its own JSON record (`Shuttle.AppWorkers.active/0`),
-      # so for app workers the continuity check would only compare the file
-      # with itself. Hold rather than release on a proof that degenerates.
-      not MapSet.disjoint?(recorded, MapSet.new(Map.get(observed, :app, []))) ->
-        app = recorded |> MapSet.intersection(MapSet.new(observed.app)) |> Enum.sort()
-
-        {:hold,
-         "heartbeat recorded app workers, whose liveness adoption cannot observe: " <>
-           Enum.join(app, ", ")}
-
       previous_run_ms < @min_healthy_run_ms ->
         {:hold,
          "previous daemon incarnation lived #{previous_run_ms}ms " <>
@@ -421,8 +394,7 @@ defmodule Shuttle.DaemonHeartbeat do
 
       true ->
         {:release,
-         "fast bounce: heartbeat #{age_ms}ms old, previous incarnation ran #{previous_run_ms}ms, " <>
-           "#{MapSet.size(recorded)} worker(s) still live"}
+         "fast bounce: heartbeat #{age_ms}ms old, previous incarnation ran #{previous_run_ms}ms"}
     end
   end
 

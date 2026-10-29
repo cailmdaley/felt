@@ -14,6 +14,19 @@ defmodule Shuttle.WaitingTrackerTest do
   defp phase(sessions, id, now \\ @now), do: Tracker.phases(sessions, now)[id].phase
   defp fold(events), do: Enum.reduce(events, %{}, &Tracker.apply_event(&2, &1, @now))
 
+  test "opening a conversation is waiting until a prompt or tool starts work" do
+    for prefix <- [[], [event("stop")], [event("session_end")]] do
+      sessions = fold(prefix ++ [event("session_start")])
+      assert phase(sessions, "session-a") == "waiting"
+
+      assert phase(Tracker.apply_event(sessions, event("user_prompt_submit"), @now), "session-a") ==
+               "working"
+
+      assert phase(Tracker.apply_event(sessions, event("pre_tool_use"), @now), "session-a") ==
+               "working"
+    end
+  end
+
   test "quiet ticks don't scan retained event histories before their first expiry" do
     sessions =
       Enum.reduce(1..5_000, %{}, fn n, sessions ->
@@ -435,7 +448,7 @@ defmodule Shuttle.WaitingTrackerTest do
       )
 
     assert restarted["parent"].kids == 0
-    assert restarted["parent"].turn == :open
+    assert restarted["parent"].turn == :closed
   end
 
   @tag replay_finding_4: true
