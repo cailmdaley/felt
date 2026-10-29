@@ -214,6 +214,7 @@ exit 1 means rejected, unknown, or another command error.`,
 					if request.NotifyWhenIdle {
 						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — no live worker to watch; the message waits for the next one\n")
 					}
+					a.recordBoardMessage(args[0], request)
 					return a.printNextWorkerReceipt(queued)
 				}
 			}
@@ -264,6 +265,9 @@ exit 1 means rejected, unknown, or another command error.`,
 					receipt.Detail = err.Error()
 				}
 			}
+			if !messageOpts.local && !messageOpts.requestJSON && err == nil && (receipt.Status == messaging.StatusAccepted || receipt.Status == messaging.StatusQueued || receipt.Status == messaging.StatusContextAdded) {
+				a.recordBoardMessage(args[0], request)
+			}
 			if messageOpts.requestJSON {
 				response := messageRequestReceipt{Receipt: receipt, FeltErrorCode: feltErrorCode, FeltReceiptProduced: receiptProduced}
 				if outputErr := json.NewEncoder(a.env.Stdout).Encode(response); outputErr != nil {
@@ -292,7 +296,7 @@ exit 1 means rejected, unknown, or another command error.`,
 				fmt.Fprintf(a.env.Stderr, "message delivered; idle subscription %s: %s\n", receipt.Idle.State, receipt.Idle.Detail)
 			}
 			if !messageOpts.requestJSON && len(args) > 0 && receipt.Status != messaging.StatusSubscribed {
-				if err := a.clearMessagedFiberAsk(args[0]); err != nil {
+				if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
 					fmt.Fprintf(a.env.Stderr, "message delivered; couldn't clear the fiber's outstanding question: %v\n", err)
 				}
 			}

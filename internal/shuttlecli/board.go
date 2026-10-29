@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +79,40 @@ func (a *app) boardWorkerParty() *boardParty {
 		return nil
 	}
 	return &boardParty{Fiber: f.UID}
+}
+
+func (a *app) boardMessageActor(from string) *boardParty {
+	by := &boardParty{Label: from}
+	if _, err := messaging.ParseAddress(from); err == nil {
+		by.Session = from
+		if target := a.messageReplyTarget(from); target != "" {
+			if lookup, err := a.lookupShuttleAddressFibers(target); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
+				by.Fiber = lookup.Fibers[0].UID
+			}
+		}
+	}
+	return by
+}
+
+func (a *app) recordBoardMessage(target string, request messaging.Request) {
+	by := a.boardMessageActor(request.From)
+	to := &boardParty{}
+	if _, err := messaging.ParseAddress(request.Address); err == nil {
+		to.Session = request.Address
+	}
+	if !strings.HasPrefix(target, "shuttle://") && !looksLikeNativeSessionID(target) {
+		if lookup, err := a.lookupShuttleAddressFibers(target); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
+			to.Fiber = lookup.Fibers[0].UID
+		}
+	}
+	member := to.Fiber
+	if member == "" {
+		member = by.Fiber
+	}
+	if to.Fiber == "" && to.Session == "" {
+		to = nil
+	}
+	a.recordBoard(boardRecord{Kind: "message", By: by, Fiber: member, To: to, Text: request.Text, Wake: request.Wake})
 }
 
 func (a *app) recordBoard(record boardRecord) {
@@ -180,12 +215,17 @@ func (a *app) boardCmd() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := getDaemonJSON[boardResponse](a, endpoint+"?"+q.Encode(), "parsing family board")
+		body, err := a.getDaemon(endpoint+"?"+q.Encode(), daemonReadTimeout)
 		if err != nil {
 			return err
 		}
 		if a.json {
-			return json.NewEncoder(a.env.Stdout).Encode(response)
+			_, err = a.env.Stdout.Write(body)
+			return err
+		}
+		var response boardResponse
+		if err := json.Unmarshal(body, &response); err != nil {
+			return fmt.Errorf("parsing family board: %w", err)
 		}
 		for _, row := range response.Records {
 			line := time.UnixMilli(row.Timestamp).Local().Format("15:04") + "  " + boardPhrase(row)

@@ -85,7 +85,7 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 
 // clearMessagedFiberAsk clears local fiber-addressed questions only after delivery
 // succeeds. Remote and session-addressed delivery is handled by the owner daemon.
-func (a *app) clearMessagedFiberAsk(target string) error {
+func (a *app) clearMessagedFiberAsk(target string, sender ...string) error {
 	lookup, err := a.lookupShuttleAddressFibers(target)
 	if err != nil || len(lookup.Fibers) != 1 || lookup.refused() {
 		return nil
@@ -118,5 +118,13 @@ func (a *app) clearMessagedFiberAsk(target string) error {
 	if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 		return err
 	}
-	return st.Write(f)
+	if err := st.Write(f); err != nil {
+		return err
+	}
+	var by *boardParty
+	if len(sender) > 0 {
+		by = a.boardMessageActor(sender[0])
+	}
+	a.recordBoard(boardRecord{Kind: "answered", Fiber: f.UID, By: by, Text: block.Ask.Text})
+	return nil
 }
