@@ -29,7 +29,7 @@ func TestBoardMessageReceiptControlsRecording(t *testing.T) {
 			}
 			_ = cmd.RunE(cmd, []string{"shuttle://remote/pi/session", "hello"})
 			data, err := os.ReadFile(sink)
-			wanted := status == messaging.StatusAccepted || status == messaging.StatusQueued || status == messaging.StatusContextAdded
+			wanted := status != messaging.StatusRejected
 			if !wanted {
 				if !os.IsNotExist(err) {
 					t.Fatalf("unexpected record: %s %v", data, err)

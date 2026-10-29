@@ -58,21 +58,17 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
-			kind, text := "asked", ""
-			by := a.boardWorkerParty()
-			if askClear {
-				kind = "cleared"
-				if oldAsk != nil {
-					text = oldAsk.Text
-				}
+			// Clearing a fiber with no question is a no-op on the board: the daemon
+			// clears after every delivered message and every forced start.
+			if !askClear {
+				a.recordBoard(boardRecord{Kind: "asked", Fiber: f.UID, By: a.boardWorkerParty(), Text: args[1]})
+			} else if oldAsk != nil {
+				kind, by := "cleared", a.boardWorkerParty()
 				if answeredBy != "" {
-					kind = "answered"
-					by = &boardParty{Label: answeredBy}
+					kind, by = "answered", a.boardMessageActor(answeredBy)
 				}
-			} else {
-				text = args[1]
+				a.recordBoard(boardRecord{Kind: kind, Fiber: f.UID, By: by, Text: oldAsk.Text})
 			}
-			a.recordBoard(boardRecord{Kind: kind, Fiber: f.UID, By: by, Text: text})
 			fmt.Fprintf(a.env.Stdout, "updated question for %s%s\n", args[0], ref.Location())
 			return nil
 		},
@@ -83,8 +79,8 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 	return askCmd
 }
 
-// clearMessagedFiberAsk clears local fiber-addressed questions only after delivery
-// succeeds. Remote and session-addressed delivery is handled by the owner daemon.
+// clearMessagedFiberAsk clears local fiber-addressed questions once a message
+// is accepted, delivered or queued for the fiber's next worker. Remote and session-addressed delivery is handled by the owner daemon.
 func (a *app) clearMessagedFiberAsk(target string, sender ...string) error {
 	lookup, err := a.lookupShuttleAddressFibers(target)
 	if err != nil || len(lookup.Fibers) != 1 || lookup.refused() {

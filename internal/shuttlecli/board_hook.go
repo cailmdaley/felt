@@ -33,6 +33,12 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 	if err != nil || shuttleRuntimeSessionID(f) != input.SessionID {
 		return
 	}
+	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: a.humanLabel()}, Text: input.Prompt}
+	// Only a question to clear takes the fiber lock.
+	if block, ok, err := shuttle.BlockOf(f); err != nil || !ok || block.Ask == nil {
+		a.recordBoard(r)
+		return
+	}
 	st := felt.NewStorage(workerStoreRoot(f.Path))
 	f, unlock, err := lockAndReloadFiber(st, f)
 	if err != nil {
@@ -42,7 +48,6 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 	if shuttleRuntimeSessionID(f) != input.SessionID {
 		return
 	}
-	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: a.humanLabel()}, Text: input.Prompt}
 	block, ok, err := shuttle.BlockOf(f)
 	if err == nil && ok && block.Ask != nil && a.ensureOwnedHere(f, f.ID) == nil {
 		question := block.Ask.Text
@@ -103,8 +108,10 @@ func (a *app) boardDigest(harness, session string) string {
 	}
 	now := a.eventNow().UnixMilli()
 	since := now - int64((6*time.Hour)/time.Millisecond)
+	// A failed fetch leaves the cursor, so a long outage never widens the
+	// window past a new session's.
 	if cursor.At > 0 {
-		since = cursor.At - int64((10*time.Minute)/time.Millisecond)
+		since = max(since, cursor.At-int64((10*time.Minute)/time.Millisecond))
 	}
 	endpoint, err := a.daemonEndpoint("/api/v1/board/family")
 	if err != nil {

@@ -82,8 +82,10 @@ func (a *app) boardWorkerParty() *boardParty {
 }
 
 func (a *app) boardMessageActor(from string) *boardParty {
-	by := &boardParty{Label: from}
-	if _, err := messaging.ParseAddress(from); err == nil {
+	by := &boardParty{}
+	if _, err := messaging.ParseAddress(from); err != nil {
+		by.Label = from
+	} else {
 		by.Session = from
 		if target := a.messageReplyTarget(from); target != "" {
 			if isSessionULID(target) {

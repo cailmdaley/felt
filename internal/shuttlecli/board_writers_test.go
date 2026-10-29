@@ -71,6 +71,39 @@ func TestBoardLifecycleAndQuestionWriters(t *testing.T) {
 	}
 }
 
+// The daemon clears after every delivered message and every forced start, so a
+// clear with no outstanding question must leave the board alone.
+func TestBoardClearWithoutQuestionRecordsNothing(t *testing.T) {
+	for _, args := range [][]string{{"ask", "f", "--clear"}, {"ask", "f", "--clear", "--answered-by", "shuttle://host/claude/abc"}} {
+		env := testEnv(t)
+		env.Set("SHUTTLE_HOST", "host")
+		env.Set("SHUTTLE_EVENTS", "")
+		path := filepath.Join(t.TempDir(), "events.jsonl")
+		env.Set("SHUTTLE_EVENTS_FILE", path)
+		dir, st := newStore(t)
+		seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir()}, nil)
+		if _, stderr, err := executeIn(t, env, dir, args...); err != nil {
+			t.Fatalf("%v %s", err, stderr)
+		}
+		if _, err := os.Stat(path); err == nil {
+			if records := readBoardRecords(t, path); len(records) != 0 {
+				t.Fatalf("%v recorded %+v", args, records)
+			}
+		}
+	}
+}
+
+// An address names a session, not a person: it goes in by.session, never the label.
+func TestBoardMessageActorKeepsAddressOutOfLabel(t *testing.T) {
+	a := newApp(testEnv(t))
+	if by := a.boardMessageActor("shuttle://host/claude/abc"); by.Label != "" || by.Session != "shuttle://host/claude/abc" {
+		t.Fatalf("%+v", by)
+	}
+	if by := a.boardMessageActor("Cail"); by.Label != "Cail" || by.Session != "" {
+		t.Fatalf("%+v", by)
+	}
+}
+
 func TestBoardWriteFailureDoesNotFailAsk(t *testing.T) {
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "host")

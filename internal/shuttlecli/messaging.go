@@ -268,7 +268,7 @@ exit 1 means rejected, unknown, or another command error.`,
 					receipt.Detail = err.Error()
 				}
 			}
-			if !messageOpts.local && !messageOpts.requestJSON && err == nil && (receipt.Status == messaging.StatusAccepted || receipt.Status == messaging.StatusQueued || receipt.Status == messaging.StatusContextAdded) {
+			if !messageOpts.local && !messageOpts.requestJSON && err == nil && (receipt.Status == messaging.StatusAccepted || receipt.Status == messaging.StatusSubmitted || receipt.Status == messaging.StatusQueued || receipt.Status == messaging.StatusContextAdded) {
 				a.recordBoardMessage(args[0], request)
 			}
 			if messageOpts.requestJSON {
