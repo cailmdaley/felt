@@ -275,7 +275,7 @@ defmodule Shuttle.Migration do
     # between verification and this command.
     session_id = pane |> String.split("\t") |> hd()
 
-    Tmux.rename(runner, session_id, to)
+    Tmux.rename_session_id(runner, session_id, to)
   end
 
   def reply(from, to, uuid), do: %{ok: true, from: from["id"], to: to["id"], session_uuid: uuid}

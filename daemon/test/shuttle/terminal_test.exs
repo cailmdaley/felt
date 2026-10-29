@@ -50,6 +50,16 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  defmodule IsolatedTmuxRunner do
+    def cmd("tmux", args, opts) do
+      Shuttle.Runner.Default.cmd(
+        "tmux",
+        ["-S", Shuttle.Env.app(:terminal_test_socket), "-f", "/dev/null" | args],
+        opts
+      )
+    end
+  end
+
   defp stub(result, ps \\ {"", 0}) do
     Process.put(:tmux_result, result)
     Process.put(:ps_result, ps)
@@ -250,13 +260,65 @@ defmodule Shuttle.TerminalTest do
     assert Terminal.list_workers(StubRunner) == {:error, :unknown}
   end
 
-  test "rename is idempotent and preserves immutable tmux session IDs" do
+  test "rename is idempotent and treats dollar-prefixed names literally" do
     assert :ok = Terminal.rename(stub({"", 0}), "leaf", "leaf")
     refute_received {:tmux_args, ["rename-session" | _]}
     assert :ok = Tmux.rename(StubRunner, "old", "new")
     assert_received {:tmux_args, ["rename-session", "-t", "=old", "new"]}
+    Process.put(:list_result, {"$12\tvictim\n$13\t$12\n", 0})
     assert :ok = Tmux.rename(StubRunner, "$12", "new")
+    assert_received {:tmux_args, ["rename-session", "-t", "$13", "new"]}
+  end
+
+  test "a missing or unobservable dollar-prefixed name never falls back to an ID" do
+    for result <- [{"$12\tvictim\n", 0}, {"timed out", :timeout}, {"no server running", 1}] do
+      Process.put(:list_result, result)
+      assert {:error, :rename_failed} = Tmux.rename(StubRunner, "$12", "new")
+      refute_received {:tmux_args, ["rename-session" | _]}
+    end
+  end
+
+  test "migration rename explicitly addresses an immutable tmux session ID" do
+    assert :ok = Tmux.rename_session_id(StubRunner, "$12", "new")
     assert_received {:tmux_args, ["rename-session", "-t", "$12", "new"]}
+  end
+
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "claim rename preserves an unrelated session whose ID equals the claimant's name" do
+    socket = Path.join(System.tmp_dir!(), "terminal-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+
+    on_exit(fn ->
+      System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true)
+    end)
+
+    assert {"$0\n", 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "victim", "-P", "-F", "\#{session_id}", "sleep 300"],
+               stderr_to_stdout: true
+             )
+
+    assert {"$1\n", 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "$0", "-P", "-F", "\#{session_id}", "sleep 300"],
+               stderr_to_stdout: true
+             )
+
+    assert :ok = Terminal.rename(IsolatedTmuxRunner, "$0", "claimed-worker")
+
+    assert {names, 0} =
+             IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_id} \#{session_name}"], [])
+
+    assert Enum.sort(String.split(names, "\n", trim: true)) == ["$0 victim", "$1 claimed-worker"]
+
+    assert :ok = Tmux.rename_session_id(IsolatedTmuxRunner, "$1", "migrated-worker")
+
+    assert {names, 0} =
+             IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_id} \#{session_name}"], [])
+
+    assert Enum.sort(String.split(names, "\n", trim: true)) == ["$0 victim", "$1 migrated-worker"]
   end
 
   test "native references do not overlap tmux names or pane IDs" do

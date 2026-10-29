@@ -92,10 +92,38 @@ defmodule Shuttle.Terminal.Tmux do
   @impl true
   def rename(_runner, name, name), do: :ok
 
-  def rename(runner, from, to) do
-    # A captured immutable session ID must not be converted into a name target.
-    target = if String.starts_with?(from, "$"), do: from, else: "=" <> from
+  def rename(runner, "$" <> _ = from, to) do
+    # tmux resolves $N as an ID even with an exact-name prefix. Resolve the
+    # literal name through the session table, then address its immutable ID.
+    case runner.cmd("tmux", ["ls", "-F", "\#{session_id}\t\#{session_name}"],
+           stderr_to_stdout: true
+         ) do
+      {output, 0} ->
+        session =
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.map(&String.split(&1, "\t", parts: 2))
+          |> Enum.find(fn
+            [_id, ^from] -> true
+            _ -> false
+          end)
 
+        case session do
+          [id, ^from] -> rename_session_id(runner, id, to)
+          nil -> {:error, :rename_failed}
+        end
+
+      _ ->
+        {:error, :rename_failed}
+    end
+  end
+
+  def rename(runner, from, to), do: rename_target(runner, "=" <> from, to)
+
+  @doc "Rename by a captured immutable session ID, independent of its current name."
+  def rename_session_id(runner, session_id, to), do: rename_target(runner, session_id, to)
+
+  defp rename_target(runner, target, to) do
     case runner.cmd("tmux", ["rename-session", "-t", target, to], stderr_to_stdout: true) do
       {_, 0} -> :ok
       _ -> {:error, :rename_failed}
