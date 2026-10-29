@@ -25,10 +25,25 @@ defmodule Shuttle.Profile do
 
   def seconds(_), do: 30
 
-  def run(duration \\ 30) do
+  def cpu_seconds(value) when is_integer(value), do: value |> max(1) |> min(10)
+
+  def cpu_seconds(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} -> cpu_seconds(n)
+      _ -> 10
+    end
+  end
+
+  def cpu_seconds(_), do: 10
+
+  def run(duration \\ 30), do: run(duration, [])
+
+  def run(duration, opts) when is_list(opts) do
+    mode = if Keyword.get(opts, :mode) == :cpu, do: :cpu, else: :file
+    duration = if mode == :cpu, do: cpu_seconds(duration), else: seconds(duration)
     caller = self()
     ref = make_ref()
-    {pid, monitor} = spawn_monitor(fn -> acquire(caller, ref, seconds(duration)) end)
+    {pid, monitor} = spawn_monitor(fn -> acquire(caller, ref, duration, mode) end)
 
     receive do
       {^ref, result} ->
@@ -41,7 +56,7 @@ defmodule Shuttle.Profile do
     end
   end
 
-  defp acquire(caller, ref, duration) do
+  defp acquire(caller, ref, duration, mode) do
     acquired =
       try do
         Process.register(self(), __MODULE__)
@@ -50,14 +65,23 @@ defmodule Shuttle.Profile do
       end
 
     if acquired do
-      result = capture(caller, duration)
+      result = capture(caller, duration, mode)
       send(caller, {ref, result})
     else
       send(caller, {ref, {:error, :busy}})
     end
   end
 
-  defp capture(caller, duration) do
+  defp capture(caller, duration, :cpu) do
+    case Shuttle.Profile.HTTP.start() do
+      {:ok, http_profile} -> capture_started(caller, duration, :cpu, http_profile)
+      {:error, reason} -> {:error, {:http_telemetry, reason}}
+    end
+  end
+
+  defp capture(caller, duration, :file), do: capture_started(caller, duration, :file, nil)
+
+  defp capture_started(caller, duration, mode, http_profile) do
     owner = Process.monitor(caller)
 
     profiler = self()
@@ -72,11 +96,12 @@ defmodule Shuttle.Profile do
       )
 
     session = :trace.session_create(:shuttle_profile, collector, [])
+    function_state = if mode == :cpu, do: Shuttle.Profile.Functions.start(session)
     ms = start_msacc()
 
     try do
       send(collector, {:session, session})
-      start_trace(session)
+      if mode == :file, do: start_trace(session)
       before_os = Shuttle.Profile.OS.snapshot()
       before_processes = reductions()
       started = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -89,6 +114,11 @@ defmodule Shuttle.Profile do
         {:DOWN, ^monitor, :process, ^collector, reason} -> {:error, {:collector_down, reason}}
       after
         duration * 1000 ->
+          if mode == :cpu, do: :trace.process(session, :all, false, [:call])
+
+          functions =
+            if function_state, do: Shuttle.Profile.Functions.finish(session, function_state)
+
           :trace.session_destroy(session)
           delivered = :trace.delivered(session, :all)
 
@@ -105,14 +135,26 @@ defmodule Shuttle.Profile do
 
           receive do
             {:file_calls, calls} ->
-              {:ok,
-               %{
-                 window: %{started_at: started, seconds: duration, single_flight: true},
-                 os: Shuttle.Profile.OS.delta(before_os, after_os),
-                 msacc: msacc_delta(before_ms, after_ms),
-                 processes: processes,
-                 file_calls: calls
-               }}
+              result = %{
+                window: %{started_at: started, seconds: duration, single_flight: true},
+                os: Shuttle.Profile.OS.delta(before_os, after_os),
+                msacc: msacc_delta(before_ms, after_ms),
+                processes: processes
+              }
+
+              if mode == :cpu do
+                http = Shuttle.Profile.HTTP.finish(http_profile)
+
+                {:ok,
+                 Map.merge(result, %{
+                   window: Map.merge(result.window, %{mode: :cpu, instrumented: true}),
+                   functions: functions,
+                   http: http,
+                   runtime: runtime()
+                 })}
+              else
+                {:ok, Map.put(result, :file_calls, calls)}
+              end
 
             {:DOWN, ^monitor, :process, ^collector, reason} ->
               {:error, {:collector_down, reason}}
@@ -129,7 +171,15 @@ defmodule Shuttle.Profile do
       Process.exit(collector, :kill)
       Process.demonitor(monitor, [:flush])
       Process.demonitor(owner, [:flush])
+      if http_profile, do: Shuttle.Profile.HTTP.stop(http_profile)
     end
+  end
+
+  defp runtime do
+    %{
+      otp_release: :erlang.system_info(:otp_release) |> List.to_string(),
+      erts_version: :erlang.system_info(:version) |> List.to_string()
+    }
   end
 
   defp start_trace(session) do

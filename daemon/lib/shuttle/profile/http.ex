@@ -20,21 +20,21 @@ defmodule Shuttle.Profile.HTTP do
     id = {__MODULE__, make_ref()}
     buffered = :atomics.new(1, signed: false)
     dropped = :atomics.new(1, signed: false)
+    caller = self()
+    ref = make_ref()
+    collector = spawn(fn -> attach_and_collect(id, owner, caller, ref, buffered, dropped) end)
 
-    collector =
-      spawn(fn -> await_attach(id, owner, Process.monitor(owner), buffered, dropped) end)
-
-    handler = &__MODULE__.handle_event/4
-    handler_config = %{collector: collector, buffered: buffered, dropped: dropped}
-
-    case :telemetry.attach_many(id, [@start_event, @stop_event], handler, handler_config) do
-      :ok ->
-        send(collector, :attached)
+    receive do
+      {:http_profile_started, ^ref, :ok} ->
         {:ok, %{id: id, collector: collector, owner: owner}}
 
-      {:error, reason} ->
-        Process.exit(collector, :shutdown)
+      {:http_profile_started, ^ref, {:error, reason}} ->
         {:error, reason}
+    after
+      5_000 ->
+        :telemetry.detach(id)
+        Process.exit(collector, :kill)
+        {:error, :start_timeout}
     end
   end
 
@@ -86,10 +86,23 @@ defmodule Shuttle.Profile.HTTP do
     end
   end
 
-  defp await_attach(id, owner, monitor, buffered, dropped) do
-    receive do
-      :attached -> collect(id, owner, monitor, buffered, dropped, %{}, %{}, 0)
-      {:DOWN, ^monitor, :process, ^owner, _reason} -> :telemetry.detach(id)
+  defp attach_and_collect(id, owner, caller, ref, buffered, dropped) do
+    monitor = Process.monitor(owner)
+    config = %{collector: self(), buffered: buffered, dropped: dropped}
+
+    case :telemetry.attach_many(
+           id,
+           [@start_event, @stop_event],
+           &__MODULE__.handle_event/4,
+           config
+         ) do
+      :ok ->
+        send(caller, {:http_profile_started, ref, :ok})
+        collect(id, owner, monitor, buffered, dropped, %{}, %{}, 0)
+
+      {:error, reason} ->
+        Process.demonitor(monitor, [:flush])
+        send(caller, {:http_profile_started, ref, {:error, reason}})
     end
   end
 
@@ -201,12 +214,15 @@ defmodule Shuttle.Profile.HTTP do
     %{
       method: bounded(conn.method || ""),
       route: bounded(route(conn)),
-      shuttle: get_in(conn.params || %{}, ["shuttle"]) == "true",
+      shuttle: shuttle_param(conn.params),
       remote_ip: conn.remote_ip |> format_ip() |> bounded(),
       forwarded_for_untrusted:
         conn |> Plug.Conn.get_req_header("x-forwarded-for") |> List.first() |> bounded()
     }
   end
+
+  defp shuttle_param(%{"shuttle" => "true"}), do: true
+  defp shuttle_param(_params), do: false
 
   defp route(%{private: %{phoenix_route: route}}) when is_binary(route), do: route
 

@@ -88,7 +88,7 @@ defmodule Shuttle.Profile.HTTPTest do
     {:ok, profile} = HTTP.start()
 
     for {ip, route} <- [{{:local, "/tmp/shuttle.sock"}, "/unix"}, {:invalid_peer, "/unknown"}] do
-      request = conn(route, "GET", 200, ip, [], %{})
+      request = conn(route, "GET", 200, ip, [], %Plug.Conn.Unfetched{aspect: :params})
       :telemetry.execute(@start, %{}, %{conn: request})
       :telemetry.execute(@stop, %{duration: 1}, %{conn: request})
     end
@@ -141,6 +141,18 @@ defmodule Shuttle.Profile.HTTPTest do
     assert_receive {:profile, profile}
     assert Enum.any?(:telemetry.list_handlers(@start), &(&1.id == profile.id))
     Process.exit(owner, :kill)
+
+    assert eventually(fn ->
+             not Enum.any?(:telemetry.list_handlers(@start), &(&1.id == profile.id))
+           end)
+  end
+
+  test "owner already dead during startup cannot leave an attached handler" do
+    owner = spawn(fn -> :ok end)
+    ref = Process.monitor(owner)
+    assert_receive {:DOWN, ^ref, :process, ^owner, _reason}
+
+    assert {:ok, profile} = HTTP.start(owner)
 
     assert eventually(fn ->
              not Enum.any?(:telemetry.list_handlers(@start), &(&1.id == profile.id))

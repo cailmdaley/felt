@@ -3,7 +3,9 @@ defmodule ShuttleWeb.ProfileController do
   use Phoenix.Controller, formats: [:json]
 
   def show(conn, params) do
-    case Shuttle.Profile.run(Map.get(params, "seconds")) do
+    opts = if Map.get(params, "mode") == "cpu", do: [mode: :cpu], else: []
+
+    case Shuttle.Profile.run(Map.get(params, "seconds"), opts) do
       {:ok, result} ->
         json(conn, result)
 

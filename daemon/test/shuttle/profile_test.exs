@@ -81,6 +81,71 @@ defmodule Shuttle.ProfileTest do
     assert Process.whereis(Shuttle.Profile) == nil
   end
 
+  test "CPU mode reports function and concurrent HTTP work without file calls" do
+    Shuttle.Test.Env.put_app_env(:host_class, :single_user)
+    sibling = :trace.session_create(:profile_cpu_sibling, self(), [])
+    parent = self()
+
+    request =
+      spawn(fn ->
+        send(
+          parent,
+          {:cpu_response, get(api_conn(), "/api/v1/debug/profile?mode=cpu&seconds=300")}
+        )
+      end)
+
+    on_exit(fn ->
+      Process.exit(request, :kill)
+      :trace.session_destroy(sibling)
+    end)
+
+    session = await_profile()
+    conn = get(api_conn(), "/api/v1/version")
+    assert conn.status == 200
+
+    assert_receive {:cpu_response, profile_conn}, 15_000
+    assert profile_conn.status == 200
+    body = Jason.decode!(profile_conn.resp_body)
+    assert body["window"]["mode"] == "cpu"
+    assert body["window"]["instrumented"] == true
+    assert body["window"]["seconds"] == 10
+    assert body["functions"]["available"] == true
+    assert Enum.any?(body["http"]["groups"], &(&1["route"] == "/api/v1/version"))
+    refute Map.has_key?(body, "file_calls")
+    assert is_binary(body["runtime"]["otp_release"])
+    assert is_binary(body["runtime"]["erts_version"])
+    assert Enum.any?(:trace.session_info(:all), fn {name, _} -> name == :profile_cpu_sibling end)
+    refute Enum.any?(:trace.session_info(:all), fn {name, _} -> name == :shuttle_profile end)
+    assert session != nil
+  end
+
+  test "CPU duration has its own ten second clamp" do
+    assert Shuttle.Profile.cpu_seconds("300") == 10
+    assert Shuttle.Profile.cpu_seconds(0) == 1
+    assert Shuttle.Profile.cpu_seconds(nil) == 10
+  end
+
+  test "killing a CPU profile requester detaches telemetry and destroys its session" do
+    Shuttle.Test.Env.put_app_env(:host_class, :single_user)
+    request = spawn(fn -> get(api_conn(), "/api/v1/debug/profile?mode=cpu&seconds=10") end)
+    on_exit(fn -> Process.exit(request, :kill) end)
+    await_profile()
+
+    assert Enum.any?(:telemetry.list_handlers([:phoenix, :endpoint, :start]), fn handler ->
+             match?({Shuttle.Profile.HTTP, _}, handler.id)
+           end)
+
+    owner = Process.whereis(Shuttle.Profile)
+    monitor = Process.monitor(owner)
+    Process.exit(request, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :normal}, 5_000
+    refute Enum.any?(:trace.session_info(:all), fn {name, _} -> name == :shuttle_profile end)
+
+    refute Enum.any?(:telemetry.list_handlers([:phoenix, :endpoint, :start]), fn handler ->
+             match?({Shuttle.Profile.HTTP, _}, handler.id)
+           end)
+  end
+
   test "collector backlog stops tracing and counts discarded queued events" do
     task = Task.async(fn -> Shuttle.Profile.run(1) end)
     session = await_profile()
