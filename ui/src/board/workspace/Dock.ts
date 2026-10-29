@@ -1095,7 +1095,7 @@ export class Dock {
     })
     settingsItem.setAttribute('aria-haspopup', 'true')
     settingsItem.setAttribute('aria-expanded', 'false')
-    const constitutionItem = this.constitutionButton = item('Brief', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
+    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
     const consoleItem = item('Console', 'console', 'ws-chat-console', () => { this.openConversation(card) })
     const refs = document.createElement('div')

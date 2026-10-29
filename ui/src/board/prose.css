@@ -8,17 +8,17 @@
   max-width: none;
   margin: 0;
   padding: 1.5rem 1.6rem 3rem;
-  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   /* The base size sets the reading scale; every heading below is em-relative,
      so this one number carries the whole hierarchy. */
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.62;
   color: var(--kbn-graphite);
 }
 @container kbn-detail (max-width: 600px) {
   .kbn-detail-prose {
     padding: 1.2rem 1.1rem 2.5rem;
-    font-size: calc(12.2px * var(--kbn-type-scale, 1));
+    font-size: var(--type-meta);
   }
 }
 
@@ -33,7 +33,7 @@
   border-left: 3px solid var(--kbn-gilt);
   border-radius: 0 3px 3px 0;
   background: color-mix(in srgb, var(--kbn-gilt) 7%, transparent);
-  font-size: 1.04em;
+  font-size: inherit;
   color: var(--kbn-ink-soft);
 }
 .kbn-detail-lede > :first-child { margin-top: 0; }
@@ -46,16 +46,16 @@
 .kbn-detail-prose h2,
 .kbn-detail-prose h3,
 .kbn-detail-prose h4 {
-  font-family: var(--font-main, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-weight: 600;
   line-height: 1.2;
   color: var(--kbn-ink);
   margin: 1.7em 0 0.5em;
 }
-.kbn-detail-prose h1 { font-size: 1.6em; font-weight: 500; font-style: italic; }
-.kbn-detail-prose h2 { font-size: 1.34em; }
-.kbn-detail-prose h3 { font-size: 1.13em; }
-.kbn-detail-prose h4 { font-size: 1em; letter-spacing: 0.01em; }
+.kbn-detail-prose h1 { font-size: var(--type-title); font-weight: 500; font-style: italic; }
+.kbn-detail-prose h2 { font-size: var(--type-title); }
+.kbn-detail-prose h3 { font-size: inherit; }
+.kbn-detail-prose h4 { font-size: inherit; letter-spacing: 0.01em; }
 .kbn-detail-prose h2 {
   padding-bottom: 0.18em;
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
@@ -131,8 +131,8 @@
 }
 
 .kbn-detail-prose code.md-inline-code {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 0.86em;
+  font-family: var(--font-mono);
+  font-size: var(--type-code);
   background: color-mix(in srgb, var(--kbn-graphite) 7%, transparent);
   padding: 0.08em 0.34em;
   border-radius: 3px;
@@ -144,11 +144,11 @@
   color: var(--kbn-code-ink);
   border-radius: 6px;
   overflow-x: auto;
-  font-size: 0.82em;
+  font-size: var(--type-code);
   line-height: 1.5;
 }
 .kbn-detail-prose pre.md-code-block code {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
+  font-family: var(--font-mono);
   background: none;
   padding: 0;
   color: inherit;
@@ -158,7 +158,7 @@
   width: 100%;
   border-collapse: collapse;
   margin: 0 0 1.1em;
-  font-size: 0.9em;
+  font-size: var(--type-note);
 }
 .kbn-detail-prose th,
 .kbn-detail-prose td {
@@ -168,8 +168,8 @@
   vertical-align: top;
 }
 .kbn-detail-prose th {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 0.82em;
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--kbn-graphite-muted);

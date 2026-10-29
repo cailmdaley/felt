@@ -275,8 +275,8 @@ export function injectProjectPickerStyles(): void {
       width: 100%;
       box-sizing: border-box;
       padding: 6px 8px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 14px;
+      font-family: var(--font-serif);
+      font-size: var(--type-note);
       color: var(--kbn-graphite);
       background: var(--kbn-blank);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -297,7 +297,7 @@ export function injectProjectPickerStyles(): void {
       border-radius: 3px;
     }
     .projpick-addpath-label {
-      font-size: 11.5px;
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-soft);
     }
     .projpick-addpath-row {
@@ -307,13 +307,13 @@ export function injectProjectPickerStyles(): void {
     }
     .projpick-addpath-input {
       flex: 1 1 auto;
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 12.5px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
     }
     .projpick-addpath-go,
     .projpick-addpath-cancel {
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 13px;
+      font-family: var(--font-serif);
+      font-size: var(--type-note);
       padding: 5px 12px;
       border-radius: 3px;
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -332,7 +332,7 @@ export function injectProjectPickerStyles(): void {
       cursor: default;
     }
     .projpick-addpath-error {
-      font-size: 12px;
+      font-size: var(--type-meta);
       color: var(--kbn-error);
     }
   `)

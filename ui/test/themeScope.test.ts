@@ -19,7 +19,7 @@ beforeAll(async () => {
   browser = await getBrowser({ executablePath: chrome })
   page = await browser.newPage()
   const defaults = { '--ws-paper': 'white', '--ws-ink': 'black', '--known': '12px', '--ws-stage-inset': '28px', '--ws-strip-h': '32px',
-    '--ws-serif': 'Georgia, serif', '--ws-focus': '#BC4538', '--kbn-agent': '#3D5BA0', '--kbn-you': '#BC4538', '--kbn-owed': '#9A7B35', '--kbn-tempered-ink': '#2E6862' }
+    '--font-serif': 'Georgia, serif', '--ws-focus': '#BC4538', '--kbn-agent': '#3D5BA0', '--kbn-you': '#BC4538', '--kbn-owed': '#9A7B35', '--kbn-tempered-ink': '#2E6862' }
   for (const [name, value] of Object.entries(defaults)) document.documentElement.style.setProperty(name, value)
   const themes = new ChannelThemes('')
   sharedDefaults = document.querySelector<HTMLStyleElement>('[data-ws-act-defaults]')!.textContent!

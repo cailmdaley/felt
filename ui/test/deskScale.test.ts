@@ -13,7 +13,13 @@ function rule(css: string, selector: string): Record<string, string> {
   const body = css.slice(css.indexOf('{', at) + 1, css.indexOf('}', at)).replace(/\/\*[\s\S]*?\*\//g, '')
   return Object.fromEntries(body.split(';').map(d => d.split(':')).filter(p => p.length >= 2).map(([k, ...v]) => [k.trim(), v.join(':').trim()]))
 }
-const px = (value: string): number => Number(/([\d.]+)px/.exec(value)?.[1])
+const type = readFileSync(resolve(__dirname, '../src/styles/type.css'), 'utf8')
+/** A length in px, reading a type role through styles/type.css. */
+const px = (value: string): number => {
+  const role = /var\((--(?:type|glyph)-[\w-]+)\)/.exec(value)?.[1]
+  if (role) return px(new RegExp(`${role}:\\s*([^;]+);`).exec(type)?.[1] ?? '')
+  return Number(/([\d.]+)px/.exec(value)?.[1])
+}
 
 describe('the Desk reads at the board label size', () => {
   it('sets a one-line row title at 14px or more, on a row of at least 34px', () => {
@@ -32,7 +38,7 @@ describe('the Desk reads at the board label size', () => {
 
   it('draws a thread crumb smaller than the name and keeps it on one line', () => {
     const row = rule(frontier, '.kbn-card-crumb')
-    expect(px(row['font-size'])).toBeLessThan(14)
+    expect(px(row['font-size'])).toBeLessThan(px(rule(deskRows, '.kbn-col-list .kbn-card .kbn-card-name')['font-size']))
     expect(row['white-space']).toBe('nowrap')
     expect(row.color).toBe('var(--kbn-ink-muted)')
   })

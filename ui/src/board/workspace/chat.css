@@ -31,11 +31,13 @@
 .ws-chat-head > .ws-chat-settings { grid-area: settings; align-self: start; }
 .ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
-/* The brief and report are paired at the end of the header. */
-.ws-chat-head > .ws-chat-refs, .ws-chat-acts > .ws-chat-refs { grid-area: chip; align-self: center; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; min-width: 0; width: auto; }
-.ws-chat-refs > .ws-report-chip { width: 42px; }
-.ws-chat-refs > .ws-chat-constitution { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 28px; padding: 4px 8px; border: 1px solid var(--ws-hairline); border-radius: 5px; background: transparent; color: var(--ws-ink-muted); font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
-.ws-chat-refs > .ws-chat-constitution::after { content: 'Brief'; }
+/* The constitution and the artifact are paired at the end of the header, set alike. */
+.ws-chat-head > .ws-chat-refs, .ws-chat-acts > .ws-chat-refs { grid-area: chip; align-self: start; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 4px; min-width: 0; width: auto; }
+.ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { display: inline-flex; align-items: center; justify-content: center; gap: 5px; width: auto; height: auto; min-height: 28px; padding: 4px 6px; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted); font: var(--type-label)/1 var(--font-serif); white-space: nowrap; }
+.ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip):hover { color: var(--ws-ink); background: var(--ws-hover); }
+.ws-chat-refs > .ws-chat-constitution::after { content: 'Constitution'; }
+/* In the action row the pair centres on the row's line like its neighbours. */
+.ws-chat-acts > .ws-chat-refs { align-self: center; }
 .ws-chat-head > .ws-chat-lead { margin-left: calc(var(--ws-control-height) - 8px); }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
 :where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
@@ -44,7 +46,7 @@
 .ws-chat .ws-chat-back {
   flex: none; width: 32px; height: 32px; min-height: 32px; padding: 0; margin-left: -6px;
   border: 0 !important; background: transparent; color: var(--ws-ink-muted);
-  font: var(--ws-label-size)/1.3 var(--ws-serif) !important;
+  font: var(--type-label)/1.3 var(--font-serif) !important;
   max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
@@ -55,7 +57,7 @@
   min-width: 0; margin: 0; padding-block: 3px;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   overflow: hidden; overflow-wrap: anywhere;
-  color: var(--ws-ink); font: 500 var(--ws-section-size)/1.25 var(--ws-serif);
+  color: var(--ws-ink); font: 500 var(--type-title)/1.25 var(--font-serif);
 }
 /* State, meter, navigation and lifecycle actions start at the left and wrap within the card. */
 .ws-chat-acts { position: relative; display: flex; flex: none; flex-wrap: wrap; min-width: 0; align-items: center; justify-content: flex-start; gap: 2px 8px; min-height: 36px; }
@@ -68,7 +70,7 @@
   --tone: var(--ws-ink-muted);
   flex: none; min-width: 10ch; padding: 1px 0; text-align: center;
   color: var(--tone);
-  font: 500 var(--ws-label-size)/1.5 var(--ws-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
+  font: 500 var(--type-label)/1.5 var(--font-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
 }
 .ws-chat-state[hidden] { display: none; }
 .ws-chat-state[data-state='question'] { --tone: var(--ws-state-question); }
@@ -83,7 +85,7 @@
 .ws-chat-acts > .ws-verdict-undo { justify-content: flex-end; }
 
 /* One context figure and the cache's warmth; cache-read share lives in settings. */
-.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--ws-label-size); color: var(--ws-ink-muted); }
+.ws-chat .ws-transcript-meter { display: inline-flex; align-items: center; gap: 6px; font-size: var(--type-label); color: var(--ws-ink-muted); }
 .ws-chat .ws-chat-head .ws-transcript-meter .ws-transcript-fact { font-size: inherit; line-height: 1.5; }
 .ws-chat .ws-transcript-meter[hidden] { display: none; }
 .ws-transcript-head .ws-transcript-meter { display: contents; }
@@ -103,17 +105,17 @@
 .ws-settings-menu .ws-header-overflow { padding: 4px 8px; border-bottom: 1px solid var(--ws-hairline-soft); }
 .ws-reader .ws-header-overflow .kbn-ctl-verdict { display: flex; gap: 8px; }
 .ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
-.ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--ws-label-size); }
-.ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--ws-serif); }
+.ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--type-label); }
+.ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--font-serif); }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
-.ws-header-word { font: var(--ws-label-size)/1 var(--ws-serif); white-space: nowrap; }
+.ws-header-word { font: var(--type-label)/1 var(--font-serif); white-space: nowrap; }
 /* A Desk row's menu lists the same verbs, drawn as the header draws them. */
 .kbn-verb-menu .ws-header-icon.ws-header-verb { display: grid; justify-content: start; width: 100%; padding: 0 10px 0 8px; }
 /* Its plain items (Open terminal, Move…) keep the verbs' height, type and word column. */
 .kbn-verb-menu .kbn-verb-menu-plain {
   display: block; width: 100%; height: 36px; box-sizing: border-box; padding: 0 10px 0 31px; margin: 0;
   border: 0; border-radius: var(--ws-control-radius); background: transparent; text-align: left;
-  font: var(--ws-label-size)/1 var(--ws-serif); color: var(--ws-ink-muted); cursor: pointer;
+  font: var(--type-label)/1 var(--font-serif); color: var(--ws-ink-muted); cursor: pointer;
 }
 .kbn-verb-menu .kbn-verb-menu-plain:is(:hover, :focus) { color: var(--ws-ink); background: var(--ws-hover); outline: none; }
 .kbn-verb-menu .kbn-verb-menu-plain:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
@@ -121,11 +123,11 @@
 /* The report reference stays legible beside the constitution brief. */
 .ws-report-chip { display: grid; flex: none; padding: 0; margin: 0; border-radius: 5px; }
 .ws-report-preview { display: block; position: relative; overflow: hidden; align-self: stretch; min-height: 84px; aspect-ratio: 3 / 2; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
-.ws-chat-refs .ws-report-preview { width: 30px; height: 20px; min-height: 20px; aspect-ratio: auto; }
-.ws-chat-refs .ws-report-label { padding: 1px 0 0; }
+.ws-chat-refs .ws-report-preview { width: 18px; height: 14px; min-height: 14px; aspect-ratio: auto; border-radius: 2px; }
+.ws-chat-refs .ws-report-label { padding: 0; font: inherit; color: inherit; }
 .ws-report-preview > .ws-thumbnail { width: 100%; height: 100%; }
-.ws-report-label { display: block; padding: 2px 4px; color: var(--ws-ink-muted); font: var(--ws-small-size)/1 var(--ws-serif); text-align: center; }
-.ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); overflow-wrap: anywhere; }
+.ws-report-label { display: block; padding: 2px 4px; color: var(--ws-ink-muted); font: var(--type-meta)/1 var(--font-serif); text-align: center; }
+.ws-header-facts { margin: 12px 0 0; color: var(--ws-ink-muted); font: var(--type-meta)/1.4 var(--font-mono); overflow-wrap: anywhere; }
 .ws-header-facts[hidden] { display: none; }
 
 /* The content is seated inside the settings sheet when opened. */
@@ -139,7 +141,7 @@
 .ws-chat-log > .kbn-detail-app-guide { flex: none; margin: 8px var(--ws-chat-gutter) 0; }
 .ws-chat-empty {
   display: none; margin: auto var(--ws-chat-gutter); text-align: center;
-  color: var(--ws-ink-muted); font: italic var(--ws-label-size)/1.5 var(--ws-serif);
+  color: var(--ws-ink-muted); font: italic var(--type-label)/1.5 var(--font-serif);
 }
 .ws-chat-log:not(:has(> .ws-transcript:not([hidden]))) > .ws-chat-empty { display: block; }
 .ws-chat .ws-transcript-inline { flex: 1; min-height: 0; display: flex; flex-direction: column; margin: 0; }
@@ -150,7 +152,9 @@
 }
 .ws-chat .ws-transcript-inline .ws-transcript-scroll { padding: 8px var(--ws-chat-gutter) 24px; scrollbar-width: thin; }
 .ws-chat .ws-transcript-inline .ws-transcript-checklist { margin-top: 8px; }
-.ws-chat .ws-transcript-inline .ws-transcript-turn { gap: 10px; padding-block: 18px 6px; }
+/* A turn's compact rows (steps, messages, chips, sent files) sit one rhythm step apart; prose takes a full step from prose. */
+.ws-chat .ws-transcript-inline .ws-transcript-turn { gap: var(--rhythm-row); padding-block: 18px 6px; }
+.ws-chat .ws-transcript-inline .ws-transcript-turn > .ws-transcript-msg + .ws-transcript-msg { margin-top: calc(var(--rhythm-prose) - var(--rhythm-row)); }
 .ws-chat .ws-transcript-inline .ws-transcript-turn + .ws-transcript-turn { border-top: 0; }
 /* Your turns are a soft bubble at the column's right, a step lighter than the page, the time under it; the worker's are prose. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you {
@@ -160,19 +164,19 @@
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text {
   padding: 7px 12px; border-radius: 10px;
   background: color-mix(in srgb, var(--ws-sheet) 70%, var(--ws-paper));
-  color: var(--ws-ink); font: var(--ws-prose-size)/1.5 var(--ws-serif); max-height: 9em;
+  color: var(--ws-ink); font: var(--type-prose)/1.5 var(--font-serif); max-height: 9em;
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
-  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--ws-small-size); color: var(--ws-ink-muted);
+  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--type-meta); color: var(--ws-ink-muted);
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
 /* The bubble already says who spoke; the line under it keeps the time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
 /* The session's brief is not your turn: a quiet line at the column's left, opening into plain text. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you.ws-transcript-msg-brief { align-self: stretch; align-items: flex-start; max-width: none; }
-.ws-chat .ws-transcript-inline .ws-transcript-msg-brief > .ws-transcript-kicker { order: 0; justify-content: flex-start; margin: 0; font: var(--ws-label-size)/1.4 var(--ws-serif); }
-.ws-chat .ws-transcript-inline .ws-transcript-msg-brief .ws-transcript-prompt-text { background: none; padding: 0 0 0 10px; border-left: 2px solid var(--ws-hairline); color: var(--ws-ink-soft); font-size: var(--ws-label-size); }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-brief > .ws-transcript-kicker { order: 0; justify-content: flex-start; margin: 0; font: var(--type-label)/1.4 var(--font-serif); }
+.ws-chat .ws-transcript-inline .ws-transcript-msg-brief .ws-transcript-prompt-text { background: none; padding: 0 0 0 10px; border-left: 2px solid var(--ws-hairline); color: var(--ws-ink-soft); font-size: var(--type-label); }
 /* A message the worker has not yet read stands after the last turn, faded, until the transcript records it. */
 .ws-chat .ws-transcript-sent { display: flex; flex-direction: column; gap: 10px; padding-block: 18px 6px; }
 .ws-chat .ws-transcript-sent:empty { display: none; }
@@ -181,10 +185,10 @@
 .ws-chat .ws-transcript-msg-sending .ws-transcript-sending + .ws-transcript-author-you + .ws-transcript-sep { display: inline; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
-.ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }
-.ws-chat .ws-transcript-inline .ws-transcript-steps { padding-left: 0; opacity: .85; }
+.ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--type-prose)/var(--leading-prose) var(--font-serif); }
+.ws-chat .ws-transcript-inline .ws-transcript-steps { min-height: 0; padding-block: 0; padding-left: 0; opacity: .85; }
 .ws-chat .ws-transcript-inline .ws-transcript-steplist { margin-left: 2px; }
-.ws-chat .ws-transcript-inline .ws-transcript-shuttle-message { margin: 4px 0; }
+.ws-chat .ws-transcript-inline .ws-transcript-shuttle-message { margin: 0; }
 .ws-chat .ws-transcript-working-inline { margin: 10px 0 0; padding-left: 0; }
 .ws-chat .ws-transcript-working-inline[hidden] { display: none; }
 
@@ -203,7 +207,7 @@
 .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { min-width: 0; max-width: 100%; box-sizing: border-box; flex-wrap: nowrap; justify-content: flex-start; container-type: inline-size; }
 .ws-chat .kbn-ctl-meet-panel { width: min(320px, 100cqw); }
 .ws-chat .ws-chat-compose .kbn-ctl-sends { min-width: 0; max-width: 100%; flex: none; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; }
-.ws-chat .ws-chat-compose .kbn-ctl-meet-chip { display: block; flex: 0 1 auto; min-width: 0; max-width: min(18ch, 35%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-serif); }
+.ws-chat .ws-chat-compose .kbn-ctl-meet-chip { display: block; flex: 0 1 auto; min-width: 0; max-width: min(18ch, 35%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-meta)/1.2 var(--font-serif); }
 .ws-chat .ws-chat-compose .kbn-ctl-meet-chip[hidden] { display: none; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends > .kbn-ctl-btn { min-width: 0; max-width: 100%; }
 .ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-composer-foot { flex-wrap: wrap; }
@@ -223,16 +227,16 @@
 @container (max-width: 560px) {
   .ws-chat-head { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: 'lead identity identity leave' 'acts acts acts acts'; align-items: start; }
   .ws-chat-head > .ws-chat-identity { align-self: start; }
-  .ws-chat-title { font-size: var(--ws-prose-size); -webkit-line-clamp: 2; }
+  .ws-chat-title { font-size: var(--type-prose); -webkit-line-clamp: 2; }
   .ws-chat-head > .ws-chat-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 2px; }
   .ws-chat-acts > .ws-chat-standing { gap: 4px; }
-  .ws-chat-acts .ws-chat-state { min-width: 5em; font-size: var(--ws-label-size); }
+  .ws-chat-acts .ws-chat-state { min-width: 5em; font-size: var(--type-label); }
   .ws-chat-acts .ws-transcript-meter { display: none; }
   .ws-reader .ws-chat-head .ws-chat-acts > .kbn-ctl-verdict { gap: 2px; padding-left: 4px; }
   .ws-chat-acts > .ws-chat-refs { gap: 2px; margin-left: auto; }
-  .ws-chat-refs > .ws-report-chip { width: 38px; }
-  .ws-chat-refs > .ws-chat-constitution { min-height: 32px; padding: 2px 4px; font-size: var(--ws-small-size); }
-  .ws-chat-head .ws-report-preview { width: 24px; height: 18px; min-height: 18px; }
+  /* A narrow card draws the pair as icons beside ⚙; their names stay in the accessible labels. */
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { min-width: 28px; min-height: 32px; gap: 0; padding: 2px 4px; }
+  .ws-chat-refs > .ws-chat-constitution::after, .ws-chat-refs .ws-report-label { display: none; }
   .ws-chat-acts > .ws-chat-settings { width: 28px; height: 32px; }
   /* Words carry the compact lifecycle group; its icons return with more room. */
   .ws-reader .ws-chat-acts .ws-header-icon.ws-header-verb { gap: 0; padding-inline: 2px; }
@@ -248,11 +252,11 @@
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
   .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
-  .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--ws-section-size) !important; }
+  .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--type-title) !important; }
   .ws-chat .ws-chat-back { min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
   .ws-chat-head { align-items: flex-start; }
   .ws-chat-lead:not([hidden]) { display: inline-flex; }
-  .ws-chat-title { font-size: var(--ws-label-size); }
+  .ws-chat-title { font-size: var(--type-label); }
   /* A page without a back destination keeps the title inset. */
   .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
@@ -265,20 +269,22 @@
   .ws-chat-title { -webkit-line-clamp: 2; }
   .ws-chat-acts { flex-wrap: wrap; }
   .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }
-  .ws-chat-title { font-size: var(--ws-label-size); }
+  .ws-chat-title { font-size: var(--type-label); }
   .ws-chat-state { margin: 0; padding: 0; line-height: 1.2; letter-spacing: 0; }
   .ws-chat .ws-transcript-meter { gap: 4px; white-space: nowrap; }
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
-  .ws-chat-head .ws-report-chip { width: 44px; min-height: 44px; gap: 0; padding: 0; align-items: center; }
+  /* On the phone the pair are icons beside ⚙, named by their labels to assistive tech. */
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; min-height: 44px; gap: 0; padding: 0; }
+  .ws-chat-refs > .ws-chat-constitution::after, .ws-chat-refs .ws-report-label { display: none; }
   .ws-report-preview { width: 24px; height: 18px; min-height: 0; aspect-ratio: auto; }
-  .ws-report-label { font-size: var(--ws-small-size); }
+  .ws-report-label { font-size: var(--type-meta); }
   .ws-chat .ws-chat-head > .ws-chat-lead { align-self: center; }
   .ws-chat-standing { gap: 6px; }
   /* Phone state, settings and references share one grouped action row. */
   .ws-chat-identity { flex-direction: column; align-items: flex-start; gap: 0; }
-  .ws-chat-state { font-size: var(--ws-label-size); }
-  .ws-chat .ws-transcript-meter { font-size: var(--ws-small-size); }
+  .ws-chat-state { font-size: var(--type-label); }
+  .ws-chat .ws-transcript-meter { font-size: var(--type-meta); }
   .ws-header-overflow { flex-wrap: wrap; }
   /* Keep the message and its one-row footer inside the phone field. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1 / -1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }

@@ -1014,7 +1014,7 @@ describe('workspace reader integration', () => {
 
     const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
     expect(constitution.hidden).toBe(false)
-    expect(constitution.getAttribute('aria-label')).toBe('Brief')
+    expect(constitution.getAttribute('aria-label')).toBe('Constitution')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')

@@ -3,7 +3,7 @@
   position: relative; display: flex; flex-direction: column; min-width: 0;
   flex: 0 0 min(var(--ws-thread-rail-width, clamp(240px, 25vw, 340px)), 60vw);
   background: var(--kbn-sheet); border-left: 1px solid var(--kbn-rule); color: var(--kbn-ink);
-  font: var(--ws-label-size)/1.3 var(--ws-serif);
+  font: var(--type-label)/1.3 var(--font-serif);
 }
 .ws-thread-rail[hidden] { display: none; }
 /* Threads size to their content up to a cap; sent files take the rest, so neither region can push the other out of reach. */
@@ -15,16 +15,16 @@
 .ws-rail-file-list { flex: 1 1 auto; padding: 4px 0 16px; }
 .ws-rail-file {
   display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px;
-  text-align: left; font: inherit; font-size: var(--ws-row-size); color: var(--kbn-ink); background: transparent; border: 0; cursor: pointer;
+  text-align: left; font: inherit; font-size: var(--type-row); color: var(--kbn-ink); background: transparent; border: 0; cursor: pointer;
 }
 .ws-rail-file > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ws-rail-file time { flex: none; color: var(--kbn-ink-muted); font: var(--ws-small-size)/1.3 var(--ws-mono); font-variant-numeric: tabular-nums; }
-.ws-rail-file .ws-sent-new { flex: none; color: var(--ws-fresh); font: var(--ws-small-size)/1.3 var(--ws-mono); }
+.ws-rail-file time { flex: none; color: var(--kbn-ink-muted); font: var(--type-meta)/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
+.ws-rail-file .ws-sent-new { flex: none; color: var(--ws-fresh); font: var(--type-meta)/1.3 var(--font-serif); }
 .ws-rail-file:hover { background: var(--ws-hover); }
 .ws-rail-file:focus { outline: none; }
 .ws-reader.ws-keyboard .ws-rail-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-rail-file[aria-current='page'] { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
-.ws-rail-files-empty { margin: 0; padding: 4px 8px; color: var(--kbn-ink-muted); font-size: var(--ws-note-size); font-style: italic; }
+.ws-rail-files-empty { margin: 0; padding: 4px 8px; color: var(--kbn-ink-muted); font-size: var(--type-note); font-style: italic; }
 .ws-thread-heading { margin: 0; padding: 4px 8px; font: inherit; font-variant: small-caps; letter-spacing: .03em; color: var(--kbn-ink-muted); }
 .ws-thread-heading:focus { outline: none; }
 .ws-thread-handle { position: absolute; top: 0; bottom: 0; left: -4px; z-index: 3; width: 9px; cursor: col-resize; touch-action: none; }
@@ -42,7 +42,7 @@
 .ws-thread-group > summary {
   display: flex; align-items: baseline; gap: 8px; list-style: none; cursor: pointer;
   margin-top: 14px; padding: 5px 8px 6px;
-  font-size: var(--ws-note-size); font-variant: small-caps; letter-spacing: .05em; font-weight: 400; color: var(--tone);
+  font-size: var(--type-note); font-variant: small-caps; letter-spacing: .05em; font-weight: 400; color: var(--tone);
   border-bottom: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
 }
 .ws-thread-group:first-child > summary { margin-top: 6px; }
@@ -52,18 +52,18 @@
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .8;
 }
 .ws-thread-group[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
-.ws-thread-group-count { font-variant: normal; font-size: var(--ws-small-size); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--tone); }
+.ws-thread-group-count { font-variant: normal; font-size: var(--type-meta); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--tone); }
 .ws-thread-group > summary:hover { background: var(--ws-hover); }
 .ws-reader.ws-keyboard .ws-thread-group > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-thread-group > summary:focus { outline: none; }
-.ws-thread-tree .kbn-thread-row { padding: 4px 26px 4px 4px; font-size: var(--ws-row-size); }
+.ws-thread-tree .kbn-thread-row { padding: 4px 26px 4px 4px; font-size: var(--type-row); }
 .ws-thread-tree .kbn-thread-item[data-depth] .kbn-thread-row { padding-left: calc(4px + var(--ws-thread-depth) * var(--ws-thread-indent)); }
-.ws-thread-tree .ws-thread-mark { flex: none; width: 12px; text-align: center; color: var(--kbn-ink-muted); font-size: var(--ws-thread-glyph-size); }
+.ws-thread-tree .ws-thread-mark { flex: none; width: 12px; text-align: center; color: var(--kbn-ink-muted); font-size: var(--glyph-small); }
 .ws-thread-tree .kbn-thread-row:hover, .ws-thread-tree .kbn-thread-row:focus-visible { background: var(--ws-hover); }
 .ws-thread-tree .kbn-thread-row.ws-thread-current { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-thread-tree .kbn-thread-item > .kbn-thread-pin { right: 4px; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-thread-rail { display: none; }
 }
-.ws-rail-files-more { display: block; width: 100%; padding: 6px 12px 6px 16px; text-align: left; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.4 var(--ws-mono); }
+.ws-rail-files-more { display: block; width: 100%; padding: 6px 12px 6px 16px; text-align: left; color: var(--ws-ink-muted); font: var(--type-meta)/1.4 var(--font-serif); }
 .ws-rail-files-more:hover { color: var(--ws-ink); }

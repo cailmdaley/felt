@@ -419,8 +419,8 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
         display: flex;
         align-items: center;
         gap: 10px;
-        font-family: 'EB Garamond', Garamond, serif;
-        font-size: 14px;
+        font-family: var(--font-serif);
+        font-size: var(--type-note);
         box-shadow: 0 0 0 1px var(--kbn-toast-edge), 0 4px 20px color-mix(in srgb, var(--kbn-shade) 40%, transparent);
         z-index: 10000;
         opacity: 0;
@@ -430,7 +430,7 @@ export function showToast(message: string, type: 'success' | 'warning' | 'error'
         animation: toast-out 0.3s ease forwards;
       }
       .shuttle-toast .toast-icon {
-        font-size: 16px;
+        font-size: var(--type-row);
         font-weight: bold;
       }
       .shuttle-toast.success .toast-icon { color: var(--kbn-owed-bright); }

@@ -8,7 +8,7 @@
   border-radius: 5px;
   background: var(--shuttle-chip-sheet, var(--kbn-sheet, transparent));
   color: var(--shuttle-chip-ink, var(--kbn-ink, inherit));
-  font: .85em/1.5 var(--font-mono, monospace);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
   text-decoration: none;
   vertical-align: baseline;
   cursor: pointer;
@@ -34,7 +34,7 @@
   gap: .5em;
   padding-inline: .55em;
   margin: 4px 6px 4px 0;
-  font: .9em/1.5 var(--ws-serif);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
 .ws-transcript-spawn-chip[hidden] { display: none; }
  .ws-transcript-spawns { align-self: flex-start; }

@@ -1,19 +1,4 @@
-/* One typographic scale for the whole board.
- *
- * Every px font-size in the board CSS — chassis, cards, the document workspace,
- * and the temporal views — is written `calc(<design px> * var(--kbn-type-scale))`,
- * so the design sizes stay readable in the source and the whole hierarchy moves
- * together from one number. Nothing else scales: spacing, rules and column
- * widths are deliberately left alone, so raising type tightens the page rather
- * than zooming it.
- *
- * Declared on :root because the document reader mounts outside the board's
- * `.kbn-modal` subtree. Every call site carries a fallback of 1, so a host that
- * never loads this file renders at design size.
- */
 :root {
-  --kbn-type-scale: 1.18;
-
   /* The board's one mobile threshold, written here so the stylesheet says out
      loud what `src/board/mobile.ts` exports. It is a disjunction, not a width:
      too narrow OR too short-and-handheld — a phone on its side is 874px wide
@@ -32,12 +17,12 @@
    cailmdaley.github.io's science-ai.astro and vellum's .illuminated
    class. Files live in ui/public/fonts/, served by the daemon at /fonts/. */
 @font-face {
-  font-family: 'EBGI F1';
+  font-family: var(--font-initials-frill);
   src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');
   font-display: swap;
 }
 @font-face {
-  font-family: 'EBGI F2';
+  font-family: var(--font-initials);
   src: url('/fonts/EBGaramond-InitialsF2.otf') format('opentype');
   font-display: swap;
 }
@@ -50,12 +35,12 @@
    at reduced opacity. Inline sizing reads as a manuscript second-
    color drop initial, not a UI rubrication. */
 .kbn-cap {
-  font-family: 'EBGI F2', 'EB Garamond', Georgia, serif;
+  font-family: var(--font-initials);
   color: var(--kbn-you);
   text-transform: uppercase;
   position: relative;
   display: inline-block;
-  font-size: 1.55em;
+  font-size: var(--glyph-initial);
   line-height: 0.78;
   letter-spacing: 0;
   /* Sits the cap on the body baseline rather than floating slightly
@@ -69,7 +54,7 @@
 }
 .kbn-cap::before {
   content: attr(data-letter);
-  font-family: 'EBGI F1', 'EB Garamond', Georgia, serif;
+  font-family: var(--font-initials-frill);
   /* EBGI F1 is pure frill/framing — the F1 glyph alone isn't a
      readable letter, just the decorative flourishes that surround
      the position a letter would occupy. So this layer sits ON TOP
@@ -148,7 +133,7 @@
   background-attachment: fixed, fixed, fixed;
   background-size: auto, auto, 256px;
   display: flex; flex-direction: column;
-  font-family: var(--font-main, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   color: var(--kbn-ink);
   overflow: hidden;
 }
@@ -167,7 +152,7 @@
   background: color-mix(in srgb, var(--kbn-owed-bright) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent);
   color: var(--kbn-owed-deep);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   border-radius: 2px;
   margin-top: 8px;
 }
@@ -224,8 +209,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   line-height: 1.2;
   font-weight: 400;
   letter-spacing: 0.1em;
@@ -261,7 +246,7 @@
   border: 1px solid color-mix(in srgb, var(--kbn-ink-muted) 40%, transparent);
   border-radius: 2px;
   background: color-mix(in srgb, var(--kbn-ink-muted) 8%, transparent);
-  font-size: 0.68em;
+  font-size: var(--type-meta);
   letter-spacing: 0;
   color: color-mix(in srgb, var(--kbn-ink-muted) 75%, transparent);
 }
@@ -341,8 +326,8 @@
 }
 .kbn-bandhead-title {
   margin: 0;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(17px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-title);
   line-height: 1.0;
   font-weight: 500;
   font-variant-caps: all-small-caps;
@@ -354,8 +339,8 @@
 }
 /* Count in the column-count idiom — same mono, same muted ink, same offset. */
 .kbn-bandhead-count {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-note);
   color: var(--kbn-ink-muted);
 }
 /* ── Drag-reveal horizon ─────────────────────────────────────────────────────
@@ -404,18 +389,18 @@
   box-shadow: 0 6px 14px color-mix(in srgb, var(--kbn-shade) 14%, transparent);
 }
 .kbn-draghorizon-open .kbn-draghorizon-inner {
-  height: calc(51px * var(--kbn-type-scale, 1));
+  height: 60px;
 }
 /* The aim readout — a fixed line under the strip naming the target under the
    cursor. It holds its height whether or not it has words, so the strip does
    not jump as you cross from cell to cell. */
 .kbn-draghorizon-aim {
-  height: calc(15px * var(--kbn-type-scale, 1));
+  height: 18px;
   padding: 0 4px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
-  line-height: calc(15px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
+  line-height: 18px;
   color: var(--kbn-ink-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -423,7 +408,7 @@
 }
 .kbn-draghorizon-aim-live { color: var(--kbn-owed-umber); }
 .kbn-draghorizon-wrap {
-  height: calc(34px * var(--kbn-type-scale, 1));
+  height: 40px;
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -470,16 +455,16 @@
 /* Day-of-week label — set as small caps in the serif rather than the
    technical mono, so the strip reads as a manuscript almanac. */
 .kbn-timeline-day-dow {
-  font-size: calc(10px * var(--kbn-type-scale, 1));
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: var(--type-meta);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   color: var(--kbn-ink-faint);
   letter-spacing: 0.06em;
 }
 .kbn-timeline-day-num {
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: var(--type-note);
+  font-family: var(--font-serif);
   font-weight: 500;
   color: var(--kbn-ink-sepia);
   font-feature-settings: "onum";
@@ -523,9 +508,9 @@
    wherever it stands. Only the plate around them differs. */
 
 .kbn-cyclechip-name {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.05;
   color: var(--kbn-owed-umber);
   white-space: nowrap;
@@ -533,10 +518,10 @@
   text-overflow: ellipsis;
 }
 .kbn-cyclechip-span {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc", "onum";
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   letter-spacing: 0.05em;
   line-height: 1.05;
   color: var(--kbn-ink-faint);
@@ -586,11 +571,11 @@
 .kbn-viewtabs-find:focus-within { border-color: color-mix(in srgb, var(--kbn-ink-muted) 60%, transparent); background: color-mix(in srgb, var(--kbn-paper) 60%, transparent); }
 .kbn-viewtabs-find input {
   flex: 1; min-width: 0; height: 100%; padding: 0 6px 0 9px; border: 0; outline: none; background: transparent;
-  font: calc(14px * var(--kbn-type-scale, 1))/1 var(--font-serif, 'EB Garamond', Georgia, serif); color: var(--kbn-ink);
+  font: var(--type-label)/1 var(--font-serif); color: var(--kbn-ink);
 }
 .kbn-viewtabs-find input::placeholder { color: var(--kbn-ink-faint); }
 .kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
-.kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono, 'IBM Plex Mono', monospace); font-size: calc(13px * 0.68 * var(--kbn-type-scale, 1)); }
+.kbn-viewtabs-find-key { margin-right: 5px; font-family: var(--font-mono); font-size: var(--type-meta); }
 .kbn-viewtabs-find:focus-within .kbn-viewtabs-find-key { visibility: hidden; }
 /* The centre holds the Desk's lens chips, at its right end. It always spans
    Find to Settings, so the gear stands still across views. */
@@ -620,9 +605,9 @@
   /* Serif + the text variation selector on the glyph itself, so U+2699 renders
      as a mark on the page instead of a colour emoji — same pairing as the
      manicule on an attention chip. */
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-emoji: text;
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   line-height: 1;
   color: var(--kbn-ink-faint);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
@@ -661,14 +646,14 @@
 .kbn-lens-chip-active .kbn-cyclechip-name { color: var(--kbn-owed-sepia); }
 .kbn-lens-chip-active .kbn-cyclechip-span { color: var(--kbn-owed-umber); }
 .kbn-lens-chip-count {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-feature-settings: "onum";
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   color: var(--kbn-ink-dun);
 }
 .kbn-lens-chip-active .kbn-lens-chip-count { color: var(--kbn-owed-sepia); }
 .kbn-lens-chip-release {
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   color: var(--kbn-owed-umber);
 }
 /* ARMED: a lens chip under the cursor mid-drag. The same loud step as a day
@@ -709,12 +694,12 @@
   justify-self: start;
   margin: 1px 2px 0;
   padding: 0 6px;
-  height: calc(15px * var(--kbn-type-scale, 1));
+  height: 18px;
   background: transparent;
   border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 35%, transparent);
   border-radius: 8px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--kbn-owed-bright) 60%, var(--kbn-ink));
   cursor: pointer;
@@ -736,7 +721,6 @@
    a lane competing with the board. The head sits at the left of the row with
    the column head's hairline rule turned ninety degrees to follow the band. */
 .kbn-section-roles {
-  --kbn-type-scale: 1;
   flex: 0 0 auto;
   flex-direction: row;
   align-items: center;
@@ -779,7 +763,7 @@
   background: var(--kbn-paper);
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 12%, transparent);
   border-radius: 3px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   color: var(--kbn-ink);
   cursor: pointer;
   user-select: none;
@@ -807,7 +791,7 @@
 .kbn-role-chip-dot-stale { background: color-mix(in srgb, var(--kbn-ink-muted) 35%, transparent); }
 .kbn-role-chip-name {
   /* A notch under `.kbn-card-name` (14.5px): the same object, quieter. */
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -815,8 +799,8 @@
 }
 .kbn-role-chip-hint {
   flex: 0 0 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.04em;
   text-transform: lowercase;
   color: color-mix(in srgb, var(--kbn-ink-muted) 75%, transparent);
@@ -881,7 +865,7 @@
 }
 .kbn-role-option { display: grid; gap: 3px; }
 .kbn-role-option span, .kbn-role-message, .kbn-role-new label {
-  font-size: .8rem;
+  font-size: var(--type-note);
   color: var(--kbn-ink-muted);
 }
 .kbn-role-message { margin: 0; }
@@ -893,17 +877,17 @@
 .kbn-role-new[hidden] { display: none; }
 .kbn-role-new label { display: grid; gap: 4px; }
 .kbn-role-popover :focus-visible { outline: 2px solid var(--kbn-owed-bright); outline-offset: 1px; }
-.kbn-rest-title { margin: 0; font-size: 1.5rem; font-weight: 400; }
+.kbn-rest-title { margin: 0; font-size: var(--type-title); font-weight: 400; }
 .kbn-rest-subject {
   margin: -8px 0 0;
-  font-size: .85rem;
+  font-size: var(--type-note);
   color: var(--kbn-ink-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.kbn-rest-headline { margin: 4px 0 0; font-size: 1.15rem; }
-.kbn-rest-relative { font-size: .85rem; color: var(--kbn-ink-muted); }
+.kbn-rest-headline { margin: 4px 0 0; font-size: var(--type-prose); }
+.kbn-rest-relative { font-size: var(--type-note); color: var(--kbn-ink-muted); }
 .kbn-rest-month {
   font-variant: small-caps;
   letter-spacing: .06em;
@@ -915,7 +899,7 @@
   gap: 2px;
   text-align: center;
 }
-.kbn-rest-dow { font-size: .7rem; color: var(--kbn-ink-muted); padding-bottom: 2px; }
+.kbn-rest-dow { font-size: var(--type-meta); color: var(--kbn-ink-muted); padding-bottom: 2px; }
 .kbn-rest-day {
   font: inherit;
   color: inherit;
@@ -938,7 +922,7 @@
 .kbn-rest-presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .kbn-rest-chip {
   font: inherit;
-  font-size: .8rem;
+  font-size: var(--type-note);
   color: inherit;
   background: none;
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
@@ -951,16 +935,16 @@
 }
 .kbn-rest-chip:hover { background: color-mix(in srgb, var(--kbn-ink) 10%, transparent); }
 .kbn-rest-chip kbd {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: .7rem;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ink-muted);
 }
 .kbn-rest-count {
   margin-left: auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-family: var(--font-mono);
   color: var(--kbn-ink-muted);
 }
-.kbn-rest-keys { margin: 0; font-size: .7rem; color: var(--kbn-ink-muted); line-height: 1.4; }
+.kbn-rest-keys { margin: 0; font-size: var(--type-meta); color: var(--kbn-ink-muted); line-height: 1.4; }
 .kbn-rest-confirm {
   font: inherit;
   color: var(--kbn-parchment);
@@ -972,8 +956,6 @@
 }
 
 .kbn-section-stash {
-  /* Design size, like `.kbn-col`. */
-  --kbn-type-scale: 1;
   flex: 0 0 auto;
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 10%, transparent);
   background: color-mix(in srgb, var(--kbn-parchment) 45%, transparent);
@@ -1018,8 +1000,8 @@
    scannable at a glance; the parent segments recede so the eye lands on the
    segment that distinguishes this cluster from its siblings. */
 .kbn-cluster-name {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.02em;
   color: var(--kbn-ink);
   min-width: 0;
@@ -1038,13 +1020,13 @@
   margin-left: 0;
 }
 .kbn-cluster-count {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ink-faint);
 }
 .kbn-cluster-tag {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(8px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--kbn-you);
@@ -1055,9 +1037,9 @@
 .kbn-cluster-divider {
   grid-column: 1 / -1;
   text-align: center;
-  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   color: var(--kbn-ink-faint);
   padding: 6px 0;
 }
@@ -1073,9 +1055,9 @@
 .kbn-cluster-empty {
   grid-column: 1 / -1;
   text-align: center;
-  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   color: var(--kbn-ink-faint);
   padding: 14px 0;
 }
@@ -1085,10 +1067,10 @@
   flex-wrap: wrap;
   gap: 6px;
   padding: 3px 2px;
-  font-family: var(--font-serif, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   /* A notch under the column card's 14.5px title: the same object in a
      quieter register. */
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink-sepia);
   cursor: pointer;
   line-height: 1.28;
@@ -1110,8 +1092,8 @@
 }
 .kbn-cluster-item-glyph {
   color: var(--kbn-agent);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   width: 10px;
   flex-shrink: 0;
   text-align: center;
@@ -1128,8 +1110,8 @@
    fact to glance at, never the thing you read first. */
 .kbn-cluster-item-wakes {
   flex: 0 0 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.04em;
   color: color-mix(in srgb, color-mix(in srgb, var(--kbn-owed-bright) 60%, var(--kbn-ink)) 75%, transparent);
   white-space: nowrap;
@@ -1146,9 +1128,6 @@
 .kbn-cluster-item-standing { box-shadow: inset 1.5px 0 0 color-mix(in srgb, var(--kbn-slate) 32%, transparent); }
 
 .kbn-col {
-  /* Desk cards/chrome render at design size — the 1.18 scale is for the
-     temporal views and document workspace reader, not the Desk lanes. */
-  --kbn-type-scale: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1245,7 +1224,7 @@
    data-letter="…"> by KanbanModal.ts; the .kbn-cap rule above paints
    the layered F2 body + F1 flourish dropcap. */
 .kbn-col-title {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   /* Body font-size is sized so the small-caps glyph height matches
      the dropcap's visible height. EB Garamond's small-cap ratio runs
      ~0.73, and the cap is set at 0.73em, so the two land together for
@@ -1269,7 +1248,7 @@
      window on any current laptop clears. Past ~40px the longest title
      starts wrapping the head to two lines on a 1280px board — which
      would grow the very box this is meant to fill. */
-  font-size: calc(38px * var(--kbn-type-scale, 1));
+  font-size: var(--type-display);
   /* Pins the line box at the 33px it occupied when the type was 33px
      at line-height 1.0, so the head's height is unchanged: 33/38.
      The strut governs both edges of the line box (the cap's inline
@@ -1296,7 +1275,7 @@
      cap at 0.73em × 38px → ~28px. Ratio-locked to the body size in
      em, so raising `.kbn-col-title`'s font-size carries the
      illumination up with the word. */
-  font-size: 0.73em;
+  font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
   line-height: 0.82;
@@ -1305,8 +1284,8 @@
    carries the column pigment, like a rubricated initial on otherwise plain
    manuscript text. The pigment is the dropcap's job; the body is the body's. */
 .kbn-col-count {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ink-muted);
   margin-left: 8px;
 }
@@ -1316,15 +1295,15 @@
    board current without a third lane action. */
 .kbn-col-action {
   flex-shrink: 0;
-  min-height: calc(28px * var(--kbn-type-scale, 1));
+  min-height: 28px;
   padding: 3px 10px;
   gap: 5px;
   border-radius: 999px;
   color: var(--kbn-on-pigment);
   box-shadow: 0 2px 4px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1;
-  font-family: var(--font-main, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1352,7 +1331,7 @@
 .kbn-col-action-inFlight:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
 .kbn-col-action-glyph { flex: 0 0 auto; line-height: 1; }
-.kbn-col-action-label { font: 500 calc(12px * var(--kbn-type-scale, 1))/1 var(--font-main, 'EB Garamond', serif); }
+.kbn-col-action-label { font: 500 var(--type-label)/1 var(--font-serif); }
 .kbn-col-list {
   flex: 1;
   overflow-y: auto;
@@ -1368,8 +1347,8 @@
 }
 .kbn-flight-caption {
   margin: 0 0 6px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -1419,20 +1398,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-size: var(--type-prose);
   font-weight: 600;
 }
 .kbn-meeting-fiber {
   overflow: hidden;
   color: var(--kbn-tempered-ink);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .kbn-meeting { display: flex; flex-direction: column; gap: 7px; min-width: 0; cursor: default; }
 .kbn-card--meeting .kbn-meeting { margin-top: 8px; padding-top: 8px; border-top: 1px solid color-mix(in srgb, var(--kbn-tempered) 22%, transparent); }
-.kbn-meeting-meta { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--kbn-graphite-muted); font-size: calc(12px * var(--kbn-type-scale, 1)); }
+.kbn-meeting-meta { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--kbn-graphite-muted); font-size: var(--type-note); }
 .kbn-meeting-dot {
   flex: 0 0 auto;
   width: 8px;
@@ -1454,7 +1433,7 @@
 .kbn-meeting-state {
   flex: 0 0 auto;
   color: var(--kbn-tempered-ink);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -1462,8 +1441,8 @@
 .kbn-meeting-duration {
   flex: 0 0 auto;
   color: var(--kbn-graphite-soft);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-note);
   font-variant-numeric: tabular-nums;
 }
 .kbn-meeting-host { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1479,7 +1458,7 @@
   border-radius: 2px;
   background: color-mix(in srgb, var(--kbn-blank) 55%, transparent);
   color: var(--kbn-graphite-deep);
-  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   line-height: 1.35;
   overflow-wrap: anywhere;
   user-select: text;
@@ -1488,12 +1467,12 @@
 .kbn-meeting-line + .kbn-meeting-line { margin-top: 2px; }
 .kbn-meeting-speaker {
   color: var(--kbn-tempered-ink);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 0.85em;
+  font-family: var(--font-mono);
+  font-size: inherit;
   font-weight: 600;
 }
 .kbn-meeting-tail[hidden], .kbn-meeting-error[hidden], .kbn-meeting-duration[hidden], .kbn-meeting-fiber[hidden] { display: none; }
-.kbn-meeting-error { color: var(--kbn-error); font-size: calc(12px * var(--kbn-type-scale, 1)); overflow-wrap: anywhere; }
+.kbn-meeting-error { color: var(--kbn-error); font-size: var(--type-note); overflow-wrap: anywhere; }
 .kbn-meeting-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
 .kbn-meeting-action {
   padding: 3px 10px;
@@ -1501,8 +1480,8 @@
   border-radius: 3px;
   background: color-mix(in srgb, var(--kbn-blank) 48%, transparent);
   color: var(--kbn-graphite-deep);
-  font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   cursor: pointer;
 }
 .kbn-meeting-action:hover:not(:disabled) { background: var(--kbn-blank); border-color: color-mix(in srgb, var(--kbn-graphite) 34%, transparent); }
@@ -1514,9 +1493,9 @@
 .kbn-empty {
   text-align: center;
   color: color-mix(in srgb, var(--kbn-ink) 6%, var(--kbn-ink-muted));
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   padding: 24px 8px;
   flex-grow: 0;
   letter-spacing: 0.01em;
@@ -1616,8 +1595,8 @@
   border: 1px solid color-mix(in srgb, var(--kbn-owed) 55%, transparent);
   border-radius: 3px;
   background: var(--kbn-paper-bright);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   line-height: 1.25;
   color: var(--kbn-ink-sepia);
   white-space: nowrap;
@@ -1635,8 +1614,8 @@
 .kbn-card-glyph {
   width: 15px;
   flex-shrink: 0;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   line-height: 1;
   text-align: center;
   color: var(--kbn-owed-bright);
@@ -1649,15 +1628,15 @@
    cursor applies. */
 .kbn-card-name {
   flex: 1;
-  font-size: calc(14.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   font-weight: 600;
   line-height: 1.25;
   text-align: left;
   color: inherit;
 }
 .kbn-card-id {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-graphite-pale);
   letter-spacing: 0.01em;
   word-break: break-all;
@@ -1668,7 +1647,7 @@
   line-height: 1.2;
 }
 .kbn-card-outcome {
-  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   line-height: 1.4;
   color: var(--kbn-ink-soft);
   /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
@@ -1689,7 +1668,7 @@
 .kbn-card-outcome h3,
 .kbn-card-outcome h4 {
   margin: 0.45em 0 0.18em;
-  font-size: 1em;
+  font-size: inherit;
   line-height: 1.25;
   font-weight: 600;
 }
@@ -1702,8 +1681,8 @@
   margin: 0.1em 0;
 }
 .kbn-card-outcome code {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 0.9em;
+  font-family: var(--font-mono);
+  font-size: var(--type-code);
   padding: 0 3px;
   background: color-mix(in srgb, var(--kbn-shade) 5%, transparent);
   border-radius: 2px;
@@ -1744,8 +1723,8 @@
   align-items: center;
 }
 .kbn-action {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   background: color-mix(in srgb, var(--kbn-ink) 4%, transparent);
@@ -1803,8 +1782,8 @@
 }
 .kbn-card-actor,
 .kbn-card-due {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.04em;
   flex-shrink: 0;
 }
@@ -1830,8 +1809,8 @@
    card's frontmatter rather than a state the card is in — nothing is being
    enforced, and the border says "look at this" quietly. */
 .kbn-card-depwarn {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ochre);
   border: 1px dashed color-mix(in srgb, var(--kbn-ochre) 45%, transparent);
   padding: 3px 6px;
@@ -1848,9 +1827,6 @@
    baseline is theirs. The dot sits in the plate's left padding, centred on
    the plate, outside the flow that sets that baseline. */
 .kbn-card-worker, .kbn-card-phase {
-  --worker-size: calc(10.5px * var(--kbn-type-scale, 1));
-  --worker-word: 400 var(--worker-size)/1 var(--font-mono, 'JetBrains Mono', monospace);
-  --worker-time: 400 var(--worker-size)/1 var(--font-mono, 'JetBrains Mono', monospace);
   --worker-figures: oldstyle-nums tabular-nums;
   --worker-gap: 0.32em;
 }
@@ -1866,7 +1842,7 @@
   border-radius: 3px;
   background: transparent;
   color: var(--kbn-ink-soft);
-  font: var(--worker-word);
+  font: 400 var(--type-meta)/1 var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
@@ -1896,12 +1872,12 @@
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--worker-dot);
 }
-.kbn-card-worker .ws-worker-state { font: var(--worker-word); }
+.kbn-card-worker .ws-worker-state { font: 400 var(--type-meta)/1 var(--font-mono); }
 .kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
-.kbn-card-worker .ws-worker-elapsed { font: var(--worker-time); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
+.kbn-card-worker .ws-worker-elapsed { font: 400 var(--type-meta)/1 var(--font-mono); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
 .kbn-card-worker .ws-worker-elapsed:empty { display: none; }
 .kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }
-.kbn-card-worker .ws-worker-via { font: var(--worker-word); color: var(--kbn-ink-muted); }
+.kbn-card-worker .ws-worker-via { font: 400 var(--type-meta)/1 var(--font-mono); color: var(--kbn-ink-muted); }
 .kbn-card-worker .ws-worker-via::before { content: '· '; }
 /* A working turn breathes in its dot alone. */
 .kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
@@ -1915,7 +1891,7 @@
    the worker pill's type, unplated; its glyph and a pigmented ink say the
    state, since no worker's dot is there to carry it. */
 .kbn-card-phase {
-  font: var(--worker-word);
+  font: 400 var(--type-meta)/1 var(--font-mono);
   font-variant-numeric: var(--worker-figures);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -1933,8 +1909,8 @@
    explains the global-per-host release — one click frees every held launch
    on the owning daemon. */
 .kbn-card-held {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--kbn-held) 75%, var(--kbn-ink));
@@ -1983,8 +1959,8 @@
    info that depends on connection, not on fiber content. Cool grey-blue
    distinguishes "stale" from the teal of "worker running." */
 .kbn-card-waiting {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-agent);
   background: color-mix(in srgb, var(--kbn-agent) 10%, transparent);
   border: 1px dashed color-mix(in srgb, var(--kbn-agent) 35%, transparent);
@@ -2003,8 +1979,8 @@
   border: 1px solid color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent);
   background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent);
   color: var(--kbn-owed-deep);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
 }
 .kbn-error.kbn-booting {
   margin: 16px 24px;
@@ -2020,8 +1996,8 @@
   background: color-mix(in srgb, var(--kbn-paper-bright) 90%, transparent);
   border: 0.5px solid color-mix(in srgb, var(--kbn-owed-bright) 55%, transparent);
   border-radius: 11px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   letter-spacing: 0.04em;
   color: var(--kbn-owed-deep);
   cursor: pointer;
@@ -2038,7 +2014,7 @@
    foot: the meta row keeps its chips' height and gives way to the undo line
    (workspace/verdicts.css), set in the actor chip's size. */
 .kbn-card-meta[data-verdict-pending] { min-height: 19px; }
-.kbn-card-meta > .ws-verdict-undo { font-size: calc(10px * var(--kbn-type-scale, 1)); letter-spacing: 0.04em; }
+.kbn-card-meta > .ws-verdict-undo { font-size: var(--type-meta); letter-spacing: 0.04em; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    THE DESK AT PHONE WIDTH
@@ -2117,7 +2093,7 @@
     min-height: var(--ws-phone-target, 44px);
     padding: 7px 9px;
     letter-spacing: 0.08em;
-    font-size: calc(11.5px * var(--kbn-type-scale, 1));
+    font-size: var(--type-note);
   }
   .kbn-viewtab-hotkey { display: none; }
   .kbn-viewtabs-views { gap: 4px; }
@@ -2152,7 +2128,7 @@
     height: var(--ws-phone-target, 44px);
     min-height: var(--ws-phone-target, 44px);
     padding: 0;
-    font-size: calc(15px * var(--kbn-type-scale, 1));
+    font-size: var(--type-prose);
     background: none;
     border-color: color-mix(in srgb, var(--kbn-ink-muted) 34%, transparent);
   }
@@ -2165,7 +2141,6 @@
      the column's own pigment, so the strip is legible as the triad even
      before you read the names. */
   .kbn-folio {
-    --kbn-type-scale: 1;
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 2px;
@@ -2202,8 +2177,8 @@
     color: var(--kbn-ink);
   }
   .kbn-folio-name {
-    font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-    font-size: 13px;
+    font-family: var(--font-serif);
+    font-size: var(--type-note);
     line-height: 1;
     font-variant-caps: all-small-caps;
     font-feature-settings: "smcp", "c2sc";
@@ -2215,8 +2190,8 @@
   }
   .kbn-folio-count {
     flex: 0 0 auto;
-    font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-    font-size: 10.5px;
+    font-family: var(--font-mono);
+    font-size: var(--type-meta);
     color: var(--kbn-ink-muted);
   }
   /* The initial rides at the strip's own size; the F1 flourish still reads at
@@ -2224,7 +2199,7 @@
      heads below do not. Inactive segments hold the pigment but drop back —
      the illumination dims, it doesn't change colour. */
   .kbn-folio-name .kbn-cap {
-    font-size: 15px;
+    font-size: var(--type-label);
     line-height: 1;
     vertical-align: -0.04em;
     margin-right: 0.06em;
@@ -2286,7 +2261,7 @@
     margin-left: 2px;
   }
   .kbn-folio-seg-active .kbn-col-action-label {
-    font-size: 11px;
+    font-size: var(--type-meta);
   }
 
   /* ── Cards, compact ────────────────────────────────────────────────────
@@ -2303,7 +2278,7 @@
     flex-shrink: 0;
   }
   .kbn-card-name {
-    font-size: 14px;
+    font-size: var(--type-note);
     line-height: 1.3;
   }
   /* One line, and it is the TAIL that matters — `…/constitutions/den-gate`
@@ -2313,7 +2288,7 @@
      line-height because `overflow: hidden` on a single line otherwise shaves
      the descenders off every `p`, `g` and `y` in the path. */
   .kbn-card-id {
-    font-size: 10px;
+    font-size: var(--type-meta);
     line-height: 1.6;
     word-break: normal;
     overflow: hidden;
@@ -2324,7 +2299,7 @@
     margin-top: -2px;
   }
   .kbn-card-outcome {
-    font-size: 12px;
+    font-size: var(--type-meta);
     line-height: 1.55;
     -webkit-line-clamp: 1;
   }
@@ -2376,7 +2351,7 @@
     margin-left: auto;
     flex: 0 0 auto;
     color: color-mix(in srgb, var(--kbn-owed-bright) 85%, transparent);
-    font-size: 11px;
+    font-size: var(--type-meta);
     line-height: 1;
     transition: transform 160ms ease;
   }
@@ -2469,7 +2444,7 @@
   }
   .kbn-viewtab {
     padding: 4px 8px;
-    font-size: calc(10.5px * var(--kbn-type-scale, 1));
+    font-size: var(--type-meta);
   }
 
   /* The folio strip loses its air and keeps its anatomy: initial, name,
@@ -2481,8 +2456,8 @@
     min-height: 34px;
     padding: 2px 4px 3px;
   }
-  .kbn-folio-name { font-size: 12px; }
-  .kbn-folio-name .kbn-cap { font-size: 14px; }
+  .kbn-folio-name { font-size: var(--type-meta); }
+  .kbn-folio-name .kbn-cap { font-size: var(--type-note); }
 
   /* The budget, written out: the body's 2px of top padding, the view strip
      (~27), the gap under it (6), the folio strip (~41) and a little air at

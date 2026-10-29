@@ -26,8 +26,6 @@
     0 1px 2px rgb(0 0 0 / 32%),
     0 28px 64px -14px rgb(0 0 0 / 64%);
   --ws-mask: #fff;
-  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
-  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
   --ws-mono-tracking: 0.1em;
   --ws-blueprint-grid: rgb(145 210 229 / 7%);
   --ws-blueprint-mark: rgb(174 223 235 / 7%);
@@ -57,11 +55,11 @@
 [data-part="label-bar"] {
   color: var(--ws-ink-muted);
   background-color: var(--ws-paper);
-  font-family: var(--ws-mono);
+  font-family: var(--font-mono);
   text-transform: uppercase;
 }
 [data-part="label-bar"] .ws-label-title {
-  font-family: var(--ws-mono);
+  font-family: var(--font-mono);
   letter-spacing: var(--ws-mono-tracking);
 }
 
@@ -85,7 +83,7 @@
 
 [data-part="fiber-title"] {
   color: var(--ws-ink);
-  font-family: var(--ws-mono);
+  font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -101,7 +99,7 @@
 }
 :scope [data-part="prose"] :is(h1, h2, h3, h4) {
   color: var(--ws-ink);
-  font-family: var(--ws-mono);
+  font-family: var(--font-mono);
   font-weight: 500;
   font-style: normal;
   letter-spacing: 0.06em;
@@ -165,7 +163,7 @@
 }
 :scope[data-part="since-row"] .ws-overview-change-name {
   color: var(--ws-ink);
-  font-family: var(--ws-mono);
+  font-family: var(--font-mono);
   text-transform: uppercase;
 }
 :scope[data-part="since-row"] .ws-overview-change-outcome { color: var(--ws-ink-soft); }

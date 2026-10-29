@@ -31,7 +31,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   Object.assign(menu.style, {
     position: 'fixed', zIndex: '10000', background: 'var(--kbn-form-paper)', color: 'var(--kbn-graphite)',
     border: '1px solid color-mix(in srgb, var(--kbn-ink) 23%, var(--kbn-parchment))', borderRadius: '4px', padding: '5px',
-    boxShadow: '0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent)', minWidth: '220px', fontFamily: 'var(--font-main, serif)',
+    boxShadow: '0 6px 20px color-mix(in srgb, var(--kbn-shade) 13.33%, transparent)', minWidth: '220px', fontFamily: 'var(--font-serif)',
   })
   const items: HTMLElement[] = []
   const anchorBounds = anchor.getBoundingClientRect()
@@ -107,7 +107,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       if (!action.disabled) items.push(item)
       continue
     }
-    Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: '16px', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
+    Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: 'var(--type-row)', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
     item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })
     item.addEventListener('blur', () => { item.style.background = 'transparent' })
     item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })

@@ -35,6 +35,7 @@
  * only knob is which surface command plus due/cold tuple to POST.
  */
 
+import '../styles/type.css'
 import './palette.css'
 import './darkControls.css'
 import { watchAppearance } from './appearance.js'

@@ -478,8 +478,8 @@ describe('state-shaped act zone', () => {
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
     const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-chat-head button')].filter(button => !button.hidden)
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Brief', 'Settings', 'Close for review', 'Rest'])
-    expect(band.el.querySelector('.ws-chat-refs .ws-chat-constitution')?.getAttribute('aria-label')).toBe('Brief')
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Constitution', 'Settings', 'Close for review', 'Rest'])
+    expect(band.el.querySelector('.ws-chat-refs .ws-chat-constitution')?.getAttribute('aria-label')).toBe('Constitution')
     expect(band.el.querySelector('.ws-chat-drawer .ws-chat-console')?.getAttribute('aria-label')).toBe('Console')
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))

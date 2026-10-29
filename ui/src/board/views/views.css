@@ -54,8 +54,8 @@
    F2/F1 dropcap on its leading letter — a size down, because a page head sits
    above a whole view rather than a single lane. */
 .kbn-view-title {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(28px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-display);
   line-height: 1.0;
   font-weight: 500;
   font-variant-caps: all-small-caps;
@@ -66,7 +66,7 @@
   margin: 0;
 }
 .kbn-view-title .kbn-cap {
-  font-size: 0.73em;
+  font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
   line-height: 0.82;
@@ -89,9 +89,9 @@
   margin: auto;
   text-align: center;
   color: var(--kbn-ink-faint);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   letter-spacing: 0.01em;
   padding: 40px 8px;
 }
@@ -108,8 +108,8 @@
   margin: 0 0 0 0.75em;
   padding: 0 0 1px;
   cursor: pointer;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   font-style: normal;

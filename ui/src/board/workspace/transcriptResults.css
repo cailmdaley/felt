@@ -4,8 +4,8 @@
 .ws-search-hit { cursor: pointer; }
 .ws-search-hit:hover { background: var(--ws-hover); }
 .ws-search-hit:focus-visible { background: var(--ws-hover); outline: 1px solid var(--ws-focus); outline-offset: -1px; }
-.ws-search-snippet { margin: 0 0 4px; font: var(--ws-label-size)/1.45 var(--ws-serif); line-height: 1.45; overflow-wrap: anywhere; }
+.ws-search-snippet { margin: 0 0 4px; font: var(--type-label)/1.45 var(--font-serif); line-height: 1.45; overflow-wrap: anywhere; }
 .ws-search-snippet mark { background: color-mix(in srgb, var(--ws-fresh) 22%, transparent); color: inherit; }
-.ws-search-meta, .ws-search-note { font: var(--ws-small-size)/1.5 var(--ws-mono); color: var(--ws-ink-muted); }
+.ws-search-meta, .ws-search-note { font: var(--type-meta)/1.5 var(--font-mono); color: var(--ws-ink-muted); }
 .ws-search-meta button { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; text-decoration: underline; }
 .ws-search-note { padding: 8px 12px; }

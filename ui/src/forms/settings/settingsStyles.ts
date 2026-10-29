@@ -34,7 +34,7 @@ const SHEET = `
   min-height: 0;
   min-width: 0;
   width: 100%;
-  font-family: var(--font-main, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   color: var(--kbn-graphite);
 }
 
@@ -53,15 +53,15 @@ const SHEET = `
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
 }
 .set-hostbar-label {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10px;
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--kbn-graphite-faint);
   flex: 0 0 auto;
 }
 .set-hostbar-note {
-  font-size: 13px;
+  font-size: var(--type-note);
   color: var(--kbn-graphite-muted);
   min-width: 0;
   overflow: hidden;
@@ -84,7 +84,7 @@ const SHEET = `
   padding: 12px 16px;
   background: color-mix(in srgb, var(--kbn-owed-bright) 9%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed) 30%, transparent);
-  font-size: 14px;
+  font-size: var(--type-note);
   line-height: 1.45;
 }
 .set-discard { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -113,8 +113,8 @@ const SHEET = `
   padding: 6px 10px;
   text-align: left;
   cursor: pointer;
-  font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 15px;
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   line-height: 1.25;
   color: var(--kbn-graphite-soft);
   display: flex;
@@ -137,10 +137,10 @@ const SHEET = `
 
 .set-railgroup { display: flex; flex-direction: column; gap: 2px; }
 .set-railgroup + .set-railgroup { margin-top: 20px; }
-.set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--kbn-graphite-faint); }
+.set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-serif); font-size: var(--type-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--kbn-graphite-faint); }
 .set-pane-heading { margin-bottom: 22px; }
-.set-pane-heading h2 { font-size: 28px; font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
-.set-pane-heading p { margin: 0; color: var(--kbn-graphite-muted); font-size: 15px; line-height: 1.4; max-width: 36rem; }
+.set-pane-heading h2 { font-size: var(--type-display); font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
+.set-pane-heading p { margin: 0; color: var(--kbn-graphite-muted); font-size: var(--type-label); line-height: 1.4; max-width: 36rem; }
 .set-opening-options { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
 .set-opening-options legend { padding: 0 0 10px; }
 .set-opening-choice { display: flex; align-items: center; gap: 12px; border: 1px solid color-mix(in srgb, var(--kbn-graphite) 15%, transparent); border-radius: 4px; padding: 14px 16px; cursor: pointer; background: color-mix(in srgb, var(--kbn-blank) 22%, transparent); }
@@ -148,15 +148,15 @@ const SHEET = `
 .set-opening-choice:focus-within { outline: 1px dashed var(--kbn-owed); outline-offset: 2px; }
 .set-opening-selected { border-color: var(--kbn-owed-bright); background: color-mix(in srgb, var(--kbn-owed-bright) 8%, transparent); }
 .set-opening-choice input { accent-color: var(--kbn-owed); width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
-.set-opening-choice strong { font-size: 18px; font-weight: 500; }
-.set-opening-note { display: block; font-size: 14px; color: var(--kbn-graphite-muted); margin-top: 3px; }
-.set-opening-default { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--kbn-owed-deep); }
+.set-opening-choice strong { font-size: var(--type-prose); font-weight: 500; }
+.set-opening-note { display: block; font-size: var(--type-note); color: var(--kbn-graphite-muted); margin-top: 3px; }
+.set-opening-default { margin-left: auto; font-family: var(--font-serif); font-size: var(--type-meta); color: var(--kbn-owed-deep); }
 .set-appearance-dark { margin-top: 26px; }
-.set-appearance-swatch { width: 34px; height: 34px; border-radius: 3px; flex-shrink: 0; display: grid; place-items: center; font-size: 12px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-blank) 8%, transparent); }
-.set-opening-guidance { line-height: 1.5; font-size: 14px; color: var(--kbn-graphite-soft); margin: 14px 0 20px; }
-.set-opening-tip { font-size: 15px; line-height: 1.45; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding: 16px 0 10px; }
+.set-appearance-swatch { width: 34px; height: 34px; border-radius: 3px; flex-shrink: 0; display: grid; place-items: center; font-size: var(--type-meta); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-blank) 8%, transparent); }
+.set-opening-guidance { line-height: 1.5; font-size: var(--type-note); color: var(--kbn-graphite-soft); margin: 14px 0 20px; }
+.set-opening-tip { font-size: var(--type-label); line-height: 1.45; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding: 16px 0 10px; }
 .set-opening-tip strong { display: block; font-weight: 500; margin-bottom: 3px; }
-.set-opening-details { margin-top: 22px; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding-top: 12px; color: var(--kbn-graphite-soft); font-size: 14px; line-height: 1.5; }
+.set-opening-details { margin-top: 22px; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding-top: 12px; color: var(--kbn-graphite-soft); font-size: var(--type-note); line-height: 1.5; }
 .set-opening-details summary { cursor: pointer; padding: 4px 0; }
 .set-opening-details p { margin: 10px 0; }
 
@@ -170,18 +170,18 @@ const SHEET = `
 }
 .set-lede {
   margin: 0 0 14px;
-  font-size: 14.5px;
+  font-size: var(--type-note);
   line-height: 1.45;
   color: var(--kbn-graphite-soft);
   max-width: 44rem;
 }
 .set-lede code, .set-mono {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 0.88em;
+  font-family: var(--font-mono);
+  font-size: var(--type-code);
 }
 .set-section-label {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10px;
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--kbn-owed);
@@ -218,13 +218,13 @@ const SHEET = `
   gap: 2px;
 }
 .set-row-path {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-graphite);
   word-break: break-all;
 }
 .set-row-note {
-  font-size: 12.5px;
+  font-size: var(--type-meta);
   line-height: 1.4;
   color: var(--kbn-graphite-muted);
   word-break: break-word;
@@ -233,7 +233,7 @@ const SHEET = `
 .set-row-note-error { color: var(--kbn-error); word-break: break-word; }
 .set-empty {
   padding: 10px 0;
-  font-size: 14px;
+  font-size: var(--type-note);
   color: var(--kbn-graphite-faint);
   font-style: italic;
 }
@@ -241,8 +241,8 @@ const SHEET = `
 /* ── Controls ──────────────────────────────────────────────────────────── */
 
 .set-input, .set-select, .set-textarea {
-  font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 15px;
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   color: var(--kbn-graphite);
   background: var(--kbn-blank);
   border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -258,8 +258,8 @@ const SHEET = `
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--kbn-owed) 18%, transparent);
 }
 .set-textarea {
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   line-height: 1.5;
   resize: vertical;
   white-space: pre;
@@ -271,8 +271,8 @@ const SHEET = `
 
 .set-btn {
   appearance: none;
-  font-family: var(--font-main, 'EB Garamond', serif);
-  font-size: 13.5px;
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   padding: 4px 12px;
   border-radius: 3px;
   border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -296,7 +296,7 @@ const SHEET = `
    of errors, which is the opposite of what a settled configuration is. */
 .set-btn-drop {
   padding: 2px 7px;
-  font-size: 13px;
+  font-size: var(--type-note);
   color: var(--kbn-graphite-pale);
   border-color: transparent;
 }
@@ -318,7 +318,7 @@ const SHEET = `
   background: color-mix(in srgb, var(--kbn-alarm) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--kbn-alarm) 50%, transparent);
   color: var(--kbn-error);
-  font-size: 13px;
+  font-size: var(--type-note);
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
@@ -329,8 +329,8 @@ const SHEET = `
   border-radius: 3px;
   background: color-mix(in srgb, var(--kbn-graphite) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent);
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   line-height: 1.5;
   color: var(--kbn-graphite-soft);
   white-space: pre-wrap;
@@ -346,14 +346,14 @@ const SHEET = `
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 14px;
   align-items: baseline;
-  font-size: 13.5px;
+  font-size: var(--type-note);
   border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
   padding-top: 8px;
 }
 .set-facts dt {
   color: var(--kbn-graphite-muted);
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10.5px;
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -361,8 +361,8 @@ const SHEET = `
   margin: 0;
   min-width: 0;
   word-break: break-word;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
 }
 
 /* ── The file, underneath ──────────────────────────────────────────────── */
@@ -383,8 +383,8 @@ const SHEET = `
   display: flex;
   align-items: baseline;
   gap: 8px;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--kbn-graphite-faint);
@@ -392,12 +392,12 @@ const SHEET = `
 .set-file > summary::-webkit-details-marker { display: none; }
 .set-file > summary:hover { color: var(--kbn-graphite-muted); }
 .set-file > summary:focus-visible { outline: 1px dashed color-mix(in srgb, var(--kbn-owed) 70%, transparent); outline-offset: 2px; }
-.set-file > summary::before { content: '\\25B8'; font-size: 11px; }
+.set-file > summary::before { content: '\\25B8'; font-size: var(--type-meta); }
 .set-file[open] > summary::before { content: '\\25BE'; }
 .set-file-path {
   margin: 8px 0 6px;
-  font-family: var(--font-mono, 'IBM Plex Mono', monospace);
-  font-size: 11.5px;
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-graphite-faint);
   word-break: break-all;
 }
@@ -425,7 +425,7 @@ const SHEET = `
   .set-railgroup { flex-direction: row; flex: 0 0 auto; }
   .set-railgroup + .set-railgroup { margin: 0; padding-left: 8px; border-left: 1px solid color-mix(in srgb, var(--kbn-graphite) 15%, transparent); }
   .set-railgroup-label { display: none; }
-  .set-pane-heading h2 { font-size: 25px; }
+  .set-pane-heading h2 { font-size: var(--type-title); }
   .set-opening-choice { padding: 12px; }
   .set-rail::-webkit-scrollbar { display: none; }
   .set-railbtn {
@@ -451,7 +451,7 @@ const SHEET = `
     flex: 1 1 100%;
     white-space: normal;
     overflow: visible;
-    font-size: 12.5px;
+    font-size: var(--type-meta);
     line-height: 1.35;
   }
   .set-pane { padding: 14px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
@@ -460,7 +460,7 @@ const SHEET = `
      surface on the one device this sheet exists for. It gets a tighter line
      height instead of a smaller size: the thing to save on a phone is vertical
      space, not point size. */
-  .set-input, .set-select, .set-textarea { font-size: 16px; }
+  .set-input, .set-select, .set-textarea { font-size: var(--type-row); }
   /* And 44px tall, which the font size alone does not give them. The select
      here is the HOST PICKER — the control that decides which machine
      everything else on this page writes to — and it was the smallest target on

@@ -701,7 +701,7 @@ export function injectStashFormStyles(): void {
   injectStyles('stash-form-styles', `
     /* The title is Stash's lead field, as the yap is Capture's: 17px. */
     .stash-title {
-      font-size: 17px;
+      font-size: var(--type-prose);
       padding: 8px 11px;
     }
     .stash-receipt {
@@ -713,15 +713,15 @@ export function injectStashFormStyles(): void {
       background: color-mix(in srgb, var(--kbn-rag) 70%, transparent);
       border: 1px dashed color-mix(in srgb, var(--kbn-owed) 42%, transparent);
       border-radius: 2px;
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-soft);
     }
     .stash-receipt-key {
       text-transform: uppercase;
       letter-spacing: 0.12em;
       color: var(--kbn-owed-bright);
-      font-size: 9.5px;
+      font-size: var(--type-meta);
     }
     .stash-receipt-sep {
       color: var(--kbn-graphite-pale);
@@ -754,7 +754,7 @@ export function injectStashFormStyles(): void {
       background: color-mix(in srgb, var(--kbn-owed) 14%, transparent);
       border: 1px solid color-mix(in srgb, var(--kbn-owed) 32%, transparent);
       border-radius: 12px;
-      font-size: 12px;
+      font-size: var(--type-meta);
       color: color-mix(in srgb, var(--kbn-owed-bright) 37%, var(--kbn-ink));
     }
     .stash-chip-x {
@@ -762,7 +762,7 @@ export function injectStashFormStyles(): void {
       border: 0;
       color: color-mix(in srgb, var(--kbn-owed-bright) 37%, var(--kbn-ink));
       cursor: pointer;
-      font-size: 14px;
+      font-size: var(--type-note);
       padding: 0 4px;
       line-height: 1;
       border-radius: 50%;
@@ -778,8 +778,8 @@ export function injectStashFormStyles(): void {
       outline: none;
       padding: 2px 4px;
       background: transparent;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
+      font-family: var(--font-serif);
+      font-size: var(--type-label);
       color: var(--kbn-graphite);
     }
     .stash-tag-input::placeholder {
@@ -795,8 +795,8 @@ export function injectStashFormStyles(): void {
       background: color-mix(in srgb, var(--kbn-graphite) 5%, transparent);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 14%, transparent);
       color: var(--kbn-graphite);
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 12px;
+      font-family: var(--font-serif);
+      font-size: var(--type-meta);
       padding: 2px 8px;
       border-radius: 10px;
       cursor: pointer;
@@ -835,8 +835,8 @@ export function injectStashFormStyles(): void {
       background: transparent;
       border: 1px solid transparent;
       border-radius: 2px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 14px;
+      font-family: var(--font-serif);
+      font-size: var(--type-note);
       color: var(--kbn-graphite);
       text-align: left;
       cursor: pointer;
@@ -852,8 +852,8 @@ export function injectStashFormStyles(): void {
       color: var(--kbn-graphite);
     }
     .stash-parent-option-id {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10.5px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
       letter-spacing: 0.02em;
       color: var(--kbn-graphite-muted);
     }
@@ -862,7 +862,7 @@ export function injectStashFormStyles(): void {
     }
     .stash-parent-empty {
       padding: 8px 10px;
-      font-size: 12px;
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-muted);
       font-style: italic;
       cursor: default;
@@ -905,11 +905,11 @@ export function injectStashFormStyles(): void {
       height: 0;
     }
     .stash-segment-name {
-      font-size: 15px;
+      font-size: var(--type-label);
       flex: none;
     }
     .stash-segment-hint {
-      font-size: 12px;
+      font-size: var(--type-meta);
       font-style: italic;
       color: var(--kbn-graphite-faint);
       white-space: nowrap;

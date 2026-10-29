@@ -14,14 +14,14 @@ export class ReportChip {
     const preview = document.createElement('span')
     preview.className = 'ws-report-preview'; preview.inert = true
     this.thumbnail = new Thumbnail({
-      key: doc.key, shuttleBase: base, fallback: 'Report', captioned: true,
+      key: doc.key, shuttleBase: base, fallback: 'Artifact', captioned: true,
       file: { fullPath: doc.path, owner: doc.owner, basename: doc.name },
       priority: () => 1, distance: () => 0,
     })
     preview.append(this.thumbnail.el)
     const reportLabel = document.createElement('span')
     reportLabel.className = 'ws-report-label'
-    reportLabel.textContent = 'Report'
+    reportLabel.textContent = 'Artifact'
     this.el.append(preview, reportLabel)
     const label = (): void => {
       const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Artifact'

@@ -36,7 +36,7 @@
 .kbn-col-list .kbn-card .kbn-card-name {
   flex: 1 1 0;
   min-width: 0;
-  font-size: calc(14.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   font-weight: 500;
   line-height: 1.25;
   display: block;
@@ -44,7 +44,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.kbn-now-board .kbn-col-title { font-size: calc(32px * var(--kbn-type-scale, 1)); }
+.kbn-now-board .kbn-col-title { font-size: var(--type-display); }
 .kbn-col-list .kbn-card > .kbn-card-meta { position: relative; flex: 0 0 auto; flex-wrap: nowrap; gap: 5px; margin: 0; }
 .kbn-col-list .kbn-card > .kbn-card-meta[data-verdict-pending] { min-width: 10.5rem; }
 .kbn-col-list .kbn-card--meeting .kbn-meeting { grid-column: 1 / -1; }
@@ -64,8 +64,8 @@
   border-radius: 1px 4px 1px 1px;
   background: var(--kbn-paper-bright);
   color: var(--kbn-ink-muted);
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: 9px;
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   line-height: 1;
 }
 .kbn-card-report[data-unseen] { position: relative; color: var(--kbn-ink-soft); }
@@ -80,15 +80,14 @@
   background: var(--kbn-owed-bright);
   box-shadow: 0 0 0 1.5px var(--kbn-row-ground, var(--kbn-paper));
 }
-.kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: calc(11px * var(--kbn-type-scale, 1)); }
+.kbn-card-stale-mark { flex-shrink: 0; color: var(--kbn-ink-muted); font-size: var(--type-meta); }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-col-list .kbn-card { min-height: 44px; padding: 6px 9px; }
-  .kbn-col-list .kbn-card .kbn-card-name { font-size: 15.5px; }
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
-  .kbn-folio .kbn-folio-name { font-size: 14px; font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
-  .kbn-folio .kbn-folio-count { font-family: inherit; font-size: 14px; color: var(--kbn-ink-muted); }
+  .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
+  .kbn-folio .kbn-folio-count { font-family: inherit; font-size: var(--type-note); color: var(--kbn-ink-muted); }
   .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { gap: 5px; padding: 0; }
   .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }

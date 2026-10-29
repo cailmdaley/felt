@@ -21,7 +21,7 @@ export function scopeTheme(css: string, scope: string, namespace: string, defaul
   // Animation values can arrive through custom properties in another rule.
   const aliases = new Map<string, string[]>()
   const animationAliases = new Set<string>()
-  const fontAliases = new Set(['--ws-serif', '--ws-mono', '--font-main', '--font-serif', '--font-mono'])
+  const fontAliases = new Set(['--font-serif', '--font-mono'])
   const collectAliases = (rules: CSSRuleList): void => {
     for (const rule of Array.from(rules)) {
       if ('style' in rule) {

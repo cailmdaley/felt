@@ -447,8 +447,8 @@ export function injectCaptureFormStyles(): void {
       box-sizing: border-box;
       resize: vertical;
       min-height: 8.5rem;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 17px;
+      font-family: var(--font-serif);
+      font-size: var(--type-prose);
       line-height: 1.5;
       color: var(--kbn-graphite);
       background: var(--kbn-blank);
@@ -477,7 +477,7 @@ export function injectCaptureFormStyles(): void {
     .capture-meeting-host-label {
       max-width: 100%;
       color: var(--kbn-graphite-muted);
-      font-size: 12px;
+      font-size: var(--type-meta);
       line-height: 1.25;
       overflow-wrap: anywhere;
     }
@@ -494,8 +494,8 @@ export function injectCaptureFormStyles(): void {
       align-items: center;
       gap: 8px;
       padding: 0 14px 0 12px;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
+      font-family: var(--font-serif);
+      font-size: var(--type-label);
       color: var(--kbn-graphite-soft);
       background: var(--kbn-blank);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);

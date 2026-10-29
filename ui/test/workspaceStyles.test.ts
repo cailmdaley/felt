@@ -4,26 +4,9 @@ import { describe, expect, it } from 'vitest'
 
 const read = (name: string): string => readFileSync(new URL(`../src/board/workspace/${name}`, import.meta.url), 'utf8')
 const css = read('reader.css').replace(/\/\*[\s\S]*?\*\//g, '')
-const tokens = read('tokens.css')
+const tokens = `${read('tokens.css')}\n${readFileSync(new URL('../src/styles/type.css', import.meta.url), 'utf8')}`
 
 describe('workspace style contracts', () => {
-  it('keeps the default type scale named and workspace font sizes on those tokens', () => {
-    for (const [token, size] of Object.entries({
-      'small-size': 11, 'note-size': 14, 'label-size': 15, 'row-size': 16, 'prose-size': 18,
-      'section-size': 21, 'heading-size': 34,
-    })) expect(tokens).toMatch(new RegExp(`--ws-${token}:\\s*${size}px;`))
-    // The theme hooks alias steps of the scale rather than adding their own.
-    expect(tokens).toMatch(/--ws-chrome-size:\s*var\(--ws-label-size\);/)
-    expect(tokens).toMatch(/--ws-lede-size:\s*var\(--ws-section-size\);/)
-    const dir = (path: string): string[] => readdirSync(new URL(path, import.meta.url)).filter(name => name.endsWith('.css') && name !== 'tokens.css').map(name => `${path}${name}`)
-    const styleFiles = [...dir('../src/board/workspace/'), ...dir('../src/board/transcript/'), '../src/board/keymap.css']
-    for (const path of styleFiles) {
-      const styles = readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
-      for (const declaration of styles.matchAll(/\bfont(?:-size)?\s*:\s*([^;{}]+)/g)) {
-        expect(declaration[1], `${path}: ${declaration[0]}`).not.toMatch(/\b\d+(?:\.\d+)?(?:px|rem)\b/)
-      }
-    }
-  })
   it('scrolls the rail\'s two regions on their own: threads capped at their content, sent files taking the rest', () => {
     const rules = new Map<string, Map<string, string>>()
     postcss.parse(read('thread-rail.css')).walkRules(rule => {
@@ -60,7 +43,7 @@ describe('workspace style contracts', () => {
   })
   it('draws the dock from workspace tokens alone', () => {
     const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
-    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl)-[\w-]+)\s*:/g)].map(m => m[1]))
+    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl|type|font|glyph|leading|rhythm)-[\w-]+)\s*:/g)].map(m => m[1]))
     for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
   })

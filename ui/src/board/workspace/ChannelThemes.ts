@@ -79,7 +79,7 @@ export class ChannelThemes {
       :where([data-ws-theme-boundary]:not(.ws-reader)) {
         all: initial; display: revert; direction: ${defaults.direction || 'ltr'}; unicode-bidi: normal;
         ${declarations(this.defaults)}
-        color: var(--ws-ink); font-family: var(--ws-serif); line-height: 1.4; box-sizing: border-box;
+        color: var(--ws-ink); font-family: var(--font-serif); line-height: 1.4; box-sizing: border-box;
       }
       }
       :where([data-ws-theme] [data-part="act"]) {

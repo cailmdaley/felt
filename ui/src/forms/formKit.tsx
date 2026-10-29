@@ -222,7 +222,7 @@ export function injectFormKitStyles(): void {
       display: flex;
       flex-direction: column;
       gap: 14px;
-      font-family: var(--font-main, 'EB Garamond', serif);
+      font-family: var(--font-serif);
       color: var(--kbn-graphite);
     }
     .form-sheet > * {
@@ -253,7 +253,7 @@ export function injectFormKitStyles(): void {
       display: inline-flex;
       align-items: baseline;
       gap: 6px;
-      font-size: 11px;
+      font-size: var(--type-meta);
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -261,8 +261,8 @@ export function injectFormKitStyles(): void {
       line-height: 1;
     }
     .form-optional {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 9.5px;
+      font-family: var(--font-serif);
+      font-size: var(--type-meta);
       font-weight: 400;
       letter-spacing: 0.12em;
       color: var(--kbn-graphite-pale);
@@ -270,7 +270,7 @@ export function injectFormKitStyles(): void {
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       border-radius: 2px;
     }
-    .form-help { font-size: 12px; line-height: 1.4; color: var(--kbn-graphite-muted); }
+    .form-help { font-size: var(--type-meta); line-height: 1.4; color: var(--kbn-graphite-muted); }
     /* One rule for every select. Custom chevron, so the boxes are identical
        rather than at the mercy of native select metrics, and border-box
        sizing, so each control fills its track exactly. */
@@ -279,8 +279,8 @@ export function injectFormKitStyles(): void {
     .form-textarea {
       width: 100%;
       box-sizing: border-box;
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
+      font-family: var(--font-serif);
+      font-size: var(--type-label);
       line-height: 1.3;
       color: var(--kbn-graphite);
       background-color: var(--kbn-blank);
@@ -319,18 +319,18 @@ export function injectFormKitStyles(): void {
       cursor: default;
     }
     .form-mono {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 13px;
+      font-family: var(--font-mono);
+      font-size: var(--type-note);
       letter-spacing: 0.02em;
     }
     .form-hint {
-      font-size: 12px;
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-muted);
       font-style: italic;
     }
     .form-hint code {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 11px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
       font-style: normal;
       background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
       padding: 1px 5px;
@@ -345,7 +345,7 @@ export function injectFormKitStyles(): void {
       align-items: center;
       align-self: flex-start;
       gap: 8px;
-      font-size: 13px;
+      font-size: var(--type-note);
       color: var(--kbn-graphite);
       cursor: pointer;
       user-select: none;
@@ -358,8 +358,8 @@ export function injectFormKitStyles(): void {
       cursor: inherit;
     }
     .form-chrome code {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 12px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
       background: color-mix(in srgb, var(--kbn-graphite) 6%, transparent);
       padding: 1px 5px;
       border-radius: 2px;
@@ -367,7 +367,7 @@ export function injectFormKitStyles(): void {
     }
     .form-chrome-hint {
       font-style: italic;
-      font-size: 12px;
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-muted);
     }
     .form-error {
@@ -375,7 +375,7 @@ export function injectFormKitStyles(): void {
       background: color-mix(in srgb, var(--kbn-alarm) 12%, transparent);
       border: 1px solid color-mix(in srgb, var(--kbn-alarm) 50%, transparent);
       color: var(--kbn-error);
-      font-size: 13px;
+      font-size: var(--type-note);
       border-radius: 2px;
     }
     .form-foot {
@@ -391,15 +391,15 @@ export function injectFormKitStyles(): void {
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      font-size: 11px;
+      font-size: var(--type-meta);
       color: var(--kbn-graphite-muted);
     }
     .form-foot-dot {
       color: var(--kbn-graphite-pale);
     }
     .form-foot-hint kbd {
-      font-family: var(--font-mono, 'JetBrains Mono', monospace);
-      font-size: 10px;
+      font-family: var(--font-mono);
+      font-size: var(--type-meta);
       background: color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       padding: 1px 5px;
       border-radius: 2px;
@@ -411,8 +411,8 @@ export function injectFormKitStyles(): void {
       gap: 8px;
     }
     .form-btn {
-      font-family: var(--font-main, 'EB Garamond', serif);
-      font-size: 15px;
+      font-family: var(--font-serif);
+      font-size: var(--type-label);
       letter-spacing: 0.01em;
       padding: 6px 18px;
       border-radius: 3px;

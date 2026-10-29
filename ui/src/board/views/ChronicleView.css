@@ -88,20 +88,20 @@
    "how far back am I". Iron-gall rather than gold: it is a statement of where
    you are, not an alarm. */
 .chr-corner-month {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   letter-spacing: 0.07em;
   line-height: 1.1;
   color: var(--kbn-ink-umber);
   white-space: nowrap;
 }
 .chr-corner-count {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   letter-spacing: 0.06em;
   color: var(--kbn-ink-faint);
 }
@@ -146,16 +146,16 @@
   box-shadow: inset 1.5px 0 0 var(--kbn-owed), inset -1.5px 0 0 var(--kbn-owed);
 }
 .chr-head-dow {
-  font-size: calc(9px * var(--kbn-type-scale, 1));
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: var(--type-meta);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.05em;
   color: var(--kbn-ink-faint);
 }
 .chr-head-num {
-  font-size: calc(12px * var(--kbn-type-scale, 1));
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-size: var(--type-note);
+  font-family: var(--font-serif);
   font-weight: 500;
   font-feature-settings: "onum";
   color: var(--kbn-ink-sepia);
@@ -215,8 +215,8 @@
   padding: 0;
   border: 0;
   background: none;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(19px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-title);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.045em;
@@ -238,8 +238,8 @@
   border: 0;
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed) 70%, transparent);
   background: none;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(19px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-title);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   letter-spacing: 0.045em;
@@ -260,17 +260,17 @@
   background: var(--kbn-paper);
   outline: 1px solid color-mix(in srgb, var(--kbn-owed) 50%, transparent);
   resize: vertical;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   line-height: 1.34;
   color: var(--kbn-ink-sepia);
 }
 
 .chr-face-span {
   flex: 1 1 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.02em;
   color: var(--kbn-ink-muted);
 }
@@ -279,7 +279,7 @@
   padding: 0 4px;
   border: 0;
   background: none;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1;
   color: var(--kbn-ink-faint);
   cursor: pointer;
@@ -288,9 +288,9 @@
 
 .chr-face-intent {
   margin: 5px 0 0;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   line-height: 1.34;
   color: var(--kbn-ink-sepia);
   max-width: 74ch;
@@ -320,18 +320,18 @@
   border-top: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 20%, transparent);
 }
 .chr-face-stats dt {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(10.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   letter-spacing: 0.06em;
   color: var(--kbn-ink-faint);
 }
 .chr-face-stats dd {
   margin: 0 6px 0 0;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-feature-settings: "onum";
-  font-size: calc(14px * var(--kbn-type-scale, 1));
+  font-size: var(--type-row);
   color: var(--kbn-ink);
 }
 
@@ -342,18 +342,18 @@
 }
 .chr-face-memoir-head {
   margin: 0 0 4px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   font-weight: 500;
   letter-spacing: 0.09em;
   color: var(--kbn-you);
 }
 .chr-face-line {
   margin: 0 0 2px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   line-height: 1.36;
   color: var(--kbn-ink-sepia);
   max-width: 92ch;
@@ -367,8 +367,8 @@
   margin-right: 4px;
 }
 .chr-face-count {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ink-faint);
 }
 /* A fiber named in the look-back opens it. Same blue-and-hairline register the
@@ -402,9 +402,9 @@
 .chr-face-mark-x { color: var(--kbn-ink-faint); }
 .chr-face-quiet {
   margin: 0;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   color: var(--kbn-ink-faint);
 }
 
@@ -414,9 +414,9 @@
   border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 50%, transparent);
   border-radius: 2px;
   background: color-mix(in srgb, var(--kbn-owed-bright) 13%, transparent);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   color: var(--kbn-owed-umber);
   cursor: pointer;
 }
@@ -453,10 +453,10 @@
   border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
 }
 .chr-cycle-tag {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   letter-spacing: 0.07em;
   color: var(--kbn-ink-faint);
 }
@@ -485,9 +485,9 @@
   border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 42%, transparent);
   border-radius: 7px;
   background: color-mix(in srgb, var(--kbn-owed-bright) 16%, transparent);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1;
   color: var(--kbn-owed-umber);
   text-align: left;
@@ -569,9 +569,9 @@
   border-radius: 5px;
   background: var(--kbn-paper);
   outline: 1px solid color-mix(in srgb, var(--kbn-owed) 70%, transparent);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink-sepia);
 }
 
@@ -599,9 +599,9 @@
   border: 0.5px solid var(--kbn-owed);
   border-radius: 7px;
   background: color-mix(in srgb, var(--kbn-paper-bright) 98%, transparent);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink);
   outline: none;
   box-shadow: 0 1px 3px color-mix(in srgb, var(--kbn-shade) 12%, transparent);
@@ -621,9 +621,9 @@
   align-items: center;
   justify-content: flex-end;
   padding-right: 10px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink-faint);
   opacity: 0;
   transition: opacity 140ms ease-out;
@@ -643,8 +643,8 @@
   padding: 0 2px;
   border: 0;
   background: transparent;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-note);
   line-height: 1;
   color: var(--kbn-owed);
   opacity: 0.7;
@@ -669,10 +669,10 @@
   box-shadow: 0 1px 4px color-mix(in srgb, var(--kbn-shade) 10%, transparent);
 }
 .chr-era-title {
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   letter-spacing: 0.07em;
   color: var(--kbn-owed);
 }
@@ -686,8 +686,8 @@
   border: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
   border-radius: 2px;
   background: var(--kbn-paper-bright);
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   line-height: 1.45;
   color: var(--kbn-ink);
   outline: none;
@@ -706,9 +706,9 @@
 .chr-era-note {
   flex: 1 1 auto;
   min-width: 0;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink-faint);
 }
 .chr-era-cancel,
@@ -716,10 +716,10 @@
   flex: 0 0 auto;
   padding: 2px 10px;
   border-radius: 2px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   letter-spacing: 0.06em;
   cursor: pointer;
 }
@@ -765,7 +765,7 @@
 .chr-state {
   flex: 0 0 auto;
   font-style: normal;
-  font-size: calc(10px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   line-height: 1;
 }
 .chr-state-draft { color: var(--kbn-ink-muted); opacity: 0.75; }
@@ -782,8 +782,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: left;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-prose);
   letter-spacing: 0.006em;
   line-height: var(--chr-row-h);
   color: var(--kbn-ink);
@@ -806,7 +806,7 @@ button.chr-name:hover {
   content: '▸';
   flex: 0 0 auto;
   margin-right: -4px;
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   color: var(--kbn-agent);
   line-height: var(--chr-row-h);
 }
@@ -815,8 +815,8 @@ button.chr-name:hover {
    first thing the eye is allowed to skip. */
 .chr-note {
   flex: 0 1 auto;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   letter-spacing: 0.015em;
   color: var(--kbn-ink-faint);
   max-width: 96px;
@@ -839,7 +839,7 @@ button.chr-name:hover {
 .chr-label-waiting .chr-name,
 .chr-label-waiting button.chr-name:hover { color: color-mix(in srgb, var(--kbn-ink) 34%, var(--kbn-ink-muted)); }
 .chr-note.kbn-card-waiting {
-  font-size: calc(8.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-meta);
   padding: 0 3px;
   margin-top: 0;
   max-width: 108px;
@@ -853,8 +853,8 @@ button.chr-name:hover {
   flex: 0 0 auto;
   min-width: 28px;
   text-align: right;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   color: var(--kbn-ink-dun);
@@ -868,8 +868,8 @@ button.chr-name:hover {
 .chr-diff {
   flex: 0 0 auto;
   text-align: right;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -953,7 +953,7 @@ button.chr-name:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1;
   pointer-events: none;
 }
@@ -966,12 +966,12 @@ button.chr-name:hover {
  * nothing a drag could write. */
 .chr-due {
   color: var(--kbn-owed-bright);
-  font-size: calc(12.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   pointer-events: auto;
   cursor: grab;
 }
 .chr-mark-dragging { cursor: grabbing; opacity: 0.85; }
-.chr-launch { color: var(--kbn-agent); font-size: calc(12.5px * var(--kbn-type-scale, 1)); opacity: 0.75; }
+.chr-launch { color: var(--kbn-agent); font-size: var(--type-label); opacity: 0.75; }
 
 /* ── The key ────────────────────────────────────────────────────────────── */
 
@@ -986,9 +986,9 @@ button.chr-name:hover {
   justify-content: flex-end;
   gap: 3px 14px;
   padding-top: 5px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.2;
   color: var(--kbn-ink-muted);
 }
@@ -1030,7 +1030,7 @@ button.chr-name:hover {
 .chr-key-seg-3 { width: 9px; height: 24px; }
 .chr-key-glyph {
   font-style: normal;
-  font-size: calc(11px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1;
 }
 .chr-key-due { color: var(--kbn-owed-bright, var(--kbn-owed-bright)); }
@@ -1079,8 +1079,8 @@ button.chr-name:hover {
   background: none;
   padding: 0 2px;
   cursor: pointer;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(15px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-prose);
   line-height: 1;
   color: var(--kbn-ink-faint);
   transition: color 90ms ease-out;
@@ -1114,9 +1114,9 @@ button.chr-name:hover {
   border: 0;
   border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent);
   background: transparent;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-size: var(--type-label);
   color: var(--kbn-ink);
   outline: none;
   /* Wider once you are in it — the query gets room without the head ever
@@ -1155,9 +1155,9 @@ button.chr-name:hover {
 
 .chr-search-none {
   padding: 8px 10px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(12px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   color: var(--kbn-ink-faint);
 }
 
@@ -1178,8 +1178,8 @@ button.chr-name:hover {
 
 .chr-hit-name {
   display: block;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
-  font-size: calc(13px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   color: var(--kbn-ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1187,8 +1187,8 @@ button.chr-name:hover {
 }
 .chr-hit-id {
   display: block;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-mono);
+  font-size: var(--type-meta);
   color: var(--kbn-ink-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1202,9 +1202,9 @@ button.chr-name:hover {
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-top: 2px;
-  font-family: var(--font-serif, 'EB Garamond', Georgia, serif);
+  font-family: var(--font-serif);
   font-style: italic;
-  font-size: calc(11.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.35;
   color: var(--kbn-ink-muted);
 }

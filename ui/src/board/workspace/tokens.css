@@ -43,8 +43,6 @@
   --ws-red: var(--ws-owed);
   --ws-stop: var(--kbn-error);
 
-  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
-  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
   /* The Desk's mono register (view tabs, counts): small, tracked, upright. */
   --ws-mono-tracking: 0.08em;
 
@@ -94,39 +92,6 @@
   --ws-parking-x: -20000px;
   --ws-small-gap: 6px;
 
-  /* The type scale. Every text size in the reader, the chat and the dock is
-     one of these seven steps; theme roots can override them.
-       small    11px  mono metadata and every small label: timestamps, counts,
-                      state words, tool lines and steps, a tile's title and
-                      caption, the menu's facts.
-       note     14px  secondary serif lines: an outcome under a row, the parent
-                      named above a thread, group captions in the sidebar and
-                      the rail, notices and the checklist in a transcript.
-       label    15px  the chrome's own voice: buttons, menu items, the index
-                      strip, kickers, the ancestry trail, composer controls.
-       row      16px  a row's title, regular weight, in the sidebar and the
-                      thread rail alike; the current row is marked by ground
-                      and full ink, never by weight.
-       prose    18px  body text: pages, messages, the composer (on the phone
-                      a transcript's prose takes the row step).
-       section  21px  a page's or a chat's title, section heads, and the
-                      outcome under a fiber's title.
-       heading  34px  a fiber's title.
-     Two theme hooks alias steps: chrome (the reader's base text) is label,
-     and lede (the outcome under a fiber's title) is section. Glyph sizes
-     below the scale size marks, not text. */
-  --ws-small-size: 11px;
-  --ws-note-size: 14px;
-  --ws-label-size: 15px;
-  --ws-chrome-size: var(--ws-label-size);
-  --ws-row-size: 16px;
-  --ws-prose-size: 18px;
-  --ws-section-size: 21px;
-  --ws-lede-size: var(--ws-section-size);
-  --ws-lede-leading: 1.4;
-  --ws-heading-size: 34px;
-  /* A dialog's or pane's close cross. */
-  --ws-close-glyph-size: 20px;
   --ws-prose-width: 760px;
   --ws-prose-padding: 44px clamp(24px, 4%, 64px) 72px;
 
@@ -146,15 +111,11 @@
   --ws-sidebar-bottom: 40px;
   /* A sidebar card's meta row: host mark and worker pill on one 19 px line, the Desk's chip height. */
   --ws-meta-row: 19px;
-  --ws-sidebar-glyph-size: 15px;
   --ws-sidebar-dot-size: 10px;
   /* The thread rail's tone bar, mark column and indent step. */
   --ws-thread-bar: 3px;
   --ws-thread-mark-slot: 16px;
   --ws-thread-indent: 14px;
-  /* The marks in that slot: an ask's glyph, and a discard's cross. */
-  --ws-thread-glyph-size: 11.5px;
-  --ws-thread-cross-size: 15px;
   /* Each thread state's tone, in the sidebar's and the Desk's vocabulary: the
      human's move in cinnabar (a question) or gold (idle), the worker's in
      cobalt, a verdict to read in verdigris, and the quiet states in ink. */

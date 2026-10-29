@@ -51,10 +51,10 @@ export function registerLivingReportJourneys(test) {
       await shot(page, `${device}-landing`)
       const dockBox = await page.locator('.ws-report-chip').boundingBox()
       const headerBox = await selected(page).locator('.ws-chat-head').boundingBox()
-      const briefBox = await selected(page).getByRole('button', { name: 'Brief', exact: true }).boundingBox()
+      const briefBox = await selected(page).getByRole('button', { name: 'Constitution', exact: true }).boundingBox()
       assert.ok(dockBox.y >= headerBox.y && dockBox.y + dockBox.height <= headerBox.y + headerBox.height, 'the chip stays within the bar on every device')
-      assert.ok(dockBox.x >= briefBox.x + briefBox.width && dockBox.x - briefBox.x - briefBox.width <= 8, 'Brief and Report stay adjacent')
-      assert.ok(Math.abs(dockBox.y + dockBox.height / 2 - briefBox.y - briefBox.height / 2) <= 1, 'Brief and Report share a centre line')
+      assert.ok(dockBox.x >= briefBox.x + briefBox.width && dockBox.x - briefBox.x - briefBox.width <= 8, 'Constitution and Artifact stay adjacent')
+      assert.ok(Math.abs(dockBox.y + dockBox.height / 2 - briefBox.y - briefBox.height / 2) <= 1, 'Constitution and Artifact share a centre line')
       assert.equal(await selected(page).locator('.ws-transcript-find').count(), 0, 'the conversation has no local Find or reserved band')
       const composerBox = await selected(page).locator('textarea').boundingBox()
       assert.ok(dockBox.y + dockBox.height < composerBox.y, 'dock stays above the composer')
@@ -146,7 +146,7 @@ export function registerLivingReportJourneys(test) {
         await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
       }
       // The brief stays one click away beside the living report.
-      await selected(page).getByRole('button', { name: 'Brief', exact: true }).click()
+      await selected(page).getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(await selected(page).locator('.ws-dock').count(), 0)
       await back(page, phone)

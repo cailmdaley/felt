@@ -1,0 +1,63 @@
+/* The board's type: two families, eight size roles, and the rhythm they sit in.
+ *
+ * Every `font-size` and `font-family` in ui/src names one of these tokens;
+ * test/typeRoles.test.ts fails on anything else. A role names what the text
+ * is, not how big it is, and says which family it takes.
+ *
+ *   display  34  serif   a fiber's title on its page; the Desk's column heads.
+ *   title    21  serif   a page's or a chat's title, section heads, the
+ *                        outcome under a fiber's title, a dialog's heading.
+ *   prose    18  serif   reading text: pages, chat messages, the composer.
+ *   row      16  serif   a row's title: Desk cards, sidebar and rail rows,
+ *                        form fields.
+ *   label    15  serif   the chrome's voice: buttons, tabs, menu items, the
+ *                        header's verbs and its Constitution and Artifact.
+ *   note     14  serif   secondary lines: an outcome under a row, a crumb, a
+ *                        caption, a hint; and the chat's compact rows (steps,
+ *                        messages, chips, sent files), so a row reads as one.
+ *   meta     12  mono    ids, timestamps, counts, keys, paths and states the
+ *                        machine wrote. Set in serif it is an eyebrow (a group
+ *                        head such as "Your turn", in small caps) or a whisper
+ *                        (an italic drop hint).
+ *   code   .9em  mono    code set inside any of the above, relative to it.
+ *
+ * Mono is for what a machine wrote or a person types: code, ids, timestamps,
+ * counts, keys. A word a person reads as a label is serif, at its row's role.
+ * Glyph tokens size marks drawn from a font (a cross, a dropcap), not text.
+ */
+:root {
+  --font-serif: 'EB Garamond', Garamond, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-initials: 'EBGI F2', var(--font-serif);
+  --font-initials-frill: 'EBGI F1', var(--font-serif);
+
+  --type-display: 34px;
+  --type-title: 21px;
+  --type-prose: 18px;
+  --type-row: 16px;
+  --type-label: 15px;
+  --type-note: 14px;
+  --type-meta: 12px;
+  --type-code: 0.9em;
+
+  /* Leading. Prose reads at --leading-prose; a single line of chrome at
+     --leading-ui; titles and anything set solid at --leading-tight. */
+  --leading-tight: 1.2;
+  --leading-ui: 1.35;
+  --leading-prose: 1.5;
+
+  /* Vertical rhythm in the chat: the space between two prose paragraphs, and
+     the tighter step that separates the compact rows between them (message
+     rows, step groups, chips, sent files, spawned threads). */
+  --rhythm-prose: 14px;
+  --rhythm-row: 4px;
+
+  /* Marks drawn from a font. */
+  --glyph-initial: 1.55em;
+  --glyph-initial-heading: 0.73em;
+  --glyph-ornament: 0.56em;
+  --glyph-close: 20px;
+  --glyph-mark: 15px;
+  --glyph-small: 11px;
+}
+

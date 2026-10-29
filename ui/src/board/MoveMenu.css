@@ -35,7 +35,7 @@
   background: var(--kbn-parchment);
   border: 1px solid color-mix(in srgb, var(--kbn-ink) 22%, transparent);
   border-radius: 2px;
-  font-family: var(--font-main, 'EB Garamond', serif);
+  font-family: var(--font-serif);
   color: var(--kbn-ink);
   box-shadow:
     0 1px 0 color-mix(in srgb, var(--kbn-paper-bright) 60%, transparent) inset,
@@ -46,8 +46,8 @@
   align-items: center;
   gap: 6px;
   padding: 2px 14px 7px;
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
-  font-size: calc(9.5px * var(--kbn-type-scale, 1));
+  font-family: var(--font-serif);
+  font-size: var(--type-meta);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--kbn-graphite-faint);
@@ -92,7 +92,7 @@
   background: transparent;
   padding: 7px 14px;
   font-family: inherit;
-  font-size: calc(14.5px * var(--kbn-type-scale, 1));
+  font-size: var(--type-note);
   line-height: 1.25;
   color: var(--kbn-ink);
   text-align: left;
@@ -130,7 +130,7 @@
     min-height: 52px;
     justify-content: center;
     padding: 8px 18px;
-    font-size: calc(16.5px * var(--kbn-type-scale, 1));
+    font-size: var(--type-row);
   }
   .kbn-move-sheet .kbn-move-item + .kbn-move-item {
     border-top: 1px solid color-mix(in srgb, var(--kbn-ink) 8%, transparent);

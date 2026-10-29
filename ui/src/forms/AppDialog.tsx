@@ -73,7 +73,7 @@ function injectAppDialogStyles(): void {
       .app-dialog-card input,
       .app-dialog-card select,
       .app-dialog-card textarea {
-        font-size: 16px;
+        font-size: var(--type-row);
       }
       .app-dialog-card button {
         min-height: 44px;
@@ -136,7 +136,7 @@ const appDialogContentStyles: React.CSSProperties = {
     'linear-gradient(135deg, color-mix(in srgb, var(--kbn-owed) 2.5%, transparent) 0%, transparent 60%),' +
     'linear-gradient(315deg, color-mix(in srgb, var(--kbn-graphite) 2%, transparent) 0%, transparent 70%)',
   color: 'var(--kbn-graphite)',
-  fontFamily: "var(--font-main, 'EB Garamond', serif)",
+  fontFamily: "var(--font-serif)",
   border: '1px solid color-mix(in srgb, var(--kbn-graphite) 22%, transparent)',
   boxShadow:
     '0 1px 0 color-mix(in srgb, var(--kbn-rag) 60%, transparent) inset,' +
@@ -238,7 +238,7 @@ export function AppDialog({
               <Dialog.Title
                 style={{
                   margin: 0,
-                  fontSize: '19px',
+                  fontSize: 'var(--type-prose)',
                   fontWeight: 600,
                   letterSpacing: '0.01em',
                   lineHeight: 1.2,
@@ -249,8 +249,8 @@ export function AppDialog({
               {eyebrow && (
                 <span
                   style={{
-                    fontFamily: "var(--font-mono, 'JetBrains Mono', monospace)",
-                    fontSize: '10px',
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 'var(--type-meta)',
                     letterSpacing: '0.16em',
                     textTransform: 'uppercase',
                     color: 'var(--kbn-graphite-faint)',

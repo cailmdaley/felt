@@ -7,7 +7,10 @@ import { getBrowser } from './browser.mjs'
 const title = 'Calibrate the shear response across independent sky patches and validate each redshift bin'
 const url = `${pathToFileURL(resolve('harness-board-dist/index.html')).href}?example=threads&transcript=warm&long-title`
 async function openRoot(page) {
-  await page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).click()
+  // Click the row's own name: its crumb leads to the root with the rail forced open.
+  const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: title }).first().locator('.kbn-card-name')
+  const box = await name.boundingBox()
+  await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-selected .ws-chat-head')
   // A family's Desk row opens its frontier; these journeys exercise the root.
   for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== title; depth++) await header.locator('.ws-chat-back').click()
@@ -65,9 +68,9 @@ export function registerHeaderBarJourneys(test) {
     await resize(850, false)
     assert.ok(await focused(temper), 'desktop actions retain focus in narrow cards')
     await resize(1440, false)
-    await header.getByRole('button', { name: 'Brief', exact: true }).focus()
+    await header.getByRole('button', { name: 'Constitution', exact: true }).focus()
     await resize(390, true)
-    assert.ok(await focused(header.getByRole('button', { name: 'Brief', exact: true })), 'Brief retains focus beside Report on the phone')
+    assert.ok(await focused(header.getByRole('button', { name: 'Constitution', exact: true })), 'Constitution retains focus beside Artifact on the phone')
     await settings.focus()
     await resize(1440, false)
     assert.ok(await focused(settings), 'the same Settings control retains focus on return to desktop')
@@ -111,8 +114,8 @@ export function registerHeaderBarJourneys(test) {
       }
       assert.ok(rows.leave.top < rows.title.bottom && rows.leave.bottom > rows.title.top, `× stays beside the title at ${width}`)
       assert.ok(rows.head.right - rows.leave.right < 80, `× ends the header at ${width}`)
-      if (width <= 701) assert.ok(rows.refs.top >= rows.acts.top - 1, `Brief and Report follow the actions at ${width}`)
-      else assert.ok(rows.refs.top <= rows.title.top + 1 && rows.refs.bottom <= rows.acts.top + 1, `Brief and Report are paired above the action row at ${width}`)
+      if (width <= 701) assert.ok(rows.refs.top >= rows.acts.top - 1, `Constitution and Artifact follow the actions at ${width}`)
+      else assert.ok(rows.refs.top <= rows.title.top + 1 && rows.refs.bottom <= rows.acts.top + 1, `Constitution and Artifact are paired above the action row at ${width}`)
       const slack = { left: rows.acts.left, right: rows.acts.right }
       const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
       const left = Math.min(...line.map(b => b.left)) - slack.left
@@ -176,7 +179,7 @@ export function registerHeaderBarJourneys(test) {
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
-  test('The 390px phone header keeps state, lifecycle verbs, Settings, Brief and Report visible together', async page => {
+  test('The 390px phone header keeps state, lifecycle verbs, Settings, Constitution and Artifact visible together', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
@@ -381,7 +384,7 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(reportTitle?.length)
       assert.equal(await report.getAttribute('aria-label'), `Read artifact: ${reportTitle}`)
       assert.equal(await report.locator('.ws-report-title').count(), 0)
-      assert.equal(await report.locator('.ws-report-label').innerText(), 'Report')
+      assert.equal(await report.locator('.ws-report-label').innerText(), 'Artifact')
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()
@@ -393,7 +396,7 @@ export function registerHeaderBarJourneys(test) {
         assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
         assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
       }
-      for (const label of device === 'desktop' ? ['Brief', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
+      for (const label of device === 'desktop' ? ['Constitution', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
         const icon = header.getByRole('button', { name: label, exact: true })
         assert.equal(await icon.getAttribute('title'), label)
         assert.deepEqual(await icon.evaluate(el => {
@@ -429,7 +432,7 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(await sheet.locator('.ws-transcript-hit:not([hidden])').count())
       assert.match(await sheet.locator('.ws-transcript-hit').innerText(), /% cached/)
       if (device === 'phone') {
-        assert.ok(await header.getByRole('button', { name: 'Brief', exact: true }).isVisible())
+        assert.ok(await header.getByRole('button', { name: 'Constitution', exact: true }).isVisible())
         assert.equal(await sheet.locator('.ws-chat-console').count(), 1, 'Console belongs to Settings even when this card has no attach target')
         assert.ok(await header.getByRole('button', { name: 'Temper', exact: true }).isVisible())
         const discard = header.getByRole('button', { name: 'Discard', exact: true })

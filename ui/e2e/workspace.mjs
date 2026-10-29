@@ -326,7 +326,7 @@ async function choose(p, label) {
       await pageFor(p, 'Chat').and(p.locator('.ws-selected')).waitFor()
     }
     if (label === 'Constitution') {
-      await headerAction(p, 'Brief')
+      await headerAction(p, 'Constitution')
     }
   } else if (label === 'calibration-report' && await isSelected(p, 'Chat')) {
     await selected(p).locator('.ws-report-chip').click()
@@ -482,34 +482,35 @@ test('Fresh Desk leaves focus alone; the first j selects awaiting review and Ent
 })
 
 for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Workspace type distinguishes names, verbs and data (${device})`, async p => {
-  const type = async (selector, size, family) => {
-    const actual = await p.locator(selector).first().evaluate(el => {
+  // Each element is checked against its type role, resolved from type.css.
+  const type = async (selector, role, family) => {
+    const actual = await p.locator(selector).first().evaluate((el, role) => {
       const style = getComputedStyle(el)
-      return { size: style.fontSize, family: style.fontFamily }
-    })
-    assert.equal(actual.size, `${size}px`, selector)
+      return { size: style.fontSize, role: style.getPropertyValue(`--type-${role}`).trim(), family: style.fontFamily }
+    }, role)
+    assert.equal(actual.size, actual.role, `${selector} is set at ${role}`)
     assert.ok(actual.family.includes(family), `${selector}: ${actual.family}`)
   }
   await open(p); await reportReady(p)
   if (device === 'desktop') {
-    await type('.ws-selected .ws-label-title', 15, 'EB Garamond')
-    await type('.ws-selected .ws-provenance', 11, 'IBM Plex Mono')
+    await type('.ws-selected .ws-label-title', 'label', 'EB Garamond')
+    await type('.ws-selected .ws-provenance', 'meta', 'IBM Plex Mono')
   } else {
-    await type('.ws-channel-title', 15, 'EB Garamond')
+    await type('.ws-channel-title', 'label', 'EB Garamond')
   }
   await choose(p, 'Constitution')
-  await type('.ws-selected .ws-prose-status', 15, 'EB Garamond')
-  if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 34, 'EB Garamond')
+  await type('.ws-selected .ws-prose-status', 'label', 'EB Garamond')
+  if (device === 'desktop') await type('.ws-selected .ws-fiber-prose h1', 'display', 'EB Garamond')
   assert.equal(await selected(p).locator('.kbn-detail-lede').count(), 0, 'the reading page draws no outcome')
   await choose(p, 'Chat')
-  await type('.ws-selected .kbn-ctl-send', 15, 'EB Garamond')
+  await type('.ws-selected .kbn-ctl-send', 'label', 'EB Garamond')
   await chatMenu(p, 'Settings')
-  await type('.ws-selected .kbn-ctl-strip', 11, 'IBM Plex Mono')
+  await type('.ws-selected .kbn-ctl-strip', 'meta', 'IBM Plex Mono')
   await choose(p, 'tone.mp3')
   await p.waitForFunction(() => document.querySelector('.ws-selected audio')?.readyState >= 1)
-  await type('.ws-selected .ws-audio-play', 15, 'EB Garamond')
-  await type('.ws-selected .ws-audio-clock', 11, 'IBM Plex Mono')
-  await type('.ws-selected .ws-audio-compare button > span:first-child', 15, 'EB Garamond')
+  await type('.ws-selected .ws-audio-play', 'label', 'EB Garamond')
+  await type('.ws-selected .ws-audio-clock', 'meta', 'IBM Plex Mono')
+  await type('.ws-selected .ws-audio-compare button > span:first-child', 'label', 'EB Garamond')
   await p.keyboard.press('?')
   assert.equal(await p.locator('.kbn-keymap-dialog header button').textContent(), '×')
   await p.keyboard.press('Escape')

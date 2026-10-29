@@ -1,8 +1,8 @@
-.kbn-thread-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; text-align: left; font: inherit; font-size: 12px; background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
+.kbn-thread-row { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; text-align: left; font: inherit; font-size: var(--type-meta); background: transparent; color: var(--kbn-ink); border: 0; padding: 6px 8px; cursor: pointer; }
 .kbn-thread-row:hover, .kbn-thread-row:focus-visible { background: var(--kbn-plate); }
 .kbn-thread-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Messages waiting for a constitution's next worker outside constitution index rows. */
-.kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: calc(11px * var(--kbn-type-scale, 1)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kbn-waiting { flex: none; color: var(--kbn-ink-faint); font-size: var(--type-meta); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kbn-thread-item { position: relative; display: flex; align-items: center; min-width: 0; }
 .kbn-thread-item > .kbn-thread-row { flex: 1 1 auto; min-width: 0; padding-right: 24px; }
 .kbn-thread-pin { position: absolute; right: 2px; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--kbn-ink-muted); cursor: pointer; opacity: 0.45; }

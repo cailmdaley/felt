@@ -26,8 +26,6 @@
     0 1px 2px color-mix(in srgb, var(--ws-ink) 10%, transparent),
     0 28px 64px -14px color-mix(in srgb, var(--ws-ink) 28%, transparent);
   --ws-mask: var(--ws-ink);
-  --ws-serif: var(--font-serif, 'EB Garamond', Georgia, serif);
-  --ws-mono: var(--font-mono, 'IBM Plex Mono', ui-monospace, monospace);
   --ws-mono-tracking: 0.08em;
   --ws-rhumb: color-mix(in srgb, var(--ws-ink) 7%, transparent);
   --ws-accent: var(--ws-fresh);
@@ -78,7 +76,7 @@
   display: block;
   width: 140px; margin-top: .65em; text-align: center;
   color: var(--ws-ink-muted);
-  font: 500 0.48em/1 var(--ws-mono);
+  font: 500 var(--glyph-ornament)/1 var(--font-serif);
   background-image: linear-gradient(var(--ws-hairline), var(--ws-hairline)), linear-gradient(var(--ws-hairline), var(--ws-hairline));
   background-size: 42% 1px; background-position: left center, right center; background-repeat: no-repeat;
   opacity: 0.72;

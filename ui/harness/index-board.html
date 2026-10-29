@@ -17,11 +17,6 @@
      file:// resolves them (the bundled rule uses an absolute /fonts/ path). */
   @font-face { font-family: 'EBGI F1'; src: url('./fonts/EBGaramond-InitialsF1.otf') format('opentype'); font-display: swap; }
   @font-face { font-family: 'EBGI F2'; src: url('./fonts/EBGaramond-InitialsF2.otf') format('opentype'); font-display: swap; }
-  :root {
-    --font-main: 'EB Garamond', Georgia, serif;
-    --font-serif: 'EB Garamond', Georgia, serif;
-    --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, monospace;
-  }
   html, body { margin: 0; height: 100%; background: #d9cdb8; }
   /* The board mounts into a fixed full-viewport host (see harness-board.ts);
      the workspace ✕ / new-window corner buttons are simulated here so the
