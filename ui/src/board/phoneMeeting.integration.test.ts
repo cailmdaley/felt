@@ -8,7 +8,7 @@ import type { RelayEvents } from '../phone/session'
 import { MOBILE_MEDIA } from './mobile'
 import { parseMeetingRecord, type MeetingRecord, type MeetingStatus } from './meeting'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes'
-import { card } from './testFixtures'
+import { card, response as boardResponse } from './testFixtures'
 
 vi.mock('../phone/relay', () => ({ RelayLink: vi.fn(function () {
   return { open: vi.fn(), close: vi.fn(), send: vi.fn(), nudge: vi.fn() }
@@ -37,10 +37,7 @@ const sendWith = (compose: () => Promise<string> = async () => ''): Send =>
 const row = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => parseMeetingRecord({
   state: 'loading', title: 'Meeting', phone: true, launch: 'L1', tmux_session: 'hark-pane', ...overrides,
 })!
-const response = (): KanbanResponse => ({
-  now: { drafts: [], inFlight: [], awaitingReview: [] },
-  stash: [], pinned: [], cycles: [], originStaleness: {},
-}) as unknown as KanbanResponse
+const response = (): KanbanResponse => boardResponse()
 const defer = <T,>() => {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((yes) => { resolve = yes })

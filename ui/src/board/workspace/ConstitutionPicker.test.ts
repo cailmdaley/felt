@@ -94,3 +94,24 @@ it('reports only retained, placed rows after every refresh and revision patch, t
   picker.dispose()
   expect(onRemove).toHaveBeenCalledTimes(2)
 })
+
+it('keeps Desk row order when the current page repeats a caption at the end', () => {
+  const cards = [card({ id: 'draft' }), card({ id: 'working' }), card({ id: 'reader-only' })]
+  picker = new ConstitutionPicker({
+    cards: () => cards,
+    onOpen: vi.fn(),
+    group: item => item.id === 'working' ? 'Working' : 'Drafts',
+  })
+  document.body.append(picker.el)
+  picker.refresh(false)
+  const rowIds = (): string[] => [...picker!.el.querySelectorAll<HTMLElement>('.ws-channel-row')]
+    .map(row => row.dataset.channelUid!)
+  const groupNames = (): string[] => [...picker!.el.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')]
+    .map(caption => caption.textContent!)
+
+  expect(rowIds()).toEqual(['draft', 'working', 'reader-only'])
+  expect(groupNames()).toEqual(['Drafts', 'Working', 'Drafts'])
+  picker.refresh(false)
+  expect(rowIds()).toEqual(['draft', 'working', 'reader-only'])
+  expect(groupNames()).toEqual(['Drafts', 'Working', 'Drafts'])
+})

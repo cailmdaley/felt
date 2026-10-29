@@ -400,17 +400,25 @@ export class Workspace {
       return
     }
     const cards = this.opts.cards()
+    const revision = JSON.stringify([
+      cards,
+      cards.map(card => {
+        const placement = this.opts.deskPlacement?.(card)
+        return placement ? [placement.column, placement.group] : null
+      }),
+    ])
+    const changed = revision !== this.lastUpdateRevision
+    if (changed) this.lastUpdateRevision = revision
     const card = cards.find(c => (c.uid ?? c.id) === this.current?.channel.uid && c.originId === this.current.channel.owner)
     // A fiber outside the feed (a role, a note) keeps its card; a role page still follows its holds.
     if (!card) {
       this.mentions.refresh()
       this.overview.cardsChanged()
+      if (changed) this.reader.refreshChannels()
       this.refreshProse(this.current)
       return
     }
-    const revision = JSON.stringify(cards)
-    if (revision === this.lastUpdateRevision) return
-    this.lastUpdateRevision = revision
+    if (!changed) return
     this.mentions.refresh()
     this.overview.cardsChanged()
     if (threadFamilyRevision(card, this.opts.threadIndex?.() ?? new ThreadIndex(cards)) === this.lastRenderedFamilyRevision) {

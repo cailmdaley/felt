@@ -375,6 +375,33 @@ async function chooseDeskColumn(p, index) {
     return !!leaf && leaf.left >= 0 && leaf.right <= innerWidth
   }, index)
 }
+test('Phone 375 Desk folio keeps its full label and count clear of the active action', async p => {
+  const tab = p.locator('.kbn-folio-seg-active')
+  await tab.waitFor()
+  const layout = await tab.evaluate(segment => {
+    const name = segment.querySelector('.kbn-folio-name')
+    const count = segment.querySelector('.kbn-folio-count')
+    const action = segment.querySelector('.kbn-col-action')
+    const label = action?.querySelector('.kbn-col-action-label')
+    const rect = el => { const box = el.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth } }
+    return {
+      tabName: name?.textContent,
+      tabLabel: segment.getAttribute('aria-label'),
+      count: count?.textContent,
+      actionLabel: action?.getAttribute('aria-label'),
+      actionTextDisplay: label ? getComputedStyle(label).display : null,
+      tab: rect(segment), name: rect(name), countBox: rect(count), action: rect(action),
+    }
+  })
+  assert.equal(layout.tabName, 'In flight')
+  assert.match(layout.tabLabel, /^In flight \(/)
+  assert.equal(layout.actionLabel, 'New idea — speak it into a card')
+  assert.equal(layout.actionTextDisplay, 'none')
+  assert.ok(layout.name.scrollWidth <= layout.name.clientWidth + 1, 'the full tab name fits')
+  assert.ok(layout.name.right <= layout.countBox.left + 1, 'the count follows the name')
+  assert.ok(layout.countBox.right <= layout.action.left + 1, 'the action follows the count')
+  assert.ok(layout.action.right <= layout.tab.right + 1, 'the action stays inside the tab')
+}, { width: 375, height: 667 })
 async function revealLatestFiles(p) {
   const latest = p.locator('.ws-overview-latest')
   await latest.waitFor()

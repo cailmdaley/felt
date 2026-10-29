@@ -1716,7 +1716,15 @@ export class KanbanModal {
   /** Update the drawn meeting in place, or redraw the desk when it moved
    *  onto or off its card. */
   private presentMeeting(): void {
-    if (!this.surfaces.updateMeetingPresentation() && this.lastResponse) this.render(this.lastResponse)
+    const updated = this.surfaces.updateMeetingPresentation()
+    if (!updated && this.lastResponse) {
+      this.render(this.lastResponse)
+      return
+    }
+    if (this.lastResponse) {
+      this.deskProjection = deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting)
+      this.syncWorkspaceRuntime()
+    }
   }
 
   private scheduleMeetingPoll(succeeded = true): void {

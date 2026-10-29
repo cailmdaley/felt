@@ -18,6 +18,7 @@ interface WorkspaceBoard {
   lastResponse: KanbanResponse | null
   pendingDeskData: KanbanResponse | null
   meetingStatus: { meeting: MeetingRecord | null }
+  presentMeeting(): void
   deskEl: HTMLDivElement | null
   workspaceCards(): KanbanCard[]
 }
@@ -135,6 +136,58 @@ describe('Desk rows in the document workspace', () => {
       const reader = [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(row => row.dataset.channelUid)
       expect(drawn).toEqual(['other-draft', 'turn', 'draft', 'working', 'review'])
       expect(reader).toEqual(drawn)
+    } finally {
+      board.unmount()
+    }
+  })
+
+  it('refreshes Reader groups through meeting start and end without changing row order', async () => {
+    const host = card({ id: 'draft-host' })
+    const working = card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })
+    const data = response({ now: { drafts: [host], inFlight: [working], awaitingReview: [] } })
+    const meeting: MeetingRecord = {
+      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
+      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
+    }
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
+    board.mount(document.body)
+    try {
+      board.lastResponse = data
+      board.render(data)
+      board.workspace.open(host, 'Desk')
+      await flushTasks()
+      const sidebar = board.workspace.reader!.el.querySelector<HTMLElement>('.ws-sidebar')!
+      board.workspace.reader!.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!.click()
+      const groups = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')].map(el => el.textContent!)
+      const rows = (): string[] => [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(el => el.dataset.channelUid!)
+      expect(groups()).toEqual(['Drafts', 'Working'])
+      expect(rows()).toEqual(['draft-host', 'working'])
+
+      const groupFor = (id: string): string | undefined => sidebar
+        .querySelector<HTMLElement>(`.ws-channel-row[data-channel-uid="${id}"]`)
+        ?.closest<HTMLElement>('.ws-channel-group')
+        ?.querySelector<HTMLElement>('.kbn-flight-caption')?.textContent
+      const deskRows = (): string[] => rows().filter(id => id === 'draft-host' || id === 'working')
+      const rolePage = card({ id: 'roles/editor', shuttleSeat: true, shuttleRole: 'editor' })
+      board.workspace.open(rolePage, 'Desk')
+      await flushTasks()
+      expect(groupFor('draft-host')).toBe('Drafts')
+
+      board.workspace.update()
+      board.meetingStatus.meeting = meeting
+      board.presentMeeting()
+
+      expect(deskRows()).toEqual(['draft-host', 'working'])
+      expect(groupFor('draft-host')).toBe('Working')
+
+      board.meetingStatus.meeting = null
+      board.presentMeeting()
+
+      expect(deskRows()).toEqual(['draft-host', 'working'])
+      expect(groupFor('draft-host')).toBe('Drafts')
     } finally {
       board.unmount()
     }

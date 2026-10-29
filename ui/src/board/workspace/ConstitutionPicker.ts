@@ -107,24 +107,29 @@ export class ConstitutionPicker {
     let parent: HTMLElement = this.list
     let cursor = listCursor
     let previousGroup: string | undefined
+    let groupRun = 0
+    let groupKey: string | undefined
     const groups = new Set<string>()
     for (const card of visible) {
       const group = this.opts.group?.(card)
       if (group !== previousGroup) {
         if (group) {
-          let box = this.groups.get(group)
+          groupKey = JSON.stringify([++groupRun, group])
+          let box = this.groups.get(groupKey)
           if (!box) {
             box = document.createElement('div'); box.className = 'ws-channel-group'
-            const caption = document.createElement('h3'); caption.className = 'kbn-flight-caption'; caption.textContent = group
-            box.append(caption); this.groups.set(group, box)
+            box.append(document.createElement('h3')); this.groups.set(groupKey, box)
           }
-          groups.add(group)
+          box.firstElementChild!.className = 'kbn-flight-caption'
+          box.firstElementChild!.textContent = group
+          groups.add(groupKey)
           if (box !== listCursor) this.list.insertBefore(box, listCursor)
           listCursor = box.nextSibling
           parent = box; cursor = box.firstChild!.nextSibling
-        } else { parent = this.list; cursor = listCursor }
+        } else { groupKey = undefined; parent = this.list; cursor = listCursor }
       }
       previousGroup = group
+      if (groupKey) groups.add(groupKey)
       const key = identity(card)
       const revision = this.opts.revision?.(card) ?? JSON.stringify(card)
       let row = this.rows.get(key)

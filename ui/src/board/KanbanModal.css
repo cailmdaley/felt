@@ -2511,3 +2511,9 @@
     gap: 4px;
   }
 }
+
+/* The narrow phone folio keeps its full tab name and count beside the action glyph. */
+@media (max-width: 430px) {
+  .kbn-folio-seg-active .kbn-col-action-label { display: none; }
+  .kbn-folio-seg-active .kbn-col-action { padding-inline: 4px; }
+}
