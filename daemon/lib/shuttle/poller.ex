@@ -106,6 +106,26 @@ defmodule Shuttle.Poller do
   # the fix is usually a one-line config edit, and re-testing costs one probe.
   @preflight_cooldown_ms 300_000
 
+  @poll_plan_task_inputs [
+    :auto_discover_felt_stores,
+    :felt_stores,
+    :discovery,
+    :full_scan_budget_ms
+  ]
+  @poll_read_task_inputs [
+    :felt_stores,
+    :discovery,
+    :full_scan_timeout_ms,
+    :full_scan_budget_ms,
+    :full_scan_min_interval_ms,
+    :last_known_listings,
+    :last_full_listings,
+    :runner,
+    :document_cache,
+    :running,
+    :task_reads
+  ]
+
   defmodule State do
     @moduledoc false
     defstruct [
@@ -1313,7 +1333,9 @@ defmodule Shuttle.Poller do
     {:env, plan_environment} = :erlang.fun_info(plan_fun, :env)
     plan_environment_words = :erts_debug.flat_size(plan_environment)
 
-    read_fun = poll_read_task_fun(state, parent, poll_token, plan)
+    read_fun =
+      poll_read_task_fun(state, parent, poll_token, plan)
+
     {:env, read_environment} = :erlang.fun_info(read_fun, :env)
     read_environment_words = :erts_debug.flat_size(read_environment)
     measurement_microseconds = System.monotonic_time(:microsecond) - measurement_started_at
@@ -1766,8 +1788,8 @@ defmodule Shuttle.Poller do
   end
 
   @doc false
-  def cached_fiber(%State{} = state, fiber_id) do
-    Enum.find_value(state.document_cache, fn {_key, %{entry: entry}} ->
+  def cached_fiber(%{document_cache: document_cache}, fiber_id) do
+    Enum.find_value(document_cache, fn {_key, %{entry: entry}} ->
       fiber = Map.get(entry, :fiber, %{})
 
       if fiber_id in [Map.get(fiber, "id"), Map.get(fiber, "uid"), Map.get(fiber, "slug")],
@@ -1802,7 +1824,7 @@ defmodule Shuttle.Poller do
   # the live GenServer). The rescue/catch turns a felt/SSH explosion into a
   # logged `{:error, _}` rather than a crash that would take the linked poller
   # down with the Task.
-  defp poll_reads(%State{} = state, discovery_plan) do
+  defp poll_reads(state, discovery_plan) do
     {candidates, store_map, store_listings, full_listings, discovery} =
       discover_candidates(state, discovery_plan)
 
@@ -2195,7 +2217,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc false
-  def discovery_plan(%State{} = state, stores, now_ms) do
+  def discovery_plan(state, stores, now_ms) do
     Map.new(stores, fn store ->
       previous = Map.get(state.discovery, store, %{})
 
@@ -5455,11 +5477,13 @@ defmodule Shuttle.Poller do
   end
 
   defp poll_plan_task_fun(%State{} = state, parent, poll_token) do
+    inputs = Map.take(state, @poll_plan_task_inputs)
+
     fn ->
       result =
         try do
-          stores = refreshed_felt_stores(state)
-          plan = discovery_plan(state, stores, System.system_time(:millisecond))
+          stores = refreshed_felt_stores(inputs)
+          plan = discovery_plan(inputs, stores, System.system_time(:millisecond))
           {:ok, %{stores: stores, discovery_plan: plan}}
         rescue
           error -> {:error, Exception.format(:error, error, __STACKTRACE__)}
@@ -5472,7 +5496,9 @@ defmodule Shuttle.Poller do
   end
 
   defp poll_read_task_fun(%State{} = state, parent, poll_token, discovery_plan) do
-    fn -> send(parent, {:poll_world, poll_token, poll_reads(state, discovery_plan)}) end
+    inputs = Map.take(state, @poll_read_task_inputs)
+
+    fn -> send(parent, {:poll_world, poll_token, poll_reads(inputs, discovery_plan)}) end
   end
 
   defp stop_poll_task(nil), do: :ok

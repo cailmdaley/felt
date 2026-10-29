@@ -61,7 +61,7 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
-  test "CPU memory diagnostics return scalars without changing Poller state" do
+  test "CPU memory diagnostics measure bounded task inputs without changing Poller state" do
     {:ok, poller} =
       start_poller!(
         runner: MockRunner,
@@ -73,6 +73,8 @@ defmodule Shuttle.PollerTest do
     await_boot_cycle!(poller)
     before = :sys.get_state(poller, @state_timeout)
 
+    baseline = Poller.cpu_memory_measurements(poller)
+
     assert %{
              available: true,
              measurement_microseconds: measurement_microseconds,
@@ -81,7 +83,7 @@ defmodule Shuttle.PollerTest do
              state: %{words: state_words, bytes: state_bytes},
              poll_plan_task_environment: %{words: plan_words, bytes: plan_bytes},
              poll_read_task_environment: %{words: read_words, bytes: read_bytes}
-           } = Poller.cpu_memory_measurements(poller)
+           } = baseline
 
     assert word_size_bytes > 0
     assert is_integer(measurement_microseconds)
@@ -92,11 +94,34 @@ defmodule Shuttle.PollerTest do
 
     assert state_words == :erts_debug.flat_size(before)
     assert state_bytes == state_words * word_size_bytes
-    assert plan_words > state_words
-    assert read_words > state_words
     assert plan_bytes == plan_words * word_size_bytes
     assert read_bytes == read_words * word_size_bytes
     assert :sys.get_state(poller, @state_timeout) == before
+
+    :sys.replace_state(poller, &%{&1 | orphans: Enum.to_list(1..5_000)})
+    with_large_excluded_field = Poller.cpu_memory_measurements(poller)
+
+    assert with_large_excluded_field.state.words > state_words
+
+    assert with_large_excluded_field.poll_plan_task_environment.words ==
+             baseline.poll_plan_task_environment.words
+
+    assert with_large_excluded_field.poll_read_task_environment.words ==
+             baseline.poll_read_task_environment.words
+
+    large_document_cache = Map.new(1..2_000, &{&1, &1})
+    :sys.replace_state(poller, &%{&1 | document_cache: large_document_cache})
+    with_large_cache = Poller.cpu_memory_measurements(poller)
+
+    assert with_large_cache.state.words > with_large_excluded_field.state.words
+
+    assert with_large_cache.poll_plan_task_environment.words ==
+             with_large_excluded_field.poll_plan_task_environment.words
+
+    assert with_large_cache.poll_read_task_environment.words >
+             with_large_excluded_field.poll_read_task_environment.words
+
+    assert :sys.get_state(poller, @state_timeout).document_cache == large_document_cache
   end
 
   test "Desk orchestrators use nearest constitution across plain levels before owner filtering" do
@@ -813,7 +838,11 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_fiber(
       "tests/report-toggle",
-      Map.put(current, "report_path", "#{MockRunner.felt_dir()}/tests/report-toggle/artifact.html")
+      Map.put(
+        current,
+        "report_path",
+        "#{MockRunner.felt_dir()}/tests/report-toggle/artifact.html"
+      )
     )
 
     sync_poll_cycle!(poller)
