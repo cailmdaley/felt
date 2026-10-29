@@ -1348,10 +1348,12 @@ defmodule Shuttle.Poller do
       semantics:
         "flat_size estimates flattened message and spawn term copy size; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS",
       poll_plan_task_environment: %{
+        input_keys: captured_poll_input_keys!(plan_environment),
         words: plan_environment_words,
         bytes: plan_environment_words * word_size_bytes
       },
       poll_read_task_environment: %{
+        input_keys: captured_poll_input_keys!(read_environment),
         words: read_environment_words,
         bytes: read_environment_words * word_size_bytes
       }
@@ -5492,6 +5494,14 @@ defmodule Shuttle.Poller do
         end
 
       send(parent, {:poll_plan, poll_token, result})
+    end
+  end
+
+  defp captured_poll_input_keys!(environment) do
+    case Enum.filter(environment, &match?(%{felt_stores: _}, &1)) do
+      [%{felt_stores: _} = inputs] -> inputs |> Map.keys() |> Enum.sort()
+      [] -> raise ArgumentError, "poll task environment is missing its captured inputs"
+      _ -> raise ArgumentError, "poll task environment has ambiguous captured inputs"
     end
   end
 

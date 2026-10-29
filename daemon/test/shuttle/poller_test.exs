@@ -81,9 +81,38 @@ defmodule Shuttle.PollerTest do
              word_size_bytes: word_size_bytes,
              semantics: semantics,
              state: %{words: state_words, bytes: state_bytes},
-             poll_plan_task_environment: %{words: plan_words, bytes: plan_bytes},
-             poll_read_task_environment: %{words: read_words, bytes: read_bytes}
+             poll_plan_task_environment: %{
+               input_keys: plan_input_keys,
+               words: plan_words,
+               bytes: plan_bytes
+             },
+             poll_read_task_environment: %{
+               input_keys: read_input_keys,
+               words: read_words,
+               bytes: read_bytes
+             }
            } = baseline
+
+    assert plan_input_keys == [
+             :auto_discover_felt_stores,
+             :discovery,
+             :felt_stores,
+             :full_scan_budget_ms
+           ]
+
+    assert read_input_keys == [
+             :discovery,
+             :document_cache,
+             :felt_stores,
+             :full_scan_budget_ms,
+             :full_scan_min_interval_ms,
+             :full_scan_timeout_ms,
+             :last_full_listings,
+             :last_known_listings,
+             :runner,
+             :running,
+             :task_reads
+           ]
 
     assert word_size_bytes > 0
     assert is_integer(measurement_microseconds)
