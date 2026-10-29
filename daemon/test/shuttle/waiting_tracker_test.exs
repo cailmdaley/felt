@@ -14,8 +14,17 @@ defmodule Shuttle.WaitingTrackerTest do
   defp phase(sessions, id, now \\ @now), do: Tracker.phases(sessions, now)[id].phase
   defp fold(events), do: Enum.reduce(events, %{}, &Tracker.apply_event(&2, &1, @now))
 
+  test "a fresh session has no turn phase before its first prompt" do
+    sessions = fold([event("session_start")])
+    assert Tracker.phases(sessions, @now) == %{}
+    assert sessions["session-a"].turn == :unstarted
+
+    sessions = Tracker.apply_event(sessions, event("user_prompt_submit"), @now)
+    assert phase(sessions, "session-a") == "working"
+  end
+
   test "opening a conversation is waiting until a prompt or tool starts work" do
-    for prefix <- [[], [event("stop")], [event("session_end")]] do
+    for prefix <- [[event("stop")], [event("session_end")]] do
       sessions = fold(prefix ++ [event("session_start")])
       assert phase(sessions, "session-a") == "waiting"
 

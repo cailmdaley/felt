@@ -136,11 +136,11 @@ from "this session is watching its own shells":
   drops the whole event and a stream with no stops reads as a fleet that never
   finishes a turn.
 
-Each session holds a turn (`open`, `closed`, or `ended`), a background-task count, a live-child count, a pending human request, and its real last-event timestamp.
+Each session holds a turn (`unstarted`, `open`, `closed`, or `ended`), a background-task count, a live-child count, a pending human request, and its real last-event timestamp.
 The phase is derived from those facts: a pending request is `attention`; an open turn is `working`; a closed turn with recent outstanding work is `working`; otherwise the session is `waiting`.
 
-- `session_start` opens the conversation in a waiting state and clears counts and pending requests.
-  A prompt or tool event starts the turn, so a quiet resume remains the human's turn.
+- `session_start` clears counts and pending requests. A known conversation reopens waiting; a first opening has no turn phase until prompt or tool evidence, so the board keeps a fresh launch starting rather than calling it the human's turn.
+  A prompt or tool event starts the turn, so a quiet resume of a known waiting session remains the human's turn.
 - `user_prompt_submit` opens the turn and clears background work and pending requests, preserving the Codex child count.
 - `stop` closes the turn, restates the background count, and clears pending requests.
 - Permission, elicitation, and untyped notifications set a pending request.

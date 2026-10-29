@@ -21,7 +21,7 @@ defmodule Shuttle.WaitingTracker do
 
   defmodule Session do
     @moduledoc false
-    defstruct turn: :open,
+    defstruct turn: :unstarted,
               bg: 0,
               kids: 0,
               pending: false,
@@ -45,11 +45,13 @@ defmodule Shuttle.WaitingTracker do
           session.pending -> "attention"
           session.turn == :open -> "working"
           session.turn != :ended and session.bg + session.kids > 0 -> "working"
+          session.turn == :unstarted -> nil
           true -> "waiting"
         end
 
       {id, %{last_event_at: session.at, phase: phase}}
     end)
+    |> Map.reject(fn {_id, activity} -> is_nil(activity.phase) end)
   end
 
   @doc "Applies one decoded event to the session map."
@@ -163,10 +165,10 @@ defmodule Shuttle.WaitingTracker do
     )
   end
 
-  # Opening or resuming a conversation does not start a model turn.
+  # A first opening has no turn evidence; a known conversation reopens quietly.
   defp do_transition(session, "session_start", event, now) do
     touch(session, event, now,
-      turn: :closed,
+      turn: if(session.turn == :unstarted, do: :unstarted, else: :closed),
       bg: 0,
       kids: 0,
       pending: false,
