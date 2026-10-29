@@ -161,21 +161,21 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   and daemon state.
 - **No tag predicate for dispatch — two gates, both explicit.** A fiber is
   Shuttle-managed iff it carries a `shuttle:` block. It dispatches iff (1) its
-  felt `status` is `active` and (2) the boot quarantine is released: every
-  daemon restart parks every dispatchable candidate — fresh launches and
-  dirty-death resumes alike — in `pending_launch` until
-  `shuttle daemon release`; only work the daemon observed running and
-  cron-due standing constitutions pass through. The one exception is opt-in per host
-  (`~/.config/shuttle/host.json` has `"quarantine_auto_release": true`): a
-  daemon killed hard and back within the heartbeat window, on the same
-  machine, with every recorded worker re-adopted and no churn, releases
-  itself only if its previous incarnation had been released
-  (`Shuttle.DaemonHeartbeat`). An asked-for restart — every deploy and
-  operator restart, `make stop`, or re-running `bin/shuttle-launch` — leaves
-  a stop marker and always holds. An unreleased hold survives hard kills.
-  There is no `enabled` flag; steady-state recovery of a worker that dies while
-  the daemon is healthy and unquarantined is unaffected, and force-dispatch
-  bypasses the quarantine. Tags are free-form qualitative noticings.
+  felt `status` is `active` and (2) fresh autonomous work is not held by boot
+  quarantine. A restart parks fresh launches in `pending_launch` until
+  `shuttle daemon release`. A worker that was already running is restored
+  automatically: a finished turn reopens quietly, while durable hook evidence
+  of an interrupted turn supplies the resume prompt; ambiguous turn evidence
+  reopens quietly. Restorations do not release the quarantine. Due standing
+  occurrences retain their scheduled authorization. On a host opting into
+  `quarantine_auto_release`, a hard crash boot can release fresh dispatch if
+  the previous daemon had been released,
+  returned within the heartbeat window on the same machine, and did not
+  crash-loop (`Shuttle.DaemonHeartbeat`). An asked-for restart — every deploy
+  and operator restart, `make stop`, or re-running `bin/shuttle-launch` — leaves
+  a stop marker and holds fresh dispatch. An unreleased hold survives hard
+  kills. There is no `enabled` flag; force-dispatch bypasses the quarantine.
+  Tags are free-form qualitative noticings.
 
 ## The daily loop
 
@@ -257,8 +257,7 @@ its repair.
 — the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
 oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
 still fire). Only on a host that opted in does a hard-killed, previously
-released daemon back within seconds, workers intact and no churn, release
-itself. A daemon
+released daemon back within seconds and without churn releases fresh dispatch. A daemon
 route change must ship with the matching UI; `make build` builds both.
 Fetched-release users do not need this checkout deployment helper. Details:
 [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).

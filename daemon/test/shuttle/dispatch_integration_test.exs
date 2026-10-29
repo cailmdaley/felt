@@ -826,7 +826,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     refute resume_half =~ "<<<"
   end
 
-  test "poller continuation resumes the dispatch marker's session on a dirty death", %{
+  test "poller restoration quietly resumes a dirty conversation with ambiguous turn evidence", %{
     host: host
   } do
     write_fiber(host, "tests/poller-history-resume", """
@@ -862,7 +862,8 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     script = read_run_script()
     assert script =~ "--resume '#{session}'"
-    assert script =~ "Mode: resume"
+    refute script =~ "Mode: resume"
+    refute script =~ " || "
   end
 
   test "resume previous dispatch reaches each harness-specific resume command", %{host: host} do
