@@ -4,8 +4,8 @@ defmodule Shuttle.Profile.Functions do
 
   Function counters are inclusive: a caller's time and allocations include the
   work of functions it calls. They are diagnostics and must not be summed as a
-  measure of total VM work. Call time excludes waiting; collection overhead is
-  outside the measured calls.
+  measure of total VM work. Call time excludes waiting. Instrumentation adds
+  overhead; exclude this window from steady-state rates.
   """
 
   @functions [
@@ -17,7 +17,7 @@ defmodule Shuttle.Profile.Functions do
     {Shuttle.Poller, :owner_feed_base, 1},
     {Shuttle.Poller, :stamp_runtime, 3},
     {Shuttle.Poller, :stamp_pending_results, 2},
-    {Shuttle.Poller, :build_snapshot, 1},
+    {Shuttle.Poller.Snapshot, :build_snapshot, 1},
     {Shuttle.Poller.Snapshot, :put_runtime, 5},
     {Shuttle.Poller.Snapshot, :put_held, 2},
     {Shuttle.Poller.Snapshot, :runtime_index, 2},
