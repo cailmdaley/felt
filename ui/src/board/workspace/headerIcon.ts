@@ -7,6 +7,8 @@ const shapes = {
   temper: '<path d="M8 1.5 14.5 8 8 14.5 1.5 8Z"/>',
   discard: '<path d="M2.5 4.5h11M6.5 4.5v-2h3v2M4 4.5l.75 9.5h6.5L12 4.5M6.75 7v4.5M9.25 7v4.5"/>',
   leave: '<path d="m4 4 8 8m0-8-8 8"/>',
+  resume: '<path d="M13 7V3l-2 2a5.5 5.5 0 1 0 2.2 6.5"/>',
+  newSession: '<path d="M8 2v12M2 8h12"/>',
 } as const
 
 export type HeaderIcon = keyof typeof shapes

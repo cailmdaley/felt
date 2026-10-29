@@ -175,17 +175,25 @@
   font: var(--ws-prose-size)/var(--ctl-line-height) var(--ws-serif);
 }
 .ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 2; }
-.ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; min-width: 0; align-items: center; gap: var(--ws-small-gap); }
 /* Text that would reach the verbs takes the whole width; the verbs drop to a row of their own at the field's foot. */
 .ws-dock .kbn-ctl-composer-stacked .kbn-detail-directive { grid-column: 1 / -1; }
 .ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: end; }
-.ws-dock .kbn-ctl-sends { display: inline-flex; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-sends { display: inline-flex; min-width: 0; gap: var(--ws-small-gap); }
 /* Verbs inside the field: the default one is a plate, the others are words. */
 .ws-dock .kbn-ctl-composer .kbn-ctl-btn { min-height: var(--ctl-h); padding-inline: 10px; border-color: transparent !important; background-color: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) { border-color: var(--ws-hairline) !important; background-color: var(--ws-fill); color: var(--ws-ink); }
-/* Meeting is a switch among the verbs. On, it shows the meeting's kind and
-   its own verb, Start meeting, in place of New session and Resume. */
+/* Meeting setup lives in a compact menu; New session and Resume stay visible. */
 .ws-dock .kbn-ctl-meet { display: contents; }
+.ws-dock .kbn-ctl-meet-overflow { position: relative; display: block; flex: none; }
+.ws-dock .kbn-ctl-meet-overflow > summary { display: grid; place-items: center; box-sizing: border-box; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--ws-section-size)/1 var(--ws-serif); cursor: pointer; list-style: none; }
+.ws-dock .kbn-ctl-meet-overflow > summary::-webkit-details-marker { display: none; }
+.ws-dock .kbn-ctl-meet-overflow > summary:hover { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-dock .kbn-ctl-meet-overflow > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-ink); outline-offset: 2px; }
+.ws-dock .kbn-ctl-meet-panel { position: absolute; bottom: calc(100% + var(--ws-small-gap)); left: 0; z-index: 10; display: none; box-sizing: border-box; width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 420px); overflow: auto; padding: 8px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); box-shadow: var(--ws-shadow-low); }
+.ws-dock .kbn-ctl-meet-overflow[open] > .kbn-ctl-meet-panel { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-meet-overflow[open] .kbn-ctl-meet { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
+.ws-dock .kbn-ctl-meet-panel > .kbn-detail-transcript { box-sizing: border-box; max-width: 100%; }
 .ws-dock .kbn-ctl-meet-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; box-sizing: border-box; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--ws-label-size)/1.4 var(--ws-serif); white-space: nowrap; cursor: pointer; margin-right: auto; }
 .ws-dock .kbn-ctl-meet-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .ws-dock .kbn-ctl-meet-switch:has(input:disabled) { opacity: .55; cursor: default; }
@@ -279,7 +287,7 @@
   .ws-dock .kbn-ctl-foot { grid-column: 3; }
   /* The verbs wrap beneath the field, inside its border, on their own row. */
   .ws-dock .kbn-ctl-composer { grid-template-columns: minmax(0, 1fr); }
-  .ws-dock .kbn-ctl-composer-foot, .ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: wrap; justify-content: flex-end; justify-self: stretch; }
+  .ws-dock .kbn-ctl-composer-foot, .ws-dock .kbn-ctl-composer-stacked .kbn-ctl-composer-foot { grid-column: 1; grid-row: 3; flex-wrap: nowrap; justify-content: flex-start; justify-self: stretch; }
   .ws-dock .kbn-ctl-meet-noun { display: none; }
   .ws-dock .kbn-ctl-foot .kbn-ctl-btn { font-size: var(--ws-label-size); }
   .ws-dock :is(.kbn-detail-parent-option, .kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { min-height: var(--ws-phone-target); box-sizing: border-box; }

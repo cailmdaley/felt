@@ -278,7 +278,7 @@ async function choose(p, label) {
       await pageFor(p, 'Chat').and(p.locator('.ws-selected')).waitFor()
     }
     if (label === 'Constitution') {
-      await headerAction(p, 'Constitution')
+      await headerAction(p, 'Brief')
     }
   } else if (label === 'calibration-report' && await isSelected(p, 'Chat')) {
     await selected(p).locator('.ws-report-chip').click()
@@ -1000,7 +1000,8 @@ for (const origin of ['desk', 'chronicle']) test(`Rest popover is above the read
   await origins[origin].open(p)
   await choose(p, 'Constitution')
   await choose(p, 'Chat')
-  await headerAction(p, 'Rest')
+  await appFocus(p)
+  await p.keyboard.press('s')
   const panel = p.locator('.kbn-rest-popover')
   await panel.waitFor()
   assert.equal(await panel.getAttribute('aria-modal'), 'true', 'Rest is a modal over the reader')
@@ -1301,9 +1302,9 @@ test('Verdicts live in the chat bar, with the undo line on its header; keys reac
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  assert.equal(await selected(p).locator('.ws-chat-acts .ws-chat-console').count(), 1)
-  assert.ok(await selected(p).getByRole('button', { name: 'Temper', exact: true }).isVisible())
-  assert.ok(await selected(p).getByRole('button', { name: 'Discard', exact: true }).isVisible())
+  assert.equal(await selected(p).locator('.ws-chat-drawer .ws-chat-console').count(), 1)
+  assert.ok(await selected(p).getByRole('button', { name: 'Close for review', exact: true }).isVisible())
+  assert.ok(await selected(p).getByRole('button', { name: 'Rest', exact: true }).isVisible())
 })
 
 async function verdictLook(locator) {
@@ -1563,11 +1564,11 @@ test('Verdict keys delay writes, guard typing, undo, and commit after leaving th
   assert.equal((await posts()).length, 1)
 })
 
-test('Temper reaches drafts and work in flight from the act zone and t, through the undo queue', async p => {
+test('Temper remains available by key for drafts and work in flight through the undo queue', async p => {
   await chooseDeskColumn(p, 0)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Weekly shear summary' }).click()
   await choose(p, 'Chat')
-  assert.ok(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), 'a draft offers verdicts in its bar')
+  assert.equal(await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').isVisible(), false, 'draft headers reserve their space for session actions')
   await p.keyboard.press('t')
   await selected(p).locator('.ws-fiber-acts .ws-verdict-undo').waitFor()
   await p.keyboard.press('z')
@@ -1587,7 +1588,7 @@ test('Temper reaches drafts and work in flight from the act zone and t, through 
       if (!error.message.includes('No dialog is showing')) dialogErrors.push(error)
     } finally { finishDialog() }
   })
-  await selected(p).locator('.ws-fiber-acts .kbn-ctl-temper').click()
+  await appFocus(p); await p.keyboard.press('t')
   await Promise.race([dialogHandled, p.waitForTimeout(50)])
   assert.deepEqual(dialogErrors, [])
   assert.equal(asked.length, 1, 'tempering a live worker asks first')
@@ -1987,10 +1988,10 @@ test('Remote worker conversation records attach handler without launching a term
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test("The fiber page's worker pill opens the same remote worker as c", async p => {
+test("Console in Settings opens the same remote worker as c", async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  await selected(p).locator('.ws-chat-head .ws-chat-console').click()
+  await headerAction(p, 'Console')
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
@@ -2954,7 +2955,10 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await fixed('blurring the composer', () => field.evaluate(el => el.blur()))
   if (!phone) await composerKeyStaysPut(p)
   await field.focus()
+  const meetingMenu = selected(p).locator('.kbn-ctl-meet-more')
+  await fixed('opening Meeting controls leaves the header still', () => meetingMenu.click())
   for (const state of ['on', 'off']) await fixed(`Meeting ${state} leaves the header still`, () => selected(p).locator('.kbn-ctl-meet-switch').click())
+  await meetingMenu.click()
   await field.evaluate(el => el.blur())
   if (!phone) for (const control of ['.kbn-ctl-resume', '.kbn-ctl-secondary']) await still(p, `hovering ${control}`, () => selected(p).locator(control).hover(), { allow: [`.ws-selected ${control}`] })
   await still(p, 'a chat poll repaint', () => repaint(p))
@@ -2968,7 +2972,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['n
   await still(p, 'a worker-state change', () => flipWorker(p), { allow: ['.ws-worker-control', '.ws-chat-state'], settle: 100 })
   assert.equal(await p.locator(':is(.ws-navbar, .kbn-viewtabs) :is(.kbn-ctl-temper,.kbn-ctl-discard)').count(), 0)
   if (phone) await headerAction(p, 'Settings')
-  for (const control of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
+  for (const control of ['.kbn-ctl-review', '.kbn-ctl-rest']) {
     assert.ok(await selected(p).locator(control).isVisible())
     if (!phone) await still(p, `hovering ${control}`, () => selected(p).locator(control).hover(), { allow: [`.ws-selected ${control}`] })
   }

@@ -13,7 +13,33 @@ async function openRoot(page) {
   for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== title; depth++) await header.locator('.ws-chat-back').click()
   await header.getByRole('heading', { name: title, exact: true }).waitFor()
 }
+const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
+  buttons.filter(button => button.checkVisibility()).map(button => button.getAttribute('aria-label')))
 export function registerHeaderBarJourneys(test) {
+  test('Lifecycle state selects the header verbs while each card remains openable', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'true')
+    })
+    await page.goto(url)
+    await openRoot(page)
+    const header = page.locator('.ws-selected .ws-chat-head')
+    assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], 'Awaiting review offers its verdicts')
+    const visits = [
+      ['Response analysis', ['Close for review', 'Rest']],
+      ['Draft the validation plan', ['Launch', 'Rest']],
+      ['Next validation', ['Resume', 'New session']],
+      ['Accepted pilot', ['Resume', 'New session']],
+      ['Discarded pilot', ['Resume', 'New session']],
+    ]
+    for (const [name, verbs] of visits) {
+      if (name === 'Accepted pilot') await page.locator('.ws-thread-rail summary').filter({ hasText: 'Archived' }).click()
+      await page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name }).click()
+      await header.getByRole('heading', { name, exact: true }).waitFor()
+      assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
+    }
+  }, { width: 1000, height: 900 })
   test('Header breakpoint crossings preserve visible focus and hand overflow focus to Settings', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
@@ -39,10 +65,10 @@ export function registerHeaderBarJourneys(test) {
     await resize(850, false)
     assert.ok(await focused(temper), 'desktop actions retain focus in narrow cards')
     await resize(1440, false)
-    await header.getByRole('button', { name: 'Constitution', exact: true }).focus()
+    await header.getByRole('button', { name: 'Brief', exact: true }).focus()
     await resize(390, true)
-    await page.waitForFunction(() => !!document.querySelector('.ws-selected .ws-chat-drawer .ws-chat-constitution'))
-    assert.ok(await focused(settings), 'a page icon moving into phone settings hands focus to Settings')
+    assert.ok(await focused(header.getByRole('button', { name: 'Brief', exact: true })), 'Brief retains focus beside Report on the phone')
+    await settings.focus()
     await resize(1440, false)
     assert.ok(await focused(settings), 'the same Settings control retains focus on return to desktop')
   }, { width: 1440, height: 900 })
@@ -57,14 +83,12 @@ export function registerHeaderBarJourneys(test) {
     const header = page.locator('.ws-selected .ws-chat-head')
     for (const width of [1440, 850, 701]) {
       await page.setViewportSize({ width, height: 900 })
-      await page.waitForFunction(() => {
-        const el = document.querySelector('.ws-selected h1')
-        return el && el.scrollHeight <= el.clientHeight + 1
-      })
+      await page.waitForFunction(() => !!document.querySelector('.ws-selected h1'))
       const geometry = await header.locator('h1').evaluate(el => ({ height: el.clientHeight, line: parseFloat(getComputedStyle(el).lineHeight), clamp: getComputedStyle(el).webkitLineClamp }))
       assert.equal(geometry.clamp, '2')
       assert.ok(geometry.height <= 2 * geometry.line + 7)
-      for (const name of ['Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible(), `${name} remains in the ${width}px header`)
+      assert.equal(await header.locator('h1').getAttribute('title'), title)
+      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], `Awaiting review draws only its verbs at ${width}`)
       assert.equal(await page.locator('.ws-selected .ws-header-overflow .kbn-ctl-verdict').count(), 0)
     }
     // The family's active thread exercises Close as well as the verdicts.
@@ -74,20 +98,21 @@ export function registerHeaderBarJourneys(test) {
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
-      for (const name of ['Close for review', 'Rest', 'Temper', 'Discard']) assert.ok(await header.getByRole('button', { name, exact: true }).isVisible())
-      // The actions start at the left beneath the title; the artifact spans
-      // both rows, with the leave control at the header's far right.
+      assert.deepEqual(await visibleHeaderVerbs(header), ['Close for review', 'Rest'], `In flight draws only its verbs at ${width}`)
+      // Narrow cards reserve the title row for navigation and identity; references join the action row.
       const rows = await header.evaluate(el => {
         const box = sel => el.querySelector(sel)?.getBoundingClientRect() ?? null
-        return { title: box('.ws-chat-title'), acts: box('.ws-chat-acts'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), chip: box('.ws-report-chip'), head: el.getBoundingClientRect() }
+        return { title: box('.ws-chat-title'), acts: box('.ws-chat-acts'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), refs: box('.ws-chat-refs'), head: el.getBoundingClientRect() }
       })
       assert.ok(rows.verbs.top >= rows.title.bottom - 1, `verbs sit beneath the title at ${width}`)
+      if (width === 701) {
+        const centers = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
+        assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `state, verbs and references share the action row: ${centers}`)
+      }
       assert.ok(rows.leave.top < rows.title.bottom && rows.leave.bottom > rows.title.top, `× stays beside the title at ${width}`)
       assert.ok(rows.head.right - rows.leave.right < 80, `× ends the header at ${width}`)
-      if (rows.chip) {
-        assert.ok(rows.chip.top <= rows.title.top + 1 && rows.chip.bottom >= rows.verbs.bottom - 1, `the artifact spans both lines at ${width}`)
-        assert.ok(rows.chip.left >= rows.acts.right - 1, `the second line keeps clear of the artifact at ${width}`)
-      }
+      if (width <= 701) assert.ok(rows.refs.top >= rows.acts.top - 1, `Brief and Report follow the actions at ${width}`)
+      else assert.ok(rows.refs.top <= rows.title.top + 1 && rows.refs.bottom <= rows.acts.top + 1, `Brief and Report are paired above the action row at ${width}`)
       const slack = { left: rows.acts.left, right: rows.acts.right }
       const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
       const left = Math.min(...line.map(b => b.left)) - slack.left
@@ -104,7 +129,18 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
+    let labelSize
     const check = async () => {
+      const sizes = await header.locator('.ws-chat-state, .kbn-ctl-verdict button:not([hidden]) .ws-header-word').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => parseFloat(getComputedStyle(el).fontSize)))
+      labelSize ??= sizes[0]
+      assert.ok(sizes.every(size => size === labelSize), `state and verbs retain the wide header text size: ${sizes}`)
+      const controls = await header.evaluate(el => {
+        const box = node => { const r = node.getBoundingClientRect(); return { center: r.top + r.height / 2, width: r.width, height: r.height } }
+        return [box(el.querySelector('.ws-chat-back')), box(document.querySelector('.ws-sidebar-toggle:not(.ws-rail-toggle)'))]
+      })
+      assert.ok(Math.abs(controls[0].center - controls[1].center) < 1, `back and sidebar share a centerline: ${JSON.stringify(controls)}`)
+      assert.equal(controls[0].width, controls[1].width)
+      assert.equal(controls[0].height, controls[1].height)
       await page.waitForFunction(() => {
         const title = document.querySelector('.ws-selected .ws-chat-title')
         const header = title?.closest('header'), box = header?.getBoundingClientRect()
@@ -115,7 +151,9 @@ export function registerHeaderBarJourneys(test) {
           })
       })
       assert.ok(await header.locator('h1').evaluate(el => el.clientHeight <= Number(getComputedStyle(el).webkitLineClamp) * parseFloat(getComputedStyle(el).lineHeight) + 7))
-      for (const name of ['Rest', 'Temper', 'Discard']) {
+      const centers = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
+      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `state, verbs and references share the action row: ${centers}`)
+      for (const name of ['Temper', 'Discard']) {
         const verb = header.getByRole('button', { name, exact: true })
         assert.ok(await verb.isVisible())
         assert.ok(await verb.evaluate(el => {
@@ -136,6 +174,45 @@ export function registerHeaderBarJourneys(test) {
         assert.ok(await page.locator(selector).evaluate(el => el.getBoundingClientRect().width >= 100), `${selector} keeps usable rows beside the minimum chat card`)
       }
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
+    }
+  }, { width: 1440, height: 900 })
+  test('Composer footer stays on one row and its Meeting menu fits at every width', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'true')
+      localStorage.setItem('shuttle:workspace:rail', 'true')
+    })
+    await page.goto(url); await openRoot(page)
+    for (const width of [1440, 1000, 701, 390]) {
+      await page.setViewportSize({ width, height: 900 })
+      const composer = page.locator('.ws-selected .kbn-ctl-composer')
+      const geometry = await composer.evaluate(el => {
+        const rect = el.getBoundingClientRect()
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].map(node => {
+          const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, center: r.top + r.height / 2 }
+        })
+        return { left: rect.left, right: rect.right, controls }
+      })
+      assert.equal(geometry.controls.length, 3)
+      assert.ok(geometry.controls.every(r => r.left >= geometry.left && r.right <= geometry.right), JSON.stringify(geometry))
+      const centers = geometry.controls.map(r => r.center)
+      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `one footer row at ${width}: ${centers}`)
+      const more = composer.locator('.kbn-ctl-meet-more')
+      await more.click()
+      await composer.locator('.kbn-ctl-meet-switch input').check()
+      const panel = await composer.locator('.kbn-ctl-meet-panel').boundingBox(), box = await composer.boundingBox()
+      assert.ok(panel.x >= box.x && panel.x + panel.width <= box.x + box.width + 1, `Meeting menu fits its composer at ${width}`)
+      await more.focus(); await page.keyboard.press('Escape')
+      assert.ok(await composer.locator('.kbn-ctl-meet-overflow').evaluate(el => !el.open))
+      assert.ok(await more.evaluate(el => document.activeElement === el))
+      const armed = await composer.evaluate(el => {
+        const box = el.getBoundingClientRect(), chip = el.querySelector('.kbn-ctl-meet-chip').getBoundingClientRect()
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-meet-chip, .kbn-ctl-sends > button')].map(node => node.getBoundingClientRect())
+        return { chip: chip.width, fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2) }
+      })
+      assert.ok(armed.chip >= 12 && armed.fits, `armed meeting remains visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
+      assert.ok(Math.max(...armed.centers) - Math.min(...armed.centers) < 1, `armed footer stays one row at ${width}`)
+      await more.click(); await composer.locator('.kbn-ctl-meet-switch input').uncheck(); await more.click()
     }
   }, { width: 1440, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
@@ -231,7 +308,8 @@ export function registerHeaderBarJourneys(test) {
       await openRoot(page)
       const chat = page.locator('.ws-page.ws-selected')
       const header = chat.locator('.ws-chat-head')
-      await chat.locator('.ws-transcript-context:not([hidden])').waitFor()
+      if (device === 'desktop') await chat.locator('.ws-transcript-context:not([hidden])').waitFor()
+      else assert.ok(await header.locator('.ws-transcript-meter').evaluate(el => getComputedStyle(el).display === 'none'), 'the phone omits the transcript meter from its action row')
       await header.locator('.ws-report-chip .ws-thumbnail').waitFor()
       assert.equal(title.length, 90)
       assert.equal(await header.locator('h1').getAttribute('title'), title)
@@ -247,14 +325,14 @@ export function registerHeaderBarJourneys(test) {
       assert.notEqual(geometry.nowrap, 'nowrap')
       assert.ok(geometry.titleHeight <= geometry.lineHeight * 2 + 7, JSON.stringify(geometry))
       if (device === 'desktop') assert.ok(await header.locator('h1').evaluate(el => el.scrollHeight <= el.clientHeight + 1), 'the full title fits, not only the clamped box')
-      assert.ok(geometry.barHeight <= (device === 'desktop' ? 130 : 90) && geometry.childrenInside, JSON.stringify(geometry))
+      assert.ok(geometry.barHeight <= (device === 'desktop' ? 130 : 110) && geometry.childrenInside, JSON.stringify(geometry))
       assert.ok(geometry.left >= 0 && geometry.right <= viewport.width, JSON.stringify(geometry))
       const report = header.locator('.ws-report-chip')
       const reportTitle = await report.getAttribute('title')
       assert.ok(reportTitle?.length)
       assert.equal(await report.getAttribute('aria-label'), `Read artifact: ${reportTitle}`)
       assert.equal(await report.locator('.ws-report-title').count(), 0)
-      assert.equal(await report.evaluate(el => [...el.childNodes].filter(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim()).length), 0, 'the chip has no text label')
+      assert.equal(await report.locator('.ws-report-label').innerText(), 'Report')
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()
@@ -262,9 +340,11 @@ export function registerHeaderBarJourneys(test) {
       }
       assert.equal(await chat.locator('.ws-report-inset, .ws-chat-outcome, .ws-transcript-find, .ws-header-sheet').count(), 0)
       assert.equal(await header.locator('.ws-transcript-share, .ws-transcript-hit').count(), 0)
-      assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
-      assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
-      for (const label of device === 'desktop' ? ['Constitution', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
+      if (device === 'desktop') {
+        assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
+        assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
+      }
+      for (const label of device === 'desktop' ? ['Brief', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
         const icon = header.getByRole('button', { name: label, exact: true })
         assert.equal(await icon.getAttribute('title'), label)
         assert.deepEqual(await icon.evaluate(el => {
@@ -273,9 +353,16 @@ export function registerHeaderBarJourneys(test) {
         }), { viewBox: '0 0 16 16', inheritsColor: true, width: 16, height: 16, weight: '1.5px' }, `${label} uses the same currentColor stroke grid in ${scheme}`)
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
-      // Desktop rows each share a centre: the title row's ×, then the verbs row.
-      const centers = await header.locator(device === 'desktop' ? '.ws-chat-acts .ws-header-icon:visible svg' : '.ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
-      assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `header icons share one vertical center in ${device}/${scheme}: ${centers}`)
+      if (device === 'desktop') {
+        const centers = await header.locator('.ws-chat-acts .ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
+        assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `lifecycle icons share one vertical center in ${device}/${scheme}: ${centers}`)
+      } else {
+        const centers = await header.evaluate(el => {
+          const center = node => { const r = node.getBoundingClientRect(); return r.top + r.height / 2 }
+          return [center(el.querySelector('.ws-chat-back')), center(document.querySelector('.ws-rail-toggle'))]
+        })
+        assert.ok(Math.abs(centers[0] - centers[1]) < 1, `back and visible rail toggle share their centerline: ${centers}`)
+      }
       await chat.locator('textarea').focus(); await chat.locator('textarea').blur()
       if (process.env.WORKSPACE_SHOTS) {
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
@@ -293,9 +380,15 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(await sheet.locator('.ws-transcript-hit:not([hidden])').count())
       assert.match(await sheet.locator('.ws-transcript-hit').innerText(), /% cached/)
       if (device === 'phone') {
-        assert.ok(await sheet.getByRole('button', { name: 'Constitution', exact: true }).isVisible())
+        assert.ok(await header.getByRole('button', { name: 'Brief', exact: true }).isVisible())
+        assert.equal(await sheet.locator('.ws-chat-console').count(), 1, 'Console belongs to Settings even when this card has no attach target')
         assert.ok(await sheet.getByRole('button', { name: 'Temper', exact: true }).isVisible())
-        assert.ok(await sheet.getByRole('button', { name: 'Discard', exact: true }).isVisible())
+        const discard = sheet.getByRole('button', { name: 'Discard', exact: true })
+        assert.ok(await discard.isVisible())
+        assert.ok(await discard.evaluate(el => {
+          const r = el.getBoundingClientRect(), sheet = el.closest('.ws-page-sheet, .ws-settings-menu').getBoundingClientRect()
+          return r.top >= Math.max(0, sheet.top) && r.bottom <= Math.min(innerHeight, sheet.bottom)
+        }), 'Discard stays inside the phone sheet’s visible bounds')
       }
       await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })
@@ -307,17 +400,10 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(await files.locator('time').count(), 'sent files carry timestamps in the threads view')
       if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
       else await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
-      // Overflow actions leave settings before opening a confirmation or undo window.
+      // A verdict leaves settings before opening its undo window.
       await header.getByRole('button', { name: 'Settings', exact: true }).click()
-      await chat.getByRole('button', { name: 'Rest', exact: true }).click()
-      const rest = page.locator('.kbn-rest-popover')
-      await rest.waitFor()
-      assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
-      assert.equal(await rest.getAttribute('aria-modal'), 'true')
-      assert.equal(await rest.evaluate(el => el.contains(document.activeElement)), true)
-      await page.keyboard.press('Escape'); await rest.waitFor({ state: 'hidden' })
-      if (device === 'phone') await header.getByRole('button', { name: 'Settings', exact: true }).click()
       await chat.getByRole('button', { name: 'Temper', exact: true }).click()
+      assert.equal(await page.locator('.ws-settings-menu:not([hidden])').count(), 0)
       const undo = header.getByRole('button', { name: `Undo verdict on ${title}`, exact: true })
       await undo.waitFor(); await undo.click()
       assert.equal(await header.locator('.ws-verdict-undo').count(), 0)

@@ -359,6 +359,6 @@
   .ws-rail-toggle { top: calc(2px + env(safe-area-inset-top)); right: 44px; width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-reader:has(.ws-rail-toggle:not([hidden])) .ws-channel-title { padding-right: var(--ws-phone-target); }
   /* On the chat page the head holds the control set; the threads button takes its far right and the head leaves it room. */
-  .ws-reader[data-page='chat'] .ws-rail-toggle { right: 4px; }
+  .ws-reader[data-page='chat'] .ws-rail-toggle { top: calc(4px + env(safe-area-inset-top)); right: 4px; }
   .ws-reader[data-page='chat']:has(.ws-rail-toggle:not([hidden])) .ws-chat-head { padding-right: calc(4px + var(--ws-phone-target)); }
 }

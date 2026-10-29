@@ -19,7 +19,10 @@ export class ReportChip {
       priority: () => 1, distance: () => 0,
     })
     preview.append(this.thumbnail.el)
-    this.el.append(preview)
+    const reportLabel = document.createElement('span')
+    reportLabel.className = 'ws-report-label'
+    reportLabel.textContent = 'Report'
+    this.el.append(preview, reportLabel)
     const label = (): void => {
       const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Artifact'
       this.el.title = title

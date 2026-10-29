@@ -12,7 +12,7 @@ function setup(phone = false) {
   vi.stubGlobal('requestAnimationFrame', () => 1); vi.stubGlobal('cancelAnimationFrame', vi.fn())
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
   reader = new Reader({ shuttleBase: '', buildProse: () => {
-    const el = document.createElement('div'); el.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"></div></header><div class="ws-chat-log"></div>'; return el
+    const el = document.createElement('div'); el.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"></div><div class="ws-chat-refs"></div></header><div class="ws-chat-log"></div>'; return el
   }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,

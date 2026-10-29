@@ -144,9 +144,8 @@ export function registerLivingReportJourneys(test) {
         assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)
         await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
       }
-      // Body embeds and links remain reachable from the constitution icon.
-      await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
-      await page.getByRole('button', { name: 'Constitution', exact: true }).click()
+      // The brief stays one click away beside the living report.
+      await selected(page).getByRole('button', { name: 'Brief', exact: true }).click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(await selected(page).locator('.ws-dock').count(), 0)
       await back(page, phone)

@@ -21,7 +21,7 @@ import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
 import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
-import { dressVerb, lifecycleVerbsFor } from './lifecycleVerbs.js'
+import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
 import { deskColumn } from '../deskColumn.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 import { anchorSelect, dismissSelectPicker } from './selectPicker.js'
@@ -419,6 +419,7 @@ interface AgentRecord {
 export interface ChatNav {
   ancestry?: readonly Ancestor[]
   origin?: { label: string; open(): void }
+  desk?: () => void
   /** Opens the constitution's own page, which has no tile in the reader's map. */
   constitution?: () => void
 }
@@ -458,7 +459,7 @@ export class Dock {
   private headRoot: HTMLElement | null = null
   private header: HTMLElement | null = null
   private lead: HTMLElement | null = null
-  /** The header's ×: leaves the chat by the same way back as ‹, never a lifecycle write. */
+  /** The header's × returns directly to the Desk, never a lifecycle write. */
   private leave: HTMLButtonElement | null = null
   private ancestry: HTMLElement | null = null
   private drawerClose: (() => boolean) | null = null
@@ -476,6 +477,8 @@ export class Dock {
   private constitutionButton: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
+  private meetingChip: HTMLElement | null = null
+  private dismissMeetingOverflow: (() => boolean) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
@@ -572,10 +575,9 @@ export class Dock {
     this.lead.replaceChildren(...back)
     this.lead.hidden = !back.length
     if (this.leave) {
-      this.leave.hidden = !nav.origin
-      this.leave.onclick = nav.origin ? () => nav.origin!.open() : null
-      const label = nav.origin ? `Leave the chat for ${nav.origin.label}` : 'Leave the chat'
-      this.leave.title = label; this.leave.setAttribute('aria-label', label)
+      this.leave.hidden = !nav.desk
+      this.leave.onclick = nav.desk ?? null
+      this.leave.title = 'Return to Desk'; this.leave.setAttribute('aria-label', 'Return to Desk')
     }
   }
 
@@ -662,8 +664,10 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.constitutionButton = this.openConstitution = null
+    this.dismissMeetingOverflow = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
+    this.meetingChip = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.composerSend = null
@@ -717,6 +721,7 @@ export class Dock {
 
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
+    if (this.dismissMeetingOverflow?.()) return true
     if (this.transcriptBand?.closeFull()) return true
     if (this.dismissConversation?.() || this.dismissParent?.()) return true
     return this.drawerClose?.() ?? false
@@ -771,6 +776,17 @@ export class Dock {
   syncMeeting(): void {
     for (const band of this.bands.values()) band.syncMeeting()
     this.meetingPaint?.()
+    const current = this.meeting?.current() ?? null
+    if (this.meetingChip) {
+      if (current) {
+        const chipHosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
+        const title = current.title?.trim() || 'Meeting'
+        this.meetingChip.hidden = !chipHosted || current.state === 'failed'
+        this.meetingChip.textContent = `Meeting · ${title}`
+        this.meetingChip.title = `Meeting hosted by this constitution: ${title}`
+        this.meetingChip.setAttribute('aria-label', this.meetingChip.title)
+      } else if (!this.meetingArmed()) this.meetingChip.hidden = true
+    }
     const pane = this.transcriptPane
     const card = this.transcriptCard
     if (!pane || !card) return
@@ -1023,6 +1039,19 @@ export class Dock {
     review.title = 'Move to Awaiting review (a)'
     review.addEventListener('click', () => this.verdict(card, 'awaitingReview'))
     verdict.prepend(review)
+    const sessionActions = document.createElement('span')
+    sessionActions.className = 'ws-header-sessions'
+    const sessionButtons = new Map(SESSION_VERBS.map(spec => {
+      const button = ctlButton('', 'ws-header-icon ws-header-verb ws-header-session')
+      button.title = spec.label; button.setAttribute('aria-label', spec.label)
+      button.innerHTML = headerIcon(spec.icon)
+      const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
+      button.append(word)
+      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')?.click())
+      sessionActions.append(button)
+      return [spec.verb, button] as const
+    }))
+    verdict.prepend(sessionActions)
 
     // A single settings sheet owns configuration, history and usage details.
     const drawer = document.createElement('div')
@@ -1065,9 +1094,12 @@ export class Dock {
     })
     settingsItem.setAttribute('aria-haspopup', 'true')
     settingsItem.setAttribute('aria-expanded', 'false')
-    const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
+    const constitutionItem = this.constitutionButton = item('Brief', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
     const consoleItem = item('Console', 'console', 'ws-chat-console', () => { this.openConversation(card) })
+    const refs = document.createElement('div')
+    refs.className = 'ws-chat-refs'
+    refs.append(constitutionItem)
     this.drawerClose = () => {
       if (this.openSettings || drawer.hidden) return false
       drawer.hidden = true; settingsItem.focus({ preventScroll: true }); return true
@@ -1112,10 +1144,12 @@ export class Dock {
     leave.className = 'ws-header-icon ws-chat-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
-    header.append(lead, identity, leave, this.head)
+    header.append(lead, identity, refs, leave, this.head)
     let iconLayout = -1
     const placeIcons = (): void => {
-      const layout = isMobileViewport() ? 0 : 2
+      const mobile = isMobileViewport()
+      const compact = !mobile && header.clientWidth > 0 && header.clientWidth <= 560
+      const layout = mobile ? 0 : compact ? 1 : 2
       if (layout === iconLayout) return
       iconLayout = layout
       const active = document.activeElement
@@ -1129,10 +1163,14 @@ export class Dock {
           next = control
         }
       }
-      place(overflow, layout === 0 ? [constitutionItem, consoleItem, verdict] : [])
-      // The state and meter ride the title's line on a phone; on desktop they open the second line.
-      place(identity, layout === 0 ? [title, status] : [title])
-      place(this.head, layout === 0 ? [settingsItem] : [status, constitutionItem, consoleItem, settingsItem, verdict])
+      place(overflow, [consoleItem, ...(mobile ? [verdict] : [])])
+      place(identity, [title])
+      if (mobile) place(this.head, [status, settingsItem, refs])
+      else if (compact) place(this.head, [status, verdict, refs, settingsItem])
+      else {
+        place(this.head, [status, verdict])
+        place(header, [lead, identity, refs, settingsItem, leave, this.head])
+      }
       if (focused) {
         const target = focused.checkVisibility() ? focused : settingsItem
         if (document.activeElement !== target) target.focus({ preventScroll: true })
@@ -1141,6 +1179,11 @@ export class Dock {
     this.head.replaceChildren()
     window.addEventListener('resize', placeIcons)
     this.composerDisposers.push(() => window.removeEventListener('resize', placeIcons))
+    if (typeof ResizeObserver !== 'undefined') {
+      const resize = new ResizeObserver(placeIcons)
+      resize.observe(header)
+      this.composerDisposers.push(() => resize.disconnect())
+    }
 
     placeIcons()
 
@@ -1153,7 +1196,9 @@ export class Dock {
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
-    compose.append(meetingPane, ...(composer ? [composer] : []), foot)
+    const meetingPanel = composer?.querySelector<HTMLElement>('.kbn-ctl-meet-panel')
+    if (meetingPanel) meetingPanel.prepend(meetingPane)
+    compose.append(...(!meetingPanel ? [meetingPane] : []), ...(composer ? [composer] : []), foot)
     this.el.classList.toggle('ws-chat-conversation', shuttleManaged)
     body.append(header, drawer, ...(shuttleManaged ? [log] : []), compose)
     this.actPaint = () => {
@@ -1170,8 +1215,16 @@ export class Dock {
       lifecycle.classList.toggle('ws-chat-state-live', hasLiveWorker(card))
       facts.textContent = chatFacts(card)
       facts.hidden = !facts.textContent
-      const offered = lifecycleVerbsFor(card, !!this.onRest)
-      verdict.hidden = !offered.length
+      const offered = headerLifecycleVerbsFor(card, !!this.onRest)
+      const sessionOffered = sessionVerbsFor(card)
+      verdict.hidden = !offered.length && !sessionOffered.length
+      sessionActions.hidden = !sessionOffered.length
+      for (const spec of SESSION_VERBS) sessionButtons.get(spec.verb)!.hidden = !sessionOffered.includes(spec.verb)
+      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')
+      const resumeComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')
+      sessionButtons.get('launch')!.disabled = Boolean(freshComposerButton?.disabled)
+      sessionButtons.get('newSession')!.disabled = Boolean(freshComposerButton?.disabled)
+      sessionButtons.get('resume')!.disabled = Boolean(resumeComposerButton?.disabled)
       if (rest) rest.hidden = !offered.includes('rest')
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
@@ -1250,7 +1303,7 @@ export class Dock {
     // While a send is in flight every verb is held and the chips are frozen,
     // so what is sent is what was shown.
     let busy = false
-    const fresh = ctlButton('Start ↵', 'kbn-ctl-send')
+    const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
@@ -1264,29 +1317,43 @@ export class Dock {
       const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
       const freshLabel = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
       const resumeLabel = live ? 'Send ↵' : 'Resume ⌥↵'
-      if (!this.blockedDispatches.has(fresh) && fresh.textContent !== freshLabel) fresh.textContent = freshLabel
-      if (!this.blockedDispatches.has(resume) && resume.textContent !== resumeLabel) resume.textContent = resumeLabel
+      const paintLabel = (button: HTMLButtonElement, label: string): void => {
+        if (this.blockedDispatches.has(button)) return
+        const shortcut = label.match(/ (?:⌥)?↵$/)?.[0]
+        if (button.textContent === label && (!shortcut || button.querySelector('.kbn-ctl-shortcut'))) return
+        button.textContent = shortcut ? label.slice(0, -shortcut.length) : label
+        if (shortcut) {
+          const hint = document.createElement('span')
+          hint.className = 'kbn-ctl-shortcut'
+          hint.textContent = shortcut
+          button.append(hint)
+        }
+      }
+      paintLabel(fresh, freshLabel)
+      paintLabel(resume, resumeLabel)
       fresh.classList.toggle('kbn-ctl-secondary', live)
       fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
       resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
       resume.title = live ? 'Send the message to the live worker (↵)'
         : resumable ? `Resume the previous session (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
-      resume.hidden = !resumable
+      resume.hidden = false
       if (live ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(live ? [resume, fresh] : [fresh, resume]))
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
-      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle
+      if (!busy && !this.blockedDispatches.has(resume)) resume.disabled = idle || !resumable
       message.placeholder = this.meetingArmed() ? 'A note for the meeting (optional)'
         : ''
+      this.actPaint?.()
     }
     this.composerPaint()
     message.addEventListener('input', () => this.composerPaint?.())
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
-      for (const verb of [fresh, resume]) if (verb !== except) verb.disabled = on
+      for (const verb of [fresh, resume]) if (on || verb !== except) verb.disabled = on
       if (!on) this.composerPaint?.()
+      else this.actPaint?.()
       for (const control of err.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.kbn-start-prompt input, .kbn-start-prompt button')) control.disabled = on
       strip.setFrozen(on)
       if (epoch === this.epoch) this.meetingPaint?.()
@@ -1348,17 +1415,53 @@ export class Dock {
       },
     }
 
-    // The verbs that take the message and act at once, side by side: a
-    // meeting (its note), a fresh worker, or the same worker resumed.
+    // The footer keeps Meeting controls behind its own menu and both session
+    // actions visible beside it.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    // With Meeting on, its own verb stands in for New session and Resume.
-    const meeting = this.meeting ? this.buildMeeting(card, err, send, armed => {
-      sends.hidden = armed
+    const meetingOverflow = document.createElement('details')
+    meetingOverflow.className = 'kbn-ctl-meet-overflow'
+    meetingOverflow.hidden = !this.meeting
+    const more = document.createElement('summary')
+    more.className = 'kbn-ctl-meet-more'
+    more.textContent = '⋯'
+    more.setAttribute('aria-label', 'Meeting controls')
+    const meetingPanel = document.createElement('div')
+    meetingPanel.className = 'kbn-ctl-meet-panel'
+    meetingOverflow.append(more, meetingPanel)
+    const meetChip = document.createElement('span')
+    meetChip.className = 'kbn-ctl-meet-chip'
+    meetChip.hidden = true
+    this.meetingChip = meetChip
+    const dismissMenu = (): boolean => {
+      if (!meetingOverflow.open) return false
+      meetingOverflow.open = false
+      more.focus({ preventScroll: true })
+      return true
+    }
+    const closeOnEscape = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || !dismissMenu()) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.dismissMeetingOverflow = dismissMenu
+    const closeOutside = (event: Event): void => {
+      if (meetingOverflow.open && event.target instanceof Node && !meetingOverflow.contains(event.target)) meetingOverflow.open = false
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    meetingOverflow.addEventListener('keydown', closeOnEscape)
+    this.composerDisposers.push(() => {
+      document.removeEventListener('pointerdown', closeOutside)
+      meetingOverflow.removeEventListener('keydown', closeOnEscape)
+      if (this.dismissMeetingOverflow === dismissMenu) this.dismissMeetingOverflow = null
+    })
+    const meeting = this.meeting ? this.buildMeeting(card, err, send, () => {
+      sends.hidden = false
       this.composerPaint?.()
       fit()
     }) : null
-    foot.append(...(meeting ? [meeting] : []), sends)
+    if (meeting) meetingPanel.append(meeting)
+    foot.append(meetingOverflow, meetChip, sends)
 
     this.composerSend = send
     this.composerError = err
@@ -1465,6 +1568,13 @@ export class Dock {
       input.checked = on
       wrap.classList.toggle('kbn-ctl-meet-on', on)
       verb.hidden = !on
+      const current = this.meeting?.current()
+      if (this.meetingChip && (!current || current.state === 'failed')) {
+        this.meetingChip.hidden = !on
+        this.meetingChip.textContent = 'Meeting armed'
+        this.meetingChip.title = 'Meeting armed'
+        this.meetingChip.setAttribute('aria-label', 'Meeting armed')
+      }
       onArm(on)
     }
     arm(false)

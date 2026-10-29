@@ -511,6 +511,7 @@ export class Workspace {
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
       origin: { label: ancestry.at(-1)?.name ?? this.origin, open: () => this.reader.back() },
+      desk: () => this.escapeHome(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
     })
   }

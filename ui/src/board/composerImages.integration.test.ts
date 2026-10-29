@@ -58,7 +58,7 @@ function mount(opts: { meeting?: MeetingJoinControl; pendingStart?: boolean } = 
       body: { dispatched: false, reason: 'arm_refused', needs: 'project_dir', host: 'cluster', message: 'no project_dir' },
     }
   }
-  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster' }))
+  composer = internals.buildComposer.call(panel, card({ id: 'work/task', originId: 'cluster', sessionUuid: 'previous-session' }))
   document.body.append(composer)
 }
 

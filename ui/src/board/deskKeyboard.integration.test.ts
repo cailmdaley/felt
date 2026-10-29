@@ -194,7 +194,7 @@ describe('Reader Rest lifecycle', () => {
 })
 
 describe('Rest controls', () => {
-  it.each([true, false])('the constitution page offers Rest for a card with tempered=%s and posts rest from the popover', async tempered => {
+  it.each([true, false])('a reviewed constitution keeps Rest on its keyboard while its header offers session actions, tempered=%s', async tempered => {
     const finished = card({ id: 'finished', uid: 'finished-uid', originId: 'remote', status: 'closed', tempered, shuttleKind: 'oneshot' })
     draw(response({ timeline: { past: [finished], futureDated: [] } }))
     inside.setView('chronicle')
@@ -202,11 +202,13 @@ describe('Rest controls', () => {
     for (let i = 0; i < 200; i++) await Promise.resolve()
     const rest = document.querySelector<HTMLButtonElement>('.ws-reader .kbn-ctl-rest')!
     expect(rest).not.toBeNull()
-    expect(rest.hidden).toBe(false)
+    expect(rest.hidden).toBe(true)
     expect(rest.closest('.kbn-ctl-verdict')!.hasAttribute('hidden')).toBe(false)
-    expect(rest.title).toContain('s')
+    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-reader .ws-header-session')].filter(button => !button.hidden).map(button => button.getAttribute('aria-label'))).toEqual(['Resume', 'New session'])
     expect(document.querySelector<HTMLElement>('.ws-reader .kbn-ctl-temper')!.hidden).toBe(true)
-    rest.click()
+    const target = document.querySelector<HTMLElement>('.ws-reader .ws-return')!
+    target.focus()
+    press('s', {}, target)
     const input = document.querySelector<HTMLInputElement>('.kbn-rest-popover')!
     expect(input).not.toBeNull()
     press('n', {}, input)

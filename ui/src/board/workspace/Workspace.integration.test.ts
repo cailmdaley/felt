@@ -7,7 +7,7 @@ import { ThreadIndex } from '../threads.js'
 import { deskSidebarRows, projectDeskFrontier } from '../KanbanReadModel.js'
 import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
-import { docKey } from './documents.js'
+import { chatKey, docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
@@ -1009,7 +1009,7 @@ describe('workspace reader integration', () => {
 
     const constitution = document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!
     expect(constitution.hidden).toBe(false)
-    expect(constitution.getAttribute('aria-label')).toBe('Constitution')
+    expect(constitution.getAttribute('aria-label')).toBe('Brief')
     constitution.click()
     expect(document.querySelector('.ws-page.ws-selected .ws-fiber-prose')).not.toBeNull()
     expect(workspace.reader.document?.kind).toBe('fiber')
@@ -1108,7 +1108,7 @@ describe('workspace reader integration', () => {
     expect(draft.value).toBe('Keep this draft')
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
     expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(0)
-    expect(document.querySelector('.ws-fiber-acts .ws-chat-console')).not.toBeNull()
+    expect(document.querySelector('.ws-chat-drawer .ws-chat-console')).not.toBeNull()
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -1131,6 +1131,44 @@ describe('workspace reader integration', () => {
     await flush()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
     expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
+  })
+
+  it('Escape closes Meeting controls through the selected chat and keeps its focus', async () => {
+    const originalBodyCards = bodyCards, originalBoardCards = boardCards
+    const managed = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', status: 'active' as const, sessionUuid: 'meeting-session' }
+    bodyCards = boardCards = [managed]
+    onTestFinished(() => { bodyCards = originalBodyCards; boardCards = originalBoardCards })
+    const control = { canJoin: () => true, modes: () => ['call'], current: () => null, join: vi.fn() }
+    workspace.dispose()
+    const dock = new Dock('', changed, undefined, undefined, { meeting: control as never })
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [managed], origin: () => 'Desk', onVisibility: visibility, dock })
+    workspace.open(managed, 'Desk', chatKey('host-a', 'alpha'))
+    await flush()
+
+    const band = dock.bandFor(managed)
+    const dismiss = vi.spyOn(band, 'handleEscape')
+    const menu = band.el.querySelector<HTMLDetailsElement>('.kbn-ctl-meet-overflow')!
+    const more = menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')!
+    more.click()
+    more.focus()
+    expect(workspace.reader.document?.kind).toBe('chat')
+    expect(menu.open).toBe(true)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+
+    expect(dismiss).toHaveBeenCalled()
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.reader.document?.kind).toBe('chat')
+    expect(menu.open).toBe(false)
+    expect(document.activeElement).toBe(more)
+
+    more.click()
+    const switchInput = menu.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
+    switchInput.focus()
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(workspace.isActive).toBe(true)
+    expect(workspace.reader.document?.kind).toBe('chat')
+    expect(menu.open).toBe(false)
+    expect(document.activeElement).toBe(more)
   })
 
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {
@@ -1208,7 +1246,7 @@ describe('workspace reader integration', () => {
     await flush()
     // The chat's Console reaches the same conversation as the navbar pill.
     expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(0)
-    document.querySelector<HTMLButtonElement>('.ws-chat-acts .ws-chat-console')!.click()
+    document.querySelector<HTMLButtonElement>('.ws-chat-drawer .ws-chat-console')!.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!

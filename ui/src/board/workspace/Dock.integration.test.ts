@@ -41,21 +41,21 @@ beforeEach(async () => {
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 describe('header action placement', () => {
-  it('× leaves the chat by the origin and writes nothing', () => {
+  it('× returns directly to Desk and writes nothing', () => {
     const transition = vi.fn()
     dock.reset(); dock = new Dock('', saved, transition)
     band = dock.bandFor(task({ status: 'active', sessionUuid: 'leave' }))
     document.body.append(band.el)
     const leave = band.el.querySelector<HTMLButtonElement>('.ws-chat-head > .ws-chat-leave')!
     expect(leave.hidden).toBe(true)
-    const origin = vi.fn()
-    band.setNav({ origin: { label: 'Desk', open: origin } })
+    const desk = vi.fn()
+    band.setNav({ origin: { label: 'Chronicle', open: vi.fn() }, desk })
     expect(leave.hidden).toBe(false)
-    expect(leave.getAttribute('aria-label')).toBe('Leave the chat for Desk')
+    expect(leave.getAttribute('aria-label')).toBe('Return to Desk')
     expect(leave.querySelector('svg path')!.getAttribute('d')).toBe('m4 4 8 8m0-8-8 8')
     vi.mocked(fetch).mockClear()
     leave.click()
-    expect(origin).toHaveBeenCalledTimes(1)
+    expect(desk).toHaveBeenCalledTimes(1)
     expect(transition).not.toHaveBeenCalled()
     expect(saved).not.toHaveBeenCalled()
     expect(writes()).toEqual([])
@@ -65,26 +65,49 @@ describe('header action placement', () => {
 
   it('draws each lifecycle verb with its word, apart from navigation', () => {
     band = dock.bandFor(task({ status: 'active', sessionUuid: 'words' }))
-    const words = [...band.head.querySelectorAll('.kbn-ctl-verdict .ws-header-word')].map(w => w.textContent)
-    expect(words).toEqual(['Close for review', 'Temper', 'Discard'])
+    const words = [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict > button')].filter(button => !button.hidden).map(button => button.querySelector('.ws-header-word')?.textContent)
+    expect(words).toEqual(['Close for review'])
     expect(band.head.querySelector('.ws-chat-constitution .ws-header-word, .ws-chat-console .ws-header-word, .ws-chat-settings .ws-header-word')).toBeNull()
   })
 
-  it('keeps every lifecycle control in a narrow desktop card, overflowing only on phones', () => {
+  it('shows only the state actions and groups phone references with Settings', () => {
     let phone = false
     vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    dock.reset(); dock = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     band = dock.bandFor(task({ status: 'active', sessionUuid: 'narrow' }))
     const header = band.el.querySelector<HTMLElement>('.ws-chat-head')!
     Object.defineProperty(header, 'clientWidth', { value: 420 })
-    const verbs = (): string[] => [...header.querySelectorAll('.kbn-ctl-verdict button')].map(b => b.getAttribute('aria-label')!)
+    const verbs = (): string[] => [...header.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict > button')].filter(button => !button.hidden).map(b => b.getAttribute('aria-label')!)
     window.dispatchEvent(new Event('resize'))
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
-    expect(header.dataset.compact).toBe('false')
+    expect(verbs()).toEqual(['Close for review', 'Rest'])
+    expect(header.dataset.compact).toBe('true')
     phone = true; window.dispatchEvent(new Event('resize'))
     expect(verbs()).toEqual([])
     expect(header.dataset.compact).toBe('true')
+    expect(header.querySelector('.ws-chat-standing')?.parentElement).toBe(band.head)
+    expect(header.querySelector('.ws-chat-settings')?.parentElement).toBe(band.head)
+    expect(header.querySelector('.ws-chat-refs')?.parentElement).toBe(band.head)
     phone = false; window.dispatchEvent(new Event('resize'))
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review', 'Rest'])
+  })
+
+  it('draws the header verbs selected for each lifecycle state', () => {
+    const controls = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
+    const visible = (patch: Partial<KanbanCard>): string[] => {
+      const band = controls.bandFor(task(patch))
+      return [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')]
+        .filter(button => !button.hidden).map(button => button.getAttribute('aria-label')!)
+    }
+    expect(visible({ status: 'open' })).toEqual(['Launch', 'Rest'])
+    expect(visible({ status: 'active', workerState: 'running', sessionUuid: 'live', tmuxSession: 'worker' }))
+      .toEqual(['Close for review', 'Rest'])
+    expect(visible({ status: 'active', sessionUuid: 'idle' })).toEqual(['Close for review', 'Rest'])
+    expect(visible({ status: 'closed', sessionUuid: 'review' })).toEqual(['Temper', 'Discard'])
+    expect(visible({ status: 'open', effectiveHorizon: 'stashed', sessionUuid: 'resting' }))
+      .toEqual(['Resume', 'New session'])
+    expect(visible({ status: 'closed', tempered: true, sessionUuid: 'tempered' })).toEqual(['Resume', 'New session'])
+    expect(visible({ status: 'closed', tempered: false, sessionUuid: 'discarded' })).toEqual(['Resume', 'New session'])
+    controls.reset()
   })
 })
 
@@ -152,7 +175,7 @@ describe('anchored pickers', () => {
     expect(band.el.querySelector('.ws-select-picker')).toBeNull()
     expect(document.activeElement).toBe(effort)
   })
-  it('offers Meeting as a switch whose verb stands in for the send verbs', async () => {
+  it('offers Meeting in its overflow while keeping both session verbs available', async () => {
     let recording: { title: string; state: 'live' } | null = null
     let canJoin = true
     const join = vi.fn(async () => ({ error: null, delivered: true }))
@@ -166,8 +189,11 @@ describe('anchored pickers', () => {
     expect([toggle.getAttribute('role'), toggle.checked]).toEqual(['switch', false])
     expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([false, true])
 
+    q<HTMLElement>('.kbn-ctl-meet-more').click()
+    expect(q<HTMLDetailsElement>('.kbn-ctl-meet-overflow').open).toBe(true)
     toggle.click()
-    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([true, false])
+    expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-start').hidden]).toEqual([false, false])
+    expect(q('.kbn-ctl-meet-chip').textContent).toBe('Meeting armed')
     expect(meetingBand.el.querySelector('[aria-label="Meeting kind"]')).toBeNull()
     expect(field.placeholder).toBe('A note for the meeting (optional)')
     vi.mocked(fetch).mockClear()
@@ -185,6 +211,7 @@ describe('anchored pickers', () => {
     canJoin = false
     meetingDock.syncMeeting()
     expect([toggle.checked, toggle.disabled, q('.kbn-ctl-meet-switch').title]).toEqual([false, true, 'Recording: Standup'])
+    expect(q('.kbn-ctl-meet-chip').hidden).toBe(true)
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
     meetingDock.reset()
   })
@@ -231,10 +258,38 @@ describe('anchored pickers', () => {
     expect(toggle.checked).toBe(true)
     meetingDock.reset()
   })
+
+  it('keeps Meeting controls in an accessible overflow menu and shows the hosted recording outside it', () => {
+    let recording: Record<string, unknown> | null = null
+    const control = { canJoin: () => true, modes: () => ['call'], current: () => recording, join: vi.fn(), stop: vi.fn() }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const band = meetingDock.bandFor(task())
+    document.body.append(band.el)
+    const foot = band.el.querySelector<HTMLElement>('.kbn-ctl-composer-foot')!
+    const menu = foot.querySelector<HTMLDetailsElement>('.kbn-ctl-meet-overflow')!
+    const more = menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')!
+    expect([...foot.children].map(child => child.className)).toEqual(['kbn-ctl-meet-overflow', 'kbn-ctl-meet-chip', 'kbn-ctl-sends'])
+    expect(more.getAttribute('aria-label')).toBe('Meeting controls')
+    expect(menu.querySelector('.kbn-ctl-meet-switch input')).not.toBeNull()
+    more.click()
+    expect(menu.open).toBe(true)
+    expect(band.handleEscape()).toBe(true)
+    expect(menu.open).toBe(false)
+    expect(document.activeElement).toBe(more)
+
+    recording = { title: 'Night sky', state: 'live', fiber: 'a/task', tail: [] }
+    meetingDock.syncMeeting()
+    const chip = foot.querySelector<HTMLElement>('.kbn-ctl-meet-chip')!
+    expect([chip.hidden, chip.textContent]).toEqual([false, 'Meeting · Night sky'])
+    menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')?.click()
+    expect(menu.querySelector('.kbn-detail-transcript')).not.toBeNull()
+    meetingDock.reset()
+  })
 })
 
 describe('Dock booting dispatch rejection', () => {
   it.each(['New session', 'Resume'])('explains a 503 booting %s without consuming the draft or retrying', async name => {
+    band = dock.bandFor(task({ sessionUuid: 'previous-session' }))
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'explicit correction'
     vi.mocked(fetch).mockClear()
@@ -249,6 +304,7 @@ describe('Dock booting dispatch rejection', () => {
   })
 
   it('explains a 503 booting Start retry and keeps the visible message for another explicit try', async () => {
+    band = dock.bandFor(task({ sessionUuid: 'previous-session' }))
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'corrected message'
     vi.mocked(fetch).mockClear()
@@ -263,6 +319,8 @@ describe('Dock booting dispatch rejection', () => {
     expect(band.el.textContent).toContain('The daemon is starting. Nothing was launched; try again shortly.')
     expect(button('Resume').disabled).toBe(false)
     expect(button('New session').disabled).toBe(false)
+    expect(button('Resume').querySelector('.kbn-ctl-shortcut')?.textContent).toBe(' ⌥↵')
+    expect(button('New session').querySelector('.kbn-ctl-shortcut')?.textContent).toBe(' ↵')
     expect(draft.value).toBe('corrected message')
     expect(writes()).toHaveLength(2)
     expect(writes()[1]).toMatchObject({ resume_mode: 'previous', user_message: 'corrected message', project_dir: '/srv/project', origin: 'owner' })
@@ -271,7 +329,22 @@ describe('Dock booting dispatch rejection', () => {
 })
 
 describe('Dock dispatch recovery', () => {
+  it('disables the header session proxies while the composer request is pending', async () => {
+    band = dock.bandFor(task({ effectiveHorizon: 'stashed', sessionUuid: 'previous-session' }))
+    const pending = deferred<Response>()
+    vi.mocked(fetch).mockImplementation(async () => pending.promise)
+    const fresh = button('New session')
+    const headerNew = band.el.querySelector<HTMLButtonElement>('.ws-header-session[aria-label="New session"]')!
+    const headerResume = band.el.querySelector<HTMLButtonElement>('.ws-header-session[aria-label="Resume"]')!
+    fresh.click()
+    expect([headerNew.disabled, headerResume.disabled]).toEqual([true, true])
+    pending.resolve(response())
+    await flush()
+    expect([headerNew.disabled, headerResume.disabled]).toEqual([false, false])
+  })
+
   it.each(['New session', 'Resume'])('re-enables %s after a sessionless conflict only when worker state changes', async name => {
+    band = dock.bandFor(task({ sessionUuid: 'previous-session' }))
     vi.mocked(fetch).mockResolvedValue(response({}, 409))
     band.el.querySelector<HTMLTextAreaElement>('textarea')!.value = 'a message'
     const verb = button(name)
@@ -279,7 +352,7 @@ describe('Dock dispatch recovery', () => {
     await flush()
     expect(verb.textContent).toBe('Already running')
     expect(verb.disabled).toBe(true)
-    dock.syncRuntime(task())
+    dock.syncRuntime(task({ sessionUuid: 'previous-session' }))
     expect(verb.disabled).toBe(true)
     dock.syncRuntime(task({ workerState: 'running', sessionUuid: 'new-session', tmuxSession: 'worker' }))
     expect(verb.disabled).toBe(false)
@@ -327,8 +400,8 @@ describe('state-shaped act zone', () => {
   it("lays the chat out as header, settings content, conversation and composer, with immediate verdicts", () => {
     const review = task({ status: 'closed', sessionUuid: 'resume-me' })
     band = dock.bandFor(review)
-    const verbs = (): string[] => [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')]
-      .filter(button => !button.hidden).map(button => button.getAttribute('aria-label') ?? '')
+    const verbs = (): string[] => [...band.head.querySelectorAll<HTMLButtonElement>('.kbn-ctl-verdict button')].filter(button => !button.hidden)
+      .map(button => button.getAttribute('aria-label') ?? '')
     const message = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     message.value = 'My correction'
     const children = [...band.el.querySelector('.ws-dock-body')!.children].map(child => child.className)
@@ -340,27 +413,32 @@ describe('state-shaped act zone', () => {
     expect(band.head.dataset.verdictKey).toBeTruthy()
     expect(band.head.dataset.column).toBe('awaitingReview')
     expect(verbs()).toEqual(['Temper', 'Discard'])
+    expect([...band.el.querySelectorAll<HTMLButtonElement>('.ws-header-session')].filter(button => !button.hidden)).toHaveLength(0)
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')?.hidden).toBe(false)
     expect(message.placeholder).toBe('')
     dock.syncRuntime({ ...review, status: 'active', workerState: 'running' })
     expect(band.el.querySelector('textarea')).toBe(message)
     expect(message.value).toBe('My correction')
     expect(band.head.dataset.column).toBe('inFlight')
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Close for review'])
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
-    expect(verbs()).toEqual(['Close for review', 'Temper', 'Discard'])
+    expect(verbs()).toEqual(['Launch'])
     dock.syncRuntime({ ...review, status: 'closed', tempered: true })
-    expect(band.head.querySelector<HTMLElement>('.kbn-ctl-verdict')?.hidden).toBe(true)
+    expect(verbs()).toEqual(['Resume', 'New session'])
     dock.syncRuntime({ ...review, status: 'open', workerState: undefined })
     expect(band.el.querySelector('.kbn-ctl-sends')?.textContent).toContain('New session ↵')
+    dock.syncRuntime({ ...review, status: 'open', effectiveHorizon: 'stashed', workerState: undefined })
+    expect([...band.el.querySelectorAll<HTMLButtonElement>('.ws-header-session')].filter(button => !button.hidden).map(button => button.getAttribute('aria-label'))).toEqual(['Resume', 'New session'])
   })
   it('offers named, keyboard-focusable icons in order without sheets or duplicate composer actions', () => {
     dock.reset(); dock = new Dock('', saved, undefined, undefined, { onRest: vi.fn() })
     band = dock.bandFor(task({ status: 'active', sessionUuid: 's', tmuxSession: 't' }))
     band.setNav({ constitution: vi.fn() })
     document.body.append(band.el)
-    const buttons = [...band.head.querySelectorAll<HTMLButtonElement>('button')]
-    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Constitution', 'Console', 'Settings', 'Close for review', 'Rest', 'Temper', 'Discard'])
+    const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-chat-head button')].filter(button => !button.hidden)
+    expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Brief', 'Settings', 'Close for review', 'Rest'])
+    expect(band.el.querySelector('.ws-chat-refs .ws-chat-constitution')?.getAttribute('aria-label')).toBe('Brief')
+    expect(band.el.querySelector('.ws-chat-drawer .ws-chat-console')?.getAttribute('aria-label')).toBe('Console')
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)
@@ -442,7 +520,7 @@ describe('state-shaped act zone', () => {
     const slot = document.createElement('div'); document.body.append(slot)
     const borrow = (drawer: HTMLElement): void => { drawer.hidden = false; slot.replaceChildren(drawer) }
     band.openSettings = other.openSettings = borrow
-    const open = (view: Dock): void => view.head.querySelector<HTMLButtonElement>('.ws-chat-settings')!.click()
+    const open = (view: Dock): void => view.el.querySelector<HTMLButtonElement>('.ws-chat-settings')!.click()
     const rows = (): string[] => [...slot.querySelectorAll<HTMLElement>('[data-session]')].map(row => row.dataset.session!)
     open(band); await flush()
     expect(rows()).toEqual(['a-first-session'])
@@ -464,22 +542,22 @@ describe('state-shaped act zone', () => {
     expect(rows()).toEqual(['a-latest-session'])
   })
   it.each([
-    ['drafts', { status: 'open' }, ['Launch ↵']],
+    ['drafts', { status: 'open' }, ['Launch ↵', 'Resume ⌥↵']],
     ['drafts with a session', { status: 'open', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['resting with a session', { status: 'open', effectiveHorizon: 'stashed', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['in flight with a live worker', { status: 'active', workerState: 'running', sessionUuid: 's', tmuxSession: 't' }, ['Send ↵', 'New session']],
     ['in flight with a session and no worker', { status: 'active', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
-    ['in flight without a worker or session', { status: 'active' }, ['Start ↵']],
+    ['in flight without a worker or session', { status: 'active' }, ['Start ↵', 'Resume ⌥↵']],
     ['awaiting review with a session', { status: 'closed', sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['tempered with a session', { status: 'closed', tempered: true, sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
     ['discarded with a session', { status: 'closed', tempered: false, sessionUuid: 's' }, ['New session ↵', 'Resume ⌥↵']],
-    ['awaiting review without a session', { status: 'closed' }, ['Start ↵']],
+    ['awaiting review without a session', { status: 'closed' }, ['Start ↵', 'Resume ⌥↵']],
   ] as const)('offers a sensible verb set: %s', (_name, patch, verbs) => {
     band = dock.bandFor(task(patch as Partial<KanbanCard>))
-    const shown = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-sends button')].filter(b => !b.hidden)
+    const shown = [...band.el.querySelectorAll<HTMLButtonElement>('.kbn-ctl-sends button')]
     expect(shown.map(b => b.textContent)).toEqual(verbs)
     expect(shown[0].classList.contains('kbn-ctl-secondary')).toBe(false)
-    expect(shown[1]?.classList.contains('kbn-ctl-secondary') ?? false).toBe(verbs.length > 1)
+    expect(shown[1]?.classList.contains('kbn-ctl-secondary') ?? false).toBe(Boolean('sessionUuid' in patch && patch.sessionUuid))
   })
   it('keeps a constitution\'s draft across a rebuilt composer and drops it once sent', async () => {
     const stored = new Map<string, string>()
