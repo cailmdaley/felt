@@ -76,7 +76,7 @@ defmodule ShuttleWeb.TranscriptController do
 
   defp local_stream(conn, session, offset) do
     with path when is_binary(path) <- Transcript.path(session),
-         {:ok, %{size: size, inode: inode}} <- File.stat(path) do
+         {:ok, %{size: size} = stat} <- File.stat(path) do
       if offset > size do
         conn
         |> put_resp_content_type("application/json")
@@ -94,15 +94,12 @@ defmodule ShuttleWeb.TranscriptController do
           :ok ->
             try do
               conn
-              |> put_private(:transcript_stream_key, key)
-              |> put_private(:transcript_stream_inode, inode)
-              |> put_private(:transcript_stream_size, size)
               |> put_resp_content_type("text/event-stream")
               |> put_resp_header("cache-control", "no-cache, no-transform")
               |> put_resp_header("x-accel-buffering", "no")
               |> put_resp_header("x-transcript-offset", Integer.to_string(offset))
               |> send_chunked(200)
-              |> TranscriptStream.follow(path, offset)
+              |> TranscriptStream.follow(path, offset, stat: stat)
             after
               TranscriptStream.release(key)
             end

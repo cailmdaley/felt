@@ -100,6 +100,11 @@ defmodule Shuttle.FileTail do
           {:append, [String.t()], offset()} | {:reset, offset()} | :noop
   def advance(path, offset), do: advance(path, offset, [])
 
+  @doc """
+  Advance with an optional `:max_bytes` cap. A capped read may return
+  `{:append, [], new_offset}` when it consumes only complete blank lines.
+  A line exceeding the cap is read with the remainder of the file.
+  """
   @spec advance(Path.t(), offset(), keyword()) ::
           {:append, [String.t()], offset()} | {:reset, offset()} | :noop
   def advance(path, offset, opts) do
@@ -150,8 +155,14 @@ defmodule Shuttle.FileTail do
     with {:ok, chunk} <- read_range(path, offset, capped_length),
          {:ok, chunk} <- maybe_read_remainder(path, offset, length, capped_length, chunk) do
       case split_complete(chunk) do
-        {[], _} -> :noop
-        {lines, consumed} -> {:append, lines, offset + consumed}
+        {[], consumed} when consumed > 0 and not is_nil(max_bytes) ->
+          {:append, [], offset + consumed}
+
+        {[], _} ->
+          :noop
+
+        {lines, consumed} ->
+          {:append, lines, offset + consumed}
       end
     else
       _ -> :noop
@@ -159,7 +170,7 @@ defmodule Shuttle.FileTail do
   end
 
   defp maybe_read_remainder(path, offset, length, capped_length, chunk) do
-    if capped_length < length and match?({[], _}, split_complete(chunk)) do
+    if capped_length < length and :binary.match(chunk, "\n") == :nomatch do
       read_range(path, offset, length)
     else
       {:ok, chunk}

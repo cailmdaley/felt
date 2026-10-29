@@ -15,8 +15,7 @@ defmodule ShuttleWeb.TranscriptStream do
     max_relays_per_remote: 16,
     relay_idle_ms: 45_000,
     relay_connect_ms: 15_000,
-    event_bytes: 262_144,
-    read_bytes: 1_048_576
+    event_bytes: 262_144
   ]
 
   def config, do: Keyword.merge(@defaults, Shuttle.Env.app(:transcript_stream, []))
@@ -34,21 +33,21 @@ defmodule ShuttleWeb.TranscriptStream do
 
   def release(key), do: Registry.unregister(@registry, key)
 
-  def follow(conn, path, offset) do
-    key = conn.private[:transcript_stream_key]
+  def follow(conn, path, offset, opts \\ []) do
+    cfg = config()
+    start = now()
 
-    try do
-      cfg = config()
-      start = now()
-      inode = conn.private[:transcript_stream_inode] || FileTail.inode(path)
-      size = conn.private[:transcript_stream_size] || offset
+    stat =
+      Keyword.get_lazy(opts, :stat, fn ->
+        case File.stat(path) do
+          {:ok, stat} -> stat
+          {:error, _} -> %{inode: nil, size: offset}
+        end
+      end)
 
-      case chunk(conn, ": open\n\n") do
-        {:ok, conn} -> loop(conn, path, offset, inode, size, start, start, cfg)
-        {:error, _} -> conn
-      end
-    after
-      if key, do: release(key)
+    case chunk(conn, ": open\n\n") do
+      {:ok, conn} -> loop(conn, path, offset, stat.inode, stat.size, start, start, cfg)
+      {:error, _} -> conn
     end
   end
 
@@ -58,7 +57,7 @@ defmodule ShuttleWeb.TranscriptStream do
     if time - started >= cfg[:max_ms] do
       conn
     else
-      result = FileTail.advance(path, offset, max_bytes: cfg[:read_bytes])
+      result = FileTail.advance(path, offset, max_bytes: cfg[:event_bytes])
 
       case File.stat(path) do
         {:ok, %{inode: current, size: size}} when current != inode or is_nil(inode) ->
@@ -76,24 +75,18 @@ defmodule ShuttleWeb.TranscriptStream do
               reset(conn, size)
 
             {:append, lines, next} ->
-              case send_events(conn, path, lines, offset, next, inode, cfg[:event_bytes]) do
-                {:ok, conn} ->
-                  written = now()
+              result =
+                if lines == [], do: {:ok, conn}, else: chunk(conn, event_iodata(lines, next))
 
-                  if current_size - offset >= cfg[:read_bytes] and current_size > next do
+              case result do
+                {:ok, conn} ->
+                  written = if lines == [], do: last_write, else: now()
+
+                  if next < current_size do
                     loop(conn, path, next, inode, current_size, started, written, cfg)
                   else
                     wait(conn, path, next, inode, current_size, started, written, cfg)
                   end
-
-                {:error, :changed} ->
-                  reset(
-                    conn,
-                    case File.stat(path) do
-                      {:ok, %{size: size}} -> size
-                      _ -> 0
-                    end
-                  )
 
                 {:error, _} ->
                   conn
@@ -124,63 +117,6 @@ defmodule ShuttleWeb.TranscriptStream do
       min(cfg[:tick_ms], remaining) ->
         loop(conn, path, offset, inode, observed_size, started, last_write, cfg)
     end
-  end
-
-  defp send_events(conn, path, lines, offset, next, inode, limit) do
-    with {:ok, file} <- :file.open(path, [:read, :binary, :raw]) do
-      result =
-        try do
-          :file.pread(file, offset, next - offset)
-        after
-          :file.close(file)
-        end
-
-      with {:ok, bytes} <- result,
-           true <- byte_size(bytes) == next - offset,
-           ^inode <- FileTail.inode(path) do
-        {records, _} =
-          bytes
-          |> :binary.split("\n", [:global])
-          |> Enum.reduce({[], offset}, fn line, {records, pos} ->
-            next_pos = pos + byte_size(line) + 1
-            if line == "", do: {records, next_pos}, else: {[{line, next_pos} | records], next_pos}
-          end)
-
-        records = Enum.reverse(records)
-
-        if Enum.map(records, &elem(&1, 0)) == lines do
-          write_batches(conn, records, limit)
-        else
-          {:error, :changed}
-        end
-      else
-        _ -> {:error, :changed}
-      end
-    else
-      {:error, _} -> {:error, :changed}
-    end
-  end
-
-  defp write_batches(conn, records, limit) do
-    {batches, batch, _size, id} =
-      Enum.reduce(records, {[], [], 0, 0}, fn {line, pos}, {batches, batch, size, id} ->
-        bytes = byte_size(line) + 1
-
-        if batch != [] and size + bytes > limit do
-          {[{Enum.reverse(batch), id} | batches], [line], bytes, pos}
-        else
-          {batches, [line | batch], size + bytes, pos}
-        end
-      end)
-
-    batches = Enum.reverse([{Enum.reverse(batch), id} | batches])
-
-    Enum.reduce_while(batches, {:ok, conn}, fn {batch, id}, {:ok, conn} ->
-      case chunk(conn, event_iodata(batch, id)) do
-        {:ok, conn} -> {:cont, {:ok, conn}}
-        error -> {:halt, error}
-      end
-    end)
   end
 
   def event_iodata(lines, id) do

@@ -14,6 +14,18 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     def chunk(_state, _body), do: {:error, :closed}
   end
 
+  defmodule BrokenStartAdapter do
+    def send_chunked(_, _, _), do: raise("send_chunked failed")
+  end
+
+  defmodule SlowAdapter do
+    def chunk(state, body) do
+      body = IO.iodata_to_binary(body)
+      if String.starts_with?(body, "id:"), do: Process.sleep(25)
+      {:ok, state <> body, state <> body}
+    end
+  end
+
   setup do
     root =
       Path.join(
@@ -142,8 +154,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
         tick_ms: 10,
         max_ms: 160,
         heartbeat_ms: 50,
-        event_bytes: 5,
-        read_bytes: 6
+        event_bytes: 5
       )
 
       :ok
@@ -174,42 +185,54 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       Env.put_app_env(:transcript_stream,
         tick_ms: 10,
         max_ms: 30,
-        event_bytes: 2,
-        read_bytes: 100
+        event_bytes: 2
       )
 
       conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
       assert response(conn, 200) =~ "id: 2\ndata: a\n\nid: 6\ndata: b\n\n"
     end
 
-    test "registration is released if following raises", %{path: path} do
+    test "registration is released if following raises" do
       Env.put_app_env(:transcript_stream, max_ms: nil)
-      key = {:local, @session}
-      assert :ok = ShuttleWeb.TranscriptStream.admit(key)
 
-      conn =
-        Plug.Test.conn(:get, "/") |> put_private(:transcript_stream_key, key) |> send_chunked(200)
+      assert_raise ArithmeticError, fn ->
+        local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      end
 
-      assert_raise ArithmeticError, fn -> ShuttleWeb.TranscriptStream.follow(conn, path, 0) end
       assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
     end
 
-    test "disconnect releases the registration", %{path: path} do
-      key = {:local, @session}
-      assert :ok = ShuttleWeb.TranscriptStream.admit(key)
+    test "registration is released if send_chunked raises before following" do
+      conn = %{Plug.Test.conn(:get, "/") | adapter: {BrokenStartAdapter, nil}}
 
-      conn =
-        Plug.Test.conn(:get, "/") |> put_private(:transcript_stream_key, key) |> send_chunked(200)
+      assert_raise RuntimeError, "send_chunked failed", fn ->
+        ShuttleWeb.TranscriptController.stream(conn, %{"session" => @session, "host" => "local"})
+      end
 
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "the deadline is checked between backlog events", %{path: path} do
+      File.write!(path, String.duplicate("x\n", 100))
+      Env.put_app_env(:transcript_stream, tick_ms: 10, max_ms: 40, event_bytes: 2)
+      conn = Plug.Test.conn(:get, "/") |> send_chunked(200)
+      conn = %{conn | adapter: {SlowAdapter, ""}}
+      result = ShuttleWeb.TranscriptStream.follow(conn, path, 0)
+      {_, body} = result.adapter
+      assert body =~ "id: 2\ndata: x\n\n"
+      refute body =~ "id: 200\n"
+    end
+
+    test "disconnect ends the follower", %{path: path} do
+      conn = Plug.Test.conn(:get, "/") |> send_chunked(200)
       conn = %{conn | adapter: {ClosedAdapter, nil}}
-      ShuttleWeb.TranscriptStream.follow(conn, path, 0)
-      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+      assert ShuttleWeb.TranscriptStream.follow(conn, path, 0) == conn
     end
 
-    test "a record larger than the event limit has its own event", %{path: path} do
+    test "a record larger than the event limit is read whole", %{path: path} do
       File.write!(path, "oversized\nx\n")
       conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
-      assert response(conn, 200) =~ "id: 10\ndata: oversized\n\nid: 12\ndata: x\n\n"
+      assert response(conn, 200) =~ "id: 12\ndata: oversized\ndata: x\n\n"
     end
 
     test "appended records arrive with their offsets", %{path: path} do
