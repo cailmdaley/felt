@@ -122,7 +122,54 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			if !found {
 				t.Fatalf("missing record %s", data)
 			}
+			input.Prompt = "another thought"
+			b, _ = json.Marshal(input)
+			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			records := readBoardRecords(t, sink)
+			if len(records) != 2 || records[1].Kind != "human" || records[1].Text != input.Prompt {
+				t.Fatalf("human records: %+v", records)
+			}
+			input.SessionID = "other"
+			b, _ = json.Marshal(input)
+			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			input.SessionID = "session"
+			input.Prompt = "[Shuttle message machine]"
+			b, _ = json.Marshal(input)
+			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			env.Set("SHUTTLE_BOARD", "off")
+			input.Prompt = "disabled"
+			b, _ = json.Marshal(input)
+			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			if records = readBoardRecords(t, sink); len(records) != 2 {
+				t.Fatalf("unexpected records: %+v", records)
+			}
 		})
+	}
+}
+
+type boardFailWriter struct{}
+
+func (boardFailWriter) Write([]byte) (int, error) { return 0, fmt.Errorf("write failed") }
+
+func TestBoardMailboxWriteFailureRetainsMessage(t *testing.T) {
+	env := messageHookEnv(t, "host")
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"family":{"label":"family"},"records":[{"id":"id","timestamp":1793300000000,"kind":"post","member":"member","text":"new"}]}`)
+	}})
+	a := newApp(env)
+	a.eventNow = func() time.Time { return time.UnixMilli(1793300000000) }
+	start := []byte(`{"hook_event_name":"SessionStart","harness":"pi","session_id":"s"}`)
+	prompt := []byte(`{"hook_event_name":"UserPromptSubmit","harness":"pi","session_id":"s"}`)
+	_ = a.runEventAndMessageHook(bytes.NewReader(start), &bytes.Buffer{})
+	_, err := messaging.Send(context.Background(), env, "host", messaging.Request{Address: "shuttle://host/pi/s", Text: "mail", From: "person", MessageID: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = a.runEventAndMessageHook(bytes.NewReader(prompt), boardFailWriter{})
+	var out bytes.Buffer
+	_ = a.runEventAndMessageHook(bytes.NewReader(prompt), &out)
+	if !strings.Contains(out.String(), "mail") {
+		t.Fatalf("mail was acknowledged after output failure: %s", out.String())
 	}
 }
 

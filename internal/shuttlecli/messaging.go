@@ -215,6 +215,9 @@ exit 1 means rejected, unknown, or another command error.`,
 						fmt.Fprintf(a.env.Stderr, "idle subscription: unsupported — no live worker to watch; the message waits for the next one\n")
 					}
 					a.recordBoardMessage(args[0], request)
+					if err := a.clearMessagedFiberAsk(args[0], request.From); err != nil {
+						fmt.Fprintf(a.env.Stderr, "message queued; couldn't clear the fiber's outstanding question: %v\n", err)
+					}
 					return a.printNextWorkerReceipt(queued)
 				}
 			}
