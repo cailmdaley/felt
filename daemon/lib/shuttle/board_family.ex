@@ -13,12 +13,13 @@ defmodule Shuttle.BoardFamily do
         host = get_in(fiber, ["shuttle", "host"])
         session = get_in(fiber, ["shuttle", "runtime", "session_uuid"])
         uid = fiber["uid"] || Threads.address(fiber)
+        harness = normalize_harness(get_in(fiber, ["shuttle", "resolved", "agent", "cli"]))
 
-        if is_binary(host) and is_binary(session) and session != "" do
+        if is_binary(host) and is_binary(session) and session != "" and is_binary(harness) do
           current =
             if host == own_host, do: SessionBinding.current(bindings, session), else: session
 
-          acc |> Map.put({host, session}, uid) |> Map.put({host, current}, uid)
+          acc |> Map.put({host, harness, session}, uid) |> Map.put({host, harness, current}, uid)
         else
           acc
         end
@@ -26,10 +27,27 @@ defmodule Shuttle.BoardFamily do
 
     local = Messaging.cached_session_fiber_index(own_host).fibers_by_session
 
+    refs = index(entries)
+
     Enum.reduce(local, runtime, fn {session, pairing}, acc ->
       uid = pairing["fiber_uid"] || pairing["fiber"]
+      entry = find(refs, uid)
+
+      harness =
+        normalize_harness(
+          pairing["harness"] ||
+            if(entry, do: get_in(entry.fiber, ["shuttle", "resolved", "agent", "cli"]))
+        )
+
       current = SessionBinding.current(bindings, session)
-      acc |> Map.put({own_host, session}, uid) |> Map.put({own_host, current}, uid)
+
+      if harness do
+        acc
+        |> Map.put({own_host, harness, session}, uid)
+        |> Map.put({own_host, harness, current}, uid)
+      else
+        acc
+      end
     end)
   end
 
@@ -118,7 +136,8 @@ defmodule Shuttle.BoardFamily do
       Enum.reduce(["by", "to"], record, fn key, acc ->
         case acc[key] do
           %{} = party -> Map.put(acc, key, resolve_party(party, own_host, sessions))
-          _ -> acc
+          nil -> acc
+          _ -> Map.delete(acc, key)
         end
       end)
 
@@ -146,7 +165,7 @@ defmodule Shuttle.BoardFamily do
       %URI{host: host, path: path} when is_binary(host) and is_binary(path) ->
         case String.split(String.trim_leading(path, "/"), "/", parts: 2) do
           [harness, native] when harness != "" and native != "" ->
-            Map.get(sessions, {host, URI.decode(native)})
+            Map.get(sessions, {host, normalize_harness(harness), URI.decode(native)})
 
           _ ->
             nil
@@ -159,12 +178,19 @@ defmodule Shuttle.BoardFamily do
 
   defp resolve_session(session, host, sessions) when is_binary(session) do
     case String.split(session, ":", parts: 2) do
-      [harness, native] when harness != "" and native != "" -> Map.get(sessions, {host, native})
-      _ -> nil
+      [harness, native] when harness != "" and native != "" ->
+        Map.get(sessions, {host, normalize_harness(harness), native})
+
+      _ ->
+        nil
     end
   end
 
   defp resolve_session(_, _, _), do: nil
+
+  defp normalize_harness("claude-code"), do: "claude"
+  defp normalize_harness(value) when value in ["claude", "codex", "pi"], do: value
+  defp normalize_harness(_), do: nil
 
   defp member(index, entries, ref) do
     case find(index, ref) do
@@ -193,10 +219,17 @@ defmodule Shuttle.BoardFamily do
 
     parent = if subject, do: Threads.orchestrator(subject, entries)
 
+    subject_viewer = viewer_uid != nil and subject != nil and subject.fiber["uid"] == viewer_uid
+    actor_viewer = viewer_uid != nil and by_entry != nil and by_entry.fiber["uid"] == viewer_uid
+
+    recipient_viewer =
+      viewer_uid != nil and to_entry != nil and to_entry.fiber["uid"] == viewer_uid
+
+    silent_clear = record["kind"] == "cleared" and subject_viewer and not actor_viewer
+
     delivered =
-      viewer_uid != nil and
-        ((record["kind"] == "message" and to_entry != nil and to_entry.fiber["uid"] == viewer_uid) or
-           (by_entry != nil and by_entry.fiber["uid"] == viewer_uid) or
+      not silent_clear and viewer_uid != nil and
+        (subject_viewer or actor_viewer or recipient_viewer or
            (record["kind"] in ~w(asked closed handed_off rested unblocked) and parent != nil and
               parent.fiber["uid"] == viewer_uid))
 

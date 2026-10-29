@@ -23,7 +23,7 @@ defmodule Shuttle.BoardFamilyTest do
       entry("work/other", "other")
     ]
 
-    sessions = %{{"host", "session"} => "child", {"host", "recipient"} => "parent"}
+    sessions = %{{"host", "pi", "session"} => "child", {"host", "pi", "recipient"} => "parent"}
 
     records = [
       %{
@@ -81,6 +81,84 @@ defmodule Shuttle.BoardFamilyTest do
     assert length(
              BoardFamily.compose(entries, records, sessions, "host", %{"all" => "true"}).records
            ) == 4
+  end
+
+  test "session index uses runtime and ledger harness identities without conflating them" do
+    dir = Path.join(System.tmp_dir!(), "board-sessions-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(dir, "sessions.jsonl"))
+
+    record = %{
+      "session" => "ledger-session",
+      "fiber" => "hub/child",
+      "uid" => "child",
+      "host" => "host",
+      "harness" => "pi",
+      "at" => 1
+    }
+
+    File.write!(Path.join(dir, "sessions.jsonl"), Jason.encode!(record) <> "\n")
+    child = entry("hub/child", "child")
+
+    child =
+      put_in(child.fiber["shuttle"], %{
+        "host" => "host",
+        "runtime" => %{"session_uuid" => "runtime-session"},
+        "resolved" => %{"agent" => %{"cli" => "codex"}}
+      })
+
+    sessions = BoardFamily.session_index([child], "host")
+    assert sessions[{"host", "codex", "runtime-session"}] == "child"
+    assert sessions[{"host", "pi", "ledger-session"}] == "child"
+    refute Map.has_key?(sessions, {"host", "claude", "ledger-session"})
+  end
+
+  test "viewer subject, actor and recipient are delivered except an externally cleared question" do
+    entries = [entry("hub", "root"), entry("hub/child", "child")]
+
+    records = [
+      %{
+        "id" => "1",
+        "timestamp" => 1,
+        "kind" => "human",
+        "fiber" => "child",
+        "by" => %{"label" => "human"}
+      },
+      %{
+        "id" => "2",
+        "timestamp" => 2,
+        "kind" => "answered",
+        "fiber" => "child",
+        "by" => %{"label" => "human"}
+      },
+      %{
+        "id" => "3",
+        "timestamp" => 3,
+        "kind" => "cleared",
+        "fiber" => "child",
+        "by" => %{"fiber" => "root"},
+        "to" => %{"fiber" => "child"}
+      },
+      %{
+        "id" => "4",
+        "timestamp" => 4,
+        "kind" => "cleared",
+        "fiber" => "child",
+        "by" => %{"fiber" => "child"}
+      },
+      %{
+        "id" => "5",
+        "timestamp" => 5,
+        "kind" => "post",
+        "fiber" => "root",
+        "to" => %{"fiber" => "child"}
+      }
+    ]
+
+    result = BoardFamily.compose(entries, records, %{}, "host", %{"fiber" => "child"})
+    assert Enum.map(result.records, & &1["delivered"]) == [true, true, false, true, true]
   end
 
   test "actor and delivery distinguish authors, replies and outbox lifecycle" do
