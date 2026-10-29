@@ -327,7 +327,7 @@ describe('board phone meeting card wiring', () => {
       getDragSourceId: () => null, setDragSourceId: vi.fn(), getLastResponse: () => state.lastResponse,
       stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), openDetail: vi.fn(),
       getMeeting: () => row({ phone: false }), getPhoneMeeting: () => board.phoneAudio,
-      onMeetingStop: vi.fn(), onMeetingTerminal: terminal, onRefresh: vi.fn(),
+      onMeetingStop: vi.fn(), onMeetingTerminal: terminal,
     })
     const section = renderer.renderNowSection(state.lastResponse.now, {})
     expect(section.querySelector('.kbn-phone-controls')).toBeNull()

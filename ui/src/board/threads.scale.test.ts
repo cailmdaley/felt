@@ -55,13 +55,13 @@ describe('a family of many threads is still one row', () => {
       fiber: { id, name: id, status: 'active', created_at: '2026-10-01T09:00:00Z', shuttle: { kind: 'oneshot' } },
       runtime: { state: 'running', phase, session_uuid: `s-${id}` } })) })
   const draw = (board: ReturnType<typeof buildKanbanResponseFromComposite>) => new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
-    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} }).renderNowSection(board.now, {})
-  it('a root in Your turn over ten working threads is the root, with the workers as a blue number', () => {
+    stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} }).renderNowSection(board.now, {})
+  it('a root in Your turn over ten working threads shows the working count', () => {
     const board = buildKanbanResponseFromComposite(family('waiting', 'working', 10))
     const desk = draw(board)
     expect(desk.querySelectorAll('.kbn-card')).toHaveLength(1)
     expect(desk.querySelector('.kbn-card')!.getAttribute('data-fiber-id')).toBe('cmbx')
-    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('10')
+    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('10 working')
     expect(desk.querySelector('.kbn-count-needs')).toBeNull()
     expect(desk.querySelector('.kbn-family-asks')).toBeNull()
   })
@@ -73,9 +73,9 @@ describe('a family of many threads is still one row', () => {
     expect(desk.querySelector('.kbn-card-crumb')!.textContent).toBe('cmbx /\u00a0')
     expect([...desk.querySelectorAll('.kbn-family-ask-name')].map(el => el.textContent)).toEqual(['cmbx/t1', 'cmbx/t2', 'cmbx/t3'])
     expect(desk.querySelector('.kbn-family-more')!.textContent).toBe('+8 more')
-    expect(desk.querySelector('.kbn-count-working')!.textContent).toBe('1')
-    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('11')
-    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('1 working, 11 needing you elsewhere in this family')
+    expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('11 need you')
+    expect(desk.querySelector('.kbn-count-working')).toBeNull()
+    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('11 your turn, 0 awaiting review, 1 working elsewhere in this family')
   })
 })
 
@@ -91,7 +91,7 @@ describe('thread read model at fleet scale', () => {
       board = buildKanbanResponseFromComposite(input)
       expect(threadIndexBuilds()).toBe(before + 1)
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => board,
-        stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {}, onRefresh: () => {} })
+        stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: () => {} })
       const desk = renderer.renderNowSection(board.now, {})
       // Each tree is one row; a family's many askers fold to three sub-lines and a `+N more`.
       expect(desk.querySelectorAll('.kbn-card')).toHaveLength(threadIndexFor(board).frontier().filter(c => board.now.inFlight.includes(c)).length)

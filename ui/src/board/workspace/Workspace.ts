@@ -35,6 +35,8 @@ export interface WorkspaceOptions {
   /** The daemon serving shuttleBase, identified by the composite feed; unknown means no local hit can open. */
   localHost?(): string | undefined
   cards(): KanbanCard[]
+  /** The active Desk projection, already in the Desk's visible reading order. */
+  deskRows?(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
   deskColumn?(card: KanbanCard): SidebarEntry[]
@@ -318,6 +320,8 @@ export class Workspace {
   forceThreadRail(): void { this.reader.forceThreadRail() }
 
   private sidebarCards(): KanbanCard[] {
+    const projected = this.opts.deskRows?.()
+    if (projected) return projected
     // The sidebar uses the same frontier rows as the Desk.
     const cards = (this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())).frontier()
     const inColumn = (column: string): KanbanCard[] => cards.filter(card => this.sidebarPlace(card) === column)
@@ -338,7 +342,8 @@ export class Workspace {
   /** A family's row earns its own column; every other node of the family follows that row. */
   private sidebarPlace(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
-    return deskColumn(root)
+    const column = deskColumn(root)
+    return column === 'scheduled' ? 'resting' : column
   }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {

@@ -187,7 +187,7 @@ export function registerHeaderBarJourneys(test) {
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-transcript-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-    for (const scheme of ['light', 'dark']) test(`Root heads the family at every depth (${device}, ${scheme})`, async page => {
+    for (const scheme of ['light', 'dark']) test(`The rail omits its open root and keeps it as the thread anchor (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
@@ -199,23 +199,23 @@ export function registerHeaderBarJourneys(test) {
       const header = page.locator('.ws-selected .ws-chat-head')
       const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
       const show = async () => { if (device === 'phone') await page.locator('.ws-rail-toggle').click() }
-      const first = () => family.locator(':scope > *').first()
-      const rootButton = () => device === 'phone' ? first() : first().locator('.kbn-thread-row')
+      const rootAnchor = () => family.locator(device === 'phone' ? '.ws-phone-threads-root' : '.ws-thread-root')
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await show()
         await family.locator('.kbn-thread-row').filter({ hasText: name }).click()
         await header.getByRole('heading', { name, exact: true }).waitFor()
         await show()
-        assert.equal(await first().locator('.kbn-thread-name').innerText(), title)
-        assert.ok(await first().locator('.constitution-state-dot').isVisible())
+        assert.equal(await rootAnchor().count(), 1)
+        assert.equal(await rootAnchor().locator('.kbn-thread-name').innerText(), title)
+        assert.ok(await rootAnchor().locator('.constitution-state-dot').isVisible())
         if (process.env.WORKSPACE_SHOTS && name === 'Choose the response cut') {
           await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
           await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `family-${device}-${scheme}.png`) })
         }
-        await rootButton().click()
+        await rootAnchor().click()
         await header.getByRole('heading', { name: title, exact: true }).waitFor()
         await show()
-        assert.equal(await rootButton().getAttribute('aria-current'), 'page')
+        assert.equal(await rootAnchor().count(), 0)
         if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
       }
     }, viewport)

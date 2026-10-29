@@ -4,6 +4,8 @@ import { card } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
 import { Workspace } from './Workspace.js'
 import { ThreadIndex } from '../threads.js'
+import { deskSidebarRows, projectDeskFrontier } from '../KanbanReadModel.js'
+import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
@@ -725,9 +727,8 @@ describe('workspace reader integration', () => {
     workspace.open(feed[3], 'Desk'); await flush()
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
-    // Empty columns draw no entry; In flight is one entry over its two bands;
-    // the strip abbreviates In flight and Awaiting review, their names stay whole.
-    expect(entries().map(entry => entry.textContent)).toEqual(['Flight3', 'Review1'])
+    // Empty columns draw no entry; In flight is one entry over its two bands.
+    expect(entries().map(entry => entry.textContent)).toEqual(['In flight3', 'Awaiting review1'])
     expect(entries().map(entry => entry.getAttribute('aria-label'))).toEqual(['In flight, 3', 'Awaiting review, 1'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Your turn', 'Working', 'Awaiting review'])
     expect(entries().filter(entry => entry.getAttribute('aria-current') === 'location').map(entry => entry.title.split('\n')[0])).toEqual(['Awaiting review'])
@@ -741,6 +742,32 @@ describe('workspace reader integration', () => {
     // Back in In flight, the click lands on the card last open there.
     entries()[0].click(); await flush()
     expect(current()).toBe('w1')
+  })
+  it('takes the sidebar rows and counts from the Desk projection, including scheduled work in Resting', async () => {
+    workspace.dispose()
+    localStorage.setItem('shuttle:workspace:sidebar', 'true')
+    const draft = card({ id: 'desk/draft', shuttleKind: 'oneshot' })
+    const turn = card({ id: 'desk/turn', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'waiting' })
+    const working = card({ id: 'desk/working', status: 'active', shuttleKind: 'oneshot', workerState: 'running', runtimePhase: 'working' })
+    const review = card({ id: 'desk/review', status: 'closed', shuttleKind: 'oneshot' })
+    const seat = card({ id: 'roles/editor', status: 'open', shuttleKind: 'standing', shuttleRole: 'editor', shuttleSeat: true })
+    const stashed = card({ id: 'desk/stashed', shuttleKind: 'oneshot', effectiveHorizon: 'stashed' })
+    const scheduled = card({ id: 'roles/scheduled', status: 'active', shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', nextLaunchAt: '2026-10-30T09:00:00Z' })
+    const projection = projectDeskFrontier(boardResponse({
+      now: { drafts: [draft], inFlight: [turn, working], awaitingReview: [review] },
+      roles: [seat], stash: [stashed], timeline: { past: [], futureDated: [scheduled] },
+    }))
+    const rows = deskSidebarRows(projection)
+    workspace = new Workspace(document.body, {
+      shuttleBase: '', cards: () => [...rows], deskRows: () => rows,
+      threadIndex: () => new ThreadIndex(rows), origin: () => 'Desk',
+      onVisibility: visibility, dock: new Dock('', changed),
+    })
+    workspace.open(rows[0], 'Desk'); await flush()
+    expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid))
+      .toEqual(rows.map(row => row.uid ?? row.id))
+    expect([...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label')))
+      .toEqual(['Drafts, 1', 'In flight, 2', 'Awaiting review, 1', 'Roles, 1', 'Resting, 2'])
   })
   it('indexes fleet filenames on a cold Desk and refreshes an open picker without entering Reader', async () => {
     workspace.dispose()

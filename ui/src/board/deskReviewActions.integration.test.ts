@@ -13,7 +13,6 @@ function renderer(): KanbanSurfaceRenderer {
     transition: vi.fn(),
     setSurface: () => {},
     openDetail: () => {},
-    onRefresh: () => {},
   })
 }
 

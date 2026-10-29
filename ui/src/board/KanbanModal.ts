@@ -66,7 +66,7 @@ import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, restingCards, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, deskSidebarRows, isQuestion, restingCards, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
 import { threadKey } from './threads.js'
 import {
   dueBouncesFromResting,
@@ -415,7 +415,6 @@ export class KanbanModal {
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
       onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
-      onRefresh: () => void this.refreshFromSource(),
     })
     this.phoneAudio = new PhoneMeeting(this.shuttleBase, () => this.presentMeeting(), () => this.surfaces.updatePhoneLevel())
   }
@@ -554,6 +553,7 @@ export class KanbanModal {
       shuttleBase: this.shuttleBase,
       localHost: () => this.lastResponse?.feltHost,
       cards: () => this.workspaceCards(),
+      deskRows: () => this.workspaceDeskRows(),
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
@@ -763,7 +763,7 @@ export class KanbanModal {
     const address = this.workspaceReturnCard
     const cardStillOwned = address && boardCards(this.lastResponse).some(card => card.id === address.id && card.originId === address.origin)
     const target = this.workspaceReturnFocus?.isConnected ? this.workspaceReturnFocus
-      : cardStillOwned ? Array.from(this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []).find(el => el.dataset.fiberId === address.id)
+      : cardStillOwned ? this.drawnDeskCardElements().find(el => el.dataset.fiberId === address.id)
       : this.tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')
     target?.focus({ preventScroll: true })
   }
@@ -787,11 +787,36 @@ export class KanbanModal {
     const byId = new Map(cards.map(card => [card.id, card]))
     const seen = new Set<string>()
     const ordered: KanbanCard[] = []
-    for (const el of this.deskEl?.querySelectorAll<HTMLElement>('[data-fiber-id]') ?? []) {
+    for (const el of this.drawnDeskCardElements()) {
       const card = byId.get(el.dataset.fiberId ?? '')
       if (card && !seen.has(card.id)) { seen.add(card.id); ordered.push(card) }
     }
     return [...ordered, ...cards.filter(card => !seen.has(card.id))]
+  }
+
+  /** The sidebar follows Desk order, using the fresh projection while its DOM is parked. */
+  private workspaceDeskRows(): KanbanCard[] {
+    const projected = deskSidebarRows(this.lastResponse)
+    // Polls can advance the feed while Reader or a temporal view keeps the
+    // Desk's DOM parked. In that window, its order describes an older
+    // projection, so use the fresh read-model order until the Desk is painted.
+    if (this.pendingDeskData) return projected
+    const byIdentity = new Map(projected.map(card => [JSON.stringify([card.originId, card.uid ?? card.id]), card]))
+    const seen = new Set<string>()
+    const drawn: KanbanCard[] = []
+    for (const el of this.drawnDeskCardElements()) {
+      const key = JSON.stringify([el.dataset.cardOrigin, el.dataset.cardUid ?? el.dataset.fiberId])
+      const card = byIdentity.get(key)
+      if (card && !seen.has(key)) { seen.add(key); drawn.push(card) }
+    }
+    return [...drawn, ...projected.filter(card => !seen.has(JSON.stringify([card.originId, card.uid ?? card.id])))]
+  }
+
+  /** Cycle-lens ghosts illustrate another surface; they do not set Desk order. */
+  private drawnDeskCardElements(): HTMLElement[] {
+    return Array.from(this.deskEl?.querySelectorAll<HTMLElement>(
+      '[data-fiber-id]:not(.kbn-card--lens-ghost)',
+    ) ?? [])
   }
 
   // ── View switching ──────────────────────────────────────────────────────────
@@ -1800,17 +1825,6 @@ export class KanbanModal {
         this.markFetchFailed(errText(err))
       }
     }
-  }
-
-  private async refreshFromSource(): Promise<void> {
-    // Kanban content is read live from each owning daemon's `/api/v1/fibers`
-    // route, so a manual refresh is just a re-fetch — there is no remote
-    // snapshot to prompt.
-    this.announce('Refreshing…')
-    await this.fetchAndRender()
-    window.setTimeout(() => {
-      void this.fetchAndRender()
-    }, 800)
   }
 
   private computeResponseSignature(data: KanbanResponse): string {

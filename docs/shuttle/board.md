@@ -23,7 +23,7 @@ band of launcher chips for every seat at rest (a constitution with
 everything else put down waits — paused and snoozed work, the hubs you start by
 hand, and standing constitutions between runs.
 
-![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In Flight, and the programme and venue decision Awaiting Review.](../assets/board-desk.jpg)
+![The Desk with fictional workshop tasks: lunch options and speaker bios in Drafts, the participant guide and venue access In flight, and the programme and venue decision Awaiting review.](../assets/board-desk.jpg)
 
 *The cards use fictional workshop data.
 Each card shows its fiber's `outcome`, so the venue decision is readable beside the guide that uses it.*

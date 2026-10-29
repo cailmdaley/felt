@@ -1174,13 +1174,14 @@ test('j/k step constitutions in the sidebar order from a Board-opened reader, th
 test('The sidebar strip names the J/K stops; every jump and strip click shows the landed card under its caption', async p => {
   const deskNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await deskNames('drafts'), flight = await deskNames('inFlight'), review = await deskNames('awaitingReview')
-  const drafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
-  assert.deepEqual([...drafts].sort(), [...deskDrafts].sort())
+  const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
+  assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
+  const drafts = deskDrafts
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()
   const strip = sidebar.locator('.ws-sidebar-index-entry')
-  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `Flight${flight.length}`, `Review${review.length}`])
-  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Review${review.length}`])
+  assert.deepEqual(await strip.allTextContents(), [`Drafts${drafts.length}`, `In flight${flight.length}`, `Awaiting review${review.length}`])
+  assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Awaiting review${review.length}`])
   const list = sidebar.locator('.ws-channel-list')
   assert.ok(await list.evaluate(el => el.scrollHeight > el.clientHeight), 'the short viewport makes the list scroll')
   // The landed card and its group's caption both sit inside the list's box, the card clear of the caption.
@@ -1209,7 +1210,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
   await p.keyboard.press('Shift+K'); await landed(flight[0], 'Working')
   await strip.filter({ hasText: 'Drafts' }).click(); await landed(drafts[1], 'Drafts')
   assert.deepEqual(await sidebar.locator('.ws-sidebar-index-entry[aria-current="location"]').allTextContents(), [`Drafts${drafts.length}`])
-  await strip.filter({ hasText: 'Review' }).click(); await landed(name, 'Awaiting review')
+  await strip.filter({ hasText: 'Awaiting review' }).click(); await landed(name, 'Awaiting review')
   // Mid-group, the group's caption holds the top of the list while its cards
   // pass beneath; past its group, it leaves with it.
   const stuck = scrollTop => list.evaluate((el, scrollTop) => {
@@ -1226,8 +1227,9 @@ test('Wide reader steps through Desk cards, preserves selection on Escape, and r
   const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
-  const drafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
-  assert.deepEqual([...drafts].sort(), [...deskDrafts].sort())
+  const knownDrafts = ['Weekly shear summary', 'Transfer-function check', 'Validate the summary against simulations']
+  assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
+  const drafts = deskDrafts
   const names = [...drafts, ...flight, ...review]
   await open(p)
   const sidebar = p.locator('.ws-sidebar').first()

@@ -28,18 +28,20 @@ describe('the phone thread page', () => {
     expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'hub' }))
   })
 
-  it('heads the family with a selectable root and state dot at every depth', () => {
+  it('keeps the family root as an anchor inside threads and omits the open root row', () => {
     const deep = thread({ id: 'hub/a/deep', orchestrator: 'hub-a', status: 'active' })
     const tree = new ThreadIndex([...feed, deep]), open = vi.fn()
-    for (const current of [feed[0], feed[1], deep]) {
+    for (const current of [feed[1], deep]) {
       const page = phoneThreads(current, tree, open)!
       const first = page.firstElementChild!
       expect(first.classList.contains('ws-phone-threads-root')).toBe(true)
       expect(first.querySelector('.constitution-state-dot')).not.toBeNull()
-      expect(first.getAttribute('aria-current')).toBe(current === feed[0] ? 'page' : null)
+      expect(first.getAttribute('aria-current')).toBeNull()
       ;(first as HTMLButtonElement).click()
       expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'hub' }))
     }
+    const rootPage = phoneThreads(feed[0], tree, open)!
+    expect(rootPage.querySelector('.ws-phone-threads-root')).toBeNull()
   })
 
   it('draws nothing for a constitution with no family', () => {

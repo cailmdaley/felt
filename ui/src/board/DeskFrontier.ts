@@ -15,9 +15,9 @@ export function familyCounts(others: Readonly<Record<FamilyNeed, number>>): { wo
 /**
  * A family's Desk row, shared by desktop and phone. The row is the node that
  * set the family's column: a thread leads with a quiet crumb to its root, the
- * others asking the same of the human follow as indented sub-lines, and the
- * rest of the tree is a blue number working and an orange one needing the
- * human, which open the family page.
+ * others asking the same of the human follow as indented sub-lines. A single
+ * priority count opens the family page; its tooltip retains the full
+ * split between work, turns and reviews.
  */
 export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard, forceRail?: boolean) => void, now = Date.now()): void {
   const family = index.family(index.card(card))
@@ -43,10 +43,11 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
   const { working, needs } = familyCounts(family.others)
   if (working || needs) {
     const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
-    const words: string[] = []
-    if (working) { const n = document.createElement('span'); n.className = 'kbn-count-working'; n.textContent = String(working); count.append(n); words.push(`${working} working`) }
-    if (needs) { const n = document.createElement('span'); n.className = 'kbn-count-needs'; n.textContent = String(needs); count.append(n); words.push(`${needs} needing you`) }
-    count.title = `${words.join(', ')} elsewhere in this family`
+    const label = document.createElement('span')
+    label.className = needs ? 'kbn-count-needs' : 'kbn-count-working'
+    label.textContent = needs ? `${needs} need you` : `${working} working`
+    count.append(label)
+    count.title = `${family.others.yours} your turn, ${family.others.review} awaiting review, ${working} working elsewhere in this family`
     count.setAttribute('aria-label', `${count.title}; open its threads`)
     count.addEventListener('click', event => { event.stopPropagation(); open(family.root, true) })
     end.prepend(count)

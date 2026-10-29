@@ -261,9 +261,10 @@ export class ThreadRail {
       row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
       return item
     }
-    const rootRow = rowFor(scope, 'root', 'Root constitution', new Set(), new Map())
-    rootRow.classList.add('ws-thread-root')
-    this.tree.replaceChildren(rootRow)
+    const rootIsOpen = current.id === scope.id && current.originId === scope.originId
+    const rootRow = rootIsOpen ? null : rowFor(scope, 'root', 'Root constitution', new Set(), new Map())
+    rootRow?.classList.add('ws-thread-root')
+    this.tree.replaceChildren(...(rootRow ? [rootRow] : []))
     const subtree = index.subtree(scope)
     // Arriving at a thread opens the groups holding it and its ancestry, once; the reader may fold them after.
     const visit = JSON.stringify([current.id, current.originId, scope.id])

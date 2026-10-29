@@ -1311,22 +1311,18 @@
   margin-left: 8px;
 }
 
-/* ── Per-lane head action ─────────────────────────────────────────────────
-   One tinted round button at each column head's right edge — the masthead's
-   three actions, folded into the lanes they feed (color = lane identity):
-     Drafts → Stash `+` (ochre) · In flight → New idea `✶` (cobalt) ·
-     Awaiting review → Refresh `↻` (teal).
-   One unified geometry; the only per-lane difference is the fill + border
-   shade, set by the -drafts / -inFlight / -awaitingReview modifiers. */
+/* ── Per-lane head actions ────────────────────────────────────────────────
+   Stash and New idea stay named beside their glyphs; polling and ⌘R keep the
+   board current without a third lane action. */
 .kbn-col-action {
   flex-shrink: 0;
-  width: calc(28px * var(--kbn-type-scale, 1));
-  height: calc(28px * var(--kbn-type-scale, 1));
-  padding: 0;
-  border-radius: 50%;
+  min-height: calc(28px * var(--kbn-type-scale, 1));
+  padding: 3px 10px;
+  gap: 5px;
+  border-radius: 999px;
   color: var(--kbn-on-pigment);
   box-shadow: 0 2px 4px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
-  font-size: calc(18px * var(--kbn-type-scale, 1));
+  font-size: calc(13px * var(--kbn-type-scale, 1));
   line-height: 1;
   font-family: var(--font-main, 'EB Garamond', serif);
   cursor: pointer;
@@ -1348,34 +1344,15 @@
 }
 .kbn-col-action-drafts:hover { background: color-mix(in srgb, var(--kbn-owed-bright) 90%, var(--kbn-paper)); }
 .kbn-col-action-drafts:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-owed-bright) 40%, transparent); }
-/* In flight → New idea `✶`, cobalt. The glyph runs a hair smaller so the
-   six-point star optically matches the heavier `+` / `↻`. */
+/* In flight → New idea `✶`, cobalt. */
 .kbn-col-action-inFlight {
   background: var(--kbn-agent);
   border: 1px solid var(--kbn-agent-deep);
-  font-size: calc(15px * var(--kbn-type-scale, 1));
 }
 .kbn-col-action-inFlight:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
-/* Awaiting review → Refresh `↻`, teal (the green of the A dropcap), a full
-   button like its siblings. */
-.kbn-col-action-awaitingReview {
-  background: var(--kbn-tempered);
-  border: 1px solid var(--kbn-tempered-ink);
-  font-size: calc(16px * var(--kbn-type-scale, 1));
-}
-.kbn-col-action-awaitingReview:hover { background: color-mix(in srgb, var(--kbn-tempered) 90%, var(--kbn-paper)); }
-.kbn-col-action-awaitingReview:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-tempered) 40%, transparent); }
-/* Refresh feedback rides the button — a brief single spin of the ↻ glyph
-   carries in-flight state (no .kbn-status text). The class is added on click
-   and removed when the spin completes. */
-.kbn-col-action-spinning {
-  animation: kbn-col-action-spin 0.65s ease-in-out;
-}
-@keyframes kbn-col-action-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
+.kbn-col-action-glyph { flex: 0 0 auto; line-height: 1; }
+.kbn-col-action-label { font: 500 calc(12px * var(--kbn-type-scale, 1))/1 var(--font-main, 'EB Garamond', serif); }
 .kbn-col-list {
   flex: 1;
   overflow-y: auto;
@@ -2293,26 +2270,23 @@
     touch-action: pan-x pan-y;
   }
 
-  /* The head folds into the strip. The folio segment already names the leaf
-     in the column's own pigment and carries its count, so a head repeating
-     "DRAFTS 4" directly beneath was the same sentence twice — and floating
-     just its glyph over the leaf put it on top of the first card's title.
-     `adoptColumnActions` moves the glyph into the segment instead, and the
-     head goes entirely. */
+  /* The head folds into the strip. The folio segment names the leaf and carries
+     its count; `adoptColumnActions` puts that lane's named action in the active
+     segment. */
   .kbn-col-head { display: none; }
   .kbn-col-list { padding-top: 8px; }
-  /* The glyph rides the active leaf's tab, at the size the rest of the strip
-     is set in. Only the leaf you are on offers its action: three across the
-     strip would turn the page marks into a toolbar. */
+  /* Only the active leaf offers its action: three across the strip would turn
+     the page marks into a toolbar. */
   .kbn-folio-seg .kbn-col-action { display: none; }
   .kbn-folio-seg-active .kbn-col-action {
     display: inline-flex;
     flex: 0 0 auto;
-    width: 22px;
-    min-width: 22px;
-    height: 22px;
-    font-size: 12px;
-    margin-left: 0;
+    min-height: 26px;
+    padding: 3px 7px;
+    margin-left: 2px;
+  }
+  .kbn-folio-seg-active .kbn-col-action-label {
+    font-size: 11px;
   }
 
   /* ── Cards, compact ────────────────────────────────────────────────────

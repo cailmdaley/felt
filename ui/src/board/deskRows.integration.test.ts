@@ -9,7 +9,7 @@ function options(data: KanbanResponse, reports: Record<string, FiberSend> = {}) 
   return {
     getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: vi.fn(), setSurface: () => {}, openDetail: vi.fn(),
-    onRest: vi.fn(), onRefresh: () => {}, getLatestReport: (c: KanbanCard) => reports[c.id],
+    onRest: vi.fn(), getLatestReport: (c: KanbanCard) => reports[c.id],
   }
 }
 const REPORT: FiberSend = { key: 'local:/work/run/report.html', fullPath: '/work/run/report.html', basename: 'report.html', timestamp: Date.now() - 3 * 3_600_000, owner: 'local' }

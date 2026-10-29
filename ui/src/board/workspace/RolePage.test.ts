@@ -54,7 +54,7 @@ describe('role page', () => {
     expect(onFiber).not.toHaveBeenCalled()
     const rows = [...ledger.querySelectorAll<HTMLButtonElement>('.ws-role-hold')]
     expect(rows.map(row => row.dataset.column)).toEqual(['awaitingReview', 'inFlight', 'drafts'])
-    expect(names(ledger, '.ws-role-hold-column')).toEqual(['Review', 'In flight', 'Draft'])
+    expect(names(ledger, '.ws-role-hold-column')).toEqual(['Awaiting review', 'In flight', 'Drafts'])
     expect(rows[2].querySelector('.ws-role-hold-outcome')?.textContent).toBe('A draft to write.')
     rows[1].click()
     expect(onCard).toHaveBeenCalledWith(flying)

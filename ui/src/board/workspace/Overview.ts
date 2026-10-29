@@ -263,9 +263,9 @@ export class Overview {
     const heading = node('div', 'ws-overview-heading')
     // The Desk's column heads open on an illuminated initial; so does the sheet.
     const title = node('h1', '')
-    const cap = node('span', 'kbn-cap', 'D'); cap.dataset.letter = 'D'
-    title.append(cap, 'ocuments')
-    title.setAttribute('aria-label', 'Documents')
+    const cap = node('span', 'kbn-cap', 'B'); cap.dataset.letter = 'B'
+    title.append(cap, 'oard')
+    title.setAttribute('aria-label', 'Board')
     heading.append(title, this.summary)
     header.append(heading)
     const changes = node('section', 'ws-overview-news')
@@ -307,7 +307,7 @@ export class Overview {
     this.status.setAttribute('role', 'status')
     this.inner.append(header, changes, this.latest, this.read, controls, this.groupsEl, this.status)
     this.el.append(this.inner)
-    this.el.setAttribute('aria-label', 'Document overview')
+    this.el.setAttribute('aria-label', 'Board')
     this.el.addEventListener('scroll', this.schedule, { passive: true })
     this.ribbon.addEventListener('scroll', this.schedule, { passive: true })
     if (typeof IntersectionObserver !== 'undefined') {

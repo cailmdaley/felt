@@ -12,7 +12,7 @@ const ask = card({ id: 'root/work/ask', name: 'Choose cut', orchestrator: 'root/
 const quiet = card({ id: 'root/work/draft', orchestrator: 'root/work', status: 'open' })
 
 describe('a family row', () => {
-  it('a deep asker leads with an elided crumb whose root opens the family, and the rest are numbers', () => {
+  it('a deep asker leads with an elided crumb whose root opens the family, and the count names work', () => {
     const host = document.createElement('div'), name = document.createElement('span'), end = document.createElement('div'), open = vi.fn()
     name.className = 'kbn-card-name'; name.textContent = ask.name; host.append(name, end)
     installFrontierDetails(host, end, ask, new ThreadIndex([root, work, ask, quiet]), open)
@@ -21,7 +21,7 @@ describe('a family row', () => {
     name.querySelector<HTMLButtonElement>('.kbn-card-crumb button')!.click()
     expect(open).toHaveBeenLastCalledWith(root, true)
     const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
-    expect(count.querySelector('.kbn-count-working')?.textContent).toBe('1')
+    expect(count.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
     expect(count.querySelector('.kbn-count-needs')).toBeNull()
     count.click(); expect(open).toHaveBeenLastCalledWith(root, true)
     expect(host.querySelector('.kbn-family-asks')).toBeNull()
@@ -58,11 +58,11 @@ describe('a family row', () => {
       const data = projectDeskFrontier(response({ now: { drafts: [], inFlight: [work], awaitingReview: [] }, threads: [root, ask, quiet] }))
       const open = vi.fn()
       const renderer = new KanbanSurfaceRenderer({ getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
-        stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: open, onRefresh: () => {} })
+        stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: open })
       const section = renderer.renderNowSection(data.now, {})
       expect(section.querySelectorAll('.kbn-card')).toHaveLength(1)
       expect(section.querySelector('.kbn-card-name')?.textContent).toBe('Quiet chair / … /\u00a0Choose cut')
-      expect(section.querySelector('.kbn-count-working')?.textContent).toBe('1')
+      expect(section.querySelector('.kbn-count-working')?.textContent).toBe('1 working')
       section.querySelector<HTMLButtonElement>('.kbn-thread-count')!.click()
       expect(open).toHaveBeenCalledWith(expect.objectContaining({ id: 'root' }), true)
     } finally { vi.unstubAllGlobals() }

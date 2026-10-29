@@ -109,7 +109,7 @@ function desk(data: KanbanResponse): HTMLElement {
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => null, setDragSourceId: () => {}, getLastResponse: () => data,
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {},
-    openDetail: vi.fn(), onRefresh: () => {},
+    openDetail: vi.fn(),
   }).renderNowSection(data.now, {}, null)
 }
 

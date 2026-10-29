@@ -144,7 +144,6 @@ describe('the Roles band', () => {
     transition: () => {},
     setSurface: () => {},
     openDetail,
-    onRefresh: () => {},
   })
 
   it('keeps an empty drop target reachable for the first seat', () => {
@@ -162,6 +161,8 @@ describe('the Roles band', () => {
     const chips = [...band.querySelectorAll<HTMLElement>('.kbn-role-chip')]
     expect(chips.map((c) => c.querySelector('.kbn-role-chip-name')?.textContent)).toEqual(['Morning post', 'Vizier'])
     expect(chips[0].querySelector('.kbn-role-chip-hint')?.textContent).toMatch(/^↻/)
+    expect(chips[1].querySelector<HTMLElement>('.kbn-role-chip-hint')?.hidden).toBe(true)
+    expect(chips[1].querySelector<HTMLElement>('.kbn-role-chip-hint')?.textContent).toBe('')
     expect(chips[1].title).toContain('seat of roles/vizier')
     chips[1].click()
     expect(openDetail).toHaveBeenCalledWith(expect.objectContaining({ id: 'life/vizier' }))

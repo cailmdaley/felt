@@ -3,7 +3,7 @@
 .kbn-card-crumb-root { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .kbn-card-crumb button { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
 .kbn-card-crumb button:hover { color: var(--kbn-ink); }
-.kbn-thread-count { flex: none; display: inline-flex; gap: 7px; font: 600 calc(12.5px * var(--kbn-type-scale, 1))/1 var(--font-mono, 'JetBrains Mono', monospace); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
+.kbn-thread-count { flex: none; display: inline-flex; font: 600 calc(12.5px * var(--kbn-type-scale, 1))/1 var(--font-mono, 'JetBrains Mono', monospace); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
 .kbn-count-working { color: var(--kbn-agent); }
 .kbn-count-needs { color: var(--kbn-owed); }
 .kbn-row-elapsed { flex: none; font: 400 calc(10.5px * var(--kbn-type-scale, 1))/1 var(--font-mono, 'JetBrains Mono', monospace); font-variant-numeric: oldstyle-nums tabular-nums; text-transform: uppercase; color: var(--kbn-ink-muted); white-space: nowrap; }

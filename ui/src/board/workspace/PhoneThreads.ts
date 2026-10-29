@@ -24,9 +24,11 @@ export function phoneThreads(card: KanbanCard, index: ThreadIndex, open: (card: 
     if (identity(thread) === current) button.setAttribute('aria-current', 'page')
     return button
   }
-  const rootRow = row(root)
-  rootRow.classList.add('ws-phone-threads-root')
-  section.append(rootRow)
+  if (identity(root) !== current) {
+    const rootRow = row(root)
+    rootRow.classList.add('ws-phone-threads-root')
+    section.append(rootRow)
+  }
   for (const [key, label] of THREAD_GROUPS) {
     const members = family.filter(thread => threadGroup(thread) === key)
     if (!members.length) continue

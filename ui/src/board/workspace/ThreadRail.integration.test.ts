@@ -14,6 +14,7 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   const done = card({ id: 'hub/done', orchestrator: root.id, status: 'closed', tempered: true, name: 'Done' })
   const all = [root, rest, child, deep, done], open = vi.fn(), rail = new ThreadRail(open, vi.fn())
   rail.show({ ...root }, new ThreadIndex(all))
+  expect(rail.el.querySelector('.ws-thread-root')).toBeNull()
   const groups = [...rail.el.querySelectorAll<HTMLDetailsElement>('.ws-thread-group')]
   expect(groups.map(g => g.querySelector('summary')!.getAttribute('aria-label'))).toEqual(['Waiting, 1', 'Armed, 1', 'Resting, 1', 'Archived, 1'])
   expect(groups.map(g => g.querySelector('.ws-thread-group-label')!.textContent)).toEqual(['Waiting', 'Armed', 'Resting', 'Archived'])
@@ -41,7 +42,7 @@ it('draws one-line state groups with parent-chain tooltips and navigates through
   expect(rail.el.querySelectorAll('.ws-thread-current')).toHaveLength(1)
   rail.el.querySelector<HTMLButtonElement>('.ws-thread-root .kbn-thread-row')!.click()
   expect(open).toHaveBeenLastCalledWith(root)
-  for (const current of [root, child, deep]) {
+  for (const current of [child, deep]) {
     rail.show(current, new ThreadIndex(all))
     const first = rail.el.querySelector('.ws-thread-tree')!.firstElementChild!
     expect(first.classList.contains('ws-thread-root')).toBe(true)

@@ -20,7 +20,6 @@ function surfaces(getFleetDefaultAgent?: (origin: string) => string): KanbanSurf
     setSurface: () => {},
     openDetail: () => {},
     getFleetDefaultAgent,
-    onRefresh: () => {},
   })
 }
 

@@ -14,7 +14,7 @@ type HoldColumn = ReturnType<typeof deskColumn>
 const HOLD_ORDER: HoldColumn[] = ['awaitingReview', 'inFlight', 'roles', 'drafts', 'scheduled', 'resting', 'cycles', 'tempered', 'composted']
 const LIVE: ReadonlySet<HoldColumn> = new Set(['awaitingReview', 'inFlight', 'drafts'])
 const HOLD_LABELS: Record<HoldColumn, string> = {
-  awaitingReview: 'Review', inFlight: 'In flight', roles: 'Seat', drafts: 'Draft', scheduled: 'Resting',
+  awaitingReview: 'Awaiting review', inFlight: 'In flight', roles: 'Roles', drafts: 'Drafts', scheduled: 'Resting',
   resting: 'Resting', cycles: 'Cycle', tempered: 'Tempered', composted: 'Discarded',
 }
 /** Rows shown before the rest fold behind "more"; live work is always shown whole. */

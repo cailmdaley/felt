@@ -379,6 +379,18 @@ export function restingCards(resp: KanbanResponse | null): KanbanCard[] {
   return [...resp.stash, ...resp.timeline.futureDated];
 }
 
+/** The Desk's frontier rows, grouped by section for the reader sidebar. */
+export function deskSidebarRows(resp: KanbanResponse | null): KanbanCard[] {
+  if (!resp) return [];
+  return [
+    ...resp.now.drafts,
+    ...resp.now.inFlight,
+    ...resp.now.awaitingReview,
+    ...resp.roles,
+    ...restingCards(resp),
+  ];
+}
+
 /** True when this card is a standing constitution asleep between runs — armed, no live
  *  worker, waiting on its own cron. The Resting region says so differently from
  *  a snooze, and `nextLaunchAt` is the day it names. */

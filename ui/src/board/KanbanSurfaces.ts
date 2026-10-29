@@ -66,10 +66,6 @@ export const COLUMN_TITLES: Record<ColumnKind, string> = {
   composted: 'Discarded',
 }
 
-/** The phone's tab for each Now column: one plain word. */
-const FOLIO_LABELS: Record<NowColumnKind, string> = { drafts: 'Drafts', inFlight: 'Live', awaitingReview: 'Review' }
-
-
 type NowColumnKind = 'drafts' | 'inFlight' | 'awaitingReview'
 const NOW_COLUMN_ORDER: NowColumnKind[] = ['drafts', 'inFlight', 'awaitingReview']
 
@@ -166,10 +162,6 @@ interface KanbanSurfaceRendererOptions {
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
   onMeetingTerminal?: (session: string) => void
   onMeetingStop?: (meeting: MeetingRecord) => void | Promise<void>
-  /** Re-fetch the board — the Awaiting review head's `↻` action. Always wired
-   *  (refresh is never read-only). */
-  onRefresh: () => void
-
 }
 
 export class KanbanSurfaceRenderer {
@@ -333,7 +325,7 @@ export class KanbanSurfaceRenderer {
 
       const name = document.createElement('span')
       name.className = 'kbn-folio-name'
-      name.textContent = FOLIO_LABELS[kind]
+      name.textContent = title
 
       const count = document.createElement('span')
       count.className = 'kbn-folio-count'
@@ -474,9 +466,10 @@ export class KanbanSurfaceRenderer {
     el.className = `kbn-lens-chip${chip.running ? ' kbn-lens-chip-running' : ''}${active ? ' kbn-lens-chip-active' : ''}`
     el.dataset.cycleId = chip.id
     el.setAttribute('aria-pressed', active ? 'true' : 'false')
+    const countLabel = `${count} ${count === 1 ? 'card' : 'cards'}`
     el.title = active
-      ? `Showing the desk through ${chip.name} — click to release.`
-      : `${chip.name} · ${cycleChipText(chip)} — click to see the desk through it.`
+      ? `Showing the desk through ${chip.name} · ${countLabel} — click to release.`
+      : `${chip.name} · ${cycleChipText(chip)} · ${countLabel} — click to see the desk through it.`
     el.setAttribute('aria-label', `${chip.name}, ${count} ${count === 1 ? 'card' : 'cards'}${active ? ' — engaged' : ''}`)
 
     const name = document.createElement('span')
@@ -489,7 +482,7 @@ export class KanbanSurfaceRenderer {
 
     const tally = document.createElement('span')
     tally.className = 'kbn-lens-chip-count'
-    tally.textContent = String(count)
+    tally.textContent = `${count} ${count === 1 ? 'card' : 'cards'}`
 
     el.append(name, span, tally)
     if (active) {
@@ -726,8 +719,6 @@ export class KanbanSurfaceRenderer {
       hint.textContent = returns ? `↻ ${returns}` : '↻'
       const schedule = humanizeCron(card.shuttleSchedule) ?? card.shuttleSchedule
       detail = [schedule, returns && `next ${returns}`].filter(Boolean).join(' · ')
-    } else {
-      hint.textContent = this.agentName(card) ?? ''
     }
     hint.hidden = hint.textContent === ''
 
@@ -1111,7 +1102,7 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * Render one Now-surface column (Drafts / In Flight / Awaiting). The
+   * Render one Now-surface column (Drafts / In flight / Awaiting review). The
    * column header doubles as the lifecycle-transition drop target.
    */
   private renderColumn(
@@ -1197,7 +1188,7 @@ export class KanbanSurfaceRenderer {
       empty.className = 'kbn-empty'
       empty.setAttribute('role', 'listitem')
       empty.textContent = kind === 'drafts'
-        ? (this.o.onStashClick ? 'Use + to create a draft. Describe what done looks like.' : 'Drafts appear here before you launch them.')
+        ? (this.o.onStashClick ? 'Use Stash to create a draft. Describe what done looks like.' : 'Drafts appear here before you launch them.')
         : kind === 'inFlight'
           ? 'Drag a draft here to start its agent.'
           : 'Work returns here when its agent hands it back for review.'
@@ -1252,54 +1243,48 @@ export class KanbanSurfaceRenderer {
   }
 
   /**
-   * The per-lane head action — one tinted round button at the column head's
-   * right edge, the verb that feeds the lane (color = lane identity):
+   * The per-lane head action — one tinted pill at the column head's right
+   * edge, naming the verb that feeds the lane (color = lane identity):
    *
-   *   Drafts          → Stash `+`  (ochre)   onStashClick
-   *   In flight       → New idea `✶` (cobalt) onNewIdeaClick
-   *   Awaiting review → Refresh `↻` (teal)   onRefresh
+   *   Drafts    → Stash `+`    (ochre)  onStashClick
+   *   In flight → New idea `✶` (cobalt) onNewIdeaClick
    *
    * Returns null for a lane whose callback isn't wired (read-only context) —
-   * those heads render title + count alone. Refresh is always available.
-   * Every button stops click propagation (the head is itself a focusable drop
-   * target). Refresh spins its glyph briefly so in-flight state rides the
-   * button, not a `.kbn-status` text line.
+   * those heads render title + count alone. Each action names its verb beside
+   * the glyph and stops click propagation (the head is itself a focusable drop
+   * target).
    */
   private makeColumnAction(kind: NowColumnKind): HTMLButtonElement | null {
     const spec =
       kind === 'drafts'
         ? this.o.onStashClick && {
-            glyph: '+', modifier: 'drafts',
+            glyph: '+', text: 'Stash', modifier: 'drafts',
             label: 'Stash a new fiber', onClick: this.o.onStashClick,
           }
         : kind === 'inFlight'
           ? this.o.onNewIdeaClick && {
-              glyph: '✶', modifier: 'inFlight',
+              glyph: '✶', text: 'New idea', modifier: 'inFlight',
               label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick,
             }
-          : {
-              glyph: '↻', modifier: 'awaitingReview',
-              label: 'Refresh the board', onClick: this.o.onRefresh, spin: true,
-            }
+          : null
     if (!spec) return null
 
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = `kbn-col-action kbn-col-action-${spec.modifier}`
-    btn.textContent = spec.glyph
+    const glyph = document.createElement('span')
+    glyph.className = 'kbn-col-action-glyph'
+    glyph.textContent = spec.glyph
+    const text = document.createElement('span')
+    text.className = 'kbn-col-action-label'
+    text.textContent = spec.text
+    btn.append(glyph, text)
     btn.setAttribute('aria-label', spec.label)
     btn.title = spec.label
     btn.addEventListener('click', (e) => {
       // The head is a drop target + focusable; a click on its action must not
       // bubble up to it (or to the column's open-detail / drag wiring).
       e.stopPropagation()
-      if ('spin' in spec && spec.spin) {
-        btn.classList.remove('kbn-col-action-spinning')
-        // Reflow so a back-to-back refresh re-triggers the animation.
-        void btn.offsetWidth
-        btn.classList.add('kbn-col-action-spinning')
-        window.setTimeout(() => btn.classList.remove('kbn-col-action-spinning'), 650)
-      }
       spec.onClick()
     })
     return btn
@@ -1692,10 +1677,10 @@ export class KanbanSurfaceRenderer {
  * On a phone the segment IS the column's name — same word, same illuminated
  * initial, same count — so the head below it was saying everything twice, and
  * the mobile stylesheet hides it. The one thing the head still owned is the
- * per-lane action (dispatch a draft, wake a worker, refresh a verdict), and
- * that belongs with the name rather than floating over the first card's title.
+ * lane action (Stash or New idea), and that belongs with the name rather than
+ * floating over the first card's title.
  *
- * Only the active segment shows its glyph (CSS): three actions across a strip
+ * Only the active segment shows its action (CSS): two across a strip
  * that is also the page marks would read as a toolbar.
  *
  * Mobile only, and re-done on every render — `KanbanModal` rebuilds the Desk

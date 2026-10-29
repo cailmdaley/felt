@@ -74,7 +74,6 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, tex
 }
 /** The index strip explains the single state mark shared by constitution rows. */
 const ROW_MARKS = 'State dot: gold your turn · blue working · muted starting · paper no live worker'
-const INDEX_LABELS: Record<string, string> = { 'In flight': 'Flight', 'Awaiting review': 'Review' }
 
 function button(cls: string, text: string, action: () => void, label = text): HTMLButtonElement {
   const b = element('button', cls, text)
@@ -1086,7 +1085,7 @@ export class Reader {
       if (!entry) {
         const key = stop.key
         entry = button('ws-sidebar-index-entry', '', () => this.jumpToStop(key))
-        entry.append(element('span', 'ws-sidebar-index-name', INDEX_LABELS[key] ?? key), element('span', 'ws-sidebar-index-count'))
+        entry.append(element('span', 'ws-sidebar-index-name', key), element('span', 'ws-sidebar-index-count'))
         this.indexEntries.set(key, entry)
       }
       const count = String(stop.cards.length)

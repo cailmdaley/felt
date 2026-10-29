@@ -19,7 +19,7 @@ function band(fiber: KanbanCard, makeSeat: (card: KanbanCard, anchor: HTMLElemen
   const data = response({ now: { drafts: [fiber], inFlight: [], awaitingReview: [] }, cycles: fiber.isCycle ? [fiber] : [] })
   return new KanbanSurfaceRenderer({
     getDragSourceId: () => fiber.id, setDragSourceId: vi.fn(), getLastResponse: () => data,
-    stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), makeSeat, openDetail: vi.fn(), onRefresh: vi.fn(),
+    stopDragAutoScroll: vi.fn(), transition: vi.fn(), setSurface: vi.fn(), makeSeat, openDetail: vi.fn(),
   }).renderRolesSection([], {})
 }
 interface SeatBoard {

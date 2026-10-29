@@ -16,7 +16,6 @@ function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn
     setSurface: () => {},
     openDetail,
     openWorker,
-    onRefresh: () => {},
   })
 }
 
@@ -59,6 +58,17 @@ afterEach(() => {
 })
 
 describe('cycle members at rest', () => {
+  it('labels the cycle chip count with its unit', () => {
+    const now = Date.parse('2026-10-05T12:00:00Z')
+    const cycle = card({ id: 'cycle', isCycle: true, cycleStart: '2026-10-01', due: '2026-10-31' })
+    const member = card({ id: 'work/member', status: 'open', shuttleKind: 'oneshot', due: '2026-10-10' })
+    const data = response({ cycles: [cycle], now: { drafts: [member], inFlight: [], awaitingReview: [] } })
+    const chip = renderer(data).renderCycleLensBar(null, vi.fn(), now)!.querySelector<HTMLButtonElement>('.kbn-lens-chip')!
+    expect(chip.querySelector('.kbn-lens-chip-count')?.textContent).toBe('1 card')
+    expect(chip.getAttribute('aria-label')).toBe('cycle, 1 card')
+    expect(chip.title).toContain('1 card')
+  })
+
   it('renders a due-dated seat like a resting member without moving it out of Roles', () => {
     const now = Date.parse('2026-10-05T12:00:00Z')
     const seat = card({ id: 'seats/vizier', shuttleSeat: true, shuttleRole: 'vizier', due: '2026-10-07', effectiveHorizon: 'stashed' })
