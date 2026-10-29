@@ -459,6 +459,16 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       end
     end
 
+    test "shutdown while awaiting upstream headers cancels and unregisters" do
+      Env.put_app_env(:transcript_stream, relay_connect_ms: 30_000)
+      send(self(), {:EXIT, self(), :shutdown})
+      conn = remote_stream()
+      assert conn.state == :unset
+      assert_received {:EXIT, _, :shutdown}
+      assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
     @tag :timing
     test "connect timeout cancels and returns an unreachable receipt" do
       assert %{"availability" => "host_unreachable"} = json_response(remote_stream(), 503)

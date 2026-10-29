@@ -128,6 +128,9 @@ defmodule ShuttleWeb.TranscriptStream do
 
       {:remote_stream, ^id, :done} ->
         TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
+
+      {:EXIT, _, _reason} = exit ->
+        return_on_exit(conn, exit)
     after
       cfg[:relay_connect_ms] ->
         TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
@@ -151,6 +154,9 @@ defmodule ShuttleWeb.TranscriptStream do
 
       {:remote_stream, ^id, {:error, _}} ->
         relay_error(conn, "upstream_error")
+
+      {:EXIT, _, _reason} = exit ->
+        return_on_exit(conn, exit)
     after
       idle_ms -> relay_error(conn, "upstream_idle")
     end
@@ -278,6 +284,7 @@ defmodule ShuttleWeb.TranscriptStream do
     remaining = max(0, cfg[:max_ms] - (now() - started))
 
     receive do
+      {:EXIT, _, _reason} = exit -> return_on_exit(conn, exit)
     after
       min(cfg[:tick_ms], remaining) ->
         loop(conn, path, offset, inode, observed_size, started, last_write, cfg)
@@ -299,6 +306,13 @@ defmodule ShuttleWeb.TranscriptStream do
       {:ok, conn} -> conn
       {:error, _} -> conn
     end
+  end
+
+  defp return_on_exit(conn, exit) do
+    # Return control to Bandit's GenServer without consuming its parent's exit.
+    # It must process that signal after request cleanup, even on keep-alive.
+    send(self(), exit)
+    conn
   end
 
   defp now, do: System.monotonic_time(:millisecond)
