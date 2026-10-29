@@ -574,7 +574,7 @@ defmodule Shuttle.Dispatcher do
         # worker by its 10s timeout.
         run_script = build_run_script(session, command, agent.id, display_fiber_id: "capture")
 
-        Logger.info("Capture session via #{agent.id} → tmux session #{session}")
+        Logger.info("Capture session via #{agent.id} → terminal #{session}")
 
         case Shuttle.Terminal.launch(runner, session, work_dir, run_script) do
           :ok -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
@@ -2300,7 +2300,7 @@ defmodule Shuttle.Dispatcher do
   @doc false
   # Public for tests. Builds the bash script that wraps the harness command
   # with start/exit banners. With `dismiss_resume_warning: true` and a
-  # `session:` name, also schedules a backgrounded tmux send-keys to
+  # `session:` name, also schedules the backend's submit key to
   # dismiss claude --resume's interactive warning page. `release_root:`
   # overrides the release root the environment scrub filters PATH against
   # (see `erts_scrub_block/1`).

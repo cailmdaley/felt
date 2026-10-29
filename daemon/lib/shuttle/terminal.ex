@@ -24,7 +24,16 @@ defmodule Shuttle.Terminal do
       end
   end
 
-  def backends, do: [primary()]
+  def backends do
+    case primary() do
+      Shuttle.Terminal.Rex ->
+        if Tmux.available?(), do: [Shuttle.Terminal.Rex, Tmux], else: [Shuttle.Terminal.Rex]
+
+      backend ->
+        [backend]
+    end
+  end
+
   def available?, do: Enum.any?(backends(), & &1.available?())
 
   @spec status(module(), String.t(), keyword()) :: status()

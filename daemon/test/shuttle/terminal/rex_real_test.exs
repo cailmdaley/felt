@@ -7,53 +7,12 @@ defmodule Shuttle.Terminal.RexRealTest do
   @moduletag skip: is_nil(Shuttle.Rex.bin())
   @moduletag timeout: 60_000
   @runner Shuttle.Runner.Default
+  import Shuttle.Test.IsolatedRex, only: [await: 1]
 
   setup %{tmp_dir: dir} do
-    bin = Rex.bin()
-    root = Path.join(System.tmp_dir!(), "rex-r3-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(root)
-    endpoint = "unix://#{root}/rex.sock"
-    Env.put_app_env(:rex_server, endpoint)
-    Env.put_env("SHUTTLE_REX_SERVER", endpoint)
-    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    root = Shuttle.Test.IsolatedRex.start(dir)
     Env.put_env("SHUTTLE_HOST", "probe-isolated-sentinel")
     Env.put_app_env(:paste_submit_delay_ms, 0)
-
-    env =
-      for key <- ~w(HOME PATH SHELL LANG SSH_AUTH_SOCK),
-          value = Shuttle.Env.get(key),
-          value != nil,
-          do: "#{key}=#{value}"
-
-    port =
-      Port.open({:spawn_executable, "/usr/bin/env"}, [
-        :binary,
-        :exit_status,
-        :stderr_to_stdout,
-        args:
-          ["-i" | env] ++
-            [
-              bin,
-              "server",
-              "run",
-              "--listen",
-              endpoint,
-              "--state-dir",
-              "#{root}/state",
-              "--max-sessions",
-              "8"
-            ]
-      ])
-
-    {:os_pid, pid} = Port.info(port, :os_pid)
-
-    on_exit(fn ->
-      # Only the isolated server created by this test receives a signal.
-      System.cmd("kill", ["-TERM", to_string(pid)], stderr_to_stdout: true)
-      File.rm_rf!(root)
-    end)
-
-    await(fn -> match?({:ok, _}, Rex.whoami(@runner)) end)
     {:ok, root: root}
   end
 
@@ -151,18 +110,5 @@ defmodule Shuttle.Terminal.RexRealTest do
     await(fn -> Rex.blocks(@runner, b["session_id"]) == {:ok, []} end)
     assert :absent = Backend.probe(@runner, name)
     assert {:ok, []} = Rex.sessions(@runner)
-  end
-
-  defp await(fun, remaining \\ 100)
-  defp await(fun, 0), do: assert(fun.(), "isolated Rex observation did not arrive")
-
-  defp await(fun, remaining) do
-    if fun.(),
-      do: :ok,
-      else:
-        (
-          Process.sleep(50)
-          await(fun, remaining - 1)
-        )
   end
 end

@@ -20,6 +20,8 @@ defmodule Shuttle.SessionResumeTest do
   @nocwd "fef866ba-b397-4277-a01b-16fcecc2b256"
 
   defmodule App do
+    def read_thread(id), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+
     def resume_thread(id, opts) do
       send(self(), {:native_resume, id})
       send(self(), {:native_resume_options, id, opts})
@@ -95,6 +97,11 @@ defmodule Shuttle.SessionResumeTest do
           {"", 0}
       end
     end
+  end
+
+  defmodule RexRunner do
+    def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
+    def cmd(command, args, opts), do: Runner.cmd(command, args, opts)
   end
 
   defmodule StubKitty do
@@ -269,6 +276,110 @@ defmodule Shuttle.SessionResumeTest do
 
       refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
     end
+  end
+
+  describe "Rex primary" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+      Env.put_app_env(:fake_rex, start_supervised!(Shuttle.Test.FakeRex))
+      Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      Env.put_env("SHUTTLE_DATA_DIR", dir)
+      :ok
+    end
+
+    test "historical resume launches in Rex with its environment and no client wait" do
+      assert {:ok, %{tmux_session: name, created: true}} =
+               SessionResume.prepare(@pi, runner: RexRunner)
+
+      assert name == "resume-" <> @pi
+      body = rex_script()
+      assert body =~ "unset TMUX TMUX_PANE"
+      assert body =~ "export PATH="
+      assert body =~ "--session '#{@pi}'"
+      refute body =~ "list-clients"
+      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+    end
+
+    test "a concurrent launch inside the facade reuses the resume" do
+      Env.put_app_env(:fake_rex_hook, fn
+        "session.list" ->
+          count = Process.get(:rex_resume_probes, 0) + 1
+          Process.put(:rex_resume_probes, count)
+
+          if count == 2 do
+            Shuttle.Test.FakeRex.sessions(%{
+              "session:concurrent" => %{
+                label: "resume-" <> @pi,
+                blocks: [%{"block_id" => "block:concurrent", "label" => "resume-" <> @pi}]
+              }
+            })
+          end
+
+        _ ->
+          :ok
+      end)
+
+      assert {:ok, %{tmux_session: "resume-" <> @pi, created: false}} =
+               SessionResume.prepare(@pi, runner: RexRunner)
+
+      refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
+               "session.create" in argv
+             end)
+    end
+
+    test "a pre-flip tmux resume is reused rather than duplicated in Rex" do
+      Runner.set_running(true)
+      assert {:ok, %{created: false}} = SessionResume.prepare(@pi, runner: RexRunner)
+
+      refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
+               "session.create" in argv
+             end)
+    end
+
+    test "owned Codex viewers launch in Rex and keep the exact native thread endpoint", %{
+      project: project
+    } do
+      assert :ok =
+               Shuttle.AppWorkers.put(%{
+                 "session_uuid" => @codex,
+                 "thread_id" => @codex,
+                 "active" => true,
+                 "surface" => "cli",
+                 "launch_state" => "running",
+                 "agent_id" => "codex-luna",
+                 "cwd" => project,
+                 "terminal_wrapper" => "codex",
+                 "backend_host" => Shuttle.Poller.own_host_id(),
+                 "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+               })
+
+      assert {:ok, %{tmux_session: name, created: true}} =
+               SessionResume.prepare(@codex, runner: RexRunner)
+
+      assert name == "codex-terminal-" <> @codex
+      assert_received {:native_resume, @codex}
+      body = rex_script()
+      assert body =~ "unset TMUX TMUX_PANE"
+      assert body =~ "export PATH="
+      assert body =~ "--remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}'"
+      assert body =~ "resume '#{@codex}'"
+      refute body =~ "list-clients"
+      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+    end
+  end
+
+  defp rex_script do
+    assert [{_, _, opts}] =
+             Enum.filter(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
+               "session.create" in argv
+             end)
+
+    spec = Jason.decode!(opts[:input])
+    ["bash", "-l", path] = hd(spec["initial_windows"])["layout"]["block"]["options"]["command"]
+    on_exit(fn -> File.rm(path) end)
+    File.read!(path)
   end
 
   describe "never a second process on a live worker's transcript" do

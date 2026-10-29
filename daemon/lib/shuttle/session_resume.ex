@@ -1,12 +1,12 @@
 defmodule Shuttle.SessionResume do
   @moduledoc """
-  Resume a past harness session in a tmux session a human attaches to — the
+  Resume a past harness session in the host's primary terminal — the
   card History's row action. Not a worker: shuttle neither dispatches, adopts
   nor watches it.
 
   `prepare/2` runs on the host that ran the session, since the transcript the
-  harness resumes from lives there. It starts (or finds) a detached tmux
-  session running the harness's own resume for that session id; the caller then
+  harness resumes from lives there. It starts (or finds) a terminal
+  running the harness's own resume for that session id; the caller then
   attaches a kitty tab to it with `Shuttle.Kitty.open/2`, over ssh when the
   host is remote, exactly as the Aloft pill attaches to a live worker.
 
@@ -31,7 +31,7 @@ defmodule Shuttle.SessionResume do
   header's `cwd`. A transcript with no usable cwd is refused rather than
   resumed somewhere its harness would not find it.
 
-  ## The tmux session
+  ## The terminal name
 
   `resume-<session uuid>`: one per conversation, so a second click finds the
   first and attaches to it rather than starting a second resume of the same
@@ -57,7 +57,7 @@ defmodule Shuttle.SessionResume do
           command: String.t()
         }
 
-  @doc "The tmux session a resume of `session` lives in."
+  @doc "The terminal name a resume of `session` lives in."
   @spec tmux_name(String.t()) :: String.t()
   def tmux_name(session) when is_binary(session), do: @prefix <> session
 
@@ -120,7 +120,7 @@ defmodule Shuttle.SessionResume do
   defp validate_resume_agent(_harness, _agent), do: :ok
 
   @doc """
-  Start the resume of `session` in its tmux session, unless it is already
+  Start the resume of `session` in the primary terminal, unless it is already
   running there. `{:ok, %{tmux_session: name, created: boolean}}`;
   `{:error, {:live, message}}` when the session is a running worker's, or
   another live process holds it (two harness processes must not share a
@@ -285,9 +285,8 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  # The script tmux runs: the release's Erlang scrubbed out, a short wait for the
-  # kitty tab to attach (so the harness first draws at the tab's size), the
-  # resume, and — if it fails — a pause so the tab says why instead of closing.
+  # The primary backend supplies its environment and viewer readiness gate.
+  # A failed resume pauses so the terminal shows why instead of closing.
   defp run_script(plan) do
     snippets = Terminal.primary().script(plan.tmux)
 

@@ -8,6 +8,11 @@ defmodule Shuttle.DispatcherTest do
   require Shuttle.Dispatcher
   alias Shuttle.Agents
 
+  defmodule RexRunner do
+    def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
+    def cmd(command, args, opts), do: Shuttle.DispatcherTest.MockRunner.cmd(command, args, opts)
+  end
+
   # ── Mock Runner ──
 
   defmodule MockRunner do
@@ -1747,6 +1752,53 @@ defmodule Shuttle.DispatcherTest do
   test "erts_scrub_block leaves PATH alone with no release root" do
     refute Dispatcher.erts_scrub_block(nil) =~ "PATH="
     assert Dispatcher.erts_scrub_block(nil) =~ "unset ROOTDIR BINDIR PROGNAME EMU ESCRIPT_NAME"
+  end
+
+  @tag :tmp_dir
+  test "Rex dispatch and capture use the primary environment without a client wait", %{
+    tmp_dir: dir
+  } do
+    alias Shuttle.Test.{Env, FakeRex}
+    Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+    Env.put_app_env(:fake_rex, start_supervised!(FakeRex))
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_env("SHUTTLE_HOST", "probe-rex-host")
+    Env.put_env("SSH_AUTH_SOCK", "/probe/agent.sock")
+
+    script =
+      Dispatcher.build_run_script("tests/haiku", "claude --resume 'abc'", "claude-sonnet",
+        session: "worker",
+        dismiss_resume_warning: true
+      )
+
+    assert script =~ "unset TMUX TMUX_PANE"
+    assert script =~ "export SHUTTLE_HOST='probe-rex-host'"
+    assert script =~ "export SSH_AUTH_SOCK='/probe/agent.sock'"
+    assert script =~ "export PATH="
+    assert script =~ ~s(send-key -s "$REX_SESSION" -b "$REX_BLOCK" enter)
+    refute script =~ "tmux"
+    refute script =~ "list-clients"
+
+    assert {:ok, %{session: name}} =
+             Dispatcher.capture("an idea",
+               runner: RexRunner,
+               work_dir: "/tmp",
+               felt_store: "/tmp"
+             )
+
+    assert [{_, _, opts}] =
+             Enum.filter(FakeRex.calls(), fn {_, argv, _} -> "session.create" in argv end)
+
+    spec = Jason.decode!(opts[:input])
+    assert spec["label"] == name
+    ["bash", "-l", path] = hd(spec["initial_windows"])["layout"]["block"]["options"]["command"]
+    on_exit(fn -> File.rm(path) end)
+    capture = File.read!(path)
+    assert capture =~ "unset TMUX TMUX_PANE"
+    assert capture =~ "export SHUTTLE_HOST='probe-rex-host'"
+    refute capture =~ "list-clients"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
   test "build_run_script with dismiss_resume_warning embeds backgrounded send-keys" do

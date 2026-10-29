@@ -38,6 +38,7 @@ defmodule Shuttle.Test.FakeRex do
     end)
   end
 
+  defp request("tmux", args, _), do: {"tmux", args, nil}
   defp request("ps", args, _), do: {"ps", args, nil}
   defp request("open", args, _), do: {"open", args, nil}
 
@@ -52,6 +53,9 @@ defmodule Shuttle.Test.FakeRex do
       ["send-key", "-s", sid, "-b", bid, key] -> {"send-key", %{bid: bid, key: key}, sid}
     end
   end
+
+  defp run("tmux", [verb | _], _, state) when verb in ["has-session", "ls", "kill-session"],
+    do: {{"no server running", 1}, state}
 
   defp run("ps", _, _, state), do: {{"", 0}, state}
   defp run("whoami", _, _, state), do: {fixture("whoami"), state}

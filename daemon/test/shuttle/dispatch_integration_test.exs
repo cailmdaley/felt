@@ -145,6 +145,22 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
   end
 
+  defmodule RealRexRunner do
+    def cmd("tmux", args, opts) do
+      # The mixed-backend secondary has its own socket, never the operator's.
+      Shuttle.Runner.Default.cmd(
+        "tmux",
+        ["-S", Shuttle.Env.app(:rex_test_tmux_socket) | args],
+        opts
+      )
+    end
+
+    def cmd(command, args, opts) when command in ["felt", "shuttle"],
+      do: IntegrationRunner.cmd(command, args, opts)
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
   # ── Setup ──────────────────────────────────────────────────────────────────
 
   setup do
@@ -263,6 +279,80 @@ defmodule Shuttle.DispatchIntegrationTest do
   end
 
   # ── Tests ──────────────────────────────────────────────────────────────────
+
+  @tag :tmp_dir
+  @tag skip: is_nil(Shuttle.Rex.bin())
+  @tag timeout: 60_000
+  test "dispatch runs a stub agent in isolated Rex and stops without creating tmux sessions", %{
+    host: host,
+    tmp_dir: dir
+  } do
+    root = Shuttle.Test.IsolatedRex.start(dir)
+    Shuttle.Test.Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+    socket = Path.join(root, "tmux.sock")
+    Shuttle.Test.Env.put_app_env(:rex_test_tmux_socket, socket)
+    wrapper = Path.join(root, "stub-agent")
+    receipt = Path.join(root, "agent-started")
+
+    File.write!(wrapper, """
+    #!/bin/bash
+    printf '%s\\n' "$REX_SESSION" "$REX_BLOCK" > '#{receipt}'
+    exec sleep 30
+    """)
+
+    File.chmod!(wrapper, 0o755)
+    registry = Path.join(root, "agents.json")
+
+    File.write!(
+      registry,
+      Jason.encode!(%{
+        "version" => 1,
+        "builtins" => "restrict",
+        "agents" => [%{"id" => "probe-agent", "cli" => "claude", "wrapper" => wrapper}]
+      })
+    )
+
+    Shuttle.Test.Env.put_env("SHUTTLE_AGENTS_FILE", registry)
+
+    write_fiber(host, "tests/rex-dispatch", """
+    ---
+    name: Isolated Rex dispatch
+    status: active
+    shuttle:
+      kind: oneshot
+      agent: probe-agent
+    ---
+    A stub worker on the isolated Rex server.
+    """)
+
+    before_tmux =
+      RealRexRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true)
+
+    assert {:ok, name} =
+             Dispatcher.dispatch("tests/rex-dispatch", runner: RealRexRunner, felt_store: host)
+
+    assert name == FiberUid.session("tests/rex-dispatch")
+    Shuttle.Test.IsolatedRex.await(fn -> File.exists?(receipt) end)
+    assert ["session:" <> _, "block:" <> _] = String.split(File.read!(receipt), "\n", trim: true)
+    assert {:ok, [%{"label" => ^name}]} = Shuttle.Rex.sessions(RealRexRunner)
+
+    assert {json, 0} =
+             Shuttle.Runner.Default.cmd(
+               Shuttle.Rex.bin(),
+               Shuttle.Rex.flags() ++ ["ls", "--json"],
+               stderr_to_stdout: true,
+               input_eof: true
+             )
+
+    assert json =~ name
+    assert Shuttle.Terminal.status(RealRexRunner, name) == :alive
+    assert {"", 0} = Shuttle.WorkerBackend.stop(RealRexRunner, name)
+    assert Shuttle.Terminal.status(RealRexRunner, name) == :gone
+    assert {:ok, []} = Shuttle.Rex.sessions(RealRexRunner)
+
+    assert RealRexRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) ==
+             before_tmux
+  end
 
   # Fresh oneshot dispatch — fiber on disk, run-script verified byte-level.
   # Exercises the full path: disk read via real felt, agent resolution,

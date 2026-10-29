@@ -30,6 +30,19 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  defmodule MixedRunner do
+    def cmd("tmux", ["kill-session" | _] = args, opts) do
+      result = StubRunner.cmd("tmux", args, opts)
+      Process.put(:tmux_result, {"no server running", 1})
+      result
+    end
+
+    def cmd("tmux", args, opts), do: StubRunner.cmd("tmux", args, opts)
+    def cmd("ps", args, opts), do: StubRunner.cmd("ps", args, opts)
+    def cmd("kill", args, opts), do: StubRunner.cmd("kill", args, opts)
+    def cmd(bin, args, opts), do: Shuttle.Test.FakeRex.cmd(bin, args, opts)
+  end
+
   defmodule ConcurrentRunner do
     def cmd("ps", _args, _opts), do: {"", 0}
 
@@ -148,6 +161,76 @@ defmodule Shuttle.TerminalTest do
     assert Terminal.locate(stub(@absent), "leaf") == nil
     assert Terminal.locate(stub({"uncertain", 1}), "leaf") == nil
     assert Terminal.status(stub(@absent), "leaf", backends: [Tmux]) == :gone
+  end
+
+  describe "Rex primary with an observe/stop tmux secondary" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      fake = start_supervised!(Shuttle.Test.FakeRex)
+      Env.put_app_env(:fake_rex, fake)
+      Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+      Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+      Env.put_env("SHUTTLE_DATA_DIR", dir)
+      File.write!(Path.join(dir, "tmux"), "#!/bin/sh\nexit 1\n")
+      File.chmod!(Path.join(dir, "tmux"), 0o755)
+      Env.put_env("PATH", dir)
+      :ok
+    end
+
+    test "tmux is secondary only when its binary is resolvable" do
+      assert Terminal.primary() == Shuttle.Terminal.Rex
+      assert Terminal.backends() == [Shuttle.Terminal.Rex, Tmux]
+      Env.put_env("PATH", "/no-terminal-binaries")
+      assert Terminal.backends() == [Shuttle.Terminal.Rex]
+    end
+
+    test "a worker alive in tmux stays alive and stop reaches its holder" do
+      stub({"", 0})
+      assert Terminal.status(MixedRunner, "pre-flip") == :alive
+      assert Terminal.locate(MixedRunner, "pre-flip") == Tmux
+      assert %{terminal: "tmux"} = Shuttle.WorkerBackend.wire("pre-flip")
+      assert {"", 0} = Shuttle.WorkerBackend.stop(MixedRunner, "pre-flip")
+      assert_received {:tmux_args, ["kill-session", "-t", "pre-flip"]}
+      assert Terminal.status(MixedRunner, "pre-flip") == :gone
+
+      refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
+               "session.destroy" in argv
+             end)
+    end
+
+    test "new workers launch only in Rex and a live tmux name cannot be duplicated" do
+      name = "new-rex-#{System.unique_integer([:positive])}"
+
+      on_exit(fn ->
+        Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{name}.*.sh"))
+        |> Enum.each(&File.rm/1)
+      end)
+
+      stub(@absent)
+      assert :ok = Terminal.launch(MixedRunner, name, "/tmp", "sleep 30\n")
+      assert Terminal.locate(MixedRunner, name) == Shuttle.Terminal.Rex
+      assert Terminal.status(MixedRunner, name) == :alive
+      refute_received {:tmux_args, ["new-session" | _]}
+      stub({"", 0})
+
+      assert {:error, :already_running} =
+               Terminal.launch(MixedRunner, "pre-flip", "/tmp", "duplicate")
+
+      assert [_] =
+               Enum.filter(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
+                 "session.create" in argv
+               end)
+    end
+
+    test "absence requires both backends and a successful process scan" do
+      stub(@absent, {@run_script_ps, 0})
+      assert Terminal.status(MixedRunner, "leaf-01ABC-shuttle") == :unknown
+      stub({"uncertain", :timeout})
+      assert Terminal.status(MixedRunner, "leaf") == :unknown
+      stub(@absent)
+      assert Terminal.status(MixedRunner, "leaf") == :gone
+    end
   end
 
   describe "stop/2" do
