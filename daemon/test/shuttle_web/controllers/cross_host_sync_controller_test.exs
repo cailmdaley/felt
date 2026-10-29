@@ -55,6 +55,9 @@ defmodule ShuttleWeb.CrossHostSyncControllerTest do
     counter = start_supervised!({Agent, fn -> 0 end})
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", owner)
     Shuttle.Test.Env.put_env("SHUTTLE_HOST", "worker")
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", Path.join(root, "shuttle-data"))
+    Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(root, "sessions.jsonl"))
+    Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
     Shuttle.Test.Env.put_app_env(:felt_runner, CountingRunner)
     Shuttle.Test.Env.put_app_env(:sync_counter, counter)
     {:ok, owner: owner, counter: counter}

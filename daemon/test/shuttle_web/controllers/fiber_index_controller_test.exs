@@ -39,11 +39,14 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
 
   defp request, do: get(api_conn(), @url)
 
+  defp sync_index, do: :sys.get_state(Shuttle.Env.server(Shuttle.FiberIndex))
+
   defp warm do
     request = Task.async(fn -> request() end)
     assert_receive {:refresh, worker}
     send(worker, {:result, {:ok, body("First")}})
     assert %{status: 200} = conn = Task.await(request)
+    sync_index()
     conn
   end
 
@@ -53,6 +56,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     send(worker, {:result, result})
     ref = Process.monitor(worker)
     assert_receive {:DOWN, ^ref, :process, ^worker, _}
+    sync_index()
     :ok
   end
 
@@ -168,6 +172,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     assert_receive {:refresh, worker}
     send(worker, :publish)
     assert Jason.decode!(Task.await(task).resp_body)["felt_stores"] == [a]
+    sync_index()
 
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", b)
     Agent.update(clock, fn _ -> 30_000 end)
@@ -176,6 +181,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     ref = Process.monitor(worker)
     send(worker, :publish)
     assert_receive {:DOWN, ^ref, :process, ^worker, _}
+    sync_index()
     updated = Jason.decode!(request().resp_body)
     assert updated["felt_stores"] == [b]
     assert [%{"fiber" => %{"name" => "b"}}] = updated["fibers"]
@@ -188,6 +194,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     ref = Process.monitor(worker)
     send(worker, :publish)
     assert_receive {:DOWN, ^ref, :process, ^worker, _}
+    sync_index()
     assert %{"felt_stores" => [], "fibers" => []} = Jason.decode!(request().resp_body)
   end
 
@@ -220,6 +227,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     assert_receive {:refresh, worker}
     send(worker, :crash)
     assert Enum.all?(Enum.map(tasks, &Task.await/1), &(&1.status == 503))
+    sync_index()
     assert request().status == 503
     refute_receive {:refresh, _}
     Agent.update(clock, fn _ -> 30_000 end)
@@ -237,6 +245,7 @@ defmodule ShuttleWeb.FiberIndexControllerTest do
     send(worker, :crash)
     ref = Process.monitor(worker)
     assert_receive {:DOWN, ^ref, :process, ^worker, _}
+    sync_index()
     assert request().resp_body == first.resp_body
   end
 end
