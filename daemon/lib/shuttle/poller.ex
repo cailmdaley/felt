@@ -53,10 +53,9 @@ defmodule Shuttle.Poller do
   @default_full_scan_timeout_ms 900_000
   @poll_stall_margin_ms 1_000
   @default_heartbeat_interval_ms 5_000
-  # THE boot-quarantine default: a freshly (re)started daemon parks every
-  # autonomous dispatch until a human releases it (POST
-  # /api/v1/quarantine/release / `shuttle daemon release`) — no timeout, no
-  # self-clearing. Single source of truth; config (`:boot_quarantine`) and the
+  # Boot quarantine holds fresh autonomous dispatch on restart; restoration
+  # and due cron work retain their authorization. Human release or an opted-in
+  # healthy crash boot releases fresh work. Single source of truth; config (`:boot_quarantine`) and the
   # start_link opt override it (config/test.exs sets false so dispatch tests
   # exercise the tick directly; quarantine tests opt back in per-poller).
   @default_boot_quarantine true
@@ -305,8 +304,8 @@ defmodule Shuttle.Poller do
       # adoption, per-poll adoption, dispatch, claim). Durable for the daemon's
       # lifetime: NEVER removed on worker exit, so "was running" outlives "is
       # running". Sole consumer is the boot-quarantine gate
-      # (`park_autonomous_launches/2`): members auto-resume, only non-members
-      # park. Not persisted — a restart re-seeds it from `adopt_orphans`.
+      # (`park_autonomous_launches/2`): members pass alongside durable
+      # restorations and due standing runs. Not persisted — a restart re-seeds it from `adopt_orphans`.
       was_running: MapSet.new(),
       # %{runtime_key => %{fiber_id: slug, uid: String.t() | nil, parked_at:
       # DateTime.t}} — every genuinely-fresh autonomous launch the boot
@@ -636,9 +635,8 @@ defmodule Shuttle.Poller do
   @doc """
   Releases the boot quarantine — the human "go" that restores autonomous
   dispatch authority to a restarted daemon. While quarantined, the daemon
-  grants no autonomous dispatches of any kind (only explicit force-dispatch
-  bypasses); steady-state resume of workers that die while the daemon is
-  healthy is unaffected.
+  holds fresh autonomous launches; restoration and due standing runs retain
+  their authorization. Explicit force-dispatch bypasses the hold.
 
   Idempotent. On release the parked set is dropped and a poll tick is
   scheduled immediately, so parked fibers dispatch without waiting out the
@@ -736,8 +734,7 @@ defmodule Shuttle.Poller do
           :stall_timeout_ms,
           Shuttle.Env.app(:stall_timeout_ms, @default_poll_stall_timeout_ms)
         ),
-      # Restart is not dispatch authority: quarantine every autonomous
-      # dispatch until a human releases the hold (see the State field
+      # Quarantine fresh autonomous dispatch after restart (see the State field
       # comment). Opt wins over app config so tests can exercise the
       # quarantine per-poller; the default lives in @default_boot_quarantine.
       boot_quarantine:
@@ -1647,7 +1644,6 @@ defmodule Shuttle.Poller do
   # into `state.running` (boot adoption, per-poll adoption, dispatch, claim).
   # Membership is durable — never removed on exit — so the boot-quarantine gate
   # auto-resumes in-flight work while still parking genuinely-fresh launches.
-  # Runtime-observation, never on-disk markers.
   #
   # Also drops any `parked_launches` entry for the key: a fiber that just entered
   # `running` (force-dispatch or claim, not only the poll's own re-dispatch) is

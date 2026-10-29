@@ -171,14 +171,13 @@ as `blocked`. A healthy run or a force-dispatch clears it.
 
 ## Boot quarantine
 
-**A daemon restart is not dispatch authority.** On every start, the daemon
-parks every candidate it has never observed running into `pending_launch` and
-dispatches nothing fresh. Work it *did* observe alive under its own uptime —
-adopted at boot, or dispatched since — resumes normally. That counts as
-continuation, not a fresh launch. A **due standing constitution** also passes through:
-its cron occurrence is a fixed-time "go" the human already gave, bounded to one
-run, so a restart that straddles 09:00 does not eat the run. (Under CLI/daemon
-contract skew it holds like everything else.)
+On every start, the daemon parks fresh autonomous work in `pending_launch`.
+Previously-running oneshot workers restore from their durable continuation markers without a release.
+A finished or ambiguous turn reopens its conversation quietly; an interrupted turn receives a continuation prompt.
+Restoration preserves the conversation even beyond the transcript cache window.
+Oneshot seats follow the same rule.
+Standing cron runs retain their close-to-review lifecycle when their worker dies; a due occurrence carries its own authorization and passes through the quarantine.
+CLI/daemon contract and reconciliation holds remain independent gates.
 
 The guard exists because a daemon that restarts repeatedly (an overloaded
 machine crash-looping, for example) would otherwise treat every restart as
@@ -206,9 +205,9 @@ re-running `bin/shuttle-launch`, whose tmux `kill-session` SIGHUPs the daemon
 with no shutdown at all. The next boot sees the marker and holds.
 
 The exception is a daemon killed *hard* — a kernel CPU-rlimit SIGKILL on a
-capped cluster login node, say — and respawned seconds later. Its workers keep
-running (tmux owns them) and nothing went stale, yet a hold there would stop all
-new work until someone noticed. A hard kill runs no shutdown code and touches no
+capped cluster login node, say — and respawned seconds later. Its workers may
+survive or need restoration; a fresh-work hold would stop new work until
+someone noticed. A hard kill runs no shutdown code and touches no
 marker. Only such a host needs the exception, so it is off unless the host opts
 in, in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`):
 
@@ -238,10 +237,7 @@ hold lifts by itself only when all of these hold:
    so a daemon that booted held after an outage or a deploy stays held;
 4. the heartbeat is less than 60 seconds old, and newer than the machine's own
    boot;
-5. every worker it recorded is live **now**, established by this daemon's own
-   tmux adoption rather than by trusting the file — and none of them is an app
-   worker, whose liveness adoption cannot observe;
-6. the previous incarnation ran at least 90 seconds, and the daemon has booted
+5. the previous incarnation ran at least 90 seconds, and the daemon has booted
    at most 3 times in the last 10 minutes, counting this boot.
 
 Anything else holds: a graceful stop, a stale heartbeat (a real outage), a crash
