@@ -1682,7 +1682,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     }
     const offset = offsetText === null ? 0 : Number(offsetText)
     if (!Number.isSafeInteger(offset)) return json({ error: 'offset must be a non-negative integer' }, 400)
-    const mode: TranscriptScenario = isLatest && ['live', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search', 'report'].includes(transcriptScenario ?? '')
+    const mode: TranscriptScenario = isLatest && ['live', 'messages', 'large', 'long-outcome', 'warm', 'cold', 'context', 'search', 'report'].includes(transcriptScenario ?? '')
       ? transcriptScenario as TranscriptScenario : 'normal'
     const updates = mode === 'live' ? liveTranscriptReads++ : 0
     const bytes = workspaceTranscriptBytes(mode, now, { earlier: isEarlier, updates })

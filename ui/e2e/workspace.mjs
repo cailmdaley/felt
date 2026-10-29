@@ -123,6 +123,54 @@ test('The chat follows a live transcript by byte offset', async p => {
   assert.ok(Number(new URL(requests.at(-1).url, 'file:///').searchParams.get('offset')) > 0)
 })
 
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Shuttle messages are separate expandable chat rows (${device})`, async p => {
+  await p.goto(`${url}&transcript=messages`)
+  await p.locator('.kbn-card').filter({ hasText: name }).click()
+  await choose(p, 'Chat')
+  const transcript = selected(p).locator('.ws-transcript')
+  const scroller = transcript.locator('.ws-transcript-scroll')
+  await scroller.waitFor()
+  await scroller.evaluate((scroll, bottom) => { scroll.scrollTop = bottom ? scroll.scrollHeight : 0 }, device === 'desktop')
+  await frames(p)
+
+  // Representative before/after captures use desktop light and phone dark.
+  for (const scheme of ['light', 'dark']) {
+    await p.emulateMedia({ colorScheme: scheme })
+    await frames(p)
+    const rows = transcript.locator('.ws-transcript-shuttle-message')
+    assert.equal(await rows.count(), 2, 'one outgoing and one incoming message have their own rows')
+    assert.equal(await rows.nth(0).getAttribute('data-direction'), 'sent')
+    assert.equal(await rows.nth(1).getAttribute('data-direction'), 'received')
+    assert.equal(await rows.nth(0).locator('.ws-transcript-message-detail').isVisible(), false, 'sent text starts collapsed')
+    assert.equal(await rows.nth(1).locator('.ws-transcript-message-detail').isVisible(), false, 'received text starts collapsed')
+    assert.ok(!(await rows.nth(0).innerText()).includes('shuttle://'), 'the compact row hides the raw session address')
+    assert.ok(!(await rows.nth(1).innerText()).includes('msg-abcdef'), 'the compact row hides the message id')
+    const capture = process.env.WORKSPACE_SHOTS && (device === 'desktop' && scheme === 'light' || device === 'phone' && scheme === 'dark')
+    if (capture) {
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}.png`) })
+    }
+  }
+
+  const sent = transcript.locator('.ws-transcript-shuttle-message[data-direction="sent"]')
+  const received = transcript.locator('.ws-transcript-shuttle-message[data-direction="received"]')
+  assert.ok(!(await sent.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the sent row sits outside tool groups')
+  assert.ok(!(await received.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the received row sits outside tool groups')
+  await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
+  assert.equal(await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').count(), 1, 'the destination resolves as a thread chip')
+  await sent.locator('.ws-transcript-message-toggle').click()
+  assert.match(await sent.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /north patch residual is in the new table/)
+  await received.locator('.ws-transcript-message-toggle').click()
+  assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /follow-up reviewed the north patch residual/)
+  await received.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
+  assert.equal(await received.locator('.ws-transcript-message-peer.ws-constitution-chip').getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender resolves to its thread chip')
+
+  const raw = transcript.locator('.ws-transcript-steps').filter({ hasText: 'Bash 1' }).first()
+  assert.ok(await raw.count(), 'the original tool call remains reachable as a separate step group')
+  await raw.click()
+  assert.match(await transcript.locator('.ws-transcript-tool-detail').innerText(), /shuttle message research\/workspace\/validation-follow-up/)
+}, viewport)
+
 test('The chat never moves under a reader through live polls and snapshot refreshes, and follows at the bottom', async p => {
   await p.goto(`${url}&transcript=live`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()

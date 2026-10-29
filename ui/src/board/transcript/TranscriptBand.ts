@@ -6,6 +6,7 @@ import { sentFileSends, type SentFile } from '../sentFiles.js'
 import { TranscriptModel, segments, type SentFileNotice, type Step, type ToolStep, type Turn } from './model.js'
 import { TranscriptFeed, type FeedStatus } from './feed.js'
 import { SentFilesFeed } from './sentFilesFeed.js'
+import type { ShuttleMessage } from './messages.js'
 import { toolLabel } from './tools.js'
 import { promptParts, type Entry, type ResultImage } from './records.js'
 import { tokenLabel } from './tokenLabel.js'
@@ -42,29 +43,120 @@ export interface TranscriptBandOptions {
 type Prompt = Extract<Entry, { kind: 'prompt' }>
 type Text = Extract<Entry, { kind: 'text' }>
 type Speaker = 'you' | 'dispatch' | 'agent'
-type Notice = Extract<Entry, { kind: 'thread-notice' }>
 
-function noticeRow(entry: Notice, tag: 'div' | 'li' = 'div'): HTMLElement {
+function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLElement {
   const row = document.createElement(tag)
-  row.className = 'ws-transcript-msg ws-transcript-thread-notice'
-  row.dataset.notice = entry.id
-  const link = document.createElement('a')
-  link.className = 'kbn-wikilink'
-  link.dataset.fiber = entry.fiber
-  link.textContent = entry.fiber
-  row.append(link, document.createTextNode(` ${entry.verb}`))
-  if (entry.at !== undefined) {
-    const stamp = document.createElement('time')
-    const when = clock(entry.at)
-    stamp.textContent = ` · ${when.text}`; stamp.title = when.title
-    row.append(stamp)
-  }
-  if (entry.text) {
-    const text = document.createElement('p')
-    text.textContent = entry.text
-    row.append(text)
-  }
+  row.className = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
+  row.dataset.message = entry.id
+  row.dataset.direction = entry.direction
+  const heading = document.createElement('div')
+  heading.className = 'ws-transcript-message-heading'
+  const direction = document.createElement('span')
+  direction.className = 'ws-transcript-message-direction'
+  const peer = document.createElement('span')
+  peer.className = 'ws-transcript-message-peer'
+  const toggle = createButton('ws-transcript-message-toggle', '')
+  const detail = document.createElement('div')
+  detail.className = 'ws-transcript-message-detail'
+  detail.hidden = true
+  const verb = document.createElement('span')
+  verb.className = 'ws-transcript-message-verb'
+  const text = document.createElement('p')
+  text.className = 'ws-transcript-message-text'
+  const source = document.createElement('p')
+  source.className = 'ws-transcript-message-text ws-transcript-message-source'
+  detail.append(verb, text, source)
+  heading.append(direction, peer, toggle)
+  row.append(heading, detail)
+  toggle.addEventListener('click', () => {
+    const expanded = toggle.getAttribute('aria-expanded') === 'true'
+    toggle.setAttribute('aria-expanded', String(!expanded))
+    paintMessageRow(row, entry)
+  })
+  paintMessageRow(row, entry)
   return row
+}
+
+function firstMessageLine(text: string, limit = 100): string {
+  const line = text.split(/\r?\n/, 1)[0].trim()
+  return line.length <= limit ? line : `${line.slice(0, limit - 1)}…`
+}
+
+function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
+  const direction = row.querySelector<HTMLElement>('.ws-transcript-message-direction')!
+  const heading = row.querySelector<HTMLElement>('.ws-transcript-message-heading')!
+  let peer = row.querySelector<HTMLElement>('.ws-transcript-message-peer')!
+  const toggle = row.querySelector<HTMLButtonElement>('.ws-transcript-message-toggle')!
+  const detail = row.querySelector<HTMLElement>('.ws-transcript-message-detail')!
+  const expanded = toggle.getAttribute('aria-expanded') === 'true'
+  const rowClass = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
+  if (row.className !== rowClass) row.className = rowClass
+  setAttr(row, 'data-message', entry.id)
+  setAttr(row, 'data-direction', entry.direction)
+  if (entry.fiber && peer.tagName !== 'A') {
+    const link = document.createElement('a')
+    link.className = 'ws-transcript-message-peer kbn-wikilink'
+    peer.replaceWith(link)
+    peer = link
+  } else if (!entry.fiber && peer.tagName === 'A') {
+    const label = document.createElement('span')
+    label.className = 'ws-transcript-message-peer ws-transcript-session-chip'
+    peer.replaceWith(label)
+    peer = label
+  }
+  peer.classList.toggle('kbn-wikilink', !!entry.fiber)
+  peer.classList.toggle('ws-transcript-session-chip', !entry.fiber)
+  if (peer.textContent !== entry.peer) peer.textContent = entry.peer
+  if (entry.fiber) setAttr(peer, 'data-fiber', entry.fiber)
+  else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
+  const directionText = entry.direction === 'received'
+    ? '← From'
+    : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'uncertain' ? '↯ Delivery unclear' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
+  if (direction.textContent !== directionText) direction.textContent = directionText
+  const toggleText = entry.direction === 'received'
+    ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
+    : entry.text || entry.source ? 'Show text' : 'Show details'
+  if (toggle.textContent !== toggleText) toggle.textContent = toggleText
+  setAttr(toggle, 'aria-label', entry.direction === 'received' ? `Expand message from ${entry.peer}` : `Show message to ${entry.peer}`)
+  setAttr(toggle, 'aria-expanded', String(expanded))
+  setAttr(toggle, 'data-expanded', String(expanded))
+  setHidden(detail, !expanded)
+  const verb = row.querySelector<HTMLElement>('.ws-transcript-message-verb')!
+  const text = row.querySelector<HTMLElement>('.ws-transcript-message-text:not(.ws-transcript-message-source)')!
+  const source = row.querySelector<HTMLElement>('.ws-transcript-message-source')!
+  if (verb.textContent !== (entry.verb ?? '')) verb.textContent = entry.verb ?? ''
+  setHidden(verb, !entry.verb)
+  if (text.textContent !== entry.text) text.textContent = entry.text
+  setHidden(text, !entry.text)
+  const sourceText = entry.source ? `Message text supplied by ${entry.source}` : ''
+  if (source.textContent !== sourceText) source.textContent = sourceText
+  setHidden(source, !entry.source || !!entry.text)
+  let stamp = heading.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
+  if (entry.at === undefined) stamp?.remove()
+  else {
+    if (!stamp) {
+      stamp = document.createElement('time')
+      stamp.className = 'ws-transcript-message-time'
+      heading.append(stamp)
+    }
+    const when = clock(entry.at)
+    if (stamp.textContent !== ` · ${when.text}`) stamp.textContent = ` · ${when.text}`
+    setAttr(stamp, 'title', when.title)
+  }
+  setAttr(row, 'data-status', entry.status ?? '')
+}
+
+/** Keep the row node under its transcript step identity while streamed tool status changes. */
+function keepMessage(cache: Map<string, Kept>, used: Set<string>, identity: string, entry: ShuttleMessage, tag: 'div' | 'li'): HTMLElement {
+  let key = identity
+  for (let n = 1; used.has(key); n++) key = `${identity}#${n}`
+  used.add(key)
+  const previous = cache.get(key)
+  const signature = JSON.stringify(entry)
+  const node = previous?.node ?? messageRow(entry, tag)
+  if (previous && previous.signature !== signature) paintMessageRow(node, entry)
+  cache.set(key, { signature, node })
+  return node
 }
 
 function sentFileRow(
@@ -1499,8 +1591,11 @@ export class TranscriptBand {
     const used = new Set<string>()
     const usedTexts = new Set<string>()
     turn.steps.forEach((step) => {
-      if (step.kind === 'thread-notice') {
-        nodes.push(keep(this.previewKept, used, `notice:${step.id}`, JSON.stringify(step), () => noticeRow(step, 'li')))
+      if (step.kind === 'shuttle-message') {
+        const identity = this.stepIdentity(step)
+        const node = keepMessage(this.previewKept, used, `message:${identity}`, step, 'li')
+        setAttr(node, 'data-reading-key', `${turn.index}:message:${identity}`)
+        nodes.push(node)
         return
       }
       if (step.kind === 'sent-file') {
@@ -1657,9 +1752,12 @@ export class TranscriptBand {
     const usedGroups = new Set<string>()
     const memberOf = new Map<string, string>()
     parts.forEach((part, position) => {
-      if (part.kind === 'thread-notice') {
-        const notice = turn.steps[part.index] as Notice
-        children.push(keep(view.kept, used, `notice:${notice.id}`, JSON.stringify(notice), () => noticeRow(notice)))
+      if (part.kind === 'shuttle-message') {
+        const message = turn.steps[part.index] as ShuttleMessage
+        const identity = this.stepIdentity(message)
+        const row = keepMessage(view.kept, used, `message:${identity}`, message, 'div')
+        setAttr(row, 'data-reading-key', `${turn.index}:message:${identity}`)
+        children.push(row)
         return
       }
       if (part.kind === 'sent-file') {

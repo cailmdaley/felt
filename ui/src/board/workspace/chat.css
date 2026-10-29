@@ -184,7 +184,7 @@
 .ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--ws-prose-size)/1.6 var(--ws-serif); }
 .ws-chat .ws-transcript-inline .ws-transcript-steps { padding-left: 0; opacity: .85; }
 .ws-chat .ws-transcript-inline .ws-transcript-steplist { margin-left: 2px; }
-.ws-chat .ws-transcript-inline .ws-transcript-thread-notice { margin: 4px 0; }
+.ws-chat .ws-transcript-inline .ws-transcript-shuttle-message { margin: 4px 0; }
 .ws-chat .ws-transcript-working-inline { margin: 10px 0 0; padding-left: 0; }
 .ws-chat .ws-transcript-working-inline[hidden] { display: none; }
 

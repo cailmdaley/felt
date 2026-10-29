@@ -1,7 +1,7 @@
 import fc from 'fast-check'
 import { describe, expect, it } from 'vitest'
 import { TranscriptModel, segments, type Step, type Turn } from './model.js'
-import type { Entry } from './records.js'
+import { normalizeRecord, type Entry } from './records.js'
 
 const entry: fc.Arbitrary<Entry> = fc.oneof(
   fc.record({ text: fc.string(), images: fc.nat(3), dispatch: fc.boolean(), at: fc.option(fc.nat(20_000), { nil: undefined }) })
@@ -20,7 +20,103 @@ const entry: fc.Arbitrary<Entry> = fc.oneof(
 
 const snapshot = (turns: readonly Turn[]): Turn[] => JSON.parse(JSON.stringify(turns)) as Turn[]
 
+function modelAfterCodexExec(commands: string[], output: string): TranscriptModel {
+  const model = new TranscriptModel()
+  const code = commands.map(command => `text(await tools.exec_command({cmd: ${JSON.stringify(command)}}))`).join('; ')
+  model.append(normalizeRecord({ type: 'response_item', payload: {
+    type: 'custom_tool_call', call_id: 'exec-send', name: 'exec', input: { code },
+  } }))
+  model.append(normalizeRecord({ type: 'response_item', payload: {
+    type: 'custom_tool_call_output', call_id: 'exec-send', output,
+  } }))
+  return model
+}
+
 describe('TranscriptModel', () => {
+  it('marks a Codex message failed when the shell result reports a nonzero exit code', () => {
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call', call_id: 'send-call', name: 'exec_command',
+      arguments: JSON.stringify({ cmd: 'shuttle message work/child "The table is ready."' }),
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call_output', call_id: 'send-call', output: 'Process exited with code 1',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
+    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: true } })
+  })
+
+  it('marks a Codex exec-wrapper message failed when its nested shell output is JSON', () => {
+    const command = 'shuttle message work/child "The table is ready."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'exec-send', name: 'exec',
+      input: { code: `text(await tools.exec_command({cmd: ${JSON.stringify(command)}}))` },
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call_output', call_id: 'exec-send',
+      output: 'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1,"output":"Error: receiver unavailable"}',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
+    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: true } })
+  })
+
+  it('uses explicit indices when concurrent nested commands finish out of order', () => {
+    const first = 'shuttle message work/first "First result."'
+    const second = 'shuttle message work/second "Second result."'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":1,"result":{"exit_code":1,"output":"receiver unavailable"}}\n{"i":0,"result":{"exit_code":0,"output":"accepted"}}'
+    const messages = modelAfterCodexExec([first, second], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([
+      { fiber: 'work/first', status: 'sent' },
+      { fiber: 'work/second', status: 'failed' },
+    ])
+  })
+
+  it('keeps a send successful when another nested shell command fails', () => {
+    const send = 'shuttle message work/child "The table is ready."'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"accepted"}}\n{"i":1,"result":{"exit_code":1,"output":"unrelated command failed"}}'
+    const messages = modelAfterCodexExec([send, 'printf unrelated'], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ fiber: 'work/child', status: 'sent' }])
+  })
+
+  it('leaves batched sends unclear when an aggregate failure cannot be assigned', () => {
+    const first = 'shuttle message work/first "First result."'
+    const second = 'shuttle message work/second "Second result."'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1,"output":"receiver unavailable"}'
+    const messages = modelAfterCodexExec([first, second], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([
+      { fiber: 'work/first', status: 'uncertain' },
+      { fiber: 'work/second', status: 'uncertain' },
+    ])
+  })
+
+  it('does not infer command identity from the count of unindexed concurrent results', () => {
+    const first = 'shuttle message work/first "First result."'
+    const second = 'shuttle message work/second "Second result."'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":0,"output":"accepted"}\n{"exit_code":1,"output":"receiver unavailable"}'
+    const messages = modelAfterCodexExec([first, second], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([
+      { fiber: 'work/first', status: 'uncertain' },
+      { fiber: 'work/second', status: 'uncertain' },
+    ])
+  })
+
+  it('uses native Codex exit status when successful shell output prints JSON', () => {
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call', call_id: 'send-call', name: 'exec_command',
+      arguments: JSON.stringify({ cmd: 'shuttle message work/child "The table is ready."' }),
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call_output', call_id: 'send-call', output: 'Process exited with code 0\n{"exit_code":1}',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'sent' })
+    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: false } })
+  })
+
   it('folds entries before the first prompt into a null-prompt turn and attaches results by id', () => {
     const model = new TranscriptModel()
     model.append([
@@ -148,7 +244,7 @@ describe('segments', () => {
   it('covers every step exactly once, in order', () => {
     const steps = fc.array(fc.constantFrom<Step>(
       { kind: 'text', text: 't' }, { kind: 'thinking', text: 'th' }, { kind: 'tool', id: 'x', name: 'Read', input: {}, version: 0 },
-      { kind: 'thread-notice', id: 'n', fiber: 'work/child', verb: 'asked', text: 'Which?' },
+      { kind: 'shuttle-message', id: 'n', direction: 'received', peer: 'child', fiber: 'work/child', target: 'work/child', verb: 'asked', text: 'Which?' },
     ))
     fc.assert(fc.property(steps, (list) => {
       const covered: number[] = []

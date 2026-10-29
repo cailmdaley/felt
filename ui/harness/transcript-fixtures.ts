@@ -17,7 +17,7 @@ export function transcriptSearchHits(now: number) {
   ]
 }
 
-export type TranscriptScenario = 'live' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context' | 'search' | 'report'
+export type TranscriptScenario = 'live' | 'messages' | 'large' | 'normal' | 'long-outcome' | 'warm' | 'cold' | 'context' | 'search' | 'report'
 
 export const LONG_OUTCOME = 'What changed in the deck:\n\n' + Array.from({ length: 12 }, (_, i) =>
   `${i + 1}. **Validation slide ${i + 1}.** The fictional response and mask-split results are shown alongside the independent reference bins. The source products and reviewer notes are ready for the next check.`,
@@ -157,6 +157,26 @@ function liveTranscript(now: number, updates: number): string {
   return records.join('')
 }
 
+/** One sent command and one peer delivery, for the chat's message-row journey. */
+function messageTranscript(now: number): string {
+  const toolId = 'fixture-message-send'
+  return [
+    user(now, -30_000, 'Check the north patch residual and tell the follow-up worker what changed.'),
+    assistant(now, -29_000, [{ type: 'tool_use', id: toolId, name: 'Bash', input: {
+      command: 'shuttle message research/workspace/validation-follow-up "The north patch residual is in the new table."',
+    } }]),
+    user(now, -28_800, [{ type: 'tool_result', tool_use_id: toolId, content: 'accepted msg-1234567890abcdef' }]),
+    line({ type: 'attachment', timestamp: timestamp(now, -28_000), attachment: {
+      type: 'queued_command',
+      prompt: '[Shuttle message msg-abcdef1234567890 from shuttle://umber-workstation/codex/follow-up-session; reply to research/workspace/validation-follow-up]\nThe follow-up reviewed the north patch residual; its table is ready.',
+      source_uuid: 'fixture-peer-message', delivery_id: 'fixture-peer-delivery', commandMode: 'prompt',
+      origin: { kind: 'peer', from: 'uds:/fixture/peer.sock', verifiedPeerPid: 1, msg_id: 'fixture-peer-message' },
+      isMeta: true,
+    } }),
+    assistant(now, -27_000, [{ type: 'text', text: 'Both workers now have the same residual table.' }]),
+  ].join('')
+}
+
 /** Captured numeric usage, with only its timestamp shifted for screenshot staging. */
 function headFacts(now: number, scenario: TranscriptScenario): string {
   if (!['warm', 'cold', 'context'].includes(scenario)) return ''
@@ -172,7 +192,9 @@ export function workspaceTranscriptBytes(
   options: { updates?: number; earlier?: boolean } = {},
 ): Uint8Array {
   const transcriptStart = options.earlier ? now - 5 * 60_000 : now
-  const source = scenario === 'large'
+  const source = scenario === 'messages'
+    ? messageTranscript(now)
+    : scenario === 'large'
     ? largeTranscript(now)
     : scenario === 'report' && !options.earlier ? ordinaryTranscript(now - 9_000_000, false) + searchTranscript(now)
     : scenario === 'search' && !options.earlier ? searchTranscript(now)

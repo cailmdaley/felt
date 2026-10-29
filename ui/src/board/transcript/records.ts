@@ -1,4 +1,4 @@
-import { threadNotices, type ThreadNotice } from './threadNotices.js'
+import { sentShuttleMessages, shuttleMessages, type ShuttleMessage } from './messages.js'
 
 export type UsageEntry = {
   kind: 'usage'
@@ -19,13 +19,13 @@ export type UsageEntry = {
 export type ResultImage = { mediaType: string; data: string } | { url: string }
 
 export type Entry =
-  | ThreadNotice
+  | ShuttleMessage
   | UsageEntry
   | { kind: 'prompt'; text: string; images: number; dispatch: boolean; at?: number }
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
-  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; at?: number }
+  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; commandExitCodes?: Array<{ index?: number; code: number }>; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
 type ObjectValue = Record<string, unknown>
@@ -99,6 +99,39 @@ function resultContent(value: unknown): { text: string; images: number; pictures
     }
   }
   return { text: text.join('\n'), images, ...(pictures.length ? { pictures } : {}) }
+}
+
+type CommandExit = { index?: number; code: number }
+
+function nestedCommandExits(value: unknown, inheritedIndex?: number): CommandExit[] {
+  if (Array.isArray(value)) return value.flatMap((item) => nestedCommandExits(item, inheritedIndex))
+  const record = object(value)
+  if (!record) return []
+  const index = typeof record.i === 'number' && Number.isInteger(record.i) ? record.i : inheritedIndex
+  if (typeof record.exit_code === 'number') return [{ ...(index === undefined ? {} : { index }), code: record.exit_code }]
+  return Object.entries(record)
+    .filter(([key]) => key !== 'i')
+    .flatMap(([, child]) => nestedCommandExits(child, index))
+}
+
+function codexCommandExitCodes(text: string): CommandExit[] | undefined {
+  const nativeCodes = [...text.matchAll(/(?:^|\n)Process exited with code (-?\d+)(?:\b|$)/gim)].map((match) => ({ code: Number(match[1]) }))
+  if (nativeCodes.length) return nativeCodes
+
+  // The Codex `exec` wrapper serializes nested exec_command results under this header.
+  const wrapperOutput = /^Script completed\r?\n[\s\S]*?\r?\nOutput:\r?\n([\s\S]*)$/i.exec(text)?.[1]?.trim()
+  if (!wrapperOutput) return undefined
+  const values: unknown[] = []
+  try {
+    const parsed: unknown = JSON.parse(wrapperOutput)
+    values.push(...(Array.isArray(parsed) ? parsed : [parsed]))
+  } catch {
+    for (const line of wrapperOutput.split(/\r?\n/)) {
+      try { values.push(JSON.parse(line)) } catch { /* Non-JSON output has no nested process status. */ }
+    }
+  }
+  const codes = values.flatMap((value) => nestedCommandExits(value))
+  return codes.length ? codes : undefined
 }
 
 function firstLine(text: string, limit = 80): string {
@@ -214,14 +247,14 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
  * arrives as a queued command absorbed into the running turn. Context a hook
  * supplied (`shuttle hook`'s mailbox, which carries thread closes, asks,
  * handoffs and rests) arrives as `hook_additional_context`, never as a
- * system-reminder in a user record; only its thread deliveries are drawn.
+ * system-reminder in a user record; explicit Shuttle messages are drawn.
  */
 function claudeAttachment(record: ObjectValue): Entry[] {
   const attachment = object(record.attachment)
   if (attachment?.type === 'hook_additional_context') {
     const content = attachment.content
     const text = Array.isArray(content) ? content.filter((part): part is string => typeof part === 'string').join('\n') : string(content) ?? ''
-    return threadNotices(text, timestamp(record.timestamp))
+    return shuttleMessages(text, timestamp(record.timestamp))
   }
   if (attachment?.type !== 'queued_command' || (attachment.commandMode ?? 'prompt') !== 'prompt') return []
   const time = timestamp(record.timestamp)
@@ -231,8 +264,14 @@ function claudeAttachment(record: ObjectValue): Entry[] {
   const images = blocks(prompt).filter(block => block.type === 'image').length
   // Another session's message, injected as the queue's meta turn, is a delivery, never the human's.
   if (attachment.isMeta === true || object(attachment.origin)?.kind === 'peer') {
-    const detail = /^\[Shuttle message \S+ from ([^;\]]+)/.exec(text)?.[1]
-    return text ? [event('Message', { detail, text: text.replace(/^\[Shuttle message [^\]]*\]\n?/, '') }, time)] : []
+    const peerText = text
+      .replace(/^\s*Another Claude session sent a message:\s*/, '')
+      .replace(PEER_CAVEAT, '')
+      .trim()
+    const deliveries = shuttleMessages(peerText, time)
+    if (deliveries.length) return deliveries
+    const detail = /^\[Shuttle message \S+ from ([^;\]]+)/.exec(peerText)?.[1]
+    return peerText ? [event('Message', { detail, text: peerText.replace(/^\[Shuttle message [^\]]*\]\n?/, '') }, time)] : []
   }
   const classified = text ? classifiedClaudeText(text, false, time) : null
   if (classified?.kind === 'prompt') return [{ ...classified, images }]
@@ -408,7 +447,11 @@ function codexRecord(record: ObjectValue): Entry[] {
       const id = string(payload.call_id)
       if (!id) return []
       const result = resultContent(payload.output)
-      return [at({ kind: 'result' as const, id, ...result, isError: payload.is_error === true }, time)]
+      const commandExitCodes = codexCommandExitCodes(result.text)
+      return [at({ kind: 'result' as const, id, ...result,
+        isError: payload.is_error === true || commandExitCodes?.some((exit) => exit.code !== 0) === true,
+        ...(commandExitCodes ? { commandExitCodes } : {}),
+      }, time)]
     }
     case 'reasoning': {
       const summary = blocks(payload.summary).map((part) => string(part.text) ?? '').filter(Boolean).join('\n')
@@ -429,11 +472,12 @@ export function normalizeRecord(raw: unknown): Entry[] {
       : claudeRecord(record)
     const seen = new Set<string>()
     const entries = native.flatMap<Entry>(entry => {
+      if (entry.kind === 'tool') return [...sentShuttleMessages(entry), entry]
       if (entry.kind !== 'prompt' && entry.kind !== 'event') return [entry]
-      const notices = threadNotices(entry.text ?? '', entry.at)
-      if (!notices.length) return [entry]
-      for (const notice of notices) seen.add(notice.id)
-      return notices
+      const messages = shuttleMessages(entry.text ?? '', entry.at)
+      if (!messages.length) return [entry]
+      for (const message of messages) seen.add(message.id)
+      return messages
     })
     // Hook-supplied context is inside system-reminder blocks, which ordinary
     // Claude prompt normalization omits. Read deliveries before losing them.
@@ -441,8 +485,8 @@ export function normalizeRecord(raw: unknown): Entry[] {
       const message = object(record.message)
       const source = contentText(message?.content)
       const reminders = [...source.matchAll(/<system-reminder\b[^>]*>([\s\S]*?)<\/system-reminder\s*>/gi)]
-      const notices = reminders.flatMap(match => threadNotices(match[1], timestamp(record.timestamp))).filter(notice => !seen.has(notice.id))
-      return [...notices, ...entries]
+      const messages = reminders.flatMap(match => shuttleMessages(match[1], timestamp(record.timestamp))).filter(message => !seen.has(message.id))
+      return [...messages, ...entries]
     }
     return entries
   } catch {

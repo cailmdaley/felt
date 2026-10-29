@@ -52,7 +52,7 @@ function jsString(source: string): string {
   }
 }
 
-function codexCommand(input: unknown): string {
+export function codexCommands(input: unknown): string[] {
   const sources: string[] = []
   const visit = (item: unknown): void => {
     if (typeof item === 'string') sources.push(item)
@@ -60,11 +60,16 @@ function codexCommand(input: unknown): string {
     else if (item !== null && typeof item === 'object') Object.values(item).forEach(visit)
   }
   visit(input)
+  const commands: string[] = []
+  const matcher = /(?:\bcmd\b|["']cmd["'])\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/gs
   for (const source of sources) {
-    const match = /(?:\bcmd\b|["']cmd["'])\s*:\s*(?:"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'|`((?:\\.|[^`\\])*)`)/s.exec(source)
-    if (match) return jsString(match[1] ?? match[2] ?? match[3] ?? '')
+    for (const match of source.matchAll(matcher)) commands.push(jsString(match[1] ?? match[2] ?? match[3] ?? ''))
   }
-  return ''
+  return commands
+}
+
+export function codexCommand(input: unknown): string {
+  return codexCommands(input)[0] ?? ''
 }
 
 function genericSummary(input: unknown): string {

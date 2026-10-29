@@ -135,13 +135,42 @@ describe('TranscriptBand', () => {
     const preview = band.el.querySelector('.ws-transcript-exchange')!
     expect([...preview.children].map(row => row.textContent)).toEqual([
       expect.stringContaining('Keep going'), expect.stringContaining('I am coordinating.'),
-      expect.stringContaining('work/child closedA measured result'), expect.stringContaining('I will integrate it.'),
+      expect.stringContaining('← FromchildA measured result'), expect.stringContaining('I will integrate it.'),
     ])
     expect(preview.querySelectorAll('.ws-transcript-thread-notice')).toHaveLength(1)
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
     expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
     expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
+  })
+  it('keeps an expanded sent-message row when its tool result arrives', async () => {
+    const session = latestId
+    const items: unknown[] = [
+      { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Send the result.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { content: [{
+        type: 'tool_use', id: 'send-call', name: 'Bash', input: { command: 'shuttle message work/child "The table is ready."' },
+      }] } },
+    ]
+    const fetcher = fixtureFetch({ [session]: items })
+    const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fetcher, inline: true })
+    bands.push(band)
+    document.body.append(band.el)
+    band.follow(target(session))
+    await settle()
+    const row = band.el.querySelector<HTMLElement>('.ws-transcript-shuttle-message')!
+    row.querySelector<HTMLButtonElement>('.ws-transcript-message-toggle')!.click()
+    expect(row.querySelector<HTMLElement>('.ws-transcript-message-detail')!.hidden).toBe(false)
+
+    items.push({ type: 'user', timestamp: '2026-09-26T14:04:00.000Z', message: { content: [{
+      type: 'tool_result', tool_use_id: 'send-call', content: 'accepted msg-42',
+    }] } })
+    await (band as unknown as { readNow(): Promise<boolean> }).readNow()
+    await settle()
+
+    expect(band.el.querySelector('.ws-transcript-shuttle-message')).toBe(row)
+    expect(row.dataset.status).toBe('sent')
+    expect(row.querySelector('.ws-transcript-message-toggle')?.getAttribute('aria-expanded')).toBe('true')
+    expect(row.querySelector<HTMLElement>('.ws-transcript-message-detail')!.hidden).toBe(false)
   })
   it('shows one sent image in the preview and full transcript, and opens it on its owner', async () => {
     const uid = '01KTESTFIBER000000000000001'

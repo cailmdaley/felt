@@ -1,4 +1,5 @@
 import type { Entry, ResultImage } from './records.js'
+import type { ShuttleMessage } from './messages.js'
 import type { SentFile, SentFileSend } from '../sentFiles.js'
 
 export interface ToolStep {
@@ -17,7 +18,7 @@ export interface SentFileNotice extends SentFileSend {
   files: SentFile[]
 }
 
-export type Step = ToolStep | SentFileNotice | Extract<Entry, { kind: 'text' | 'thinking' | 'event' | 'thread-notice' }>
+export type Step = ToolStep | SentFileNotice | Extract<Entry, { kind: 'text' | 'thinking' | 'event' }> | ShuttleMessage
 
 export interface Turn {
   index: number
@@ -59,7 +60,8 @@ function updateTimes(turn: Turn, time: number | undefined): void {
 export class TranscriptModel {
   private readonly turnList: Turn[] = []
   private readonly tools = new Map<string, ToolReference>()
-  private readonly notices = new Set<string>()
+  private readonly messages = new Set<string>()
+  private readonly messagesByTool = new Map<string, ShuttleMessage[]>()
   private sentFiles = new Map<string, SentFileNotice>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
@@ -74,9 +76,12 @@ export class TranscriptModel {
 
   append(entries: readonly Entry[]): void {
     for (const entry of entries) {
-      if (entry.kind === 'thread-notice') {
-        if (this.notices.has(entry.id)) continue
-        this.notices.add(entry.id)
+      if (entry.kind === 'shuttle-message') {
+        if (this.messages.has(entry.id)) continue
+        this.messages.add(entry.id)
+        if (entry.direction === 'sent' && entry.toolId) {
+          this.messagesByTool.set(entry.toolId, [...(this.messagesByTool.get(entry.toolId) ?? []), entry])
+        }
       }
       if (entry.kind === 'usage') {
         if (entry.model) this.facts.model = entry.model
@@ -112,6 +117,30 @@ export class TranscriptModel {
           ...(entry.at === undefined ? {} : { at: entry.at }),
         }
         reference.step.version++
+        const messages = this.messagesByTool.get(entry.id) ?? []
+        if (!entry.isError) {
+          for (const message of messages) message.status = 'sent'
+        } else {
+          const commandCount = messages[0]?.commandCount ?? messages.length
+          const byCommand = new Map<number, ShuttleMessage[]>()
+          for (const message of messages) {
+            const index = message.commandIndex ?? 0
+            byCommand.set(index, [...(byCommand.get(index) ?? []), message])
+          }
+          const exits = entry.commandExitCodes ?? []
+          const explicitlyIndexed = exits.length > 0 && exits.every((exit) => exit.index !== undefined)
+          for (const message of messages) {
+            const index = message.commandIndex ?? 0
+            const group = byCommand.get(index) ?? []
+            const matches = explicitlyIndexed
+              ? exits.filter((exit) => exit.index === index)
+              : commandCount === 1 && exits.length <= 1 ? exits : []
+            const canAttribute = group.length === 1 && (message.commandSegmentCount ?? 1) === 1 && matches.length === 1
+            if (canAttribute) message.status = matches[0].code === 0 ? 'sent' : 'failed'
+            else if (commandCount === 1 && group.length === 1 && (message.commandSegmentCount ?? 1) === 1 && exits.length === 0) message.status = 'failed'
+            else message.status = 'uncertain'
+          }
+        }
         updateTimes(reference.turn, entry.at)
         this.touch(reference.turn)
         continue
@@ -159,7 +188,8 @@ export class TranscriptModel {
   reset(): void {
     this.turnList.length = 0
     this.tools.clear()
-    this.notices.clear()
+    this.messages.clear()
+    this.messagesByTool.clear()
     this.sentFiles.clear()
     this.dirty.clear()
     this.resetRequested = true
@@ -274,7 +304,7 @@ export class TranscriptModel {
 /** A turn's steps as the reader lays them out: each agent message on its own, the work between messages as one run. */
 export type Segment =
   | { kind: 'text'; index: number }
-  | { kind: 'thread-notice'; index: number }
+  | { kind: 'shuttle-message'; index: number }
   | { kind: 'sent-file'; index: number }
   | { kind: 'steps'; start: number; end: number }
 
@@ -282,7 +312,7 @@ export function segments(steps: readonly Step[]): Segment[] {
   const out: Segment[] = []
   let runStart = -1
   steps.forEach((step, index) => {
-    if (step.kind === 'text' || step.kind === 'thread-notice' || step.kind === 'sent-file') {
+    if (step.kind === 'text' || step.kind === 'shuttle-message' || step.kind === 'sent-file') {
       if (runStart >= 0) out.push({ kind: 'steps', start: runStart, end: index })
       runStart = -1
       out.push({ kind: step.kind, index })
