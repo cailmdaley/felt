@@ -54,8 +54,8 @@ defmodule Shuttle.LifecycleService do
   """
   @spec write(verb(), String.t(), keyword()) :: Shuttle.Felt.result()
   def write(:clear_ask, fiber_id, opts) do
-    opts = Keyword.delete(opts, :args)
-    Shuttle.CLI.run_lifecycle("ask", fiber_id, ["--clear"], opts)
+    {args, opts} = Keyword.pop(opts, :args, [])
+    Shuttle.CLI.run_lifecycle("ask", fiber_id, ["--clear" | args], opts)
   end
 
   def write(verb, fiber_id, opts)

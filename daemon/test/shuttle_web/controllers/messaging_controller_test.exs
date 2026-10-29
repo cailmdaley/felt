@@ -15,8 +15,16 @@ defmodule ShuttleWeb.MessagingControllerTest do
        0}
     end
 
-    def cmd("shuttle", ["-C", store, "ask", "work/worker", "--clear"], _opts) do
-      send(Process.whereis(ShuttleWeb.MessagingControllerTest.Client), {:cleared_ask, store})
+    def cmd(
+          "shuttle",
+          ["-C", store, "ask", "work/worker", "--clear", "--answered-by", from],
+          _opts
+        ) do
+      send(
+        Process.whereis(ShuttleWeb.MessagingControllerTest.Client),
+        {:cleared_ask, store, from}
+      )
+
       {"cleared\n", 0}
     end
 
@@ -289,6 +297,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
         Shuttle.Messaging.send_message(%{
           "address" => "shuttle://local/codex/native%2Fid",
           "text" => "Use the conservative cut.",
+          "from" => "reviewer",
           "message_id" => id,
           "wake" => id != "context_added"
         })
@@ -296,9 +305,9 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert match?({:ok, _, _}, result)
 
       if id in ["accepted", "queued", "submitted", "context_added"] do
-        assert_receive {:cleared_ask, ^store}
+        assert_receive {:cleared_ask, ^store, "reviewer"}
       else
-        refute_receive {:cleared_ask, _}
+        refute_receive {:cleared_ask, _, _}
       end
     end
   end
