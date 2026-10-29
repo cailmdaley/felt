@@ -13,6 +13,9 @@ defmodule Shuttle.TailnetDial.Bridge do
   # never does. It must exceed the longest forward any caller waits on — the
   # 330 s remote folder picker — or the bridge cuts live requests short.
   @in_flight_timeout_ms 600_000
+  # Response bytes can belong to an open stream, not just a pooled keep-alive.
+  # Leave room for 15 s stream heartbeats and scheduling/network jitter.
+  @idle_timeout_ms 60_000
   @socket_options [:binary, active: false, packet: :http_bin]
 
   def child_spec(opts) do
@@ -321,16 +324,17 @@ defmodule Shuttle.TailnetDial.Bridge do
     end
   end
 
-  # Two budgets, chosen by which side spoke last. After the peer's bytes (a
-  # response, or nothing yet) the relay is an idle pooled keep-alive and is
-  # reaped after `2 × request_timeout_ms`. After the client's bytes a request
-  # is awaiting its answer, and the per-remote poll budget says nothing about
-  # how long that may take: a forwarded message waits on the receiver's
-  # delivery for seconds, a remote folder picker for minutes. Reaping those
-  # at the poll budget (4 s by default) closed forwards mid-request, which
-  # httpc reports as `:socket_closed_remotely` — after a keep-alive retry, ~8 s.
+  # The relay carries opaque bytes: a peer write can start a response, continue
+  # a stream, or finish a pooled request. Its silence budget accommodates stream
+  # heartbeats independently of the remote's short poll request timeout. Each
+  # write renews that budget. Client writes get the longer unanswered-request
+  # ceiling; a one-sided close gets only the bounded drain window.
   defp relay_timeouts(opts) do
-    idle = 2 * Keyword.fetch!(opts, :request_timeout_ms)
+    idle =
+      max(
+        2 * Keyword.fetch!(opts, :request_timeout_ms),
+        Shuttle.Env.app(:tailnet_dial_idle_timeout_ms, @idle_timeout_ms)
+      )
 
     in_flight =
       Shuttle.Env.app(:tailnet_dial_in_flight_timeout_ms, @in_flight_timeout_ms)
