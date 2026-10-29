@@ -1612,7 +1612,7 @@ defmodule Shuttle.Dispatcher do
             resumed_at = DateTime.utc_now()
 
             fallback_signal =
-              if agent.cli == "pi",
+              if agent.cli == "pi" and not quiet?,
                 do: private_fallback_signal(session, resumed_at, session_id),
                 else: nil
 

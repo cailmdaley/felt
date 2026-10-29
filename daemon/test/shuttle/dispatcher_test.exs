@@ -766,6 +766,35 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ "tmux send-keys"
   end
 
+  test "Pi restoration reopens the same conversation without a prompt or fresh fallback" do
+    session = "11111111-2222-3333-4444-555555555555"
+
+    MockRunner.override_fiber("tests/haiku", %{
+      shuttle: %{
+        "resolved" => %{
+          "agent" => %{
+            "id" => "pi-luna",
+            "cli" => "pi",
+            "wrapper" => "pi",
+            "model" => "openai/gpt-6-luna"
+          }
+        },
+        "runtime" => %{"session_uuid" => session, "dispatched_at" => "2026-10-29T00:00:00Z"}
+      }
+    })
+
+    assert {:ok, _} = Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+
+    {"tmux", ["new-session" | args]} =
+      Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+    script = File.read!(List.last(args))
+    assert script =~ "--session '#{session}'"
+    refute script =~ "Mode: resume"
+    refute script =~ "<<<"
+    refute script =~ " || "
+  end
+
   test "dirty restoration continues a turn with its resume prompt" do
     session = "11111111-2222-3333-4444-555555555555"
 
