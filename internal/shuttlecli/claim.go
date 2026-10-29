@@ -1,39 +1,13 @@
 package shuttlecli
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/spf13/cobra"
 )
-
-// tmuxCurrentSession names the tmux session of this terminal's pane
-// (app.claimTmuxSession).
-func (a *app) tmuxCurrentSession() (string, error) {
-	if a.env.Getenv("TMUX") == "" {
-		return "", fmt.Errorf("this terminal is outside tmux")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	pane := a.env.Getenv("TMUX_PANE")
-	if pane == "" {
-		return "", fmt.Errorf("the current tmux pane is unknown")
-	}
-	args := []string{"display-message", "-p", "-t", pane}
-	out, err := a.env.CommandContext(ctx, "tmux", append(args, "#{session_name}")...).Output()
-	if err != nil {
-		return "", err
-	}
-	name := strings.TrimSpace(string(out))
-	if name == "" {
-		return "", fmt.Errorf("tmux returned no session name")
-	}
-	return name, nil
-}
 
 func (a *app) claimCmd() *cobra.Command {
 	claimCmd := &cobra.Command{
@@ -78,6 +52,7 @@ If your session cannot be identified, leave the task as an open draft.`,
 			}
 			session, _ := cmd.Flags().GetString("session")
 			tmux, _ := cmd.Flags().GetString("tmux-session")
+			pane := ""
 			if surface == "app" {
 				if tmux != "" {
 					return fmt.Errorf("--tmux-session cannot be used for an app claim")
@@ -90,10 +65,13 @@ If your session cannot be identified, leave the task as an open draft.`,
 				}
 			} else {
 				if tmux == "" {
-					tmux, err = a.claimTmuxSession()
-					if err != nil {
-						return fmt.Errorf("cannot identify existing terminal conversation: %w; leave the task as a draft or supply --tmux-session", err)
+					ref, refErr := a.currentTerminal()
+					// A human-born Rex terminal has native IDs but no worker binding.
+					// A damaged index must not hide those exact claim coordinates.
+					if refErr != nil && !(ref.Backend == "rex" && validRexRef(ref.NativeSession, ref.NativePane)) {
+						return fmt.Errorf("cannot identify existing terminal conversation: %w; leave the task as a draft or supply --tmux-session", refErr)
 					}
+					tmux, pane = ref.NativeSession, ref.NativePane
 				}
 				if session == "" {
 					_, session = a.harnessSessionFromEnv()
@@ -103,7 +81,7 @@ If your session cannot be identified, leave the task as an open draft.`,
 			if err != nil {
 				return err
 			}
-			body, err := json.Marshal(map[string]any{"fiber_id": id, "surface": surface, "tmux_session": tmux, "session_uuid": session, "agent": block.Agent})
+			body, err := json.Marshal(map[string]any{"fiber_id": id, "surface": surface, "tmux_session": tmux, "tmux_pane": pane, "session_uuid": session, "agent": block.Agent})
 			if err != nil {
 				return err
 			}

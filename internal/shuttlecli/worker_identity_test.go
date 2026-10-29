@@ -152,7 +152,7 @@ func TestNativeWorkerDoesNotInheritUnboundIdentity(t *testing.T) {
 	if a.isOwnFiber(parent) {
 		t.Fatal("parent falsely recognized as own fiber")
 	}
-	a.endOwnTmuxSession()
+	a.endOwnTerminal()
 	if _, err := os.Stat(kills); !os.IsNotExist(err) {
 		t.Fatal("unbound child killed parent's terminal")
 	}

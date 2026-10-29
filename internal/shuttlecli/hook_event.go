@@ -380,7 +380,7 @@ func trimToolInput(raw json.RawMessage) json.RawMessage {
 	return out
 }
 
-// currentTmuxSession names the tmux session this hook fired inside — the
+// currentTmuxSession names the worker terminal this hook fired inside — the
 // carrier of the fiber ULID for dispatched CLI workers. It provides artifact
 // and terminal context; turn phases join only by harness session UUID.
 //
@@ -399,12 +399,12 @@ func (a *app) currentTmuxSession() string {
 		}
 		return row.Tmux
 	}
-	if a.env.Getenv("TMUX") != "" {
-		s, err := a.tmuxCurrentSession()
+	if a.env.Getenv("TMUX") != "" || a.env.Getenv("REX_SESSION") != "" || a.env.Getenv("REX_BLOCK") != "" {
+		ref, err := a.currentTerminal()
 		if err != nil {
 			return ""
 		}
-		return s
+		return ref.Name
 	}
 	return strings.TrimSpace(a.env.Getenv("SHUTTLE_TMUX_SESSION"))
 }

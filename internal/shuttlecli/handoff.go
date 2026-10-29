@@ -54,7 +54,7 @@ An explicit different fiber stamps that fiber and leaves the caller running.` + 
 			// the kill loses nothing. A worker stamping a DIFFERENT fiber (e.g. a
 			// dead sibling worker's) stays alive.
 			if self {
-				a.endOwnTmuxSession()
+				a.endOwnTerminal()
 			}
 			return nil
 		},
@@ -88,9 +88,9 @@ func (a *app) resolveHandoffPath(fiber string) (string, bool, error) {
 	}
 	// An explicit target is never replaced with ambient worker identity.
 	// Preserve manual handoff outside an identified worker.
-	session, _ := a.tmuxCurrentSession()
+	terminal, _ := a.currentTerminal()
 	_, native := a.harnessSessionFromEnv()
-	manual := native == "" && fiberUIDFromTmuxSession(session) == "" && a.env.Getenv("SHUTTLE_FIBER_PATH") == ""
+	manual := native == "" && fiberUIDFromTmuxSession(terminal.Name) == "" && a.env.Getenv("SHUTTLE_FIBER_PATH") == ""
 	return f.Path, manual, nil
 }
 
@@ -190,25 +190,27 @@ func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 	return at, nil
 }
 
-// endOwnTmuxSession tears down the tmux session this process is running in — the
-// worker's <leaf>-<UID>-shuttle session. Exit verbs call it after their durable
-// document write or successful daemon route. Best-effort and a no-op outside tmux (e.g.
-// a manual/test invocation), so it never kills a stray shell: it asks tmux for the
-// session of its own pane ($TMUX_PANE) and kills exactly that.
-func (a *app) endOwnTmuxSession() {
-	session, err := a.tmuxCurrentSession()
-	if err != nil || session == "" {
+// endOwnTerminal closes this terminal after a durable exit write. Rex requires
+// an authoritative binding whose ULID matches the caller's current fiber, so an
+// unbound shell or a child with inherited native context cannot close a worker.
+func (a *app) endOwnTerminal() {
+	ref, err := a.currentTerminal()
+	if err != nil || ref.Name == "" {
 		return
 	}
-	if _, native := a.harnessSessionFromEnv(); native != "" {
+	_, native := a.harnessSessionFromEnv()
+	if ref.Backend == "rex" || native != "" {
 		own, err := a.currentWorkerFiber()
-		if err != nil || fiberUIDFromTmuxSession(session) != own.UID {
+		if err != nil || fiberUIDFromTmuxSession(ref.Name) != own.UID {
 			return
 		}
 	}
-	// This kills our own pane mid-call; the field is already durably on disk (the
-	// rename completed before we got here), so nothing is lost.
-	_ = a.env.Command("tmux", "kill-session", "-t", session).Run()
+	// Closing this terminal can end the caller mid-call; the write is durable.
+	if ref.Backend == "rex" {
+		_ = (&rexTerminal{a: a}).closeBound(rexBinding{SessionID: ref.NativeSession, BlockID: ref.NativePane})
+	} else {
+		_ = (&tmuxTerminal{a: a}).Kill(ref.Name)
+	}
 }
 
 // idFromPath derives a cosmetic fiber id from a .md path (the leaf stem). The id

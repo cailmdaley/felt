@@ -107,7 +107,7 @@ The daemon's boot quarantine can still hold an eligible fiber until
 				return fmt.Errorf("listing fibers: %w", err)
 			}
 
-			live := a.liveTmuxSessions()
+			live := a.liveTerminalSessions()
 			owners := sessionOwnerMap(entries)
 			reg := a.statusAgentRegistry()
 
@@ -177,7 +177,7 @@ func (a *app) psCmd() *cobra.Command {
 		Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			live := a.liveTmuxSessions()
+			live := a.liveTerminalSessions()
 			if len(live) == 0 {
 				if a.json {
 					return a.outputJSON([]map[string]string{})
@@ -423,7 +423,7 @@ func columnTitle(column string) string {
 // one is live. A fiber without a uid has no session name and so no worker.
 func (a *app) liveWorkerSession(f *felt.Felt) (string, bool) {
 	session := shuttleTmuxSessionName(f.ID, f.UID)
-	if session != "" && a.tmuxSessionExists(session) {
+	if session != "" && a.terminalSessionExists(session) {
 		return session, true
 	}
 	return "", false

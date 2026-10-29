@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -99,8 +98,8 @@ func (a *app) migrateWorker(cmd *cobra.Command, source, target *felt.Felt, rest,
 		return nil, err
 	}
 	harness, session := a.harnessSessionFromEnv()
-	pane := strings.TrimSpace(a.env.Getenv("TMUX_PANE"))
-	if a.env.Getenv("TMUX") == "" || (harness == "codex" && session != "") {
+	pane := a.currentTerminalPane()
+	if harness == "codex" && session != "" {
 		// App Server tools can inherit a pane belonging to another conversation.
 		pane = ""
 	}

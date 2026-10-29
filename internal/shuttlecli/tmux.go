@@ -45,17 +45,6 @@ func errFiberWithoutUID(fiberID string) error {
 	return fmt.Errorf("fiber %s has no intrinsic ULID id, so it has no worker session name — run `felt backfill-ids` or add an `id:` (ULID) to its frontmatter", fiberID)
 }
 
-// tmuxHasSession and tmuxKillSession back app.tmuxSessionExists and
-// app.killTmuxSession. The `=` prefix tells tmux to match the session name
-// exactly (not as a pattern).
-func (a *app) tmuxHasSession(sessionName string) bool {
-	return a.env.Command("tmux", "has-session", "-t", "="+sessionName).Run() == nil
-}
-
-func (a *app) tmuxKillSession(session string) error {
-	return a.env.Command("tmux", "kill-session", "-t", session).Run()
-}
-
 // shuttleSessionULID matches the uid a worker session name embeds:
 // <leaf>-<ULID>-shuttle, Crockford base32 (no I, L, O, U).
 var shuttleSessionULID = regexp.MustCompile(`-([0-9A-HJKMNP-TV-Z]{26})-shuttle$`)
@@ -79,22 +68,4 @@ func fiberUIDFromTmuxSession(sessionName string) string {
 // shuttle worker: one that parses as <leaf>-<ULID>-shuttle.
 func isShuttleTmuxSessionName(sessionName string) bool {
 	return fiberUIDFromTmuxSession(sessionName) != ""
-}
-
-// tmuxLiveWorkerSessions returns the set of live shuttle worker session names —
-// the running side of status/ps (app.liveTmuxSessions). An absent or empty
-// server yields the empty set (status still renders, every row idle).
-func (a *app) tmuxLiveWorkerSessions() map[string]bool {
-	out, err := a.env.Command("tmux", "ls", "-F", "#{session_name}").Output()
-	if err != nil {
-		return map[string]bool{}
-	}
-	result := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		line = strings.TrimSpace(line)
-		if isShuttleTmuxSessionName(line) {
-			result[line] = true
-		}
-	}
-	return result
 }

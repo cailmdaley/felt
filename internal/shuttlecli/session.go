@@ -225,6 +225,26 @@ Exits with a clear error if no session is live.`,
 				}
 			}
 
+			holder, err := a.terminalHolder(session)
+			if err != nil {
+				return fmt.Errorf("locating terminal %q: %w", session, err)
+			}
+			if holder != nil && holder.ID() == "rex" {
+				if a.env.Getenv("SSH_CONNECTION") != "" || a.env.Getenv("SSH_TTY") != "" {
+					return fmt.Errorf("Rex workers have no TTY renderer; open %s from a Rex client", session)
+				}
+				endpoint, err := a.daemonEndpoint("/api/v1/attach")
+				if err != nil {
+					return err
+				}
+				payload, _ := json.Marshal(map[string]string{"tmux_session": session})
+				if _, err := a.postDaemonContext(cmd.Context(), endpoint, payload, daemonPostTimeout); err != nil {
+					return err
+				}
+				fmt.Fprintf(a.env.Stdout, "Opened %s in Rex.\n", session)
+				return nil
+			}
+
 			tmux, err := a.env.LookPath("tmux")
 			if err != nil {
 				return fmt.Errorf("tmux not found: %w", err)

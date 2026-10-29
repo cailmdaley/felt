@@ -161,8 +161,8 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 				fmt.Fprintf(a.env.Stdout, "  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
 				return nil
 			}
-			if err := a.killTmuxSession(session); err != nil {
-				return fmt.Errorf("killing tmux session %q: %w", session, err)
+			if err := a.killTerminalSession(session); err != nil {
+				return fmt.Errorf("killing terminal %q: %w", session, err)
 			}
 			fmt.Fprintf(a.env.Stdout, "  worker: killed %s\n", session)
 			return nil
@@ -341,8 +341,8 @@ this host is killed.` + workerExitIdentityHelp,
 			if session == "" {
 				return nil
 			}
-			if err := a.killTmuxSession(session); err != nil {
-				return fmt.Errorf("killing tmux session %q: %w", session, err)
+			if err := a.killTerminalSession(session); err != nil {
+				return fmt.Errorf("killing terminal %q: %w", session, err)
 			}
 			fmt.Fprintf(a.env.Stdout, "  worker: stopped %s\n", session)
 			return nil
@@ -721,7 +721,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
 						if routed && err == nil && a.isOwnFiber(candidate) {
-							a.endOwnTmuxSession()
+							a.endOwnTerminal()
 						}
 						return err
 					}
@@ -750,7 +750,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				}
 				if routed, err := a.forwardLifecycleAction(cmd, args, owner, "close", f, fields); routed || err != nil {
 					if routed && err == nil && a.isOwnFiber(f) {
-						a.endOwnTmuxSession()
+						a.endOwnTerminal()
 					}
 					return err
 				}
@@ -805,7 +805,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				fmt.Fprintln(a.env.Stdout, "  tempered: false")
 			}
 			if a.isOwnFiber(f) {
-				a.endOwnTmuxSession()
+				a.endOwnTerminal()
 			}
 			return nil
 		},

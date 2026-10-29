@@ -12,7 +12,7 @@ import (
 
 func TestMigrateRoutesIdentityWithoutLocalLifecycleWrites(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"", "--rest", "--disabled", "codex"} {
+	for _, mode := range []string{"", "--rest", "--disabled", "codex", "rex", "rex-codex"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
@@ -21,7 +21,13 @@ func TestMigrateRoutesIdentityWithoutLocalLifecycleWrites(t *testing.T) {
 			env.Set("CLAUDE_CODE_SESSION_ID", "live-session")
 			env.Set("TMUX", "/tmp/test-socket,1,0")
 			env.Set("TMUX_PANE", "%17")
-			if mode == "codex" {
+			if strings.HasPrefix(mode, "rex") {
+				env.Unset("TMUX")
+				env.Unset("TMUX_PANE")
+				env.Set("REX_SESSION", "session:source")
+				env.Set("REX_BLOCK", "block:source")
+			}
+			if strings.Contains(mode, "codex") {
 				env.Unset("CLAUDE_CODE_SESSION_ID")
 				env.Set("CODEX_THREAD_ID", "live-session")
 			}
@@ -49,7 +55,10 @@ func TestMigrateRoutesIdentityWithoutLocalLifecycleWrites(t *testing.T) {
 				t.Fatalf("%v: %s", err, out)
 			}
 			wantPane := "%17"
-			if mode == "codex" {
+			if mode == "rex" {
+				wantPane = "block:source"
+			}
+			if strings.Contains(mode, "codex") {
 				wantPane = ""
 			}
 			if body["from"] != "from" || body["to"] != "to" || body["session_id"] != "live-session" || body["tmux_pane"] != wantPane || body["rest"] != (mode == "--rest") || body["disabled"] != (mode == "--disabled") {

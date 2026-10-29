@@ -63,8 +63,8 @@ func TestClaimTerminalInferenceRejectionAndUnsupportedIdentity(t *testing.T) {
 	defer server.Close()
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
 	env.Set("CLAUDE_CODE_SESSION_ID", "claude-session")
+	stubWorkerExitTmux(t, env, "exact-session", storage.Path("setup"))
 	inTmux := newApp(env)
-	inTmux.claimTmuxSession = func() (string, error) { return "exact-session", nil }
 	_, _, err := executeApp(t, inTmux, dir, "-C", dir, "claim", "setup")
 	if err == nil || !strings.Contains(err.Error(), "do not activate") {
 		t.Fatalf("rejection %v", err)
@@ -93,7 +93,38 @@ func TestClaimTmuxInferenceRequiresExactPane(t *testing.T) {
 	env := testEnv(t)
 	env.Set("TMUX", "/tmp/socket,1,0")
 	env.Set("TMUX_PANE", "")
-	if _, err := newApp(env).claimTmuxSession(); err == nil || !strings.Contains(err.Error(), "pane is unknown") {
+	if _, err := newApp(env).currentTerminal(); err == nil || !strings.Contains(err.Error(), "pane is unknown") {
 		t.Fatalf("inherited TMUX must not select an arbitrary session: %v", err)
+	}
+}
+
+func TestClaimRexSendsExactNativeCoordinates(t *testing.T) {
+	t.Parallel()
+	dir, st := newStore(t)
+	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "test-host")
+	env.Set("REX_SESSION", "session:human")
+	env.Set("REX_BLOCK", "block:human")
+	env.Set("CLAUDE_CODE_SESSION_ID", "native-conversation")
+	env.Set("PATH", "")
+	seedShuttleRole(t, st, "draft", "open", map[string]any{"kind": "oneshot", "agent": "claude-opus", "host": "test-host", "surface": "cli", "project_dir": dir}, nil)
+	var body map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/claim" {
+			t.Errorf("unexpected route %s", r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Write([]byte(`{"claimed":true}`))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	if _, _, err := executeIn(t, env, dir, "-C", dir, "claim", "draft"); err != nil {
+		t.Fatal(err)
+	}
+	if body["tmux_session"] != "session:human" || body["tmux_pane"] != "block:human" || body["session_uuid"] != "native-conversation" {
+		t.Fatalf("wrong claim coordinates %v", body)
+	}
+	if mustRead(t, st, "draft").Status != "open" {
+		t.Fatal("claim activated task")
 	}
 }

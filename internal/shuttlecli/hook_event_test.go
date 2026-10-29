@@ -982,3 +982,28 @@ func TestHookTmuxSessionRequiresExactPane(t *testing.T) {
 		t.Fatalf("inherited TMUX without a pane named session %q", got)
 	}
 }
+
+func TestHookTerminalTmuxWinsOverInheritedRex(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	_, st := newStore(t)
+	seedShuttleRole(t, st, "own", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, st, "own")
+	name := shuttleTmuxSessionName(f.ID, f.UID)
+	stubWorkerExitTmux(t, env, name, f.Path)
+	env.Set("REX_SESSION", "session:anchor")
+	env.Set("REX_BLOCK", "block:anchor")
+	writeRexBindings(t, env, map[string]rexBinding{"anchor": {SessionID: "session:anchor", BlockID: "block:anchor", CreatedAt: "stamp"}})
+	ref, err := newApp(env).currentTerminal()
+	if err != nil || ref.Backend != "tmux" || ref.Name != name || ref.NativePane != "%1" {
+		t.Fatalf("wrong current terminal %+v: %v", ref, err)
+	}
+	if got := newApp(env).currentTmuxSession(); got != name {
+		t.Fatalf("hook selected Rex anchor: %q", got)
+	}
+	// Incomplete tmux identity must not fall through to an inherited Rex block.
+	env.Set("TMUX_PANE", "")
+	if got := newApp(env).currentTmuxSession(); got != "" {
+		t.Fatalf("hook inherited anchor: %q", got)
+	}
+}

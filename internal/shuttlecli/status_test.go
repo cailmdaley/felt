@@ -15,7 +15,7 @@ import (
 func withStubbedLiveSessions(t *testing.T, env *sysenv.Env, live map[string]bool) *app {
 	t.Helper()
 	a := newApp(env)
-	a.liveTmuxSessions = func() map[string]bool { return live }
+	a.terminals = []terminalBackend{&stubTerminal{id: "tmux", live: live}}
 	return a
 }
 

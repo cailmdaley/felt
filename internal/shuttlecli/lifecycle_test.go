@@ -28,8 +28,7 @@ func withStubbedTmux(t *testing.T, env *sysenv.Env, live map[string]bool) (*app,
 	t.Helper()
 	a := newApp(env)
 	killed := &[]string{}
-	a.tmuxSessionExists = func(name string) bool { return live[name] }
-	a.killTmuxSession = func(name string) error { *killed = append(*killed, name); return nil }
+	a.terminals = []terminalBackend{&stubTerminal{id: "tmux", live: live, killed: killed}}
 	return a, killed
 }
 

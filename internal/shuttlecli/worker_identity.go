@@ -40,8 +40,8 @@ func (a *app) currentWorkerFiber() (*felt.Felt, error) {
 		}
 		return a.workerBindingFiber(*row)
 	}
-	session, _ := a.tmuxCurrentSession()
-	if uid := fiberUIDFromTmuxSession(session); uid != "" {
+	terminal, _ := a.currentTerminal()
+	if uid := fiberUIDFromTmuxSession(terminal.Name); uid != "" {
 		return a.workerFiberByUID(uid)
 	}
 	if path := a.env.Getenv("SHUTTLE_FIBER_PATH"); path != "" {

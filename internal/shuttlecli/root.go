@@ -110,13 +110,8 @@ type app struct {
 	// hostGOOS is runtime.GOOS: the platform whose tunnel supervisor
 	// tunnels install renders and places.
 	hostGOOS string
-	// tmuxSessionExists and killTmuxSession address one session by exact name.
-	tmuxSessionExists func(sessionName string) bool
-	killTmuxSession   func(session string) error
-	// liveTmuxSessions is the set of live shuttle worker sessions.
-	liveTmuxSessions func() map[string]bool
-	// claimTmuxSession names the tmux session this terminal is in.
-	claimTmuxSession func() (string, error)
+	// terminals holds the host's observation/stop backends, resolved lazily.
+	terminals []terminalBackend
 	// detectTmuxOrigin reports which launchd coalition owns the tmux server.
 	detectTmuxOrigin func() tmuxOriginReport
 	// loginEnvCapture is the login-shell capture installDaemonSupervisor uses.
@@ -167,10 +162,6 @@ func newApp(env *sysenv.Env) *app {
 		httpProxy:                 http.ProxyFromEnvironment,
 		versionProbeTimeout:       3 * time.Second,
 	}
-	a.tmuxSessionExists = a.tmuxHasSession
-	a.killTmuxSession = a.tmuxKillSession
-	a.liveTmuxSessions = a.tmuxLiveWorkerSessions
-	a.claimTmuxSession = a.tmuxCurrentSession
 	a.detectTmuxOrigin = a.probeTmuxOrigin
 	a.loginEnvCapture = a.captureLoginEnv
 	a.execDaemonRelease = a.execRelease
