@@ -935,6 +935,9 @@ defmodule Shuttle.TailnetDialTest do
   defp start_bridge(base, localapi, host, port, opts \\ []) do
     remote = remote(host, port, opts)
     data_dir = Keyword.get(opts, :data_dir, Path.join(base, "data"))
+    previous_socket = Application.get_env(:shuttle, :tailscale_socket)
+    Application.put_env(:shuttle, :tailscale_socket, localapi)
+    on_exit(fn -> restore_app_env(:tailscale_socket, previous_socket) end)
 
     {:ok, manager} =
       TailnetDial.start_link(
