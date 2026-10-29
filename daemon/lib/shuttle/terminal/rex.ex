@@ -160,6 +160,10 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def rename(runner, from, to) do
+    Shuttle.Terminal.with_lock(to, fn -> rename_locked(runner, from, to) end)
+  end
+
+  defp rename_locked(runner, from, to) do
     Shuttle.Terminal.with_lock({__MODULE__, :rename}, fn ->
       with :ok <- valid_label(to),
            {:ok, source} <- resolve(runner, from),
@@ -346,9 +350,11 @@ defmodule Shuttle.Terminal.Rex do
 
   defp recover_block(runner, name, sid) do
     with {:ok, blocks} <- Rex.blocks(runner, sid) do
-      matching = Enum.filter(blocks, &(&1["label"] == name and name != nil))
+      # Native claims may select a sole human pane. Name recovery requires
+      # the worker block's label, never an unrelated remaining pane.
+      matching = if name, do: Enum.filter(blocks, &(&1["label"] == name)), else: blocks
 
-      case if(matching == [], do: blocks, else: matching) do
+      case matching do
         [%{"block_id" => bid}] ->
           b = binding(sid, bid)
 
@@ -358,7 +364,10 @@ defmodule Shuttle.Terminal.Rex do
             {:ok, b}
           end
 
-        [] ->
+        [] when blocks == [] and name != nil ->
+          destroy_empty(runner, sid)
+
+        [] when blocks == [] ->
           {:error, :not_found}
 
         _ ->
@@ -367,19 +376,27 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
+  defp destroy_empty(runner, sid) do
+    case Rex.destroy(runner, sid) do
+      {:ok, _} -> {:error, :not_found}
+      {:error, reason} when reason in [:not_found, :server_absent] -> {:error, :not_found}
+      error -> error
+    end
+  end
+
   defp live_block(runner, name, b) do
     with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
       if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])) do
         {:ok, b}
       else
-        # Only an empty session is disposable; other human panes survive.
-        cleanup =
-          if blocks == [] and name != nil,
-            do: Rex.destroy(runner, b["session_id"]),
-            else: {:ok, %{}}
-
-        with {:ok, _} <- cleanup,
-             :ok <- if(name, do: Bindings.delete(name, b), else: :ok) do
+        if blocks == [] and name != nil do
+          with {:error, :not_found} <- destroy_empty(runner, b["session_id"]),
+               :ok <- Bindings.delete(name, b) do
+            {:error, :not_found}
+          end
+        else
+          # Retain the missing block's address while human panes survive.
+          # Later probes must not recover them as the departed worker.
           {:error, :not_found}
         end
       end

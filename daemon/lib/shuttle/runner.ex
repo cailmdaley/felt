@@ -17,6 +17,10 @@ defmodule Shuttle.Runner do
   The default is `:infinity`. Exceeding the ceiling kills the child, discards
   partial output and returns `{message, :output_limit}`, never truncated success.
 
+  `input_eof: true` supplies `input:` through a private file so an EOF-reading
+  CLI can finish. The request stays off argv, and the bounded Port still owns
+  the child. Without it, stdin remains open for frame-based request protocols.
+
   `timeout_ms: :infinity` is for completion-owned local mutations: neither a
   deadline nor caller death SIGKILLs them, so they can release filesystem locks.
   Their network phases must carry their own deadlines.

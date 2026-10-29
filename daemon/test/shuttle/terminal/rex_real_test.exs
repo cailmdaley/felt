@@ -140,6 +140,19 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, []} = Rex.sessions(@runner)
   end
 
+  test "an empty worker session is reclaimed after its binding is lost", %{root: root} do
+    name = "probe-lost-#{System.unique_integer([:positive])}-shuttle"
+    path = WorkerProcess.script_path(name)
+    File.write!(path, "exit 0\n")
+    on_exit(fn -> File.rm(path) end)
+    assert :ok = Backend.launch(@runner, name, root, path, [])
+    assert {:ok, %{"bindings" => %{^name => b}}} = RexBindings.read()
+    assert :ok = RexBindings.delete(name, b)
+    await(fn -> Rex.blocks(@runner, b["session_id"]) == {:ok, []} end)
+    assert :absent = Backend.probe(@runner, name)
+    assert {:ok, []} = Rex.sessions(@runner)
+  end
+
   defp await(fun, remaining \\ 100)
   defp await(fun, 0), do: assert(fun.(), "isolated Rex observation did not arrive")
 

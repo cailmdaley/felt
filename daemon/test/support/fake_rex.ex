@@ -20,9 +20,11 @@ defmodule Shuttle.Test.FakeRex do
   def clients(clients), do: Agent.update(pid(), &%{&1 | clients: clients})
 
   def cmd(bin, argv, opts) do
+    {key, args, sid} = request(bin, argv, opts)
+    if hook = Shuttle.Env.app(:fake_rex_hook), do: hook.(key)
+
     Agent.get_and_update(pid(), fn state ->
       state = %{state | calls: [{bin, argv, opts} | state.calls]}
-      {key, args, sid} = request(bin, argv, opts)
 
       case Map.fetch(state.replies, key) do
         {:ok, response} ->
@@ -36,6 +38,7 @@ defmodule Shuttle.Test.FakeRex do
     end)
   end
 
+  defp request("ps", args, _), do: {"ps", args, nil}
   defp request("open", args, _), do: {"open", args, nil}
 
   defp request(_, args, opts) do
@@ -50,6 +53,7 @@ defmodule Shuttle.Test.FakeRex do
     end
   end
 
+  defp run("ps", _, _, state), do: {{"", 0}, state}
   defp run("whoami", _, _, state), do: {fixture("whoami"), state}
   defp run("open", _, _, state), do: {{"", 0}, state}
   defp run("client.list", _, _, state), do: {%{"clients" => state.clients}, state}

@@ -264,6 +264,76 @@ defmodule Shuttle.Terminal.RexTest do
     assert File.read!(RexBindings.path()) == "broken"
   end
 
+  test "an exited worker cannot adopt or paste into a surviving human pane on later probes" do
+    seed()
+    assert :present = Rex.probe(FakeRex, @name)
+
+    FakeRex.sessions(%{
+      sid() => %{label: @name, blocks: [%{"block_id" => "block:human", "label" => "human"}]}
+    })
+
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert {:error, _} = Rex.paste(FakeRex, @name, "not for the human")
+    assert :absent = Rex.close(FakeRex, @name)
+
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} ->
+             "block.event" in args or "session.destroy" in args
+           end)
+
+    assert FakeRex.state().sessions[sid()].blocks == [
+             %{"block_id" => "block:human", "label" => "human"}
+           ]
+  end
+
+  test "lost-binding recovery refuses a sole block whose label is not the worker's recovery index" do
+    FakeRex.sessions(%{
+      sid() => %{label: @name, blocks: [%{"block_id" => "block:human", "label" => "human"}]}
+    })
+
+    assert :unknown = Rex.probe(FakeRex, @name)
+    assert {:error, _} = Rex.paste(FakeRex, @name, "not for the human")
+  end
+
+  test "lost-binding recovery destroys an empty worker-labelled session before relaunch" do
+    FakeRex.sessions(%{sid() => %{label: @name, blocks: []}})
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert FakeRex.state().sessions == %{}
+    assert :absent = Rex.probe(FakeRex, @name)
+  end
+
+  test "rename holds launch's destination-name lock across its check and mutation" do
+    seed()
+    Env.put_app_env(:terminal_backend, Rex)
+    parent = self()
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "session.set_label" ->
+        send(parent, {:rename_paused, self()})
+
+        receive do
+          :continue -> :ok
+        after
+          5_000 -> raise "rename test barrier timed out"
+        end
+
+      _ ->
+        :ok
+    end)
+
+    rename = Task.async(fn -> Rex.rename(FakeRex, sid(), "canonical") end)
+    assert_receive {:rename_paused, renamer}, 2_000
+
+    launch =
+      Task.async(fn -> Shuttle.Terminal.launch(FakeRex, "canonical", "/tmp", "sleep 30\n") end)
+
+    assert Task.yield(launch, 100) == nil
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+    send(renamer, :continue)
+    assert Task.await(rename) == :ok
+    assert Task.await(launch) == {:error, :already_running}
+  end
+
   defp seed, do: FakeRex.sessions(%{sid() => %{label: @name, blocks: blocks()}})
   defp sid, do: FakeRex.fixture("session_create")["session_id"]
   defp bid, do: hd(FakeRex.fixture("session_create")["initial_windows"])["block_ids"] |> hd()
