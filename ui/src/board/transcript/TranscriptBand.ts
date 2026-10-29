@@ -4,7 +4,7 @@ import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
 import { fileKind } from '../attachments.js'
 import { sentFileSends, type SentFile } from '../sentFiles.js'
 import { TranscriptModel, segments, type SentFileNotice, type Step, type ToolStep, type Turn } from './model.js'
-import { TranscriptFeed, type FeedStatus } from './feed.js'
+import { TranscriptFeed, type FeedStatus, type StreamEnd } from './feed.js'
 import { SentFilesFeed } from './sentFilesFeed.js'
 import type { ShuttleMessage } from './messages.js'
 import { toolLabel } from './tools.js'
@@ -791,6 +791,12 @@ export class TranscriptBand {
   private readingPromise: Promise<boolean> | null = null
   private pollTimer: number | null = null
   private pollDelay = LIVE_POLL_MS
+  private following: Promise<void> | null = null
+  private followingStopped = false
+  private streamUnsupported = false
+  private streamRetryAt = 0
+  private streamRetryDelay = 2000
+  private sentFilesTimer: number | null = null
   private loadingTimer: number | null = null
   private renderFrame: number | null = null
   private layoutFrame: number | null = null
@@ -968,7 +974,7 @@ export class TranscriptBand {
         this.intersecting = visible
         if (visible) {
           if (becameVisible) this.readIfVisible()
-        } else if (!this.fullOpen || this.inline) this.stopPollTimer()
+        } else if (!this.fullOpen || this.inline) this.stopFollowing()
       })
       this.observer.observe(this.el)
     }
@@ -1005,7 +1011,7 @@ export class TranscriptBand {
     this.disposed = true
     this.clearCacheTimer()
     this.closeFull()
-    this.stopPollTimer()
+    this.stopFollowing()
     this.clearLoadingTimer()
     if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame)
     if (this.layoutFrame !== null) cancelAnimationFrame(this.layoutFrame)
@@ -1036,7 +1042,8 @@ export class TranscriptBand {
       this.target = null
       this.paintTasks()
       this.hasReadCurrent = false
-      this.stopPollTimer()
+      this.stopFollowing()
+      this.following = null
       this.clearLoadingTimer()
       this.feed?.dispose()
       this.feed = null
@@ -1069,7 +1076,8 @@ export class TranscriptBand {
       return
     }
 
-    this.stopPollTimer()
+    this.stopFollowing()
+    this.following = null
     this.clearLoadingTimer()
     this.feed?.dispose()
     this.feed = null
@@ -1085,6 +1093,9 @@ export class TranscriptBand {
     this.hasInitialRender = false
     this.hasReadCurrent = false
     this.pollDelay = LIVE_POLL_MS
+    this.streamUnsupported = false
+    this.streamRetryAt = 0
+    this.streamRetryDelay = 2000
     this.feed = new TranscriptFeed({
       shuttleBase: this.shuttleBase,
       session: target.session,
@@ -1135,7 +1146,7 @@ export class TranscriptBand {
     this.folded = !this.folded
     this.paintFold()
     this.writeFolded()
-    if (!this.canReadNow()) this.stopPollTimer()
+    if (!this.canReadNow()) this.stopFollowing()
     else this.readIfVisible()
     if (!this.folded) this.scheduleLayout()
   }
@@ -1295,7 +1306,7 @@ export class TranscriptBand {
 
   private visibilityChanged(): void {
     if (document.visibilityState === 'visible') this.readIfVisible()
-    else this.stopPollTimer()
+    else this.stopFollowing()
   }
 
   private canReadNow(): boolean {
@@ -1305,6 +1316,14 @@ export class TranscriptBand {
 
   private readIfVisible(): void {
     if (!this.canReadNow() || (!this.target?.live && this.hasReadCurrent)) return
+    if (this.following) {
+      // A stopped stream must commit its last event before a catch-up read.
+      if (this.followingStopped) {
+        const feed = this.feed
+        void this.following.then(() => { if (this.feed === feed) this.readIfVisible() })
+      }
+      return
+    }
     this.stopPollTimer()
     void this.readNow()
   }
@@ -1319,8 +1338,7 @@ export class TranscriptBand {
     void sentFilesFeed?.read().then(arrived => {
       sentFilesArrived = arrived
       if (arrived && this.feed === feed && this.canReadNow() && this.target?.live) {
-        this.pollDelay = LIVE_POLL_MS
-        this.schedulePoll(this.pollDelay)
+        if (!this.following && !this.readingPromise) this.keepFollowing(true)
       }
     })
     shared = feed.read().then((transcriptArrived) => {
@@ -1328,8 +1346,7 @@ export class TranscriptBand {
       if (this.readingPromise === shared) this.readingPromise = null
       if (this.feed === feed) this.hasReadCurrent = true
       if (this.feed === feed && this.canReadNow() && this.target?.live) {
-        this.pollDelay = arrived ? LIVE_POLL_MS : Math.min(MAX_POLL_MS, this.pollDelay * 1.5)
-        this.schedulePoll(this.pollDelay)
+        this.keepFollowing(arrived)
       }
       return arrived
     }, () => {
@@ -1343,6 +1360,65 @@ export class TranscriptBand {
     })
     this.readingPromise = shared
     return shared
+  }
+
+  private keepFollowing(arrived: boolean): void {
+    this.pollDelay = arrived ? LIVE_POLL_MS : Math.min(MAX_POLL_MS, this.pollDelay * 1.5)
+    if (this.following) return
+    if (this.streamUnsupported || Date.now() < this.streamRetryAt) {
+      this.schedulePoll(this.pollDelay)
+      return
+    }
+    this.startFollowing()
+  }
+
+  private startFollowing(): void {
+    const feed = this.feed
+    if (!feed || this.following || !this.target?.live || !this.canReadNow()) return
+    this.stopPollTimer()
+    this.followingStopped = false
+    const following = feed.stream().then(end => {
+      if (this.following !== following || this.feed !== feed) return
+      this.following = null
+      this.onStreamEnd(end)
+    })
+    this.following = following
+    this.sentFilesSoon()
+  }
+
+  private onStreamEnd(end: StreamEnd): void {
+    if (end === 'stopped' || !this.target?.live || !this.canReadNow()) return
+    if (end === 'closed') {
+      this.streamRetryDelay = 2000
+      this.streamRetryAt = 0
+      this.startFollowing()
+    } else if (end === 'reset') {
+      void this.readNow()
+    } else if (end === 'unsupported') {
+      this.streamUnsupported = true
+      this.schedulePoll(LIVE_POLL_MS)
+    } else {
+      this.streamRetryAt = Date.now() + this.streamRetryDelay
+      this.streamRetryDelay = Math.min(60_000, this.streamRetryDelay * 2)
+      this.schedulePoll(LIVE_POLL_MS)
+    }
+  }
+
+  private sentFilesSoon(): void {
+    if (!this.sentFilesFeed || this.sentFilesTimer !== null) return
+    const feed = this.sentFilesFeed
+    this.sentFilesTimer = window.setTimeout(() => {
+      this.sentFilesTimer = null
+      if (this.sentFilesFeed === feed && this.canReadNow()) void feed.read()
+    }, 1500)
+  }
+
+  private stopFollowing(): void {
+    this.stopPollTimer()
+    this.followingStopped = true
+    this.feed?.stopStream()
+    if (this.sentFilesTimer !== null) window.clearTimeout(this.sentFilesTimer)
+    this.sentFilesTimer = null
   }
 
   private schedulePoll(delay: number): void {
@@ -1359,14 +1435,12 @@ export class TranscriptBand {
   }
 
   private finishLiveSession(): void {
-    this.stopPollTimer()
-    if (!this.feed) return
-    const current = this.readingPromise
-    if (current) {
-      void current.finally(() => {
-        if (!this.disposed && this.feed && this.target && !this.target.live) void this.readNow()
-      })
-    } else void this.readNow()
+    this.stopFollowing()
+    const feed = this.feed
+    if (!feed) return
+    void Promise.all([this.following, this.readingPromise]).then(() => {
+      if (!this.disposed && this.feed === feed && this.target && !this.target.live) void this.readNow()
+    })
   }
 
   private statusChanged(status: FeedStatus, detail?: string): void {
@@ -1390,8 +1464,8 @@ export class TranscriptBand {
       this.setNote(empty && this.target?.live ? 'empty-live' : null)
       return
     }
-    // A failed poll after a good read is transient: keep the words on screen
-    // and let the next poll try again. Only a transcript never read says so.
+    // A failure while following is transient: keep the words on screen
+    // and retry. Only a transcript never read says so.
     if ((status === 'error' || status === 'unreachable') && this.model.turns.length > 0) return
     this.setNote(status, detail)
   }
@@ -1420,6 +1494,7 @@ export class TranscriptBand {
 
   private acceptEntries(entries: Entry[]): void {
     if (this.disposed) return
+    if (this.following) this.sentFilesSoon()
     this.pendingEntries.push(...entries)
     if (this.renderFrame !== null) return
     this.renderFrame = requestAnimationFrame(() => {
@@ -1699,7 +1774,7 @@ export class TranscriptBand {
     this.pane.remove()
     this.openButton.setAttribute('aria-expanded', 'false')
     this.clearFull()
-    if (!this.canReadNow()) this.stopPollTimer()
+    if (!this.canReadNow()) this.stopFollowing()
     if (hadFocus && this.openButton.isConnected && !this.disposed) this.openButton.focus({ preventScroll: true })
     return true
   }

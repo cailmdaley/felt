@@ -79,6 +79,48 @@ describe('Dock worker transcript', () => {
     expect(requests).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
   })
 
+  it('follows a live card through the owner stream, then catches up once when it parks', async () => {
+    vi.useFakeTimers()
+    const requests: string[] = []
+    const bytes = line('Latest word.')
+    let controller!: ReadableStreamDefaultController<Uint8Array>
+    let signal!: AbortSignal
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      requests.push(url)
+      if (url.includes('/transcript/stream')) {
+        signal = init!.signal!
+        return new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c } }), {
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }
+      if (url.includes('/transcript/raw')) {
+        const offset = Number(new URL(url, 'http://localhost').searchParams.get('offset'))
+        return new Response(bytes.slice(offset), { headers: { 'x-transcript-offset': String(offset) } })
+      }
+      if (url.endsWith('/agents')) return json([{ id: 'claude-opus', cli: 'claude' }])
+      return json({})
+    }))
+    const dock = makeDock()
+    const live = task({ sessionUuid: latestId, workerState: 'running' })
+    const band = dock.bandFor(live)
+    document.body.append(band.el)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(requests).toContain(`/api/v1/transcript/stream?session=${latestId}&offset=${bytes.length}&host=candide`)
+    const entry = { type: 'assistant', message: { content: [{ type: 'text', text: 'Pushed through the Dock.' }] } }
+    controller.enqueue(new TextEncoder().encode(`id: ${bytes.length + 100}\ndata: ${JSON.stringify(entry)}\n\n`))
+    for (let i = 0; i < 4; i++) {
+      controller.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+      await vi.advanceTimersByTimeAsync(15_000)
+    }
+    expect(band.el.textContent).toContain('Pushed through the Dock.')
+    expect(requests.filter(url => url.includes('/transcript/raw'))).toHaveLength(1)
+    dock.syncRuntime({ ...live, workerState: undefined })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(signal.aborted).toBe(true)
+    expect(requests.filter(url => url.includes('/transcript/raw'))).toHaveLength(2)
+  })
+
   it('reads the conversation inline between the header and the composer, its compact meter in the bar', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) => String(url).endsWith('/agents')
       ? json([{ id: 'claude-opus', cli: 'claude' }])

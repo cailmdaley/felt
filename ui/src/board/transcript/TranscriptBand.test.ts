@@ -69,6 +69,46 @@ const sessionAndFilesFetch = (
   })
 })
 
+/** Controlled HTTP bodies exercise the real feed, including abort and byte offsets. */
+const streamFixture = () => {
+  let bytes = encoded(records('Initial prompt', 'Initial answer'))
+  const requests: string[] = []
+  const streams: { controller: ReadableStreamDefaultController<Uint8Array>; signal: AbortSignal }[] = []
+  let streamStatus = 200
+  let files: unknown[] = []
+  const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+    const url = new URL(String(input))
+    requests.push(url.toString())
+    if (url.pathname.endsWith('/sent-files/session')) return new Response(JSON.stringify({ files }))
+    if (url.pathname.endsWith('/transcript/stream')) {
+      if (streamStatus !== 200) return new Response('', { status: streamStatus })
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { streams.push({ controller, signal: init!.signal! }) },
+      }), { headers: { 'content-type': 'text/event-stream' } })
+    }
+    const offset = Number(url.searchParams.get('offset'))
+    return new Response(bytes.slice(offset), { headers: { 'x-transcript-offset': String(offset) } })
+  })
+  return {
+    fetcher, requests, streams,
+    raw: () => requests.filter(url => url.includes('/transcript/raw')),
+    sent: () => requests.filter(url => url.includes('/sent-files/session')),
+    status: (status: number) => { streamStatus = status },
+    files: (next: unknown[]) => { files = next },
+    append(items: unknown[]) {
+      const extra = encoded(items)
+      bytes = new Uint8Array([...bytes, ...extra])
+      streams.at(-1)!.controller.enqueue(new TextEncoder().encode(
+        `id: ${bytes.length}\n${items.map(item => `data: ${JSON.stringify(item)}\n`).join('')}\n`,
+      ))
+    },
+    reset() {
+      bytes = encoded(records('Replacement prompt', 'Replacement answer'))
+      streams.at(-1)!.controller.enqueue(new TextEncoder().encode('event: reset\ndata: {"byte_count":0}\n\n'))
+    },
+  }
+}
+
 const send = (fullPath: string, timestamp: number, sessionId = latestId): Record<string, unknown> => ({
   fullPath,
   basename: fullPath.split('/').pop(),
@@ -953,6 +993,198 @@ describe('TranscriptBand', () => {
     expect(requests.map((url) => new URL(url).searchParams.get('session'))).toEqual([latestId, earlierId, latestId])
   })
 
+  it('streams visible live entries without raw polls, including when the full pane opens', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.raw()).toHaveLength(1)
+    expect(fixture.streams).toHaveLength(1)
+    const stream = fixture.streams[0]
+    expect(new URL(fixture.requests.find(url => url.includes('/stream'))!).searchParams.get('offset'))
+      .toBe(String(encoded(records('Initial prompt', 'Initial answer')).length))
+    fixture.append(records('Streamed prompt', 'Streamed answer'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(band.el.textContent).toContain('Streamed answer')
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
+    for (let i = 0; i < 4; i++) {
+      stream.controller.enqueue(new TextEncoder().encode(': keepalive\n\n'))
+      await vi.advanceTimersByTimeAsync(15_000)
+    }
+    expect(fixture.raw()).toHaveLength(1)
+    expect(fixture.streams).toHaveLength(1)
+    expect(stream.signal.aborted).toBe(false)
+  })
+
+  it.each(['fold', 'hidden', 'offscreen', 'dispose'] as const)('aborts following on %s and resumes with catch-up when visible', async (reason) => {
+    vi.useFakeTimers()
+    let intersect!: (entries: { isIntersecting: boolean }[]) => void
+    if (reason === 'offscreen') {
+      vi.stubGlobal('IntersectionObserver', class {
+        constructor(callback: typeof intersect) { intersect = callback }
+        observe() {} disconnect() {}
+      })
+    }
+    try {
+      const fixture = streamFixture()
+      const band = makeBand(fixture.fetcher)
+      band.follow(target(latestId, { live: true }))
+      if (reason === 'offscreen') intersect([{ isIntersecting: true }])
+      await vi.advanceTimersByTimeAsync(50)
+      const stream = fixture.streams[0]
+      const head = band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!
+      const visibility = vi.spyOn(document, 'visibilityState', 'get')
+      if (reason === 'fold') head.click()
+      else if (reason === 'hidden') {
+        visibility.mockReturnValue('hidden')
+        document.dispatchEvent(new Event('visibilitychange'))
+      } else if (reason === 'offscreen') intersect([{ isIntersecting: false }])
+      else band.dispose()
+      expect(stream.signal.aborted).toBe(true)
+      // Resume before the aborted stream's promise has settled.
+      if (reason === 'fold') head.click()
+      else if (reason === 'hidden') {
+        visibility.mockReturnValue('visible')
+        document.dispatchEvent(new Event('visibilitychange'))
+      } else if (reason === 'offscreen') intersect([{ isIntersecting: true }])
+      await vi.advanceTimersByTimeAsync(50)
+      expect(fixture.raw()).toHaveLength(reason === 'dispose' ? 1 : 2)
+      expect(fixture.streams).toHaveLength(reason === 'dispose' ? 1 : 2)
+    } finally { vi.unstubAllGlobals() }
+  })
+
+  it('aborts a parked worker stream and makes exactly one final raw read', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    fixture.append(records('Last prompt', 'Last answer'))
+    await microtasks()
+    band.follow(target(latestId))
+    expect(fixture.streams[0].signal.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fixture.raw()).toHaveLength(2)
+    expect(fixture.streams).toHaveLength(1)
+    expect(band.el.textContent).toContain('Last answer')
+    expect(new URL(fixture.raw()[1]).searchParams.get('offset')).not.toBe('0')
+  })
+
+  it('waits for a time-sliced stream event to commit before the parked final read', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => clock.mock.calls.length * 10)
+    const extra = records('Final prompt', 'Final answer')
+    fixture.append(extra)
+    await microtasks() // The first decoded record yields to a timer; the event is not committed yet.
+    band.follow(target(latestId))
+    expect(fixture.raw()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.raw()).toHaveLength(2)
+    const expectedOffset = encoded(records('Initial prompt', 'Initial answer')).length + encoded(extra).length
+    expect(new URL(fixture.raw()[1]).searchParams.get('offset')).toBe(String(expectedOffset))
+    expect(band.el.textContent).toContain('Final answer')
+  })
+
+  it('ignores an old stream ending after switching targets', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    band.follow(target(earlierId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.streams[0].signal.aborted).toBe(true)
+    expect(fixture.streams[1].signal.aborted).toBe(false)
+    expect(fixture.raw()).toHaveLength(2)
+    expect(fixture.streams).toHaveLength(2)
+    fixture.append(records('New session prompt', 'New session answer'))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(band.el.textContent).toContain('New session answer')
+  })
+
+  it('polls an unsupported target without retrying its stream, and tries a new target', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    fixture.status(501)
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fixture.raw()).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(fixture.requests.filter(url => url.includes('/transcript/stream'))).toHaveLength(1)
+    fixture.status(200)
+    band.follow(target(earlierId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.streams).toHaveLength(1)
+  })
+
+  it.each([429, 503])('polls after HTTP %i and retries streams with exponential backoff', async status => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    fixture.status(status)
+    const band = makeBand(fixture.fetcher)
+    const attempts = () => fixture.requests.filter(url => url.includes('/transcript/stream')).length
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(attempts()).toBe(1)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fixture.raw()).toHaveLength(2)
+    expect(attempts()).toBe(2)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fixture.raw()).toHaveLength(3)
+    expect(attempts()).toBe(2) // The second failure waits four seconds before another attempt.
+    fixture.status(200)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fixture.streams).toHaveLength(1)
+  })
+
+  it('reconnects a closed stream from its offset and catches up from zero after reset', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    fixture.append(records('Appended', 'Appended answer'))
+    await vi.advanceTimersByTimeAsync(50)
+    fixture.streams[0].controller.close()
+    await microtasks()
+    expect(fixture.streams).toHaveLength(2)
+    expect(fixture.raw()).toHaveLength(1)
+    fixture.reset()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.raw()).toHaveLength(2)
+    expect(new URL(fixture.raw()[1]).searchParams.get('offset')).toBe('0')
+    expect(fixture.streams).toHaveLength(3)
+    expect(band.el.textContent).toContain('Replacement answer')
+    expect(band.el.textContent).not.toContain('Appended answer')
+  })
+
+  it('refreshes sent files 1.5 seconds after connecting or receiving streamed entries', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true, uid: 'task-uid' }))
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.sent()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1450)
+    expect(fixture.sent()).toHaveLength(2)
+    fixture.files([send('/tmp/stream-result.html', Date.parse('2026-09-26T14:15:00Z'))])
+    fixture.append(records('Send the file', 'Here is the result'))
+    await microtasks()
+    await vi.advanceTimersByTimeAsync(1499)
+    expect(fixture.sent()).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(51)
+    expect(fixture.sent()).toHaveLength(3)
+    expect(band.el.textContent).toContain('stream-result.html')
+    expect(fixture.raw()).toHaveLength(1)
+  })
+
   it('reads immediately when unfolded, polls only while live, and stops polling when folded', async () => {
     vi.useFakeTimers()
     const requests: string[] = []
@@ -964,18 +1196,19 @@ describe('TranscriptBand', () => {
     const band = makeBand(fetcher)
     band.follow(target(latestId, { live: true }))
     await microtasks()
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    const rawReads = () => requests.filter(url => url.includes('/transcript/raw')).length
+    expect(rawReads()).toBe(1)
 
     await vi.advanceTimersByTimeAsync(4500)
-    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(rawReads()).toBe(2)
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!.click()
     expect(band.el.querySelector('.ws-transcript-head')?.getAttribute('aria-expanded')).toBe('false')
-    const stoppedAt = fetcher.mock.calls.length
+    const stoppedAt = rawReads()
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(fetcher).toHaveBeenCalledTimes(stoppedAt)
+    expect(rawReads()).toBe(stoppedAt)
 
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-head')!.click()
     await microtasks()
-    expect(fetcher).toHaveBeenCalledTimes(stoppedAt + 1)
+    expect(rawReads()).toBe(stoppedAt + 1)
   })
 })
