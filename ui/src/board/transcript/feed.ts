@@ -114,6 +114,8 @@ export class TranscriptFeed {
       reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let scanFrom = 0
+      const lineEnd = /[\r\n]/g
       let data: string[] = []
       let id = ''
       let event = ''
@@ -127,12 +129,14 @@ export class TranscriptFeed {
           buffer += decoder.decode(part.value, { stream: true })
         }
         while (true) {
-          const match = /[\r\n]/.exec(buffer)
-          if (!match) break
+          lineEnd.lastIndex = scanFrom
+          const match = lineEnd.exec(buffer)
+          if (!match) { scanFrom = buffer.length; break }
           const i = match.index
-          if (buffer[i] === '\r' && i === buffer.length - 1) break
+          if (buffer[i] === '\r' && i === buffer.length - 1) { scanFrom = i; break }
           const line = buffer.slice(0, i)
           buffer = buffer.slice(i + (buffer[i] === '\r' && buffer[i + 1] === '\n' ? 2 : 1))
+          scanFrom = 0
           if (!line) {
             if (event === 'error') return 'failed'
             if (event === 'reset') {

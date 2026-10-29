@@ -203,6 +203,28 @@ describe('TranscriptFeed stream', () => {
     expect(entriesFrom(onEntries)).toMatchObject([{ kind: 'prompt', text: 'shear α' }])
   })
 
+  it('scans a multi-megabyte partial SSE line only once across chunks', async () => {
+    const text = 'x'.repeat(2 * 1024 * 1024)
+    const wire = new TextEncoder().encode(`id: 99\ndata: ${jsonLine(text).trimEnd()}\n\n`)
+    const stream = new ReadableStream<Uint8Array>({ start(c) {
+      for (let i = 0; i < wire.length; i += 4096) c.enqueue(wire.slice(i, i + 4096))
+      c.close()
+    } })
+    const { reader, onEntries } = feed(async () => response(stream, 200, { 'content-type': 'text/event-stream' }))
+    let scanned = 0
+    const exec = RegExp.prototype.exec
+    const scan = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, input: string) {
+      if (this.source === '[\\r\\n]') scanned += input.length - this.lastIndex
+      return exec.call(this, input)
+    })
+    try {
+      expect(await reader.stream()).toBe('closed')
+      expect(entriesFrom(onEntries)).toMatchObject([{ text }])
+      expect(scanned).toBeGreaterThan(wire.length / 2)
+      expect(scanned).toBeLessThan(wire.length * 2)
+    } finally { scan.mockRestore(); reader.dispose() }
+  })
+
   it('dispatches a CR-only event whose last delimiter is at EOF', async () => {
     const { reader, onEntries } = feed(async () => sse(`id: 99\rdata: ${jsonLine('CR only').trimEnd()}\r\r`))
     expect(await reader.stream()).toBe('closed')
