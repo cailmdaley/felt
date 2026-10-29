@@ -36,6 +36,7 @@ export function lifecycleVerbsFor(card: KanbanCard, canRest: boolean): Lifecycle
 /** The header keeps only the actions called for by the card's current state. */
 export function headerLifecycleVerbsFor(card: KanbanCard, canRest: boolean): LifecycleVerb[] {
   const reachable = lifecycleVerbsFor(card, canRest)
+  if (deskColumn(card) === 'roles') return []
   if (deskColumn(card) === 'awaitingReview') return reachable.filter(verb => verb === 'temper' || verb === 'discard')
   if (deskColumn(card) === 'inFlight' || hasLiveWorker(card)) return reachable.filter(verb => verb === 'review' || verb === 'rest')
   if (deskColumn(card) === 'drafts') return reachable.filter(verb => verb === 'rest')
@@ -48,7 +49,7 @@ export function sessionVerbsFor(card: KanbanCard): SessionVerb[] {
   if (!onDesk(card)) return []
   const column = deskColumn(card)
   if (column === 'drafts') return ['launch']
-  if (column === 'resting' || column === 'scheduled' || column === 'tempered' || column === 'composted') return ['resume', 'newSession']
+  if (column === 'roles' || column === 'resting' || column === 'scheduled' || column === 'tempered' || column === 'composted') return ['resume', 'newSession']
   return []
 }
 

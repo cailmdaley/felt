@@ -477,7 +477,7 @@ export class Dock {
   private constitutionButton: HTMLButtonElement | null = null
   private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
-  private meetingChip: HTMLElement | null = null
+  private meetingChip: HTMLButtonElement | null = null
   private dismissMeetingOverflow: (() => boolean) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -782,10 +782,11 @@ export class Dock {
         const chipHosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
         const title = current.title?.trim() || 'Meeting'
         this.meetingChip.hidden = !chipHosted || current.state === 'failed'
+        this.meetingChip.disabled = !chipHosted || current.state === 'failed'
         this.meetingChip.textContent = `Meeting · ${title}`
         this.meetingChip.title = `Meeting hosted by this constitution: ${title}`
         this.meetingChip.setAttribute('aria-label', this.meetingChip.title)
-      } else if (!this.meetingArmed()) this.meetingChip.hidden = true
+      } else this.meetingChip.hidden = true
     }
     const pane = this.transcriptPane
     const card = this.transcriptCard
@@ -1047,7 +1048,7 @@ export class Dock {
       button.innerHTML = headerIcon(spec.icon)
       const word = document.createElement('span'); word.className = 'ws-header-word'; word.textContent = spec.label
       button.append(word)
-      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')?.click())
+      button.addEventListener('click', () => this.el.querySelector<HTMLButtonElement>(spec.verb === 'resume' ? '.kbn-ctl-resume' : '.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')?.click())
       sessionActions.append(button)
       return [spec.verb, button] as const
     }))
@@ -1163,9 +1164,9 @@ export class Dock {
           next = control
         }
       }
-      place(overflow, [consoleItem, ...(mobile ? [verdict] : [])])
+      place(overflow, [consoleItem])
       place(identity, [title])
-      if (mobile) place(this.head, [status, settingsItem, refs])
+      if (mobile) place(this.head, [status, verdict, settingsItem, refs])
       else if (compact) place(this.head, [status, verdict, refs, settingsItem])
       else {
         place(this.head, [status, verdict])
@@ -1196,9 +1197,7 @@ export class Dock {
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
-    const meetingPanel = composer?.querySelector<HTMLElement>('.kbn-ctl-meet-panel')
-    if (meetingPanel) meetingPanel.prepend(meetingPane)
-    compose.append(...(!meetingPanel ? [meetingPane] : []), ...(composer ? [composer] : []), foot)
+    compose.append(meetingPane, ...(composer ? [composer] : []), foot)
     this.el.classList.toggle('ws-chat-conversation', shuttleManaged)
     body.append(header, drawer, ...(shuttleManaged ? [log] : []), compose)
     this.actPaint = () => {
@@ -1220,7 +1219,7 @@ export class Dock {
       verdict.hidden = !offered.length && !sessionOffered.length
       sessionActions.hidden = !sessionOffered.length
       for (const spec of SESSION_VERBS) sessionButtons.get(spec.verb)!.hidden = !sessionOffered.includes(spec.verb)
-      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')
+      const freshComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')
       const resumeComposerButton = this.el.querySelector<HTMLButtonElement>('.kbn-ctl-resume')
       sessionButtons.get('launch')!.disabled = Boolean(freshComposerButton?.disabled)
       sessionButtons.get('newSession')!.disabled = Boolean(freshComposerButton?.disabled)
@@ -1305,6 +1304,7 @@ export class Dock {
     let busy = false
     const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
+    let meetingStartButton: HTMLButtonElement | undefined
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
@@ -1315,8 +1315,9 @@ export class Dock {
       // beside it (⌥↵), marked while its prompt cache is estimated warm.
       const live = resumable && hasLiveWorker(card)
       const warmUntil = resumable && !live ? this.transcriptBand?.cacheWarm(card.sessionUuid!) : undefined
-      const freshLabel = live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
-      const resumeLabel = live ? 'Send ↵' : 'Resume ⌥↵'
+      const armed = this.meetingArmed()
+      const freshLabel = armed ? 'New session ⌥↵' : live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
+      const resumeLabel = armed ? (live ? 'Send' : 'Resume') : live ? 'Send ↵' : 'Resume ⌥↵'
       const paintLabel = (button: HTMLButtonElement, label: string): void => {
         if (this.blockedDispatches.has(button)) return
         const shortcut = label.match(/ (?:⌥)?↵$/)?.[0]
@@ -1331,14 +1332,20 @@ export class Dock {
       }
       paintLabel(fresh, freshLabel)
       paintLabel(resume, resumeLabel)
-      fresh.classList.toggle('kbn-ctl-secondary', live)
-      fresh.title = live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
-      resume.classList.toggle('kbn-ctl-secondary', resumable && !live)
-      resume.title = live ? 'Send the message to the live worker (↵)'
+      if (meetingStartButton) paintLabel(meetingStartButton, 'Start meeting ↵')
+      fresh.classList.toggle('kbn-ctl-secondary', live || armed)
+      fresh.title = armed ? 'Start a new session (⌥↵)' : live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
+      if (meetingStartButton) meetingStartButton.title = 'Start meeting (↵)'
+      resume.classList.toggle('kbn-ctl-secondary', armed || (resumable && !live))
+      resume.title = armed ? (live ? 'Send the message to the live worker' : 'Resume the previous session')
+        : live ? 'Send the message to the live worker (↵)'
         : resumable ? `Resume the previous session (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = false
-      if (live ? sends.firstChild !== resume : sends.firstChild !== fresh) sends.append(...(live ? [resume, fresh] : [fresh, resume]))
+      const ordered = armed && meetingStartButton ? [meetingStartButton, ...(live ? [resume, fresh] : [fresh, resume])] : live ? [resume, fresh] : [fresh, resume]
+      if (ordered.some((button, index) => sends.children[index] !== button) || sends.children.length !== ordered.length) sends.replaceChildren(...ordered)
+      if (meetingStartButton) meetingStartButton.hidden = !armed
+      box.classList.toggle('kbn-ctl-composer-meeting-armed', armed)
       // A live worker is resumed only to hand it a message; attaching to it
       // is the terminal action's.
       const idle = hasLiveWorker(card) && message.value.trim() === '' && images.list.length === 0
@@ -1351,7 +1358,7 @@ export class Dock {
     message.addEventListener('input', () => this.composerPaint?.())
     const setBusy = (on: boolean, except?: HTMLButtonElement): void => {
       busy = on
-      for (const verb of [fresh, resume]) if (on || verb !== except) verb.disabled = on
+      for (const verb of [fresh, resume, ...(meetingStartButton ? [meetingStartButton] : [])]) if (on || verb !== except) verb.disabled = on
       if (!on) this.composerPaint?.()
       else this.actPaint?.()
       for (const control of err.querySelectorAll<HTMLInputElement | HTMLButtonElement>('.kbn-start-prompt input, .kbn-start-prompt button')) control.disabled = on
@@ -1429,9 +1436,18 @@ export class Dock {
     const meetingPanel = document.createElement('div')
     meetingPanel.className = 'kbn-ctl-meet-panel'
     meetingOverflow.append(more, meetingPanel)
-    const meetChip = document.createElement('span')
+    const meetChip = document.createElement('button')
+    meetChip.type = 'button'
     meetChip.className = 'kbn-ctl-meet-chip'
     meetChip.hidden = true
+    meetChip.disabled = true
+    meetChip.addEventListener('click', () => {
+      const pane = this.transcriptPane
+      if (!pane || !this.meeting?.current()) return
+      pane.hidden = false
+      pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')?.focus({ preventScroll: true })
+      pane.scrollIntoView({ block: 'nearest' })
+    })
     this.meetingChip = meetChip
     const dismissMenu = (): boolean => {
       if (!meetingOverflow.open) return false
@@ -1455,11 +1471,12 @@ export class Dock {
       meetingOverflow.removeEventListener('keydown', closeOnEscape)
       if (this.dismissMeetingOverflow === dismissMenu) this.dismissMeetingOverflow = null
     })
-    const meeting = this.meeting ? this.buildMeeting(card, err, send, () => {
-      sends.hidden = false
+    const meeting = this.meeting ? this.buildMeeting(card, err, send, (armed, controls) => {
+      if (!armed && meetingStartButton) controls.append(meetingStartButton)
       this.composerPaint?.()
       fit()
     }) : null
+    meetingStartButton = meeting?.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start') ?? undefined
     if (meeting) meetingPanel.append(meeting)
     foot.append(meetingOverflow, meetChip, sends)
 
@@ -1499,7 +1516,11 @@ export class Dock {
       if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation()
       if (event.repeat || busy) return
-      if (this.meetingArmed()) { this.meetingStart?.(); return }
+      if (this.meetingArmed() && !event.altKey) { this.meetingStart?.(); return }
+      if (this.meetingArmed() && event.altKey) {
+        void this.runRequeue(card, send.compose, 'fresh', fresh, err).then(ok => landed(ok, 'fresh', false))
+        return
+      }
       // ↵ is the default verb the buttons show, ⌥↵ the secondary.
       const resumable = Boolean(card.sessionUuid)
       const live = hasLiveWorker(card)
@@ -1523,7 +1544,7 @@ export class Dock {
 
   /**
    * Meeting, for this constitution: a switch in the composer's control row.
-   * Off by default. On, the composer's verbs become Start meeting, recording on the
+   * Off by default. On, Enter and the primary composer button start recording on the
    * daemon — nothing records before that press; mobile opens this tab's mic in
    * the press's gesture and keeps its controls on the board. The composer's
    * message, with its images' lines, becomes the meeting's note, and the
@@ -1533,9 +1554,9 @@ export class Dock {
    * place, off and inert, naming the recording on hover. The switch is also
    * disabled when the device's required audio mode is unavailable.
    * It follows the board's meeting poll.
-   * `onArm` hears the switch so the composer can trade its verbs.
+   * `onArm` hears the switch so the primary composer button can name its action.
    */
-  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean) => void = () => {}): HTMLElement {
+  private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean, controls: HTMLElement) => void = () => {}): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
     const toggle = document.createElement('label')
@@ -1551,31 +1572,14 @@ export class Dock {
     toggle.append(input, track, word)
     const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
     const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
-    const verb = ctlButton('', 'kbn-ctl-send kbn-ctl-meet-start')
-    verb.setAttribute('aria-label', 'Start meeting')
-    // The phone's narrow row drops the noun the switch beside it already says.
-    const verbFace = (busy: boolean): void => {
-      if (busy) { verb.textContent = 'Starting…'; return }
-      const noun = document.createElement('span')
-      noun.className = 'kbn-ctl-meet-noun'
-      noun.textContent = ' meeting'
-      verb.replaceChildren('Start', noun, ' ↵')
-    }
-    verbFace(false)
-
+    const startInMenu = ctlButton('Start meeting', 'kbn-ctl-send kbn-ctl-meet-start kbn-ctl-meet-primary')
+    startInMenu.setAttribute('aria-label', 'Start meeting')
     let starting = false
     const arm = (on: boolean): void => {
       input.checked = on
       wrap.classList.toggle('kbn-ctl-meet-on', on)
-      verb.hidden = !on
-      const current = this.meeting?.current()
-      if (this.meetingChip && (!current || current.state === 'failed')) {
-        this.meetingChip.hidden = !on
-        this.meetingChip.textContent = 'Meeting armed'
-        this.meetingChip.title = 'Meeting armed'
-        this.meetingChip.setAttribute('aria-label', 'Meeting armed')
-      }
-      onArm(on)
+      startInMenu.hidden = !on
+      onArm(on, wrap)
     }
     arm(false)
     input.addEventListener('change', () => arm(input.checked))
@@ -1592,7 +1596,7 @@ export class Dock {
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || !canJoin()
       input.disabled = held
-      verb.disabled = held
+      startInMenu.disabled = held
       toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
       if (!canJoin() && input.checked && !starting) arm(false)
     }
@@ -1602,7 +1606,7 @@ export class Dock {
       if (!input.checked || starting || send.busy() || !canJoin()) return
       starting = true
       send.setBusy(true)
-      verbFace(true)
+      startInMenu.textContent = 'Starting…'
       err.style.display = 'none'
       // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
@@ -1628,18 +1632,14 @@ export class Dock {
         err.style.display = ''
       }).finally(() => {
         starting = false
-        verbFace(false)
+        startInMenu.textContent = 'Start meeting'
         if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
     }
     this.meetingStart = start
-    verb.addEventListener('click', (e) => {
-      e.stopPropagation()
-      start()
-    })
-
-    wrap.append(toggle, verb)
+    startInMenu.addEventListener('click', e => { e.stopPropagation(); start() })
+    wrap.append(toggle, startInMenu)
     paint()
     return wrap
   }

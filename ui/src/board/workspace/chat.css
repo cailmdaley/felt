@@ -206,6 +206,9 @@
 .ws-chat .ws-chat-compose .kbn-ctl-meet-chip { display: block; flex: 0 1 auto; min-width: 0; max-width: min(18ch, 35%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--ws-small-size)/1.2 var(--ws-serif); }
 .ws-chat .ws-chat-compose .kbn-ctl-meet-chip[hidden] { display: none; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends > .kbn-ctl-btn { min-width: 0; max-width: 100%; }
+.ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-composer-foot { flex-wrap: wrap; }
+.ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-sends { display: contents; }
+.ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-sends > .kbn-ctl-btn { flex: 0 0 auto; max-width: none; }
 
 /* A fiber with no conversation keeps its page; the header holds its acts only. */
 .ws-chat:not(.ws-chat-conversation) { padding: 0; margin: 0 0 var(--ws-inset); border-bottom: var(--ws-line-width) solid var(--ws-hairline); }

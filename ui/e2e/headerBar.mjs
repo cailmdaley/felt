@@ -176,6 +176,33 @@ export function registerHeaderBarJourneys(test) {
       if (process.env.WORKSPACE_SHOTS && width === 701) await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'header-both-columns-narrow-desktop-light.png') })
     }
   }, { width: 1440, height: 900 })
+  test('The 390px phone header keeps state, lifecycle verbs, Settings, Brief and Report visible together', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+    })
+    await page.goto(url)
+    await openRoot(page)
+    const header = page.locator('.ws-selected .ws-chat-head')
+    const assertActions = async expected => {
+      assert.deepEqual(await visibleHeaderVerbs(header), expected)
+      for (const selector of ['.ws-chat-standing', '.kbn-ctl-verdict', '.ws-chat-settings', '.ws-chat-refs']) {
+        const box = await header.locator(selector).boundingBox()
+        assert.ok(box && box.width > 0 && box.x >= 0 && box.x + box.width <= 390, `${selector} is visible within the phone header: ${JSON.stringify(box)}`)
+        assert.ok(await header.locator(selector).evaluate(el => el.parentElement === el.closest('.ws-chat-head').querySelector('.ws-chat-acts')), `${selector} stays in the phone action row`)
+      }
+      const row = await header.locator('.ws-chat-acts').boundingBox()
+      const centers = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
+      assert.ok(centers.length >= 4 && Math.max(...centers) - Math.min(...centers) < 1, `all phone actions share row two: ${centers}`)
+      assert.ok(row && row.x + row.width <= 390)
+    }
+    await assertActions(['Temper', 'Discard'])
+    await page.locator('.ws-rail-toggle').click()
+    await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
+    await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
+    await assertActions(['Close for review', 'Rest'])
+  }, { width: 390, height: 844 })
   test('Composer footer stays on one row and its Meeting menu fits at every width', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
@@ -188,7 +215,7 @@ export function registerHeaderBarJourneys(test) {
       const composer = page.locator('.ws-selected .kbn-ctl-composer')
       const geometry = await composer.evaluate(el => {
         const rect = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].map(node => {
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
           const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, center: r.top + r.height / 2 }
         })
         return { left: rect.left, right: rect.right, controls }
@@ -206,15 +233,37 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(await composer.locator('.kbn-ctl-meet-overflow').evaluate(el => !el.open))
       assert.ok(await more.evaluate(el => document.activeElement === el))
       const armed = await composer.evaluate(el => {
-        const box = el.getBoundingClientRect(), chip = el.querySelector('.kbn-ctl-meet-chip').getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-meet-chip, .kbn-ctl-sends > button')].map(node => node.getBoundingClientRect())
-        return { chip: chip.width, fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2) }
+        const box = el.getBoundingClientRect()
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
+        return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), startVisible: el.querySelector('.kbn-ctl-meet-primary').checkVisibility(), armedChipHidden: el.querySelector('.kbn-ctl-meet-chip').hidden }
       })
-      assert.ok(armed.chip >= 12 && armed.fits, `armed meeting remains visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
-      assert.ok(Math.max(...armed.centers) - Math.min(...armed.centers) < 1, `armed footer stays one row at ${width}`)
+      assert.ok(armed.startVisible && armed.armedChipHidden && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
+      const rows = new Set(armed.centers.map(center => Math.round(center)))
+      assert.ok(rows.size <= 2, `armed footer uses at most two rows at ${width}: ${JSON.stringify(armed.centers)}`)
       await more.click(); await composer.locator('.kbn-ctl-meet-switch input').uncheck(); await more.click()
     }
   }, { width: 1440, height: 900 })
+  test('A meeting started from the composer stays visible with Stop after closing its menu', async page => {
+    await page.addInitScript(() => {
+      if (window !== window.top) return
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+    })
+    await page.goto(`${url}&meeting=idle`)
+    await openRoot(page)
+    const composer = page.locator('.ws-selected .kbn-ctl-composer')
+    await composer.locator('.kbn-ctl-meet-more').click()
+    await composer.getByRole('switch').check()
+    await composer.getByRole('button', { name: 'Start meeting', exact: true }).click()
+    const menu = composer.locator('.kbn-ctl-meet-overflow')
+    await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-stop')?.checkVisibility())
+    if (await menu.evaluate(el => el.open)) await menu.locator('summary').click()
+    assert.equal(await menu.evaluate(el => el.open), false)
+    const stop = page.locator('.ws-selected .kbn-detail-transcript-stop')
+    await stop.waitFor({ state: 'visible' })
+    assert.equal(await stop.innerText(), 'Stop')
+    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
+  }, { width: 1000, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
@@ -382,13 +431,13 @@ export function registerHeaderBarJourneys(test) {
       if (device === 'phone') {
         assert.ok(await header.getByRole('button', { name: 'Brief', exact: true }).isVisible())
         assert.equal(await sheet.locator('.ws-chat-console').count(), 1, 'Console belongs to Settings even when this card has no attach target')
-        assert.ok(await sheet.getByRole('button', { name: 'Temper', exact: true }).isVisible())
-        const discard = sheet.getByRole('button', { name: 'Discard', exact: true })
+        assert.ok(await header.getByRole('button', { name: 'Temper', exact: true }).isVisible())
+        const discard = header.getByRole('button', { name: 'Discard', exact: true })
         assert.ok(await discard.isVisible())
         assert.ok(await discard.evaluate(el => {
-          const r = el.getBoundingClientRect(), sheet = el.closest('.ws-page-sheet, .ws-settings-menu').getBoundingClientRect()
-          return r.top >= Math.max(0, sheet.top) && r.bottom <= Math.min(innerHeight, sheet.bottom)
-        }), 'Discard stays inside the phone sheet’s visible bounds')
+          const r = el.getBoundingClientRect(), head = el.closest('.ws-chat-head').getBoundingClientRect()
+          return r.top >= head.top && r.bottom <= head.bottom
+        }), 'Discard stays in the phone header action row')
       }
       await page.keyboard.press('Escape')
       await sheet.waitFor({ state: 'hidden' })

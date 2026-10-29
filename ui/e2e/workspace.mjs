@@ -1461,7 +1461,7 @@ test('Landscape phone keeps a one-row top bar while the fiber awaits review', as
   await headerAction(p, 'Settings')
   await p.locator('.ws-settings-menu:not([hidden])').waitFor()
   for (const verb of ['.kbn-ctl-temper', '.kbn-ctl-discard']) {
-    const box = await p.locator(`.ws-settings-menu:not([hidden]) .kbn-ctl-verdict ${verb}`).boundingBox()
+    const box = await selected(p).locator(`.ws-chat-head .kbn-ctl-verdict ${verb}`).boundingBox()
     assert.ok(box.height >= 44 && box.width >= 44, `${verb} is a full target on the constitution's page: ${JSON.stringify(box)}`)
   }
 }, { width: 844, height: 390 }, 'false', 'reduce', true)
