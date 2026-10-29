@@ -1363,11 +1363,11 @@ defmodule Shuttle.RemoteRegistry.Client do
           | {:response, non_neg_integer(), [{String.t(), String.t()}], binary()}
           | {:error, term()}
 
-  @doc "Start a flow-controlled GET; owner receives {:remote_stream, id, stream_event}."
+  @doc "Start a flow-controlled GET; the owner pid or alias receives {:remote_stream, id, stream_event}."
   @callback stream_get(
               url :: String.t(),
               req_headers :: [{String.t(), String.t()}],
-              owner :: pid(),
+              owner :: pid() | reference(),
               connect_timeout_ms :: non_neg_integer()
             ) :: {:ok, stream_id()} | {:error, term()}
 
@@ -1521,14 +1521,15 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   @doc """
   Start a streaming GET with a bounded connection wait and no request deadline.
 
-  Events go to `owner`; the process calling this function owns cancellation and
-  must call `stream_cancel/1` in its cleanup, even after completion. The opaque
-  reference indexes that process's request/profile pair. The handler cursor in
+  Events go to the `owner` pid or process alias; the caller owns cancellation and
+  must call `stream_cancel/1` in its cleanup, even after completion. Deactivating
+  an owner alias cuts off delivery independently of asynchronous cancellation.
+  The opaque reference indexes that process's request/profile pair. The handler cursor in
   `{:open, headers, cursor}` grants one more delivery through `stream_next/1`.
   """
   @impl true
   def stream_get(url, req_headers, owner, connect_timeout_ms)
-      when is_binary(url) and is_list(req_headers) and is_pid(owner) and
+      when is_binary(url) and is_list(req_headers) and (is_pid(owner) or is_reference(owner)) and
              is_integer(connect_timeout_ms) and connect_timeout_ms >= 0 do
     with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       id = make_ref()

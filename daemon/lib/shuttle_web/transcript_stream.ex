@@ -51,6 +51,8 @@ defmodule ShuttleWeb.TranscriptStream do
         json_response(conn, 429, %{error: "stream_capacity"})
 
       :ok ->
+        owner = :erlang.alias()
+
         try do
           cfg = config()
           client = OriginRouter.forward_client()
@@ -60,14 +62,22 @@ defmodule ShuttleWeb.TranscriptStream do
                  "/api/v1/transcript/stream",
                  Map.put(query, "host", "local"),
                  req_headers: [{"accept", "text/event-stream"}],
+                 owner: owner,
                  connect_timeout_ms: cfg[:relay_connect_ms]
                ) do
             {:ok, id} ->
               try do
                 relay_open(conn, remote, query, session, client, id, cfg)
               after
-                client.stream_cancel(id)
-                flush_stream(id)
+                # httpc cancellation is asynchronous. Close delivery before draining
+                # so a keep-alive connection cannot receive this request's late bytes.
+                :erlang.unalias(owner)
+
+                try do
+                  client.stream_cancel(id)
+                after
+                  flush_stream(id)
+                end
               end
 
             {:error, :stream_not_supported} ->
@@ -77,6 +87,7 @@ defmodule ShuttleWeb.TranscriptStream do
               TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
           end
         after
+          :erlang.unalias(owner)
           release(key)
         end
     end

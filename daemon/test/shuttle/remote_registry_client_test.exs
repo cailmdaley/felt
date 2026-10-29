@@ -165,6 +165,46 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     end
   end
 
+  defmodule DeferredCancelClient do
+    @moduledoc false
+    alias Shuttle.RemoteRegistry.Client.Default
+
+    def stream_get(url, headers, owner, timeout) do
+      observer = Shuttle.Env.app(:stream_test_observer)
+      caller = self()
+
+      receiver =
+        spawn(fn ->
+          monitor = Process.monitor(caller)
+          forward(owner, observer, caller, monitor)
+        end)
+
+      Default.stream_get(url, headers, receiver, timeout)
+    end
+
+    def stream_next(cursor), do: Default.stream_next(cursor)
+
+    # The test holds cancellation without suspending the shared httpc profile.
+    # Its relay process calls Default.stream_cancel/1 after the late delivery.
+    def stream_cancel(id) do
+      send(Shuttle.Env.app(:stream_test_observer), {:cancel_deferred, id})
+      :ok
+    end
+
+    defp forward(owner, observer, caller, monitor) do
+      receive do
+        {:remote_stream, _, _} = message ->
+          send(owner, message)
+          send(caller, {:delivery_barrier, message})
+          send(observer, {:transport_delivered, message})
+          forward(owner, observer, caller, monitor)
+
+        {:DOWN, ^monitor, :process, _, _} ->
+          :ok
+      end
+    end
+  end
+
   defmodule TranscriptOwnerPlug do
     @moduledoc false
     @behaviour Plug
@@ -428,6 +468,71 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       assert conn.resp_body =~ first_event <> second_event
       assert conn.resp_body =~ "event: reset\ndata: {\"byte_count\":0}\n\n"
       assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    @tag :timing
+    test "an idle relay cuts off late httpc bytes while cancellation is deferred" do
+      alias ShuttleWeb.TranscriptStream
+      base = stream_server()
+      observer = self()
+      Shuttle.Test.Env.put_app_env(:stream_test_observer, observer)
+      Shuttle.Test.Env.put_app_env(:write_forward_client, DeferredCancelClient)
+
+      Shuttle.Test.Env.put_app_env(:transcript_stream,
+        relay_connect_ms: @http_timeout_ms,
+        relay_idle_ms: 40
+      )
+
+      relay =
+        Task.async(fn ->
+          remote = %Shuttle.Remote{name: "owner-a", url: base}
+          session = "a3edf873-cb1c-40ab-a891-f26f5333b320"
+
+          conn =
+            TranscriptStream.relay(
+              Plug.Test.conn(:get, "/"),
+              remote,
+              %{"session" => session},
+              session
+            )
+
+          send(observer, {:relay_returned, self()})
+
+          receive do
+            {:check_mailbox, id} ->
+              try do
+                assert_receive {:delivery_barrier, {:remote_stream, ^id, {:data, ": open\n\n"}}},
+                               @http_timeout_ms
+
+                refute_received {:remote_stream, ^id, _}
+                assert conn.status == 200
+                assert conn.resp_body == ""
+                assert Registry.lookup(ShuttleWeb.TranscriptStreams, {:relay, remote.name}) == []
+              after
+                Default.stream_cancel(id)
+              end
+          after
+            @http_timeout_ms -> flunk("late-delivery probe did not finish")
+          end
+        end)
+
+      assert_receive {:stream_server, server, ["close"]}, @http_timeout_ms
+      assert_receive {:transport_delivered, {:remote_stream, id, {:open, _, _}}}, @http_timeout_ms
+      assert_receive {:cancel_deferred, ^id}, @http_timeout_ms
+      assert_receive {:relay_returned, relay_pid}, @http_timeout_ms
+      assert relay_pid == relay.pid
+
+      # The HTTP/1 request process remains alive after returning its response.
+      # The relay waits for a barrier from the same sender as the late bytes,
+      # so the mailbox check cannot race a not-yet-delivered event.
+      send(server, :start_body)
+
+      assert_receive {:transport_delivered, {:remote_stream, ^id, {:data, ": open\n\n"}}},
+                     @http_timeout_ms
+
+      send(relay.pid, {:check_mailbox, id})
+      Task.await(relay, @http_timeout_ms)
+      send(server, :finish)
     end
 
     test "the receiver cannot crash its httpc handler on malformed replies" do

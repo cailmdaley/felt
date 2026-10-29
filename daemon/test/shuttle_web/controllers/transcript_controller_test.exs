@@ -492,6 +492,42 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
     end
 
+    test "cleanup drains events queued before the delivery cutoff" do
+      StubStreamClient.set_events([{:response, 503, [], ~s({"error":"booting"})}])
+
+      conn =
+        local_conn()
+        |> register_before_send(fn conn ->
+          id = StubStreamClient.last().id
+          send(self(), {:remote_stream, id, {:data, "already queued"}})
+          send(self(), {:remote_stream, id, :done})
+          conn
+        end)
+        |> get("/api/v1/transcript/stream", %{"session" => @session, "host" => "owner-a"})
+
+      assert response(conn, 503) == ~s({"error":"booting"})
+      id = StubStreamClient.last().id
+      refute_received {:remote_stream, ^id, _}
+    end
+
+    test "completed relays reject deliveries sent after cancellation returns" do
+      StubStreamClient.set_events([{:open, [{"content-type", "text/event-stream"}]}, :done])
+      assert response(remote_stream(), 200) == ""
+      %{owner: owner, id: id} = StubStreamClient.last()
+
+      sender =
+        Task.async(fn ->
+          for event <- [{:data, "late bytes"}, :done, {:error, :closed}] do
+            send(owner, {:remote_stream, id, event})
+          end
+        end)
+
+      Task.await(sender)
+      refute_received {:remote_stream, ^id, _}
+      assert StubStreamClient.cancelled() == [id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
     test "downstream disconnect cancels without asking for more bytes" do
       StubStreamClient.set_events([
         {:open, [{"content-type", "text/event-stream"}]},
