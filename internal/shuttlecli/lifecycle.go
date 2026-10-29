@@ -312,6 +312,14 @@ this host is killed.` + workerExitIdentityHelp,
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
+			by := a.boardWorkerParty()
+			if actor != "" {
+				if by == nil {
+					by = &boardParty{}
+				}
+				by.Session = actor
+			}
+			a.recordBoard(boardRecord{Kind: "rested", Fiber: f.UID, By: by})
 			fmt.Fprintf(a.env.Stdout, "rested %s%s (status: open, horizon: stashed)\n", args[0], ref.Location())
 			if statusBefore != felt.StatusOpen {
 				fmt.Fprintf(a.env.Stdout, "  status: %s → open\n", shuttleNonEmpty(statusBefore, "(missing)"))
@@ -771,6 +779,22 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
+			verdict := ""
+			if tempered != nil {
+				if *tempered {
+					verdict = "tempered"
+				} else {
+					verdict = "discarded"
+				}
+			}
+			by := a.boardWorkerParty()
+			if actor := a.actorSession(closeActor); actor != "" {
+				if by == nil {
+					by = &boardParty{}
+				}
+				by.Session = actor
+			}
+			a.recordBoard(boardRecord{Kind: "closed", Fiber: f.UID, By: by, Verdict: verdict})
 			fmt.Fprintf(a.env.Stdout, "closed %s%s\n", args[0], ref.Location())
 			switch {
 			case tempered == nil:

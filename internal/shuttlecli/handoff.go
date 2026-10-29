@@ -43,6 +43,11 @@ An explicit different fiber stamps that fiber and leaves the caller running.` + 
 			if err != nil {
 				return err
 			}
+			if f, err := a.workerFiberAtPath(path, ""); err == nil {
+				a.recordBoard(boardRecord{Kind: "handed_off", Fiber: f.UID, By: a.boardWorkerParty()})
+			} else {
+				fmt.Fprintf(a.env.Stderr, "warning: could not record family board: %v\n", err)
+			}
 			fmt.Fprintf(a.env.Stdout, "handed off: %s (handed_off_at=%s)\n", path, at)
 			// Final act — but ONLY when handing off our own fiber: end our own tmux
 			// session (no-op outside tmux). The field is already durably on disk, so

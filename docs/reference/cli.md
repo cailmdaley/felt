@@ -514,6 +514,17 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
     `mark-runtime` serve daemon and fleet plumbing. An adopter running
     shuttle solo will not need them.
 
+### `shuttle board [fiber] [--since 2h|<RFC3339>] [--all] [--json]`
+
+Read family activity from the local daemon, oldest first.
+Omit the fiber inside a worker to use its own family; `--all` reads across families.
+
+### `shuttle post <text|-> [--fiber <id>]`
+
+Post to a family board without waking a worker.
+The current worker identifies the member, or `--fiber` selects one explicitly; `-` reads the text from stdin.
+Recording works offline.
+
 ### `shuttle send-file <path> [path...]`
 
 Publish readable regular files to the Shuttle Board and the session/fiber sent-files

@@ -217,6 +217,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.rolesCmd(),
 		a.askCmd(),
 		a.boardCmd(),
+		a.postCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),
 		a.migrateCmd(),
