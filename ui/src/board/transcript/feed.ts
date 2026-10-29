@@ -119,9 +119,13 @@ export class TranscriptFeed {
       let event = ''
       while (true) {
         const part = await Promise.race([reader.read(), aborted])
-        if (part.done) return 'closed'
-        arm()
-        buffer += decoder.decode(part.value, { stream: true })
+        if (part.done) {
+          if (!buffer.endsWith('\r')) return 'closed'
+          buffer += '\n'
+        } else {
+          arm()
+          buffer += decoder.decode(part.value, { stream: true })
+        }
         while (true) {
           const match = /[\r\n]/.exec(buffer)
           if (!match) break
@@ -154,6 +158,7 @@ export class TranscriptFeed {
             else if (field === 'event') event = value
           }
         }
+        if (part.done) return 'closed'
       }
     } catch {
       return controller.signal.aborted && !timedOut ? 'stopped' : 'failed'
@@ -242,18 +247,18 @@ export class TranscriptFeed {
   }
 
   private async decode(bytes: Uint8Array, epoch: number): Promise<void> {
+    const slice = { started: now() }
     for (let offset = 0; offset < bytes.byteLength; offset += DECODE_CHUNK_BYTES) {
       this.pendingLine += this.decoder.decode(bytes.subarray(offset, Math.min(bytes.byteLength, offset + DECODE_CHUNK_BYTES)), { stream: true })
       const lines = this.pendingLine.split('\n')
       this.pendingLine = lines.pop() ?? ''
-      await this.emitLines(lines, epoch)
+      await this.emitLines(lines, epoch, slice)
       if (!this.active(epoch)) return
     }
   }
 
-  private async emitLines(lines: string[], epoch: number): Promise<void> {
+  private async emitLines(lines: string[], epoch: number, slice = { started: now() }): Promise<void> {
     let batch: Entry[] = []
-    let sliceStarted = now()
     const flush = (): void => {
       if (batch.length) this.onEntries(batch)
       batch = []
@@ -267,11 +272,11 @@ export class TranscriptFeed {
           // A malformed JSONL row does not prevent later records from being read.
         }
       }
-      if (now() - sliceStarted >= TIME_SLICE_MS) {
+      if (now() - slice.started >= TIME_SLICE_MS) {
         flush()
         await new Promise<void>((resolve) => setTimeout(resolve, 0))
         if (!this.active(epoch)) return
-        sliceStarted = now()
+        slice.started = now()
       }
     }
     flush()

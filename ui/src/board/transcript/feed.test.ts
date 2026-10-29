@@ -203,6 +203,24 @@ describe('TranscriptFeed stream', () => {
     expect(entriesFrom(onEntries)).toMatchObject([{ kind: 'prompt', text: 'shear α' }])
   })
 
+  it('dispatches a CR-only event whose last delimiter is at EOF', async () => {
+    const { reader, onEntries } = feed(async () => sse(`id: 99\rdata: ${jsonLine('CR only').trimEnd()}\r\r`))
+    expect(await reader.stream()).toBe('closed')
+    expect(entriesFrom(onEntries)).toMatchObject([{ text: 'CR only' }])
+  })
+
+  it('shares the raw decoding time budget across byte chunks', async () => {
+    let time = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => { time += 4; return time })
+    const timer = vi.spyOn(globalThis, 'setTimeout')
+    const body = new TextEncoder().encode(Array.from({ length: 5 }, () => jsonLine('x'.repeat(65_000))).join(''))
+    const { reader } = feed(async () => response(body, 200, { 'x-transcript-offset': '0' }))
+    try {
+      await reader.read()
+      expect(timer).toHaveBeenCalled()
+    } finally { clock.mockRestore(); timer.mockRestore() }
+  })
+
   it('resumes a partial raw line at the last complete byte boundary', async () => {
     const first = jsonLine('first')
     const second = jsonLine('second α')
