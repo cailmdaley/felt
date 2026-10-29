@@ -42,7 +42,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 	if shuttleRuntimeSessionID(f) != input.SessionID {
 		return
 	}
-	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: "human"}, Text: input.Prompt}
+	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: a.humanLabel()}, Text: input.Prompt}
 	block, ok, err := shuttle.BlockOf(f)
 	if err == nil && ok && block.Ask != nil && a.ensureOwnedHere(f, f.ID) == nil {
 		question := block.Ask.Text
@@ -57,6 +57,20 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		r.Text = "Q: " + question + " — A: " + input.Prompt
 	}
 	a.recordBoard(r)
+}
+
+// humanLabel names the person typing in a worker's chat: SHUTTLE_HUMAN, else
+// the first word of Git's user.name, else "human".
+func (a *app) humanLabel() string {
+	if name := strings.TrimSpace(a.env.Getenv("SHUTTLE_HUMAN")); name != "" {
+		return name
+	}
+	if out, err := a.env.Command("git", "config", "--global", "user.name").Output(); err == nil {
+		if fields := strings.Fields(string(out)); len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return "human"
 }
 
 func boardDigestLine(r boardRow) string {

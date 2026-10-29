@@ -94,6 +94,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			sink := filepath.Join(t.TempDir(), "events.jsonl")
 			env.Set("SHUTTLE_EVENTS_FILE", sink)
 			env.Set("SHUTTLE_MESSAGES", "off")
+			env.Set("SHUTTLE_HUMAN", "Cail")
 			dir, st := newStore(t)
 			seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir(), "runtime": map[string]any{"session_uuid": "session"}, "ask": map[string]any{"text": "Which?", "at": "2026-10-28T10:00:00Z"}}, nil)
 			env.Set("SHUTTLE_STORES", dir)
@@ -121,7 +122,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				var r boardRecord
 				if json.Unmarshal(line, &r) == nil && r.Type == "board" {
 					found = true
-					if r.Kind != "answered" || r.By == nil || r.By.Label != "human" || r.Text != "Q: Which? — A: this one" {
+					if r.Kind != "answered" || r.By == nil || r.By.Label != "Cail" || r.Text != "Q: Which? — A: this one" {
 						t.Fatalf("record %+v", r)
 					}
 				}
