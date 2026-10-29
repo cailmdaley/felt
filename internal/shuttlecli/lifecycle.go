@@ -156,7 +156,10 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			if pauseLocal {
 				return nil
 			}
-			session, _ := a.liveWorkerSession(f)
+			session, _, err := a.liveWorkerSession(f)
+			if err != nil {
+				return err
+			}
 			if session == "" {
 				fmt.Fprintf(a.env.Stdout, "  worker: no live session %s\n", shuttleTmuxSessionName(f.ID, f.UID))
 				return nil
@@ -337,7 +340,10 @@ this host is killed.` + workerExitIdentityHelp,
 			if restLocal {
 				return nil
 			}
-			session, _ := a.liveWorkerSession(f)
+			session, _, err := a.liveWorkerSession(f)
+			if err != nil {
+				return err
+			}
 			if session == "" {
 				return nil
 			}

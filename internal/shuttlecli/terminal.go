@@ -1,6 +1,9 @@
 package shuttlecli
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // terminalBackend observes and closes terminals; only the daemon launches them.
 type terminalBackend interface {
@@ -51,9 +54,9 @@ func (a *app) terminalHolder(name string) (terminalBackend, error) {
 	return nil, uncertain
 }
 
-func (a *app) terminalSessionExists(name string) bool {
-	holder, _ := a.terminalHolder(name)
-	return holder != nil
+func (a *app) terminalSessionExists(name string) (bool, error) {
+	holder, err := a.terminalHolder(name)
+	return holder != nil, err
 }
 
 func (a *app) killTerminalSession(name string) error {
@@ -67,18 +70,25 @@ func (a *app) killTerminalSession(name string) error {
 	return holder.Kill(name)
 }
 
-func (a *app) liveTerminalSessions() map[string]bool {
+func (a *app) liveTerminalSessions() (map[string]bool, error) {
 	live := map[string]bool{}
-	backends, _ := a.terminalBackends()
+	backends, err := a.terminalBackends()
+	if err != nil {
+		return nil, err
+	}
+	var failures []error
 	for _, backend := range backends {
-		names, _ := backend.LiveWorkers()
+		names, err := backend.LiveWorkers()
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s listing: %w", backend.ID(), err))
+		}
 		for name, present := range names {
 			if present {
 				live[name] = true
 			}
 		}
 	}
-	return live
+	return live, errors.Join(failures...)
 }
 
 // currentTerminalPane reads exact native coordinates without a backend probe.

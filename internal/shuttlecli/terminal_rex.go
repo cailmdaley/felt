@@ -165,30 +165,41 @@ func (r *rexTerminal) Has(name string) (bool, error) {
 // The daemon retains a missing-block binding while human panes survive in the
 // session. That negative evidence must not become permission to close them.
 func (r *rexTerminal) boundBlockPresent(binding rexBinding) (bool, error) {
-	out, err := r.command("{}", "api", "call", "-s", binding.SessionID, "session.list_blocks", "-")
-	if errors.Is(err, errRexAbsent) || errors.Is(err, errRexNotFound) {
-		return false, nil
-	}
+	blocks, err := r.blocks(binding.SessionID)
 	if err != nil {
 		return false, err
 	}
-	var doc struct {
-		Blocks *[]struct {
-			BlockID string `json:"block_id"`
-		} `json:"blocks"`
-	}
-	if err := json.Unmarshal(out, &doc); err != nil {
-		return false, err
-	}
-	if doc.Blocks == nil {
-		return false, fmt.Errorf("Rex returned no block list")
-	}
-	for _, block := range *doc.Blocks {
+	for _, block := range blocks {
 		if block.BlockID == binding.BlockID {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+type rexBlock struct {
+	BlockID string `json:"block_id"`
+	Label   string `json:"label"`
+}
+
+func (r *rexTerminal) blocks(sid string) ([]rexBlock, error) {
+	out, err := r.command("{}", "api", "call", "-s", sid, "session.list_blocks", "-")
+	if errors.Is(err, errRexAbsent) || errors.Is(err, errRexNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Blocks *[]rexBlock `json:"blocks"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return nil, err
+	}
+	if doc.Blocks == nil {
+		return nil, fmt.Errorf("Rex returned no block list")
+	}
+	return *doc.Blocks, nil
 }
 
 func (r *rexTerminal) Kill(name string) error {
@@ -233,12 +244,33 @@ func (r *rexTerminal) LiveWorkers() (map[string]bool, error) {
 		return live, err
 	}
 	for _, session := range sessions {
-		if isShuttleTmuxSessionName(session.Label) {
-			live[session.Label] = true
-		}
+		bound := map[string]rexBinding{}
 		for name, binding := range doc.Bindings {
-			if binding.SessionID == session.SessionID && isShuttleTmuxSessionName(name) {
-				live[name] = true
+			if binding.SessionID == session.SessionID {
+				bound[name] = binding
+			}
+		}
+		if len(bound) == 0 && !isShuttleTmuxSessionName(session.Label) {
+			continue
+		}
+		blocks, err := r.blocks(session.SessionID)
+		if err != nil {
+			return live, err
+		}
+		for name, binding := range bound {
+			for _, block := range blocks {
+				if block.BlockID == binding.BlockID && isShuttleTmuxSessionName(name) {
+					live[name] = true
+				}
+			}
+		}
+		// A bound session's label is display, never a second worker identity.
+		// Lost-binding recovery needs a matching block label, like the daemon.
+		if len(bound) == 0 {
+			for _, block := range blocks {
+				if block.Label == session.Label {
+					live[session.Label] = true
+				}
 			}
 		}
 	}

@@ -64,7 +64,7 @@ case "$*" in
   *'session.destroy -')
     cat >/dev/null
     if [ -n "$REX_TEST_FIBER" ]; then cp "$REX_TEST_FIBER" "$REX_TEST_SNAPSHOT" || exit 1; fi
-    printf '{}\n' ;; 
+    printf '{}\n' ;;
   *) exit 99 ;;
 esac
 `
@@ -98,10 +98,12 @@ func TestTerminalBackendsAndMixedHolders(t *testing.T) {
 	}
 	var rk, tk []string
 	a.terminals = []terminalBackend{&stubTerminal{id: "rex", live: map[string]bool{"new": true}, killed: &rk}, &stubTerminal{id: "tmux", live: map[string]bool{"old": true}, killed: &tk}}
-	if !a.terminalSessionExists("old") || !a.terminalSessionExists("new") || a.terminalSessionExists("absent") {
-		t.Fatal("mixed presence")
+	for name, want := range map[string]bool{"old": true, "new": true, "absent": false} {
+		if present, err := a.terminalSessionExists(name); present != want || err != nil {
+			t.Fatalf("%s: %v %v", name, present, err)
+		}
 	}
-	if got := a.liveTerminalSessions(); !reflect.DeepEqual(got, map[string]bool{"old": true, "new": true}) {
+	if got, err := a.liveTerminalSessions(); err != nil || !reflect.DeepEqual(got, map[string]bool{"old": true, "new": true}) {
 		t.Fatal(got)
 	}
 	if err := a.killTerminalSession("old"); err != nil {
@@ -111,8 +113,8 @@ func TestTerminalBackendsAndMixedHolders(t *testing.T) {
 		t.Fatalf("wrong holder killed: %v %v", rk, tk)
 	}
 	a.terminals = []terminalBackend{&stubTerminal{id: "rex", err: errors.New("timeout")}, &stubTerminal{id: "tmux", live: map[string]bool{"old": true}}}
-	if !a.terminalSessionExists("old") {
-		t.Fatal("primary uncertainty hid a known secondary")
+	if present, err := a.terminalSessionExists("old"); !present || err != nil {
+		t.Fatalf("primary uncertainty hid a known secondary: %v %v", present, err)
 	}
 	if err := a.killTerminalSession("missing"); err == nil {
 		t.Fatal("uncertain holder was killed")
@@ -162,6 +164,7 @@ func TestRexBindingReadAndTerminalObservations(t *testing.T) {
 	})
 	before, _ := os.ReadFile(path)
 	log := stubRex(t, env, `{"sessions":[{"session_id":"session:bound","label":"renamed display"},{"session_id":"session:recover","label":"`+other+`"}]}`, 0)
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:bound"},{"block_id":"block:recover","label":"`+other+`"}]}`)
 	r := &rexTerminal{a: newApp(env)}
 	if has, err := r.Has(name); !has || err != nil {
 		t.Fatalf("renamed binding %v %v", has, err)

@@ -107,7 +107,10 @@ The daemon's boot quarantine can still hold an eligible fiber until
 				return fmt.Errorf("listing fibers: %w", err)
 			}
 
-			live := a.liveTerminalSessions()
+			live, err := a.liveTerminalSessions()
+			if err != nil {
+				return fmt.Errorf("observing worker terminals: %w", err)
+			}
 			owners := sessionOwnerMap(entries)
 			reg := a.statusAgentRegistry()
 
@@ -177,7 +180,10 @@ func (a *app) psCmd() *cobra.Command {
 		Long:  "Prints one line per live shuttle tmux worker session (and the fiber it owns, when resolvable).",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			live := a.liveTerminalSessions()
+			live, err := a.liveTerminalSessions()
+			if err != nil {
+				return fmt.Errorf("observing worker terminals: %w", err)
+			}
 			if len(live) == 0 {
 				if a.json {
 					return a.outputJSON([]map[string]string{})
@@ -273,7 +279,10 @@ func (a *app) runStatusOneFiber(query string) error {
 
 	statusNow := f.Status
 	armed := statusNow == felt.StatusActive
-	session, running := a.liveWorkerSession(f)
+	session, running, err := a.liveWorkerSession(f)
+	if err != nil {
+		return err
+	}
 	column := shuttle.Column(f, block, running, time.Now())
 	until := blockerName(st, block.BlockedOn)
 	problem := agentProblem(a.statusAgentRegistry(), block)
@@ -419,14 +428,21 @@ func columnTitle(column string) string {
 	return column
 }
 
-// liveWorkerSession reports the tmux session holding this fiber's worker, if
-// one is live. A fiber without a uid has no session name and so no worker.
-func (a *app) liveWorkerSession(f *felt.Felt) (string, bool) {
+// liveWorkerSession reports the terminal holding this fiber's worker, if
+// one is live. Uncertain observations fail rather than declaring it absent.
+func (a *app) liveWorkerSession(f *felt.Felt) (string, bool, error) {
 	session := shuttleTmuxSessionName(f.ID, f.UID)
-	if session != "" && a.terminalSessionExists(session) {
-		return session, true
+	if session == "" {
+		return "", false, nil
 	}
-	return "", false
+	present, err := a.terminalSessionExists(session)
+	if err != nil {
+		return "", false, fmt.Errorf("observing worker terminal %q: %w", session, err)
+	}
+	if present {
+		return session, true, nil
+	}
+	return "", false, nil
 }
 
 // writeBlockSummary writes the human-readable "Current block:" report. Dispatch

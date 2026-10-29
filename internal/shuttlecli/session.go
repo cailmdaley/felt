@@ -215,7 +215,10 @@ Exits with a clear error if no session is live.`,
 			if want == "" {
 				return errFiberWithoutUID(f.ID)
 			}
-			session, _ := a.liveWorkerSession(f)
+			session, _, err := a.liveWorkerSession(f)
+			if err != nil {
+				return err
+			}
 			if session == "" {
 				// A managed Codex terminal is a replaceable viewer, not the
 				// conversation owner. Preparing it never starts a model turn.
