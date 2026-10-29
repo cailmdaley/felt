@@ -216,11 +216,15 @@ defmodule Shuttle.CodexBackend do
       {:ok, %File.Stat{type: :symlink}} when reason == {:transport, :enoent} ->
         if File.exists?(path), do: {:error, :alias_target_present}, else: :ok
 
+      # A refused connect means no listener is bound, and the scan found no
+      # holder: either the retained owned pane shows the server died, or the
+      # pane is gone with it (tmux server restart, killed session). Codex's
+      # native per-endpoint lock and connect-before-unlink guard reclaim the
+      # stale socket; our own unlink would race a parallel start or external
+      # owner. A pane that is still alive never reaches here (slot/2 refuses).
       {:ok, _}
-      when slot == :dead and reason in [{:transport, :econnrefused}, {:transport, :enoent}] ->
-        # The retained owned pane proves death. Codex's native per-endpoint
-        # lock and connect-before-unlink guard reclaim its stale socket. Doing
-        # our own unlink here would race a parallel start or external owner.
+      when slot in [:dead, :new] and
+             reason in [{:transport, :econnrefused}, {:transport, :enoent}] ->
         :ok
 
       _ ->

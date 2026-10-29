@@ -155,8 +155,35 @@ defmodule Shuttle.CodexBackendTest do
     assert [] = starts(runner)
   end
 
+  test "a refused socket whose pane is gone starts a fresh server; a timeout holds", %{
+    opts: opts,
+    path: path,
+    runner: runner
+  } do
+    :ok = Shuttle.CodexEndpoint.ensure_root(path)
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ifaddr: {:local, path}])
+    File.chmod!(path, 0o600)
+    :ok = :gen_tcp.close(listener)
+    assert {:ok, %File.Stat{type: :other}} = File.lstat(path)
+
+    slow = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :timeout}} end)
+    assert %{state: :waiting, error: message} = CodexBackend.check(slow)
+    assert message =~ "socket exists"
+    assert [] = starts(runner)
+
+    change(runner, scan: {"123 1 codex app-server --listen unix://#{path}\n", 0})
+    refused = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :econnrefused}} end)
+    assert %{state: :waiting} = CodexBackend.check(refused)
+    assert [] = starts(runner)
+
+    change(runner, scan: {"", 0})
+    assert %{state: :starting} = CodexBackend.check(refused)
+    assert [{"tmux", ["new-session" | _]}] = starts(runner)
+    assert File.exists?(path)
+  end
+
   # Negative control: dropping the dangling-alias clause leaves this waiting,
-  # and a probe failure other than enoent never takes it.
+  # and a probe failure that is neither refused nor enoent never takes it.
   test "a genuine alias left dangling by a cleared /tmp starts a fresh server", %{
     opts: opts,
     path: path,
@@ -172,8 +199,8 @@ defmodule Shuttle.CodexBackendTest do
     if File.exists?(Path.join(protected, hash)) == false do
       File.ln_s!(Path.join(protected, hash), path)
 
-      refused = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :econnrefused}} end)
-      assert %{state: :waiting} = CodexBackend.check(refused)
+      slow = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :timeout}} end)
+      assert %{state: :waiting} = CodexBackend.check(slow)
       assert [] = starts(runner)
 
       gone = Keyword.put(opts, :probe, fn _ -> {:error, {:transport, :enoent}} end)

@@ -77,7 +77,7 @@ The manager starts `command codex app-server --listen unix://PATH` in an endpoin
 On macOS it uses the same terminal-owned tmux guard as worker dispatch and never falls back to an invisible daemon-born server.
 Healthy existing servers are adopted without a PID change, and restarting Shuttle leaves the backend and its active turns alive.
 Launch failures back off from 2 seconds to a 300-second cap.
-A retained owned dead pane and successful process scan can authorize native locked recovery of a stale socket after hard death.
+A refused socket, a dead or missing owned pane and a successful process scan can authorize native locked recovery of a stale socket after hard death.
 An unresponsive unowned socket, a missing socket with a live server holder, an uncertain process scan, or another manager still starting is a wait, not permission to launch a duplicate.
 Never remove a socket merely because a connection timed out.
 After reboot, Shuttle starts the absent dependency without releasing worker quarantine.

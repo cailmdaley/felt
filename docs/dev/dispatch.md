@@ -144,7 +144,7 @@ It never creates a project, thread, or model turn merely to establish readiness.
 Dispatch and capture preflight the cached health before creating a conversation; a non-ready backend returns retryable `backend_not_ready` waiting responses.
 The Poller shows the wait with zero failed attempts and retries on the ordinary poll, without the five-minute preflight cooldown.
 An explicit request isn't queued for an unbounded future launch, and a capture must be repeated after readiness.
-The backend's endpoint-specific tmux session survives Shuttle restarts; owned dead panes and healthy process observations authorize native locked stale recovery, never live-server replacement.
+The backend's endpoint-specific tmux session survives Shuttle restarts; a dead or missing owned pane, a refused socket and healthy process observations authorize native locked stale recovery, never live-server replacement.
 `GET /api/v1/version` exposes its independent `codex_backend` health.
 Terminal dispatch preflights its wrapper and tmux before creating a conversation.
 The backend owns the thread, configured model and effort, initial turn, and task assignment.

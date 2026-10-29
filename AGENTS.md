@@ -62,7 +62,7 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   `Shuttle.CodexBackend` reconciles asynchronously even under boot quarantine, adopts healthy servers untouched, and starts an absent server in tmux with clean worker identity.
   Its default control root is private literal `/tmp/shuttle-codex-<euid>-<SHA256(OS-hostname)[0:16]>`; `SHUTTLE_CODEX_SOCKET` is authoritative across daemon, Go messaging, and terminal viewers.
   `CODEX_HOME` stays persistent; authentication, configuration, and rollouts aren't moved to temporary storage.
-  Retained owned dead panes and healthy process scans authorize native locked stale-socket recovery; uncertain observations never authorize replacement.
+  A refused or missing socket with a healthy process scan and no live owned pane authorizes native locked stale-socket recovery; uncertain observations never authorize replacement.
   Dispatch waits retryably before creating a conversation, outside the five-minute preflight cooldown.
   `/api/v1/version` reports independent `codex_backend` health; Codex's native `daemon version` describes its own endpoint, not Shuttle's listener.
   Durable ownership records retain their pinned endpoint when defaults or configuration change.

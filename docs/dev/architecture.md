@@ -361,7 +361,7 @@ The manager starts `command codex app-server --listen unix://PATH` in an endpoin
 It scrubs worker identity, fiber, run, and tmux variables before starting the backend; it doesn't depend on an interactive Codex wrapper.
 The private endpoint root holds exclusively created launch scripts, while tmux owns the backend process across manager and Shuttle restarts.
 A healthy existing server is adopted untouched.
-A retained owned dead pane, a successful process scan with no server holder, and a refused or missing socket authorize recovery through Codex's native per-endpoint startup lock and stale-socket checks.
+A successful process scan with no server holder, no live owned pane (dead or gone), and a refused or missing socket authorize recovery through Codex's native per-endpoint startup lock and stale-socket checks.
 Remote TUI clients don't count as server holders.
 Unowned unresponsive sockets, missing sockets with live server holders, failed observations, and another manager still starting remain uncertain and never authorize replacement.
 Shuttle never kills a live backend, unlinks its socket, or restarts it for a config change.
