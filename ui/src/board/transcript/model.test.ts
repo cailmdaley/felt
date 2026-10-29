@@ -78,6 +78,14 @@ describe('TranscriptModel', () => {
     expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
   })
 
+  it('keeps an explicit unknown Shuttle receipt unclear despite its nonzero exit status', () => {
+    const messages = modelAfterCodexExec(
+      ['shuttle message work/child "The table is ready."'],
+      'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1,"output":"unknown shuttle://host/codex/session (msg-abc)"}',
+    ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: 'uncertain' }])
+  })
+
   it('uses explicit indices when concurrent nested commands finish out of order', () => {
     const first = 'shuttle message work/first "First result."'
     const second = 'shuttle message work/second "Second result."'

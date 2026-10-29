@@ -25,10 +25,10 @@ export type Entry =
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
-  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageIds?: string[]; commandOutcomes?: CommandOutcome[]; at?: number }
+  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageIds?: string[]; unknownMessageIds?: string[]; commandOutcomes?: CommandOutcome[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
-export type CommandOutcome = { index?: number; exitCode?: number; acceptedMessageIds: string[] }
+export type CommandOutcome = { index?: number; exitCode?: number; acceptedMessageIds: string[]; unknownMessageIds?: string[] }
 
 type ObjectValue = Record<string, unknown>
 
@@ -118,6 +118,19 @@ function acceptedMessageIds(text: string): string[] {
   return [...ids]
 }
 
+function unknownMessageIds(text: string): string[] {
+  const ids = new Set([...text.matchAll(/^\s*unknown\s+[^\r\n]*?\((msg-[\w-]+)\)\s*$/gim)].map(match => match[1]))
+  for (const line of text.split(/\r?\n/)) {
+    try {
+      const receipt = object(JSON.parse(line))
+      if (receipt && string(receipt.status) === 'unknown' && typeof receipt.message_id === 'string' && receipt.message_id.startsWith('msg-')) {
+        ids.add(receipt.message_id)
+      }
+    } catch { /* Plain text receipts use the status line above. */ }
+  }
+  return [...ids]
+}
+
 function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
   const record = object(value)
   if (!record) return undefined
@@ -132,11 +145,12 @@ function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
     ...(index === undefined ? {} : { index }),
     exitCode: result.exit_code as number,
     acceptedMessageIds: acceptedMessageIds(output),
+    unknownMessageIds: unknownMessageIds(output),
   }
 }
 
 function codexCommandOutcomes(text: string, exitCode?: unknown): CommandOutcome[] | undefined {
-  if (typeof exitCode === 'number') return [{ exitCode, acceptedMessageIds: acceptedMessageIds(text) }]
+  if (typeof exitCode === 'number') return [{ exitCode, acceptedMessageIds: acceptedMessageIds(text), unknownMessageIds: unknownMessageIds(text) }]
   // The Codex `exec` wrapper serializes each exec_command result after this header.
   const wrapperOutput = /^Script completed\r?\n[\s\S]*?\r?\nOutput:\r?\n([\s\S]*)$/i.exec(text)?.[1]?.trim()
   if (!wrapperOutput) return undefined
@@ -246,6 +260,7 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
       const id = string(block.tool_use_id)
       if (id) {
         const receipts = acceptedMessageIds(result.text)
+        const unknowns = unknownMessageIds(result.text)
         results.push(at({
           kind: 'result' as const,
           id,
@@ -254,6 +269,7 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
           images: result.images,
           ...(result.pictures ? { pictures: result.pictures } : {}),
           ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
+          ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
         }, time))
       }
     }
@@ -385,7 +401,11 @@ function piRecord(record: ObjectValue): Entry[] {
     const id = string(message.toolCallId)
     if (!id) return []
     const receipts = acceptedMessageIds(result.text)
-    return [at({ kind: 'result' as const, id, ...result, isError: message.isError === true, ...(receipts.length ? { acceptedMessageIds: receipts } : {}) }, time)]
+    const unknowns = unknownMessageIds(result.text)
+    return [at({ kind: 'result' as const, id, ...result, isError: message.isError === true,
+      ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
+      ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
+    }, time)]
   }
   if (role !== 'assistant') return []
 
@@ -478,9 +498,11 @@ function codexRecord(record: ObjectValue): Entry[] {
       const result = resultContent(payload.output)
       const commandOutcomes = codexCommandOutcomes(result.text, payload.exit_code)
       const receipts = acceptedMessageIds(result.text)
+      const unknowns = unknownMessageIds(result.text)
       return [at({ kind: 'result' as const, id, ...result,
         isError: payload.is_error === true || commandOutcomes?.some(outcome => outcome.exitCode !== undefined && outcome.exitCode !== 0) === true,
         ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
+        ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
         ...(commandOutcomes ? { commandOutcomes } : {}),
       }, time)]
     }

@@ -98,6 +98,25 @@ describe('Shuttle messages in transcripts', () => {
       { kind: 'shuttle-message', fiber: 'work/child', text: 'The actual message.' },
       { kind: 'tool' },
     ])
+
+    for (const command of [
+      `shuttle message work/child <<'BODY' -\nMessage through the trailing stdin argument.\nBODY`,
+      `shuttle message work/child --file - <<'BODY'\nMessage through --file stdin.\nBODY`,
+    ]) {
+      const entries = normalizeRecord({ type: 'assistant', message: { content: [{
+        type: 'tool_use', id: 'stdin-variant', name: 'Bash', input: { command },
+      }] } })
+      expect(entries[0]).toMatchObject({ kind: 'shuttle-message', text: expect.stringContaining('Message through') })
+    }
+  })
+
+  it('preserves a literal single-quoted command substitution as message text', () => {
+    const literal = '$(cat <<EOF\nLiteral code example\nEOF\n)'
+    const command = `shuttle message work/child '${literal}'`
+    const entries = normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'literal-heredoc', name: 'Bash', input: { command },
+    }] } })
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', text: literal })
   })
 
   it('does not absorb redirects or pipeline commands into the message text', () => {

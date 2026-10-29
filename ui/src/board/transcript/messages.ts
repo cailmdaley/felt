@@ -138,7 +138,7 @@ type CommandCollection = { sends: ParsedSend[]; chains: Map<string, boolean>; se
 const GLOBAL_VALUE_FLAGS = new Set(['-C', '--store'])
 const MESSAGE_VALUE_FLAGS = new Set(['--file', '--message-id', '--from', '--attach'])
 const MESSAGE_FLAGS = new Set(['--context-only', '--notify-wake', '--notify-when-idle', '--wake', '--json', '-j'])
-const CAT_HEREDOC = /\$\(\s*cat\s+<<-?\s*(['"]?)([\w.-]+)\1[\t ]*\r?\n([\s\S]*?)\r?\n\2[\t ]*\r?\n?[\t ]*\)/g
+const CAT_HEREDOC = /^\$\(\s*cat\s+<<-?\s*(['"]?)([\w.-]+)\1[\t ]*\r?\n([\s\S]*?)\r?\n\2[\t ]*\r?\n?[\t ]*\)/
 
 function optionValue(words: string[], index: number, flags: Set<string>): { flag: string; value?: string; next: number } | undefined {
   const word = words[index]
@@ -152,12 +152,38 @@ function optionValue(words: string[], index: number, flags: Set<string>): { flag
 function expandCatHereDocs(source: string): { source: string; substitutions: Map<string, string> } {
   const substitutions = new Map<string, string>()
   let next = 0
-  const expanded = source.replace(CAT_HEREDOC, (_match, _quote: string, _delimiter: string, body: string) => {
-    const marker = `__FELT_HEREDOC_${next++}__`
-    substitutions.set(marker, body)
-    return marker
-  })
-  return { source: expanded, substitutions }
+  let output = ''
+  let quote = ''
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index]
+    if (quote === "'") {
+      output += char
+      if (char === "'") quote = ''
+      continue
+    }
+    if (char === '\\') {
+      output += char
+      if (index + 1 < source.length) output += source[++index]
+      continue
+    }
+    if (quote === '"') {
+      if (char === '"') quote = ''
+    } else if (char === "'" || char === '"') {
+      quote = char
+    }
+    if (char === '$') {
+      const match = CAT_HEREDOC.exec(source.slice(index))
+      if (match) {
+        const marker = `__FELT_HEREDOC_${next++}__`
+        substitutions.set(marker, match[3])
+        output += marker
+        index += match[0].length - 1
+        continue
+      }
+    }
+    output += char
+  }
+  return { source: output, substitutions }
 }
 
 function readHereDocDelimiter(line: string, start: number): { delimiter: string; stripTabs: boolean; end: number } | undefined {
@@ -389,10 +415,15 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
   const text: string[] = []
   let source: string | undefined
   let heredocText: string | undefined
+  const heredocMarkers: string[] = []
+  let stdin = false
   let attachments = false
   let options = true
   const noteValueFlag = (flag: string, value?: string): void => {
-    if (flag === '--file') source = value ? `file: ${value}` : 'file'
+    if (flag === '--file') {
+      if (value === '-') { source = 'standard input'; stdin = true }
+      else source = value ? `file: ${value}` : 'file'
+    }
     if (flag === '--attach') {
       attachments = true
       source = source ?? (value ? `attachment: ${value}` : 'attachment')
@@ -401,7 +432,7 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
   for (; index < words.length; index++) {
     const word = words[index]
     if (heredocs.has(word)) {
-      if (source === 'standard input') heredocText = heredocs.get(word)
+      heredocMarkers.push(word)
       continue
     }
     if (options && word === '--') { options = false; continue }
@@ -417,10 +448,11 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
       if (!target && word.startsWith('-')) continue
     }
     if (!target) target = word
-    else if (word === '-' && text.length === 0) source = source ?? 'standard input'
+    else if (word === '-' && text.length === 0) { source = source ?? 'standard input'; stdin = true }
     else text.push(word)
   }
   if (!target) return null
+  if (stdin && heredocMarkers.length) heredocText = heredocs.get(heredocMarkers.at(-1)!)
   const body = heredocText ?? text.join(' ')
   const bodySource = heredocText === undefined ? source : undefined
   if (!body && !bodySource && !attachments) return null

@@ -123,20 +123,29 @@ export class TranscriptModel {
         }
         const explicitlyIndexed = (entry.commandOutcomes?.length ?? 0) > 0 && entry.commandOutcomes!.every(outcome => outcome.index !== undefined)
         const matchedReceipts = new Map<number, string[]>()
+        const matchedUnknowns = new Map<number, string[]>()
         if (explicitlyIndexed) {
           for (const outcome of entry.commandOutcomes!) {
             if (outcome.index !== undefined && outcome.acceptedMessageIds.length) {
               matchedReceipts.set(outcome.index, [...(matchedReceipts.get(outcome.index) ?? []), ...outcome.acceptedMessageIds])
             }
+            if (outcome.index !== undefined && outcome.unknownMessageIds?.length) {
+              matchedUnknowns.set(outcome.index, [...(matchedUnknowns.get(outcome.index) ?? []), ...outcome.unknownMessageIds])
+            }
           }
         }
         const allReceiptsMatchRows = !explicitlyIndexed && (entry.acceptedMessageIds?.length ?? 0) === messages.length && messages.length > 0
+        const allUnknownsMatchRows = !explicitlyIndexed && (entry.unknownMessageIds?.length ?? 0) === messages.length && messages.length > 0
         const indexedOutcomes = entry.commandOutcomes ?? []
         for (const [messageIndex, reference] of messages.entries()) {
           const message = reference.message
           const commandIndex = message.commandIndex ?? 0
           const commandRows = messages.filter(other => (other.message.commandIndex ?? 0) === commandIndex)
           const commandReceipts = matchedReceipts.get(commandIndex) ?? []
+          const commandUnknowns = matchedUnknowns.get(commandIndex) ?? []
+          const commandOutcomeUnknowns = !explicitlyIndexed && indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1
+            ? indexedOutcomes[0].unknownMessageIds ?? []
+            : commandUnknowns
           const commandMessageIndex = commandRows.indexOf(reference)
           const receiptMatches = explicitlyIndexed
             ? commandReceipts.length === commandRows.length && !!commandReceipts[commandMessageIndex]
@@ -144,6 +153,16 @@ export class TranscriptModel {
               || allReceiptsMatchRows && !!entry.acceptedMessageIds?.[messageIndex]
           if (receiptMatches) {
             message.status = 'sent'
+            continue
+          }
+
+          const unknownReceiptMatches = explicitlyIndexed
+            ? commandUnknowns.length === commandRows.length && !!commandUnknowns[commandMessageIndex]
+            : messages.length === 1 && (entry.unknownMessageIds?.length ?? 0) > 0
+              || allUnknownsMatchRows && !!entry.unknownMessageIds?.[messageIndex]
+              || commandRows.length === 1 && commandOutcomeUnknowns.length > 0
+          if (unknownReceiptMatches) {
+            message.status = 'uncertain'
             continue
           }
 
