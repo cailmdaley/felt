@@ -8,6 +8,68 @@ defmodule Shuttle.OriginRouterTest do
 
   @remotes [%{name: "candide", url: "http://localhost:4001"}]
 
+  defmodule StreamClient do
+    def stream_get(url, headers, owner, timeout) do
+      send(owner, {:stream_request, url, headers, owner, timeout})
+      Shuttle.Env.app(:stream_result, {:ok, :opaque_stream})
+    end
+  end
+
+  defmodule ReadOnlyClient do
+    def get(_url, _timeout), do: {:ok, "{}"}
+  end
+
+  describe "forward_stream/4" do
+    setup do
+      Shuttle.Test.Env.put_app_env(:write_forward_client, StreamClient)
+      {:ok, remote: %Remote{name: "owner", url: "http://localhost:4001"}}
+    end
+
+    test "strips both origin keys and forwards the URL, headers, owner and connect timeout", %{
+      remote: remote
+    } do
+      owner = self()
+      headers = [{"accept", "text/event-stream"}]
+
+      assert {:ok, :opaque_stream} =
+               OriginRouter.forward_stream(
+                 remote,
+                 "/api/v1/transcript/stream",
+                 %{:origin => "hub", "origin" => "owner", "host" => "local", "offset" => "42"},
+                 req_headers: headers,
+                 owner: owner,
+                 connect_timeout_ms: 1234
+               )
+
+      assert_receive {:stream_request, url, ^headers, ^owner, 1234}
+
+      assert %URI{host: "localhost", port: 4001, path: "/api/v1/transcript/stream", query: query} =
+               URI.parse(url)
+
+      assert URI.decode_query(query) == %{"host" => "local", "offset" => "42"}
+    end
+
+    test "defaults to the calling process, no headers and a bounded connect timeout", %{
+      remote: remote
+    } do
+      owner = self()
+      assert {:ok, :opaque_stream} = OriginRouter.forward_stream(remote, "/stream", %{})
+      assert_receive {:stream_request, _url, [], ^owner, 15_000}
+    end
+
+    test "returns transport errors without changing their shape", %{remote: remote} do
+      Shuttle.Test.Env.put_app_env(:stream_result, {:error, :econnrefused})
+      assert {:error, :econnrefused} = OriginRouter.forward_stream(remote, "/stream", %{})
+    end
+
+    test "refuses a client without stream_get instead of buffering a GET", %{remote: remote} do
+      Shuttle.Test.Env.put_app_env(:write_forward_client, ReadOnlyClient)
+
+      assert {:error, :stream_not_supported} =
+               OriginRouter.forward_stream(remote, "/stream", %{"origin" => "owner"})
+    end
+  end
+
   describe "route/2" do
     test "nil/empty/local/own-host origins all route :local, quietly" do
       for origin <- [nil, "", "local", "laptop"] do

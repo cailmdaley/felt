@@ -1354,10 +1354,38 @@ defmodule Shuttle.RemoteRegistry.Client do
                content_type :: String.t(), body :: binary()}
               | {:error, term()}
 
+  @typedoc "An opaque stream identity, passed back to stream_cancel/1."
+  @type stream_id :: reference()
+  @type stream_event ::
+          {:open, [{String.t(), String.t()}], cursor :: term()}
+          | {:data, binary()}
+          | :done
+          | {:response, non_neg_integer(), [{String.t(), String.t()}], binary()}
+          | {:error, term()}
+
+  @doc "Start a flow-controlled GET; owner receives {:remote_stream, id, stream_event}."
+  @callback stream_get(
+              url :: String.t(),
+              req_headers :: [{String.t(), String.t()}],
+              owner :: pid(),
+              connect_timeout_ms :: non_neg_integer()
+            ) :: {:ok, stream_id()} | {:error, term()}
+
+  @callback stream_next(cursor :: term()) :: :ok
+
+  @doc "Cancel from the process that called stream_get/4, including after completion."
+  @callback stream_cancel(id :: stream_id()) :: :ok
+
   # Only file responses that need conditional-GET relay use get_file/3. Clients
   # without it retain the binary-safe get_file/2 path; read-only registry stubs
   # need only get/2.
-  @optional_callbacks post: 4, get_file: 2, get_file: 3, get: 3
+  @optional_callbacks post: 4,
+                      get_file: 2,
+                      get_file: 3,
+                      get: 3,
+                      stream_get: 4,
+                      stream_next: 1,
+                      stream_cancel: 1
 end
 
 defmodule Shuttle.RemoteRegistry.Client.Default do
@@ -1490,6 +1518,122 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
+  @doc """
+  Start a streaming GET with a bounded connection wait and no request deadline.
+
+  Events go to `owner`; the process calling this function owns cancellation and
+  must call `stream_cancel/1` in its cleanup, even after completion. The opaque
+  reference indexes that process's request/profile pair. The handler cursor in
+  `{:open, headers, cursor}` grants one more delivery through `stream_next/1`.
+  """
+  @impl true
+  def stream_get(url, req_headers, owner, connect_timeout_ms)
+      when is_binary(url) and is_list(req_headers) and is_pid(owner) and
+             is_integer(connect_timeout_ms) and connect_timeout_ms >= 0 do
+    with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
+      id = make_ref()
+
+      headers =
+        [
+          {"connection", "close"}
+          | Enum.reject(req_headers, fn {name, _} -> String.downcase(name) == "connection" end)
+        ]
+        |> Enum.map(fn {name, value} ->
+          {String.to_charlist(name), String.to_charlist(value)}
+        end)
+
+      http_opts =
+        request_url
+        |> http_opts(connect_timeout_ms, private_dial?)
+        |> Keyword.put(:timeout, :infinity)
+
+      opts = [
+        sync: false,
+        stream: {:self, :once},
+        body_format: :binary,
+        receiver: {__MODULE__, :relay_stream_message, [owner, id]}
+      ]
+
+      case :httpc.request(
+             :get,
+             {String.to_charlist(request_url), headers},
+             http_opts,
+             opts,
+             profile
+           ) do
+        {:ok, request_id} ->
+          Process.put({__MODULE__, :stream, id}, {request_id, profile})
+          {:ok, id}
+
+        {:error, reason} ->
+          transport_error(reason, private_dial?, url)
+      end
+    end
+  rescue
+    e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @impl true
+  def stream_next(cursor) do
+    :httpc.stream_next(cursor)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  @impl true
+  def stream_cancel(id) do
+    case Process.delete({__MODULE__, :stream, id}) do
+      {request_id, profile} -> :httpc.cancel_request(request_id, profile)
+      nil -> :ok
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
+  # httpc_response:send/2 invokes MFA receivers with [ReplyInfo | Args].
+  # ReplyInfo retains the request id, but has no outer {:http, ...} wrapper.
+  # This runs in the handler: translate and send only, without waiting for credit.
+  @doc false
+  def relay_stream_message(reply, owner, id) do
+    event =
+      case reply do
+        {_request_id, :stream_start, headers, cursor} ->
+          {:open, normalize_headers(headers), cursor}
+
+        {_request_id, :stream, bytes} ->
+          {:data, IO.iodata_to_binary(bytes)}
+
+        {_request_id, :stream_end, _headers} ->
+          :done
+
+        {_request_id, {{_version, status, _reason}, headers, body}} ->
+          {:response, status, normalize_headers(headers), IO.iodata_to_binary(body)}
+
+        {_request_id, {:error, reason}} ->
+          {:error, reason}
+      end
+
+    send(owner, {:remote_stream, id, event})
+    :ok
+  rescue
+    e ->
+      send(owner, {:remote_stream, id, {:error, {:exception, Exception.message(e)}}})
+      :ok
+  catch
+    kind, reason ->
+      send(owner, {:remote_stream, id, {:error, {kind, reason}}})
+      :ok
+  end
+
   # HEAD uses the same profile, proxy, private dial, and verified TLS setup.
   def head_file(url, req_headers, timeout_ms)
       when is_binary(url) and is_list(req_headers) and is_integer(timeout_ms) do
@@ -1499,7 +1643,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
-  # The one httpc call every callback makes: `{:ok, status, headers, body}`
+  # Buffered requests return `{:ok, status, headers, body}`
   # with lowercased string headers, or `{:error, reason}`.
   #
   # `body_format: :binary` returns the response body as a raw binary. Without

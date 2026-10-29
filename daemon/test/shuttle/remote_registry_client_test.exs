@@ -86,6 +86,270 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
              {:error, {:http_status, 503, @utf8_body}}
   end
 
+  defmodule StreamPlug do
+    @moduledoc false
+    @behaviour Plug
+
+    @impl true
+    def init(opts), do: opts
+
+    @impl true
+    def call(%{request_path: "/file"} = conn, _opts),
+      do: Plug.Conn.send_resp(conn, 200, "file — bytes")
+
+    def call(conn, opts) do
+      owner = Keyword.fetch!(opts, :owner)
+
+      conn =
+        conn
+        |> Plug.Conn.put_resp_content_type("text/event-stream")
+        |> Plug.Conn.put_resp_header("cache-control", "no-cache, no-transform")
+        |> Plug.Conn.send_chunked(200)
+
+      send(owner, {:stream_server, self(), Plug.Conn.get_req_header(conn, "connection")})
+
+      if Keyword.get(opts, :immediate_body, false) do
+        {:ok, conn} = Plug.Conn.chunk(conn, ": open\n\n")
+        serve(conn, owner)
+      else
+        receive do
+          :start_body ->
+            {:ok, conn} = Plug.Conn.chunk(conn, ": open\n\n")
+            serve(conn, owner)
+        after
+          15_000 -> conn
+        end
+      end
+    end
+
+    defp serve(conn, owner) do
+      receive do
+        {:emit, token, bytes} ->
+          case Plug.Conn.chunk(conn, bytes) do
+            {:ok, conn} ->
+              send(owner, {:emitted, token})
+              serve(conn, owner)
+
+            {:error, reason} ->
+              send(owner, {:closed, token, reason})
+              conn
+          end
+
+        {:probe_closed, token} ->
+          probe_closed(conn, owner, token, 100)
+
+        :finish ->
+          send(owner, :server_finished)
+          conn
+      after
+        15_000 -> conn
+      end
+    end
+
+    defp probe_closed(conn, owner, token, remaining) do
+      case Plug.Conn.chunk(conn, ": cancelled\n\n") do
+        {:error, reason} ->
+          send(owner, {:closed, token, reason})
+          conn
+
+        {:ok, conn} when remaining > 0 ->
+          receive do
+          after
+            10 -> probe_closed(conn, owner, token, remaining - 1)
+          end
+
+        {:ok, conn} ->
+          send(owner, {:still_open, token})
+          conn
+      end
+    end
+  end
+
+  defp stream_server(opts \\ []) do
+    server =
+      start_supervised!(
+        {Bandit, plug: {StreamPlug, [owner: self()] ++ opts}, port: 0, ip: {127, 0, 0, 1}}
+      )
+
+    {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+    "http://127.0.0.1:#{port}"
+  end
+
+  defp open_stream(url, connect_timeout \\ @http_timeout_ms) do
+    assert {:ok, id} =
+             Default.stream_get(
+               url,
+               [{"accept", "text/event-stream"}, {"Connection", "keep-alive"}],
+               self(),
+               connect_timeout
+             )
+
+    assert_receive {:stream_server, server, ["close"]}, @http_timeout_ms
+    assert_receive {:remote_stream, ^id, {:open, headers, cursor}}, @http_timeout_ms
+    assert {"content-type", "text/event-stream; charset=utf-8"} in headers
+    # Separate headers from the first body bytes to make the credit tests
+    # independent of httpc's initial-body buffering and TCP packet boundaries.
+    :ok = Default.stream_next(cursor)
+    send(server, :start_body)
+    assert_receive {:remote_stream, ^id, {:data, ": open\n\n"}}, @http_timeout_ms
+    {id, cursor, server}
+  end
+
+  defp receive_stream_bytes(_id, _cursor, remaining) when remaining <= 0, do: ""
+
+  defp receive_stream_bytes(id, cursor, remaining) do
+    assert_receive {:remote_stream, ^id, {:data, bytes}}, @http_timeout_ms
+    :ok = Default.stream_next(cursor)
+    bytes <> receive_stream_bytes(id, cursor, remaining - byte_size(bytes))
+  end
+
+  describe "streaming transport" do
+    test "delivers bytes before completion and waits for stream_next after each data event" do
+      {id, cursor, server} = open_stream(stream_server() <> "/stream")
+
+      try do
+        for n <- 1..3 do
+          bytes = "id: #{n}\ndata: γ×κ — #{n}\n\n"
+          token = make_ref()
+          send(server, {:emit, token, bytes})
+          assert_receive {:emitted, ^token}, @http_timeout_ms
+          refute_receive {:remote_stream, ^id, _}, 100
+          assert :ok = Default.stream_next(cursor)
+          assert_receive {:remote_stream, ^id, {:data, ^bytes}}, @http_timeout_ms
+          refute_received :server_finished
+        end
+
+        :ok = Default.stream_next(cursor)
+        send(server, :finish)
+        assert_receive :server_finished, @http_timeout_ms
+        assert_receive {:remote_stream, ^id, :done}, @http_timeout_ms
+      after
+        assert :ok = Default.stream_cancel(id)
+        send(server, :finish)
+      end
+    end
+
+    test "an immediate body arrives intact before completion, independent of TCP chunk boundaries" do
+      url = stream_server(immediate_body: true) <> "/stream"
+      assert {:ok, id} = Default.stream_get(url, [], self(), @http_timeout_ms)
+      assert_receive {:stream_server, server, ["close"]}, @http_timeout_ms
+      assert_receive {:remote_stream, ^id, {:open, _headers, cursor}}, @http_timeout_ms
+
+      try do
+        :ok = Default.stream_next(cursor)
+        token = make_ref()
+        send(server, {:emit, token, "data: γ×κ\n\n"})
+        assert_receive {:emitted, ^token}, @http_timeout_ms
+        body = receive_stream_bytes(id, cursor, byte_size(": open\n\ndata: γ×κ\n\n"))
+        assert body == ": open\n\ndata: γ×κ\n\n"
+        refute_received :server_finished
+      after
+        :ok = Default.stream_cancel(id)
+        send(server, :finish)
+      end
+    end
+
+    test "cancel closes the socket, stops delivery and is idempotent" do
+      {id, cursor, server} = open_stream(stream_server() <> "/stream")
+      monitor = Process.monitor(cursor)
+      assert :ok = Default.stream_cancel(id)
+      assert :ok = Default.stream_cancel(id)
+      assert_receive {:DOWN, ^monitor, :process, ^cursor, _}, @http_timeout_ms
+      token = make_ref()
+      send(server, {:probe_closed, token})
+      assert_receive {:closed, ^token, _reason}, @http_timeout_ms
+      assert :ok = Default.stream_next(cursor)
+      refute_receive {:remote_stream, ^id, {:data, _}}, 100
+    end
+
+    @tag :timing
+    test "an open stream does not stall a concurrent get_file on the same profile" do
+      base = stream_server()
+      {id, _cursor, server} = open_stream(base <> "/stream")
+
+      try do
+        task = Task.async(fn -> Default.get_file(base <> "/file", [], @http_timeout_ms) end)
+        assert {:ok, 200, _headers, _type, "file — bytes"} = Task.await(task, 1_000)
+        refute_received :server_finished
+      after
+        :ok = Default.stream_cancel(id)
+        send(server, :finish)
+      end
+    end
+
+    @tag :timing
+    test "the connect timeout does not limit the lifetime of an open stream" do
+      {id, cursor, server} = open_stream(stream_server() <> "/stream", 500)
+
+      try do
+        refute_receive {:remote_stream, ^id, _}, 600
+        token = make_ref()
+        send(server, {:emit, token, "data: still here\n\n"})
+        assert_receive {:emitted, ^token}, @http_timeout_ms
+        :ok = Default.stream_next(cursor)
+        assert_receive {:remote_stream, ^id, {:data, "data: still here\n\n"}}, @http_timeout_ms
+      after
+        :ok = Default.stream_cancel(id)
+        send(server, :finish)
+      end
+    end
+
+    test "a non-streamed 404 keeps its status, headers and binary body" do
+      server =
+        start_supervised!(
+          {Bandit, plug: {EchoPlug, body: @utf8_body, status: 404}, port: 0, ip: {127, 0, 0, 1}}
+        )
+
+      {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+
+      assert {:ok, id} =
+               Default.stream_get(
+                 "http://127.0.0.1:#{port}/missing",
+                 [],
+                 self(),
+                 @http_timeout_ms
+               )
+
+      try do
+        assert_receive {:remote_stream, ^id, {:response, 404, headers, @utf8_body}},
+                       @http_timeout_ms
+
+        assert {"content-type", "application/json; charset=utf-8"} in headers
+        refute_received {:remote_stream, ^id, {:open, _, _}}
+      after
+        :ok = Default.stream_cancel(id)
+      end
+    end
+
+    test "asynchronous connection failures are sent to the owner" do
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+      :ok = :gen_tcp.close(listener)
+
+      assert {:ok, id} =
+               Default.stream_get("http://127.0.0.1:#{port}/stream", [], self(), @http_timeout_ms)
+
+      try do
+        assert_receive {:remote_stream, ^id, {:error, _reason}}, @http_timeout_ms
+      after
+        :ok = Default.stream_cancel(id)
+      end
+    end
+
+    test "the receiver cannot crash its httpc handler on malformed replies" do
+      id = make_ref()
+
+      assert :ok =
+               Default.relay_stream_message(
+                 {make_ref(), :stream_start, :bad_headers, self()},
+                 self(),
+                 id
+               )
+
+      assert_receive {:remote_stream, ^id, {:error, _}}
+    end
+  end
+
   describe "the fleet proxy" do
     test "lands on our proxied profile and nowhere else", %{url: url} do
       # httpc's proxy is per profile, not per request, so the point of owning
@@ -165,6 +429,9 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
                  {:error, reason}
 
         assert Default.head_file("https://hub.example.invalid/x", [], @http_timeout_ms) ==
+                 {:error, reason}
+
+        assert Default.stream_get("https://hub.example.invalid/x", [], self(), @http_timeout_ms) ==
                  {:error, reason}
       end
     end

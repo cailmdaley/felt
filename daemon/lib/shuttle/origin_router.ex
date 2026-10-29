@@ -37,6 +37,7 @@ defmodule Shuttle.OriginRouter do
   @forward_transit_margin_ms 10_000
   # A forwarded read serves the owner's files and feeds, not a Poller call.
   @read_forward_timeout_ms 30_000
+  @stream_connect_timeout_ms 15_000
   @file_range_limit 4 * 1024 * 1024
   @file_error_limit 64 * 1024
 
@@ -162,6 +163,34 @@ defmodule Shuttle.OriginRouter do
     case client.get_file(url, timeout) do
       {:ok, status, content_type, body} -> {:forwarded, status, content_type, body}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
+    end
+  end
+
+  @doc """
+  Open a flow-controlled GET to an owner, stripping `origin` from the query.
+
+  Returns the client's opaque stream id or transport error without buffering
+  the response. A client without `stream_get/4` returns
+  `{:error, :stream_not_supported}`. Events go to `:owner` (the caller by
+  default); `:req_headers` defaults to `[]` and `:connect_timeout_ms` to 15 s.
+  The caller owns cancellation through `forward_client().stream_cancel/1`.
+  """
+  @spec forward_stream(Remote.t(), String.t(), map(), keyword()) ::
+          {:ok, Shuttle.RemoteRegistry.Client.stream_id()} | {:error, term()}
+  def forward_stream(%Remote{} = remote, path, query, opts \\ []) when is_map(query) do
+    client = forward_client()
+    stripped = query |> Map.delete("origin") |> Map.delete(:origin)
+    url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
+
+    if Code.ensure_loaded?(client) and function_exported?(client, :stream_get, 4) do
+      client.stream_get(
+        url,
+        Keyword.get(opts, :req_headers, []),
+        Keyword.get(opts, :owner, self()),
+        Keyword.get(opts, :connect_timeout_ms, @stream_connect_timeout_ms)
+      )
+    else
+      {:error, :stream_not_supported}
     end
   end
 
