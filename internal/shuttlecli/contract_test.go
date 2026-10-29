@@ -49,9 +49,6 @@ func TestMigrateContractMatchesDaemon(t *testing.T) {
 		t.Fatal("daemon has no expected contract level")
 	}
 	level, err := strconv.Atoi(string(match[1]))
-	if err == nil && level == 21 && ShuttleContractLevel == 22 {
-		t.Skip("family board daemon level 22 is integrated in the parallel worktree")
-	}
 	if err != nil || level != ShuttleContractLevel {
 		t.Fatalf("daemon level %s differs from CLI %d", match[1], ShuttleContractLevel)
 	}
