@@ -1332,12 +1332,18 @@ defmodule Shuttle.Poller do
     plan_fun = poll_plan_task_fun(state, parent, poll_token)
     {:env, plan_environment} = :erlang.fun_info(plan_fun, :env)
     plan_environment_words = :erts_debug.flat_size(plan_environment)
+    plan_inputs = captured_poll_inputs!(plan_environment)
+    plan_input_keys = plan_inputs |> Map.keys() |> Enum.sort()
+    plan_input_fields = poll_input_field_measurements(plan_inputs, word_size_bytes)
 
     read_fun =
       poll_read_task_fun(state, parent, poll_token, plan)
 
     {:env, read_environment} = :erlang.fun_info(read_fun, :env)
     read_environment_words = :erts_debug.flat_size(read_environment)
+    read_inputs = captured_poll_inputs!(read_environment)
+    read_input_keys = read_inputs |> Map.keys() |> Enum.sort()
+    read_input_fields = poll_input_field_measurements(read_inputs, word_size_bytes)
     measurement_microseconds = System.monotonic_time(:microsecond) - measurement_started_at
 
     measurements = %{
@@ -1346,14 +1352,16 @@ defmodule Shuttle.Poller do
       word_size_bytes: word_size_bytes,
       state: %{words: state_words, bytes: state_words * word_size_bytes},
       semantics:
-        "flat_size estimates flattened message and spawn term copy size; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS",
+        "flat_size estimates flattened message and spawn term copy size; input_fields measure each input-map value separately and exclude map/environment overhead and other captured terms; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS",
       poll_plan_task_environment: %{
-        input_keys: captured_poll_input_keys!(plan_environment),
+        input_keys: plan_input_keys,
+        input_fields: plan_input_fields,
         words: plan_environment_words,
         bytes: plan_environment_words * word_size_bytes
       },
       poll_read_task_environment: %{
-        input_keys: captured_poll_input_keys!(read_environment),
+        input_keys: read_input_keys,
+        input_fields: read_input_fields,
         words: read_environment_words,
         bytes: read_environment_words * word_size_bytes
       }
@@ -5497,12 +5505,19 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp captured_poll_input_keys!(environment) do
+  defp captured_poll_inputs!(environment) do
     case Enum.filter(environment, &match?(%{felt_stores: _}, &1)) do
-      [%{felt_stores: _} = inputs] -> inputs |> Map.keys() |> Enum.sort()
+      [%{felt_stores: _} = inputs] -> inputs
       [] -> raise ArgumentError, "poll task environment is missing its captured inputs"
       _ -> raise ArgumentError, "poll task environment has ambiguous captured inputs"
     end
+  end
+
+  defp poll_input_field_measurements(inputs, word_size_bytes) do
+    Map.new(inputs, fn {field, value} ->
+      words = :erts_debug.flat_size(value)
+      {field, %{words: words, bytes: words * word_size_bytes}}
+    end)
   end
 
   defp poll_read_task_fun(%State{} = state, parent, poll_token, discovery_plan) do

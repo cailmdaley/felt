@@ -83,11 +83,13 @@ defmodule Shuttle.PollerTest do
              state: %{words: state_words, bytes: state_bytes},
              poll_plan_task_environment: %{
                input_keys: plan_input_keys,
+               input_fields: plan_input_fields,
                words: plan_words,
                bytes: plan_bytes
              },
              poll_read_task_environment: %{
                input_keys: read_input_keys,
+               input_fields: read_input_fields,
                words: read_words,
                bytes: read_bytes
              }
@@ -114,12 +116,25 @@ defmodule Shuttle.PollerTest do
              :task_reads
            ]
 
+    assert plan_input_fields |> Map.keys() |> Enum.sort() == plan_input_keys
+    assert read_input_fields |> Map.keys() |> Enum.sort() == read_input_keys
+
+    Enum.each(plan_input_fields, fn {field, measurement} ->
+      words = :erts_debug.flat_size(Map.fetch!(before, field))
+      assert measurement == %{words: words, bytes: words * baseline.word_size_bytes}
+    end)
+
+    Enum.each(read_input_fields, fn {field, measurement} ->
+      words = :erts_debug.flat_size(Map.fetch!(before, field))
+      assert measurement == %{words: words, bytes: words * baseline.word_size_bytes}
+    end)
+
     assert word_size_bytes > 0
     assert is_integer(measurement_microseconds)
     assert measurement_microseconds >= 0
 
     assert semantics ==
-             "flat_size estimates flattened message and spawn term copy size; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS"
+             "flat_size estimates flattened message and spawn term copy size; input_fields measure each input-map value separately and exclude map/environment overhead and other captured terms; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS"
 
     assert state_words == :erts_debug.flat_size(before)
     assert state_bytes == state_words * word_size_bytes
@@ -147,8 +162,22 @@ defmodule Shuttle.PollerTest do
     assert with_large_cache.poll_plan_task_environment.words ==
              with_large_excluded_field.poll_plan_task_environment.words
 
+    assert with_large_cache.poll_plan_task_environment.input_fields ==
+             with_large_excluded_field.poll_plan_task_environment.input_fields
+
     assert with_large_cache.poll_read_task_environment.words >
              with_large_excluded_field.poll_read_task_environment.words
+
+    assert with_large_cache.poll_read_task_environment.input_fields.document_cache.words >
+             with_large_excluded_field.poll_read_task_environment.input_fields.document_cache.words
+
+    refute :document_cache in with_large_cache.poll_plan_task_environment.input_keys
+
+    assert Map.delete(with_large_cache.poll_read_task_environment.input_fields, :document_cache) ==
+             Map.delete(
+               with_large_excluded_field.poll_read_task_environment.input_fields,
+               :document_cache
+             )
 
     assert :sys.get_state(poller, @state_timeout).document_cache == large_document_cache
   end
