@@ -4,9 +4,7 @@ defmodule Shuttle.BoardFamily do
   alias Shuttle.{EventStream, Messaging, SessionBinding, Threads}
 
   @doc "Build a session index from cached worker identities and receiver succession."
-  def session_index(entries, own_host) do
-    bindings = EventStream.session_bindings()
-
+  def session_index(entries, own_host, bindings \\ EventStream.session_bindings()) do
     runtime =
       Enum.reduce(entries, %{}, fn entry, acc ->
         fiber = entry.fiber

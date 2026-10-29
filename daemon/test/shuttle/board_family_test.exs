@@ -109,7 +109,26 @@ defmodule Shuttle.BoardFamilyTest do
         "resolved" => %{"agent" => %{"cli" => "codex"}}
       })
 
-    sessions = BoardFamily.session_index([child], "host")
+    now = System.system_time(:millisecond)
+
+    start = %{
+      "type" => "session_start",
+      "sessionId" => "runtime-session",
+      "harness" => "codex",
+      "receiverPid" => 42,
+      "receiverBirth" => "birth",
+      "timestamp" => now
+    }
+
+    successor = %{start | "sessionId" => "successor", "timestamp" => now + 1}
+
+    bindings =
+      Shuttle.SessionBinding.new()
+      |> Shuttle.SessionBinding.apply_event(start, now)
+      |> Shuttle.SessionBinding.apply_event(successor, now)
+
+    sessions = BoardFamily.session_index([child], "host", bindings)
+    assert sessions[{"host", "codex", "successor"}] == "child"
     assert sessions[{"host", "codex", "runtime-session"}] == "child"
     assert sessions[{"host", "pi", "ledger-session"}] == "child"
     refute Map.has_key?(sessions, {"host", "claude", "ledger-session"})
