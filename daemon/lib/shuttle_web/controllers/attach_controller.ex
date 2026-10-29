@@ -1,6 +1,6 @@
 defmodule ShuttleWeb.AttachController do
   @moduledoc """
-  Open a tmux session in kitty: `POST /api/v1/attach`.
+  Open a conversation in this host's terminal display: `POST /api/v1/attach`.
 
   Two bodies:
 
@@ -9,20 +9,20 @@ defmodule ShuttleWeb.AttachController do
       live.
     * `{ "session": "<uuid>", "shuttle_host": "..." }` — a past harness session,
       from a History row. The host that ran it first starts (or finds) the
-      tmux session resuming it (`Shuttle.SessionResume`; forwarded to
+      terminal resuming it (`Shuttle.SessionResume`; forwarded to
       `POST /api/v1/sessions/resume` when that host is remote), then the tab
       attaches to it as it would to a worker.
 
   Unlike the kanban write-plane this is **not** owner-routed: the terminal must
   open on the machine serving the UI (where the human is), so the receiving
-  daemon always opens the tab locally — for a remote host it opens a local
-  kitty tab that `ssh`es there (see `Shuttle.Kitty`).
+  daemon always opens the viewer locally. `Shuttle.Opener` selects Rex or
+  kitty for this host's display and uses ssh for remote tmux terminals.
 
   `shuttle_host` is optional; absent/own-host → local. Returns 200
   `{ "attached": true, "session": <tmux session> }` on success, 400 for a
   missing or malformed session or a non-string host, 409 when the session is
-  that host's running worker (attach to its tmux instead), 422 when the host
-  cannot resume it or is unknown, 502 when kitty or the remote can't be reached
+  that host's running worker (attach to its terminal instead), 422 when the host
+  cannot resume it or is unknown, 502 when the display or remote can't be reached
   (or the remote's daemon predates the resume route).
   """
 
@@ -96,7 +96,7 @@ defmodule ShuttleWeb.AttachController do
   defp prepare_terminal(_tmux, _host), do: :ok
 
   defp attach(conn, tmux, host) do
-    case kitty().open(tmux, host) do
+    case opener().open(tmux, host) do
       :ok ->
         json(conn, %{attached: true, session: tmux})
 
@@ -155,5 +155,5 @@ defmodule ShuttleWeb.AttachController do
     end
   end
 
-  defp kitty, do: Shuttle.Env.app(:kitty_impl, Shuttle.Kitty)
+  defp opener, do: Shuttle.Env.app(:opener_impl, Shuttle.Opener)
 end

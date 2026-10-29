@@ -9,7 +9,7 @@ export interface ConversationAction {
 /** Offer only destinations that can open this recorded conversation. */
 export function conversationActions(webLink: string | null | undefined, desktop: boolean, terminal?: () => void): ConversationAction[] {
   const actions: ConversationAction[] = []
-  if (desktop && terminal) actions.push({ label: 'Open in Terminal (Kitty)', run: terminal })
+  if (desktop && terminal) actions.push({ label: 'Open in terminal', run: terminal })
   const web = claudeWebLink(webLink)
   if (web) {
     actions.push({ label: 'Open in Claude browser', href: web })

@@ -720,7 +720,7 @@ defmodule Shuttle.AppWorkersTest do
     tmux = WorkerBackend.tmux(ref)
     Runner.remove_tmux_session(tmux)
     Env.put_app_env(:terminal_runner, Runner)
-    Env.put_app_env(:kitty_impl, Kitty)
+    Env.put_app_env(:opener_impl, Kitty)
 
     body =
       post(

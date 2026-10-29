@@ -16,6 +16,15 @@ describe('dispatchIneligibleReason', () => {
     expect(dispatchIneligibleReason({ reason: 'tmux_server_unavailable' })).toContain('kitty')
   })
 
+  it('names Rex and Rex Server access as the remedy for an unavailable Rex server', () => {
+    const reason = dispatchIneligibleReason({ reason: 'rex_server_unavailable' })
+    expect(reason).toContain('Open Rex')
+    expect(reason).toContain('grant Rex Server access')
+    expect(reason).toContain('Full Disk Access')
+    expect(reason).not.toContain('kitty')
+    expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'rex_server_unavailable' })).toBe(reason)
+  })
+
   it('falls back to per-detail copy when the daemon sends no message', () => {
     expect(dispatchIneligibleReason({ reason: 'not_eligible', detail: 'project_dir_missing' }))
       .toBe("The fiber's project_dir does not exist on the owning host.")

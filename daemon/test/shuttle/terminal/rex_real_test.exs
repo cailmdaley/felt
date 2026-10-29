@@ -93,6 +93,84 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
+  test "unbound viewers dedupe while live and destroy their own empty sessions on exit", %{
+    root: root
+  } do
+    label = "probe-viewer@tmux"
+    receipt = Path.join(root, "viewer-env")
+    gate = Path.join(root, "viewer-exit")
+    Env.put_env("SSH_AUTH_SOCK", "/tmp/probe-daemon-agent")
+
+    command = [
+      "/bin/bash",
+      "-c",
+      "printf '%s' \"$SSH_AUTH_SOCK\" > '#{receipt}'; while [ ! -e '#{gate}' ]; do /bin/sleep 0.05; done"
+    ]
+
+    assert {:ok, sid} = Backend.viewer(@runner, label, command)
+    await(fn -> File.exists?(receipt) end)
+    assert File.read!(receipt) == "/tmp/probe-daemon-agent"
+    assert {:ok, ^sid} = Backend.viewer(@runner, label, command)
+    assert {:ok, [%{"session_id" => ^sid, "label" => ^label}]} = Rex.sessions(@runner)
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert bindings == %{}
+    File.write!(gate, "exit")
+    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+  end
+
+  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  test "a real tmux attach viewer closes without stopping its tmux server", %{root: root} do
+    tmux = Shuttle.Env.find_executable("tmux")
+    socket = Path.join(root, "tmux.sock")
+
+    assert {_, 0} =
+             System.cmd(tmux, [
+               "-S",
+               socket,
+               "new-session",
+               "-d",
+               "-s",
+               "probe-worker",
+               "/bin/sleep",
+               "60"
+             ])
+
+    on_exit(fn -> System.cmd(tmux, ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+
+    assert {:ok, sid} =
+             Backend.viewer(@runner, "probe-worker@tmux", [
+               tmux,
+               "-S",
+               socket,
+               "attach",
+               "-t",
+               "=probe-worker"
+             ])
+
+    await(fn ->
+      case System.cmd(tmux, ["-S", socket, "list-clients", "-F", "\#{client_session}"],
+             stderr_to_stdout: true
+           ) do
+        {"probe-worker\n", 0} -> true
+        _ -> false
+      end
+    end)
+
+    assert {:ok, ^sid} =
+             Backend.viewer(@runner, "probe-worker@tmux", [
+               tmux,
+               "-S",
+               socket,
+               "attach",
+               "-t",
+               "=probe-worker"
+             ])
+
+    assert {_, 0} = System.cmd(tmux, ["-S", socket, "detach-client", "-s", "probe-worker"])
+    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+    assert {_, 0} = System.cmd(tmux, ["-S", socket, "has-session", "-t", "=probe-worker"])
+  end
+
   test "a human-labelled native session is claimed canonically and a retry keeps its watcher", %{
     root: root
   } do

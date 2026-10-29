@@ -153,6 +153,8 @@ export function dispatchIneligibleReason(body: DispatchIneligibleBody): string {
       return 'Draft — set status: active to allow dispatch.'
     case 'closed':
       return 'Fiber is closed — reopen it before dispatching.'
+    case 'rex_server_unavailable':
+      return "Open Rex on the daemon's machine and grant Rex Server access in System Settings → Privacy & Security → Full Disk Access, then dispatch again."
     // macOS: the daemon refuses to be the process that forks the tmux server,
     // because macOS would then charge every worker's file access to the
     // daemon's binary. Fallback copy only — the daemon's own message (which

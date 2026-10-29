@@ -288,13 +288,110 @@ defmodule Shuttle.Terminal.Rex do
   # The runner-taking form keeps app activation testable without selecting a
   # session in the operator's app.
   defp reveal_with(runner, name) do
-    with {:ok, b} <- resolve(runner, name),
-         {:ok, client} <- ensure_app_client(runner),
-         {:ok, _} <- Rex.select(runner, client, b["session_id"]),
+    with {:ok, b} <- resolve(runner, name) do
+      reveal_session(runner, b["session_id"])
+    else
+      error -> {:error, "Cannot open Rex terminal: #{inspect(error)}"}
+    end
+  end
+
+  defp reveal_session(runner, sid) do
+    with {:ok, client} <- ensure_app_client(runner),
+         {:ok, _} <- Rex.select(runner, client, sid),
          {_, 0} <- runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
       :ok
     else
       error -> {:error, "Cannot open Rex terminal: #{inspect(error)}"}
+    end
+  end
+
+  @doc "Open or focus an unbound Rex viewer for a local or remote tmux worker."
+  def reveal_tmux(name, host, destination) do
+    runner = Env.app(:rex_runner, Shuttle.Runner.Default)
+    label = name <> "@" <> (host || "tmux")
+
+    with :ok <- ensure_ready(runner),
+         {:ok, argv} <- viewer_command(name, destination),
+         {:ok, sid} <- viewer(runner, label, argv) do
+      reveal_session(runner, sid)
+    else
+      {:error, message} when is_binary(message) -> {:error, message}
+      error -> {:error, "Cannot open Rex viewer: #{inspect(error)}"}
+    end
+  end
+
+  defp viewer_command(name, nil) do
+    case Env.find_executable("tmux") do
+      nil -> {:error, "tmux executable not found for the local Rex viewer"}
+      executable -> {:ok, [executable, "attach", "-t", "=" <> name]}
+    end
+  end
+
+  defp viewer_command(name, destination) do
+    # ssh joins its command arguments before the remote shell parses them.
+    # Quote that shell's target as well as the viewer's local argv.
+    remote = Enum.map_join(["tmux", "attach", "-t", "=" <> name], " ", &quote_sh/1)
+    {:ok, ["ssh", "-tt", "--", destination, remote]}
+  end
+
+  @doc false
+  def viewer(runner, label, argv) do
+    Shuttle.Terminal.with_lock({__MODULE__, :viewer, label}, fn ->
+      with :ok <- valid_label(label),
+           {:ok, sessions} <- Rex.sessions(runner) do
+        case Enum.filter(sessions, &(&1["label"] == label)) do
+          [] -> create_viewer(runner, label, argv)
+          [%{"session_id" => sid}] -> reuse_viewer(runner, label, argv, sid)
+          _ -> {:error, "Ambiguous Rex viewer label #{label}; refusing to select a session"}
+        end
+      end
+    end)
+  end
+
+  defp reuse_viewer(runner, label, argv, sid) do
+    case Rex.blocks(runner, sid) do
+      {:ok, []} ->
+        with {:ok, _} <- Rex.destroy(runner, sid), do: create_viewer(runner, label, argv)
+
+      {:ok, [_ | _]} ->
+        {:ok, sid}
+
+      error ->
+        error
+    end
+  end
+
+  defp create_viewer(runner, label, argv) do
+    # Rex retains empty sessions. The viewer removes its own session after
+    # attach/ssh returns; reopening also sweeps an empty session after a crash.
+    cleanup =
+      Enum.map_join([Rex.bin() || "rex"] ++ Rex.flags(), " ", &quote_sh/1) <>
+        " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
+
+    exports =
+      Enum.map_join(~w(PATH SSH_AUTH_SOCK), "", fn key ->
+        case Env.get(key) do
+          nil -> "unset #{key}\n"
+          value -> "export #{key}=#{quote_sh(value)}\n"
+        end
+      end)
+
+    script =
+      "unset TMUX TMUX_PANE\n" <>
+        exports <>
+        "trap #{quote_sh(cleanup)} EXIT\n" <> Enum.map_join(argv, " ", &quote_sh/1) <> "\n"
+
+    spec =
+      create_spec(label, Env.home(), "", [])
+      |> put_in(["initial_windows", Access.at(0), "layout", "block", "options", "command"], [
+        "bash",
+        "-c",
+        script
+      ])
+
+    with {:ok, reply} <- Rex.create(runner, spec),
+         {:ok, b} <- created_binding(reply) do
+      {:ok, b["session_id"]}
     end
   end
 

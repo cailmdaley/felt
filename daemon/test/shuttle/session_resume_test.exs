@@ -197,7 +197,7 @@ defmodule Shuttle.SessionResumeTest do
     Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
     Env.put_app_env(:session_resume_runner, Runner)
     Env.put_app_env(:session_resume_live, fn -> [] end)
-    Env.put_app_env(:kitty_impl, StubKitty)
+    Env.put_app_env(:opener_impl, StubKitty)
     Env.put_app_env(:os_type, {:unix, :linux})
 
     on_exit(fn -> File.rm_rf(root) end)

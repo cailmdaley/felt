@@ -17,10 +17,10 @@ afterEach(() => {
 
 it('offers only actual supported alternatives, including query URLs on the web', () => {
   expect(conversationActions(web, true, vi.fn()).map(a => a.label)).toEqual([
-    'Open in Terminal (Kitty)', 'Open in Claude browser', 'Open in Claude app',
+    'Open in terminal', 'Open in Claude browser', 'Open in Claude app',
   ])
   expect(conversationActions(`${web}?source=remote`, true, vi.fn()).map(a => a.label)).toEqual([
-    'Open in Terminal (Kitty)', 'Open in Claude browser',
+    'Open in terminal', 'Open in Claude browser',
   ])
   expect(conversationActions('https://claude.ai.evil.test/code/session_test', true, vi.fn())).toHaveLength(1)
   expect(conversationActions(web, false, vi.fn())).toEqual([{ label: 'Open in Claude browser', href: web }])
