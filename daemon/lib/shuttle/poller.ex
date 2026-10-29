@@ -783,8 +783,7 @@ defmodule Shuttle.Poller do
     state =
       if state.reconciliation_hold, do: state, else: SessionReconciliation.adopt_orphans(state)
 
-    # Adoption has run, so `state.running` is this daemon's OWN observation of
-    # what is live — which is what the continuity condition is checked against.
+    # Adoption must settle before a healthy crash boot can release fresh work.
     state = maybe_auto_release_boot_quarantine(state, previous_heartbeat)
 
     # Carry the previous ring forward with this boot appended, then write
