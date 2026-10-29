@@ -96,6 +96,13 @@ export interface StashCluster {
   cards: KanbanCard[]
 }
 
+/** The Resting section's groups and the exact row order they draw. */
+export interface RestingOrder {
+  undated: StashCluster[]
+  dated: StashCluster[]
+  flat: KanbanCard[]
+}
+
 /** One live edge-scroll axis: its rAF handle, current velocity, and the
  *  element being scrolled. */
 interface AxisScroll {
@@ -595,9 +602,11 @@ export class KanbanSurfaceRenderer {
    *  second heading — Resting is still one region, just two temperatures of
    *  the same thing. */
   renderStashSection(
-    stash: KanbanCard[],
+    stashOrOrder: KanbanCard[] | RestingOrder,
     staleness: Record<string, KanbanOriginStaleness>,
   ): HTMLElement {
+    const order = Array.isArray(stashOrOrder) ? restingOrder(stashOrOrder) : stashOrOrder
+    const stash = order.flat
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-stash'
     section.setAttribute('role', 'region')
@@ -607,18 +616,17 @@ export class KanbanSurfaceRenderer {
     section.append(restingHead)
     this.installBandCollapse(section, restingHead, 'resting')
 
-    const { undated, dated } = splitStashByReturn(stash)
     const grid = document.createElement('div')
     grid.className = 'kbn-cluster-grid'
-    grid.append(...this.renderClusterGroup(undated, staleness))
-    if (undated.length > 0 && dated.length > 0) {
+    grid.append(...this.renderClusterGroup(order.undated, staleness))
+    if (order.undated.length > 0 && order.dated.length > 0) {
       const divider = document.createElement('div')
       divider.className = 'kbn-cluster-divider kbn-cluster-divider-group'
       divider.setAttribute('aria-hidden', 'true')
       divider.textContent = '— already coming back —'
       grid.append(divider)
     }
-    grid.append(...this.renderClusterGroup(dated, staleness, sortDatedByReturn))
+    grid.append(...this.renderClusterGroup(order.dated, staleness))
     if (stash.length === 0) {
       const empty = document.createElement('div')
       empty.className = 'kbn-cluster-empty'
@@ -738,11 +746,9 @@ export class KanbanSurfaceRenderer {
    *  list or the dated returns), shared so the group split in
    *  `renderStashSection` doesn't have to duplicate the cold divider logic. */
   private renderClusterGroup(
-    cards: KanbanCard[],
+    clusters: StashCluster[],
     staleness: Record<string, KanbanOriginStaleness>,
-    reorder?: (clusters: StashCluster[]) => StashCluster[],
   ): HTMLElement[] {
-    const clusters = reorder ? reorder(clusterStashCards(cards)) : clusterStashCards(cards)
     const warm = clusters.filter((c) => !c.cold)
     const cold = clusters.filter((c) => c.cold)
 
@@ -1975,6 +1981,18 @@ export function clusterStashCards(stash: KanbanCard[]): StashCluster[] {
     return byCreatedAtDesc(a.cards[0], b.cards[0])
   })
   return out
+}
+
+/** Order Resting once for both its rendered clusters and its linear row list. */
+export function restingOrder(stash: KanbanCard[], z: Zone = hostZone()): RestingOrder {
+  const { undated, dated } = splitStashByReturn(stash)
+  const undatedClusters = clusterStashCards(undated)
+  const datedClusters = sortDatedByReturn(clusterStashCards(dated), z)
+  return {
+    undated: undatedClusters,
+    dated: datedClusters,
+    flat: [...undatedClusters, ...datedClusters].flatMap((cluster) => cluster.cards),
+  }
 }
 
 /**

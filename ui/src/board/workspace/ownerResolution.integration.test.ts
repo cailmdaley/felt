@@ -36,7 +36,7 @@ function sheet(): Overview {
 }
 function reader(hash = '#/board'): Workspace {
   window.history.replaceState(null, '', hash)
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: vi.fn(), dock: new Dock('', vi.fn()) })
+  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, deskRows: () => cards, origin: () => 'Board', onVisibility: vi.fn(), dock: new Dock('', vi.fn()) })
   overview = workspace.overview
   return workspace
 }

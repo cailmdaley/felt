@@ -280,7 +280,7 @@ const DRAFTS: MockFiber[] = [
     uid: ULID.boardChrome,
     name: 'Board chrome + two-column file viewer',
     status: 'open',
-    outcome: 'Dissolve the masthead; fold its three actions into the column heads as one tinted round-button family.',
+    outcome: 'Keep the column actions beside their lanes, in one restrained button family.',
     tags: ['constitution', 'kanban', 'design'],
     shuttle: shuttleBlock(),
   },
@@ -1776,7 +1776,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 // ── Mount ────────────────────────────────────────────────────────────────────
 // Wire the lane actions so every available button can be exercised offline.
 // Terminal writes its selected session to the document for harness inspection;
-// onRefresh is owned internally by KanbanModal.
+// KanbanModal owns polling the composite feed and its recovery action.
 try {
   assertUlids()
   const modal = new KanbanModal({

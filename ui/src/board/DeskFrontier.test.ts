@@ -29,3 +29,13 @@ it('draws an age without descendants, and omits it when the pill has no age', ()
   installFrontierDetails(host, end, quiet, new ThreadIndex([quiet]), vi.fn(), now)
   expect(end.children).toHaveLength(0)
 })
+
+it('uses agreement in the family count and omits empty tooltip categories', () => {
+  const parent = card({ id: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+  const child = card({ id: 'hub/ask', orchestrator: 'hub', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
+  const host = document.createElement('div'), end = document.createElement('div')
+  installFrontierDetails(host, end, parent, new ThreadIndex([parent, child]), vi.fn(), now)
+  const count = end.querySelector<HTMLButtonElement>('.kbn-thread-count')!
+  expect(count.querySelector('.kbn-count-needs')?.textContent).toBe('1 needs you')
+  expect(count.title).toBe('1 your turn')
+})

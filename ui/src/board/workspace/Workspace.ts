@@ -3,12 +3,12 @@ import { hasWorkerToStop, type KanbanCard } from '../KanbanTypes.js'
 import type { Dock } from './Dock.js'
 import { Verdicts, confirmWorkerStop, type Verdict } from './Verdicts.js'
 import { fiberPageKicker, onDesk, reviewReachable, verdictReachable } from './fiberPageState.js'
-import { deskColumn } from '../deskColumn.js'
 import { holdsRevision, roleHolds, roleSlug } from './RolePage.js'
 import { isAgentCard, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
 import { cardFromCompositeEntry, IN_FLIGHT_BANDS, inFlightBand } from '../KanbanReadModel.js'
+import { deskColumn } from '../deskColumn.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
@@ -36,7 +36,7 @@ export interface WorkspaceOptions {
   localHost?(): string | undefined
   cards(): KanbanCard[]
   /** The active Desk projection, already in the Desk's visible reading order. */
-  deskRows?(): KanbanCard[]
+  deskRows(): KanbanCard[]
   origin(): string
   onVisibility(active: boolean): void
   deskColumn?(card: KanbanCard): SidebarEntry[]
@@ -320,29 +320,16 @@ export class Workspace {
   forceThreadRail(): void { this.reader.forceThreadRail() }
 
   private sidebarCards(): KanbanCard[] {
-    const projected = this.opts.deskRows?.()
-    if (projected) return projected
-    // The sidebar uses the same frontier rows as the Desk.
-    const cards = (this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())).frontier()
-    const inColumn = (column: string): KanbanCard[] => cards.filter(card => this.sidebarPlace(card) === column)
-    const flight = inColumn('inFlight')
-    return [
-      ...inColumn('drafts'),
-      ...IN_FLIGHT_BANDS.flatMap(([band]) => flight.filter(card => inFlightBand(card) === band)),
-      ...inColumn('awaitingReview'),
-      ...inColumn('roles'),
-      ...inColumn('resting'),
-    ]
+    return this.opts.deskRows()
   }
   /** A family's Desk row holds every node's place in the Desk order. */
   private sidebarRoot(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
     return index ? index.family(index.card(card)).lead : card
   }
-  /** A family's row earns its own column; every other node of the family follows that row. */
+  /** A family's Desk row holds every node's place in the Desk order. */
   private sidebarPlace(card: KanbanCard): string {
-    const root = this.sidebarRoot(card)
-    const column = deskColumn(root)
+    const column = deskColumn(this.sidebarRoot(card))
     return column === 'scheduled' ? 'resting' : column
   }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */

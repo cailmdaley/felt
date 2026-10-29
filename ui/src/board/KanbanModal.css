@@ -2275,8 +2275,8 @@
      segment. */
   .kbn-col-head { display: none; }
   .kbn-col-list { padding-top: 8px; }
-  /* Only the active leaf offers its action: three across the strip would turn
-     the page marks into a toolbar. */
+  /* Only the active leaf carries its action; the other segments remain page
+     marks instead of turning the strip into a toolbar. */
   .kbn-folio-seg .kbn-col-action { display: none; }
   .kbn-folio-seg-active .kbn-col-action {
     display: inline-flex;

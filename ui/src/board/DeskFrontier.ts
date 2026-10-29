@@ -45,9 +45,13 @@ export function installFrontierDetails(host: HTMLElement, end: HTMLElement, card
     const count = document.createElement('button'); count.type = 'button'; count.className = 'kbn-thread-count'
     const label = document.createElement('span')
     label.className = needs ? 'kbn-count-needs' : 'kbn-count-working'
-    label.textContent = needs ? `${needs} need you` : `${working} working`
+    label.textContent = needs ? `${needs} ${needs === 1 ? 'needs' : 'need'} you` : `${working} working`
     count.append(label)
-    count.title = `${family.others.yours} your turn, ${family.others.review} awaiting review, ${working} working elsewhere in this family`
+    count.title = [
+      family.others.yours > 0 && `${family.others.yours} your turn`,
+      family.others.review > 0 && `${family.others.review} awaiting review`,
+      working > 0 && `${working} working elsewhere in this family`,
+    ].filter(Boolean).join(', ')
     count.setAttribute('aria-label', `${count.title}; open its threads`)
     count.addEventListener('click', event => { event.stopPropagation(); open(family.root, true) })
     end.prepend(count)

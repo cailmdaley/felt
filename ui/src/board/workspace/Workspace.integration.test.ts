@@ -2,9 +2,10 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { ColumnKind, KanbanCard } from '../KanbanTypes.js'
-import { Workspace } from './Workspace.js'
+import { Workspace, type WorkspaceOptions } from './Workspace.js'
 import { ThreadIndex } from '../threads.js'
-import { deskSidebarRows, projectDeskFrontier } from '../KanbanReadModel.js'
+import { projectDeskFrontier } from '../KanbanReadModel.js'
+import { deskOrder } from '../deskOrdering.js'
 import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
 import { chatKey, docKey } from './documents.js'
@@ -28,6 +29,10 @@ vi.mock('../FileViewerPanel.js', () => ({
 }))
 
 let workspace: Workspace
+type WorkspaceTestOptions = Omit<WorkspaceOptions, 'deskRows'> & { deskRows?: WorkspaceOptions['deskRows'] }
+function makeWorkspace(root: HTMLElement, opts: WorkspaceTestOptions): Workspace {
+  return new Workspace(root, { ...opts, deskRows: opts.deskRows ?? opts.cards })
+}
 const cards = [
   card({ id: 'work/alpha', uid: 'alpha', name: 'Alpha', originId: 'host-a', fiberDir: '/notes/alpha', path: 'work/alpha/alpha.md' }),
   card({ id: 'work/beta', uid: 'beta', name: 'Beta', originId: 'host-b', fiberDir: '/notes/beta', path: 'work/beta/beta.md' }),
@@ -113,7 +118,7 @@ beforeEach(() => {
   localStorage.clear()
   changed.mockClear()
   visibility.mockClear()
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
+  workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock("", changed) })
 })
 afterEach(() => { resetLanes(); workspace?.dispose(); vi.useRealTimers(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -173,7 +178,7 @@ it('restores nested reader parents from the history entry after reload, but not 
   workspace.reader.openDocument(table)
   const hash = window.location.hash
   workspace.dispose()
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+  workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
   await flush()
   workspace.reader.back()
   expect(workspace.reader.document?.key).toBe(report)
@@ -181,7 +186,7 @@ it('restores nested reader parents from the history entry after reload, but not 
   expect(workspace.reader.document?.kind).toBe('fiber')
   workspace.dispose()
   window.history.replaceState(null, '', hash)
-  workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+  workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
   await flush()
   workspace.reader.back()
   expect(workspace.reader.document?.kind).toBe('fiber')
@@ -198,7 +203,7 @@ describe('bar Find transcripts', () => {
     const find = document.createElement('input')
     document.body.append(find)
     bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, localHost: () => localHost })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), find, localHost: () => localHost })
     return find
   }
   const type = (find: HTMLInputElement, text: string): void => {
@@ -306,7 +311,7 @@ describe('workspace reader integration', () => {
   it('s on the constitution page requests rest, not the sidebar', async () => {
     workspace.dispose()
     const onRest = vi.fn()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed), onRest })
     const constitution = { ...cards[0], shuttleKind: 'oneshot' as const }
     bodyCards = [constitution]
     workspace.open(constitution); await flush(); await flush()
@@ -383,7 +388,7 @@ describe('workspace reader integration', () => {
     let live = reviewing
     bodyCards = [reviewing]
     const commit = vi.fn()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [live], origin: () => 'Desk',
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [live], origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
@@ -412,7 +417,7 @@ describe('workspace reader integration', () => {
     let live = [reviewing]
     bodyCards = live
     const commit = vi.fn()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(reviewing); await flush()
     vi.useFakeTimers()
@@ -430,7 +435,7 @@ describe('workspace reader integration', () => {
     const press = (key: string): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })) }
     const open = async (fiber: KanbanCard, commit: (card: KanbanCard, target: ColumnKind) => void): Promise<HTMLElement> => {
       bodyCards = [fiber]
-      workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
+      workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [fiber], origin: () => 'Desk',
         onVisibility: visibility, dock: new Dock('', changed, commit) })
       workspace.open(fiber); await flush()
       return document.querySelector<HTMLElement>('.ws-fiber-acts')!
@@ -480,7 +485,7 @@ describe('workspace reader integration', () => {
     let live = [app]
     bodyCards = live
     const commit = vi.fn()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => live, origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(app); await flush()
     vi.useFakeTimers()
@@ -511,7 +516,7 @@ describe('workspace reader integration', () => {
       status: 'closed', shuttleKind: 'oneshot' })
     bodyCards = [linked]
     const commit = vi.fn()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [], origin: () => 'Desk',
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => [], origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed, commit) })
     workspace.open(linked); await flush()
     vi.useFakeTimers()
@@ -529,9 +534,9 @@ describe('workspace reader integration', () => {
     localStorage.setItem('shuttle:workspace:sidebar', 'true')
     const returned = vi.fn()
     const grouped = [{ ...cards[0], status: 'closed' }, { ...cards[1], status: 'active' }]
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => grouped, origin: () => 'Board', onVisibility: visibility,
-      onReturnCard: returned, dock: new Dock('', changed),
+      deskRows: () => [grouped[1], grouped[0]], onReturnCard: returned, dock: new Dock('', changed),
     })
     workspace.open(grouped[0], 'Board'); await flush()
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Working', 'Awaiting review'])
@@ -548,7 +553,7 @@ describe('workspace reader integration', () => {
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', workerState: 'running', runtimePhase })
     const feed = [{ ...cards[0], status: 'closed' }, flight('w1', 'working'), flight('n1', 'waiting'), flight('w2', 'working'), flight('n2', 'blocked'), { ...cards[1], uid: 'draft', id: 'work/draft', name: 'draft' }]
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[5], feed[2], feed[4], feed[1], feed[3], feed[0]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)).toEqual(['draft', 'n1', 'n2', 'w1', 'w2', 'alpha'])
@@ -582,7 +587,7 @@ describe('workspace reader integration', () => {
     ]
     const index = new ThreadIndex(raw)
     const feed = raw.map(c => ({ ...c, threadSummary: index.summary(c) }))
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[0], feed[4], feed[1], feed[6], feed[7]], threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const rows = (): (string | undefined)[] => [...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(row => row.dataset.channelUid)
     const strip = (): (string | null)[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')].map(entry => entry.getAttribute('aria-label'))
     workspace.open(feed[0], 'Desk'); await flush()
@@ -603,7 +608,7 @@ describe('workspace reader integration', () => {
       thread({ id: 'hub/sub/leaf', orchestrator: 'hub-sub', status: 'active', workerState: 'running', runtimePhase: 'working' }),
     ]
     bodyCards = feed
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const title = (): string | null | undefined => document.querySelector('.ws-page.ws-selected .ws-chat-title')?.textContent
     workspace.open(feed[0], 'Desk'); await flush()
     expect(title()).toBe('hub')
@@ -662,7 +667,7 @@ describe('workspace reader integration', () => {
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
     const feed = [cards[0], thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }), thread({ id: 'lone', status: 'active' })]
     bodyCards = feed
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
     workspace.open(feed[0], 'Desk'); await flush()
     expect(reader().classList.contains('ws-with-rail')).toBe(true)
@@ -695,7 +700,7 @@ describe('workspace reader integration', () => {
       thread({ id: 'loud/sub', orchestrator: 'loud', status: 'active', workerState: 'running', runtimePhase: 'working' }),
     ]
     bodyCards = feed
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
     const toggle = (): HTMLButtonElement => document.querySelector<HTMLButtonElement>('.ws-rail-toggle')!
     workspace.open(feed[0], 'Desk'); await flush()
@@ -709,7 +714,7 @@ describe('workspace reader integration', () => {
       expect(reader().classList.contains('ws-with-rail')).toBe(false)
     }
     workspace.dispose()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[0], 'Desk'); await flush()
     expect([reader().classList.contains('ws-with-rail'), toggle().hidden]).toEqual([false, false])
     toggle().click()
@@ -723,7 +728,7 @@ describe('workspace reader integration', () => {
     const flight = (uid: string, runtimePhase?: KanbanCard['runtimePhase']): KanbanCard =>
       ({ ...cards[1], id: `work/${uid}`, uid, name: uid, path: `work/${uid}/${uid}.md`, status: 'active', workerState: 'running', runtimePhase })
     const feed = [flight('w1', 'working'), flight('w2', 'working'), flight('n1', 'waiting'), { ...cards[0], status: 'closed' }]
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => feed, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, deskRows: () => [feed[2], feed[0], feed[1], feed[3]], origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     workspace.open(feed[3], 'Desk'); await flush()
     const entries = (): HTMLButtonElement[] => [...document.querySelectorAll<HTMLButtonElement>('.ws-sidebar-index-entry')]
     const current = (): string | null | undefined => document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')
@@ -757,8 +762,8 @@ describe('workspace reader integration', () => {
       now: { drafts: [draft], inFlight: [turn, working], awaitingReview: [review] },
       roles: [seat], stash: [stashed], timeline: { past: [], futureDated: [scheduled] },
     }))
-    const rows = deskSidebarRows(projection)
-    workspace = new Workspace(document.body, {
+    const rows = deskOrder(projection).rows
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => [...rows], deskRows: () => rows,
       threadIndex: () => new ThreadIndex(rows), origin: () => 'Desk',
       onVisibility: visibility, dock: new Dock('', changed),
@@ -774,7 +779,7 @@ describe('workspace reader integration', () => {
     document.body.replaceChildren()
     vi.spyOn(Date, 'now').mockReturnValue(1000)
     vi.mocked(fetch).mockClear()
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const previous = document.createElement('button')
     document.body.append(previous); previous.focus()
     const route = window.location.hash
@@ -933,7 +938,7 @@ describe('workspace reader integration', () => {
       }
       return new Response('{}')
     })
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => shared, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => shared, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
 
     const reportA = docKey('host-a', '/notes/shared/report.html', 'host-a')
     const reportB = docKey('host-b', '/notes/shared/report.html', 'host-b')
@@ -1054,7 +1059,7 @@ describe('workspace reader integration', () => {
     ]
     bodyCards = ownerCards
     workspace.dispose()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => ownerCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed),
     })
@@ -1091,7 +1096,7 @@ describe('workspace reader integration', () => {
     bodyCards = liveCards
     workspace.dispose()
     const transition = vi.fn()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => liveCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed, transition),
     })
@@ -1217,7 +1222,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     window.history.replaceState(null, '', '/')
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const historyLength = window.history.length
     workspace.open(cards[0])
     await flush()
@@ -1238,7 +1243,7 @@ describe('workspace reader integration', () => {
     const openWorker = vi.fn()
     bodyCards = [live]
     workspace.dispose()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => [live], origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed, undefined, openWorker),
     })
@@ -1287,7 +1292,7 @@ describe('workspace reader integration', () => {
     bodyOverrides.set('host-a:first', 'First result.\n\n:::{embed} report.html\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} notes.md\n:::')
     bodyOverrides.set('host-b:second', 'Second result.\n\n:::{embed} notes.md\n:::\n\n:::{embed} table.html\n:::\n\n:::{embed} report.html\n:::')
     workspace.dispose()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => orderedCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed),
     })
@@ -1410,7 +1415,7 @@ describe('workspace reader integration', () => {
     // A routed page paints at once from a provisional frame, before its receipts.
     workspace.dispose()
     window.history.replaceState(null, '', '/')
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
+    workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const tableKey = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(tableKey)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
@@ -1537,7 +1542,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     document.body.replaceChildren()
     const onView = vi.fn()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => cards, origin: () => 'Board', onVisibility: visibility, onView,
       dock: new Dock('', changed),
     })
@@ -1561,7 +1566,7 @@ describe('workspace reader integration', () => {
     workspace.dispose()
     document.body.replaceChildren()
     const onView = vi.fn()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility, onView,
       dock: new Dock('', changed),
     })
@@ -1595,7 +1600,7 @@ describe('workspace reader integration', () => {
 
     workspace.dispose()
     document.body.replaceChildren()
-    workspace = new Workspace(document.body, {
+    workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => boardCards, origin: () => 'Desk', onVisibility: visibility,
       dock: new Dock('', changed),
     })

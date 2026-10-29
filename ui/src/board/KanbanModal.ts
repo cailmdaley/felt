@@ -60,13 +60,14 @@ import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
+import { deskOrder } from './deskOrdering.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
-import { buildKanbanResponseFromComposite, deriveCycleLens, deskSidebarRows, isQuestion, restingCards, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
+import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
 import { threadKey } from './threads.js'
 import {
   dueBouncesFromResting,
@@ -553,7 +554,7 @@ export class KanbanModal {
       shuttleBase: this.shuttleBase,
       localHost: () => this.lastResponse?.feltHost,
       cards: () => this.workspaceCards(),
-      deskRows: () => this.workspaceDeskRows(),
+      deskRows: () => deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting).rows,
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
@@ -780,36 +781,13 @@ export class KanbanModal {
     })
   }
 
-  /** Drawn Desk order, followed by chronological cards. */
+  /** Desk order, followed by the remaining board cards. */
   private workspaceCards(): KanbanCard[] {
     if (!this.lastResponse) return []
     const cards = boardCards(this.lastResponse)
-    const byId = new Map(cards.map(card => [card.id, card]))
-    const seen = new Set<string>()
-    const ordered: KanbanCard[] = []
-    for (const el of this.drawnDeskCardElements()) {
-      const card = byId.get(el.dataset.fiberId ?? '')
-      if (card && !seen.has(card.id)) { seen.add(card.id); ordered.push(card) }
-    }
-    return [...ordered, ...cards.filter(card => !seen.has(card.id))]
-  }
-
-  /** The sidebar follows Desk order, using the fresh projection while its DOM is parked. */
-  private workspaceDeskRows(): KanbanCard[] {
-    const projected = deskSidebarRows(this.lastResponse)
-    // Polls can advance the feed while Reader or a temporal view keeps the
-    // Desk's DOM parked. In that window, its order describes an older
-    // projection, so use the fresh read-model order until the Desk is painted.
-    if (this.pendingDeskData) return projected
-    const byIdentity = new Map(projected.map(card => [JSON.stringify([card.originId, card.uid ?? card.id]), card]))
-    const seen = new Set<string>()
-    const drawn: KanbanCard[] = []
-    for (const el of this.drawnDeskCardElements()) {
-      const key = JSON.stringify([el.dataset.cardOrigin, el.dataset.cardUid ?? el.dataset.fiberId])
-      const card = byIdentity.get(key)
-      if (card && !seen.has(key)) { seen.add(key); drawn.push(card) }
-    }
-    return [...drawn, ...projected.filter(card => !seen.has(JSON.stringify([card.originId, card.uid ?? card.id])))]
+    const ordered = deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting).rows
+    const seen = new Set(ordered.map(card => JSON.stringify([card.originId, card.uid ?? card.id])))
+    return [...ordered, ...cards.filter(card => !seen.has(JSON.stringify([card.originId, card.uid ?? card.id])))]
   }
 
   /** Cycle-lens ghosts illustrate another surface; they do not set Desk order. */
@@ -1950,7 +1928,8 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const { now, staleness } = data
+    const order = deskOrder(data, undefined, this.meetingStatus.meeting)
+    const { staleness } = data
 
     this.deskEl.innerHTML = ''
     this.body.classList.remove('kbn-body-zoomed')
@@ -1974,13 +1953,13 @@ export class KanbanModal {
       if (lensBar) this.lensSlotEl.append(lensBar)
     }
 
-    this.deskEl.append(this.surfaces.renderNowSection(now, staleness, lens))
+    this.deskEl.append(this.surfaces.renderNowSection(order.now, staleness, lens))
     // Seats at rest sit in their own band between Now and Resting.
-    const rolesBand = this.surfaces.renderRolesSection(data.roles, staleness)
+    const rolesBand = this.surfaces.renderRolesSection(order.roles, staleness)
     if (rolesBand) this.deskEl.append(rolesBand)
     // Resting draws everything at rest — snoozed work AND standing constitutions asleep
     // between runs, which classify as `scheduled`; see `restingCards`.
-    this.deskEl.append(this.surfaces.renderStashSection(restingCards(data), staleness))
+    this.deskEl.append(this.surfaces.renderStashSection(order.resting, staleness))
 
     this.restoreScrollSnapshot(scrollSnapshot)
     // A redraw repaints the selection in place: the Desk scrolls only when the

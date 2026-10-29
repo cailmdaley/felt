@@ -75,7 +75,7 @@ describe('a family of many threads is still one row', () => {
     expect(desk.querySelector('.kbn-family-more')!.textContent).toBe('+8 more')
     expect(desk.querySelector('.kbn-count-needs')!.textContent).toBe('11 need you')
     expect(desk.querySelector('.kbn-count-working')).toBeNull()
-    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('11 your turn, 0 awaiting review, 1 working elsewhere in this family')
+    expect(desk.querySelector('.kbn-thread-count')!.getAttribute('title')).toBe('11 your turn, 1 working elsewhere in this family')
   })
 })
 
