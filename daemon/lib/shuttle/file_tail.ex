@@ -159,7 +159,7 @@ defmodule Shuttle.FileTail do
   end
 
   defp maybe_read_remainder(path, offset, length, capped_length, chunk) do
-    if capped_length < length and :binary.match(chunk, "\n") == :nomatch do
+    if capped_length < length and match?({[], _}, split_complete(chunk)) do
       read_range(path, offset, length)
     else
       {:ok, chunk}

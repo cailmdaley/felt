@@ -57,6 +57,13 @@ defmodule Shuttle.FileTailTest do
     assert {:append, ["partial"], 23} = FileTail.advance(path, 15, max_bytes: 4)
   end
 
+  test "a blank-only capped slice does not block later records", %{path: path} do
+    bytes = String.duplicate("\n", 100) <> "record\n"
+    File.write!(path, bytes)
+    assert {:append, ["record"], size} = FileTail.advance(path, 0, max_bytes: 10)
+    assert size == byte_size(bytes)
+  end
+
   test "advance without a cap or with a nil cap reads the full remainder", %{path: path} do
     File.write!(path, "a\nb\npartial")
     assert {:append, ["a", "b"], 4} = FileTail.advance(path, 0)
