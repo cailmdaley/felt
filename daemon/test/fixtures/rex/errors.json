@@ -1,0 +1,206 @@
+{
+  "server_absent": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/missing.sock",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 4,
+    "stdout": "",
+    "stderr": "Error: rex server is not running\nrex server autostart is disabled\nconnecting to Rex server unix:///tmp/rexprobe.myyg/missing.sock: connecting to API control: failed to WebSocket dial: failed to send handshake request: Get \"http://rex/api/control\": dial unix /tmp/rexprobe.myyg/missing.sock: connect: no such file or directory\n"
+  },
+  "server_absent_stale_socket": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/stale.sock",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 4,
+    "stdout": "",
+    "stderr": "Error: rex server is not running\nrex server autostart is disabled\nconnecting to Rex server unix:///tmp/rexprobe.myyg/stale.sock: connecting to API control: failed to WebSocket dial: failed to send handshake request: Get \"http://rex/api/control\": dial unix /tmp/rexprobe.myyg/stale.sock: connect: connection refused\n"
+  },
+  "server_absent_json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/missing.sock",
+      "ls",
+      "--json"
+    ],
+    "exit_status": 4,
+    "stdout": "",
+    "stderr": "Error: rex server is not running\nrex server autostart is disabled\nconnecting to Rex server unix:///tmp/rexprobe.myyg/missing.sock: connecting to API control: failed to WebSocket dial: failed to send handshake request: Get \"http://rex/api/control\": dial unix /tmp/rexprobe.myyg/missing.sock: connect: no such file or directory\n"
+  },
+  "session_not_found": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:00000000-0000-4000-8000-000000000001",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: session target \"session:00000000-0000-4000-8000-000000000001\" not found\n"
+  },
+  "session_not_found_json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "session",
+      "inspect",
+      "session:00000000-0000-4000-8000-000000000001",
+      "--json"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: session target \"session:00000000-0000-4000-8000-000000000001\" not found\n"
+  },
+  "session_not_found_rpc": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: stream response \"control-1\" failed: session session:00000000-0000-4000-8000-000000000001 not found (status=404 code=session_not_found)\n"
+  },
+  "block_not_found": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: stream response \"control-3\" failed: block not found: block:00000000-0000-4000-8000-000000000002 (status=404 code=not_found)\n"
+  },
+  "block_not_found_json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "block",
+      "inspect",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "block:00000000-0000-4000-8000-000000000002",
+      "--json"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: block target \"block:00000000-0000-4000-8000-000000000002\" not found\n"
+  },
+  "invalid_version_flag": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "--version"
+    ],
+    "exit_status": 2,
+    "stdout": "",
+    "stderr": "Error: unknown flag: --version\n\nUsage:\n  rex [command] [flags]\n\nRun \"rex --help\" for more information.\n"
+  },
+  "timeout": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "--timeout",
+      "1s",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 1,
+    "stdout": "",
+    "stderr": "Error: connecting to the server timed out after 1s; increase --timeout: context deadline exceeded\n"
+  },
+  "timeout_json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "--timeout",
+      "1s",
+      "ls",
+      "--json"
+    ],
+    "exit_status": 1,
+    "stdout": "",
+    "stderr": "Error: connecting to the server timed out after 1s; increase --timeout: context deadline exceeded\n"
+  },
+  "max_sessions": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 1,
+    "stdout": "",
+    "stderr": "Error: stream response \"control-1\" failed: server already has its maximum of 8 sessions; destroy one before creating another (status=409 code=conflict)\n"
+  },
+  "server_absent_after_shutdown": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 4,
+    "stdout": "",
+    "stderr": "Error: rex server is not running\nrex server autostart is disabled\nconnecting to Rex server unix:///tmp/rexprobe.myyg/rex.sock: connecting to API control: failed to WebSocket dial: failed to send handshake request: Get \"http://rex/api/control\": dial unix /tmp/rexprobe.myyg/rex.sock: connect: no such file or directory\n"
+  }
+}

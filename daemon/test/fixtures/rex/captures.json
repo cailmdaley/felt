@@ -1,0 +1,1181 @@
+{
+  "session_create.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"initial_windows\":[{\"window_id\":\"window:01a18956-b23c-79bc-bf52-0ea1fbb79885\",\"block_ids\":[\"block:01a18956-b239-7b46-b990-f3e890d2c713\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"initial_windows\": [{\"window_label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"options\": {\"shell\": \"none\", \"command\": [\"bash\", \"-l\", \"/tmp/rexprobe.myyg/worker.sh\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "session_list.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"sessions\":[{\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "list_blocks.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18956-b239-7b46-b990-f3e890d2c713\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"placement\":\"placed\",\"window_id\":\"window:01a18956-b23c-79bc-bf52-0ea1fbb79885\",\"owner\":\"client:01a18956-b239-74b7-847f-cc805f4b1b22\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "process_running.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"last_exit\":null,\"child\":{\"pid\":15302,\"user_id\":0,\"user\":\"root\",\"name\":\"login\",\"path\":\"/usr/bin/login\"},\"foreground\":{\"pid\":15302,\"user_id\":0,\"user\":\"root\",\"name\":\"login\",\"path\":\"/usr/bin/login\"},\"home\":\"<HOME>\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18956-b239-7b46-b990-f3e890d2c713\", \"args\": {}}"
+  },
+  "process_exited.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a1895b-5315-787b-a1fe-a41fc559cbc8",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"last_exit\":{\"exit_code\":0},\"home\":\"<HOME>\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a1895b-5315-7904-828f-3420d47a8296\", \"args\": {}}"
+  },
+  "session_create_duplicate.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18956-b289-7416-a6b5-170fbb3bf351\",\"initial_windows\":[{\"window_id\":\"window:01a18956-b28a-7a83-a26b-9f9e3e213c6a\",\"block_ids\":[\"block:01a18956-b289-754b-bc63-5a56f9272345\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"initial_windows\": [{\"window_label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\", \"options\": {\"shell\": \"none\", \"command\": [\"bash\", \"-l\", \"/tmp/rexprobe.myyg/worker.sh\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "resolve_duplicate.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "target.resolve",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"results\":[{\"query\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\",\"status\":\"ambiguous\",\"candidates\":[{\"kind\":\"session\",\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"},{\"kind\":\"session\",\"session_id\":\"session:01a18956-b289-7416-a6b5-170fbb3bf351\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"}]}]}\n",
+    "stderr": "",
+    "stdin": "{\"kinds\": [\"session\"], \"queries\": [\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"]}"
+  },
+  "resolve_not_found.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "target.resolve",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"results\":[{\"query\":\"session:00000000-0000-4000-8000-000000000001\",\"status\":\"not_found\"}]}\n",
+    "stderr": "",
+    "stdin": "{\"kinds\": [\"session\"], \"queries\": [\"session:00000000-0000-4000-8000-000000000001\"]}"
+  },
+  "block_event_paste.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4469-7893-928e-e797679ac2c9",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4469-7952-afbb-51b0f5b5ce7a\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first line\\nsecond line\\nthird line\"}}}"
+  },
+  "paste_modes.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4469-7893-928e-e797679ac2c9",
+      "com.superlogical.terminal.modes",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"screen\":\"primary\",\"modes\":[{\"name\":\"disable_keyboard\",\"number\":2,\"ansi\":true,\"set\":false},{\"name\":\"insert\",\"number\":4,\"ansi\":true,\"set\":false},{\"name\":\"send_receive_mode\",\"number\":12,\"ansi\":true,\"set\":true,\"default\":true},{\"name\":\"linefeed\",\"number\":20,\"ansi\":true,\"set\":false},{\"name\":\"cursor_keys\",\"number\":1,\"set\":false},{\"name\":\"132_column\",\"number\":3,\"set\":false},{\"name\":\"slow_scroll\",\"number\":4,\"set\":false},{\"name\":\"reverse_colors\",\"number\":5,\"set\":false},{\"name\":\"origin\",\"number\":6,\"set\":false},{\"name\":\"wraparound\",\"number\":7,\"set\":true,\"default\":true},{\"name\":\"autorepeat\",\"number\":8,\"set\":false},{\"name\":\"mouse_event_x10\",\"number\":9,\"set\":false},{\"name\":\"cursor_blinking\",\"number\":12,\"set\":false},{\"name\":\"cursor_visible\",\"number\":25,\"set\":true,\"default\":true},{\"name\":\"enable_mode_3\",\"number\":40,\"set\":false},{\"name\":\"reverse_wrap\",\"number\":45,\"set\":false},{\"name\":\"alt_screen_legacy\",\"number\":47,\"set\":false},{\"name\":\"keypad_keys\",\"number\":66,\"set\":false},{\"name\":\"backarrow_key_mode\",\"number\":67,\"set\":false},{\"name\":\"enable_left_and_right_margin\",\"number\":69,\"set\":false},{\"name\":\"mouse_event_normal\",\"number\":1000,\"set\":false},{\"name\":\"mouse_event_button\",\"number\":1002,\"set\":false},{\"name\":\"mouse_event_any\",\"number\":1003,\"set\":false},{\"name\":\"focus_event\",\"number\":1004,\"set\":false},{\"name\":\"mouse_format_utf8\",\"number\":1005,\"set\":false},{\"name\":\"mouse_format_sgr\",\"number\":1006,\"set\":false},{\"name\":\"mouse_alternate_scroll\",\"number\":1007,\"set\":true,\"default\":true},{\"name\":\"mouse_format_urxvt\",\"number\":1015,\"set\":false},{\"name\":\"mouse_format_sgr_pixels\",\"number\":1016,\"set\":false},{\"name\":\"ignore_keypad_with_numlock\",\"number\":1035,\"set\":true,\"default\":true},{\"name\":\"alt_esc_prefix\",\"number\":1036,\"set\":true,\"default\":true},{\"name\":\"alt_sends_escape\",\"number\":1039,\"set\":false},{\"name\":\"reverse_wrap_extended\",\"number\":1045,\"set\":false},{\"name\":\"alt_screen\",\"number\":1047,\"set\":false},{\"name\":\"save_cursor\",\"number\":1048,\"set\":false},{\"name\":\"alt_screen_save_cursor_clear_enter\",\"number\":1049,\"set\":false},{\"name\":\"bracketed_paste\",\"number\":2004,\"set\":true},{\"name\":\"synchronized_output\",\"number\":2026,\"set\":false},{\"name\":\"grapheme_cluster\",\"number\":2027,\"set\":false},{\"name\":\"report_color_scheme\",\"number\":2031,\"set\":false},{\"name\":\"report_visibility\",\"number\":2033,\"set\":false},{\"name\":\"in_band_size_reports\",\"number\":2048,\"set\":false},{\"name\":\"kitty_paste_events\",\"number\":5522,\"set\":false}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4469-7952-afbb-51b0f5b5ce7a\", \"args\": {}}"
+  },
+  "set_label.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "session.set_label",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"revision\":2}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-renamed-worker\"}"
+  },
+  "set_block_label.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "session.set_block_label",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"revision\":3}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18956-b239-7b46-b990-f3e890d2c713\", \"label\": \"probe-renamed-block\"}"
+  },
+  "resolve_native.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "target.resolve",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"results\":[{\"query\":\"block:01a18956-b239-7b46-b990-f3e890d2c713\",\"status\":\"resolved\",\"target\":{\"kind\":\"block\",\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"window_id\":\"window:01a18956-b23c-79bc-bf52-0ea1fbb79885\",\"block_id\":\"block:01a18956-b239-7b46-b990-f3e890d2c713\",\"label\":\"probe-renamed-block\",\"where\":\"window 1\"}}]}\n",
+    "stderr": "",
+    "stdin": "{\"kinds\": [\"block\"], \"queries\": [\"block:01a18956-b239-7b46-b990-f3e890d2c713\"]}"
+  },
+  "reflow_before.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.format",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"content\":\"Last login: Thu Oct 29 21:28:11 on ttys027\\n0000000000111111111122222222223333333333444444444455555555556666666666777777777788888888889999999999000000000011111111112222222222333333333344444444445555555555\\n66666666667777777777888888888899999999990000000000111111111122222222223333333333\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {\"format\": \"text\", \"trim\": true, \"unwrap\": false}}"
+  },
+  "reflow_after.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.format",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"content\":\"Last login: Thu Oct 29 21:28:11 on ttys027\\n00000000001111111111222222222233333333334444444444555555555566666666667777777777\\n88888888889999999999000000000011111111112222222222333333333344444444445555555555\\n66666666667777777777888888888899999999990000000000111111111122222222223333333333\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {\"format\": \"text\", \"trim\": true, \"unwrap\": false}}"
+  },
+  "reflow_restored.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.format",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"content\":\"Last login: Thu Oct 29 21:28:11 on ttys027\\n0000000000111111111122222222223333333333444444444455555555556666666666777777777788888888889999999999000000000011111111112222222222333333333344444444445555555555\\n66666666667777777777888888888899999999990000000000111111111122222222223333333333\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {\"format\": \"text\", \"trim\": true, \"unwrap\": false}}"
+  },
+  "resize_unowned.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.resize",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {\"columns\": 80, \"rows\": 48}}"
+  },
+  "resize_owned.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "do",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "-e",
+      "local own = rex.call(\"session.own_block\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\", block_ids={\"block:01a18959-4934-75df-b11f-c0bdc593ca99\"}, mode=\"take\"}); local resized=rex.call(\"com.superlogical.terminal.resize\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\", block_id=\"block:01a18959-4934-75df-b11f-c0bdc593ca99\", args={columns=80,rows=48}}); return {own=own,resized=resized,size=rex.call(\"com.superlogical.terminal.size\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\",block_id=\"block:01a18959-4934-75df-b11f-c0bdc593ca99\",args={}})}",
+      "--json"
+    ],
+    "exit_status": 0,
+    "stdout": "{\n  \"own\": {\n    \"blocks\": [\n      {\n        \"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\",\n        \"owner\": \"client:01a18959-4ad5-7338-9852-02684f2dfd35\"\n      }\n    ]\n  },\n  \"resized\": {},\n  \"size\": {\n    \"cell_height_px\": 16,\n    \"cell_width_px\": 8,\n    \"columns\": 80,\n    \"desired\": [\n      {\n        \"client_id\": \"client:01a18959-4ad5-7338-9852-02684f2dfd35\",\n        \"columns\": 80,\n        \"rows\": 48,\n        \"updated_at\": \"2026-10-29T21:28:12.893154+01:00\"\n      },\n      {\n        \"client_id\": \"client:01a18959-4934-7153-946c-479e87863967\",\n        \"columns\": 160,\n        \"rows\": 48,\n        \"updated_at\": \"2026-10-29T21:28:12.469679+01:00\"\n      }\n    ],\n    \"owner\": \"client:01a18959-4ad5-7338-9852-02684f2dfd35\",\n    \"rows\": 48\n  }\n}\n",
+    "stderr": ""
+  },
+  "size_before.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.size",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"columns\":160,\"rows\":48,\"cell_width_px\":8,\"cell_height_px\":16,\"owner\":\"client:01a18959-4934-7153-946c-479e87863967\",\"desired\":[{\"client_id\":\"client:01a18959-4934-7153-946c-479e87863967\",\"columns\":160,\"rows\":48,\"updated_at\":\"2026-10-29T21:28:12.469679+01:00\"}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {}}"
+  },
+  "size_unowned.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.size",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"columns\":160,\"rows\":48,\"cell_width_px\":8,\"cell_height_px\":16,\"owner\":\"client:01a18959-4934-7153-946c-479e87863967\",\"desired\":[{\"client_id\":\"client:01a18959-4934-7153-946c-479e87863967\",\"columns\":160,\"rows\":48,\"updated_at\":\"2026-10-29T21:28:12.469679+01:00\"}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {}}"
+  },
+  "size_after.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.size",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"columns\":80,\"rows\":48,\"cell_width_px\":8,\"cell_height_px\":16,\"owner\":null,\"desired\":[{\"client_id\":\"client:01a18959-4934-7153-946c-479e87863967\",\"columns\":160,\"rows\":48,\"updated_at\":\"2026-10-29T21:28:12.469679+01:00\"}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {}}"
+  },
+  "whoami.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "whoami",
+      "--json"
+    ],
+    "exit_status": 0,
+    "stdout": "{\n  \"principal\": {\n    \"kind\": \"peer\",\n    \"transport\": \"unix\",\n    \"display\": \"uid 592148721\",\n    \"uid\": 592148721,\n    \"gid\": 2048330233,\n    \"pid\": 15249\n  },\n  \"account\": \"<USER>\",\n  \"endpoint\": \"unix:///tmp/rexprobe.myyg/rex.sock\",\n  \"pid\": 15112,\n  \"instance_id\": \"87436c00-278f-4cd6-830c-8a31a2a402f4\",\n  \"host_id\": \"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\n  \"started_at\": \"2026-10-29T20:25:22.550905Z\",\n  \"rex_version\": \"0.0.1793131181-gdd9a20\",\n  \"exit_empty\": false,\n  \"session_count\": 0,\n  \"tailscale\": {\n    \"state\": \"disabled\",\n    \"allow_tailnet_members\": false\n  }\n}\n",
+    "stderr": ""
+  },
+  "server_version.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "server.version",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"rex_version\":\"0.0.1793131181-gdd9a20\",\"platform\":\"darwin_arm64\",\"commit\":\"dd9a201ca13b186bf36ecaedc4aad93b048eb655\",\"built_at\":\"2026-10-27T19:59:41Z\",\"dirty\":false,\"api_revision\":7}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "server_status.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "server.status",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"pid\":15112,\"instance_id\":\"87436c00-278f-4cd6-830c-8a31a2a402f4\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"started_at\":\"2026-10-29T20:25:22.550905Z\",\"exit_empty\":false,\"session_count\":0,\"tailscale\":{\"state\":\"disabled\",\"allow_tailnet_members\":false},\"api_revision\":7,\"config\":{\"generation\":1,\"hash\":\"\"}}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "final_sessions.json": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"sessions\":[]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "version": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "version"
+    ],
+    "exit_status": 0,
+    "stdout": "rex 0.0.1793131181-gdd9a20\ncommit: dd9a201ca13b186bf36ecaedc4aad93b048eb655\nbuilt: 2026-10-27T19:59:41Z\napi: revision 7 (supports 0 to 7)\n",
+    "stderr": ""
+  },
+  "process_running_stable": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"last_exit\":null,\"child\":{\"pid\":15302,\"user_id\":0,\"user\":\"root\",\"name\":\"login\",\"path\":\"/usr/bin/login\"},\"foreground\":{\"pid\":15302,\"user_id\":0,\"user\":\"root\",\"name\":\"login\",\"path\":\"/usr/bin/login\"},\"home\":\"<HOME>\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18956-b239-7b46-b990-f3e890d2c713\", \"args\": {}}"
+  },
+  "main_capture": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "capture",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "-b",
+      "block:01a18956-b239-7b46-b990-f3e890d2c713",
+      "--trim"
+    ],
+    "exit_status": 0,
+    "stdout": "Last login: Thu Oct 29 20:15:09 on ttys026\nprobe worker running\n",
+    "stderr": ""
+  },
+  "duplicate_destroy": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b289-7416-a6b5-170fbb3bf351",
+      "session.destroy",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "set_label_restore": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+      "session.set_label",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"revision\":4}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"}"
+  },
+  "isolated_direct_env": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18957-5e50-7a3d-a6fe-9c9cd42817d0\",\"initial_windows\":[{\"window_id\":\"window:01a18957-5e52-73bd-9a23-5c7a320153b8\",\"block_ids\":[\"block:01a18957-5e50-7b04-91f6-9500cfc728b6\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-env-isolated_direct_env\", \"initial_windows\": [{\"window_label\": \"probe-env-isolated_direct_env\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-env-isolated_direct_env\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"env | sort > /tmp/rexprobe.myyg/isolated_direct_env.env; echo $$ > /tmp/rexprobe.myyg/isolated_direct_env.pid; sleep 30\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "isolated_bash_login": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18957-5ede-7059-ba35-522b86e0796f\",\"initial_windows\":[{\"window_id\":\"window:01a18957-5edf-7bbf-84b9-6825f5226db0\",\"block_ids\":[\"block:01a18957-5ede-72fd-b45f-ed4cde7ae367\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-env-isolated_bash_login\", \"initial_windows\": [{\"window_label\": \"probe-env-isolated_bash_login\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-env-isolated_bash_login\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-l\", \"-c\", \"env | sort > /tmp/rexprobe.myyg/isolated_bash_login.env; echo $$ > /tmp/rexprobe.myyg/isolated_bash_login.pid; sleep 30\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "paste_bracketed": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18959-4469-7893-928e-e797679ac2c9\",\"initial_windows\":[{\"window_id\":\"window:01a18959-446c-7bc7-9673-0a83f5fa88e1\",\"block_ids\":[\"block:01a18959-4469-7952-afbb-51b0f5b5ce7a\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-paste_bracketed\", \"initial_windows\": [{\"window_label\": \"probe-paste_bracketed\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-paste_bracketed\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"stty raw -echo; printf '\\\\033[?2004h'; echo ready > /tmp/rexprobe.myyg/paste_bracketed.ready; exec /bin/cat -uv > /tmp/rexprobe.myyg/paste_bracketed.txt\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "paste_unbracketed": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18959-46ef-7985-b6da-7bfb78be5a40\",\"initial_windows\":[{\"window_id\":\"window:01a18959-46f2-751c-a8cd-7c9fac1f5846\",\"block_ids\":[\"block:01a18959-46ef-7a21-bed8-f5f63919ee6b\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-paste_unbracketed\", \"initial_windows\": [{\"window_label\": \"probe-paste_unbracketed\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-paste_unbracketed\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"stty raw -echo; printf '\\\\033[?2004l'; echo ready > /tmp/rexprobe.myyg/paste_unbracketed.ready; exec /bin/cat -uv > /tmp/rexprobe.myyg/paste_unbracketed.txt\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "paste_bracketed_enter": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "send-key",
+      "-s",
+      "session:01a18959-4469-7893-928e-e797679ac2c9",
+      "-b",
+      "block:01a18959-4469-7952-afbb-51b0f5b5ce7a",
+      "enter"
+    ],
+    "exit_status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "paste_unbracketed_enter": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "send-key",
+      "-s",
+      "session:01a18959-46ef-7985-b6da-7bfb78be5a40",
+      "-b",
+      "block:01a18959-46ef-7a21-bed8-f5f63919ee6b",
+      "enter"
+    ],
+    "exit_status": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "paste_unbracketed_event": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-46ef-7985-b6da-7bfb78be5a40",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-46ef-7a21-bed8-f5f63919ee6b\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first line\\nsecond line\\nthird line\"}}}"
+  },
+  "paste_unbracketed_modes": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-46ef-7985-b6da-7bfb78be5a40",
+      "com.superlogical.terminal.modes",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"screen\":\"primary\",\"modes\":[{\"name\":\"disable_keyboard\",\"number\":2,\"ansi\":true,\"set\":false},{\"name\":\"insert\",\"number\":4,\"ansi\":true,\"set\":false},{\"name\":\"send_receive_mode\",\"number\":12,\"ansi\":true,\"set\":true,\"default\":true},{\"name\":\"linefeed\",\"number\":20,\"ansi\":true,\"set\":false},{\"name\":\"cursor_keys\",\"number\":1,\"set\":false},{\"name\":\"132_column\",\"number\":3,\"set\":false},{\"name\":\"slow_scroll\",\"number\":4,\"set\":false},{\"name\":\"reverse_colors\",\"number\":5,\"set\":false},{\"name\":\"origin\",\"number\":6,\"set\":false},{\"name\":\"wraparound\",\"number\":7,\"set\":true,\"default\":true},{\"name\":\"autorepeat\",\"number\":8,\"set\":false},{\"name\":\"mouse_event_x10\",\"number\":9,\"set\":false},{\"name\":\"cursor_blinking\",\"number\":12,\"set\":false},{\"name\":\"cursor_visible\",\"number\":25,\"set\":true,\"default\":true},{\"name\":\"enable_mode_3\",\"number\":40,\"set\":false},{\"name\":\"reverse_wrap\",\"number\":45,\"set\":false},{\"name\":\"alt_screen_legacy\",\"number\":47,\"set\":false},{\"name\":\"keypad_keys\",\"number\":66,\"set\":false},{\"name\":\"backarrow_key_mode\",\"number\":67,\"set\":false},{\"name\":\"enable_left_and_right_margin\",\"number\":69,\"set\":false},{\"name\":\"mouse_event_normal\",\"number\":1000,\"set\":false},{\"name\":\"mouse_event_button\",\"number\":1002,\"set\":false},{\"name\":\"mouse_event_any\",\"number\":1003,\"set\":false},{\"name\":\"focus_event\",\"number\":1004,\"set\":false},{\"name\":\"mouse_format_utf8\",\"number\":1005,\"set\":false},{\"name\":\"mouse_format_sgr\",\"number\":1006,\"set\":false},{\"name\":\"mouse_alternate_scroll\",\"number\":1007,\"set\":true,\"default\":true},{\"name\":\"mouse_format_urxvt\",\"number\":1015,\"set\":false},{\"name\":\"mouse_format_sgr_pixels\",\"number\":1016,\"set\":false},{\"name\":\"ignore_keypad_with_numlock\",\"number\":1035,\"set\":true,\"default\":true},{\"name\":\"alt_esc_prefix\",\"number\":1036,\"set\":true,\"default\":true},{\"name\":\"alt_sends_escape\",\"number\":1039,\"set\":false},{\"name\":\"reverse_wrap_extended\",\"number\":1045,\"set\":false},{\"name\":\"alt_screen\",\"number\":1047,\"set\":false},{\"name\":\"save_cursor\",\"number\":1048,\"set\":false},{\"name\":\"alt_screen_save_cursor_clear_enter\",\"number\":1049,\"set\":false},{\"name\":\"bracketed_paste\",\"number\":2004,\"set\":false},{\"name\":\"synchronized_output\",\"number\":2026,\"set\":false},{\"name\":\"grapheme_cluster\",\"number\":2027,\"set\":false},{\"name\":\"report_color_scheme\",\"number\":2031,\"set\":false},{\"name\":\"report_visibility\",\"number\":2033,\"set\":false},{\"name\":\"in_band_size_reports\",\"number\":2048,\"set\":false},{\"name\":\"kitty_paste_events\",\"number\":5522,\"set\":false}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-46ef-7a21-bed8-f5f63919ee6b\", \"args\": {}}"
+  },
+  "paste_bracketed_wake_capture": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "capture",
+      "-s",
+      "session:01a18959-4469-7893-928e-e797679ac2c9",
+      "-b",
+      "block:01a18959-4469-7952-afbb-51b0f5b5ce7a",
+      "--trim"
+    ],
+    "exit_status": 0,
+    "stdout": "\n",
+    "stderr": ""
+  },
+  "paste_unbracketed_wake_capture": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "capture",
+      "-s",
+      "session:01a18959-46ef-7985-b6da-7bfb78be5a40",
+      "-b",
+      "block:01a18959-46ef-7a21-bed8-f5f63919ee6b",
+      "--trim"
+    ],
+    "exit_status": 0,
+    "stdout": "\n",
+    "stderr": ""
+  },
+  "idle_bracketed": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18959-b4af-7a21-8302-798619a381dd\",\"initial_windows\":[{\"window_id\":\"window:01a18959-b4b0-7df6-bf4f-b0c2ddeadf5d\",\"block_ids\":[\"block:01a18959-b4af-7abe-996b-6775d6bccd21\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-idle_bracketed\", \"initial_windows\": [{\"window_label\": \"probe-idle_bracketed\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-idle_bracketed\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"stty raw -echo; printf '\\\\033[?2004h'; echo ready > /tmp/rexprobe.myyg/idle_bracketed.ready; exec /bin/cat -uv > /tmp/rexprobe.myyg/idle_bracketed.txt\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "idle_unbracketed": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18959-b8c0-7b00-8995-2a68872db341\",\"initial_windows\":[{\"window_id\":\"window:01a18959-b8c2-7269-9345-37547390f0b1\",\"block_ids\":[\"block:01a18959-b8c0-7b7d-96a3-083c9712c5bd\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-idle_unbracketed\", \"initial_windows\": [{\"window_label\": \"probe-idle_unbracketed\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-idle_unbracketed\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"stty raw -echo; printf '\\\\033[?2004l'; echo ready > /tmp/rexprobe.myyg/idle_unbracketed.ready; exec /bin/cat -uv > /tmp/rexprobe.myyg/idle_unbracketed.txt\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "idle_bracketed_modes_before": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b4af-7a21-8302-798619a381dd",
+      "com.superlogical.terminal.modes",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"screen\":\"primary\",\"modes\":[{\"name\":\"disable_keyboard\",\"number\":2,\"ansi\":true,\"set\":false},{\"name\":\"insert\",\"number\":4,\"ansi\":true,\"set\":false},{\"name\":\"send_receive_mode\",\"number\":12,\"ansi\":true,\"set\":true,\"default\":true},{\"name\":\"linefeed\",\"number\":20,\"ansi\":true,\"set\":false},{\"name\":\"cursor_keys\",\"number\":1,\"set\":false},{\"name\":\"132_column\",\"number\":3,\"set\":false},{\"name\":\"slow_scroll\",\"number\":4,\"set\":false},{\"name\":\"reverse_colors\",\"number\":5,\"set\":false},{\"name\":\"origin\",\"number\":6,\"set\":false},{\"name\":\"wraparound\",\"number\":7,\"set\":true,\"default\":true},{\"name\":\"autorepeat\",\"number\":8,\"set\":false},{\"name\":\"mouse_event_x10\",\"number\":9,\"set\":false},{\"name\":\"cursor_blinking\",\"number\":12,\"set\":false},{\"name\":\"cursor_visible\",\"number\":25,\"set\":true,\"default\":true},{\"name\":\"enable_mode_3\",\"number\":40,\"set\":false},{\"name\":\"reverse_wrap\",\"number\":45,\"set\":false},{\"name\":\"alt_screen_legacy\",\"number\":47,\"set\":false},{\"name\":\"keypad_keys\",\"number\":66,\"set\":false},{\"name\":\"backarrow_key_mode\",\"number\":67,\"set\":false},{\"name\":\"enable_left_and_right_margin\",\"number\":69,\"set\":false},{\"name\":\"mouse_event_normal\",\"number\":1000,\"set\":false},{\"name\":\"mouse_event_button\",\"number\":1002,\"set\":false},{\"name\":\"mouse_event_any\",\"number\":1003,\"set\":false},{\"name\":\"focus_event\",\"number\":1004,\"set\":false},{\"name\":\"mouse_format_utf8\",\"number\":1005,\"set\":false},{\"name\":\"mouse_format_sgr\",\"number\":1006,\"set\":false},{\"name\":\"mouse_alternate_scroll\",\"number\":1007,\"set\":true,\"default\":true},{\"name\":\"mouse_format_urxvt\",\"number\":1015,\"set\":false},{\"name\":\"mouse_format_sgr_pixels\",\"number\":1016,\"set\":false},{\"name\":\"ignore_keypad_with_numlock\",\"number\":1035,\"set\":true,\"default\":true},{\"name\":\"alt_esc_prefix\",\"number\":1036,\"set\":true,\"default\":true},{\"name\":\"alt_sends_escape\",\"number\":1039,\"set\":false},{\"name\":\"reverse_wrap_extended\",\"number\":1045,\"set\":false},{\"name\":\"alt_screen\",\"number\":1047,\"set\":false},{\"name\":\"save_cursor\",\"number\":1048,\"set\":false},{\"name\":\"alt_screen_save_cursor_clear_enter\",\"number\":1049,\"set\":false},{\"name\":\"bracketed_paste\",\"number\":2004,\"set\":true},{\"name\":\"synchronized_output\",\"number\":2026,\"set\":false},{\"name\":\"grapheme_cluster\",\"number\":2027,\"set\":false},{\"name\":\"report_color_scheme\",\"number\":2031,\"set\":false},{\"name\":\"report_visibility\",\"number\":2033,\"set\":false},{\"name\":\"in_band_size_reports\",\"number\":2048,\"set\":false},{\"name\":\"kitty_paste_events\",\"number\":5522,\"set\":false}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b4af-7abe-996b-6775d6bccd21\", \"args\": {}}"
+  },
+  "idle_unbracketed_modes_before": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b8c0-7b00-8995-2a68872db341",
+      "com.superlogical.terminal.modes",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"screen\":\"primary\",\"modes\":[{\"name\":\"disable_keyboard\",\"number\":2,\"ansi\":true,\"set\":false},{\"name\":\"insert\",\"number\":4,\"ansi\":true,\"set\":false},{\"name\":\"send_receive_mode\",\"number\":12,\"ansi\":true,\"set\":true,\"default\":true},{\"name\":\"linefeed\",\"number\":20,\"ansi\":true,\"set\":false},{\"name\":\"cursor_keys\",\"number\":1,\"set\":false},{\"name\":\"132_column\",\"number\":3,\"set\":false},{\"name\":\"slow_scroll\",\"number\":4,\"set\":false},{\"name\":\"reverse_colors\",\"number\":5,\"set\":false},{\"name\":\"origin\",\"number\":6,\"set\":false},{\"name\":\"wraparound\",\"number\":7,\"set\":true,\"default\":true},{\"name\":\"autorepeat\",\"number\":8,\"set\":false},{\"name\":\"mouse_event_x10\",\"number\":9,\"set\":false},{\"name\":\"cursor_blinking\",\"number\":12,\"set\":false},{\"name\":\"cursor_visible\",\"number\":25,\"set\":true,\"default\":true},{\"name\":\"enable_mode_3\",\"number\":40,\"set\":false},{\"name\":\"reverse_wrap\",\"number\":45,\"set\":false},{\"name\":\"alt_screen_legacy\",\"number\":47,\"set\":false},{\"name\":\"keypad_keys\",\"number\":66,\"set\":false},{\"name\":\"backarrow_key_mode\",\"number\":67,\"set\":false},{\"name\":\"enable_left_and_right_margin\",\"number\":69,\"set\":false},{\"name\":\"mouse_event_normal\",\"number\":1000,\"set\":false},{\"name\":\"mouse_event_button\",\"number\":1002,\"set\":false},{\"name\":\"mouse_event_any\",\"number\":1003,\"set\":false},{\"name\":\"focus_event\",\"number\":1004,\"set\":false},{\"name\":\"mouse_format_utf8\",\"number\":1005,\"set\":false},{\"name\":\"mouse_format_sgr\",\"number\":1006,\"set\":false},{\"name\":\"mouse_alternate_scroll\",\"number\":1007,\"set\":true,\"default\":true},{\"name\":\"mouse_format_urxvt\",\"number\":1015,\"set\":false},{\"name\":\"mouse_format_sgr_pixels\",\"number\":1016,\"set\":false},{\"name\":\"ignore_keypad_with_numlock\",\"number\":1035,\"set\":true,\"default\":true},{\"name\":\"alt_esc_prefix\",\"number\":1036,\"set\":true,\"default\":true},{\"name\":\"alt_sends_escape\",\"number\":1039,\"set\":false},{\"name\":\"reverse_wrap_extended\",\"number\":1045,\"set\":false},{\"name\":\"alt_screen\",\"number\":1047,\"set\":false},{\"name\":\"save_cursor\",\"number\":1048,\"set\":false},{\"name\":\"alt_screen_save_cursor_clear_enter\",\"number\":1049,\"set\":false},{\"name\":\"bracketed_paste\",\"number\":2004,\"set\":false},{\"name\":\"synchronized_output\",\"number\":2026,\"set\":false},{\"name\":\"grapheme_cluster\",\"number\":2027,\"set\":false},{\"name\":\"report_color_scheme\",\"number\":2031,\"set\":false},{\"name\":\"report_visibility\",\"number\":2033,\"set\":false},{\"name\":\"in_band_size_reports\",\"number\":2048,\"set\":false},{\"name\":\"kitty_paste_events\",\"number\":5522,\"set\":false}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b8c0-7b7d-96a3-083c9712c5bd\", \"args\": {}}"
+  },
+  "idle_bracketed_paste": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b4af-7a21-8302-798619a381dd",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b4af-7abe-996b-6775d6bccd21\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first\\nsecond\"}}}"
+  },
+  "idle_unbracketed_paste": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b8c0-7b00-8995-2a68872db341",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b8c0-7b7d-96a3-083c9712c5bd\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first\\nsecond\"}}}"
+  },
+  "idle_bracketed_paste_awake": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b4af-7a21-8302-798619a381dd",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b4af-7abe-996b-6775d6bccd21\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first\\nsecond\"}}}"
+  },
+  "idle_unbracketed_paste_awake": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-b8c0-7b00-8995-2a68872db341",
+      "block.event",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-b8c0-7b7d-96a3-083c9712c5bd\", \"event\": {\"type\": \"paste\", \"payload\": {\"text\": \"first\\nsecond\"}}}"
+  },
+  "reflow": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18959-4934-7557-a423-9f8d041de5d3\",\"initial_windows\":[{\"window_id\":\"window:01a18959-4935-7bfa-bf9e-93712bb69968\",\"block_ids\":[\"block:01a18959-4934-75df-b11f-c0bdc593ca99\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-reflow\", \"initial_windows\": [{\"window_label\": \"probe-reflow\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-reflow\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"printf '000000000011111111112222222222333333333344444444445555555555666666666677777777778888888888999999999900000000001111111111222222222233333333334444444444555555555566666666667777777777888888888899999999990000000000111111111122222222223333333333\\\\r\\\\n'; sleep 600\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "reflow_unwrap": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "com.superlogical.terminal.format",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"content\":\"Last login: Thu Oct 29 21:28:11 on ttys027\\n000000000011111111112222222222333333333344444444445555555555666666666677777777778888888888999999999900000000001111111111222222222233333333334444444444555555555566666666667777777777888888888899999999990000000000111111111122222222223333333333\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\", \"args\": {\"format\": \"text\", \"trim\": true, \"unwrap\": true}}"
+  },
+  "resize_restore": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "do",
+      "-s",
+      "session:01a18959-4934-7557-a423-9f8d041de5d3",
+      "-e",
+      "local own = rex.call(\"session.own_block\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\", block_ids={\"block:01a18959-4934-75df-b11f-c0bdc593ca99\"}, mode=\"take\"}); local resized=rex.call(\"com.superlogical.terminal.resize\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\", block_id=\"block:01a18959-4934-75df-b11f-c0bdc593ca99\", args={columns=160,rows=48}}); return {own=own,resized=resized,size=rex.call(\"com.superlogical.terminal.size\", {session_id=\"session:01a18959-4934-7557-a423-9f8d041de5d3\",block_id=\"block:01a18959-4934-75df-b11f-c0bdc593ca99\",args={}})}",
+      "--json"
+    ],
+    "exit_status": 0,
+    "stdout": "{\n  \"own\": {\n    \"blocks\": [\n      {\n        \"block_id\": \"block:01a18959-4934-75df-b11f-c0bdc593ca99\",\n        \"owner\": \"client:01a18959-4b36-7bee-9723-b0070e02f4a9\"\n      }\n    ]\n  },\n  \"resized\": {},\n  \"size\": {\n    \"cell_height_px\": 16,\n    \"cell_width_px\": 8,\n    \"columns\": 160,\n    \"desired\": [\n      {\n        \"client_id\": \"client:01a18959-4b36-7bee-9723-b0070e02f4a9\",\n        \"columns\": 160,\n        \"rows\": 48,\n        \"updated_at\": \"2026-10-29T21:28:12.984159+01:00\"\n      },\n      {\n        \"client_id\": \"client:01a18959-4934-7153-946c-479e87863967\",\n        \"columns\": 160,\n        \"rows\": 48,\n        \"updated_at\": \"2026-10-29T21:28:12.469679+01:00\"\n      }\n    ],\n    \"owner\": \"client:01a18959-4b36-7bee-9723-b0070e02f4a9\",\n    \"rows\": 48\n  }\n}\n",
+    "stderr": ""
+  },
+  "exit_status_check": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a1895b-5315-787b-a1fe-a41fc559cbc8\",\"initial_windows\":[{\"window_id\":\"window:01a1895b-5316-7c4c-b81b-af9429fba3e1\",\"block_ids\":[\"block:01a1895b-5315-7904-828f-3420d47a8296\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-exit_status_check\", \"initial_windows\": [{\"window_label\": \"probe-exit_status_check\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-exit_status_check\", \"options\": {\"shell\": \"none\", \"command\": [\"/bin/bash\", \"-c\", \"echo explicit-exit-23 > /tmp/rexprobe.myyg/exit-status-ready; exit 23\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": false, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "exit_status_check_destroy": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a1895b-5315-787b-a1fe-a41fc559cbc8",
+      "session.destroy",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_delayed": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18956-f7be-7a1d-9c95-51882c37a82f\",\"initial_windows\":[{\"window_id\":\"window:01a18956-f7c0-7710-902a-aea808486476\",\"block_ids\":[\"block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-exit_delayed\", \"initial_windows\": [{\"window_label\": \"probe-exit_delayed\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-exit_delayed\", \"options\": {\"shell\": \"none\", \"command\": [\"bash\", \"-c\", \"sleep 1; exit 17\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "exit_delayed_sessions": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"sessions\":[{\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"},{\"session_id\":\"session:01a18956-f7be-7a1d-9c95-51882c37a82f\",\"label\":\"probe-exit_delayed\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_delayed_blocks": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"blocks\":[]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_delayed_process": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: stream response \"control-3\" failed: block not found: block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12 (status=404 code=not_found)\n",
+    "stdin": "{\"block_id\": \"block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12\", \"args\": {}}"
+  },
+  "exit_delayed_destroy": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+      "session.destroy",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_immediate": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4\",\"initial_windows\":[{\"window_id\":\"window:01a18957-0039-7e5b-92f6-08c0e8178429\",\"block_ids\":[\"block:01a18957-0037-7e96-b30d-fcf06f3d79f7\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-exit_immediate\", \"initial_windows\": [{\"window_label\": \"probe-exit_immediate\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-exit_immediate\", \"options\": {\"shell\": \"none\", \"command\": [\"bash\", \"-c\", \"exit 0\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": true, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "exit_immediate_sessions": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"sessions\":[{\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"},{\"session_id\":\"session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4\",\"label\":\"probe-exit_immediate\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_immediate_blocks": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"blocks\":[]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_immediate_process": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 3,
+    "stdout": "",
+    "stderr": "Error: stream response \"control-3\" failed: block not found: block:01a18957-0037-7e96-b30d-fcf06f3d79f7 (status=404 code=not_found)\n",
+    "stdin": "{\"block_id\": \"block:01a18957-0037-7e96-b30d-fcf06f3d79f7\", \"args\": {}}"
+  },
+  "exit_immediate_destroy": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+      "session.destroy",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_keep": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.create",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"session_id\":\"session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2\",\"initial_windows\":[{\"window_id\":\"window:01a18957-08a2-7b81-8f55-c9a9168f5ed0\",\"block_ids\":[\"block:01a18957-08a0-7e7b-a639-109e3eece9a3\"],\"revision\":1}]}\n",
+    "stderr": "",
+    "stdin": "{\"label\": \"probe-exit_keep\", \"initial_windows\": [{\"window_label\": \"probe-exit_keep\", \"layout\": {\"block\": {\"flavor\": \"com.superlogical.terminal.shell\", \"label\": \"probe-exit_keep\", \"options\": {\"shell\": \"none\", \"command\": [\"bash\", \"-c\", \"sleep 1; exit 23\"], \"cwd\": \"/tmp/rexprobe.myyg\", \"size\": {\"columns\": 160, \"rows\": 48}, \"exit\": {\"on_completion\": false, \"quick_exit_threshold_ms\": 0}}}}}]}"
+  },
+  "exit_keep_sessions": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "session.list",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"sessions\":[{\"session_id\":\"session:01a18956-b239-799c-be50-f3f8f28c0d88\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\"},{\"session_id\":\"session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2\",\"label\":\"probe-exit_keep\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_keep_blocks": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+      "session.list_blocks",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18957-08a0-7e7b-a639-109e3eece9a3\",\"label\":\"probe-exit_keep\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"placement\":\"placed\",\"window_id\":\"window:01a18957-08a2-7b81-8f55-c9a9168f5ed0\",\"owner\":\"client:01a18957-08a0-7718-a8eb-1afa14eefc1f\"}]}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "exit_keep_process": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+      "com.superlogical.terminal.process",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"last_exit\":{\"exit_code\":0},\"home\":\"<HOME>\"}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18957-08a0-7e7b-a639-109e3eece9a3\", \"args\": {}}"
+  },
+  "exit_keep_destroy": {
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+      "session.destroy",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{}\n",
+    "stderr": "",
+    "stdin": "{}"
+  },
+  "early_paste_modes": {
+    "name": "paste_bracketed_modes",
+    "argv": [
+      "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+      "-S",
+      "unix:///tmp/rexprobe.myyg/rex.sock",
+      "--autostart=false",
+      "api",
+      "call",
+      "-s",
+      "session:01a18958-726c-72d2-b2ff-1f6676f3e48f",
+      "com.superlogical.terminal.modes",
+      "-"
+    ],
+    "exit_status": 0,
+    "stdout": "{\"screen\":\"primary\",\"modes\":[{\"name\":\"disable_keyboard\",\"number\":2,\"ansi\":true,\"set\":false},{\"name\":\"insert\",\"number\":4,\"ansi\":true,\"set\":false},{\"name\":\"send_receive_mode\",\"number\":12,\"ansi\":true,\"set\":true,\"default\":true},{\"name\":\"linefeed\",\"number\":20,\"ansi\":true,\"set\":false},{\"name\":\"cursor_keys\",\"number\":1,\"set\":false},{\"name\":\"132_column\",\"number\":3,\"set\":false},{\"name\":\"slow_scroll\",\"number\":4,\"set\":false},{\"name\":\"reverse_colors\",\"number\":5,\"set\":false},{\"name\":\"origin\",\"number\":6,\"set\":false},{\"name\":\"wraparound\",\"number\":7,\"set\":true,\"default\":true},{\"name\":\"autorepeat\",\"number\":8,\"set\":false},{\"name\":\"mouse_event_x10\",\"number\":9,\"set\":false},{\"name\":\"cursor_blinking\",\"number\":12,\"set\":false},{\"name\":\"cursor_visible\",\"number\":25,\"set\":true,\"default\":true},{\"name\":\"enable_mode_3\",\"number\":40,\"set\":false},{\"name\":\"reverse_wrap\",\"number\":45,\"set\":false},{\"name\":\"alt_screen_legacy\",\"number\":47,\"set\":false},{\"name\":\"keypad_keys\",\"number\":66,\"set\":false},{\"name\":\"backarrow_key_mode\",\"number\":67,\"set\":false},{\"name\":\"enable_left_and_right_margin\",\"number\":69,\"set\":false},{\"name\":\"mouse_event_normal\",\"number\":1000,\"set\":false},{\"name\":\"mouse_event_button\",\"number\":1002,\"set\":false},{\"name\":\"mouse_event_any\",\"number\":1003,\"set\":false},{\"name\":\"focus_event\",\"number\":1004,\"set\":false},{\"name\":\"mouse_format_utf8\",\"number\":1005,\"set\":false},{\"name\":\"mouse_format_sgr\",\"number\":1006,\"set\":false},{\"name\":\"mouse_alternate_scroll\",\"number\":1007,\"set\":true,\"default\":true},{\"name\":\"mouse_format_urxvt\",\"number\":1015,\"set\":false},{\"name\":\"mouse_format_sgr_pixels\",\"number\":1016,\"set\":false},{\"name\":\"ignore_keypad_with_numlock\",\"number\":1035,\"set\":true,\"default\":true},{\"name\":\"alt_esc_prefix\",\"number\":1036,\"set\":true,\"default\":true},{\"name\":\"alt_sends_escape\",\"number\":1039,\"set\":false},{\"name\":\"reverse_wrap_extended\",\"number\":1045,\"set\":false},{\"name\":\"alt_screen\",\"number\":1047,\"set\":false},{\"name\":\"save_cursor\",\"number\":1048,\"set\":false},{\"name\":\"alt_screen_save_cursor_clear_enter\",\"number\":1049,\"set\":false},{\"name\":\"bracketed_paste\",\"number\":2004,\"set\":false},{\"name\":\"synchronized_output\",\"number\":2026,\"set\":false},{\"name\":\"grapheme_cluster\",\"number\":2027,\"set\":false},{\"name\":\"report_color_scheme\",\"number\":2031,\"set\":false},{\"name\":\"report_visibility\",\"number\":2033,\"set\":false},{\"name\":\"in_band_size_reports\",\"number\":2048,\"set\":false},{\"name\":\"kitty_paste_events\",\"number\":5522,\"set\":false}]}\n",
+    "stderr": "",
+    "stdin": "{\"block_id\": \"block:01a18958-726c-7395-8554-22cb99103f8d\", \"args\": {}}"
+  }
+}

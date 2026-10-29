@@ -1,0 +1,247 @@
+{
+  "exit_delayed": {
+    "request": {
+      "label": "probe-exit_delayed",
+      "initial_windows": [
+        {
+          "window_label": "probe-exit_delayed",
+          "layout": {
+            "block": {
+              "flavor": "com.superlogical.terminal.shell",
+              "label": "probe-exit_delayed",
+              "options": {
+                "shell": "none",
+                "command": [
+                  "bash",
+                  "-c",
+                  "sleep 1; exit 17"
+                ],
+                "cwd": "/tmp/rexprobe.myyg",
+                "size": {
+                  "columns": 160,
+                  "rows": 48
+                },
+                "exit": {
+                  "on_completion": true,
+                  "quick_exit_threshold_ms": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "create": {
+      "session_id": "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+      "initial_windows": [
+        {
+          "window_id": "window:01a18956-f7c0-7710-902a-aea808486476",
+          "block_ids": [
+            "block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12"
+          ],
+          "revision": 1
+        }
+      ]
+    },
+    "session_list": {
+      "sessions": [
+        {
+          "session_id": "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+          "label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+        },
+        {
+          "session_id": "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+          "label": "probe-exit_delayed"
+        }
+      ]
+    },
+    "list_blocks": {
+      "blocks": []
+    },
+    "process_call": {
+      "argv": [
+        "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+        "-S",
+        "unix:///tmp/rexprobe.myyg/rex.sock",
+        "--autostart=false",
+        "api",
+        "call",
+        "-s",
+        "session:01a18956-f7be-7a1d-9c95-51882c37a82f",
+        "com.superlogical.terminal.process",
+        "-"
+      ],
+      "exit_status": 3,
+      "stdout": "",
+      "stderr": "Error: stream response \"control-3\" failed: block not found: block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12 (status=404 code=not_found)\n",
+      "stdin": "{\"block_id\": \"block:01a18956-f7be-7ad9-9eb0-ad5beeb07a12\", \"args\": {}}"
+    }
+  },
+  "exit_immediate": {
+    "request": {
+      "label": "probe-exit_immediate",
+      "initial_windows": [
+        {
+          "window_label": "probe-exit_immediate",
+          "layout": {
+            "block": {
+              "flavor": "com.superlogical.terminal.shell",
+              "label": "probe-exit_immediate",
+              "options": {
+                "shell": "none",
+                "command": [
+                  "bash",
+                  "-c",
+                  "exit 0"
+                ],
+                "cwd": "/tmp/rexprobe.myyg",
+                "size": {
+                  "columns": 160,
+                  "rows": 48
+                },
+                "exit": {
+                  "on_completion": true,
+                  "quick_exit_threshold_ms": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "create": {
+      "session_id": "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+      "initial_windows": [
+        {
+          "window_id": "window:01a18957-0039-7e5b-92f6-08c0e8178429",
+          "block_ids": [
+            "block:01a18957-0037-7e96-b30d-fcf06f3d79f7"
+          ],
+          "revision": 1
+        }
+      ]
+    },
+    "session_list": {
+      "sessions": [
+        {
+          "session_id": "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+          "label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+        },
+        {
+          "session_id": "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+          "label": "probe-exit_immediate"
+        }
+      ]
+    },
+    "list_blocks": {
+      "blocks": []
+    },
+    "process_call": {
+      "argv": [
+        "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+        "-S",
+        "unix:///tmp/rexprobe.myyg/rex.sock",
+        "--autostart=false",
+        "api",
+        "call",
+        "-s",
+        "session:01a18957-0037-7dac-bf2a-a2b5a44dbbe4",
+        "com.superlogical.terminal.process",
+        "-"
+      ],
+      "exit_status": 3,
+      "stdout": "",
+      "stderr": "Error: stream response \"control-3\" failed: block not found: block:01a18957-0037-7e96-b30d-fcf06f3d79f7 (status=404 code=not_found)\n",
+      "stdin": "{\"block_id\": \"block:01a18957-0037-7e96-b30d-fcf06f3d79f7\", \"args\": {}}"
+    }
+  },
+  "exit_keep": {
+    "request": {
+      "label": "probe-exit_keep",
+      "initial_windows": [
+        {
+          "window_label": "probe-exit_keep",
+          "layout": {
+            "block": {
+              "flavor": "com.superlogical.terminal.shell",
+              "label": "probe-exit_keep",
+              "options": {
+                "shell": "none",
+                "command": [
+                  "bash",
+                  "-c",
+                  "sleep 1; exit 23"
+                ],
+                "cwd": "/tmp/rexprobe.myyg",
+                "size": {
+                  "columns": 160,
+                  "rows": 48
+                },
+                "exit": {
+                  "on_completion": false,
+                  "quick_exit_threshold_ms": 0
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "create": {
+      "session_id": "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+      "initial_windows": [
+        {
+          "window_id": "window:01a18957-08a2-7b81-8f55-c9a9168f5ed0",
+          "block_ids": [
+            "block:01a18957-08a0-7e7b-a639-109e3eece9a3"
+          ],
+          "revision": 1
+        }
+      ]
+    },
+    "session_list": {
+      "sessions": [
+        {
+          "session_id": "session:01a18956-b239-799c-be50-f3f8f28c0d88",
+          "label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+        },
+        {
+          "session_id": "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+          "label": "probe-exit_keep"
+        }
+      ]
+    },
+    "list_blocks": {
+      "blocks": [
+        {
+          "block_id": "block:01a18957-08a0-7e7b-a639-109e3eece9a3",
+          "label": "probe-exit_keep",
+          "creator_name": "com.superlogical.terminal",
+          "flavor": "com.superlogical.terminal.shell",
+          "host_id": "28c8e6dc-0a04-4a20-accf-7d6d1fb85481",
+          "placement": "placed",
+          "window_id": "window:01a18957-08a2-7b81-8f55-c9a9168f5ed0",
+          "owner": "client:01a18957-08a0-7718-a8eb-1afa14eefc1f"
+        }
+      ]
+    },
+    "process_call": {
+      "argv": [
+        "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex",
+        "-S",
+        "unix:///tmp/rexprobe.myyg/rex.sock",
+        "--autostart=false",
+        "api",
+        "call",
+        "-s",
+        "session:01a18957-08a0-7a9a-bc16-21a8f1cde1b2",
+        "com.superlogical.terminal.process",
+        "-"
+      ],
+      "exit_status": 0,
+      "stdout": "{\"last_exit\":{\"exit_code\":0},\"home\":\"<HOME>\"}\n",
+      "stderr": "",
+      "stdin": "{\"block_id\": \"block:01a18957-08a0-7e7b-a639-109e3eece9a3\", \"args\": {}}"
+    }
+  }
+}

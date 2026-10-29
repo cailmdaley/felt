@@ -1,0 +1,22 @@
+{
+  "bracketed": {
+    "paste_text": "first line\nsecond line\nthird line",
+    "before_enter_cat_v": "^[[200~first line\nsecond line\nthird line^[[201~",
+    "after_enter_cat_v": "^[[200~first line\nsecond line\nthird line^[[201~^M",
+    "after_enter_hex": "5e5b5b3230307e6669727374206c696e650a7365636f6e64206c696e650a7468697264206c696e655e5b5b3230317e5e4d"
+  },
+  "unbracketed": {
+    "paste_text": "first line\nsecond line\nthird line",
+    "before_enter_cat_v": "first line^Msecond line^Mthird line",
+    "after_enter_cat_v": "first line^Msecond line^Mthird line^M",
+    "after_enter_hex": "6669727374206c696e655e4d7365636f6e64206c696e655e4d7468697264206c696e655e4d"
+  },
+  "idle_bracketed": {
+    "before_capture": "^[[200~first\nsecond^[[201~",
+    "after_capture_and_second_paste": "^[[200~first\nsecond^[[201~^[[200~first\nsecond^[[201~"
+  },
+  "idle_unbracketed": {
+    "before_capture": "first^Msecond",
+    "after_capture_and_second_paste": "first^Msecondfirst^Msecond"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "own": {
+    "blocks": [
+      {
+        "block_id": "block:01a18959-4934-75df-b11f-c0bdc593ca99",
+        "owner": "client:01a18959-4ad5-7338-9852-02684f2dfd35"
+      }
+    ]
+  },
+  "resized": {},
+  "size": {
+    "cell_height_px": 16,
+    "cell_width_px": 8,
+    "columns": 80,
+    "desired": [
+      {
+        "client_id": "client:01a18959-4ad5-7338-9852-02684f2dfd35",
+        "columns": 80,
+        "rows": 48,
+        "updated_at": "2026-10-29T21:28:12.893154+01:00"
+      },
+      {
+        "client_id": "client:01a18959-4934-7153-946c-479e87863967",
+        "columns": 160,
+        "rows": 48,
+        "updated_at": "2026-10-29T21:28:12.469679+01:00"
+      }
+    ],
+    "owner": "client:01a18959-4ad5-7338-9852-02684f2dfd35",
+    "rows": 48
+  }
+}

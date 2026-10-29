@@ -1,0 +1,32 @@
+[
+  {
+    "delay_after_ready_seconds": 0,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  },
+  {
+    "delay_after_ready_seconds": 0,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  },
+  {
+    "delay_after_ready_seconds": 0,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  },
+  {
+    "delay_after_ready_seconds": 0.4,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  },
+  {
+    "delay_after_ready_seconds": 0.4,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  },
+  {
+    "delay_after_ready_seconds": 0.4,
+    "mode_2004_before_paste": true,
+    "cat_v": "^[[200~first\nsecond^[[201~"
+  }
+]

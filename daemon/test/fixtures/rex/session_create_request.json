@@ -1,0 +1,31 @@
+{
+  "label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle",
+  "initial_windows": [
+    {
+      "window_label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle",
+      "layout": {
+        "block": {
+          "flavor": "com.superlogical.terminal.shell",
+          "label": "probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle",
+          "options": {
+            "shell": "none",
+            "command": [
+              "bash",
+              "-l",
+              "/tmp/rexprobe.myyg/worker.sh"
+            ],
+            "cwd": "/tmp/rexprobe.myyg",
+            "size": {
+              "columns": 160,
+              "rows": 48
+            },
+            "exit": {
+              "on_completion": true,
+              "quick_exit_threshold_ms": 0
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "principal": {
+    "kind": "peer",
+    "transport": "unix",
+    "display": "uid 592148721",
+    "uid": 592148721,
+    "gid": 2048330233,
+    "pid": 15249
+  },
+  "account": "<USER>",
+  "endpoint": "unix:///tmp/rexprobe.myyg/rex.sock",
+  "pid": 15112,
+  "instance_id": "87436c00-278f-4cd6-830c-8a31a2a402f4",
+  "host_id": "28c8e6dc-0a04-4a20-accf-7d6d1fb85481",
+  "started_at": "2026-10-29T20:25:22.550905Z",
+  "rex_version": "0.0.1793131181-gdd9a20",
+  "exit_empty": false,
+  "session_count": 0,
+  "tailscale": {
+    "state": "disabled",
+    "allow_tailnet_members": false
+  }
+}
