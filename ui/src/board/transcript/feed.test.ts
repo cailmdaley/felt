@@ -185,6 +185,95 @@ describe('TranscriptFeed', () => {
   })
 })
 
+describe('TranscriptFeed stream', () => {
+  const sse = (body: string): Response => response(body, 200, { 'content-type': 'text/event-stream; charset=utf-8' })
+
+  it('parses arbitrary byte splits, CRLF and UTF-8 and commits the event id', async () => {
+    const line = jsonLine('shear α').trimEnd()
+    const wire = new TextEncoder().encode(`: open\r\nid: 123\r\ndata: ${line}\r\n\r\n`)
+    const stream = new ReadableStream<Uint8Array>({ start(c) { for (const byte of wire) c.enqueue(Uint8Array.of(byte)); c.close() } })
+    const requests: string[] = []
+    const { reader, onEntries } = feed(async (input) => {
+      requests.push(String(input))
+      return requests.length === 1 ? response(stream, 200, { 'content-type': 'text/event-stream' }) : response(new Uint8Array(), 200, { 'x-transcript-offset': '123' })
+    })
+    expect(await reader.stream()).toBe('closed')
+    await reader.read()
+    expect(offsetFrom(requests[1])).toBe(123)
+    expect(entriesFrom(onEntries)).toMatchObject([{ kind: 'prompt', text: 'shear α' }])
+  })
+
+  it('resumes a partial raw line at the last complete byte boundary', async () => {
+    const first = jsonLine('first')
+    const second = jsonLine('second α')
+    const boundary = new TextEncoder().encode(first).length
+    const total = new TextEncoder().encode(first + second).length
+    const requests: string[] = []
+    const { reader, onEntries } = feed(async (input) => {
+      requests.push(String(input))
+      return requests.length === 1
+        ? response(new TextEncoder().encode(first + second.slice(0, 15)), 200, { 'x-transcript-offset': '0' })
+        : sse(`id: ${total}\ndata: ${second.trimEnd()}\n\n`)
+    })
+    await reader.read()
+    expect(await reader.stream()).toBe('closed')
+    expect(offsetFrom(requests[1])).toBe(boundary)
+    expect(entriesFrom(onEntries)).toMatchObject([{ text: 'first' }, { text: 'second α' }])
+  })
+
+  it.each([
+    [200, '{}', 'application/json', 'unsupported'],
+    [501, '', 'application/json', 'unsupported'],
+    [404, '{}', 'application/json', 'unsupported'],
+    [404, '{"availability":"transcript_missing"}', 'application/json', 'failed'],
+    [409, '', 'application/json', 'failed'],
+    [429, '', 'application/json', 'busy'],
+    [503, '', 'application/json', 'failed'],
+  ] as const)('maps stream HTTP %i', async (status, body, contentType, result) => {
+    const { reader, onStatus } = feed(async () => response(body, status, { 'content-type': contentType }))
+    expect(await reader.stream()).toBe(result)
+    if (status === 404 && result === 'failed') expect(onStatus).toHaveBeenCalledWith('missing')
+    if (status === 409) expect(onStatus).toHaveBeenCalledWith('pending')
+  })
+
+  it.each(['http', 'event'])('resets on %s', async (kind) => {
+    const { reader, onReset } = feed(async () => kind === 'http' ? response(null, 416) : sse('event: reset\ndata: {"byte_count":0}\n\n'))
+    expect(await reader.stream()).toBe('reset')
+    expect(onReset).toHaveBeenCalledOnce()
+  })
+
+  it('commits a decoded event when stopped during its time slice', async () => {
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => 100 + clock.mock.calls.length * 10)
+    const lines = Array.from({ length: 4 }, (_, i) => `data: ${jsonLine(`line ${i}`).trimEnd()}\n`).join('')
+    const requests: string[] = []
+    const onEntries = vi.fn<(entries: Entry[]) => void>(() => reader.stopStream())
+    const { reader } = feed(async (input) => {
+      requests.push(String(input))
+      return requests.length === 1 ? sse(`id: 99\n${lines}\n`) : response(new Uint8Array(), 200, { 'x-transcript-offset': '99' })
+    }, { onEntries })
+    try {
+      const following = reader.stream()
+      expect(await following).toBe('stopped')
+      await reader.read()
+      expect(offsetFrom(requests[1])).toBe(99)
+      expect(entriesFrom(onEntries)).toHaveLength(4)
+    } finally { clock.mockRestore() }
+  })
+
+  it('fails when the stream is idle and stops on explicit abort', async () => {
+    vi.useFakeTimers()
+    try {
+      const { reader } = feed(async () => response(new ReadableStream({ start() {} }), 200, { 'content-type': 'text/event-stream' }))
+      const idle = reader.stream()
+      await vi.advanceTimersByTimeAsync(45_000)
+      expect(await idle).toBe('failed')
+      const stopped = reader.stream()
+      reader.stopStream()
+      expect(await stopped).toBe('stopped')
+    } finally { vi.useRealTimers() }
+  })
+})
+
 describe('TranscriptFeed default fetch', () => {
   it('calls the global fetch unbound, as browsers require', async () => {
     const original = globalThis.fetch

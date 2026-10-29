@@ -1,5 +1,7 @@
 import { normalizeRecord, type Entry } from './records.js'
 
+export type StreamEnd = 'closed' | 'reset' | 'unsupported' | 'busy' | 'failed' | 'stopped'
+
 export type FeedStatus = 'loading' | 'ready' | 'missing' | 'pending' | 'unreachable' | 'error'
 
 export interface TranscriptFeedOptions {
@@ -29,6 +31,8 @@ export class TranscriptFeed {
   private readonly onReset: () => void
   private readonly onStatus: (status: FeedStatus, detail?: string) => void
   private offset = 0
+  private lineOffset = 0
+  private streamController: AbortController | null = null
   private decoder = new TextDecoder()
   private pendingLine = ''
   private inFlight: Promise<boolean> | null = null
@@ -64,7 +68,108 @@ export class TranscriptFeed {
     return shared
   }
 
+  /** Follow complete records from the last committed line boundary. */
+  async stream(): Promise<StreamEnd> {
+    if (this.disposed || this.streamController) return 'stopped'
+    const controller = new AbortController()
+    this.streamController = controller
+    const epoch = this.epoch
+    this.offset = this.lineOffset
+    this.pendingLine = ''
+    this.decoder = new TextDecoder()
+    let timedOut = false
+    let timer: ReturnType<typeof setTimeout>
+    const arm = (): void => {
+      clearTimeout(timer)
+      timer = setTimeout(() => { timedOut = true; controller.abort() }, 45_000)
+    }
+    const aborted = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+    })
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
+    arm()
+    try {
+      const response = await Promise.race([this.fetcher(this.url('stream'), {
+        cache: 'no-store', signal: controller.signal, headers: { accept: 'text/event-stream' },
+      }), aborted])
+      if (!this.active(epoch) || controller.signal.aborted) return timedOut ? 'failed' : 'stopped'
+      if (response.status === 501) return 'unsupported'
+      if (response.status === 429) return 'busy'
+      if (response.status === 416) {
+        this.resetBytes()
+        this.onReset()
+        return 'reset'
+      }
+      if (response.status === 404) {
+        const receipt = await Promise.race([response.json().catch(() => null), aborted]) as { availability?: unknown } | null
+        if (!this.active(epoch) || controller.signal.aborted) return timedOut ? 'failed' : 'stopped'
+        if (!receipt || !('availability' in receipt)) return 'unsupported'
+        this.onStatus('missing')
+        return 'failed'
+      }
+      if (response.status === 409) { this.onStatus('pending'); return 'failed' }
+      if (response.status !== 200) return 'failed'
+      if (!/^text\/event-stream(?:\s*;|\s*$)/i.test(response.headers.get('content-type') ?? '')) return 'unsupported'
+      if (!response.body) return 'failed'
+      reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let data: string[] = []
+      let id = ''
+      let event = ''
+      while (true) {
+        const part = await Promise.race([reader.read(), aborted])
+        if (part.done) return 'closed'
+        arm()
+        buffer += decoder.decode(part.value, { stream: true })
+        while (true) {
+          const match = /[\r\n]/.exec(buffer)
+          if (!match) break
+          const i = match.index
+          if (buffer[i] === '\r' && i === buffer.length - 1) break
+          const line = buffer.slice(0, i)
+          buffer = buffer.slice(i + (buffer[i] === '\r' && buffer[i + 1] === '\n' ? 2 : 1))
+          if (!line) {
+            if (event === 'reset') {
+              this.resetBytes()
+              this.onReset()
+              return 'reset'
+            }
+            if (data.length) {
+              if (!/^\d+$/.test(id) || !Number.isSafeInteger(Number(id)) || Number(id) < this.lineOffset) return 'failed'
+              await this.emitLines(data, epoch)
+              if (!this.active(epoch)) return 'stopped'
+              this.offset = this.lineOffset = Number(id)
+              this.onStatus('ready')
+            }
+            data = []; id = ''; event = ''
+            if (controller.signal.aborted) return timedOut ? 'failed' : 'stopped'
+          } else if (!line.startsWith(':')) {
+            const colon = line.indexOf(':')
+            const field = colon < 0 ? line : line.slice(0, colon)
+            let value = colon < 0 ? '' : line.slice(colon + 1)
+            if (value.startsWith(' ')) value = value.slice(1)
+            if (field === 'data') data.push(value)
+            else if (field === 'id') id = value
+            else if (field === 'event') event = value
+          }
+        }
+      }
+    } catch {
+      return controller.signal.aborted && !timedOut ? 'stopped' : 'failed'
+    } finally {
+      clearTimeout(timer!)
+      if (reader) void reader.cancel().catch(() => {})
+      if (this.streamController === controller) this.streamController = null
+    }
+  }
+
+  stopStream(): void {
+    this.streamController?.abort()
+  }
+
   dispose(): void {
+    this.stopStream()
     this.disposed = true
     this.epoch++
   }
@@ -120,6 +225,8 @@ export class TranscriptFeed {
       this.onReset()
       if (!this.active(epoch)) return false
     }
+    const lastNewline = body.lastIndexOf(0x0a)
+    if (lastNewline >= 0) this.lineOffset = this.offset + lastNewline + 1
     this.offset += body.byteLength
 
     try {
@@ -135,6 +242,16 @@ export class TranscriptFeed {
   }
 
   private async decode(bytes: Uint8Array, epoch: number): Promise<void> {
+    for (let offset = 0; offset < bytes.byteLength; offset += DECODE_CHUNK_BYTES) {
+      this.pendingLine += this.decoder.decode(bytes.subarray(offset, Math.min(bytes.byteLength, offset + DECODE_CHUNK_BYTES)), { stream: true })
+      const lines = this.pendingLine.split('\n')
+      this.pendingLine = lines.pop() ?? ''
+      await this.emitLines(lines, epoch)
+      if (!this.active(epoch)) return
+    }
+  }
+
+  private async emitLines(lines: string[], epoch: number): Promise<void> {
     let batch: Entry[] = []
     let sliceStarted = now()
     const flush = (): void => {
@@ -142,35 +259,27 @@ export class TranscriptFeed {
       batch = []
     }
 
-    for (let offset = 0; offset < bytes.byteLength; offset += DECODE_CHUNK_BYTES) {
-      const text = this.decoder.decode(bytes.subarray(offset, Math.min(bytes.byteLength, offset + DECODE_CHUNK_BYTES)), { stream: true })
-      this.pendingLine += text
-      let newline = this.pendingLine.indexOf('\n')
-      while (newline >= 0) {
-        const line = this.pendingLine.slice(0, newline)
-        this.pendingLine = this.pendingLine.slice(newline + 1)
-        if (line.trim()) {
-          try {
-            batch.push(...normalizeRecord(JSON.parse(line) as unknown))
-          } catch {
-            // A malformed JSONL row does not prevent later records from being read.
-          }
+    for (const line of lines) {
+      if (line.trim()) {
+        try {
+          batch.push(...normalizeRecord(JSON.parse(line) as unknown))
+        } catch {
+          // A malformed JSONL row does not prevent later records from being read.
         }
-        if (now() - sliceStarted >= TIME_SLICE_MS) {
-          flush()
-          await new Promise<void>((resolve) => setTimeout(resolve, 0))
-          if (!this.active(epoch)) return
-          sliceStarted = now()
-        }
-        newline = this.pendingLine.indexOf('\n')
       }
-      if (!this.active(epoch)) return
+      if (now() - sliceStarted >= TIME_SLICE_MS) {
+        flush()
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        if (!this.active(epoch)) return
+        sliceStarted = now()
+      }
     }
     flush()
   }
 
   private resetBytes(): void {
     this.offset = 0
+    this.lineOffset = 0
     this.decoder = new TextDecoder()
     this.pendingLine = ''
   }
@@ -179,8 +288,8 @@ export class TranscriptFeed {
     return !this.disposed && this.epoch === epoch
   }
 
-  private url(): string {
-    let url = `${this.shuttleBase}/api/v1/transcript/raw?session=${encodeURIComponent(this.session)}&offset=${this.offset}`
+  private url(route = 'raw'): string {
+    let url = `${this.shuttleBase}/api/v1/transcript/${route}?session=${encodeURIComponent(this.session)}&offset=${this.offset}`
     if (this.host) url += `&host=${encodeURIComponent(this.host)}`
     return url
   }
