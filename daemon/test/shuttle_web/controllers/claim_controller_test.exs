@@ -75,9 +75,12 @@ defmodule ShuttleWeb.ClaimControllerTest do
 
       assert {sid, bid} == {ctx.sid, ctx.bid}
       before = Shuttle.Poller.worker_status(ctx.poller, "claimed")
+      renamed = Map.put(FakeRex.state().sessions[ctx.sid], :label, "human display")
+      FakeRex.sessions(%{ctx.sid => renamed})
       retry = post(api_conn(), "/api/v1/claim", Jason.encode!(body))
       assert retry.status == 200, retry.resp_body
       assert Shuttle.Poller.worker_status(ctx.poller, "claimed").pid == before.pid
+      assert FakeRex.state().sessions[ctx.sid].label == "human display"
       # The same native session with a different block is not the worker.
       session = FakeRex.state().sessions[ctx.sid]
 
@@ -122,6 +125,37 @@ defmodule ShuttleWeb.ClaimControllerTest do
                FakeRex.state().sessions[ctx.sid].blocks,
                &(&1["block_id"] == "block:human")
              )["label"] == "human"
+    end
+
+    test "a sibling block cannot displace the same session's claimed live worker", ctx do
+      body = %{fiber_id: "claimed", tmux_session: ctx.sid, tmux_pane: ctx.bid}
+      assert post(api_conn(), "/api/v1/claim", Jason.encode!(body)).status == 200
+      FeltStoreRunner.set_fiber("sibling", make_fiber("sibling"))
+      FeltStoreRunner.set_shuttle("sibling", "kind: oneshot\nagent: claude-sonnet\n", "open")
+      session = FakeRex.state().sessions[ctx.sid]
+
+      FakeRex.sessions(%{
+        ctx.sid => %{
+          session
+          | blocks: session.blocks ++ [%{"block_id" => "block:sibling", "label" => "human"}]
+        }
+      })
+
+      {:ok, original} = RexBindings.read()
+
+      sibling =
+        post(
+          api_conn(),
+          "/api/v1/claim",
+          Jason.encode!(%{fiber_id: "sibling", tmux_session: ctx.sid, tmux_pane: "block:sibling"})
+        )
+
+      assert sibling.status == 500
+      assert RexBindings.read() == {:ok, original}
+      assert Shuttle.Terminal.Rex.probe(RexRunner, ctx.canonical) == :present
+      assert Shuttle.Poller.worker_status(ctx.poller, "claimed").session == ctx.canonical
+      assert Shuttle.Poller.worker_status(ctx.poller, "sibling") == nil
+      refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.destroy" in args end)
     end
 
     test "block references are claimable and canonical bindings recover untracked claims", ctx do

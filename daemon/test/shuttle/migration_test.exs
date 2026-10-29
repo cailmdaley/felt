@@ -224,6 +224,55 @@ defmodule Shuttle.MigrationTest do
     end
   end
 
+  for direction <- ["forward", "reverse"], cut <- [:session_label, :block_label] do
+    test "Rex #{direction} recovery repairs a crash after #{cut} before the binding write", %{
+      poller: p
+    } do
+      %{sid: sid, bid: bid, pid: pid} = rex_source()
+      state = :sys.get_state(p)
+      {:ok, plan} = Shuttle.Migration.prepare(state, "source", "dest", [])
+      {:ok, entry} = Shuttle.MigrationJournal.create(plan, "test-host")
+
+      entry =
+        if unquote(direction) == "reverse" do
+          assert :ok = Shuttle.Migration.reconcile_backend(state, entry)
+          {:ok, reversed} = Shuttle.MigrationJournal.reverse(entry)
+          reversed
+        else
+          entry
+        end
+
+      target = entry["backend"][if(unquote(direction) == "reverse", do: "before", else: "after")]
+
+      assert {:ok, _} =
+               Shuttle.Rex.call(Runner, "session.set_label", %{"label" => target}, session: sid)
+
+      if unquote(cut) == :block_label do
+        assert {:ok, _} =
+                 Shuttle.Rex.call(
+                   Runner,
+                   "session.set_block_label",
+                   %{"block_id" => bid, "label" => target},
+                   session: sid
+                 )
+      end
+
+      assert :ok = Shuttle.Migration.reconcile_backend(state, entry)
+      assert :ok = Shuttle.Migration.reconcile_backend(state, entry)
+
+      assert {:ok, %{"bindings" => %{^target => %{"session_id" => ^sid, "block_id" => ^bid}}}} =
+               Shuttle.Terminal.RexBindings.read()
+
+      assert {:ok, %{"child_pid" => ^pid}} = Shuttle.Terminal.Rex.identity(Runner, target)
+      assert {:ok, procs} = WorkerProcess.scan(Runner)
+      assert WorkerProcess.session_process(procs, target).pid == pid
+      assert Shuttle.Test.FakeRex.state().sessions[sid].label == target
+
+      assert [%{"block_id" => ^bid, "label" => ^target}] =
+               Shuttle.Test.FakeRex.state().sessions[sid].blocks
+    end
+  end
+
   test "Rex recovery verifies child PID and holds missing evidence without making it unresolvable",
        %{poller: p} do
     %{bid: bid} = rex_source()

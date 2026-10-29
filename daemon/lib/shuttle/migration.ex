@@ -226,10 +226,7 @@ defmodule Shuttle.Migration do
       end)
 
     # Query the captured backend directly: script aliases are being reconciled.
-    with {:ok, source?} <- terminal_exists(terminal, state.runner, from),
-         {:ok, dest?} <- terminal_exists(terminal, state.runner, to),
-         :ok <-
-           reconcile_name(terminal, state.runner, from, to, source?, dest?, backend["identity"]) do
+    with :ok <- reconcile_terminal(terminal, state.runner, from, to, backend["identity"]) do
       if forward?,
         do: WorkerProcess.write_migration_aliases(aliases),
         else: WorkerProcess.restore_migration_aliases(aliases)
@@ -242,6 +239,62 @@ defmodule Shuttle.Migration do
 
       error ->
         error
+    end
+  end
+
+  defp reconcile_terminal(Rex, runner, from, to, identity) do
+    case terminal_exists(Rex, runner, identity["block_id"]) do
+      {:ok, true} ->
+        # Labels and the binding are separate writes. Captured native identity
+        # proves the resource even between those writes or after label drift.
+        with :ok <- verify_identity(Rex, runner, identity["block_id"], identity),
+             :ok <- verify_rex_endpoint(runner, from, identity),
+             :ok <- verify_rex_endpoint(runner, to, identity),
+             do: rename(Rex, runner, to, identity)
+
+      {:ok, false} ->
+        reconcile_names(Rex, runner, from, to, identity)
+
+      error ->
+        error
+    end
+  end
+
+  defp reconcile_terminal(Tmux, runner, from, to, identity),
+    do: reconcile_names(Tmux, runner, from, to, identity)
+
+  defp reconcile_names(terminal, runner, from, to, identity) do
+    with {:ok, source?} <- terminal_exists(terminal, runner, from),
+         {:ok, dest?} <- terminal_exists(terminal, runner, to),
+         do: reconcile_name(terminal, runner, from, to, source?, dest?, identity)
+  end
+
+  defp verify_rex_endpoint(runner, name, expected) do
+    case Rex.address(runner, name) do
+      {:ok, address} ->
+        if address == Map.take(expected, ~w(session_id block_id)),
+          do: :ok,
+          else: {:error, :backend_identity_mismatch}
+
+      {:error, :not_found} ->
+        :ok
+
+      {:error, :unknown} ->
+        verify_rex_label_transition(runner, name, expected["session_id"])
+
+      _ ->
+        {:error, :backend_unobservable}
+    end
+  end
+
+  defp verify_rex_label_transition(runner, name, sid) do
+    with {:ok, sessions} <- Shuttle.Rex.sessions(runner) do
+      case Enum.filter(sessions, &(&1["label"] == name)) do
+        [%{"session_id" => ^sid}] -> :ok
+        _ -> {:error, :backend_unobservable}
+      end
+    else
+      _ -> {:error, :backend_unobservable}
     end
   end
 
@@ -285,22 +338,7 @@ defmodule Shuttle.Migration do
   defp reconcile_name(backend, runner, _, to, false, true, identity),
     do: verify_identity(backend, runner, to, identity)
 
-  defp reconcile_name(Rex, runner, from, to, false, false, identity) do
-    # A display rename or lost binding cannot hide a still-live captured block.
-    case terminal_exists(Rex, runner, identity["block_id"]) do
-      {:ok, true} ->
-        with :ok <- verify_identity(Rex, runner, identity["block_id"], identity),
-             do: rename(Rex, runner, to, identity)
-
-      {:ok, false} ->
-        absent_worker(runner, from, to)
-
-      error ->
-        error
-    end
-  end
-
-  defp reconcile_name(Tmux, runner, from, to, false, false, _),
+  defp reconcile_name(_, runner, from, to, false, false, _),
     do: absent_worker(runner, from, to)
 
   defp absent_worker(runner, from, to) do

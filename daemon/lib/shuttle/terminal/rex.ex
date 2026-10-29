@@ -171,15 +171,26 @@ defmodule Shuttle.Terminal.Rex do
     Shuttle.Terminal.with_lock({__MODULE__, :rename}, fn ->
       with :ok <- valid_label(to),
            {:ok, source} <- rename_source(runner, from, opts),
-           :ok <- target_free(runner, to, source),
-           :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], to),
-           :ok <- store(runner, to, source),
-           :ok <- remove_old_binding(from, to, source) do
-        :ok
+           {:ok, bound?} <- target_free(runner, to, source) do
+        if bound? and opts == [] do
+          :ok
+        else
+          write_rename(runner, from, to, source)
+        end
       else
         _ -> {:error, :rename_failed}
       end
     end)
+  end
+
+  defp write_rename(runner, from, to, source) do
+    with :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], to),
+         :ok <- store(runner, to, source),
+         :ok <- remove_old_binding(from, to, source) do
+      :ok
+    else
+      _ -> {:error, :rename_failed}
+    end
   end
 
   defp rename_source(runner, "session:" <> _ = sid, block_id: "block:" <> _ = bid),
@@ -189,17 +200,32 @@ defmodule Shuttle.Terminal.Rex do
 
   defp target_free(runner, name, source) do
     with {:ok, doc} <- Bindings.read(),
-         {:ok, sessions} <- Rex.sessions(runner) do
+         {:ok, sessions} <- Rex.sessions(runner),
+         {:ok, blocks} <- Rex.blocks(runner, source["session_id"]) do
       sid = source["session_id"]
       live = Enum.map(sessions, & &1["session_id"])
       b = doc["bindings"][name]
 
+      # A session is one ownership unit: closing it hangs up every block.
+      # Another live worker block must not lose its binding to this claim.
+      owned_block? =
+        Enum.any?(doc["bindings"], fn {_, owned} ->
+          owned["session_id"] == sid and owned["block_id"] != source["block_id"] and
+            Enum.any?(blocks, &(&1["block_id"] == owned["block_id"]))
+        end)
+
       conflict =
-        (b != nil and b["session_id"] in live and
-           (b["session_id"] != sid or b["block_id"] != source["block_id"])) or
+        owned_block? or
+          (b != nil and b["session_id"] in live and
+             (b["session_id"] != sid or b["block_id"] != source["block_id"])) or
           Enum.any?(sessions, &(&1["label"] == name and &1["session_id"] != sid))
 
-      if conflict, do: {:error, :rename_failed}, else: :ok
+      if conflict,
+        do: {:error, :rename_failed},
+        else:
+          {:ok,
+           b != nil and
+             Map.take(b, ~w(session_id block_id)) == Map.take(source, ~w(session_id block_id))}
     end
   end
 
