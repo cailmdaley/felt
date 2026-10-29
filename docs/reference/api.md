@@ -635,7 +635,7 @@ what keeps the route cheap: `Shuttle.EventStream` holds the histogram in
 memory, folded once from both files and then only over appended bytes, and a
 request reads its window out of that.
 
-`/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking. It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`. A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock. An externally cleared ask about the viewer is not delivered. The default window is 24 hours, or six hours for `all=true`, bounded by the 14-day retained stream.
+`/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking. It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`. A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock. An externally cleared ask about the viewer is not delivered. The default window is 24 hours, or six hours for `all=true`, limited to up to 14 days and bounded by the two retained event files. Remote records are served from the last cached feed while a due refresh runs asynchronously.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
