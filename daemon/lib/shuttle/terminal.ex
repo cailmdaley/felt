@@ -80,7 +80,7 @@ defmodule Shuttle.Terminal do
 
   @doc "Launch only when the name is positively free; keep its script in the worker's argv."
   def launch(runner, name, cwd, script_text, opts \\ []) do
-    :global.trans({{__MODULE__, name}, self()}, fn ->
+    with_lock(name, fn ->
       if status(runner, name) == :gone do
         backend = primary()
 
@@ -103,6 +103,9 @@ defmodule Shuttle.Terminal do
       end
     end)
   end
+
+  @doc "Serialize a terminal mutation; a shared key also protects backend-wide indexes."
+  def with_lock(key, fun), do: :global.trans({{__MODULE__, key}, self()}, fun)
 
   @doc "Hang up the terminal, then wait and signal its worker until positively gone."
   def stop(runner, name, opts \\ []) do

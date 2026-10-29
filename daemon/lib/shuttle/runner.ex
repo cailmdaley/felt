@@ -98,11 +98,45 @@ defmodule Shuttle.Runner do
           {"#{command}: command not found", 127}
 
         executable ->
-          case run_bounded(executable, command, args, opts, timeout_ms) do
+          case run_with_input(executable, command, args, opts, timeout_ms) do
             {:spawn_error, :enoent} -> {"#{command}: command not found", 127}
             {:spawn_error, :eacces} -> {"#{command}: permission denied", 126}
             result -> result
           end
+      end
+    end
+
+    # Some CLIs read stdin to EOF rather than decoding one frame. A private
+    # file supplies EOF without exposing the request in argv or abandoning
+    # the bounded Port/child cleanup contract.
+    defp run_with_input(executable, command, args, opts, timeout_ms) do
+      if Keyword.get(opts, :input_eof, false) and is_binary(opts[:input]) do
+        root =
+          Path.join(
+            System.tmp_dir!(),
+            "shuttle-stdin-" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+          )
+
+        File.mkdir!(root)
+        File.chmod!(root, 0o700)
+        path = Path.join(root, "input")
+
+        try do
+          File.write!(path, opts[:input])
+          File.chmod!(path, 0o600)
+
+          run_bounded(
+            "/bin/sh",
+            command,
+            ["-c", ~s(exec "$@" < "$0"), path, executable | args],
+            Keyword.delete(opts, :input),
+            timeout_ms
+          )
+        after
+          File.rm_rf(root)
+        end
+      else
+        run_bounded(executable, command, args, opts, timeout_ms)
       end
     end
 
