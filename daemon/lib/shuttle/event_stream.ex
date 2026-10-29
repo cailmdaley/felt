@@ -76,7 +76,7 @@ defmodule Shuttle.EventStream do
 
   require Logger
 
-  alias Shuttle.{Activity, FileTail, SentFiles, WaitingTracker, SessionBinding}
+  alias Shuttle.{Activity, Board, FileTail, SentFiles, WaitingTracker, SessionBinding}
 
   @poll_interval_ms 1_000
   # A catch-up read that lands during a reseed waits for it; the seed of a
@@ -106,6 +106,7 @@ defmodule Shuttle.EventStream do
       offset: 0,
       sent_rotated: [],
       sent_live: [],
+      board: %{},
       waiting: %{},
       seed_events: nil,
       binding: SessionBinding.new()
@@ -159,6 +160,13 @@ defmodule Shuttle.EventStream do
   @spec sent_events(GenServer.server(), Path.t()) :: {:ok, [SentFiles.event()]} | :miss
   def sent_events(server \\ __MODULE__, path) do
     GenServer.call(server, {:sent_events, path}, @read_timeout_ms)
+  catch
+    :exit, _ -> :miss
+  end
+
+  @doc "The retained board records, after catching up with the stream."
+  def board_records(server \\ __MODULE__, path) do
+    GenServer.call(server, {:board_records, path}, @read_timeout_ms)
   catch
     :exit, _ -> :miss
   end
@@ -339,6 +347,13 @@ defmodule Shuttle.EventStream do
     {:reply, {:ok, events}, state}
   end
 
+  def handle_call({:board_records, path}, _from, %State{events_file: path} = state) do
+    state = state |> follow() |> publish()
+    {:reply, {:ok, Board.prune(state.board, state.clock.())}, state}
+  end
+
+  def handle_call({:board_records, _other}, _from, state), do: {:reply, :miss, state}
+
   def handle_call({:slice, _other, _from_ms, _to_ms}, _from, state), do: {:reply, :miss, state}
 
   def handle_call({:sent_events, _other}, _from, state), do: {:reply, :miss, state}
@@ -357,7 +372,8 @@ defmodule Shuttle.EventStream do
 
     state = %{
       state
-      | waiting: WaitingTracker.prune(state.waiting, state.clock.()),
+      | board: Board.prune(state.board, state.clock.()),
+        waiting: WaitingTracker.prune(state.waiting, state.clock.()),
         binding: SessionBinding.prune(state.binding, state.clock.())
     }
 
@@ -381,6 +397,7 @@ defmodule Shuttle.EventStream do
       | activity: Activity.new_acc(),
         sent_rotated: [],
         sent_live: [],
+        board: %{},
         waiting: known,
         seed_events: [],
         binding: binding
@@ -404,7 +421,8 @@ defmodule Shuttle.EventStream do
           inode: inode,
           waiting: waiting,
           seed_events: nil,
-          binding: SessionBinding.prune(state.binding, now)
+          binding: SessionBinding.prune(state.binding, now),
+          board: Board.prune(state.board, now)
       })
     end
   end
@@ -494,6 +512,7 @@ defmodule Shuttle.EventStream do
       state
       | activity: Activity.fold_event(state.activity, event),
         sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
+        board: Board.fold(state.board, event),
         binding: binding
     }
   end
