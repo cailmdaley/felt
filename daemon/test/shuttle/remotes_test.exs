@@ -362,6 +362,13 @@ defmodule Shuttle.RemotesTest do
                Remotes.connect_socket(socket, [:binary, active: false], 1_000)
 
       assert why =~ "writable by group or others"
+
+      Shuttle.RuntimeCache.delete({Shuttle.Remotes, :default_socket, home, {:unix, :linux}})
+
+      assert {:error, {:untrusted_socket, {:refused, ^socket, why}}} =
+               Remotes.connect_socket(socket, [:binary, active: false], 1_000)
+
+      assert why =~ "writable by group or others"
     end
 
     # A layout under $HOME: the modes of .local, .local/state and
@@ -440,6 +447,26 @@ defmodule Shuttle.RemotesTest do
 
       assert Remotes.tailscale_socket_source() == {:configured, explicit}
       assert Remotes.tailscale_socket() == explicit
+    end
+
+    test "a configured path equal to the default location uses configured authorization", %{
+      socket: socket
+    } do
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
+
+      remotes_file =
+        write_remotes(Jason.encode!(%{"defaults" => %{"tailscale_socket" => socket}}))
+
+      Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", remotes_file)
+
+      assert Remotes.tailscale_socket_source() == {:configured, socket}
+      assert {:ok, conn} = Remotes.connect_socket(socket, [:binary, active: false], 1_000)
+      :gen_tcp.close(conn)
+
+      File.write!(remotes_file, "{}")
+
+      assert {:error, {:untrusted_socket, {:refused, ^socket, "default socket is Linux-only"}}} =
+               Remotes.connect_socket(socket, [:binary, active: false], 1_000)
     end
 
     test "\"system\" names the system tailscaled and keeps the fleet readable" do

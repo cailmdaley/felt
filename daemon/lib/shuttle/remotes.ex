@@ -320,15 +320,24 @@ defmodule Shuttle.Remotes do
   # Selection is cached for reconciliation, never authorization. Every new
   # connection to the default path checks the literal ancestry again.
   def authorize_socket(path) do
-    home = default_socket_home()
+    case tailscale_socket_source() do
+      {:configured, configured} ->
+        if normalized_tailscale_socket(configured) == path,
+          do: :ok,
+          else: authorize_default_socket(path)
 
-    if is_binary(home) and path == Path.join(home, @default_socket_path) do
-      case default_tailscale_socket_check() do
-        {:ok, ^path} -> :ok
-        refused -> {:error, {:untrusted_socket, refused}}
-      end
-    else
-      :ok
+      _source ->
+        authorize_default_socket(path)
+    end
+  end
+
+  defp authorize_default_socket(path) do
+    case default_tailscale_socket_check() do
+      {:ok, ^path} ->
+        :ok
+
+      observed ->
+        {:error, {:untrusted_socket, observed}}
     end
   end
 
@@ -443,10 +452,12 @@ defmodule Shuttle.Remotes do
   @doc """
   A cheap change token for the resolved fleet: the file's `{mtime, size}` (or
   `nil` when absent), `Shuttle.TailnetPeers.generation/0`, and the default
-  LocalAPI socket when one exists. The registries and the dial reconciler
+  LocalAPI socket when one exists (whose selection is cached for up to 60 s).
+  The registries and the dial reconciler
   compare it each tick, so `shuttle remotes add`, a newly discovered peer, and
-  a userspace tailscaled starting after the daemon all take effect without a
-  daemon bounce. Size is folded in because POSIX mtime has 1-second
+  a userspace tailscaled starting after the daemon take effect without a daemon
+  bounce; default socket appearance, disappearance, or trust changes can take
+  up to 60 s to enter this token. Size is folded in because POSIX mtime has 1-second
   granularity and an edit-and-save inside the same second is ordinary.
   """
   @spec config_token() ::

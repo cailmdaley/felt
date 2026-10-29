@@ -604,13 +604,7 @@ defmodule Shuttle.RemoteFiberRegistry do
     updated = apply_result(entry, result, now)
 
     if state.store_dir != nil and updated.last_polled_at != entry.last_polled_at do
-      updated = %{
-        updated
-        | encoded_fibers: updated.encoded_fibers || Jason.encode!(updated.fibers)
-      }
-
       persist(state.store_dir, name, updated)
-      updated
     else
       updated
     end
@@ -619,6 +613,9 @@ defmodule Shuttle.RemoteFiberRegistry do
   defp persist(dir, name, entry) do
     # A 304 changes the observation time, not the rows. Keep the large JSON
     # fragment and encode only the small metadata, preserving the disk format.
+    cached = entry.encoded_fibers || Jason.encode!(entry.fibers)
+    entry = %{entry | encoded_fibers: cached}
+
     metadata =
       Jason.encode!(%{
         "stores" => entry.stores,
@@ -629,12 +626,17 @@ defmodule Shuttle.RemoteFiberRegistry do
 
     encoded = [
       "{\"fibers\":",
-      entry.encoded_fibers,
+      cached,
       ",",
       binary_part(metadata, 1, byte_size(metadata) - 1)
     ]
 
     RegistryCommon.persist(dir, name, encoded, "RemoteFiberRegistry")
+    entry
+  rescue
+    error ->
+      Logger.debug("RemoteFiberRegistry: persist for #{name} failed — #{inspect(error)}")
+      entry
   end
 
   # A restored entry carries its rows, its etag (so the first poll can 304

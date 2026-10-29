@@ -851,6 +851,33 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert Process.alive?(Process.whereis(reg))
     end
 
+    test "an encoding failure during a 304 keeps the registry and cached feed alive", %{
+      dir: dir
+    } do
+      url = Remote.fibers_url(candide())
+      MockClient.set(url, {:ok, feed_body([sample_fiber("foo")])})
+      reg = boot(dir, [])
+
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+      persisted = File.read!(store_path(dir))
+      unencodable = self()
+
+      :sys.replace_state(reg, fn state ->
+        update_in(state.feeds["candide"], fn entry ->
+          %{entry | fibers: [unencodable], encoded_fibers: nil}
+        end)
+      end)
+
+      # The unchanged response is a 304, so persisting it has to encode the
+      # deliberately unencodable in-memory rows inside the rescue boundary.
+      :ok = RemoteFiberRegistry.refresh_now(reg)
+
+      assert Process.alive?(Process.whereis(reg))
+      assert [^unencodable] = :sys.get_state(reg).feeds["candide"].fibers
+      assert :sys.get_state(reg).feeds["candide"].encoded_fibers == nil
+      assert File.read!(store_path(dir)) == persisted
+    end
+
     test "persistence is off when store_dir is nil", %{dir: dir} do
       MockClient.set(Remote.fibers_url(candide()), {:ok, feed_body([sample_fiber("foo")])})
 

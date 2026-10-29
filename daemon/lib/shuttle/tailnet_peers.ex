@@ -25,8 +25,10 @@ defmodule Shuttle.TailnetPeers do
   Results live in an ETS table this process owns: `peers/0` feeds
   `Shuttle.Remotes.configured/0`, `generation/0` (which changes only when the peer
   set changes) is folded into `Shuttle.Remotes.config_token/0` so the registries
-  and the dial reconciler pick up a new peer without a bounce, and `status/0`
-  is the report `/api/v1/version` and `shuttle doctor` show.
+  and the dial reconciler pick up a new peer without a bounce. Default LocalAPI
+  socket selection is cached for up to 60 s, so a socket appearing after boot
+  can take that long to enter the token. `status/0` is the report
+  `/api/v1/version` and `shuttle doctor` show.
 
   When Tailscale is absent, stopped or failing, the round discovers nothing
   and records why: the fleet is the configured entries alone. A peer that
