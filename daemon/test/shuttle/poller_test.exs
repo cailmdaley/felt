@@ -76,12 +76,17 @@ defmodule Shuttle.PollerTest do
     assert %{
              available: true,
              word_size_bytes: word_size_bytes,
+             semantics: semantics,
              state: %{words: state_words, bytes: state_bytes},
              poll_plan_task_environment: %{words: plan_words, bytes: plan_bytes},
              poll_read_task_environment: %{words: read_words, bytes: read_bytes}
            } = Poller.cpu_memory_measurements(poller)
 
     assert word_size_bytes > 0
+
+    assert semantics ==
+             "flat_size counts flattened heap terms and references; ref-counted binary payload bytes are shared and excluded, this is not RSS"
+
     assert state_words == :erts_debug.flat_size(before)
     assert state_bytes == state_words * word_size_bytes
     assert plan_words > state_words

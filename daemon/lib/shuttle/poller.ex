@@ -1308,25 +1308,27 @@ defmodule Shuttle.Poller do
     stores = state.felt_stores
     plan = discovery_plan(state, stores, System.system_time(:millisecond))
 
-    plan_closure_words =
-      state |> poll_plan_task_fun(parent, poll_token) |> :erts_debug.flat_size()
+    plan_fun = poll_plan_task_fun(state, parent, poll_token)
+    {:env, plan_environment} = :erlang.fun_info(plan_fun, :env)
+    plan_environment_words = :erts_debug.flat_size(plan_environment)
 
-    read_closure_words =
-      state
-      |> poll_read_task_fun(parent, poll_token, plan)
-      |> :erts_debug.flat_size()
+    read_fun = poll_read_task_fun(state, parent, poll_token, plan)
+    {:env, read_environment} = :erlang.fun_info(read_fun, :env)
+    read_environment_words = :erts_debug.flat_size(read_environment)
 
     measurements = %{
       available: true,
       word_size_bytes: word_size_bytes,
       state: %{words: state_words, bytes: state_words * word_size_bytes},
+      semantics:
+        "flat_size counts flattened heap terms and references; ref-counted binary payload bytes are shared and excluded, this is not RSS",
       poll_plan_task_environment: %{
-        words: plan_closure_words,
-        bytes: plan_closure_words * word_size_bytes
+        words: plan_environment_words,
+        bytes: plan_environment_words * word_size_bytes
       },
       poll_read_task_environment: %{
-        words: read_closure_words,
-        bytes: read_closure_words * word_size_bytes
+        words: read_environment_words,
+        bytes: read_environment_words * word_size_bytes
       }
     }
 

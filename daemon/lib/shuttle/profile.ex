@@ -117,6 +117,8 @@ defmodule Shuttle.Profile do
         {:DOWN, ^monitor, :process, ^collector, reason} -> {:error, {:collector_down, reason}}
       after
         duration * 1000 ->
+          after_gc = if mode == :cpu, do: :erlang.statistics(:garbage_collection)
+
           functions =
             if function_state, do: Shuttle.Profile.Functions.finish(session, function_state)
 
@@ -130,7 +132,6 @@ defmodule Shuttle.Profile do
           end
 
           after_ms = msacc_stats(ms)
-          after_gc = if mode == :cpu, do: :erlang.statistics(:garbage_collection)
           after_os = Shuttle.Profile.OS.snapshot()
           processes = top_processes(before_processes)
           send(collector, {:finish, self()})
@@ -195,7 +196,8 @@ defmodule Shuttle.Profile do
       collections: after_count - before_count,
       words_reclaimed: words_reclaimed,
       bytes_reclaimed: words_reclaimed * word_size_bytes,
-      word_size_bytes: word_size_bytes
+      word_size_bytes: word_size_bytes,
+      semantics: "VM-wide reclaimed words; reclaimed words are not allocations"
     }
   end
 

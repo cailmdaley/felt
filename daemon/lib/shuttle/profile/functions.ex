@@ -43,6 +43,12 @@ defmodule Shuttle.Profile.Functions do
   ]
 
   @max_rows 40
+  @source_helpers [
+    "Shuttle.Poller.run_shuttle_listing/5",
+    "Shuttle.FeltStores.felt_ls_json/1",
+    "Shuttle.FiberDocuments.ls_rows/4"
+  ]
+  @max_source_process_rows @max_rows * length(@source_helpers)
 
   @doc "Starts counters for the static allowlist in an existing trace session."
   def start(session) do
@@ -80,6 +86,21 @@ defmodule Shuttle.Profile.Functions do
 
     case read_counters(session, active) do
       {:ok, rows} ->
+        sorted_rows = Enum.sort_by(rows, &{-&1["cpu_microseconds"], &1["function"], &1["pid"]})
+        top_process_functions = Enum.take(sorted_rows, @max_rows)
+        retained_pids = MapSet.new(top_process_functions, & &1["pid"])
+
+        all_source_process_rows =
+          Enum.filter(sorted_rows, &(&1["function"] in @source_helpers))
+
+        source_process_rows =
+          Enum.filter(all_source_process_rows, &MapSet.member?(retained_pids, &1["pid"]))
+
+        source_process_functions = Enum.take(source_process_rows, @max_source_process_rows)
+
+        source_process_functions_omitted_count =
+          max(length(all_source_process_rows) - length(source_process_functions), 0)
+
         totals =
           rows
           |> Enum.group_by(& &1["function"])
@@ -100,17 +121,18 @@ defmodule Shuttle.Profile.Functions do
             "excludes_instrumented_callees" => true,
             "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
-            "source_helper_counters" => "per-process correlation; not inclusive decode timings",
+            "source_helper_counters" =>
+              "per-process correlation for PIDs retained in top_process_functions; not inclusive decode timings",
             "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           },
           "functions" => totals,
           "skipped_functions" => Enum.map(skipped, &mfa_string/1),
-          "top_process_functions" =>
-            Enum.take(
-              Enum.sort_by(rows, &{-&1["cpu_microseconds"], &1["function"], &1["pid"]}),
-              @max_rows
-            ),
-          "process_function_limit" => @max_rows
+          "top_process_functions" => top_process_functions,
+          "process_function_limit" => @max_rows,
+          "source_process_functions" => source_process_functions,
+          "source_process_functions_limit" => @max_source_process_rows,
+          "source_process_functions_omitted_count" => source_process_functions_omitted_count,
+          "source_process_functions_truncated" => source_process_functions_omitted_count > 0
         }
 
       :unavailable ->
@@ -121,12 +143,17 @@ defmodule Shuttle.Profile.Functions do
           "skipped_functions" => Enum.map(skipped, &mfa_string/1),
           "top_process_functions" => [],
           "process_function_limit" => @max_rows,
+          "source_process_functions" => [],
+          "source_process_functions_limit" => @max_source_process_rows,
+          "source_process_functions_omitted_count" => 0,
+          "source_process_functions_truncated" => false,
           "semantics" => %{
             "includes_uninstrumented_callees" => true,
             "excludes_instrumented_callees" => true,
             "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
-            "source_helper_counters" => "per-process correlation; not inclusive decode timings",
+            "source_helper_counters" =>
+              "per-process correlation for PIDs retained in top_process_functions; not inclusive decode timings",
             "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           }
         }

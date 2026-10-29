@@ -121,7 +121,8 @@ defmodule Shuttle.ProfileTest do
              "collections" => collections,
              "words_reclaimed" => words_reclaimed,
              "bytes_reclaimed" => bytes_reclaimed,
-             "word_size_bytes" => word_size_bytes
+             "word_size_bytes" => word_size_bytes,
+             "semantics" => gc_semantics
            } = body["gc"]
 
     assert word_size_bytes > 0
@@ -129,6 +130,7 @@ defmodule Shuttle.ProfileTest do
     assert is_integer(collections)
     assert is_integer(words_reclaimed)
     assert bytes_reclaimed == words_reclaimed * word_size_bytes
+    assert gc_semantics == "VM-wide reclaimed words; reclaimed words are not allocations"
 
     assert Enum.any?(body["functions"]["functions"], fn row ->
              row["function"] == "Jason.encode_to_iodata!/1" and row["calls"] > 0
