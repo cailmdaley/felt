@@ -1,10 +1,12 @@
 package shuttlecli
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
+	"io"
+	mathrand "math/rand"
 	"net/http"
 	"net/url"
 	"os"
@@ -134,6 +136,7 @@ type app struct {
 	// rest); it outlasts the Poller call that serves it (daemonPostTimeout).
 	daemonLifecycleTimeout time.Duration
 	// eventNow and eventRand stamp and break ties between hook events.
+	boardEntropy      io.Reader
 	eventNow          func() time.Time
 	eventRand         func() int
 	eventReceiverPID  func() int
@@ -156,10 +159,11 @@ func newApp(env *sysenv.Env) *app {
 		daemonPause:               time.Sleep,
 		messageResolveWait:        90 * time.Second,
 		daemonLifecycleTimeout:    daemonPostTimeout,
+		boardEntropy:              rand.Reader,
 		eventNow:                  time.Now,
 		eventReceiverPID:          messaging.HookReceiverPID,
 		eventProcessBirth:         messaging.ProcessBirthToken,
-		eventRand:                 func() int { return rand.Intn(32768) },
+		eventRand:                 func() int { return mathrand.Intn(32768) },
 		httpProxy:                 http.ProxyFromEnvironment,
 		versionProbeTimeout:       3 * time.Second,
 	}
@@ -212,6 +216,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.roleCmd(),
 		a.rolesCmd(),
 		a.askCmd(),
+		a.boardCmd(),
 		a.shuttleCheckCmd(),
 		a.claimCmd(),
 		a.migrateCmd(),

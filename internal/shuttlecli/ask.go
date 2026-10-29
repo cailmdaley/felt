@@ -10,6 +10,7 @@ import (
 
 func (a *app) askCmd() *cobra.Command {
 	var askClear bool
+	var answeredBy string
 	askCmd := &cobra.Command{
 		Use:   "ask <fiber> [question]",
 		Short: "Set or clear a worker's outstanding one-line question",
@@ -19,6 +20,9 @@ question. Status, outcome and configuration remain unchanged. A question
 asked by the thread's own orchestrator is marked so that it is not delivered
 back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 		Args: func(cmd *cobra.Command, args []string) error {
+			if answeredBy != "" && !askClear {
+				return fmt.Errorf("--answered-by requires --clear")
+			}
 			if askClear {
 				return cobra.ExactArgs(1)(cmd, args)
 			}
@@ -34,6 +38,7 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 				return err
 			}
 			var value any
+			oldAsk := block.Ask
 			block.Ask = nil
 			if !askClear {
 				block.Ask = &shuttle.Ask{Text: args[1], At: time.Now().UTC().Format(time.RFC3339Nano)}
@@ -53,11 +58,28 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
+			kind, text := "asked", ""
+			by := a.boardWorkerParty()
+			if askClear {
+				kind = "cleared"
+				if oldAsk != nil {
+					text = oldAsk.Text
+				}
+				if answeredBy != "" {
+					kind = "answered"
+					by = &boardParty{Label: answeredBy}
+				}
+			} else {
+				text = args[1]
+			}
+			a.recordBoard(boardRecord{Kind: kind, Fiber: f.UID, By: by, Text: text})
 			fmt.Fprintf(a.env.Stdout, "updated question for %s%s\n", args[0], ref.Location())
 			return nil
 		},
 	}
 	askCmd.Flags().BoolVar(&askClear, "clear", false, "Remove the outstanding question")
+	askCmd.Flags().StringVar(&answeredBy, "answered-by", "", "Record the label of the person who answered")
+	_ = askCmd.Flags().MarkHidden("answered-by")
 	return askCmd
 }
 
