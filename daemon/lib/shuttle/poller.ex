@@ -1301,6 +1301,7 @@ defmodule Shuttle.Poller do
   end
 
   def handle_call(:cpu_memory_measurements, _from, %State{} = state) do
+    measurement_started_at = System.monotonic_time(:microsecond)
     word_size_bytes = :erlang.system_info(:wordsize)
     state_words = :erts_debug.flat_size(state)
     parent = self()
@@ -1315,13 +1316,15 @@ defmodule Shuttle.Poller do
     read_fun = poll_read_task_fun(state, parent, poll_token, plan)
     {:env, read_environment} = :erlang.fun_info(read_fun, :env)
     read_environment_words = :erts_debug.flat_size(read_environment)
+    measurement_microseconds = System.monotonic_time(:microsecond) - measurement_started_at
 
     measurements = %{
       available: true,
+      measurement_microseconds: measurement_microseconds,
       word_size_bytes: word_size_bytes,
       state: %{words: state_words, bytes: state_words * word_size_bytes},
       semantics:
-        "flat_size counts flattened heap terms and references; ref-counted binary payload bytes are shared and excluded, this is not RSS",
+        "flat_size estimates flattened message and spawn term copy size; ref-counted off-heap binary payloads stay shared and are excluded, this is not RSS",
       poll_plan_task_environment: %{
         words: plan_environment_words,
         bytes: plan_environment_words * word_size_bytes
