@@ -78,6 +78,84 @@ defmodule Shuttle.Poller.DocumentCache do
     {cache, stats}
   end
 
+  @doc """
+  Build a deterministic address index for a finalized document cache.
+
+  Fiber IDs and UIDs take precedence over slugs. Shared aliases resolve to the
+  candidate with the lexically smallest fiber ID, then UID and cache key.
+  Missing aliases are omitted.
+  """
+  def index(cache) when is_map(cache), do: cache |> index_with_collisions() |> elem(0)
+
+  @doc false
+  def index_with_collisions(cache) when is_map(cache) do
+    entries =
+      Enum.map(cache, fn {key, %{entry: entry}} ->
+        {key, Map.get(entry, :fiber, %{})}
+      end)
+
+    identity_candidates = candidates_by_alias(entries, ["id", "uid"])
+
+    identity_index =
+      Map.new(identity_candidates, fn {address, candidates} ->
+        {address, winner(candidates)}
+      end)
+
+    slug_candidates = candidates_by_alias(entries, ["slug"])
+
+    collision_signatures =
+      slug_candidates
+      |> Enum.filter(fn {_slug, candidates} -> length(candidates) > 1 end)
+      |> Map.new(fn {slug, candidates} ->
+        signature =
+          candidates
+          |> Enum.sort_by(&candidate_order/1)
+          |> Enum.map(fn {key, fiber} ->
+            {Map.get(fiber, "id"), Map.get(fiber, "uid"), key}
+          end)
+
+        {slug, signature}
+      end)
+
+    index =
+      Enum.reduce(slug_candidates, identity_index, fn {slug, candidates}, aliases ->
+        Map.put_new(aliases, slug, winner(candidates))
+      end)
+
+    {index, collision_signatures}
+  end
+
+  defp candidates_by_alias(entries, fields) do
+    Enum.reduce(entries, %{}, fn {key, fiber}, aliases ->
+      Enum.reduce(fields, aliases, fn field, candidates ->
+        case Map.get(fiber, field) do
+          nil ->
+            candidates
+
+          address ->
+            Map.update(candidates, address, [{key, fiber}], &[{key, fiber} | &1])
+        end
+      end)
+    end)
+  end
+
+  @doc false
+  def collision_transition(previous, current) do
+    current = MapSet.new(Enum.map(current, fn {slug, signature} -> {slug, signature} end))
+    newly_observed = current |> MapSet.difference(previous) |> Enum.sort()
+    {current, newly_observed}
+  end
+
+  defp winner(candidates), do: candidates |> Enum.min_by(&candidate_order/1) |> elem(1)
+
+  defp candidate_order({key, fiber}) do
+    {sort_value(Map.get(fiber, "id")), sort_value(Map.get(fiber, "uid")), sort_value(key)}
+  end
+
+  defp sort_value(value) when is_binary(value), do: {0, value}
+  defp sort_value(nil), do: {1, ""}
+  defp sort_value(value), do: {2, inspect(value)}
+
   @doc "Cache key for a candidate/fiber: its uid when present, else its id."
   def cache_key(candidate) do
     case Map.get(candidate, "uid") do

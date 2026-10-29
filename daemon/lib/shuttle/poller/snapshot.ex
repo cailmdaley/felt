@@ -3,10 +3,12 @@ defmodule Shuttle.Poller.Snapshot do
   Read-only serialization of `Shuttle.Poller` state into the wire shapes the
   `:4000` API and the kanban feed consume.
 
-  Every function here is a pure projection: it takes the poller `State` (or a
-  slice of it) and returns plain maps/lists. The wire shape is load-bearing —
-  API and kanban consumers depend on it byte-for-byte — so changes here must
-  preserve it exactly.
+  Worker projection reads one fresh `AppWorkers` record per managed worker,
+  then derives its wire fields and runtime presentation from that record.
+  Other inputs come from the poller `State` (or a slice of it), and the
+  functions return plain maps/lists. The wire shape is load-bearing — API and
+  kanban consumers depend on it byte-for-byte — so changes here must preserve
+  it exactly.
 
   The identity helpers it shares with the rest of the poller (`fiber_address/1`,
   `metadata_uid/1`) live in `Shuttle.Poller`; `standing_role_snapshots/3` lives
@@ -27,9 +29,10 @@ defmodule Shuttle.Poller.Snapshot do
     eligible =
       Enum.map(state.running, fn {_runtime_key, meta} ->
         fiber_id = Poller.fiber_address(meta)
+        record = app_worker_record(meta)
 
         meta
-        |> worker_fields()
+        |> worker_fields(record)
         |> Map.merge(%{
           fiber_id: fiber_id,
           uid: Poller.metadata_uid(meta),
@@ -37,7 +40,7 @@ defmodule Shuttle.Poller.Snapshot do
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
         })
-        |> native_activity(meta.session)
+        |> native_activity(meta.session, record)
         |> put_tasks(state.task_reads)
       end)
 
@@ -124,7 +127,8 @@ defmodule Shuttle.Poller.Snapshot do
         |> StandingRoles.standing_role_snapshots(now, state)
         |> with_office(state),
       claimed_count: map_size(state.running),
-      max_concurrent: if(state.max_concurrent_workers == :infinity, do: nil, else: state.max_concurrent_workers),
+      max_concurrent:
+        if(state.max_concurrent_workers == :infinity, do: nil, else: state.max_concurrent_workers),
       # The refresh's hit/miss/eviction/entry counts plus the feed envelope's
       # freshness fields (its `entries` is the live cache size; the stats'
       # count from the last refresh is the one reported here).
@@ -178,7 +182,7 @@ defmodule Shuttle.Poller.Snapshot do
   """
   def runtime_index(running, activity) do
     Enum.reduce(running, %{}, fn {runtime_key, meta}, acc ->
-      payload = runtime_payload(meta, activity)
+      payload = runtime_payload(meta, activity, app_worker_record(meta))
 
       [runtime_key, Poller.metadata_uid(meta), Poller.fiber_address(meta)]
       |> Enum.filter(&(is_binary(&1) and &1 != ""))
@@ -311,21 +315,35 @@ defmodule Shuttle.Poller.Snapshot do
   # payload share, so the two agree on shape. The payload's presence is the
   # viewer's liveness signal and `state` qualifies it; `tmux_session` is only
   # the CLI worker's terminal handle (nil for an app worker).
-  defp worker_fields(meta) do
+  defp app_worker_record(meta) do
+    case Shuttle.AppWorkers.id(meta.session) do
+      nil ->
+        nil
+
+      id ->
+        case Shuttle.AppWorkers.get(id) do
+          {:ok, record} -> record
+          _ -> nil
+        end
+    end
+  end
+
+  defp worker_fields(meta, record) do
     app_id = Shuttle.AppWorkers.id(meta.session)
+    backend = Shuttle.WorkerBackend.wire(meta.session, record)
 
     %{
-      tmux_session: Shuttle.WorkerBackend.tmux(meta.session),
-      surface: Shuttle.WorkerBackend.wire(meta.session).surface,
+      tmux_session: backend.tmux_session,
+      surface: backend.surface,
       session_uuid: app_id || Map.get(meta, :session_uuid),
       thread_id: app_id,
       desktop_link: Shuttle.SessionLink.desktop_url(app_id),
-      transcript_session_uuid: app_id && Shuttle.AppWorkers.transcript_id(app_id),
+      transcript_session_uuid: backend[:transcript_session_uuid],
       agent: Map.get(meta, :agent_id),
       state: Map.get(meta, :state, "running"),
       launch_error: Map.get(meta, :launch_error),
-      terminal_error: Map.get(Shuttle.WorkerBackend.wire(meta.session), :terminal_error),
-      backend_error: Map.get(Shuttle.WorkerBackend.wire(meta.session), :backend_error),
+      terminal_error: backend[:terminal_error],
+      backend_error: backend[:backend_error],
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
@@ -364,13 +382,13 @@ defmodule Shuttle.Poller.Snapshot do
   # Fallback: a just-dispatched worker with no hook event yet has no tracker
   # record, so we fall back to `meta.last_activity_at` (≈ `started_at`) and omit
   # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
-  defp runtime_payload(meta, activity) do
-    base = worker_fields(meta)
+  defp runtime_payload(meta, activity, record) do
+    base = worker_fields(meta, record)
 
     activity_key =
       case Shuttle.AppWorkers.id(meta.session) do
         nil -> Map.get(meta, :session_uuid)
-        id -> Shuttle.AppWorkers.transcript_id(id)
+        _id -> base.transcript_session_uuid
       end
 
     payload =
@@ -382,17 +400,17 @@ defmodule Shuttle.Poller.Snapshot do
           Map.put(base, :last_activity_at, DateTime.to_unix(meta.last_activity_at, :millisecond))
       end
 
-    native_activity(payload, meta.session)
+    native_activity(payload, meta.session, record)
   end
 
-  defp native_activity(payload, session) do
+  defp native_activity(payload, session, record) do
     case Shuttle.AppWorkers.id(session) do
       nil ->
         payload
 
-      id ->
-        case Shuttle.AppWorkers.get(id) do
-          {:ok, %{"launch_state" => "running", "remote_phase" => phase} = record}
+      _id ->
+        case record do
+          %{"launch_state" => "running", "remote_phase" => phase} = record
           when phase in ["working", "waiting", "attention"] ->
             payload
             |> Map.put(:phase, phase)

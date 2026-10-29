@@ -433,6 +433,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         | own_host_id: "test-host",
           document_cache_ready: true,
           document_cache: %{uid => %{modified_at: "m1", entry: entry}},
+          document_fiber_index:
+            Shuttle.Poller.DocumentCache.index(%{uid => %{modified_at: "m1", entry: entry}}),
           running:
             Map.put(state.running, uid, %{
               fiber_id: "tests/live",
@@ -495,7 +497,13 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
     :sys.replace_state(poller, fn state ->
-      %{state | own_host_id: "test-host", document_cache_ready: false, document_cache: %{}}
+      %{
+        state
+        | own_host_id: "test-host",
+          document_cache_ready: false,
+          document_cache: %{},
+          document_fiber_index: %{}
+      }
     end)
 
     restore_poller_on_exit(poller, original_state)
@@ -541,7 +549,9 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         state
         | own_host_id: "test-host",
           document_cache_ready: true,
-          document_cache: %{uid => %{modified_at: "m1", entry: entry}}
+          document_cache: %{uid => %{modified_at: "m1", entry: entry}},
+          document_fiber_index:
+            Shuttle.Poller.DocumentCache.index(%{uid => %{modified_at: "m1", entry: entry}})
       }
     end)
 
@@ -603,7 +613,9 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         state
         | own_host_id: "test-host",
           document_cache_ready: true,
-          document_cache: %{uid => %{modified_at: "m1", entry: base}}
+          document_cache: %{uid => %{modified_at: "m1", entry: base}},
+          document_fiber_index:
+            Shuttle.Poller.DocumentCache.index(%{uid => %{modified_at: "m1", entry: base}})
       }
     end)
 
@@ -615,7 +627,13 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     changed = put_in(base.fiber["name"], "After")
 
     :sys.replace_state(poller, fn state ->
-      %{state | document_cache: %{uid => %{modified_at: "m2", entry: changed}}}
+      cache = %{uid => %{modified_at: "m2", entry: changed}}
+
+      %{
+        state
+        | document_cache: cache,
+          document_fiber_index: Shuttle.Poller.DocumentCache.index(cache)
+      }
     end)
 
     conn2 = get(api_conn(), "/api/v1/fibers?shuttle=true")
@@ -1804,7 +1822,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
             last_full_listings: %{},
             discovery: %{},
             document_cache_ready: false,
-            document_cache: %{}
+            document_cache: %{},
+            document_fiber_index: %{}
         }
       end)
 

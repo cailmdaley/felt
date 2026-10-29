@@ -189,17 +189,29 @@ defmodule Shuttle.WorkerBackend do
   end
 
   def wire(session) do
+    record =
+      case AppWorkers.id(session) do
+        nil ->
+          nil
+
+        id ->
+          case AppWorkers.get(id) do
+            {:ok, record} -> record
+            _ -> nil
+          end
+      end
+
+    wire(session, record)
+  end
+
+  @doc "Build a worker presentation from an already-read ownership record."
+  def wire(session, record) do
     case AppWorkers.id(session) do
       nil ->
         %{surface: "cli", tmux_session: session}
 
       id ->
-        record =
-          case AppWorkers.get(id) do
-            {:ok, record} -> record
-            _ -> %{}
-          end
-
+        record = if is_map(record), do: record, else: %{}
         surface = record["surface"] || "app"
 
         %{
@@ -207,7 +219,7 @@ defmodule Shuttle.WorkerBackend do
           tmux_session: if(surface == "cli", do: record["terminal_tmux"]),
           session_uuid: id,
           thread_id: id,
-          transcript_session_uuid: AppWorkers.transcript_id(id),
+          transcript_session_uuid: record["transcript_session_uuid"] || id,
           desktop_link: Shuttle.SessionLink.desktop_url(id),
           project_id: record["project_id"],
           terminal_error: record["terminal_error"],

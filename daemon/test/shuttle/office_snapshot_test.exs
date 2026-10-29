@@ -1,7 +1,7 @@
 defmodule Shuttle.OfficeSnapshotTest do
   use ExUnit.Case, async: true
 
-  alias Shuttle.Poller.{Snapshot, State}
+  alias Shuttle.Poller.{DocumentCache, Snapshot, State}
 
   test "snapshot rows project the office and boolean seat from cached shuttle fields" do
     for {shuttle, role, seat} <- [
@@ -10,19 +10,22 @@ defmodule Shuttle.OfficeSnapshotTest do
           {%{"seat" => "gardener"}, nil, false},
           {%{}, nil, false}
         ] do
-      state = %State{
-        document_cache: %{
-          "office" => %{
-            entry: %{
-              fiber: %{
-                "id" => "tests/office",
-                "role" => "ignored",
-                "seat" => true,
-                "shuttle" => shuttle
-              }
+      document_cache = %{
+        "office" => %{
+          entry: %{
+            fiber: %{
+              "id" => "tests/office",
+              "role" => "ignored",
+              "seat" => true,
+              "shuttle" => shuttle
             }
           }
-        },
+        }
+      }
+
+      state = %State{
+        document_cache: document_cache,
+        document_fiber_index: DocumentCache.index(document_cache),
         parked_launches: %{
           "office" => %{fiber_id: "tests/office", uid: nil, parked_at: DateTime.utc_now()}
         }

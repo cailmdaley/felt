@@ -16,6 +16,171 @@ defmodule Shuttle.PollerTest do
   alias Shuttle.Test.FeltStoreRunner, as: MockRunner
   alias Shuttle.Test.Env
 
+  test "document fiber index gives ids and uids precedence and resolves slugs lexically" do
+    small_cache = %{
+      "z-fiber" => %{
+        entry: %{fiber: %{"id" => "z-fiber", "uid" => "uid-z", "slug" => "shared"}}
+      },
+      "a-fiber" => %{
+        entry: %{fiber: %{"id" => "a-fiber", "uid" => "uid-a", "slug" => "shared"}}
+      },
+      "slug-shadow" => %{
+        entry: %{fiber: %{"id" => "slug-shadow", "uid" => "uid-shadow", "slug" => "identity"}}
+      },
+      "slug-shadow-z" => %{
+        entry: %{fiber: %{"id" => "slug-shadow-z", "uid" => "uid-shadow-z", "slug" => "identity"}}
+      },
+      "identity" => %{
+        entry: %{fiber: %{"id" => "identity", "uid" => "uid-identity", "slug" => "other"}}
+      },
+      "duplicate-z" => %{
+        entry: %{
+          fiber: %{"id" => "duplicate", "uid" => "same-uid", "slug" => "dup-z", "name" => "z"}
+        }
+      },
+      "duplicate-a" => %{
+        entry: %{
+          fiber: %{"id" => "duplicate", "uid" => "same-uid", "slug" => "dup-a", "name" => "a"}
+        }
+      },
+      "uid-z" => %{
+        entry: %{fiber: %{"id" => "uid-winner-z", "uid" => "shared-uid", "slug" => "uid-z"}}
+      },
+      "uid-a" => %{
+        entry: %{fiber: %{"id" => "uid-winner-a", "uid" => "shared-uid", "slug" => "uid-a"}}
+      },
+      "empty-id" => %{
+        entry: %{fiber: %{"id" => "", "slug" => "empty-slug"}}
+      },
+      "nil-fields" => %{
+        entry: %{fiber: %{"slug" => nil}}
+      }
+    }
+
+    {small_index, small_collisions} =
+      Shuttle.Poller.DocumentCache.index_with_collisions(small_cache)
+
+    assert small_index["shared"] == small_cache["a-fiber"].entry.fiber
+    assert small_index["identity"] == small_cache["identity"].entry.fiber
+    assert small_index["shared-uid"] == small_cache["uid-a"].entry.fiber
+    assert small_index["uid-z"] == small_cache["z-fiber"].entry.fiber
+    assert small_index["duplicate"] == small_cache["duplicate-a"].entry.fiber
+    assert small_index[""] == small_cache["empty-id"].entry.fiber
+
+    assert small_index ==
+             Shuttle.Poller.DocumentCache.index(Map.new(Enum.reverse(Enum.to_list(small_cache))))
+
+    refute Map.has_key?(small_index, nil)
+    assert Poller.cached_fiber(%{document_fiber_index: small_index}, nil) == nil
+
+    assert small_collisions["shared"] == [
+             {"a-fiber", "uid-a", "a-fiber"},
+             {"z-fiber", "uid-z", "z-fiber"}
+           ]
+
+    assert small_collisions["identity"] == [
+             {"slug-shadow", "uid-shadow", "slug-shadow"},
+             {"slug-shadow-z", "uid-shadow-z", "slug-shadow-z"}
+           ]
+
+    {seen, first_warnings} =
+      Shuttle.Poller.DocumentCache.collision_transition(MapSet.new(), small_collisions)
+
+    assert first_warnings == Enum.sort(Map.to_list(small_collisions))
+
+    assert {^seen, []} =
+             Shuttle.Poller.DocumentCache.collision_transition(seen, small_collisions)
+
+    {empty_seen, []} = Shuttle.Poller.DocumentCache.collision_transition(seen, %{})
+
+    assert {_reappeared, ^first_warnings} =
+             Shuttle.Poller.DocumentCache.collision_transition(empty_seen, small_collisions)
+
+    warning_log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        first_install = Poller.install_document_cache(%Shuttle.Poller.State{}, small_cache)
+        _same_install = Poller.install_document_cache(first_install, small_cache)
+
+        # Poll-task index construction is pure and does not emit install warnings.
+        _task_index = Shuttle.Poller.DocumentCache.index(small_cache)
+
+        cleared = Poller.install_document_cache(first_install, %{})
+        _reinstalled = Poller.install_document_cache(cleared, small_cache)
+      end)
+
+    assert length(String.split(warning_log, "document slug collision")) - 1 == 4
+    assert warning_log =~ "resolves to fiber id \"identity\""
+
+    wide_cache =
+      Map.merge(
+        small_cache,
+        Map.new(1..40, fn number ->
+          id = "wide-#{String.pad_leading(Integer.to_string(number), 2, "0")}"
+          {id, %{entry: %{fiber: %{"id" => id, "uid" => "uid-#{id}", "slug" => "wide-shared"}}}}
+        end)
+      )
+
+    {wide_index, wide_collisions} = Shuttle.Poller.DocumentCache.index_with_collisions(wide_cache)
+    reversed_cache = Map.new(Enum.reverse(Enum.to_list(wide_cache)))
+
+    assert wide_index == Shuttle.Poller.DocumentCache.index(reversed_cache)
+    assert wide_index["wide-shared"]["id"] == "wide-01"
+    assert wide_collisions["wide-shared"] |> hd() == {"wide-01", "uid-wide-01", "wide-01"}
+  end
+
+  test "runtime projection reads one fresh app record and reuses its transcript identity" do
+    id = "app-session-1"
+
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "shuttle-poller-projection-#{System.unique_integer([:positive])}"
+      )
+
+    Env.put_app_env(:app_workers_dir, root)
+    on_exit(fn -> File.rm_rf(root) end)
+    File.mkdir_p!(root)
+    path = Path.join(root, id <> ".json")
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "active" => true,
+        "surface" => "app",
+        "transcript_session_uuid" => "native-transcript",
+        "launch_state" => "running",
+        "remote_phase" => "waiting",
+        "phase_changed_at" => 1234
+      })
+    )
+
+    meta = %{
+      session: Shuttle.AppWorkers.ref(id),
+      session_uuid: id,
+      started_at: DateTime.utc_now(),
+      last_activity_at: DateTime.utc_now(),
+      state: "running"
+    }
+
+    callers = Shuttle.Env.callers()
+
+    {index, reads} =
+      Shuttle.Test.FileReadTrace.run(fn ->
+        Shuttle.Env.adopt_callers(callers)
+        Snapshot.runtime_index(%{id => meta}, %{})
+      end)
+
+    assert [%{surface: "app", transcript_session_uuid: "native-transcript", phase: "waiting"}] =
+             Map.values(index)
+
+    assert reads == [path]
+
+    File.write!(path, "null")
+    assert {:error, :ownership_record_unreadable} = Shuttle.AppWorkers.call(id, :interrupt)
+  end
+
   defmodule IdentityRunner do
     def cmd(command, args, opts) do
       if command == "shuttle" and "mark-runtime" in args and
@@ -154,7 +319,11 @@ defmodule Shuttle.PollerTest do
              baseline.poll_read_task_environment.words
 
     large_document_cache = Map.new(1..2_000, &{&1, &1})
-    :sys.replace_state(poller, &%{&1 | document_cache: large_document_cache})
+
+    :sys.replace_state(poller, fn state ->
+      %{state | document_cache: large_document_cache, document_fiber_index: %{}}
+    end)
+
     with_large_cache = Poller.cpu_memory_measurements(poller)
 
     assert with_large_cache.state.words > with_large_excluded_field.state.words
@@ -226,7 +395,16 @@ defmodule Shuttle.PollerTest do
     ]
 
     cache = Map.new(entries, &{&1.fiber["id"], %{entry: &1, modified_at: nil}})
-    :sys.replace_state(poller, &%{&1 | document_cache: cache, document_cache_ready: true})
+
+    :sys.replace_state(poller, fn state ->
+      %{
+        state
+        | document_cache: cache,
+          document_fiber_index: Shuttle.Poller.DocumentCache.index(cache),
+          document_cache_ready: true
+      }
+    end)
+
     assert {:ok, %{fibers: feed}} = Poller.cached_fiber_documents(poller)
 
     assert Map.new(feed, &{&1.fiber["id"], &1.orchestrator}) == %{
@@ -657,6 +835,10 @@ defmodule Shuttle.PollerTest do
 
     assert shuttle_show_count() == 0
 
+    cached_state = :sys.get_state(poller, @state_timeout)
+    assert Poller.cached_fiber(cached_state, uid)["uid"] == uid
+    assert Poller.cached_fiber(cached_state, "tests/cached-document")["uid"] == uid
+
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "slug" => "tests/cached-document"}}] = body.fibers
 
@@ -679,6 +861,25 @@ defmodule Shuttle.PollerTest do
     assert shuttle_show_count() == 0
     assert {:ok, body} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid, "name" => "changed document"}}] = body.fibers
+    cached_state = :sys.get_state(poller, @state_timeout)
+    assert Poller.cached_fiber(cached_state, uid)["name"] == "changed document"
+
+    assert Poller.cached_fiber(cached_state, "tests/cached-document")["name"] ==
+             "changed document"
+
+    MockRunner.delete_fiber("tests/cached-document")
+    assert :ok = Poller.refresh_document(poller, "tests/cached-document")
+    refreshed_state = :sys.get_state(poller, @state_timeout)
+    assert Poller.cached_fiber(refreshed_state, uid) == nil
+    assert Poller.cached_fiber(refreshed_state, "tests/cached-document") == nil
+
+    sync_poll_cycle!(poller)
+
+    assert_eventually(fn ->
+      state = :sys.get_state(poller, @state_timeout)
+      assert Poller.cached_fiber(state, uid) == nil
+      assert Poller.cached_fiber(state, "tests/cached-document") == nil
+    end)
   end
 
   test "post-mutation document refresh keeps Shuttle's resolved agent" do
@@ -708,6 +909,9 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, refreshed} = Poller.cached_fiber_documents(poller)
     assert [%{fiber: %{"id" => ^uid} = refreshed_fiber}] = refreshed.fibers
+    refreshed_state = :sys.get_state(poller, @state_timeout)
+    assert Poller.cached_fiber(refreshed_state, uid) == refreshed_fiber
+    assert Poller.cached_fiber(refreshed_state, id) == refreshed_fiber
     assert get_in(refreshed_fiber, ["shuttle", "resolved", "agent", "id"]) == "claude-opus"
 
     MockRunner.set_shuttle(id, """
@@ -845,7 +1049,11 @@ defmodule Shuttle.PollerTest do
     :sys.replace_state(poller, fn state ->
       %{
         state
-        | document_cache: %{uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}}
+        | document_cache: %{uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}},
+          document_fiber_index:
+            Shuttle.Poller.DocumentCache.index(%{
+              uid => %{modified_at: "2026-06-06T02:00:00Z", entry: patched_entry}
+            })
       }
     end)
 
@@ -938,7 +1146,13 @@ defmodule Shuttle.PollerTest do
     assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
     :sys.replace_state(poller, fn state ->
-      %{state | document_cache_ready: false, cold_feed_logged: false, document_cache: %{}}
+      %{
+        state
+        | document_cache_ready: false,
+          cold_feed_logged: false,
+          document_cache: %{},
+          document_fiber_index: %{}
+      }
     end)
 
     log =

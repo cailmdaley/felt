@@ -46,11 +46,14 @@ defmodule ShuttleWeb.ThreadsControllerTest do
   end
 
   defp warm!(entries, running) do
+    cache = Map.new(entries, &{&1.fiber["uid"], %{modified_at: nil, entry: &1}})
+
     :sys.replace_state(quiet_poller!(), fn state ->
       %{
         state
         | document_cache_ready: true,
-          document_cache: Map.new(entries, &{&1.fiber["uid"], %{modified_at: nil, entry: &1}}),
+          document_cache: cache,
+          document_fiber_index: Shuttle.Poller.DocumentCache.index(cache),
           running: Map.new(running, &{&1, %{}})
       }
     end)

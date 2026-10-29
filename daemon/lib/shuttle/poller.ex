@@ -196,6 +196,10 @@ defmodule Shuttle.Poller do
       # entries from the widened Shuttle listing projection and reuses unchanged
       # entries by modified_at.
       document_cache: %{},
+      document_fiber_index: %{},
+      # Collisions still present in the installed cache; absent signatures clear
+      # so a later recurrence is logged again.
+      document_slug_collisions: MapSet.new(),
       document_cache_stats: %{hits: 0, misses: 0, evictions: 0, entries: 0},
       task_reads: %{},
       document_cache_ready: false,
@@ -1765,14 +1769,7 @@ defmodule Shuttle.Poller do
   end
 
   @doc false
-  def cached_fiber(%{document_cache: document_cache}, fiber_id) do
-    Enum.find_value(document_cache, fn {_key, %{entry: entry}} ->
-      fiber = Map.get(entry, :fiber, %{})
-
-      if fiber_id in [Map.get(fiber, "id"), Map.get(fiber, "uid"), Map.get(fiber, "slug")],
-        do: fiber
-    end)
-  end
+  def cached_fiber(%{document_fiber_index: index}, fiber_id), do: Map.get(index, fiber_id)
 
   defp running_worker(%State{} = state, fiber_id) do
     case running_key(state, fiber_id) do
@@ -1894,13 +1891,14 @@ defmodule Shuttle.Poller do
     # Merge newly resolved store entries into the cache. Existing entries
     # are not evicted — earlier-configured stores win for ID collisions,
     # and cache entries are stable for the daemon's lifetime.
+    state = install_document_cache(state, document_cache)
+
     state = %{
       state
       | fiber_store_cache: Map.merge(new_store_map, state.fiber_store_cache),
         # Rebuilt (not merged) each poll so a rename or delete can't leave a
         # stale uid→slug entry; an as-yet-unseen uid falls through to felt.
         uid_slug_index: build_uid_slug_index(candidates),
-        document_cache: document_cache,
         document_cache_stats: document_cache_stats,
         document_cache_ready: true,
         document_cache_refreshed_at: refreshed_at,
@@ -2386,6 +2384,35 @@ defmodule Shuttle.Poller do
     end
   end
 
+  @doc false
+  def install_document_cache(%State{} = state, document_cache) do
+    {document_fiber_index, collisions} =
+      Shuttle.Poller.DocumentCache.index_with_collisions(document_cache)
+
+    {document_slug_collisions, newly_observed} =
+      Shuttle.Poller.DocumentCache.collision_transition(
+        state.document_slug_collisions,
+        collisions
+      )
+
+    Enum.each(newly_observed, fn {slug, candidates} ->
+      ids = Enum.map(candidates, fn {id, _uid, _key} -> id end)
+      winner = Map.get(document_fiber_index, slug)
+
+      Logger.warning(
+        "document slug collision #{inspect(slug)} among fiber ids #{inspect(ids)}; " <>
+          "resolves to fiber id #{inspect(Map.get(winner, "id"))}"
+      )
+    end)
+
+    %{
+      state
+      | document_cache: document_cache,
+        document_fiber_index: document_fiber_index,
+        document_slug_collisions: document_slug_collisions
+    }
+  end
+
   # Stamp serve-time tmux liveness onto each owned feed row. The owner is the
   # only daemon that knows its own running workers (`state.running`), so it
   # carries that truth on the same `/api/v1/fibers` rows a viewer already reads
@@ -2619,7 +2646,7 @@ defmodule Shuttle.Poller do
             end
           end)
 
-        %{state | document_cache: cache}
+        install_document_cache(state, cache)
 
       {:error, _} ->
         state
@@ -2628,9 +2655,10 @@ defmodule Shuttle.Poller do
 
   defp read_worker_tasks(state) do
     binding = session_bindings()
+    fiber_index = Shuttle.Poller.DocumentCache.index(state.document_cache)
 
     Enum.reduce(state.running, %{}, fn {_key, meta}, reads ->
-      fiber = cached_fiber(state, fiber_address(meta))
+      fiber = Map.get(fiber_index, fiber_address(meta))
       cli = worker_cli(meta, fiber)
 
       session =
@@ -2684,11 +2712,11 @@ defmodule Shuttle.Poller do
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)
         cached = %{modified_at: Map.get(fiber, "modified_at"), entry: entry}
-        %{state | document_cache: Map.put(without_fiber, key, cached)}
+        install_document_cache(state, Map.put(without_fiber, key, cached))
 
       {:ok, %{fibers: []}} ->
         # Fiber no longer resolves (uninstalled / deleted): drop it from the feed.
-        %{state | document_cache: without_fiber}
+        install_document_cache(state, without_fiber)
 
       {:error, reason} ->
         Logger.warning("refresh_document #{fiber_id} skipped: #{inspect(reason)}")
