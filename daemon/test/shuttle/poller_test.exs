@@ -61,6 +61,36 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
+  test "CPU memory diagnostics return scalars without changing Poller state" do
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        own_host_id: "test-host",
+        felt_stores: [MockRunner.felt_root()],
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+    before = :sys.get_state(poller, @state_timeout)
+
+    assert %{
+             available: true,
+             word_size_bytes: word_size_bytes,
+             state: %{words: state_words, bytes: state_bytes},
+             poll_plan_task_environment: %{words: plan_words, bytes: plan_bytes},
+             poll_read_task_environment: %{words: read_words, bytes: read_bytes}
+           } = Poller.cpu_memory_measurements(poller)
+
+    assert word_size_bytes > 0
+    assert state_words == :erts_debug.flat_size(before)
+    assert state_bytes == state_words * word_size_bytes
+    assert plan_words > state_words
+    assert read_words > state_words
+    assert plan_bytes == plan_words * word_size_bytes
+    assert read_bytes == read_words * word_size_bytes
+    assert :sys.get_state(poller, @state_timeout) == before
+  end
+
   test "Desk orchestrators use nearest constitution across plain levels before owner filtering" do
     root = MockRunner.felt_root()
 

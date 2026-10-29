@@ -373,6 +373,11 @@ defmodule Shuttle.Poller do
     GenServer.call(server, :snapshot, timeout_ms)
   end
 
+  @doc false
+  def cpu_memory_measurements(server \\ Shuttle.Env.server(__MODULE__)) do
+    GenServer.call(server, :cpu_memory_measurements, 1_000)
+  end
+
   @spec cached_fiber_documents(keyword() | GenServer.server()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(opts) when is_list(opts),
     do: cached_fiber_documents(Shuttle.Env.server(__MODULE__), opts)
@@ -1293,6 +1298,39 @@ defmodule Shuttle.Poller do
   @impl true
   def handle_call(:snapshot, _from, state) do
     {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
+  end
+
+  def handle_call(:cpu_memory_measurements, _from, %State{} = state) do
+    word_size_bytes = :erlang.system_info(:wordsize)
+    state_words = :erts_debug.flat_size(state)
+    parent = self()
+    poll_token = make_ref()
+    stores = state.felt_stores
+    plan = discovery_plan(state, stores, System.system_time(:millisecond))
+
+    plan_closure_words =
+      state |> poll_plan_task_fun(parent, poll_token) |> :erts_debug.flat_size()
+
+    read_closure_words =
+      state
+      |> poll_read_task_fun(parent, poll_token, plan)
+      |> :erts_debug.flat_size()
+
+    measurements = %{
+      available: true,
+      word_size_bytes: word_size_bytes,
+      state: %{words: state_words, bytes: state_words * word_size_bytes},
+      poll_plan_task_environment: %{
+        words: plan_closure_words,
+        bytes: plan_closure_words * word_size_bytes
+      },
+      poll_read_task_environment: %{
+        words: read_closure_words,
+        bytes: read_closure_words * word_size_bytes
+      }
+    }
+
+    {:reply, measurements, state}
   end
 
   def handle_call(:thread_inputs, _from, %State{document_cache_ready: false} = state),
@@ -5391,7 +5429,28 @@ defmodule Shuttle.Poller do
   # Poller sizes the read watchdog against the returned set and each store's
   # next full/hot mode before starting the potentially long scan phase.
   defp start_poll_plan_task(parent, poll_token, %State{} = state) do
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+    Task.Supervisor.start_child(
+      Shuttle.TaskSupervisor,
+      poll_plan_task_fun(state, parent, poll_token)
+    )
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  # Poll reads are supervised but intentionally not linked to this GenServer:
+  # the watchdog must be able to kill one wedged read without taking the
+  # Poller down with it. Both the watchdog and terminate/2 reap the current phase.
+  defp start_poll_read_task(parent, poll_token, %State{} = state, discovery_plan) do
+    Task.Supervisor.start_child(
+      Shuttle.TaskSupervisor,
+      poll_read_task_fun(state, parent, poll_token, discovery_plan)
+    )
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  defp poll_plan_task_fun(%State{} = state, parent, poll_token) do
+    fn ->
       result =
         try do
           stores = refreshed_felt_stores(state)
@@ -5404,20 +5463,11 @@ defmodule Shuttle.Poller do
         end
 
       send(parent, {:poll_plan, poll_token, result})
-    end)
-  catch
-    :exit, reason -> {:error, reason}
+    end
   end
 
-  # Poll reads are supervised but intentionally not linked to this GenServer:
-  # the watchdog must be able to kill one wedged read without taking the
-  # Poller down with it. Both the watchdog and terminate/2 reap the current phase.
-  defp start_poll_read_task(parent, poll_token, %State{} = state, discovery_plan) do
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      send(parent, {:poll_world, poll_token, poll_reads(state, discovery_plan)})
-    end)
-  catch
-    :exit, reason -> {:error, reason}
+  defp poll_read_task_fun(%State{} = state, parent, poll_token, discovery_plan) do
+    fn -> send(parent, {:poll_world, poll_token, poll_reads(state, discovery_plan)}) end
   end
 
   defp stop_poll_task(nil), do: :ok

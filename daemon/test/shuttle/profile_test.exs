@@ -19,6 +19,9 @@ defmodule Shuttle.ProfileTest do
       assert %{window: %{seconds: 1, single_flight: true}, processes: [_ | _], file_calls: calls} =
                result
 
+      refute Map.has_key?(result, :gc)
+      refute Map.has_key?(result, :memory)
+
       assert Enum.any?(calls.by_caller, fn row ->
                row.caller == "Shuttle.ProfileTest.stat_loop/0" and row.function == "File.stat/1" and
                  row.count > 0
@@ -111,6 +114,21 @@ defmodule Shuttle.ProfileTest do
     assert body["window"]["instrumented"] == true
     assert body["window"]["seconds"] == 10
     assert body["functions"]["available"] == true
+
+    assert %{"available" => false, "reason" => "poller_unreachable"} = body["memory"]
+
+    assert %{
+             "collections" => collections,
+             "words_reclaimed" => words_reclaimed,
+             "bytes_reclaimed" => bytes_reclaimed,
+             "word_size_bytes" => word_size_bytes
+           } = body["gc"]
+
+    assert word_size_bytes > 0
+
+    assert is_integer(collections)
+    assert is_integer(words_reclaimed)
+    assert bytes_reclaimed == words_reclaimed * word_size_bytes
 
     assert Enum.any?(body["functions"]["functions"], fn row ->
              row["function"] == "Jason.encode_to_iodata!/1" and row["calls"] > 0

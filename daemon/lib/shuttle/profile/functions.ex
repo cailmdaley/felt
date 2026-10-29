@@ -4,19 +4,23 @@ defmodule Shuttle.Profile.Functions do
 
   Counters include uninstrumented callees and exclude calls to other
   instrumented functions. They do not cover total VM CPU. Call time excludes
-  waiting. Instrumentation adds overhead; exclude this window from steady-state
-  rates.
+  waiting. The source helpers correlate work by process; their counters are not
+  inclusive decode timings. Instrumentation adds overhead; exclude this window
+  from steady-state rates.
   """
 
   @functions [
     {Shuttle.Poller, :start_poll_plan_task, 3},
     {Shuttle.Poller, :start_poll_read_task, 4},
+    {Shuttle.Poller, :run_shuttle_listing, 5},
     {Shuttle.Poller, :poll_reads, 2},
     {Shuttle.Poller, :apply_poll_cycle, 2},
     {Shuttle.Poller, :cached_fiber, 2},
     {Shuttle.Poller, :owner_feed_base, 1},
     {Shuttle.Poller, :stamp_runtime, 3},
     {Shuttle.Poller, :stamp_pending_results, 2},
+    {Shuttle.FeltStores, :felt_ls_json, 1},
+    {Shuttle.FiberDocuments, :ls_rows, 4},
     {Shuttle.Poller.Snapshot, :build_snapshot, 1},
     {Shuttle.Poller.Snapshot, :put_runtime, 5},
     {Shuttle.Poller.Snapshot, :put_held, 2},
@@ -96,6 +100,7 @@ defmodule Shuttle.Profile.Functions do
             "excludes_instrumented_callees" => true,
             "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
+            "source_helper_counters" => "per-process correlation; not inclusive decode timings",
             "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           },
           "functions" => totals,
@@ -121,6 +126,7 @@ defmodule Shuttle.Profile.Functions do
             "excludes_instrumented_callees" => true,
             "covers_total_vm_cpu" => false,
             "cpu_excludes_wait" => true,
+            "source_helper_counters" => "per-process correlation; not inclusive decode timings",
             "instrumentation_overhead" => "included; exclude profile windows from steady rates"
           }
         }

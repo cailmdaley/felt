@@ -14,6 +14,9 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert {Jason, :encode_to_iodata!, 2} in state.active
       assert {Jason, :decode, 1} in state.active
       assert {Jason, :decode, 2} in state.active
+      assert {Shuttle.Poller, :run_shuttle_listing, 5} in state.active
+      assert {Shuttle.FeltStores, :felt_ls_json, 1} in state.active
+      assert {Shuttle.FiberDocuments, :ls_rows, 4} in state.active
 
       test_pid = self()
 
@@ -37,6 +40,9 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert result["semantics"]["excludes_instrumented_callees"]
       refute result["semantics"]["covers_total_vm_cpu"]
       assert result["semantics"]["cpu_excludes_wait"]
+
+      assert result["semantics"]["source_helper_counters"] ==
+               "per-process correlation; not inclusive decode timings"
 
       assert %{"function" => "Jason.encode!/1", "calls" => calls} =
                Enum.find(result["functions"], &(&1["function"] == "Jason.encode!/1"))

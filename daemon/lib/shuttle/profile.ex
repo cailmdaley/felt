@@ -73,15 +73,17 @@ defmodule Shuttle.Profile do
   end
 
   defp capture(caller, duration, :cpu) do
+    memory = poller_memory_snapshot()
+
     case Shuttle.Profile.HTTP.start() do
-      {:ok, http_profile} -> capture_started(caller, duration, :cpu, http_profile)
+      {:ok, http_profile} -> capture_started(caller, duration, :cpu, http_profile, memory)
       {:error, reason} -> {:error, {:http_telemetry, reason}}
     end
   end
 
-  defp capture(caller, duration, :file), do: capture_started(caller, duration, :file, nil)
+  defp capture(caller, duration, :file), do: capture_started(caller, duration, :file, nil, nil)
 
-  defp capture_started(caller, duration, mode, http_profile) do
+  defp capture_started(caller, duration, mode, http_profile, memory) do
     owner = Process.monitor(caller)
 
     profiler = self()
@@ -108,6 +110,7 @@ defmodule Shuttle.Profile do
       before_ms = msacc_stats(ms)
       :trace.process(session, :all, true, [:call])
       if mode == :file, do: :trace.process(session, self(), false, [:call])
+      before_gc = if mode == :cpu, do: :erlang.statistics(:garbage_collection)
 
       receive do
         {:DOWN, ^owner, :process, ^caller, _} -> {:error, :request_down}
@@ -127,6 +130,7 @@ defmodule Shuttle.Profile do
           end
 
           after_ms = msacc_stats(ms)
+          after_gc = if mode == :cpu, do: :erlang.statistics(:garbage_collection)
           after_os = Shuttle.Profile.OS.snapshot()
           processes = top_processes(before_processes)
           send(collector, {:finish, self()})
@@ -148,6 +152,8 @@ defmodule Shuttle.Profile do
                    window: Map.merge(result.window, %{mode: :cpu, instrumented: true}),
                    functions: functions,
                    http: http,
+                   memory: memory,
+                   gc: gc_delta(before_gc, after_gc),
                    runtime: runtime()
                  })}
               else
@@ -171,6 +177,26 @@ defmodule Shuttle.Profile do
       Process.demonitor(owner, [:flush])
       if http_profile, do: Shuttle.Profile.HTTP.stop(http_profile)
     end
+  end
+
+  defp poller_memory_snapshot do
+    Shuttle.Poller.cpu_memory_measurements()
+  rescue
+    _ -> %{available: false, reason: "poller_unreachable"}
+  catch
+    :exit, _ -> %{available: false, reason: "poller_unreachable"}
+  end
+
+  defp gc_delta({before_count, before_words, _}, {after_count, after_words, _}) do
+    word_size_bytes = :erlang.system_info(:wordsize)
+    words_reclaimed = after_words - before_words
+
+    %{
+      collections: after_count - before_count,
+      words_reclaimed: words_reclaimed,
+      bytes_reclaimed: words_reclaimed * word_size_bytes,
+      word_size_bytes: word_size_bytes
+    }
   end
 
   defp runtime do
