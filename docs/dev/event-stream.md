@@ -139,14 +139,15 @@ from "this session is watching its own shells":
 Each session holds a turn (`open`, `closed`, or `ended`), a background-task count, a live-child count, a pending human request, and its real last-event timestamp.
 The phase is derived from those facts: a pending request is `attention`; an open turn is `working`; a closed turn with recent outstanding work is `working`; otherwise the session is `waiting`.
 
-- `session_start` opens the turn and clears counts and pending requests.
+- `session_start` opens the conversation in a waiting state and clears counts and pending requests.
+  A prompt or tool event starts the turn, so a quiet resume remains the human's turn.
 - `user_prompt_submit` opens the turn and clears background work and pending requests, preserving the Codex child count.
 - `stop` closes the turn, restates the background count, and clears pending requests.
 - Permission, elicitation, and untyped notifications set a pending request.
   `idle_prompt` closes the turn without clearing an existing request.
 - Tool progress clears pending requests and opens the turn, except for Codex child activity on an already-closed parent turn with live children.
 - `session_end` ends the turn and clears counts and pending requests.
-  Only a new `session_start` can reopen it.
+  Only a new `session_start` can reopen the conversation.
 - `interrupted` closes the turn and clears counts and pending requests, unless
   later activity already landed. No harness hook reports an interrupt (Esc in
   Claude Code, an aborted Codex turn). `Shuttle.InterruptWatcher` reads it from
