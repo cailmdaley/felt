@@ -46,6 +46,42 @@ defmodule Shuttle.Runner do
     # would accumulate stuck felt processes and amplify the load it was
     # defending against.
     def cmd(command, args, opts) do
+      if Keyword.get(opts, :input_eof, false) do
+        with_input_file(command, args, opts)
+      else
+        cmd_without_eof(command, args, opts)
+      end
+    end
+
+    defp with_input_file(command, args, opts) do
+      input = Keyword.fetch!(opts, :input)
+
+      path =
+        Path.join(
+          System.tmp_dir!(),
+          "shuttle-input-" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+        )
+
+      {:ok, file} = File.open(path, [:write, :binary, :exclusive])
+
+      try do
+        File.chmod!(path, 0o600)
+        IO.binwrite(file, input)
+        File.close(file)
+        opts = opts |> Keyword.delete(:input_eof) |> Keyword.delete(:input)
+
+        cmd_without_eof(
+          "sh",
+          ["-c", "input=$1; shift; exec \"$@\" < \"$input\"", "sh", path, command | args],
+          opts
+        )
+      after
+        File.close(file)
+        File.rm(path)
+      end
+    end
+
+    defp cmd_without_eof(command, args, opts) do
       {timeout_ms, opts} = Keyword.pop(opts, :timeout_ms, default_timeout_ms())
       opts = opts |> with_scoped_env() |> then(&maybe_clear_inherited_tmux(command, &1))
 

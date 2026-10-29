@@ -15,6 +15,15 @@ defmodule Shuttle.ThreadOutbox do
     end)
   end
 
+  @doc "Capture records and return only the ids created by this call."
+  def capture_new(records) do
+    transaction(false, fn root, _baseline ->
+      Enum.flat_map(records, fn {id, record} ->
+        if capture_one(root, id, record), do: [id], else: []
+      end)
+    end)
+  end
+
   def pending(owner) do
     transaction(false, fn root, _baseline ->
       root
@@ -46,8 +55,11 @@ defmodule Shuttle.ThreadOutbox do
   defp capture_one(root, id, record) do
     path = pending_path(root, id)
 
-    unless File.exists?(acked_path(root, id)) or File.exists?(path) do
+    if File.exists?(acked_path(root, id)) or File.exists?(path) do
+      false
+    else
       write_atomic!(path, Jason.encode!(%{id: id, record: record}))
+      true
     end
   end
 

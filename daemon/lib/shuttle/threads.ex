@@ -550,19 +550,41 @@ defmodule Shuttle.Threads do
         thread = entry.fiber["uid"] || entry.fiber["id"]
         blocker_id = blocker["uid"] || address(blocker)
 
+        text = "#{blocker["name"] || address(blocker)} closed"
+
         {"thread-" <> digest({entry.felt_store, thread, "unblocked", blocker_id, stamp}),
          %{
            "owner" => own_host,
            "store" => parent.felt_store,
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
-           "text" =>
-             "thread #{address(entry.fiber)} unblocked: " <>
-               "#{blocker["name"] || address(blocker)} closed",
+           "text" => "thread #{address(entry.fiber)} unblocked: #{text}",
            "wake" => false
-         }}
+         }, %{"kind" => "unblocked", "fiber" => thread, "text" => text}}
       end
 
-    ThreadOutbox.capture(records)
+    created =
+      records
+      |> Enum.map(fn {id, record, _board} -> {id, record} end)
+      |> ThreadOutbox.capture_new()
+      |> MapSet.new()
+
+    Enum.each(records, fn {id, _record, board} ->
+      if MapSet.member?(created, id) do
+        case Shuttle.CLI.run(["board", "append"],
+               input: Jason.encode!(board) <> "\n",
+               input_eof: true
+             ) do
+          {:ok, _} ->
+            :ok
+
+          error ->
+            require Logger
+            Logger.warning("Recording unblock on board failed: #{inspect(error)}")
+        end
+      end
+    end)
+
+    :ok
   end
 
   @doc "Retry persisted publications; acknowledgment means recipient mailbox enqueue, not worker consumption."
