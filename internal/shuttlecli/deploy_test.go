@@ -1071,6 +1071,7 @@ make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
 export -f git make
 ssh() { [ "$2" = true ] || bash -c "$2"; }
 run_on() { printf 1; }
+run_on_visible() { :; }
 config_migration_cmd() { :; }
 refresh_harnesses() { :; }
 check_listen() { :; }
