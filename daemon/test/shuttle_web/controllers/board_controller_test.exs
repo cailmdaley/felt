@@ -6,6 +6,99 @@ defmodule ShuttleWeb.BoardControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  defmodule FakePoller do
+    use GenServer
+    def start_link(entries), do: GenServer.start_link(__MODULE__, entries)
+    def init(entries), do: {:ok, entries}
+
+    def handle_call(:thread_inputs, _from, entries),
+      do: {:reply, {:ok, {entries, MapSet.new(), nil}}, entries}
+  end
+
+  defmodule RemoteClient do
+    def get(_url, _headers, _timeout) do
+      now = System.system_time(:millisecond)
+
+      records = [
+        %{
+          "id" => "duplicate",
+          "timestamp" => now,
+          "type" => "board",
+          "kind" => "post",
+          "fiber" => "child",
+          "text" => "remote duplicate"
+        },
+        %{
+          "id" => "remote",
+          "timestamp" => now,
+          "type" => "board",
+          "kind" => "asked",
+          "fiber" => "child"
+        }
+      ]
+
+      {:ok, 200, [], Jason.encode!(%{records: records})}
+    end
+  end
+
+  test "family endpoint composes and deduplicates a remote feed" do
+    path = Path.join(System.tmp_dir!(), "board-family-api-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm(path) end)
+    now = System.system_time(:millisecond)
+
+    record = %{
+      "type" => "board",
+      "id" => "duplicate",
+      "timestamp" => now,
+      "kind" => "post",
+      "fiber" => "child",
+      "text" => "local"
+    }
+
+    File.write!(path, Jason.encode!(record) <> "\n")
+    Shuttle.Test.Env.put_env("SHUTTLE_EVENTS_FILE", path)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
+
+    entries =
+      for {id, uid} <- [{"hub", "root"}, {"hub/child", "child"}],
+          do: %{
+            felt_store: "/store",
+            fiber: %{
+              "id" => id,
+              "slug" => id,
+              "uid" => uid,
+              "name" => uid,
+              "shuttle" => %{"host" => "host"}
+            }
+          }
+
+    poller = start_supervised!({FakePoller, entries})
+    Shuttle.Test.Env.put_server(Shuttle.Poller, poller)
+    dir = Path.join(System.tmp_dir!(), "board-cache-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    registry =
+      start_supervised!(
+        {Shuttle.RemoteTemporalRegistry,
+         name: nil,
+         remotes: [%Shuttle.Remote{name: "remote", url: "http://remote"}],
+         client: RemoteClient,
+         store_dir: dir}
+      )
+
+    Shuttle.Test.Env.put_server(Shuttle.RemoteTemporalRegistry, registry)
+    result = api_conn() |> get("/api/v1/board/family?fiber=root&since_ms=0") |> json_response(200)
+    assert result["family"]["root_uid"] == "root"
+
+    assert [%{"id" => "duplicate", "text" => "local"}, %{"id" => "remote", "delivered" => true}] =
+             result["records"]
+
+    assert %{"family" => nil, "viewer" => nil, "records" => []} =
+             api_conn() |> get("/api/v1/board/family?session=pi:unknown") |> json_response(200)
+
+    assert 400 == get(api_conn(), "/api/v1/board/family").status
+  end
+
   test "local feed filters and supports conditional requests" do
     path = Path.join(System.tmp_dir!(), "board-api-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)

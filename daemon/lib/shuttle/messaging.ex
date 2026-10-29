@@ -206,7 +206,8 @@ defmodule Shuttle.Messaging do
   # rotated file changes; steady-state calls pay two stats instead of a full
   # JSONL scan. The size and inode catch appends and rotation within one mtime
   # second.
-  defp cached_session_fiber_index(host) do
+  @doc "Cached session-to-fiber pairings for the local host."
+  def cached_session_fiber_index(host) do
     path = SessionLedger.default_path()
     token = {session_ledger_file_token(path), app_worker_directory_token()}
 

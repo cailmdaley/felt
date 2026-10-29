@@ -622,6 +622,8 @@ ledgers](../shuttle/telemetry.md) for what writes the files underneath.
 | `GET /commits` | `commits.jsonl` | Which session made each commit, with `--shortstat` counts |
 | `GET /sent-files/all` | `events.jsonl` | Every `SendUserFile` push on this host |
 | `GET /sent-files` | `events.jsonl` | One fiber's sent-files trail, capped at 50 |
+| `GET /board` | `events.jsonl` | Host-local board records since `since_ms`, oldest first; ETag/304 supported |
+| `GET /board/family` | local and remote board feeds | Current family board, resolved against constitution containment |
 
 `/activity` takes `from_ms` and `to_ms` and answers
 `{host, from_ms, to_ms, buckets}`. It rounds the window inward to whole minutes
@@ -632,6 +634,8 @@ routes below, that validator almost never matches on a busy host and is not
 what keeps the route cheap: `Shuttle.EventStream` holds the histogram in
 memory, folded once from both files and then only over appended bytes, and a
 request reads its window out of that.
+
+`/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking. It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`. The default window is 24 hours, or six hours for `all=true`, bounded by the 14-day retained stream.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
