@@ -30,7 +30,7 @@ defmodule ShuttleWeb.BoardController do
               since_ms = max(since_ms, now - 14 * 86_400_000)
 
               remote =
-                RemoteTemporalRegistry.entries(:board)
+                RemoteTemporalRegistry.entries_nowait(:board)
                 |> Map.values()
                 |> Enum.flat_map(& &1.items)
 

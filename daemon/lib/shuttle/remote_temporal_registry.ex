@@ -41,6 +41,9 @@ defmodule Shuttle.RemoteTemporalRegistry do
   request. Concurrent requests for the same feed share the one in-flight
   fetch; within the gate, requests are answered from memory at once.
 
+  `entries_nowait/1` starts the same gated refresh but immediately returns the
+  cached view, including while a fetch is in flight.
+
   The gate is on the last ATTEMPT, not the last success, so an unreachable
   remote is retried at most once per gate however often the board asks.
 
@@ -196,6 +199,13 @@ defmodule Shuttle.RemoteTemporalRegistry do
     RegistryCommon.read(server, {:entries, feed}, %{}, RegistryCommon.read_timeout_ms())
   end
 
+  @doc "Start due refreshes and return the cached feed without waiting for them."
+  def entries_nowait(feed), do: entries_nowait(Shuttle.Env.server(__MODULE__), feed)
+
+  def entries_nowait(server, feed) when feed in @feeds do
+    RegistryCommon.read(server, {:entries_nowait, feed}, %{}, RegistryCommon.read_timeout_ms())
+  end
+
   @doc """
   Invalidate one remote feed after a successful owner-routed write. The next
   composite read bypasses the freshness gate; a fetch begun before the write
@@ -263,6 +273,11 @@ defmodule Shuttle.RemoteTemporalRegistry do
   end
 
   @impl true
+  def handle_call({:entries_nowait, feed}, _from, state) do
+    state = state |> reload_remotes() |> start_due_fetches(feed)
+    {:reply, build_view(state, feed), state}
+  end
+
   def handle_call({:entries, feed}, from, state) do
     state = state |> reload_remotes() |> start_due_fetches(feed)
 

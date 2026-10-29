@@ -166,6 +166,26 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {clock, advance}
   end
 
+  test "nonblocking board reads share an in-flight refresh and expose it after completion", %{
+    dir: dir
+  } do
+    record = %{"id" => "brd-test", "timestamp" => 100}
+    MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [record]})})
+    MockClient.hold("/api/v1/board")
+    {_pid, name} = start_registry(dir)
+    assert %{items: []} = RemoteTemporalRegistry.entries_nowait(name, :board)["candide"]
+    assert_receive {:fetch_held, fetcher}, 1000
+    assert %{items: []} = RemoteTemporalRegistry.entries_nowait(name, :board)["candide"]
+    assert MockClient.calls("/api/v1/board") == 1
+    send(fetcher, :release)
+
+    assert wait_until(fn ->
+             RemoteTemporalRegistry.entries_nowait(name, :board)["candide"].items == [record]
+           end)
+
+    assert MockClient.calls("/api/v1/board") == 1
+  end
+
   test "board feed fetches its retained window and persists last good records", %{dir: dir} do
     record = %{"id" => "brd-test", "type" => "board", "timestamp" => 100}
     MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [record]})})

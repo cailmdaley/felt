@@ -87,6 +87,12 @@ defmodule ShuttleWeb.BoardControllerTest do
       )
 
     Shuttle.Test.Env.put_server(Shuttle.RemoteTemporalRegistry, registry)
+
+    assert %{"family" => nil, "viewer" => nil, "records" => []} =
+             api_conn() |> get("/api/v1/board/family?session=pi:unknown") |> json_response(200)
+
+    assert :sys.get_state(registry).entries["remote"].feeds.board.last_attempt_at == nil
+    assert %{items: [_ | _]} = Shuttle.RemoteTemporalRegistry.entries(registry, :board)["remote"]
     result = api_conn() |> get("/api/v1/board/family?fiber=root&since_ms=0") |> json_response(200)
     assert result["family"]["root_uid"] == "root"
 
