@@ -99,7 +99,7 @@ defmodule Shuttle.TmuxServer do
       :present ->
         disarm_exit_empty(runner)
 
-      # Uncertainty never blocks — the same doctrine as `Shuttle.Tmux.present?/2`.
+      # Uncertainty never blocks — the same doctrine as `Shuttle.Terminal.present?/2`.
       # A `tmux ls` that fails for an environmental reason must not refuse a
       # dispatch that would have worked. Nothing to harden either: there may be
       # no server there at all.
@@ -128,14 +128,19 @@ defmodule Shuttle.TmuxServer do
 
   `:present` on exit 0; `:absent` only on a non-zero exit whose output is one of
   tmux's own absence messages (positive evidence — shared with
-  `Shuttle.Tmux`); `:unknown` for every other failure, including a timeout.
+  `Shuttle.Terminal.Tmux`); `:unknown` for every other failure, including a timeout.
   """
   @spec presence(module()) :: presence()
   def presence(runner) do
     case runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
-      {_output, 0} -> :present
-      {_output, :timeout} -> :unknown
-      {output, _status} -> if Shuttle.Tmux.absence_message?(output), do: :absent, else: :unknown
+      {_output, 0} ->
+        :present
+
+      {_output, :timeout} ->
+        :unknown
+
+      {output, _status} ->
+        if Shuttle.Terminal.Tmux.absence_message?(output), do: :absent, else: :unknown
     end
   end
 

@@ -52,7 +52,7 @@ defmodule Shuttle.ActionQueries do
 
   defp session_live?(session, opts) do
     runner = Keyword.get(opts, :runner, default_runner())
-    Shuttle.Tmux.present?(runner, session)
+    Shuttle.Terminal.present?(runner, session)
   end
 
   defp fiber_address(fiber) do

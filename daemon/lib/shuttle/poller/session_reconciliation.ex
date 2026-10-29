@@ -273,7 +273,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # The App Server owns the conversation across daemon restarts, but a terminal
-  # viewer belongs to tmux and may have died with its server. Check every poll:
+  # viewer belongs to its terminal backend and may have died with its server. Check every poll:
   # the backend can still be starting during boot adoption. Recreate only the
   # viewer for CLI-surface records; prepare verifies the exact stored thread and
   # starts its TUI without creating a model turn. App-surface records need none.
@@ -289,7 +289,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
            case :global.trans(
                   lock,
                   fn ->
-                    case Shuttle.Tmux.session_status(runner, tmux) do
+                    case Shuttle.Terminal.status(runner, tmux) do
                       :gone -> Shuttle.CodexTerminal.prepare(id, runner: runner)
                       :alive -> :ok
                       :unknown -> Shuttle.CodexTerminal.prepare(id, runner: runner)
@@ -419,7 +419,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
   defp kill_closed_session(%State{} = state, fiber_id, fiber, session) do
     if fiber, do: Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
     Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
-    _ = state.runner.cmd("tmux", ["kill-session", "-t", session], stderr_to_stdout: true)
+    _ = Shuttle.Terminal.close(state.runner, session)
     state
   end
 end

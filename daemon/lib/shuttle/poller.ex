@@ -633,7 +633,7 @@ defmodule Shuttle.Poller do
   when nothing is running for the fiber.
 
   The stop succeeds once the worker's processes are gone, whether or not tmux
-  could still see its session (`Shuttle.Tmux.stop/2`). A failed stop means a
+  could still see its session (`Shuttle.Terminal.stop/2`). A failed stop means a
   worker may have survived it; tracking is left in place — no `{:ok, ...}`
   reply and no runtime teardown — so the board doesn't show a stopped card
   while a worker keeps mutating the fiber.
@@ -3962,7 +3962,7 @@ defmodule Shuttle.Poller do
       is_binary(paste_into) ->
         # Resume with a message on a live terminal worker: the message is the
         # human's next turn, typed into the conversation as they would type it.
-        case Shuttle.Tmux.paste(state.runner, paste_into, message) do
+        case Shuttle.Terminal.paste(state.runner, paste_into, message) do
           :ok -> {:reply, {:ok, paste_into}, state}
           {:error, reason} -> {:reply, {:error, {:paste_failed, reason}}, state}
         end
@@ -4485,26 +4485,14 @@ defmodule Shuttle.Poller do
     canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
     rename_result =
-      if tmux_session == canonical do
-        {:ok, canonical}
-      else
-        case state.runner.cmd(
-               "tmux",
-               ["rename-session", "-t", "=" <> tmux_session, canonical],
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            {:ok, canonical}
+      case Shuttle.Terminal.rename(state.runner, tmux_session, canonical) do
+        :ok ->
+          {:ok, canonical}
 
-          {output, _} ->
-            # Fail the claim rather than registering under a non-canonical
-            # name: the restart re-adoption scan and liveness only see
-            # `<leaf>-<uid>-shuttle` names, so a degraded
-            # registration would go invisible on daemon restart and a
-            # duplicate worker would dispatch alongside it.
-            Logger.warning("claim: rename #{tmux_session} → #{canonical} failed: #{output}")
-            {:error, :rename_failed}
-        end
+        {:error, reason} ->
+          # Register only the canonical name so restart adoption can find it.
+          Logger.warning("claim: rename #{tmux_session} → #{canonical} failed: #{reason}")
+          {:error, :rename_failed}
       end
 
     case rename_result do
@@ -4859,7 +4847,7 @@ defmodule Shuttle.Poller do
         # it must fail rather than report nothing running.
         app_without_tmux? =
           get_in(fiber, ["shuttle", "surface"]) == "app" and
-            Shuttle.Env.find_executable("tmux") == nil
+            not Shuttle.Terminal.available?()
 
         session = Dispatcher.session_name(slug, uid)
 
@@ -5193,7 +5181,7 @@ defmodule Shuttle.Poller do
 
       _ ->
         app_without_tmux? =
-          Shuttle.Env.find_executable("tmux") == nil and
+          not Shuttle.Terminal.available?() and
             case fetch_fiber_full(fiber_id, state) do
               {:ok, fiber} -> get_in(fiber, ["shuttle", "surface"]) == "app"
               _ -> false
@@ -5417,7 +5405,7 @@ defmodule Shuttle.Poller do
   # a refusal. A forced fresh dispatch (`force` + `resume_mode:"fresh"` — the
   # kanban New-session button and drag-launch both send these) stamps the
   # clean-exit marker, stops the live worker — waiting until its processes are
-  # gone (`Shuttle.Tmux.stop/2`), since the fresh session reuses its name — and
+  # gone (`Shuttle.Terminal.stop/2`), since the fresh session reuses its name — and
   # drops the runtime entry, THEN lets the caller's `cond` fall through to a
   # fresh dispatch instead of returning `:already_running`. Without this,
   # starting fresh on an open session meant the costly resume →
@@ -5935,51 +5923,9 @@ defmodule Shuttle.Poller do
     end
   end
 
-  # Lists live shuttle worker sessions: those tmux lists, united with those
-  # whose run script is still running (`Shuttle.WorkerProcess`), so a worker
-  # whose tmux server lost its socket is still listed. Failure is classified
-  # the same three ways as `Shuttle.Tmux.session_status/2` (see that
-  # moduledoc): "no sessions" is a POSITIVE claim, made only when tmux answers
-  # (exit 0, or its own absence message such as "no server running") AND the
-  # process scan answers. Anything else — the runner's wall-clock `:timeout` (a
-  # wedged tmux), an exec failure, an unrecognized error, or an empty tmux
-  # answer the process scan could not check — returns `{:error, :unknown}`:
-  # the world is UNCERTAIN, not empty. Conflating the two is how a single
-  # wedged `tmux ls` mass-marked every live standing constitution dead
-  # (reconcile_dead_standing_roles writes status flips to their fibers!) and
-  # made boot adoption adopt nothing. Callers whose action on an empty list is
-  # destructive or reconciling MUST skip the pass on `:unknown` — uncertainty
-  # counts as present; the next healthy scan catches up. A listed session tmux
-  # cannot see is adopted like any other; its watcher reads `:unknown` and
-  # holds.
+  # Uncertainty is not an empty host: reconciling callers must skip that pass.
   @doc false
-  def list_shuttle_sessions(state) do
-    tmux =
-      case state.runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
-        {output, 0} ->
-          {:ok,
-           output
-           |> String.split("\n")
-           |> Enum.map(&String.trim/1)
-           |> Enum.filter(&Dispatcher.shuttle_session?/1)}
-
-        {_output, :timeout} ->
-          {:error, :unknown}
-
-        {output, _status} ->
-          # Genuine no-server exits non-zero WITH tmux's own absence message.
-          # Any other failure is uncertainty.
-          if Shuttle.Tmux.absence_message?(output), do: {:ok, []}, else: {:error, :unknown}
-      end
-
-    with {:ok, listed} <- tmux do
-      case Shuttle.WorkerProcess.scan(state.runner) do
-        {:ok, procs} -> {:ok, Enum.uniq(listed ++ Shuttle.WorkerProcess.sessions(procs))}
-        {:error, :unknown} when listed == [] -> {:error, :unknown}
-        {:error, :unknown} -> {:ok, listed}
-      end
-    end
-  end
+  def list_shuttle_sessions(state), do: Shuttle.Terminal.list_workers(state.runner)
 
   defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
     if is_reference(state.tick_timer_ref) do

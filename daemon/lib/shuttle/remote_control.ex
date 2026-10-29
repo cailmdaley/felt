@@ -9,7 +9,8 @@ defmodule Shuttle.RemoteControl do
   """
   use GenServer
 
-  alias Shuttle.{Dispatcher, Host, Tmux, TmuxServer, WorkerProcess}
+  alias Shuttle.{Dispatcher, Host, Terminal, TmuxServer, WorkerProcess}
+  alias Shuttle.Terminal.Tmux
 
   @session "shuttle-remote-control"
   @target "=" <> @session <> ":"
@@ -251,14 +252,14 @@ defmodule Shuttle.RemoteControl do
   end
 
   defp stop(state) do
-    case Tmux.stop(state.runner, @session) do
+    case Terminal.stop(state.runner, @session, backends: [Tmux]) do
       {_, 0} -> :ok
       {output, _} -> {:error, "Cannot stop Remote Control: #{output}"}
     end
   end
 
   defp observe(runner) do
-    case Tmux.session_status(runner, @session) do
+    case Terminal.status(runner, @session, backends: [Tmux]) do
       :gone -> :gone
       :unknown -> {:error, "Remote Control tmux session is uncertain; holding"}
       :alive -> pane(runner)

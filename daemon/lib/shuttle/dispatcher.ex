@@ -576,8 +576,8 @@ defmodule Shuttle.Dispatcher do
 
         Logger.info("Capture session via #{agent.id} → tmux session #{session}")
 
-        case spawn_tmux(session, work_dir, run_script, runner) do
-          {:ok, _} -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
+        case Shuttle.Terminal.launch(runner, session, work_dir, run_script) do
+          :ok -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
           error -> error
         end
       end
@@ -910,8 +910,8 @@ defmodule Shuttle.Dispatcher do
   # the daemon refuses with :already_running and the caller adopts instead.
   defp check_not_running(fiber_id, uid, runner, surface) do
     cond do
-      surface == "app" and Shuttle.Env.find_executable("tmux") == nil -> :ok
-      Shuttle.Tmux.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
+      surface == "app" and not Shuttle.Terminal.available?() -> :ok
+      Shuttle.Terminal.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
       true -> :ok
     end
   end
@@ -945,7 +945,7 @@ defmodule Shuttle.Dispatcher do
 
   # ── Dispatch preflight ──
 
-  # The work directory is load-bearing twice over: `spawn_tmux` hands it to
+  # The work directory is load-bearing twice over: `Terminal.launch` hands it to
   # `tmux new-session -c`, and the wrapper probe below runs in it. When it is not
   # a directory on this host BOTH fail — and the probe fails in exactly the shape
   # a missing wrapper does (non-zero exit, no output), so without this check the
@@ -976,7 +976,7 @@ defmodule Shuttle.Dispatcher do
   # wrapper's command word resolves to nothing there — a zsh/fish user whose bash
   # login profile never defines the shell function, or a wrapper that was simply
   # never installed — bash exits 127 the instant the script reaches it. The tmux
-  # session spawns and dies inside a second; `spawn_tmux` saw a successful `tmux
+  # session spawns and dies inside a second; `Terminal.launch` saw a successful `tmux
   # new-session` and reported a successful dispatch; the board shows nothing at
   # all. A stranger's very first dispatch can vanish with no error on any surface.
   #
@@ -1071,21 +1071,10 @@ defmodule Shuttle.Dispatcher do
 
   defp check_wrapper_kind(_agent, _word, _kind), do: :ok
 
-  # The last preflight, and the only one that is macOS-only: a tmux server must
-  # already exist, forked by the user's kitty rather than by this daemon. When
-  # the daemon forks it, macOS privacy charges every worker's file access to the
-  # daemon's binary and the whole fleet drowns in "erlexec" prompts the daemon
-  # can never satisfy — see `Shuttle.TmuxServer`. Placed LAST so it only runs
-  # for a dispatch that was otherwise going to happen, and immediately before
-  # `spawn_tmux`, whose `tmux new-session` is the fork in question.
-  #
-  # `spawn_tmux/4` itself is untouched: `tmux new-session`'s exit status stays
-  # the dispatch's ground truth. (Rejected alternative: routing every dispatch
-  # through `kitty @ launch` — kitty's exit code masks tmux's, and it would
-  # refuse dispatch whenever kitty is closed even with a healthy human-born
-  # server.)
-  defp ensure_tmux_server(runner) do
-    case Shuttle.TmuxServer.ensure_available(runner) do
+  # The terminal server must have the intended privacy root before it forks
+  # workers. Keep this last so only otherwise-ready dispatches can start it.
+  defp ensure_terminal_ready(runner) do
+    case Shuttle.Terminal.primary().ensure_ready(runner) do
       :ok -> :ok
       {:error, {tag, message}} -> dispatch_refused(tag, message)
     end
@@ -1103,15 +1092,28 @@ defmodule Shuttle.Dispatcher do
   defp check_no_human_resume(session_id, runner) do
     tmux = Shuttle.SessionResume.tmux_name(session_id)
 
-    if Shuttle.SessionResume.running?(tmux, runner) do
-      dispatch_refused(
-        :session_open_in_resume,
-        "session #{session_id} is open in tmux #{tmux} (a resume from the card's History). " <>
-          "Close that terminal, or attach to it, before this fiber's worker resumes the same session."
-      )
-    else
-      :ok
+    case Shuttle.Terminal.status(runner, tmux) do
+      :gone ->
+        :ok
+
+      :unknown ->
+        # Preserve the process-scan diagnostic when it is the uncertain evidence.
+        case Shuttle.WorkerProcess.check_free(runner, session_id) do
+          {:error, {_, message}} -> dispatch_refused(:transcript_held, message)
+          :ok -> resume_terminal_held(session_id, tmux)
+        end
+
+      :alive ->
+        resume_terminal_held(session_id, tmux)
     end
+  end
+
+  defp resume_terminal_held(session_id, tmux) do
+    dispatch_refused(
+      :session_open_in_resume,
+      "session #{session_id} is open in tmux #{tmux} (a resume from the card's History). " <>
+        "Close that terminal, or attach to it, before this fiber's worker resumes the same session."
+    )
   end
 
   # Every preflight refusal takes this shape: a tagged reason the surfaces can
@@ -1182,7 +1184,7 @@ defmodule Shuttle.Dispatcher do
         "App surface requires an interactive Codex agent; surface must be cli or app."}}
 
   def preflight_terminal(agent, work_dir, runner) do
-    with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_tmux_server(runner)
+    with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_terminal_ready(runner)
   end
 
   @doc "Validates agent configuration that must be honored by the shared Codex backend."
@@ -1792,10 +1794,11 @@ defmodule Shuttle.Dispatcher do
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
   defp spawn_and_record(session, work_dir, run_script, runner, record_fun) do
-    case spawn_tmux(session, work_dir, run_script, runner) do
-      {:ok, _} = result ->
+    case Shuttle.Terminal.launch(runner, session, work_dir, run_script) do
+      :ok ->
+        Logger.info("Worker running: #{Shuttle.Terminal.primary().id()} #{session}")
         record_fun.()
-        result
+        {:ok, session}
 
       error ->
         error
@@ -1863,29 +1866,6 @@ defmodule Shuttle.Dispatcher do
   end
 
   def effective_resume_intent(intent, _agent, _opts), do: intent
-
-  # Spawn a tmux session from a run-script string. The script's path names the
-  # session (`Shuttle.WorkerProcess.script_path/1`) and stays in the pane
-  # bash's argv for the worker's life, so the process table can vouch for a
-  # worker tmux cannot see.
-  def spawn_tmux(session, work_dir, run_script, runner) do
-    tmp_path = Shuttle.WorkerProcess.script_path(session)
-
-    File.write!(tmp_path, run_script)
-    File.chmod!(tmp_path, 0o755)
-
-    args = ["new-session", "-d", "-s", session, "-c", work_dir, "bash", "-l", tmp_path]
-
-    case runner.cmd("tmux", args, stderr_to_stdout: true) do
-      {_, 0} ->
-        Logger.info("Worker running: tmux attach -t #{session}")
-        {:ok, session}
-
-      {output, _} ->
-        File.rm(tmp_path)
-        {:error, "tmux failed: #{output}"}
-    end
-  end
 
   # Stamp the dispatch marker in the fiber's `shuttle:` block right after a
   # successful fresh dispatch, so "Resume previous" and the autonomous
@@ -2030,13 +2010,11 @@ defmodule Shuttle.Dispatcher do
         true
 
       now >= next_liveness_check ->
-        case runner.cmd("tmux", ["has-session", "-t", session], stderr_to_stdout: true) do
-          {_, 0} ->
-            :timer.sleep(@session_capture_poll_ms)
-            await_fallback(path, session, runner, now + 10_000)
-
-          _ ->
-            false
+        if Shuttle.Terminal.present?(runner, session) do
+          :timer.sleep(@session_capture_poll_ms)
+          await_fallback(path, session, runner, now + 10_000)
+        else
+          false
         end
 
       true ->
@@ -2333,6 +2311,8 @@ defmodule Shuttle.Dispatcher do
     # wait-for-client gate below would only burn its full timeout for nothing.
     headless = Keyword.get(opts, :headless, false)
     display_fiber_id = Keyword.get(opts, :display_fiber_id, fiber_id)
+    terminal = Keyword.get_lazy(opts, :terminal, &Shuttle.Terminal.primary/0)
+    snippets = terminal.script(session)
 
     # The fiber's `.md` path for the worker's `shuttle handoff`: it stamps
     # `shuttle.handed_off_at` directly into this file (no felt-store resolution,
@@ -2348,52 +2328,20 @@ defmodule Shuttle.Dispatcher do
           ""
       end
 
-    # When resuming claude, schedule a backgrounded tmux send-keys to
-    # dismiss the interactive warning page. Runs *inside* the same tmux
-    # session it's targeting — tmux send-keys can target the current
-    # session, the keypress lands on whatever's at the prompt (claude's
-    # warning UI). 2 seconds is a safety margin for claude startup.
+    # Dismiss the resume warning after startup, and let interactive workers
+    # wait for a viewer before the harness draws its first screen.
     dismiss_block =
-      if dismiss_resume_warning and session != "" do
-        # Single-quote the session name so slashes/dots don't trip the shell.
-        ~s|( sleep 2; tmux send-keys -t '#{session}' Enter ) &\n    |
-      else
-        ""
-      end
+      if dismiss_resume_warning and session != "", do: snippets.submit_key, else: ""
 
-    # Wait briefly for a real interactive tmux client (e.g. kitty's
-    # `tmux attach`) to attach before starting the harness. We spawn the
-    # tmux session detached (`tmux new-session -d ...`), which inherits
-    # the server's `default-size` (80x24 by default). If the harness
-    # starts rendering before a human-sized client attaches, its initial
-    # output — especially `claude --resume`, which emits the dispatch
-    # banner and "remote-control is active" line as soon as it loads
-    # saved state — bakes into the scrollback at 80 cols and stays there
-    # even after tmux resizes on attach (resize doesn't reflow scrollback).
-    # The user sees a tiny ~80-col-wide content area inside a much larger
-    # kitty tab. Waiting until the first non-control client attaches lets
-    # the harness initialize at the kitty terminal's real size.
-    #
-    # Control-mode clients (`tmux -C attach -r` previews) don't count —
-    # they declare a fake 200x50 and don't represent a human attach.
-    # Filter them out via `client_control_mode=0`.
-    #
-    # The expected client of this gate is an auto-attach in the kanban's
-    # dispatch-success path (kitty `launch --type=tab tmux attach`), which
-    # lands in ~300-500ms. The 10s timeout is the safety net for the rare
-    # cases where that auto-attach can't run — kitty isn't running, or the
-    # daemon was dispatched with no human in the loop (CLI, scheduled
-    # standing constitution). After the timeout the harness proceeds at the
-    # default-size.
     wait_for_client_block =
-      if session != "" and not headless, do: wait_for_client_block(session), else: ""
+      if session != "" and not headless, do: snippets.wait_for_viewer, else: ""
 
     """
     #!/bin/bash
     set -e
     trap 'rm -f "$0"' EXIT
 
-    #{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{fiber_key_block}#{wait_for_client_block}
+    #{snippets.env}#{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{fiber_key_block}#{wait_for_client_block}
     echo ""
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"
 
@@ -2401,22 +2349,6 @@ defmodule Shuttle.Dispatcher do
 
     echo ""
     echo "Shuttle worker exited (agent=#{agent_id})"
-    """
-  end
-
-  @doc false
-  # Shell that waits up to 10s for a human tmux client on `session` (see the
-  # wait-for-client note in `build_run_script/4`). Shared with
-  # `Shuttle.SessionResume`, whose tab attaches the same way.
-  def wait_for_client_block(session) do
-    ~s"""
-    WAIT_DEADLINE=$(( $(date +%s) + 10 ))
-    while [ "$(date +%s)" -lt "$WAIT_DEADLINE" ]; do
-      if tmux list-clients -t '#{session}' -F '\#{client_control_mode}' 2>/dev/null | grep -qx '0'; then
-        break
-      fi
-      sleep 0.2
-    done
     """
   end
 

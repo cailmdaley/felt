@@ -478,7 +478,7 @@ defmodule Shuttle.PollerTest do
   # match or a snapshot-shape assert). It re-runs the assertion every 5ms,
   # catching its own failure, so it passes the instant the polled state settles.
   # The poll cycle is a multi-hop async chain (tick → 20ms timer → run_poll_cycle
-  # → read Task → :poll_world → apply → dispatch → spawn_tmux) that a loaded
+  # → read Task → :poll_world → apply → dispatch → Terminal.launch) that a loaded
   # machine stretches arbitrarily, so the ceiling (~30s, as wait_until's) is
   # reached only when the state never settles.
   defp assert_eventually(fun, attempts \\ 6_000) do
@@ -2550,7 +2550,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, first_session} =
              Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
 
-    assert Shuttle.Tmux.present?(MockRunner, first_session)
+    assert Shuttle.Terminal.present?(MockRunner, first_session)
 
     before_cut = length(MockRunner.commands())
 
@@ -2595,7 +2595,7 @@ defmodule Shuttle.PollerTest do
     assert new_idx > kill_idx
 
     # The fiber is live again under a fresh session (same canonical name).
-    assert Shuttle.Tmux.present?(MockRunner, second_session)
+    assert Shuttle.Terminal.present?(MockRunner, second_session)
   end
 
   # A cut worker's run script outlives `tmux kill-session` for as long as its
@@ -2641,7 +2641,7 @@ defmodule Shuttle.PollerTest do
                resume_mode: "fresh"
              )
 
-    assert Shuttle.Tmux.present?(MockRunner, session)
+    assert Shuttle.Terminal.present?(MockRunner, session)
     cut_commands = MockRunner.commands() |> Enum.drop(before_cut)
 
     refute Enum.any?(cut_commands, &match?({"kill", _}, &1)),
@@ -2720,7 +2720,7 @@ defmodule Shuttle.PollerTest do
            end)
 
     # The live session is untouched.
-    assert Shuttle.Tmux.present?(MockRunner, session)
+    assert Shuttle.Terminal.present?(MockRunner, session)
   end
 
   test "Resume with a message on a live session types it into the conversation as the human's turn" do
@@ -5621,7 +5621,7 @@ defmodule Shuttle.PollerTest do
              get_in(MockRunner.fiber(fiber_id), ["shuttle", "runtime", "handed_off_at"]) != nil
            end)
 
-    assert Shuttle.Tmux.present?(MockRunner, session)
+    assert Shuttle.Terminal.present?(MockRunner, session)
 
     closed_fiber = MockRunner.fiber(fiber_id)
     handed_off_at = get_in(closed_fiber, ["shuttle", "runtime", "handed_off_at"])
@@ -6081,7 +6081,7 @@ defmodule Shuttle.PollerTest do
     # `tmux ls` timing out means the session list is UNKNOWN, not empty.
     # Reading it as "no sessions" mass-marked every armed standing role
     # awaiting (status:closed — a fiber WRITE) off a single wedged scan.
-    # Uncertainty counts as present (Shuttle.Tmux): the dead-orphan pass must
+    # Uncertainty counts as present (Shuttle.Terminal): the dead-orphan pass must
     # skip the tick and let the next healthy scan decide.
     fiber_id = "tests/standing-tmux-wedged"
 

@@ -6,7 +6,7 @@ defmodule Shuttle.WorkerBackend do
   def session_status(runner, session) do
     case AppWorkers.id(session) do
       nil ->
-        Shuttle.Tmux.session_status(runner, session)
+        Shuttle.Terminal.status(runner, session)
 
       id ->
         case AppWorkers.get(id) do
@@ -92,7 +92,7 @@ defmodule Shuttle.WorkerBackend do
               :ok
 
             terminal ->
-              Shuttle.Tmux.stop(runner, terminal)
+              Shuttle.Terminal.stop(runner, terminal)
           end
 
           :ok
@@ -149,7 +149,7 @@ defmodule Shuttle.WorkerBackend do
   def stop(runner, session) do
     case AppWorkers.id(session) do
       nil ->
-        Shuttle.Tmux.stop(runner, session)
+        Shuttle.Terminal.stop(runner, session)
 
       id ->
         :global.trans({{Shuttle.CodexTerminal, id}, self()}, fn ->
@@ -184,7 +184,7 @@ defmodule Shuttle.WorkerBackend do
   defp stop_viewer(runner, session) do
     case tmux(session) do
       nil -> {"", 0}
-      terminal -> Shuttle.Tmux.stop(runner, terminal)
+      terminal -> Shuttle.Terminal.stop(runner, terminal)
     end
   end
 

@@ -1,7 +1,7 @@
 defmodule Shuttle.CodexTerminal do
   @moduledoc "Replaceable terminal viewers of durably owned App Server threads."
 
-  alias Shuttle.{AppWorkers, Dispatcher, Tmux}
+  alias Shuttle.{AppWorkers, Dispatcher, Terminal}
 
   def tmux_name(id), do: "codex-terminal-" <> id
 
@@ -15,10 +15,9 @@ defmodule Shuttle.CodexTerminal do
   viewers closed, including those with attached clients.
   """
   def sweep(runner) do
-    case runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) do
-      {output, 0} ->
-        output
-        |> String.split("\n", trim: true)
+    case Terminal.list(runner, "codex-terminal-") do
+      {:ok, names} ->
+        names
         |> Enum.flat_map(fn
           "codex-terminal-" <> id = tmux -> [{id, tmux}]
           _ -> []
@@ -41,7 +40,7 @@ defmodule Shuttle.CodexTerminal do
              true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
              state when state in [:idle, :not_loaded, :missing, :system_error] <-
                AppWorkers.state(id),
-             {_, 0} <- Tmux.stop(runner, tmux) do
+             {_, 0} <- Terminal.stop(runner, tmux) do
           true
         else
           _ -> false
@@ -63,7 +62,7 @@ defmodule Shuttle.CodexTerminal do
              :ok <- verified_thread(id) do
           tmux = record["terminal_tmux"] || tmux_name(id)
 
-          case Tmux.session_status(runner, tmux) do
+          case Terminal.status(runner, tmux) do
             :alive -> {:ok, %{tmux_session: tmux, created: false}}
             :unknown -> {:error, :terminal_visibility_unknown}
             :gone -> start(id, record, tmux, runner)
@@ -109,7 +108,7 @@ defmodule Shuttle.CodexTerminal do
            (is_binary(agent.wrapper) and is_binary(cwd)) || {:error, :terminal_recipe_missing},
          :ok <- Dispatcher.preflight_terminal(agent, cwd, runner),
          :ok <- resume_exact(id, 10),
-         {:ok, ^tmux} <- Dispatcher.spawn_tmux(tmux, cwd, script(id, record, tmux), runner) do
+         :ok <- Terminal.launch(runner, tmux, cwd, script(id, record, tmux)) do
       AppWorkers.update(id, %{"terminal_error" => nil})
       {:ok, %{tmux_session: tmux, created: true}}
     end
@@ -139,12 +138,13 @@ defmodule Shuttle.CodexTerminal do
 
   defp script(id, record, tmux) do
     endpoint = "unix://" <> record["backend_endpoint"]
+    snippets = Terminal.primary().script(tmux)
 
     """
     #!/bin/bash
     trap 'rm -f "$0"' EXIT
-    #{Dispatcher.erts_scrub_block()}
-    #{Dispatcher.wait_for_client_block(tmux)}
+    #{snippets.env}#{Dispatcher.erts_scrub_block()}
+    #{snippets.wait_for_viewer}
     #{command(record["terminal_wrapper"], record["cwd"], id, endpoint)}
     """
   end

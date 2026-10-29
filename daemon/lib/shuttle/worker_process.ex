@@ -31,7 +31,7 @@ defmodule Shuttle.WorkerProcess do
 
   A scan that fails (non-zero exit, timeout, no uid) is `{:error, :unknown}`,
   and every caller reads uncertainty as "present" — the doctrine of
-  `Shuttle.Tmux`.
+  `Shuttle.Terminal`.
   """
 
   require Logger

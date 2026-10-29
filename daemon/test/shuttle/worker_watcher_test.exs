@@ -211,7 +211,7 @@ defmodule Shuttle.WorkerWatcherTest do
   end
 
   # ── Flake robustness tests ─────────────────────────────────────────────────
-  # Liveness is classified three ways by Shuttle.Tmux (see tmux_test.exs): exit 0
+  # Liveness is classified three ways by Shuttle.Terminal (see terminal_test.exs): exit 0
   # is :alive, tmux's own absence message ("can't find session") is :gone, and any
   # OTHER non-zero is :unknown. Only :gone counts toward death; :unknown is an
   # inconclusive read (server hiccup, PATH, fork-under-load) that must NEVER kill
@@ -255,7 +255,7 @@ defmodule Shuttle.WorkerWatcherTest do
   test "inconclusive (:unknown) checks never declare death, even well past the threshold" do
     # The stronger guarantee: an inconclusive read is not a death signal AT ALL,
     # so far more than max_consecutive_failures of them in a row still can't kill
-    # a live worker. Reverting Shuttle.Tmux's :unknown carve-out (treating any
+    # a live worker. Removing Shuttle.Terminal's :unknown carve-out (treating any
     # non-zero as death) re-arms the false-kill-then-resume storm.
     session = FiberUid.session("tests/inconclusive")
     FlakeyRunner.add_session(session)

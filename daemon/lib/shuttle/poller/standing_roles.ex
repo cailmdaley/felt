@@ -40,7 +40,7 @@ defmodule Shuttle.Poller.StandingRoles do
     # cycle's `Poller.list_shuttle_sessions/1` result) is {:ok, sessions} —
     # including a genuine tmux-server-absent {:ok, []}. On {:error, :unknown}
     # (a wedged `tmux ls`, a timeout) the pass is skipped wholesale —
-    # uncertainty counts as present (see Shuttle.Tmux), and a wedged tmux must
+    # uncertainty counts as present (see Shuttle.Terminal), and a wedged tmux must
     # never mass-mark live standing constitutions dead. A truly dead orphan is
     # simply caught by the next healthy scan.
     case scan do

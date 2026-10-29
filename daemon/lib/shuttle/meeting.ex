@@ -49,7 +49,8 @@ defmodule Shuttle.Meeting do
   that socket.
   """
 
-  alias Shuttle.{HostCapabilities, Remote, Remotes, Runner, Tmux}
+  alias Shuttle.{HostCapabilities, Remote, Remotes, Runner}
+  alias Shuttle.Terminal.Tmux
   require Logger
 
   @session "hark-meeting"

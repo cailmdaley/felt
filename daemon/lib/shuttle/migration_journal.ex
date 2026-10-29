@@ -315,7 +315,7 @@ defmodule Shuttle.MigrationJournal do
 
   defp encode_backend({:tmux, old, new, aliases, identity}) do
     %{
-      "type" => "tmux",
+      "type" => Shuttle.Terminal.Tmux.id(),
       "identity" => identity,
       "before" => old,
       "after" => new,

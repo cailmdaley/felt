@@ -43,7 +43,7 @@ defmodule Shuttle.SessionResume do
 
   require Logger
 
-  alias Shuttle.{Agents, Dispatcher, SessionLedger, Transcript, TmuxServer, WorkerProcess}
+  alias Shuttle.{Agents, Dispatcher, SessionLedger, Terminal, Transcript, WorkerProcess}
 
   @prefix "resume-"
 
@@ -149,12 +149,19 @@ defmodule Shuttle.SessionResume do
       _ ->
         with :ok <- not_the_worker(session, live.()),
              {:ok, plan} <- plan(session, opts) do
-          if running?(plan.tmux, runner) do
-            {:ok, %{tmux_session: plan.tmux, created: false}}
-          else
-            with :ok <- resume_identity_free(plan, runner),
-                 :ok <- prepare_backend(plan, runner),
-                 do: start(plan, runner)
+          case Terminal.status(runner, plan.tmux) do
+            :alive ->
+              {:ok, %{tmux_session: plan.tmux, created: false}}
+
+            :unknown ->
+              # Uncertainty prevents launch, but does not prove a reusable viewer.
+              with :ok <- resume_identity_free(plan, runner),
+                   do: {:error, "Resume terminal visibility is unknown; holding without launch"}
+
+            :gone ->
+              with :ok <- resume_identity_free(plan, runner),
+                   :ok <- prepare_backend(plan, runner),
+                   do: start(plan, runner)
           end
         end
     end
@@ -244,36 +251,27 @@ defmodule Shuttle.SessionResume do
     :exit, _ -> []
   end
 
-  @doc "Whether the tmux session `tmux` exists on this host."
+  @doc "Whether a terminal or an uncertain observation holds this resume on the host."
   @spec running?(String.t(), module()) :: boolean()
-  def running?(tmux, runner) do
-    match?({_, 0}, runner.cmd("tmux", ["has-session", "-t", "=" <> tmux], stderr_to_stdout: true))
-  end
+  def running?(name, runner), do: Terminal.present?(runner, name)
 
   defp start(plan, runner) do
-    with :ok <- tmux_server(runner) do
-      script = WorkerProcess.script_path(plan.tmux)
+    case Terminal.launch(runner, plan.tmux, plan.cwd, run_script(plan)) do
+      :ok ->
+        Logger.info("Resume of #{plan.session} (#{plan.agent}) → #{plan.tmux}")
+        {:ok, %{tmux_session: plan.tmux, created: true}}
 
-      File.write!(script, run_script(plan))
-      File.chmod!(script, 0o755)
+      {:error, :already_running} ->
+        {:ok, %{tmux_session: plan.tmux, created: false}}
 
-      args = ["new-session", "-d", "-s", plan.tmux, "-c", plan.cwd, "bash", "-l", script]
+      {:error, {_tag, message}} ->
+        {:error, message}
 
-      case runner.cmd("tmux", args, stderr_to_stdout: true) do
-        {_, 0} ->
-          Logger.info("Resume of #{plan.session} (#{plan.agent}) → tmux #{plan.tmux}")
-          {:ok, %{tmux_session: plan.tmux, created: true}}
-
-        {output, _} ->
-          File.rm(script)
-          output = output |> to_string() |> String.trim()
-
-          # A second click racing the first: the session exists, which is all
-          # the caller wanted.
-          if String.contains?(output, "duplicate session"),
-            do: {:ok, %{tmux_session: plan.tmux, created: false}},
-            else: {:error, "tmux failed: #{output}"}
-      end
+      {:error, message} ->
+        # An external tmux client can still win the name outside our launch lock.
+        if String.contains?(message, "duplicate session"),
+          do: {:ok, %{tmux_session: plan.tmux, created: false}},
+          else: {:error, message}
     end
   end
 
@@ -287,22 +285,17 @@ defmodule Shuttle.SessionResume do
     end
   end
 
-  defp tmux_server(runner) do
-    case TmuxServer.ensure_available(runner) do
-      :ok -> :ok
-      {:error, {_tag, message}} -> {:error, message}
-    end
-  end
-
   # The script tmux runs: the release's Erlang scrubbed out, a short wait for the
   # kitty tab to attach (so the harness first draws at the tab's size), the
   # resume, and — if it fails — a pause so the tab says why instead of closing.
   defp run_script(plan) do
+    snippets = Terminal.primary().script(plan.tmux)
+
     """
     #!/bin/bash
     trap 'rm -f "$0"' EXIT
 
-    #{Dispatcher.erts_scrub_block()}#{Dispatcher.wait_for_client_block(plan.tmux)}
+    #{snippets.env}#{Dispatcher.erts_scrub_block()}#{snippets.wait_for_viewer}
     #{plan.command} || {
       status=$?
       echo ""

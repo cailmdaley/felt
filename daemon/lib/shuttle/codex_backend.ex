@@ -7,7 +7,8 @@ defmodule Shuttle.CodexBackend do
   No path in this module kills a server, removes a socket, or replaces a live pane.
   """
   use GenServer
-  alias Shuttle.{CodexEndpoint, Tmux, TmuxServer, WorkerProcess}
+  alias Shuttle.{CodexEndpoint, Terminal, TmuxServer, WorkerProcess}
+  alias Shuttle.Terminal.Tmux
 
   defmodule BoundedRunner do
     def cmd(command, args, opts),
@@ -233,7 +234,7 @@ defmodule Shuttle.CodexBackend do
   end
 
   defp slot(path, runner) do
-    case Tmux.session_status(runner, session(path)) do
+    case Terminal.status(runner, session(path), backends: [Tmux]) do
       :gone ->
         {:ok, :new}
 

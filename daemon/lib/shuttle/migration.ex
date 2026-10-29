@@ -1,6 +1,7 @@
 defmodule Shuttle.Migration do
   @moduledoc "Validation and reversible backend changes for a Poller-owned session migration."
   alias Shuttle.{AppWorkers, Dispatcher, FeltStores, LifecycleStore, Poller, WorkerProcess}
+  alias Shuttle.Terminal.Tmux
 
   def prepare(state, from_id, to_id, opts) do
     with {:ok, from} <- resolve(state, from_id),
@@ -132,15 +133,9 @@ defmodule Shuttle.Migration do
     if AppWorkers.app?(session) do
       {:error, :surface_unsupported}
     else
-      case runner.cmd("tmux", ["display-message", "-p", "-t", pane, "\#{session_name}"],
-             stderr_to_stdout: true
-           ) do
-        {output, 0} ->
-          if String.trim(output) == session, do: :ok, else: {:error, :identity_mismatch}
-
-        _ ->
-          {:error, :identity_mismatch}
-      end
+      if Tmux.owns_pane?(runner, session, pane),
+        do: :ok,
+        else: {:error, :identity_mismatch}
     end
   end
 
@@ -168,9 +163,9 @@ defmodule Shuttle.Migration do
         {:error, :uid_missing}
       else
         with {:ok, procs} <- WorkerProcess.scan(state.runner),
-             {:ok, panes} <- tmux_identity(state.runner, worker.session) do
+             {:ok, terminal_identity} <- Tmux.identity(state.runner, worker.session) do
           aliases = WorkerProcess.migration_aliases(procs, worker.session, canonical)
-          identity = %{"session_uuid" => uuid, "panes" => panes}
+          identity = Map.put(terminal_identity, "session_uuid", uuid)
           {:ok, {:tmux, worker.session, canonical, aliases, identity}}
         else
           _ -> {:error, :surface_unsupported}
@@ -237,27 +232,8 @@ defmodule Shuttle.Migration do
     end
   end
 
-  defp tmux_identity(runner, name) do
-    format = "\#{session_id}\t\#{session_created}\t\#{pane_id}\t\#{pane_pid}"
-
-    case runner.cmd("tmux", ["list-panes", "-s", "-t", "=" <> name, "-F", format],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        lines = String.split(String.trim(output), "\n", trim: true)
-
-        if lines != [] and
-             Enum.all?(lines, &Regex.match?(~r/^\$[0-9]+\t[0-9]+\t%[0-9]+\t[1-9][0-9]*$/, &1)),
-           do: {:ok, Enum.sort(lines)},
-           else: {:error, :backend_unobservable}
-
-      _ ->
-        {:error, :backend_unobservable}
-    end
-  end
-
   defp verify_tmux_identity(runner, name, %{"panes" => expected}) do
-    with {:ok, observed} <- tmux_identity(runner, name) do
+    with {:ok, %{"panes" => observed}} <- Tmux.identity(runner, name) do
       if Enum.all?(expected, &(&1 in observed)),
         do: :ok,
         else: {:error, :backend_identity_mismatch}
@@ -267,14 +243,10 @@ defmodule Shuttle.Migration do
   defp verify_tmux_identity(_, _, _), do: {:error, :backend_identity_mismatch}
 
   defp tmux_exists(runner, name) do
-    case runner.cmd("tmux", ["has-session", "-t", "=" <> name], stderr_to_stdout: true) do
-      {_, 0} ->
-        {:ok, true}
-
-      {out, _} ->
-        if Shuttle.Tmux.absence_message?(out),
-          do: {:ok, false},
-          else: {:error, :backend_unobservable}
+    case Tmux.probe(runner, name) do
+      :present -> {:ok, true}
+      :absent -> {:ok, false}
+      :unknown -> {:error, :backend_unobservable}
     end
   end
 
@@ -303,10 +275,7 @@ defmodule Shuttle.Migration do
     # between verification and this command.
     session_id = pane |> String.split("\t") |> hd()
 
-    case runner.cmd("tmux", ["rename-session", "-t", session_id, to], stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      _ -> {:error, :rename_failed}
-    end
+    Tmux.rename(runner, session_id, to)
   end
 
   def reply(from, to, uuid), do: %{ok: true, from: from["id"], to: to["id"], session_uuid: uuid}

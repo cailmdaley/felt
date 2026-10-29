@@ -652,7 +652,7 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, ref} = dispatch("tests/terminal")
     terminal = WorkerBackend.tmux(ref)
     Runner.remove_tmux_session(terminal)
-    assert Shuttle.Tmux.session_status(Runner, terminal) == :gone
+    assert Shuttle.Terminal.status(Runner, terminal) == :gone
     calls_before_restart = App.calls()
     App.set(:read_result, {:error, :backend_not_ready})
 
@@ -675,11 +675,11 @@ defmodule Shuttle.AppWorkersTest do
       200
     )
 
-    assert Shuttle.Tmux.session_status(Runner, terminal) == :gone
+    assert Shuttle.Terminal.status(Runner, terminal) == :gone
 
     App.set(:read_result, {:ok, %{"id" => "app-session-1", "status" => %{"type" => "idle"}}})
     send(poller, :run_poll_cycle)
-    eventually(fn -> Shuttle.Tmux.session_status(Runner, terminal) == :alive end, 200)
+    eventually(fn -> Shuttle.Terminal.status(Runner, terminal) == :alive end, 200)
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
     assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", _}, &1))
     refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
@@ -2344,7 +2344,7 @@ defmodule Shuttle.AppWorkersTest do
       terminal_fiber("tests/app")
       {:ok, session} = dispatch("tests/app")
       tmux = WorkerBackend.tmux(session)
-      assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+      assert Shuttle.Terminal.status(Runner, tmux) == :alive
 
       {:ok, poller} =
         start_poller!(
@@ -2380,10 +2380,10 @@ defmodule Shuttle.AppWorkersTest do
       if completion == :none do
         assert %{session: ^session} = Poller.worker_status(poller, "tests/app")
         assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
-        assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+        assert Shuttle.Terminal.status(Runner, tmux) == :alive
       else
         assert Poller.worker_status(poller, "tests/app") == nil
-        assert Shuttle.Tmux.session_status(Runner, tmux) == :gone
+        assert Shuttle.Terminal.status(Runner, tmux) == :gone
         # The conversation keeps its identity for attach and resume.
         assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
                  AppWorkers.get("app-session-1")
@@ -2434,10 +2434,10 @@ defmodule Shuttle.AppWorkersTest do
 
     for {id, tmux} <- viewers do
       expected = if id in ["retired", "attached", "system-error"], do: :gone, else: :alive
-      assert Shuttle.Tmux.session_status(Runner, tmux) == expected, id
+      assert Shuttle.Terminal.status(Runner, tmux) == expected, id
     end
 
-    assert Shuttle.Tmux.session_status(Runner, "shuttle-codex-0123456789abcdef") == :alive
+    assert Shuttle.Terminal.status(Runner, "shuttle-codex-0123456789abcdef") == :alive
     assert {:ok, %{"active" => false}} = AppWorkers.get("retired")
     assert {:ok, %{"active" => false}} = AppWorkers.get("system-error")
     assert Shuttle.CodexTerminal.sweep(Runner) == []
@@ -2452,7 +2452,7 @@ defmodule Shuttle.AppWorkersTest do
 
     assert :retired = WorkerBackend.retire_assignment(Runner, session, Runner.fiber("tests/app"))
     assert {:ok, %{"active" => false}} = AppWorkers.get("app-session-1")
-    assert Shuttle.Tmux.session_status(Runner, tmux) == :gone
+    assert Shuttle.Terminal.status(Runner, tmux) == :gone
     assert Shuttle.CodexTerminal.sweep(Runner) == []
   end
 
@@ -2465,7 +2465,7 @@ defmodule Shuttle.AppWorkersTest do
 
     assert :retained = WorkerBackend.retire_assignment(Runner, session, Runner.fiber("tests/app"))
     assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
-    assert Shuttle.Tmux.session_status(Runner, tmux) == :alive
+    assert Shuttle.Terminal.status(Runner, tmux) == :alive
   end
 
   test "sweep keeps a retired viewer whose thread state is unknown" do
@@ -2482,7 +2482,7 @@ defmodule Shuttle.AppWorkersTest do
 
     Runner.add_tmux_session("codex-terminal-quiet")
     assert Shuttle.CodexTerminal.sweep(Runner) == []
-    assert Shuttle.Tmux.session_status(Runner, "codex-terminal-quiet") == :alive
+    assert Shuttle.Terminal.status(Runner, "codex-terminal-quiet") == :alive
   end
 
   defp app_server_command?({"tmux", args}),

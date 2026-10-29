@@ -1878,7 +1878,7 @@ defmodule Shuttle.DispatcherTest do
   end
 
   test "build_run_script with no session skips the wait" do
-    # spawn_tmux always passes a session, but the function defaults
+    # Dispatch always passes a session, but the function defaults
     # session to "" — guard against accidental no-session callers
     # spinning forever on a session that doesn't exist.
     script = Dispatcher.build_run_script("tests/haiku", "claude <<< 'hi'", "claude-sonnet")
