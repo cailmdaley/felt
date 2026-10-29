@@ -19,6 +19,13 @@ defmodule Shuttle.ThreadsTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
+  defmodule NoFiberReadsRunner do
+    def cmd(command, args, _opts) do
+      send(Process.get(:fiber_read_test_pid), {:fiber_read, command, args})
+      {"unexpected fiber read", 1}
+    end
+  end
+
   setup %{tmp_dir: dir} = context do
     home = Path.join(dir, "home")
     data = Path.join(dir, "data")
@@ -149,6 +156,30 @@ defmodule Shuttle.ThreadsTest do
 
       assert [%{"id" => "hub/child", "column" => ^expected_column}] = roster["threads"]
     end
+  end
+
+  test "free-text blockers with slashes skip fiber reads while ids still resolve", %{store: store} do
+    assert {:ok, %{fibers: [%{fiber: fiber}]}} =
+             FiberDocuments.get("hub/child", felt_stores: [store])
+
+    uid = fiber["uid"]
+    assert Shuttle.ULID.valid?(uid)
+    Process.put(:fiber_read_test_pid, self())
+    Env.put_app_env(:felt_runner, NoFiberReadsRunner)
+
+    assert Threads.blocker(
+             "end of week (~30 Oct), after Cail's Wed/Thu analysis calls",
+             store,
+             %{}
+           ) ==
+             nil
+
+    assert Threads.blocker("first week / maybe later", store, %{}) == nil
+    assert Threads.blocker(uid, store, %{uid => fiber}) == fiber
+    refute_receive {:fiber_read, _, _}
+
+    Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+    assert %{"slug" => "hub/child"} = Threads.blocker("hub/child", store, %{})
   end
 
   test "the orchestrator's own rest and close reach no one; another session's are delivered",

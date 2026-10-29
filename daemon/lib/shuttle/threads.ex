@@ -348,7 +348,9 @@ defmodule Shuttle.Threads do
 
   # A stored uid, or the id of a fiber felt gave none; anything else is text.
   defp fiber_ref?(value),
-    do: Shuttle.ULID.valid?(String.upcase(value)) or String.contains?(value, "/")
+    do:
+      Shuttle.ULID.valid?(String.upcase(value)) or
+        (String.contains?(value, "/") and not Regex.match?(~r/\s/u, value))
 
   defp blocker_name(value, felt_store, by_uid) do
     case blocker(value, felt_store, by_uid) do
