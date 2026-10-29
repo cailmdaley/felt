@@ -25,8 +25,10 @@ export type Entry =
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
-  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; commandExitCodes?: Array<{ index?: number; code: number }>; at?: number }
+  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageIds?: string[]; commandOutcomes?: CommandOutcome[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
+
+export type CommandOutcome = { index?: number; exitCode?: number; acceptedMessageIds: string[] }
 
 type ObjectValue = Record<string, unknown>
 
@@ -101,24 +103,41 @@ function resultContent(value: unknown): { text: string; images: number; pictures
   return { text: text.join('\n'), images, ...(pictures.length ? { pictures } : {}) }
 }
 
-type CommandExit = { index?: number; code: number }
+const ACCEPTED_MESSAGE_STATUSES = new Set(['accepted', 'submitted', 'queued', 'context_added', 'subscribed', 'queued_for_next_worker'])
 
-function nestedCommandExits(value: unknown, inheritedIndex?: number): CommandExit[] {
-  if (Array.isArray(value)) return value.flatMap((item) => nestedCommandExits(item, inheritedIndex))
-  const record = object(value)
-  if (!record) return []
-  const index = typeof record.i === 'number' && Number.isInteger(record.i) ? record.i : inheritedIndex
-  if (typeof record.exit_code === 'number') return [{ ...(index === undefined ? {} : { index }), code: record.exit_code }]
-  return Object.entries(record)
-    .filter(([key]) => key !== 'i')
-    .flatMap(([, child]) => nestedCommandExits(child, index))
+function acceptedMessageIds(text: string): string[] {
+  const ids = new Set([...text.matchAll(/\b(?:accepted|submitted|queued|context_added|subscribed|queued_for_next_worker)\b[^\r\n]*?\b(msg-[\w-]+)\b/g)].map(match => match[1]))
+  for (const line of text.split(/\r?\n/)) {
+    try {
+      const receipt = object(JSON.parse(line))
+      if (receipt && ACCEPTED_MESSAGE_STATUSES.has(string(receipt.status) ?? '') && typeof receipt.message_id === 'string' && receipt.message_id.startsWith('msg-')) {
+        ids.add(receipt.message_id)
+      }
+    } catch { /* Plain text receipts use the status line above. */ }
+  }
+  return [...ids]
 }
 
-function codexCommandExitCodes(text: string): CommandExit[] | undefined {
-  const nativeCodes = [...text.matchAll(/(?:^|\n)Process exited with code (-?\d+)(?:\b|$)/gim)].map((match) => ({ code: Number(match[1]) }))
-  if (nativeCodes.length) return nativeCodes
+function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
+  const record = object(value)
+  if (!record) return undefined
+  const index = typeof record.i === 'number' && Number.isInteger(record.i) ? record.i : undefined
+  const nested = object(record.result)
+  const result = typeof record.exit_code === 'number' && typeof record.output === 'string'
+    ? record
+    : index !== undefined && typeof nested?.exit_code === 'number' && typeof nested.output === 'string' ? nested : undefined
+  if (!result) return undefined
+  const output = string(result.output) ?? ''
+  return {
+    ...(index === undefined ? {} : { index }),
+    exitCode: result.exit_code as number,
+    acceptedMessageIds: acceptedMessageIds(output),
+  }
+}
 
-  // The Codex `exec` wrapper serializes nested exec_command results under this header.
+function codexCommandOutcomes(text: string, exitCode?: unknown): CommandOutcome[] | undefined {
+  if (typeof exitCode === 'number') return [{ exitCode, acceptedMessageIds: acceptedMessageIds(text) }]
+  // The Codex `exec` wrapper serializes each exec_command result after this header.
   const wrapperOutput = /^Script completed\r?\n[\s\S]*?\r?\nOutput:\r?\n([\s\S]*)$/i.exec(text)?.[1]?.trim()
   if (!wrapperOutput) return undefined
   const values: unknown[] = []
@@ -127,11 +146,14 @@ function codexCommandExitCodes(text: string): CommandExit[] | undefined {
     values.push(...(Array.isArray(parsed) ? parsed : [parsed]))
   } catch {
     for (const line of wrapperOutput.split(/\r?\n/)) {
-      try { values.push(JSON.parse(line)) } catch { /* Non-JSON output has no nested process status. */ }
+      try { values.push(JSON.parse(line)) } catch { /* Non-JSON output has no structured process status. */ }
     }
   }
-  const codes = values.flatMap((value) => nestedCommandExits(value))
-  return codes.length ? codes : undefined
+  const outcomes = values.flatMap(value => {
+    const outcome = structuredCommandOutcome(value)
+    return outcome ? [outcome] : []
+  })
+  return outcomes.length ? outcomes : undefined
 }
 
 function firstLine(text: string, limit = 80): string {
@@ -222,14 +244,18 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
     } else if (block.type === 'tool_result') {
       const result = resultContent(block.content)
       const id = string(block.tool_use_id)
-      if (id) results.push(at({
-        kind: 'result' as const,
-        id,
-        text: result.text,
-        isError: block.is_error === true,
-        images: result.images,
-        ...(result.pictures ? { pictures: result.pictures } : {}),
-      }, time))
+      if (id) {
+        const receipts = acceptedMessageIds(result.text)
+        results.push(at({
+          kind: 'result' as const,
+          id,
+          text: result.text,
+          isError: block.is_error === true,
+          images: result.images,
+          ...(result.pictures ? { pictures: result.pictures } : {}),
+          ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
+        }, time))
+      }
     }
   }
 
@@ -268,7 +294,7 @@ function claudeAttachment(record: ObjectValue): Entry[] {
       .replace(/^\s*Another Claude session sent a message:\s*/, '')
       .replace(PEER_CAVEAT, '')
       .trim()
-    const deliveries = shuttleMessages(peerText, time)
+    const deliveries = shuttleMessages(peerText, time, true)
     if (deliveries.length) return deliveries
     const detail = /^\[Shuttle message \S+ from ([^;\]]+)/.exec(peerText)?.[1]
     return peerText ? [event('Message', { detail, text: peerText.replace(/^\[Shuttle message [^\]]*\]\n?/, '') }, time)] : []
@@ -344,6 +370,7 @@ function piRecord(record: ObjectValue): Entry[] {
   }
   if (record.type === 'custom_message') {
     const content = string(record.content)
+    if (record.customType === 'shuttle' && content) return shuttleMessages(content, timestamp(record.timestamp))
     return [event('Context', { detail: string(record.customType), text: content }, timestamp(record.timestamp))]
   }
   if (record.type !== 'message') return []
@@ -356,7 +383,9 @@ function piRecord(record: ObjectValue): Entry[] {
   if (role === 'toolResult') {
     const result = resultContent(content)
     const id = string(message.toolCallId)
-    return id ? [at({ kind: 'result' as const, id, ...result, isError: message.isError === true }, time)] : []
+    if (!id) return []
+    const receipts = acceptedMessageIds(result.text)
+    return [at({ kind: 'result' as const, id, ...result, isError: message.isError === true, ...(receipts.length ? { acceptedMessageIds: receipts } : {}) }, time)]
   }
   if (role !== 'assistant') return []
 
@@ -447,10 +476,12 @@ function codexRecord(record: ObjectValue): Entry[] {
       const id = string(payload.call_id)
       if (!id) return []
       const result = resultContent(payload.output)
-      const commandExitCodes = codexCommandExitCodes(result.text)
+      const commandOutcomes = codexCommandOutcomes(result.text, payload.exit_code)
+      const receipts = acceptedMessageIds(result.text)
       return [at({ kind: 'result' as const, id, ...result,
-        isError: payload.is_error === true || commandExitCodes?.some((exit) => exit.code !== 0) === true,
-        ...(commandExitCodes ? { commandExitCodes } : {}),
+        isError: payload.is_error === true || commandOutcomes?.some(outcome => outcome.exitCode !== undefined && outcome.exitCode !== 0) === true,
+        ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
+        ...(commandOutcomes ? { commandOutcomes } : {}),
       }, time)]
     }
     case 'reasoning': {
@@ -472,9 +503,12 @@ export function normalizeRecord(raw: unknown): Entry[] {
       : claudeRecord(record)
     const seen = new Set<string>()
     const entries = native.flatMap<Entry>(entry => {
-      if (entry.kind === 'tool') return [...sentShuttleMessages(entry), entry]
+      if (entry.kind === 'tool') {
+        const messages = sentShuttleMessages(entry)
+        return [...messages, ...(messages.length && messages.every(message => message.hideTool) ? [] : [entry])]
+      }
       if (entry.kind !== 'prompt' && entry.kind !== 'event') return [entry]
-      const messages = shuttleMessages(entry.text ?? '', entry.at)
+      const messages = shuttleMessages(entry.text ?? '', entry.at, true)
       if (!messages.length) return [entry]
       for (const message of messages) seen.add(message.id)
       return messages

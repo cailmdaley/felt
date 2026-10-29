@@ -100,6 +100,23 @@ describe('constitution mentions', () => {
     expect(chip.textContent).toBe('Returned · Working')
     runtime.dispose()
   })
+  it('updates a message fiber chip through its label span without replacing the affordance', () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<a class="kbn-wikilink" data-fiber="work/child" data-spawn-chip data-transcript-message-peer data-mention-source="Child"><span class="ws-transcript-message-peer-label">Child</span></a>'
+    const runtime = mentionRuntime(root, vi.fn())
+    const rows = constitutionMentions([work()])
+    runtime.update(rows, resolveConstitutionCandidates(['[[work/child]]'], rows, index).targets)
+    const link = root.querySelector<HTMLAnchorElement>('a')!
+    const label = link.querySelector<HTMLElement>('.ws-transcript-message-peer-label')!
+    expect(link.textContent).toBe('Child')
+    expect(link.getAttribute('aria-label')).toBe('Open Child — working')
+    const renamed = constitutionMentions([work({ name: 'North patch follow-up' })])
+    runtime.update(renamed, resolveConstitutionCandidates(['[[work/child]]'], renamed, index).targets)
+    expect(link.querySelector('.ws-transcript-message-peer-label')).toBe(label)
+    expect(label.textContent).toBe('North patch follow-up')
+    expect(link.getAttribute('aria-label')).toBe('Open North patch follow-up — working')
+    runtime.dispose()
+  })
   it('suppresses installed wikilink handlers when a retained constitution identity disappears', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ fibers: [{ fiber: { id: 'work/child', name: 'Child' } }] }))))
     const root = document.createElement('div'); root.innerHTML = '<a class="kbn-wikilink" data-fiber="work/child">work/child</a>'

@@ -26,14 +26,15 @@ function modelAfterCodexExec(commands: string[], output: string): TranscriptMode
   model.append(normalizeRecord({ type: 'response_item', payload: {
     type: 'custom_tool_call', call_id: 'exec-send', name: 'exec', input: { code },
   } }))
-  model.append(normalizeRecord({ type: 'response_item', payload: {
+  const result = normalizeRecord({ type: 'response_item', payload: {
     type: 'custom_tool_call_output', call_id: 'exec-send', output,
-  } }))
+  } })
+  model.append(result)
   return model
 }
 
 describe('TranscriptModel', () => {
-  it('marks a Codex message failed when the shell result reports a nonzero exit code', () => {
+  it('does not treat prose about a process exit as structured exit status', () => {
     const model = new TranscriptModel()
     model.append(normalizeRecord({ type: 'response_item', payload: {
       type: 'function_call', call_id: 'send-call', name: 'exec_command',
@@ -43,8 +44,22 @@ describe('TranscriptModel', () => {
       type: 'function_call_output', call_id: 'send-call', output: 'Process exited with code 1',
     } }))
     const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'uncertain' })
+    expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
+  })
+
+  it('uses the structured Codex process status to mark a failed send', () => {
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call', call_id: 'send-call', name: 'exec_command',
+      arguments: JSON.stringify({ cmd: 'shuttle message work/child "The table is ready."' }),
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'function_call_output', call_id: 'send-call', exit_code: 1, output: 'receiver unavailable',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
     expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
-    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: true } })
+    expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
   })
 
   it('marks a Codex exec-wrapper message failed when its nested shell output is JSON', () => {
@@ -60,13 +75,13 @@ describe('TranscriptModel', () => {
     } }))
     const steps = model.turns.flatMap(turn => turn.steps)
     expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
-    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: true } })
+    expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
   })
 
   it('uses explicit indices when concurrent nested commands finish out of order', () => {
     const first = 'shuttle message work/first "First result."'
     const second = 'shuttle message work/second "Second result."'
-    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":1,"result":{"exit_code":1,"output":"receiver unavailable"}}\n{"i":0,"result":{"exit_code":0,"output":"accepted"}}'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":1,"result":{"exit_code":1,"output":"receiver unavailable"}}\n{"i":0,"result":{"exit_code":0,"output":"accepted work/first (msg-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)"}}'
     const messages = modelAfterCodexExec([first, second], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
     expect(messages).toMatchObject([
       { fiber: 'work/first', status: 'sent' },
@@ -76,7 +91,7 @@ describe('TranscriptModel', () => {
 
   it('keeps a send successful when another nested shell command fails', () => {
     const send = 'shuttle message work/child "The table is ready."'
-    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"accepted"}}\n{"i":1,"result":{"exit_code":1,"output":"unrelated command failed"}}'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"accepted work/child (msg-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb)"}}\n{"i":1,"result":{"exit_code":1,"output":"unrelated command failed"}}'
     const messages = modelAfterCodexExec([send, 'printf unrelated'], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
     expect(messages).toMatchObject([{ fiber: 'work/child', status: 'sent' }])
   })
@@ -103,18 +118,62 @@ describe('TranscriptModel', () => {
     ])
   })
 
-  it('uses native Codex exit status when successful shell output prints JSON', () => {
+  it('uses a matching Shuttle receipt when another result field has an unrelated exit code', () => {
     const model = new TranscriptModel()
     model.append(normalizeRecord({ type: 'response_item', payload: {
       type: 'function_call', call_id: 'send-call', name: 'exec_command',
       arguments: JSON.stringify({ cmd: 'shuttle message work/child "The table is ready."' }),
     } }))
     model.append(normalizeRecord({ type: 'response_item', payload: {
-      type: 'function_call_output', call_id: 'send-call', output: 'Process exited with code 0\n{"exit_code":1}',
+      type: 'function_call_output', call_id: 'send-call', exit_code: 1, output: 'accepted work/child (msg-cccccccccccccccccccccccccccccccc)\n{"exit_code":1}',
     } }))
     const steps = model.turns.flatMap(turn => turn.steps)
     expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'sent' })
-    expect(steps.find(step => step.kind === 'tool')).toMatchObject({ result: { isError: false } })
+    expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
+  })
+
+  it('does not assign one receipt to every message in a shared shell call', () => {
+    const first = 'shuttle message work/first "First result."'
+    const second = 'shuttle message work/second "Second result."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'shared-send', name: 'Bash', input: { command: `${first}; ${second}` },
+    }] } }))
+    model.append(normalizeRecord({ type: 'user', message: { content: [{
+      type: 'tool_result', tool_use_id: 'shared-send', content: `accepted work/first (msg-dddddddddddddddddddddddddddddddd)`,
+    }] } }))
+    const messages = model.turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([
+      { fiber: 'work/first', status: 'uncertain' },
+      { fiber: 'work/second', status: 'uncertain' },
+    ])
+  })
+
+  it('leaves a send after && unclear when only the compound command result failed', () => {
+    const command = 'make test && shuttle message work/child "The table is ready."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'guarded-send', name: 'Bash', input: { command },
+    }] } }))
+    model.append([{ kind: 'result', id: 'guarded-send', text: 'tests failed', isError: true, images: 0,
+      commandOutcomes: [{ exitCode: 1, acceptedMessageIds: [] }] }])
+    expect(model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'uncertain' })
+  })
+
+  it('leaves a successful wrapper without a Shuttle receipt uncertain', () => {
+    const messages = modelAfterCodexExec(
+      ['shuttle message work/child "The table is ready." || true'],
+      'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":0,"output":""}',
+    ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: 'uncertain' }])
+  })
+
+  it('ignores JSON output that lacks the structured process-result shape', () => {
+    const messages = modelAfterCodexExec(
+      ['shuttle message work/child "The table is ready."'],
+      'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1}',
+    ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: 'uncertain' }])
   })
 
   it('folds entries before the first prompt into a null-prompt turn and attaches results by id', () => {

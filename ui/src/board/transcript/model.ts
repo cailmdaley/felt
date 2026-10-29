@@ -50,6 +50,11 @@ interface ToolReference {
   step: ToolStep
 }
 
+interface MessageReference {
+  message: ShuttleMessage
+  turn: Turn
+}
+
 function updateTimes(turn: Turn, time: number | undefined): void {
   if (time === undefined) return
   turn.startedAt = turn.startedAt === undefined ? time : Math.min(turn.startedAt, time)
@@ -61,7 +66,7 @@ export class TranscriptModel {
   private readonly turnList: Turn[] = []
   private readonly tools = new Map<string, ToolReference>()
   private readonly messages = new Set<string>()
-  private readonly messagesByTool = new Map<string, ShuttleMessage[]>()
+  private readonly messagesByTool = new Map<string, MessageReference[]>()
   private sentFiles = new Map<string, SentFileNotice>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
@@ -79,9 +84,6 @@ export class TranscriptModel {
       if (entry.kind === 'shuttle-message') {
         if (this.messages.has(entry.id)) continue
         this.messages.add(entry.id)
-        if (entry.direction === 'sent' && entry.toolId) {
-          this.messagesByTool.set(entry.toolId, [...(this.messagesByTool.get(entry.toolId) ?? []), entry])
-        }
       }
       if (entry.kind === 'usage') {
         if (entry.model) this.facts.model = entry.model
@@ -108,41 +110,65 @@ export class TranscriptModel {
       }
       if (entry.kind === 'result') {
         const reference = this.tools.get(entry.id)
-        if (!reference) continue
-        reference.step.result = {
-          text: entry.text,
-          isError: entry.isError,
-          images: entry.images,
-          ...(entry.pictures ? { pictures: entry.pictures } : {}),
-          ...(entry.at === undefined ? {} : { at: entry.at }),
-        }
-        reference.step.version++
         const messages = this.messagesByTool.get(entry.id) ?? []
-        if (!entry.isError) {
-          for (const message of messages) message.status = 'sent'
-        } else {
-          const commandCount = messages[0]?.commandCount ?? messages.length
-          const byCommand = new Map<number, ShuttleMessage[]>()
-          for (const message of messages) {
-            const index = message.commandIndex ?? 0
-            byCommand.set(index, [...(byCommand.get(index) ?? []), message])
+        if (reference) {
+          reference.step.result = {
+            text: entry.text,
+            isError: entry.isError,
+            images: entry.images,
+            ...(entry.pictures ? { pictures: entry.pictures } : {}),
+            ...(entry.at === undefined ? {} : { at: entry.at }),
           }
-          const exits = entry.commandExitCodes ?? []
-          const explicitlyIndexed = exits.length > 0 && exits.every((exit) => exit.index !== undefined)
-          for (const message of messages) {
-            const index = message.commandIndex ?? 0
-            const group = byCommand.get(index) ?? []
-            const matches = explicitlyIndexed
-              ? exits.filter((exit) => exit.index === index)
-              : commandCount === 1 && exits.length <= 1 ? exits : []
-            const canAttribute = group.length === 1 && (message.commandSegmentCount ?? 1) === 1 && matches.length === 1
-            if (canAttribute) message.status = matches[0].code === 0 ? 'sent' : 'failed'
-            else if (commandCount === 1 && group.length === 1 && (message.commandSegmentCount ?? 1) === 1 && exits.length === 0) message.status = 'failed'
-            else message.status = 'uncertain'
+          reference.step.version++
+        }
+        const explicitlyIndexed = (entry.commandOutcomes?.length ?? 0) > 0 && entry.commandOutcomes!.every(outcome => outcome.index !== undefined)
+        const matchedReceipts = new Map<number, string[]>()
+        if (explicitlyIndexed) {
+          for (const outcome of entry.commandOutcomes!) {
+            if (outcome.index !== undefined && outcome.acceptedMessageIds.length) {
+              matchedReceipts.set(outcome.index, [...(matchedReceipts.get(outcome.index) ?? []), ...outcome.acceptedMessageIds])
+            }
           }
         }
-        updateTimes(reference.turn, entry.at)
-        this.touch(reference.turn)
+        const allReceiptsMatchRows = !explicitlyIndexed && (entry.acceptedMessageIds?.length ?? 0) === messages.length && messages.length > 0
+        const indexedOutcomes = entry.commandOutcomes ?? []
+        for (const [messageIndex, reference] of messages.entries()) {
+          const message = reference.message
+          const commandIndex = message.commandIndex ?? 0
+          const commandRows = messages.filter(other => (other.message.commandIndex ?? 0) === commandIndex)
+          const commandReceipts = matchedReceipts.get(commandIndex) ?? []
+          const commandMessageIndex = commandRows.indexOf(reference)
+          const receiptMatches = explicitlyIndexed
+            ? commandReceipts.length === commandRows.length && !!commandReceipts[commandMessageIndex]
+            : messages.length === 1 && (entry.acceptedMessageIds?.length ?? 0) > 0
+              || allReceiptsMatchRows && !!entry.acceptedMessageIds?.[messageIndex]
+          if (receiptMatches) {
+            message.status = 'sent'
+            continue
+          }
+
+          const matchingOutcomes = explicitlyIndexed
+            ? indexedOutcomes.filter(outcome => outcome.index === commandIndex)
+            : indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1 ? indexedOutcomes : []
+          const exitCode = matchingOutcomes.length === 1 ? matchingOutcomes[0].exitCode : undefined
+          const failed = exitCode !== undefined ? exitCode !== 0 : entry.isError && indexedOutcomes.length === 0
+          if (!failed) {
+            message.status = 'uncertain'
+          } else if ((explicitlyIndexed || (message.commandCount ?? 1) === 1)
+            && commandRows.length === 1
+            && (message.commandSegmentCount ?? 1) === 1) {
+            message.status = 'failed'
+          } else {
+            message.status = 'uncertain'
+          }
+        }
+        const touched = new Set<Turn>()
+        for (const message of messages) touched.add(message.turn)
+        if (reference) touched.add(reference.turn)
+        for (const turn of touched) {
+          updateTimes(turn, entry.at)
+          this.touch(turn)
+        }
         continue
       }
 
@@ -171,6 +197,9 @@ export class TranscriptModel {
       } else {
         turn.steps.push(entry)
         if (entry.kind === 'text') turn.answer = turn.steps.length - 1
+        if (entry.kind === 'shuttle-message' && entry.direction === 'sent' && entry.toolId) {
+          this.messagesByTool.set(entry.toolId, [...(this.messagesByTool.get(entry.toolId) ?? []), { message: entry, turn }])
+        }
       }
       updateTimes(turn, entry.at)
       this.touch(turn)

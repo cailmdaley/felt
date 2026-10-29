@@ -175,9 +175,17 @@ describe('TranscriptBand', () => {
     const preview = band.el.querySelector('.ws-transcript-exchange')!
     expect([...preview.children].map(row => row.textContent)).toEqual([
       expect.stringContaining('Keep going'), expect.stringContaining('I am coordinating.'),
-      expect.stringContaining('← FromchildA measured result'), expect.stringContaining('I will integrate it.'),
+      expect.stringContaining('← Fromchild· closedA measured result'), expect.stringContaining('I will integrate it.'),
     ])
     expect(preview.querySelectorAll('.ws-transcript-thread-notice')).toHaveLength(1)
+    const notice = preview.querySelector<HTMLElement>('.ws-transcript-thread-notice')!
+    expect(notice.querySelector('.ws-transcript-message-toggle')?.textContent).toContain('· closed')
+    expect(notice.querySelector('.ws-transcript-message-toggle')?.getAttribute('aria-label')).toContain('· closed')
+    expect(notice.querySelector('.ws-transcript-message-detail .ws-transcript-message-thread-state')).toBeNull()
+    notice.querySelector<HTMLElement>('.ws-transcript-message-toggle')!.click()
+    await settle()
+    expect(notice.querySelector<HTMLElement>('.ws-transcript-message-preview')?.hidden).toBe(true)
+    expect(notice.querySelector('.ws-transcript-message-detail')?.textContent).toContain('A measured result')
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
     expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
@@ -198,7 +206,7 @@ describe('TranscriptBand', () => {
     band.follow(target(session))
     await settle()
     const row = band.el.querySelector<HTMLElement>('.ws-transcript-shuttle-message')!
-    row.querySelector<HTMLButtonElement>('.ws-transcript-message-toggle')!.click()
+    row.querySelector<HTMLElement>('.ws-transcript-message-toggle')!.click()
     expect(row.querySelector<HTMLElement>('.ws-transcript-message-detail')!.hidden).toBe(false)
 
     items.push({ type: 'user', timestamp: '2026-09-26T14:04:00.000Z', message: { content: [{

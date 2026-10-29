@@ -509,40 +509,55 @@
   color: var(--ws-ink-muted);
   font-size: var(--type-note);
 }
-.ws-transcript-message-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.ws-transcript-message-expander { min-width: 0; }
+.ws-transcript-message-toggle {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  list-style: none;
+  cursor: pointer;
+}
+.ws-transcript-message-toggle::-webkit-details-marker { display: none; }
 .ws-transcript-message-direction { flex: 0 0 auto; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.ws-transcript-message-peer { flex: 0 0 auto; color: var(--ws-ink-soft); }
+.ws-transcript-message-peer { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-soft); }
 .ws-transcript-message-peer.ws-constitution-chip {
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: min(24em, 60vw);
   overflow: hidden;
   overflow-wrap: normal;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.ws-transcript-message-peer-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-session-chip { padding: 0 5px; border: 1px solid var(--ws-hairline); border-radius: 999px; font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .ws-transcript-message-toggle {
   flex: 1 1 0;
   min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
+}
+.ws-transcript-message-preview {
+  flex: 1 1 8em;
+  min-width: 0;
   color: var(--ws-ink-muted);
   font: var(--type-note)/var(--leading-ui) var(--font-serif);
   text-align: left;
-  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ws-transcript-message-toggle::after { content: ' ▸'; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
-.ws-transcript-message-toggle[data-expanded='true']::after { content: ' ▾'; }
+.ws-transcript-message-expander[open] .ws-transcript-message-preview { display: none; }
+.ws-transcript-message-thread-state { flex: 0 0 auto; color: var(--ws-ink-soft); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.ws-transcript-message-toggle::after { flex: 0 0 auto; margin-left: auto; content: '⌄'; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+.ws-transcript-message-toggle[data-expanded='true']::after { content: '⌃'; }
 .ws-transcript-message-toggle:hover { color: var(--ws-ink); }
 .ws-transcript-message-time { flex: 0 0 auto; margin-left: auto; font: var(--type-meta) var(--font-mono); }
 .ws-transcript-message-detail { margin: 5px 0 1px; padding-left: 9px; border-left: 1px solid var(--ws-hairline); color: var(--ws-ink-soft); }
-.ws-transcript-message-detail[hidden], .ws-transcript-message-verb[hidden], .ws-transcript-message-text[hidden] { display: none; }
-.ws-transcript-message-verb { display: block; margin-bottom: 3px; font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.ws-transcript-message-detail[hidden], .ws-transcript-message-thread-state[hidden], .ws-transcript-message-text[hidden], .ws-transcript-message-source[hidden], .ws-transcript-message-command[hidden] { display: none; }
 .ws-transcript-message-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ws-transcript-message-source { color: var(--ws-ink-muted); font-style: italic; }
+.ws-transcript-message-command { max-height: 18em; margin: 6px 0 0; overflow: auto; color: var(--ws-ink-muted); font: var(--type-code) var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-transcript-message-time { display: none; }
 }

@@ -57,6 +57,18 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     if (value === null) { if (link.hasAttribute(name)) { link.removeAttribute(name); layoutChanged = true } }
     else if (link.getAttribute(name) !== value) { link.setAttribute(name, value); layoutChanged = true }
   }
+  const setMessagePeerLabel = (link: HTMLAnchorElement, label: string): boolean => {
+    if (!link.hasAttribute('data-transcript-message-peer')) return false
+    let child = link.querySelector<HTMLElement>(':scope > .ws-transcript-message-peer-label')
+    if (!child) {
+      child = document.createElement('span')
+      child.className = 'ws-transcript-message-peer-label'
+      link.replaceChildren(child)
+      layoutChanged = true
+    }
+    if (child.textContent !== label) { child.textContent = label; layoutChanged = true }
+    return true
+  }
   const paint = (link: HTMLAnchorElement, row: ConstitutionMention, source: string): void => {
     if (!link.classList.contains('ws-constitution-chip')) { link.classList.add('ws-constitution-chip'); layoutChanged = true }
     if (link.classList.contains('ws-constitution-chip-missing')) { link.classList.remove('ws-constitution-chip-missing'); layoutChanged = true }
@@ -69,7 +81,7 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     setData(link, 'turn', row.turn || undefined)
     setAttr(link, 'href', '#constitution')
     const label = link.hasAttribute('data-spawn-chip') ? row.name : `${row.name} · ${row.state}`
-    if (link.textContent !== label) { link.textContent = label; layoutChanged = true }
+    if (!setMessagePeerLabel(link, label) && link.textContent !== label) { link.textContent = label; layoutChanged = true }
     if (link.hidden) { link.hidden = false; layoutChanged = true }
     setAttr(link, 'title', `${row.id}\n${row.state}${row.outcome ? '\n' + row.outcome : ''}`)
     setAttr(link, 'aria-label', link.hasAttribute('data-spawn-chip') ? `Open ${row.name} — ${row.state.toLowerCase()}` : label)
@@ -95,7 +107,7 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
         if (!link.classList.contains('ws-constitution-chip-missing')) { link.classList.add('ws-constitution-chip-missing'); layoutChanged = true }
         setAttr(link, 'aria-disabled', 'true')
         const source = link.dataset.mentionSource ?? identity
-        if (link.textContent !== source) { link.textContent = source; layoutChanged = true }
+        if (!setMessagePeerLabel(link, source) && link.textContent !== source) { link.textContent = source; layoutChanged = true }
         setAttr(link, 'title', 'Constitution unavailable in the current read model')
       }
     }

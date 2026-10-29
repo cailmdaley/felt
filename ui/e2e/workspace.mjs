@@ -148,7 +148,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     const capture = process.env.WORKSPACE_SHOTS && (device === 'desktop' && scheme === 'light' || device === 'phone' && scheme === 'dark')
     if (capture) {
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}.png`) })
+      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-collapsed.png`) })
     }
   }
 
@@ -158,17 +158,21 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.ok(!(await received.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the received row sits outside tool groups')
   await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
   assert.equal(await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').count(), 1, 'the destination resolves as a thread chip')
-  await sent.locator('.ws-transcript-message-toggle').click()
+  await sent.locator('.ws-transcript-message-direction').click()
   assert.match(await sent.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /north patch residual is in the new table/)
-  await received.locator('.ws-transcript-message-toggle').click()
+  await received.locator('.ws-transcript-message-direction').click()
   assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /follow-up reviewed the north patch residual/)
+  assert.equal(await received.locator('.ws-transcript-message-preview').isVisible(), false, 'expanding replaces the preview with the full message')
   await received.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
   assert.equal(await received.locator('.ws-transcript-message-peer.ws-constitution-chip').getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender resolves to its thread chip')
 
-  const raw = transcript.locator('.ws-transcript-steps').filter({ hasText: 'Bash 1' }).first()
-  assert.ok(await raw.count(), 'the original tool call remains reachable as a separate step group')
-  await raw.click()
-  assert.match(await transcript.locator('.ws-transcript-tool-detail').innerText(), /shuttle message research\/workspace\/validation-follow-up/)
+  assert.equal(await transcript.locator('.ws-transcript-steps').filter({ hasText: 'Bash 1' }).count(), 0, 'a pure send does not repeat as a tool group')
+  assert.match(await sent.locator('.ws-transcript-message-command').innerText(), /shuttle message research\/workspace\/validation-follow-up/, 'the expanded message retains the source command')
+  if (process.env.WORKSPACE_SHOTS) {
+    await p.emulateMedia({ colorScheme: device === 'desktop' ? 'light' : 'dark' })
+    await frames(p)
+    await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-expanded.png`) })
+  }
 }, viewport)
 
 test('The chat never moves under a reader through live polls and snapshot refreshes, and follows at the bottom', async p => {

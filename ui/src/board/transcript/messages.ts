@@ -20,6 +20,9 @@ export interface ShuttleMessage {
   commandIndex?: number
   commandCount?: number
   commandSegmentCount?: number
+  /** Hide a tool call that contains only sends; its source is shown in the expanded row. */
+  hideTool?: boolean
+  rawCommand?: string
   at?: number
 }
 
@@ -54,10 +57,13 @@ function fiberCandidate(value: string): string | undefined {
 }
 
 function sessionLabel(address: string): string {
-  const match = /^shuttle:\/\/([^/]+)\/([^/]+)\//.exec(address)
+  const match = /^shuttle:\/\/([^/]+)\/([^/]+)(?:\/([^/?#]+))?/.exec(address)
   if (!match) return 'session'
+  const host = match[1]
   const harness = match[2]
-  return `${harness.charAt(0).toUpperCase()}${harness.slice(1)} · ${match[1]}`
+  const session = match[3]
+  const shortSession = session ? ` · …${session.slice(-6)}` : ''
+  return `${harness.charAt(0).toUpperCase()}${harness.slice(1)} · ${host}${shortSession}`
 }
 
 function senderLabel(sender: string): string {
@@ -78,9 +84,13 @@ function peerFor(target: string): Pick<ShuttleMessage, 'peer' | 'fiber' | 'addre
 const DELIVERY = /\[Shuttle message ([^\s\]\r\n]+)([^\]\r\n]*)\]\r?\n([\s\S]*?)(?=\r?\n\[Shuttle message |\s*<\/system-reminder\s*>|$)/g
 
 /** Peer mailboxes and daemon thread results are explicit user-context envelopes. */
-export function shuttleMessages(source: string, at?: number): ShuttleMessage[] {
+export function shuttleMessages(source: string, at?: number, anchored = false): ShuttleMessage[] {
+  if (anchored && !/^\s*\[Shuttle message /.test(source)) return []
+  const input = anchored ? source.trimStart() : source
   const messages: ShuttleMessage[] = []
-  for (const match of source.matchAll(DELIVERY)) {
+  const matches = [...input.matchAll(DELIVERY)]
+  for (const [index, match] of matches.entries()) {
+    if (anchored && index > 0) break
     const id = match[1]
     const metadata = match[2]
     const body = match[3].trim()
@@ -120,67 +130,15 @@ export function shuttleMessages(source: string, at?: number): ShuttleMessage[] {
 }
 
 type ToolCall = { id: string; name: string; input: unknown; at?: number }
-
-function shellSegments(source: string): string[][] {
-  const segments: string[][] = []
-  let words: string[] = []
-  let word = ''
-  let active = false
-  let quote = ''
-  let escaped = false
-  const pushWord = () => {
-    if (active) words.push(word)
-    word = ''
-    active = false
-  }
-  const pushSegment = () => {
-    pushWord()
-    if (words.length) segments.push(words)
-    words = []
-  }
-
-  for (let index = 0; index < source.length; index++) {
-    const char = source[index]
-    if (escaped) {
-      if (char !== '\n') word += char
-      active = true
-      escaped = false
-    } else if (quote === "'") {
-      if (char === "'") quote = ''
-      else word += char
-    } else if (quote === '"') {
-      if (char === '"') quote = ''
-      else if (char === '\\' && index + 1 < source.length) escaped = true
-      else word += char
-    } else if (char === '\\') {
-      escaped = true
-      active = true
-    } else if (char === "'" || char === '"') {
-      quote = char
-      active = true
-    } else if (char === ';' || char === '|' || char === '&' || char === '\n') {
-      pushSegment()
-      while (index + 1 < source.length && (source[index + 1] === char || char === '&' && source[index + 1] === '|')) index++
-    } else if (/\s/.test(char)) pushWord()
-    else {
-      word += char
-      active = true
-    }
-  }
-  pushSegment()
-  return segments
-}
+type ShellCommand = { words: string[]; chain: number }
+type ShellParse = { commands: ShellCommand[]; substitutions: Map<string, string>; heredocs: Map<string, string> }
+type ParsedSend = { target: string; text: string; source?: string }
+type CommandCollection = { sends: ParsedSend[]; chains: Map<string, boolean>; segmentCount: number }
 
 const GLOBAL_VALUE_FLAGS = new Set(['-C', '--store'])
 const MESSAGE_VALUE_FLAGS = new Set(['--file', '--message-id', '--from', '--attach'])
 const MESSAGE_FLAGS = new Set(['--context-only', '--notify-wake', '--notify-when-idle', '--wake', '--json', '-j'])
-
-function skipValueFlag(words: string[], index: number, flags: Set<string>): number | undefined {
-  const word = words[index]
-  if (flags.has(word)) return index + 2
-  for (const flag of flags) if (word.startsWith(`${flag}=`)) return index + 1
-  return undefined
-}
+const CAT_HEREDOC = /\$\(\s*cat\s+<<-?\s*(['"]?)([\w.-]+)\1[\t ]*\r?\n([\s\S]*?)\r?\n\2[\t ]*\r?\n?[\t ]*\)/g
 
 function optionValue(words: string[], index: number, flags: Set<string>): { flag: string; value?: string; next: number } | undefined {
   const word = words[index]
@@ -191,16 +149,238 @@ function optionValue(words: string[], index: number, flags: Set<string>): { flag
   return undefined
 }
 
-function messageCommand(words: string[]): { target: string; text: string; source?: string } | null {
-  let executable = 0
-  if (words[executable] === 'env') executable++
-  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[executable] ?? '')) executable++
-  const program = words[executable]?.split('/').at(-1)
-  if (program !== 'shuttle') return null
-  let index = executable + 1
+function expandCatHereDocs(source: string): { source: string; substitutions: Map<string, string> } {
+  const substitutions = new Map<string, string>()
+  let next = 0
+  const expanded = source.replace(CAT_HEREDOC, (_match, _quote: string, _delimiter: string, body: string) => {
+    const marker = `__FELT_HEREDOC_${next++}__`
+    substitutions.set(marker, body)
+    return marker
+  })
+  return { source: expanded, substitutions }
+}
+
+function readHereDocDelimiter(line: string, start: number): { delimiter: string; stripTabs: boolean; end: number } | undefined {
+  let index = start + 2
+  let stripTabs = false
+  if (line[index] === '-') { stripTabs = true; index++ }
+  while (line[index] === ' ' || line[index] === '\t') index++
+  const quote = line[index] === "'" || line[index] === '"' ? line[index++] : ''
+  const startWord = index
+  while (index < line.length && (quote ? line[index] !== quote : !/[\s;|&<>]/.test(line[index]))) index++
+  const delimiter = line.slice(startWord, index)
+  if (!delimiter) return undefined
+  if (quote && line[index] === quote) index++
+  return { delimiter, stripTabs, end: index }
+}
+
+/** Replace here-document bodies with tokens before tokenizing; bodies are input, never commands. */
+function stripHereDocBodies(source: string): { source: string; bodies: Map<string, string> } {
+  const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? []
+  const output: string[] = []
+  const bodies = new Map<string, string>()
+  const pending: Array<{ delimiter: string; stripTabs: boolean; marker: string; lines: string[] }> = []
+  let next = 0
+  let quote = ''
+  let escaped = false
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex]
+    if (pending.length) {
+      const current = pending[0]
+      const bodyLine = line.replace(/\r?\n$/, '')
+      const comparable = current.stripTabs ? bodyLine.replace(/^\t+/, '') : bodyLine
+      if (comparable === current.delimiter) {
+        bodies.set(current.marker, current.lines.join('\n'))
+        pending.shift()
+      } else current.lines.push(comparable)
+      if (/\r?\n$/.test(line) && pending.length === 0) output.push('\n')
+      continue
+    }
+
+    let cleaned = ''
+    for (let index = 0; index < line.length; index++) {
+      const char = line[index]
+      if (escaped) { cleaned += char; escaped = false; continue }
+      if (quote === "'") { cleaned += char; if (char === "'") quote = ''; continue }
+      if (quote === '"') {
+        cleaned += char
+        if (char === '"') quote = ''
+        else if (char === '\\') escaped = true
+        continue
+      }
+      if (char === '\\') { cleaned += char; escaped = true; continue }
+      if (char === "'" || char === '"') { quote = char; cleaned += char; continue }
+      if (char === '<' && line[index + 1] === '<' && line[index + 2] !== '<') {
+        const heredoc = readHereDocDelimiter(line, index)
+        if (heredoc) {
+          const marker = `__FELT_INPUT_HEREDOC_${next++}__`
+          pending.push({ delimiter: heredoc.delimiter, stripTabs: heredoc.stripTabs, marker, lines: [] })
+          cleaned += ` ${marker} `
+          index = heredoc.end - 1
+          continue
+        }
+      }
+      cleaned += char
+    }
+    output.push(cleaned)
+  }
+  return { source: output.join(''), bodies }
+}
+
+function redirectionEnd(source: string, start: number): number {
+  let index = start
+  if (source[index] === '&' && source[index + 1] === '>') index += 2
+  else {
+    const operator = source[index]
+    index++
+    while (source[index] === operator) index++
+    if ((source[index] === '&' || source[index] === '|') && operator !== source[index]) index++
+  }
+  while (source[index] === ' ' || source[index] === '\t') index++
+  if (index >= source.length || /[\r\n;|&]/.test(source[index])) return index
+  let quote = ''
+  let escaped = false
+  for (; index < source.length; index++) {
+    const char = source[index]
+    if (escaped) { escaped = false; continue }
+    if (quote === "'") { if (char === "'") quote = ''; continue }
+    if (quote === '"') { if (char === '"') quote = ''; else if (char === '\\') escaped = true; continue }
+    if (char === '\\') { escaped = true; continue }
+    if (char === "'" || char === '"') { quote = char; continue }
+    if (/\s/.test(char) || /[;|&<>]/.test(char)) break
+  }
+  return index
+}
+
+function shellSegments(source: string): ShellParse {
+  const expanded = expandCatHereDocs(source)
+  const heredocs = stripHereDocBodies(expanded.source)
+  const clean = heredocs.source
+  const commands: ShellCommand[] = []
+  let words: string[] = []
+  let word = ''
+  let active = false
+  let quote = ''
+  let escaped = false
+  let chain = 0
+
+  const pushWord = () => {
+    if (active) {
+      let value = word
+      for (const [marker, body] of expanded.substitutions) value = value.split(marker).join(body)
+      words.push(value)
+    }
+    word = ''
+    active = false
+  }
+  const pushPipelineCommand = () => {
+    pushWord()
+    if (words.length) commands.push({ words, chain })
+    words = []
+  }
+  const pushSequence = () => {
+    const hadCommand = words.length > 0 || active
+    pushPipelineCommand()
+    if (hadCommand) chain++
+  }
+
+  for (let index = 0; index < clean.length; index++) {
+    const char = clean[index]
+    if (escaped) {
+      if (char !== '\n') word += char
+      active = true
+      escaped = false
+      continue
+    }
+    if (quote === "'") {
+      if (char === "'") quote = ''
+      else word += char
+      continue
+    }
+    if (quote === '"') {
+      if (char === '"') quote = ''
+      else if (char === '\\' && index + 1 < clean.length) {
+        const next = clean[index + 1]
+        if (next === '$' || next === '`' || next === '"' || next === '\\' || next === '\n') escaped = true
+        else word += char
+      } else word += char
+      continue
+    }
+    if ((char === '<' || char === '>') || char === '&' && clean[index + 1] === '>') {
+      if (/^\d+$/.test(word)) { word = ''; active = false }
+      else pushWord()
+      index = redirectionEnd(clean, index) - 1
+      continue
+    }
+    if (char === '\\') { escaped = true; active = true; continue }
+    if (char === "'" || char === '"') { quote = char; active = true; continue }
+    if (char === '$' && clean[index + 1] === '(') {
+      // Keep command substitutions intact so their arguments cannot become shell separators.
+      let depth = 1, end = index + 2, nestedQuote = ''
+      for (; end < clean.length && depth > 0; end++) {
+        const nestedChar = clean[end]
+        if (nestedQuote === "'") { if (nestedChar === "'") nestedQuote = ''; continue }
+        if (nestedQuote === '"') { if (nestedChar === '"') nestedQuote = ''; else if (nestedChar === '\\') end++; continue }
+        if (nestedChar === "'" || nestedChar === '"') nestedQuote = nestedChar
+        else if (nestedChar === '(') depth++
+        else if (nestedChar === ')') depth--
+      }
+      word += clean.slice(index, end)
+      active = true
+      index = end - 1
+      continue
+    }
+    if (char === '|' && clean[index + 1] !== '|') {
+      pushPipelineCommand()
+      continue
+    }
+    if (char === '&' && clean[index + 1] === '&') {
+      pushSequence()
+      index++
+      continue
+    }
+    if (char === '|' && clean[index + 1] === '|') {
+      pushSequence()
+      index++
+      continue
+    }
+    if (char === ';' || char === '\n' || char === '&') {
+      pushSequence()
+      if (char === '&') while (clean[index + 1] === '&') index++
+      continue
+    }
+    if (/\s/.test(char)) { pushWord(); continue }
+    word += char
+    active = true
+  }
+  pushPipelineCommand()
+  return { commands, substitutions: expanded.substitutions, heredocs: heredocs.bodies }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function messageCommand(words: string[], heredocs: Map<string, string>): { target: string; text: string; source?: string } | null {
+  let index = 0
+  while (words[index] === 'env') index++
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index++
+  if (words[index] === 'command') index++
+  if (words[index] === 'timeout') {
+    index++
+    while (words[index]?.startsWith('-')) {
+      const option = words[index]
+      if (['-k', '--kill-after', '-s', '--signal'].includes(option)) index += 2
+      else index++
+    }
+    if (words[index] && /^\d/.test(words[index])) index++
+  }
+  if (words[index]?.split('/').at(-1) !== 'shuttle') return null
+  index++
   while (index < words.length) {
-    const skipped = skipValueFlag(words, index, GLOBAL_VALUE_FLAGS)
-    if (skipped !== undefined) { index = skipped; continue }
+    const option = optionValue(words, index, GLOBAL_VALUE_FLAGS)
+    if (option) { index = option.next; continue }
     if (words[index] === '--json' || words[index] === '-j') { index++; continue }
     break
   }
@@ -208,7 +388,9 @@ function messageCommand(words: string[]): { target: string; text: string; source
   let target: string | undefined
   const text: string[] = []
   let source: string | undefined
+  let heredocText: string | undefined
   let attachments = false
+  let options = true
   const noteValueFlag = (flag: string, value?: string): void => {
     if (flag === '--file') source = value ? `file: ${value}` : 'file'
     if (flag === '--attach') {
@@ -218,53 +400,115 @@ function messageCommand(words: string[]): { target: string; text: string; source
   }
   for (; index < words.length; index++) {
     const word = words[index]
-    const option = optionValue(words, index, MESSAGE_VALUE_FLAGS)
-    if (option) {
-      noteValueFlag(option.flag, option.value)
-      index = option.next - 1
-    } else if (MESSAGE_FLAGS.has(word) || /^--(?:wake|store)=/.test(word)) {
-      if (word === '--notify-when-idle') source = source ?? 'idle notification'
-    } else if (!target && word.startsWith('-')) continue
-    else if (!target) target = word
+    if (heredocs.has(word)) {
+      if (source === 'standard input') heredocText = heredocs.get(word)
+      continue
+    }
+    if (options && word === '--') { options = false; continue }
+    if (options) {
+      const global = optionValue(words, index, GLOBAL_VALUE_FLAGS)
+      const option = optionValue(words, index, MESSAGE_VALUE_FLAGS)
+      if (global) { index = global.next - 1; continue }
+      if (option) { noteValueFlag(option.flag, option.value); index = option.next - 1; continue }
+      if (MESSAGE_FLAGS.has(word) || /^--wake=/.test(word)) {
+        if (word === '--notify-when-idle') source = source ?? 'idle notification'
+        continue
+      }
+      if (!target && word.startsWith('-')) continue
+    }
+    if (!target) target = word
     else if (word === '-' && text.length === 0) source = source ?? 'standard input'
-    else if (word.startsWith('-')) continue
     else text.push(word)
   }
   if (!target) return null
-  const body = text.join(' ')
-  if (!body && !source && !attachments) return null
-  return { target, text: body, ...(source ? { source } : {}), ...(attachments && !body ? { source: source ?? 'attachment' } : {}) }
+  const body = heredocText ?? text.join(' ')
+  const bodySource = heredocText === undefined ? source : undefined
+  if (!body && !bodySource && !attachments) return null
+  return { target, text: body, ...(bodySource ? { source: bodySource } : {}), ...(attachments && !body ? { source: bodySource ?? 'attachment' } : {}) }
 }
 
-/** Outgoing shell calls become a separate row; their native tool record remains alongside them. */
+function shellWrapper(words: string[]): string | undefined {
+  let index = 0
+  while (words[index] === 'env') index++
+  while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index++
+  if (words[index] === 'timeout') {
+    index++
+    while (words[index]?.startsWith('-')) {
+      if (['-k', '--kill-after', '-s', '--signal'].includes(words[index])) index += 2
+      else index++
+    }
+    if (words[index] && /^\d/.test(words[index])) index++
+  }
+  const program = words[index]?.split('/').at(-1)
+  if (!['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(program ?? '')) return undefined
+  for (let flag = index + 1; flag < words.length; flag++) {
+    if (words[flag] === '-c' || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(words[flag])) return words[flag + 1]
+  }
+  return undefined
+}
+
+function collectShell(source: string, namespace: string, depth = 0): CommandCollection {
+  if (depth > 4) return { sends: [], chains: new Map(), segmentCount: 0 }
+  const parsed = shellSegments(source)
+  const sends: ParsedSend[] = []
+  const chains = new Map<string, boolean>()
+  let segmentCount = 0
+  for (const command of parsed.commands) {
+    const key = `${namespace}.${command.chain}`
+    const wrapped = shellWrapper(command.words)
+    if (wrapped !== undefined) {
+      const nested = collectShell(wrapped, key, depth + 1)
+      segmentCount += nested.segmentCount
+      for (const [nestedKey, hasSend] of nested.chains) chains.set(nestedKey, hasSend)
+      sends.push(...nested.sends)
+      if (!nested.chains.size) chains.set(key, false)
+      continue
+    }
+    segmentCount++
+    const send = messageCommand(command.words, parsed.heredocs)
+    chains.set(key, (chains.get(key) ?? true) && !!send)
+    if (send) sends.push(send)
+  }
+  return { sends, chains, segmentCount }
+}
+
+function toolCommands(tool: ToolCall): string[] {
+  const input = object(tool.input)
+  if (tool.name === 'exec') return codexCommands(tool.input)
+  const command = input?.command
+  if (Array.isArray(command) && command.every((part): part is string => typeof part === 'string')) {
+    return [command.map(shellQuote).join(' ')]
+  }
+  return [string(command) ?? string(input?.cmd) ?? string(tool.input)].filter((value): value is string => Boolean(value))
+}
+
+/** Outgoing shell calls become a separate row; pure-send tool calls fold into that row's detail. */
 export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
   if (!/^(bash|shell|exec|exec_command|terminal|command|run_terminal_cmd)$/i.test(tool.name)) return []
-  const input = object(tool.input)
-  const commands = tool.name === 'exec'
-    ? codexCommands(tool.input)
-    : [string(input?.command) ?? string(input?.cmd) ?? string(tool.input)].filter((command): command is string => Boolean(command))
+  const commands = toolCommands(tool)
   if (!commands.length) return []
-  const messages: ShuttleMessage[] = []
-  for (const [commandIndex, command] of commands.entries()) {
-    const segments = shellSegments(command)
-    for (const words of segments) {
-      const parsed = messageCommand(words)
-      if (!parsed) continue
-      const peer = peerFor(parsed.target)
-      messages.push(withTime({
-        kind: 'shuttle-message' as const,
-        id: `sent:${tool.id}:${messages.length}`,
-        direction: 'sent' as const,
-        ...peer,
-        text: parsed.text,
-        ...(parsed.source ? { source: parsed.source } : {}),
-        toolId: tool.id,
-        commandIndex,
-        commandCount: commands.length,
-        commandSegmentCount: segments.length,
-        status: 'pending' as const,
-      }, tool.at))
-    }
-  }
-  return messages
+  const collected = commands.map((command, index) => collectShell(command, `cmd${index}`))
+  const parsedSends = collected.flatMap(result => result.sends)
+  if (!parsedSends.length) return []
+  const allChains = new Map(collected.flatMap(result => [...result.chains]))
+  const pureSend = allChains.size > 0 && [...allChains.values()].every(Boolean)
+  return parsedSends.map((parsed, index) => {
+    const peer = peerFor(parsed.target)
+    const commandIndex = collected.findIndex(result => result.sends.includes(parsed))
+    return withTime({
+      kind: 'shuttle-message' as const,
+      id: `sent:${tool.id}:${index}`,
+      direction: 'sent' as const,
+      ...peer,
+      text: parsed.text,
+      ...(parsed.source ? { source: parsed.source } : {}),
+      toolId: tool.id,
+      commandIndex,
+      commandCount: commands.length,
+      commandSegmentCount: collected[commandIndex]?.segmentCount ?? 1,
+      hideTool: pureSend,
+      ...(pureSend ? { rawCommand: commands[commandIndex] } : {}),
+      status: 'pending' as const,
+    }, tool.at)
+  })
 }

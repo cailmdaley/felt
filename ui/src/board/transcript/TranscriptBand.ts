@@ -49,28 +49,32 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   row.className = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
   row.dataset.message = entry.id
   row.dataset.direction = entry.direction
-  const heading = document.createElement('div')
-  heading.className = 'ws-transcript-message-heading'
+  const expander = document.createElement('details')
+  expander.className = 'ws-transcript-message-expander'
+  const toggle = document.createElement('summary')
+  toggle.className = 'ws-transcript-message-toggle'
   const direction = document.createElement('span')
   direction.className = 'ws-transcript-message-direction'
   const peer = document.createElement('span')
   peer.className = 'ws-transcript-message-peer'
-  const toggle = createButton('ws-transcript-message-toggle', '')
+  const preview = document.createElement('span')
+  preview.className = 'ws-transcript-message-preview'
   const detail = document.createElement('div')
   detail.className = 'ws-transcript-message-detail'
-  detail.hidden = true
-  const verb = document.createElement('span')
-  verb.className = 'ws-transcript-message-verb'
+  const threadState = document.createElement('span')
+  threadState.className = 'ws-transcript-message-thread-state'
   const text = document.createElement('p')
   text.className = 'ws-transcript-message-text'
   const source = document.createElement('p')
   source.className = 'ws-transcript-message-text ws-transcript-message-source'
-  detail.append(verb, text, source)
-  heading.append(direction, peer, toggle)
-  row.append(heading, detail)
-  toggle.addEventListener('click', () => {
-    const expanded = toggle.getAttribute('aria-expanded') === 'true'
-    toggle.setAttribute('aria-expanded', String(!expanded))
+  const command = document.createElement('pre')
+  command.className = 'ws-transcript-message-command'
+  command.dataset.mentionIgnore = ''
+  detail.append(text, source, command)
+  toggle.append(direction, peer, threadState, preview)
+  expander.append(toggle, detail)
+  row.append(expander)
+  expander.addEventListener('toggle', () => {
     paintMessageRow(row, entry)
   })
   paintMessageRow(row, entry)
@@ -84,11 +88,12 @@ function firstMessageLine(text: string, limit = 100): string {
 
 function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   const direction = row.querySelector<HTMLElement>('.ws-transcript-message-direction')!
-  const heading = row.querySelector<HTMLElement>('.ws-transcript-message-heading')!
+  const expander = row.querySelector<HTMLDetailsElement>('.ws-transcript-message-expander')!
   let peer = row.querySelector<HTMLElement>('.ws-transcript-message-peer')!
-  const toggle = row.querySelector<HTMLButtonElement>('.ws-transcript-message-toggle')!
-  const detail = row.querySelector<HTMLElement>('.ws-transcript-message-detail')!
-  const expanded = toggle.getAttribute('aria-expanded') === 'true'
+  const toggle = row.querySelector<HTMLElement>('.ws-transcript-message-toggle')!
+  const preview = row.querySelector<HTMLElement>('.ws-transcript-message-preview')!
+  const threadState = row.querySelector<HTMLElement>('.ws-transcript-message-thread-state')!
+  const expanded = expander.open
   const rowClass = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
   if (row.className !== rowClass) row.className = rowClass
   setAttr(row, 'data-message', entry.id)
@@ -96,6 +101,13 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   if (entry.fiber && peer.tagName !== 'A') {
     const link = document.createElement('a')
     link.className = 'ws-transcript-message-peer kbn-wikilink'
+    link.dataset.transcriptMessagePeer = ''
+    link.dataset.spawnChip = ''
+    link.dataset.fiber = entry.fiber
+    link.dataset.mentionSource = entry.peer
+    const label = document.createElement('span')
+    label.className = 'ws-transcript-message-peer-label'
+    link.append(label)
     peer.replaceWith(link)
     peer = link
   } else if (!entry.fiber && peer.tagName === 'A') {
@@ -106,7 +118,20 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   }
   peer.classList.toggle('kbn-wikilink', !!entry.fiber)
   peer.classList.toggle('ws-transcript-session-chip', !entry.fiber)
-  if (peer.textContent !== entry.peer) peer.textContent = entry.peer
+  if (entry.fiber) {
+    setAttr(peer, 'data-spawn-chip', '')
+    setAttr(peer, 'data-transcript-message-peer', '')
+    setAttr(peer, 'data-fiber', entry.fiber)
+    if (!peer.classList.contains('ws-constitution-chip')) {
+      let label = peer.querySelector<HTMLElement>(':scope > .ws-transcript-message-peer-label')
+      if (!label) {
+        label = document.createElement('span')
+        label.className = 'ws-transcript-message-peer-label'
+        peer.replaceChildren(label)
+      }
+      if (label.textContent !== entry.peer) label.textContent = entry.peer
+    }
+  } else if (peer.textContent !== entry.peer) peer.textContent = entry.peer
   if (entry.fiber) setAttr(peer, 'data-fiber', entry.fiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
   const directionText = entry.direction === 'received'
@@ -115,29 +140,34 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   if (direction.textContent !== directionText) direction.textContent = directionText
   const toggleText = entry.direction === 'received'
     ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
-    : entry.text || entry.source ? 'Show text' : 'Show details'
-  if (toggle.textContent !== toggleText) toggle.textContent = toggleText
-  setAttr(toggle, 'aria-label', entry.direction === 'received' ? `Expand message from ${entry.peer}` : `Show message to ${entry.peer}`)
+    : ''
+  if (preview.textContent !== toggleText) preview.textContent = toggleText
+  setAttr(toggle, 'data-direction', entry.direction)
+  const action = entry.direction === 'received' ? `Expand message from ${entry.peer}` : `Expand message to ${entry.peer}`
+  setAttr(toggle, 'aria-label', entry.verb ? `${action} · ${entry.verb}` : action)
   setAttr(toggle, 'aria-expanded', String(expanded))
   setAttr(toggle, 'data-expanded', String(expanded))
-  setHidden(detail, !expanded)
-  const verb = row.querySelector<HTMLElement>('.ws-transcript-message-verb')!
+  setHidden(preview, expanded)
   const text = row.querySelector<HTMLElement>('.ws-transcript-message-text:not(.ws-transcript-message-source)')!
   const source = row.querySelector<HTMLElement>('.ws-transcript-message-source')!
-  if (verb.textContent !== (entry.verb ?? '')) verb.textContent = entry.verb ?? ''
-  setHidden(verb, !entry.verb)
+  const command = row.querySelector<HTMLElement>('.ws-transcript-message-command')!
+  const stateText = entry.verb ? `· ${entry.verb}` : ''
+  if (threadState.textContent !== stateText) threadState.textContent = stateText
+  setHidden(threadState, !entry.verb)
   if (text.textContent !== entry.text) text.textContent = entry.text
   setHidden(text, !entry.text)
   const sourceText = entry.source ? `Message text supplied by ${entry.source}` : ''
   if (source.textContent !== sourceText) source.textContent = sourceText
   setHidden(source, !entry.source || !!entry.text)
-  let stamp = heading.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
+  if (command.textContent !== (entry.rawCommand ?? '')) command.textContent = entry.rawCommand ?? ''
+  setHidden(command, !entry.rawCommand)
+  let stamp = toggle.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
   if (entry.at === undefined) stamp?.remove()
   else {
     if (!stamp) {
       stamp = document.createElement('time')
       stamp.className = 'ws-transcript-message-time'
-      heading.append(stamp)
+      toggle.append(stamp)
     }
     const when = clock(entry.at)
     if (stamp.textContent !== ` · ${when.text}`) stamp.textContent = ` · ${when.text}`
