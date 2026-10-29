@@ -43,6 +43,26 @@ defmodule Shuttle.FileTailTest do
     assert FileTail.advance(path, new_offset) == :noop
   end
 
+  test "a capped advance stops at the last newline within the cap", %{path: path} do
+    File.write!(path, "start\na\nb\npartial\n")
+    assert {:append, ["a", "b"], 10} = FileTail.advance(path, 6, max_bytes: 7)
+    assert {:append, ["partial"], 18} = FileTail.advance(path, 10, max_bytes: 7)
+  end
+
+  test "a line longer than the cap is read whole, with complete remainder lines", %{path: path} do
+    File.write!(path, "long line\nnext\npartial")
+    assert {:append, ["long line", "next"], 15} = FileTail.advance(path, 0, max_bytes: 4)
+    assert :noop = FileTail.advance(path, 15, max_bytes: 4)
+    File.write!(path, "\n", [:append])
+    assert {:append, ["partial"], 23} = FileTail.advance(path, 15, max_bytes: 4)
+  end
+
+  test "advance without a cap or with a nil cap reads the full remainder", %{path: path} do
+    File.write!(path, "a\nb\npartial")
+    assert {:append, ["a", "b"], 4} = FileTail.advance(path, 0)
+    assert {:append, ["a", "b"], 4} = FileTail.advance(path, 0, max_bytes: nil)
+  end
+
   test "advance holds back a partial append until its newline lands", %{path: path} do
     File.write!(path, "a\n")
     assert FileTail.advance(path, 2) == :noop

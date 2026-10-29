@@ -27,6 +27,7 @@ defmodule Shuttle.FileTail do
   stop at the **last newline** and leave the remainder unconsumed, so the next
   poll re-reads that record whole. Advancing past it would silently drop the
   event; re-reading it costs one short read.
+  An optional read cap bounds each advance unless a line exceeds it.
 
   ## Shrink is the caller's decision
 
@@ -97,11 +98,20 @@ defmodule Shuttle.FileTail do
   """
   @spec advance(Path.t(), offset()) ::
           {:append, [String.t()], offset()} | {:reset, offset()} | :noop
-  def advance(path, offset) do
+  def advance(path, offset), do: advance(path, offset, [])
+
+  @spec advance(Path.t(), offset(), keyword()) ::
+          {:append, [String.t()], offset()} | {:reset, offset()} | :noop
+  def advance(path, offset, opts) do
     case File.stat(path) do
-      {:ok, %{size: size}} when size > offset -> read_appended(path, offset, size - offset)
-      {:ok, %{size: size}} when size < offset -> {:reset, size}
-      _ -> :noop
+      {:ok, %{size: size}} when size > offset ->
+        read_appended(path, offset, size - offset, opts[:max_bytes])
+
+      {:ok, %{size: size}} when size < offset ->
+        {:reset, size}
+
+      _ ->
+        :noop
     end
   end
 
@@ -134,16 +144,25 @@ defmodule Shuttle.FileTail do
     end
   end
 
-  defp read_appended(path, offset, length) do
-    case read_range(path, offset, length) do
-      {:ok, chunk} ->
-        case split_complete(chunk) do
-          {[], _} -> :noop
-          {lines, consumed} -> {:append, lines, offset + consumed}
-        end
+  defp read_appended(path, offset, length, max_bytes) do
+    capped_length = if is_nil(max_bytes), do: length, else: min(length, max_bytes)
 
-      _ ->
-        :noop
+    with {:ok, chunk} <- read_range(path, offset, capped_length),
+         {:ok, chunk} <- maybe_read_remainder(path, offset, length, capped_length, chunk) do
+      case split_complete(chunk) do
+        {[], _} -> :noop
+        {lines, consumed} -> {:append, lines, offset + consumed}
+      end
+    else
+      _ -> :noop
+    end
+  end
+
+  defp maybe_read_remainder(path, offset, length, capped_length, chunk) do
+    if capped_length < length and :binary.match(chunk, "\n") == :nomatch do
+      read_range(path, offset, length)
+    else
+      {:ok, chunk}
     end
   end
 
