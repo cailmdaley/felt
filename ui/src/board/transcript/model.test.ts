@@ -86,6 +86,17 @@ describe('TranscriptModel', () => {
     expect(messages).toMatchObject([{ status: 'uncertain' }])
   })
 
+  it.each([
+    ['accepted', 0, 'sent'],
+    ['unknown', 1, 'uncertain'],
+  ] as const)('matches a custom message ID in an explicit %s receipt', (status, exitCode, expected) => {
+    const command = 'shuttle message --message-id follow-up work/child "Ready."'
+    const receipt = `${status} shuttle://host/codex/session (follow-up)`
+    const output = `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({ exit_code: exitCode, output: receipt })}`
+    const messages = modelAfterCodexExec([command], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: expected }])
+  })
+
   it('uses explicit indices when concurrent nested commands finish out of order', () => {
     const first = 'shuttle message work/first "First result."'
     const second = 'shuttle message work/second "Second result."'

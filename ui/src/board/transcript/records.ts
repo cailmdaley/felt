@@ -104,13 +104,30 @@ function resultContent(value: unknown): { text: string; images: number; pictures
 }
 
 const ACCEPTED_MESSAGE_STATUSES = new Set(['accepted', 'submitted', 'queued', 'context_added', 'subscribed', 'queued_for_next_worker'])
+const UNKNOWN_MESSAGE_STATUSES = new Set(['unknown'])
 
-function acceptedMessageIds(text: string): string[] {
-  const ids = new Set([...text.matchAll(/\b(?:accepted|submitted|queued|context_added|subscribed|queued_for_next_worker)\b[^\r\n]*?\b(msg-[\w-]+)\b/g)].map(match => match[1]))
+function parenthesizedReceiptId(line: string): string | undefined {
+  const value = line.trimEnd()
+  if (!value.endsWith(')')) return undefined
+  let depth = 0
+  for (let index = value.length - 1; index >= 0; index--) {
+    if (value[index] === ')') depth++
+    else if (value[index] === '(' && --depth === 0) return value.slice(index + 1, -1).trim() || undefined
+  }
+  return undefined
+}
+
+function receiptMessageIds(text: string, statuses: Set<string>): string[] {
+  const ids = new Set<string>()
   for (const line of text.split(/\r?\n/)) {
+    const status = /^\s*([a-z_]+)\b/i.exec(line)?.[1]?.toLowerCase()
+    if (status && statuses.has(status)) {
+      const id = parenthesizedReceiptId(line)
+      if (id) ids.add(id)
+    }
     try {
       const receipt = object(JSON.parse(line))
-      if (receipt && ACCEPTED_MESSAGE_STATUSES.has(string(receipt.status) ?? '') && typeof receipt.message_id === 'string' && receipt.message_id.startsWith('msg-')) {
+      if (receipt && statuses.has(string(receipt.status) ?? '') && typeof receipt.message_id === 'string' && receipt.message_id.length > 0) {
         ids.add(receipt.message_id)
       }
     } catch { /* Plain text receipts use the status line above. */ }
@@ -118,17 +135,12 @@ function acceptedMessageIds(text: string): string[] {
   return [...ids]
 }
 
+function acceptedMessageIds(text: string): string[] {
+  return receiptMessageIds(text, ACCEPTED_MESSAGE_STATUSES)
+}
+
 function unknownMessageIds(text: string): string[] {
-  const ids = new Set([...text.matchAll(/^\s*unknown\s+[^\r\n]*?\((msg-[\w-]+)\)\s*$/gim)].map(match => match[1]))
-  for (const line of text.split(/\r?\n/)) {
-    try {
-      const receipt = object(JSON.parse(line))
-      if (receipt && string(receipt.status) === 'unknown' && typeof receipt.message_id === 'string' && receipt.message_id.startsWith('msg-')) {
-        ids.add(receipt.message_id)
-      }
-    } catch { /* Plain text receipts use the status line above. */ }
-  }
-  return [...ids]
+  return receiptMessageIds(text, UNKNOWN_MESSAGE_STATUSES)
 }
 
 function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {

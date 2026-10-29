@@ -117,6 +117,12 @@ describe('Shuttle messages in transcripts', () => {
       type: 'tool_use', id: 'literal-heredoc', name: 'Bash', input: { command },
     }] } })
     expect(entries[0]).toMatchObject({ kind: 'shuttle-message', text: literal })
+
+    const stdin = `shuttle message work/child - <<'BODY'\n$(cat <<'EOF'\nA literal code example.\nEOF\n)\nBODY`
+    const fromStdin = normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'stdin-literal-heredoc', name: 'Bash', input: { command: stdin },
+    }] } })
+    expect(fromStdin[0]).toMatchObject({ kind: 'shuttle-message', text: "$(cat <<'EOF'\nA literal code example.\nEOF\n)" })
   })
 
   it('does not absorb redirects or pipeline commands into the message text', () => {

@@ -154,16 +154,32 @@ function expandCatHereDocs(source: string): { source: string; substitutions: Map
   let next = 0
   let output = ''
   let quote = ''
-  for (let index = 0; index < source.length; index++) {
+  const pending: Array<{ delimiter: string; stripTabs: boolean }> = []
+  let index = 0
+  while (index < source.length) {
+    if (pending.length && (index === 0 || source[index - 1] === '\n')) {
+      const newline = source.indexOf('\n', index)
+      const end = newline < 0 ? source.length : newline
+      const line = source.slice(index, end).replace(/\r$/, '')
+      const current = pending[0]
+      const comparable = current.stripTabs ? line.replace(/^\t+/, '') : line
+      output += source.slice(index, newline < 0 ? source.length : newline + 1)
+      if (comparable === current.delimiter) pending.shift()
+      index = newline < 0 ? source.length : newline + 1
+      continue
+    }
+
     const char = source[index]
     if (quote === "'") {
       output += char
       if (char === "'") quote = ''
+      index++
       continue
     }
     if (char === '\\') {
       output += char
       if (index + 1 < source.length) output += source[++index]
+      index++
       continue
     }
     if (quote === '"') {
@@ -177,11 +193,19 @@ function expandCatHereDocs(source: string): { source: string; substitutions: Map
         const marker = `__FELT_HEREDOC_${next++}__`
         substitutions.set(marker, match[3])
         output += marker
-        index += match[0].length - 1
+        index += match[0].length
         continue
       }
     }
+    if (!quote && char === '<' && source[index + 1] === '<' && source[index + 2] !== '<') {
+      const lineStart = source.lastIndexOf('\n', index - 1) + 1
+      const lineEnd = source.indexOf('\n', index)
+      const line = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd)
+      const heredoc = readHereDocDelimiter(line, index - lineStart)
+      if (heredoc) pending.push({ delimiter: heredoc.delimiter, stripTabs: heredoc.stripTabs })
+    }
     output += char
+    index++
   }
   return { source: output, substitutions }
 }
