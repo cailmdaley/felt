@@ -58,6 +58,7 @@ export function addThreadFixtures(example: WorkspaceExample, now: number, many =
         tempered: slug === 'archive' ? true : slug === 'discard' ? false : undefined,
         outcome: `${name}: evidence and next steps are ready.`,
         shuttle: slug === 'draft' ? { kind: 'oneshot' } : { kind: 'oneshot', host: WORKSPACE_HOST, agent: 'codex-sol', project_dir: '/fixture-project',
+          ...(slug === 'rest' ? { role: 'surveyor', seat: true } : {}),
           ask: phase === 'attention' ? { text: 'Which cut should we use?', at: new Date(now - 120000).toISOString() } : undefined },
       },
       runtime: phase ? { state: 'running', phase, session_uuid: `session-${slug}` } : null,

@@ -217,8 +217,10 @@ export function formatMeetingDuration(startedAt: string | null, nowMs = Date.now
  */
 export function meetingHostCard(meeting: MeetingRecord | null, cards: Iterable<KanbanCard>): KanbanCard | null {
   if (!meeting?.fiber) return null
-  for (const card of cards) if (card.id === meeting.fiber) return card
-  return null
+  const candidates = [...cards].filter(card => card.id === meeting.fiber || card.uid === meeting.fiber)
+  const owner = meeting.mirror_host ?? meeting.recorder
+  if (owner) return candidates.find(card => card.originId === owner) ?? null
+  return candidates[0] ?? null
 }
 
 export interface TranscriptLine {

@@ -33,13 +33,13 @@
 
 /* Verdict verbs wear their pigment wherever the workspace offers them (the
    recipe and pigments live with the Desk's, in KanbanModal.css). */
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
   color: var(--verdict-ink); background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
 }
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
   color: var(--verdict-ink); background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
 }
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):focus-visible {
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):focus-visible {
   outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
 }
 .ws-verdict-word { color: var(--verdict-ink); }

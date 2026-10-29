@@ -4,6 +4,7 @@ import {
   joinDeliveryPhrase,
   meetingJoinable,
   meetingActions,
+  meetingHostCard,
   meetingDuration,
   meetingPollDelay,
   meetingStateWord,
@@ -60,6 +61,13 @@ describe('joining a meeting to a constitution', () => {
     expect(joinDeliveryPhrase('message')).toBe('its worker has the meeting')
     expect(joinDeliveryPhrase('resume')).toBe('resumed with the meeting')
     expect(joinDeliveryPhrase('dispatch')).toBe('started with the meeting')
+  })
+
+  it('resolves duplicate fiber ids on the meeting owner and never another origin', () => {
+    const local = { id: 'work/run', uid: 'run', originId: 'local', shuttleHost: 'local' } as KanbanCard
+    const remote = { id: 'work/run', uid: 'run', originId: 'cluster', shuttleHost: 'cluster' } as KanbanCard
+    expect(meetingHostCard(meeting({ fiber: 'work/run', mirror_host: 'cluster' }), [local, remote])).toBe(remote)
+    expect(meetingHostCard(meeting({ fiber: 'work/run', recorder: 'missing-host' }), [local, remote])).toBeNull()
   })
 })
 

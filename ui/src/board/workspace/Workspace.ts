@@ -14,7 +14,8 @@ import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
 import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
-import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, chatDocument, chatKey, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { meetingHostCard, type MeetingRecord } from '../meeting.js'
 import { buildFiberProse } from './FiberProse.js'
 import { bindConstitutionMentions } from './bodyLinks.js'
 import { frameBridge } from './DocumentBridge.js'
@@ -133,6 +134,13 @@ export class Workspace {
     this.origin = opts.origin()
     this.history = new WorkspaceHistory(route => { void this.applyRoute(route) })
     this.dock = opts.dock
+    const meetingHost = (meeting: MeetingRecord): KanbanCard | undefined => meetingHostCard(meeting, this.opts.cards()) ?? undefined
+    this.dock.setMeetingHostOpen(meeting => {
+      if (!meeting.fiber) return
+      const host = meetingHost(meeting)
+      if (host) this.open(host, this.origin, chatKey(host.originId, host.uid ?? host.id), this.overview.hasMetadata(host), false)
+      else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
+    }, meeting => meetingHost(meeting)?.name)
     this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.overview = new Overview({

@@ -478,6 +478,9 @@ export class Dock {
   private openConstitution: (() => void) | null = null
   private meetingPaint: (() => void) | null = null
   private meetingChip: HTMLButtonElement | null = null
+  private meetingGlobalStop: HTMLButtonElement | null = null
+  private meetingPaneCollapsed = false
+  private meetingPaneIdentity: string | null = null
   private dismissMeetingOverflow: (() => boolean) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
@@ -507,6 +510,8 @@ export class Dock {
   private readonly onOpenWorker?: (tmuxSessionName: string, shuttleHost?: string) => void
   private readonly meeting: MeetingJoinControl | null
   private readonly onRest?: (card: KanbanCard, anchor: HTMLElement) => void
+  private onMeetingHostOpen?: (meeting: MeetingRecord) => void
+  private meetingHostName?: (meeting: MeetingRecord) => string | undefined
 
   constructor(
     shuttleBase: string,
@@ -521,6 +526,12 @@ export class Dock {
     this.onOpenWorker = onWorkerOpen
     this.meeting = opts.meeting ?? null
     this.onRest = opts.onRest
+  }
+
+  setMeetingHostOpen(open: (meeting: MeetingRecord) => void, hostName?: (meeting: MeetingRecord) => string | undefined): void {
+    this.onMeetingHostOpen = open
+    this.meetingHostName = hostName
+    for (const band of this.bands.values()) band.setMeetingHostOpen(open, hostName)
   }
 
   /** The chat's element, built on first use so controls can be exercised without a page. */
@@ -630,6 +641,7 @@ export class Dock {
     if (!band) {
       band = new Dock(this.shuttleBase, this.onSaved, this.onTransition, this.onOpenWorker,
         { meeting: this.meeting ?? undefined, onRest: this.onRest })
+      if (this.onMeetingHostOpen) band.setMeetingHostOpen(this.onMeetingHostOpen, this.meetingHostName)
       band.setVerdictQueue(this.queueVerdict)
       this.bands.set(key, band)
     }
@@ -668,6 +680,9 @@ export class Dock {
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     this.meetingChip = null
+    this.meetingGlobalStop = null
+    this.meetingPaneCollapsed = false
+    this.meetingPaneIdentity = null
     for (const timer of this.timers) window.clearTimeout(timer)
     this.timers.clear()
     this.composerSend = null
@@ -777,27 +792,42 @@ export class Dock {
     for (const band of this.bands.values()) band.syncMeeting()
     this.meetingPaint?.()
     const current = this.meeting?.current() ?? null
+    const identity = current ? `${current.fiber ?? ''}\0${current.started_at ?? ''}\0${current.title ?? ''}` : null
+    if (identity !== this.meetingPaneIdentity) {
+      this.meetingPaneIdentity = identity
+      this.meetingPaneCollapsed = false
+    }
     if (this.meetingChip) {
       if (current) {
         const chipHosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
         const title = current.title?.trim() || 'Meeting'
-        this.meetingChip.hidden = !chipHosted || current.state === 'failed'
-        this.meetingChip.disabled = !chipHosted || current.state === 'failed'
-        this.meetingChip.textContent = `Meeting · ${title}`
-        this.meetingChip.title = `Meeting hosted by this constitution: ${title}`
+        this.meetingChip.hidden = current.state === 'failed'
+        this.meetingChip.disabled = current.state === 'failed'
+        const host = chipHosted ? null : this.meetingHostName?.(current) ?? current.fiber?.split('/').at(-1)
+        this.meetingChip.textContent = host ? `Recording · ${host}` : `Meeting · ${title}`
+        this.meetingChip.title = host ? `Open meeting host: ${current.fiber}` : `Toggle meeting transcript: ${title}`
         this.meetingChip.setAttribute('aria-label', this.meetingChip.title)
       } else this.meetingChip.hidden = true
+    }
+    if (this.meetingGlobalStop) {
+      const actions = current && this.meeting?.stop ? meetingActions(current, this.meeting.stopRequested?.(current) ?? false) : null
+      const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
+      this.meetingGlobalStop.hidden = !actions || (hosted && !this.meetingPaneCollapsed)
+      if (actions) {
+        this.meetingGlobalStop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
+        this.meetingGlobalStop.disabled = actions.stopDisabled
+      }
     }
     const pane = this.transcriptPane
     const card = this.transcriptCard
     if (!pane || !card) return
     const meeting = this.meeting?.current() ?? null
     const hosted = meetingHostCard(meeting, [card]) !== null
-    pane.hidden = !hosted || meeting === null
+    pane.hidden = !hosted || meeting === null || this.meetingPaneCollapsed
     if (!meeting || !hosted) return
     const actions = this.meeting?.stop ? meetingActions(meeting, this.meeting.stopRequested?.(meeting) ?? false) : null
     const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
-    stop.hidden = !actions
+    stop.hidden = !actions || this.meetingPaneCollapsed
     if (actions) {
       stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
       stop.disabled = actions.stopDisabled
@@ -1146,13 +1176,11 @@ export class Dock {
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
     header.append(lead, identity, refs, leave, this.head)
-    let iconLayout = -1
+    let settingsInTitleRow = false
     const placeIcons = (): void => {
       const mobile = isMobileViewport()
       const compact = !mobile && header.clientWidth > 0 && header.clientWidth <= 560
       const layout = mobile ? 0 : compact ? 1 : 2
-      if (layout === iconLayout) return
-      iconLayout = layout
       const active = document.activeElement
       const focused = active instanceof HTMLElement && [constitutionItem, consoleItem, settingsItem, verdict].some(control => control.contains(active)) ? active : null
       if (this.header) this.header.dataset.compact = String(layout < 2)
@@ -1166,7 +1194,21 @@ export class Dock {
       }
       place(overflow, [consoleItem])
       place(identity, [title])
-      if (mobile) place(this.head, [status, verdict, settingsItem, refs])
+      if (mobile) {
+        const settingsWidth = settingsItem.getBoundingClientRect().width
+        if (settingsInTitleRow && this.head.scrollWidth + settingsWidth + 4 <= this.head.clientWidth) settingsInTitleRow = false
+        if (settingsInTitleRow) {
+          place(header, [lead, identity, settingsItem, leave, this.head])
+          place(this.head, [status, verdict, refs])
+        } else {
+          place(this.head, [status, verdict, settingsItem, refs])
+          if (this.head.scrollWidth > this.head.clientWidth + 1) {
+            settingsInTitleRow = true
+            place(header, [lead, identity, settingsItem, leave, this.head])
+            place(this.head, [status, verdict, refs])
+          }
+        }
+      }
       else if (compact) place(this.head, [status, verdict, refs, settingsItem])
       else {
         place(this.head, [status, verdict])
@@ -1318,23 +1360,11 @@ export class Dock {
       const armed = this.meetingArmed()
       const freshLabel = armed ? 'New session ⌥↵' : live ? 'New session' : resumable ? 'New session ↵' : deskColumn(card) === 'drafts' ? 'Launch ↵' : 'Start ↵'
       const resumeLabel = armed ? (live ? 'Send' : 'Resume') : live ? 'Send ↵' : 'Resume ⌥↵'
-      const paintLabel = (button: HTMLButtonElement, label: string): void => {
-        if (this.blockedDispatches.has(button)) return
-        const shortcut = label.match(/ (?:⌥)?↵$/)?.[0]
-        if (button.textContent === label && (!shortcut || button.querySelector('.kbn-ctl-shortcut'))) return
-        button.textContent = shortcut ? label.slice(0, -shortcut.length) : label
-        if (shortcut) {
-          const hint = document.createElement('span')
-          hint.className = 'kbn-ctl-shortcut'
-          hint.textContent = shortcut
-          button.append(hint)
-        }
-      }
-      paintLabel(fresh, freshLabel)
-      paintLabel(resume, resumeLabel)
-      if (meetingStartButton) paintLabel(meetingStartButton, 'Start meeting ↵')
+      this.paintLabel(fresh, freshLabel)
+      this.paintLabel(resume, resumeLabel)
+      if (meetingStartButton) this.paintLabel(meetingStartButton, 'Start meeting ↵')
       fresh.classList.toggle('kbn-ctl-secondary', live || armed)
-      fresh.title = armed ? 'Start a new session (⌥↵)' : live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
+      fresh.title = armed ? `Start a new session (⌥↵)${live ? ', cutting the live worker' : ''}` : live ? 'Start a new session, cutting the live worker (⌥↵)' : resumable ? 'Start a new session (↵)' : ''
       if (meetingStartButton) meetingStartButton.title = 'Start meeting (↵)'
       resume.classList.toggle('kbn-ctl-secondary', armed || (resumable && !live))
       resume.title = armed ? (live ? 'Send the message to the live worker' : 'Resume the previous session')
@@ -1438,17 +1468,35 @@ export class Dock {
     meetingOverflow.append(more, meetingPanel)
     const meetChip = document.createElement('button')
     meetChip.type = 'button'
-    meetChip.className = 'kbn-ctl-meet-chip'
+    meetChip.className = 'kbn-ctl-btn kbn-ctl-meet-chip'
     meetChip.hidden = true
     meetChip.disabled = true
     meetChip.addEventListener('click', () => {
       const pane = this.transcriptPane
-      if (!pane || !this.meeting?.current()) return
-      pane.hidden = false
+      const current = this.meeting?.current()
+      if (!current) return
+      if (this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) === null) {
+        this.onMeetingHostOpen?.(current)
+        return
+      }
+      if (!pane) return
+      this.meetingPaneCollapsed = !pane.hidden
+      pane.hidden = !pane.hidden
+      if (this.meetingGlobalStop) this.meetingGlobalStop.hidden = !pane.hidden
+      if (pane.hidden) return
       pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')?.focus({ preventScroll: true })
-      pane.scrollIntoView({ block: 'nearest' })
+      pane.scrollIntoView?.({ block: 'nearest' })
     })
     this.meetingChip = meetChip
+    const meetingStop = ctlButton('Stop', 'kbn-detail-transcript-stop kbn-ctl-meet-stop')
+    meetingStop.hidden = true
+    meetingStop.addEventListener('click', event => {
+      event.stopPropagation()
+      const current = this.meeting?.current()
+      if (!current || this.meeting?.stopRequested?.(current)) return
+      void this.meeting?.stop?.(current)
+    })
+    this.meetingGlobalStop = meetingStop
     const dismissMenu = (): boolean => {
       if (!meetingOverflow.open) return false
       meetingOverflow.open = false
@@ -1478,7 +1526,7 @@ export class Dock {
     }) : null
     meetingStartButton = meeting?.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start') ?? undefined
     if (meeting) meetingPanel.append(meeting)
-    foot.append(meetingOverflow, meetChip, sends)
+    foot.append(meetingOverflow, meetChip, meetingStop, sends)
 
     this.composerSend = send
     this.composerError = err
@@ -1542,6 +1590,20 @@ export class Dock {
     return composeDirective(text, await uploadPastedImages(this.shuttleBase, card, images.list))
   }
 
+  private paintLabel(button: HTMLButtonElement, label: string): void {
+    if (this.blockedDispatches.has(button)) return
+    const shortcut = label.match(/ (?:⌥)?↵$/)?.[0]
+    const visible = shortcut ? label.slice(0, -shortcut.length) : label
+    if (button.textContent === visible && (!shortcut || button.querySelector('.kbn-ctl-shortcut'))) return
+    button.textContent = visible
+    if (shortcut) {
+      const hint = document.createElement('span')
+      hint.className = 'kbn-ctl-shortcut'
+      hint.textContent = shortcut
+      button.append(hint)
+    }
+  }
+
   /**
    * Meeting, for this constitution: a switch in the composer's control row.
    * Off by default. On, Enter and the primary composer button start recording on the
@@ -1572,18 +1634,20 @@ export class Dock {
     toggle.append(input, track, word)
     const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
     const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
-    const startInMenu = ctlButton('Start meeting', 'kbn-ctl-send kbn-ctl-meet-start kbn-ctl-meet-primary')
-    startInMenu.setAttribute('aria-label', 'Start meeting')
+    const startButton = ctlButton('Start meeting', 'kbn-ctl-send kbn-ctl-meet-start kbn-ctl-meet-primary')
+    startButton.setAttribute('aria-label', 'Start meeting')
     let starting = false
+    let armed = false
     const arm = (on: boolean): void => {
+      armed = on
       input.checked = on
       wrap.classList.toggle('kbn-ctl-meet-on', on)
-      startInMenu.hidden = !on
+      startButton.hidden = !on
       onArm(on, wrap)
     }
     arm(false)
     input.addEventListener('change', () => arm(input.checked))
-    this.meetingArmed = () => input.checked && !input.disabled
+    this.meetingArmed = () => armed
 
 
     const paint = (): void => {
@@ -1596,7 +1660,7 @@ export class Dock {
       const recording = current !== null && current.state !== 'failed'
       const held = starting || send.busy() || !canJoin()
       input.disabled = held
-      startInMenu.disabled = held
+      startButton.disabled = held
       toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
       if (!canJoin() && input.checked && !starting) arm(false)
     }
@@ -1606,7 +1670,7 @@ export class Dock {
       if (!input.checked || starting || send.busy() || !canJoin()) return
       starting = true
       send.setBusy(true)
-      startInMenu.textContent = 'Starting…'
+      this.paintLabel(startButton, 'Starting…')
       err.style.display = 'none'
       // The join is called inside the press's gesture, so Phone can open the
       // mic; it resolves the note (uploading any images) after that.
@@ -1632,14 +1696,14 @@ export class Dock {
         err.style.display = ''
       }).finally(() => {
         starting = false
-        startInMenu.textContent = 'Start meeting'
+        this.paintLabel(startButton, 'Start meeting')
         if (began && epoch === this.epoch) arm(false)
         send.setBusy(false)
       })
     }
     this.meetingStart = start
-    startInMenu.addEventListener('click', e => { e.stopPropagation(); start() })
-    wrap.append(toggle, startInMenu)
+    startButton.addEventListener('click', e => { e.stopPropagation(); start() })
+    wrap.append(toggle, startButton)
     paint()
     return wrap
   }

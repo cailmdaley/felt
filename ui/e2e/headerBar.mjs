@@ -184,20 +184,25 @@ export function registerHeaderBarJourneys(test) {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle:workspace:rail', 'false')
+      localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
     })
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
     const assertActions = async expected => {
       assert.deepEqual(await visibleHeaderVerbs(header), expected)
-      for (const selector of ['.ws-chat-standing', '.kbn-ctl-verdict', '.ws-chat-settings', '.ws-chat-refs']) {
+      for (const selector of ['.ws-chat-standing', '.kbn-ctl-verdict', '.ws-chat-refs']) {
         const box = await header.locator(selector).boundingBox()
         assert.ok(box && box.width > 0 && box.x >= 0 && box.x + box.width <= 390, `${selector} is visible within the phone header: ${JSON.stringify(box)}`)
         assert.ok(await header.locator(selector).evaluate(el => el.parentElement === el.closest('.ws-chat-head').querySelector('.ws-chat-acts')), `${selector} stays in the phone action row`)
       }
+      const settings = header.locator('.ws-chat-settings')
+      const settingsBox = await settings.boundingBox()
+      assert.ok(settingsBox && settingsBox.x >= 0 && settingsBox.x + settingsBox.width <= 390, `Settings stays available in the phone header: ${JSON.stringify(settingsBox)}`)
+      assert.ok(await settings.evaluate(el => [el.closest('.ws-chat-head'), el.closest('.ws-chat-acts')].includes(el.parentElement)), 'Settings either stays with the actions or moves to the title row')
       const row = await header.locator('.ws-chat-acts').boundingBox()
       const centers = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
-      assert.ok(centers.length >= 4 && Math.max(...centers) - Math.min(...centers) < 1, `all phone actions share row two: ${centers}`)
+      assert.ok(centers.length >= 3 && Math.max(...centers) - Math.min(...centers) < 1, `state verbs and references share row two: ${centers}`)
       assert.ok(row && row.x + row.width <= 390)
     }
     await assertActions(['Temper', 'Discard'])
@@ -205,6 +210,14 @@ export function registerHeaderBarJourneys(test) {
     await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     await assertActions(['Close for review', 'Rest'])
+    await page.locator('.ws-rail-toggle').click()
+    await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Next validation' }).click()
+    await header.getByRole('heading', { name: 'Next validation', exact: true }).waitFor()
+    await assertActions(['Resume', 'New session'])
+    if (process.env.WORKSPACE_SHOTS) {
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'resting-seat-phone-light.png') })
+    }
   }, { width: 390, height: 844 })
   test('Composer footer stays on one row and its Meeting menu fits at every width', async page => {
     await page.addInitScript(() => {
@@ -251,6 +264,7 @@ export function registerHeaderBarJourneys(test) {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle:workspace:rail', 'false')
+      localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: 'light' }))
     })
     await page.goto(`${url}&meeting=idle`)
     await openRoot(page)
@@ -259,13 +273,47 @@ export function registerHeaderBarJourneys(test) {
     await composer.getByRole('switch').check()
     await composer.getByRole('button', { name: 'Start meeting', exact: true }).click()
     const menu = composer.locator('.kbn-ctl-meet-overflow')
-    await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-stop')?.checkVisibility())
+    await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')?.checkVisibility())
     if (await menu.evaluate(el => el.open)) await menu.locator('summary').click()
     assert.equal(await menu.evaluate(el => el.open), false)
-    const stop = page.locator('.ws-selected .kbn-detail-transcript-stop')
+    const stop = page.locator('.ws-selected .kbn-detail-transcript-meta .kbn-detail-transcript-stop')
     await stop.waitFor({ state: 'visible' })
     assert.equal(await stop.innerText(), 'Stop')
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
+    const chip = composer.locator('.kbn-ctl-meet-chip')
+    await chip.click()
+    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isHidden())
+    const globalStop = composer.locator('.kbn-ctl-meet-stop')
+    await globalStop.waitFor({ state: 'visible' })
+    assert.equal(await globalStop.innerText(), 'Stop')
+    await chip.click()
+    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
+    for (const width of [1440, 701, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      const actions = page.locator('.ws-selected .ws-chat-acts')
+      const geometry = await actions.evaluate(el => {
+        const box = el.getBoundingClientRect()
+        const children = [...el.children].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
+        return { box: { left: box.left, right: box.right }, children }
+      })
+      assert.ok(geometry.children.every(box => box.left >= geometry.box.left - 1 && box.right <= geometry.box.right + 1), `actions fit at ${width}: ${JSON.stringify(geometry)}`)
+      if (process.env.WORKSPACE_SHOTS) {
+        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `meeting-live-${width}-light.png`) })
+      }
+    }
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.locator('.ws-chat-leave').click()
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    const foreignHeader = page.locator('.ws-selected .ws-chat-head')
+    await foreignHeader.getByRole('heading', { name: 'Remote covariance review', exact: true }).waitFor()
+    const foreignChip = page.locator('.ws-selected .kbn-ctl-meet-chip')
+    await foreignChip.waitFor({ state: 'visible' })
+    assert.equal(await foreignChip.innerText(), 'Recording · Calibrate the shear response across independent sky patches and validate each redshift bin')
+    assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-stop').innerText(), 'Stop')
+    await foreignChip.click()
+    await foreignHeader.getByRole('heading', { name: title, exact: true }).waitFor()
+    assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible(), 'the chip opens on the meeting host chat')
   }, { width: 1000, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
     await page.addInitScript(() => {

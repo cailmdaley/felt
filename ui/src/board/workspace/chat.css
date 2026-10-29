@@ -99,7 +99,7 @@
 .ws-reader .ws-header-icon[hidden] { display: none; }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
-:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
 .ws-header-overflow { display: flex; align-items: center; gap: 8px; }
 .ws-header-overflow:empty { display: none; }
 .ws-settings-menu .ws-header-overflow { padding: 4px 8px; border-bottom: 1px solid var(--ws-hairline-soft); }
@@ -207,7 +207,7 @@
 .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { min-width: 0; max-width: 100%; box-sizing: border-box; flex-wrap: nowrap; justify-content: flex-start; container-type: inline-size; }
 .ws-chat .kbn-ctl-meet-panel { width: min(320px, 100cqw); }
 .ws-chat .ws-chat-compose .kbn-ctl-sends { min-width: 0; max-width: 100%; flex: none; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; }
-.ws-chat .ws-chat-compose .kbn-ctl-meet-chip { display: block; flex: 0 1 auto; min-width: 0; max-width: min(18ch, 35%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-muted); font: var(--type-meta)/1.2 var(--font-serif); }
+.ws-chat .ws-chat-compose .kbn-ctl-meet-chip { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .ws-chat .ws-chat-compose .kbn-ctl-meet-chip[hidden] { display: none; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends > .kbn-ctl-btn { min-width: 0; max-width: 100%; }
 .ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-composer-foot { flex-wrap: wrap; }
@@ -260,14 +260,15 @@
   /* A page without a back destination keeps the title inset. */
   .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
-  .ws-chat-head { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: 'lead identity identity leave' 'acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
+  .ws-chat-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: 'lead identity settings leave' 'acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
   .ws-chat-acts { justify-content: flex-start; }
   .ws-chat-acts > .ws-chat-settings { width: 36px; height: var(--ws-phone-target); }
   .ws-chat-acts > .ws-chat-refs { justify-self: end; gap: 2px; margin-left: 0; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
   .ws-chat-head > .ws-chat-leave { align-self: center; }
   .ws-chat-title { -webkit-line-clamp: 2; }
-  .ws-chat-acts { flex-wrap: wrap; }
+  .ws-chat-acts { flex-wrap: nowrap; }
+  .ws-chat-acts > .kbn-ctl-verdict { flex-wrap: nowrap; white-space: nowrap; }
   .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }
   .ws-chat-title { font-size: var(--type-label); }
   .ws-chat-state { margin: 0; padding: 0; line-height: 1.2; letter-spacing: 0; }
