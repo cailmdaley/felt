@@ -975,7 +975,7 @@ deploy_remote() {
     rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:.config/shuttle/agents.json" \
       || { bad "could not sync remote agent registry"; return 1; }
   fi
-  run_on "$host" "$(config_migration_cmd 1 "$dir/bin/rel")" \
+  run_on_visible "$host" "$(config_migration_cmd 1 "$dir/bin/rel")" \
     || { bad "config migration or supervisor refresh failed on $host"; return 1; }
   local harness_failed=0
   refresh_harnesses "$host" "$dir" || harness_failed=1

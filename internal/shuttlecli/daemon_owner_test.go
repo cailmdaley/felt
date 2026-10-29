@@ -84,11 +84,26 @@ func TestSupervisorEndpointUsesManagerAndRenderedPort(t *testing.T) {
 	for _, tc := range []struct{ name, managerEnv, dropins, want string }{
 		{"caller override excluded", "", "", "tcp://127.0.0.1:4401"},
 		{"manager listen wins", "SHUTTLE_LISTEN=tcp://127.0.0.1:4410", "", "tcp://127.0.0.1:4410"},
-		{"dropin refused", "", "DropInPaths=/unit.d/local.conf", ""},
+		{"endpoint dropin refused", "", "DropInPaths=DIR/listen.conf", ""},
+		{"environment file dropin refused", "", "DropInPaths=DIR/host.conf DIR/envfile.conf", ""},
+		{"unreadable dropin refused", "", "DropInPaths=DIR/missing.conf", ""},
+		{"unrelated dropins kept", "", "DropInPaths=DIR/host.conf DIR/ld.conf", "tcp://127.0.0.1:4401"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := testEnv(t)
 			bin := t.TempDir()
+			unitDir := t.TempDir()
+			for name, body := range map[string]string{
+				"listen.conf":  "[Service]\nEnvironment=\"SHUTTLE_LISTEN=tcp://127.0.0.1:9\"\n",
+				"envfile.conf": "[Service]\nEnvironmentFile=/etc/shuttle.env\n",
+				"host.conf":    "[Unit]\n# shared home\nConditionHost=builder.example.org\n",
+				"ld.conf":      "[Service]\nEnvironment=\"LD_LIBRARY_PATH=/opt/lib\"\n",
+			} {
+				if err := os.WriteFile(filepath.Join(unitDir, name), []byte(body), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tc.dropins = strings.ReplaceAll(tc.dropins, "DIR", unitDir)
 			source := "#!/bin/sh\ncase \"$*\" in *DropInPaths*) echo '" + tc.dropins + "';; *show-environment*) echo '" + tc.managerEnv + "';; esac\n"
 			if err := os.WriteFile(filepath.Join(bin, "systemctl"), []byte(source), 0755); err != nil {
 				t.Fatal(err)

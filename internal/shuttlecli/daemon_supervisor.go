@@ -25,8 +25,12 @@ func (a *app) supervisorHostSettings(options supervisorOptions) (hostSettings, e
 			return hostSettings{}, fmt.Errorf("inspecting service overrides: %w", err)
 		}
 		for _, line := range strings.Split(string(dropins), "\n") {
-			if value, ok := strings.CutPrefix(line, "DropInPaths="); ok && strings.TrimSpace(value) != "" {
-				return hostSettings{}, fmt.Errorf("cannot safely refresh %s with systemd drop-ins; move its settings into install options or host.json first", systemdUnitName(options.Label))
+			if value, ok := strings.CutPrefix(line, "DropInPaths="); ok {
+				for _, path := range strings.Fields(value) {
+					if err := dropInLeavesEndpointAlone(path, keys); err != nil {
+						return hostSettings{}, fmt.Errorf("cannot safely refresh %s: drop-in %s %v; move it into install options or host.json first", systemdUnitName(options.Label), path, err)
+					}
+				}
 			}
 		}
 		out, err := a.env.Command("systemctl", "--user", "show-environment").Output()
@@ -61,6 +65,31 @@ func (a *app) supervisorHostSettings(options supervisorOptions) (hostSettings, e
 		env.Set("SHUTTLE_PORT", options.Port)
 	}
 	return newApp(env).resolveHostSettings()
+}
+
+// dropInLeavesEndpointAlone admits a drop-in that cannot change where the
+// daemon listens: unit conditions, library paths and the like survive a
+// refresh of the base unit untouched. One that sets an endpoint key, or loads
+// an environment file whose contents the refresh cannot see, is refused.
+func dropInLeavesEndpointAlone(path string, keys []string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("is unreadable (%v)", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "EnvironmentFile=") {
+			return fmt.Errorf("loads an environment file")
+		}
+		if value, ok := strings.CutPrefix(line, "Environment="); ok {
+			for _, key := range keys {
+				if strings.Contains(value, key+"=") {
+					return fmt.Errorf("sets %s", key)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // loop-present is shared by installation and the deploy script so they cannot
