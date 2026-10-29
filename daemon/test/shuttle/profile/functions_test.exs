@@ -9,10 +9,22 @@ defmodule Shuttle.Profile.FunctionsTest do
 
     try do
       state = Functions.start(session)
-      :trace.process(session, :all, true, [:call])
       assert {Jason, :encode!, 1} in state.active
 
-      {worker, monitor} = spawn_monitor(fn -> Jason.encode!(%{"probe" => true}) end)
+      test_pid = self()
+
+      {worker, monitor} =
+        spawn_monitor(fn ->
+          send(test_pid, {:worker_ready, self()})
+
+          receive do
+            :go -> Jason.encode!(%{"probe" => true})
+          end
+        end)
+
+      assert_receive {:worker_ready, ^worker}
+      :trace.process(session, worker, true, [:call])
+      send(worker, :go)
       assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}
 
       result = Functions.finish(session, state)
@@ -24,7 +36,7 @@ defmodule Shuttle.Profile.FunctionsTest do
       assert %{"function" => "Jason.encode!/1", "calls" => calls} =
                Enum.find(result["functions"], &(&1["function"] == "Jason.encode!/1"))
 
-      assert calls >= 1
+      assert calls == 1
       assert Enum.any?(result["top_process_functions"], &(&1["pid"] == inspect(worker)))
       assert is_binary(Jason.encode!(result))
     after

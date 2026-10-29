@@ -28,7 +28,9 @@ defmodule Shuttle.Profile.Functions do
     {ShuttleWeb.FiberDocumentsController, :composite, 2},
     {ShuttleWeb.RelayHelpers, :etag_hash, 1},
     {ShuttleWeb.ConditionalJSON, :send, 2},
+    {Shuttle.Runner.Default, :open_port, 3},
     {Jason, :encode!, 1},
+    {Jason, :decode!, 1},
     {:erlang, :term_to_binary, 1}
   ]
 
