@@ -2167,7 +2167,14 @@ defmodule Shuttle.AppWorkersTest do
       end
 
       if unquote(remote in [:not_loaded, :missing] or (remote == :idle and completion != :none)) do
-        assert nil == Poller.worker_status(poller, "tests/app")
+        # Boot retirement takes the terminal lock without waiting and retains on
+        # an uncertain read; a later poll's closure reconciliation retires it.
+        eventually(fn ->
+          send(poller, :run_poll_cycle)
+          :sys.get_state(poller)
+          Poller.worker_status(poller, "tests/app") == nil
+        end)
+
 
         assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
                  AppWorkers.get("app-session-1")
