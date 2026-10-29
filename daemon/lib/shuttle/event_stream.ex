@@ -2,7 +2,7 @@ defmodule Shuttle.EventStream do
   @moduledoc """
   The one reader of this host's hook-event stream (`~/.shuttle/events.jsonl`)
   and its rotated sibling `events.jsonl.1`. It reads each line once, decodes it
-  once, and hands the decoded event to four pure projections it holds in
+  once, and hands the decoded event to five pure projections it holds in
   memory:
 
     * `Shuttle.Activity` — the per-minute activity fold behind
@@ -11,7 +11,8 @@ defmodule Shuttle.EventStream do
     * `Shuttle.WaitingTracker` — explicit turn state per harness session UUID,
       stamped onto running cards as `last_event_at` and `phase`;
     * `Shuttle.SessionBinding` — receiver-process succession joining the
-      worker's persisted UUID to its current harness session.
+      worker's persisted UUID to its current harness session;
+    * `Shuttle.Board` — retained board records keyed by id.
 
   Every projection is a pure function of a prefix of the stream: the bytes
   below a given offset never change between rotations, so following the file
@@ -106,7 +107,8 @@ defmodule Shuttle.EventStream do
       offset: 0,
       sent_rotated: [],
       sent_live: [],
-      board: %{},
+      board_rotated: %{},
+      board_live: %{},
       waiting: %{},
       seed_events: nil,
       binding: SessionBinding.new()
@@ -349,7 +351,8 @@ defmodule Shuttle.EventStream do
 
   def handle_call({:board_records, path}, _from, %State{events_file: path} = state) do
     state = state |> follow() |> publish()
-    {:reply, {:ok, Board.prune(state.board, state.clock.())}, state}
+    records = state.board_rotated |> Map.merge(state.board_live) |> Board.prune(state.clock.())
+    {:reply, {:ok, records}, state}
   end
 
   def handle_call({:board_records, _other}, _from, state), do: {:reply, :miss, state}
@@ -372,7 +375,8 @@ defmodule Shuttle.EventStream do
 
     state = %{
       state
-      | board: Board.prune(state.board, state.clock.()),
+      | board_rotated: Board.prune(state.board_rotated, state.clock.()),
+        board_live: Board.prune(state.board_live, state.clock.()),
         waiting: WaitingTracker.prune(state.waiting, state.clock.()),
         binding: SessionBinding.prune(state.binding, state.clock.())
     }
@@ -397,7 +401,8 @@ defmodule Shuttle.EventStream do
       | activity: Activity.new_acc(),
         sent_rotated: [],
         sent_live: [],
-        board: %{},
+        board_rotated: %{},
+        board_live: %{},
         waiting: known,
         seed_events: [],
         binding: binding
@@ -408,7 +413,17 @@ defmodule Shuttle.EventStream do
     if inode != nil and FileTail.inode(rotated(path)) == inode do
       seed(state, binding, known)
     else
-      state = ingest(%{from_rotated | sent_rotated: from_rotated.sent_live, sent_live: []}, lines)
+      state =
+        ingest(
+          %{
+            from_rotated
+            | sent_rotated: from_rotated.sent_live,
+              sent_live: [],
+              board_rotated: from_rotated.board_live,
+              board_live: %{}
+          },
+          lines
+        )
 
       waiting =
         known
@@ -422,7 +437,8 @@ defmodule Shuttle.EventStream do
           waiting: waiting,
           seed_events: nil,
           binding: SessionBinding.prune(state.binding, now),
-          board: Board.prune(state.board, now)
+          board_rotated: Board.prune(state.board_rotated, now),
+          board_live: Board.prune(state.board_live, now)
       })
     end
   end
@@ -469,7 +485,9 @@ defmodule Shuttle.EventStream do
         state
         | activity: Activity.drop_before(state.activity, Activity.first_timestamp(rotated)),
           sent_rotated: state.sent_live,
-          sent_live: []
+          sent_live: [],
+          board_rotated: state.board_live,
+          board_live: %{}
       }
 
       # The inode comes from the open file, so it names the file these lines
@@ -512,7 +530,7 @@ defmodule Shuttle.EventStream do
       state
       | activity: Activity.fold_event(state.activity, event),
         sent_live: Enum.reverse(SentFiles.project(event), state.sent_live),
-        board: Board.fold(state.board, event),
+        board_live: Board.fold(state.board_live, event),
         binding: binding
     }
   end

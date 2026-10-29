@@ -3,6 +3,16 @@ defmodule Shuttle.BoardTest do
 
   alias Shuttle.{Board, EventStream}
 
+  test "the shared record fixture folds every board kind" do
+    records =
+      Path.expand("../fixtures/board/records.jsonl", __DIR__)
+      |> File.stream!()
+      |> Enum.reduce(%{}, fn line, acc -> Board.fold(acc, Jason.decode!(line)) end)
+
+    assert Enum.map(Board.since(records, 0), & &1["kind"]) ==
+             ~w(message post human asked answered cleared closed handed_off rested unblocked)
+  end
+
   test "folds by id, prunes and orders records" do
     now = System.system_time(:millisecond)
 
@@ -40,7 +50,7 @@ defmodule Shuttle.BoardTest do
     File.rename!(path, path <> ".1")
     File.write!(path, line.("d"))
     assert {:ok, records} = EventStream.board_records(name, path)
-    assert Map.keys(records) |> Enum.sort() == ["a", "b", "c", "d"]
+    assert Map.keys(records) |> Enum.sort() == ["b", "c", "d"]
     File.write!(path, "")
     assert {:ok, records} = EventStream.board_records(name, path)
     assert Map.keys(records) |> Enum.sort() == ["b", "c"]
