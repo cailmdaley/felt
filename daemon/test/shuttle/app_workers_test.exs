@@ -117,6 +117,7 @@ defmodule Shuttle.AppWorkersTest do
   # The App fake with one thread, "busy", in a running turn.
   defmodule BusyApp do
     def state("busy"), do: :running
+    def state("system-error"), do: :system_error
     def state(id), do: Shuttle.AppWorkersTest.App.state(id)
   end
 
@@ -2321,7 +2322,7 @@ defmodule Shuttle.AppWorkersTest do
     end
   end
 
-  test "sweep closes viewers of retired, quiet conversations even when attached" do
+  test "sweep closes viewers of retired and system-error conversations even when attached" do
     write = fn id, active ->
       :ok =
         AppWorkers.put(%{
@@ -2336,7 +2337,7 @@ defmodule Shuttle.AppWorkersTest do
     end
 
     viewers =
-      for id <- ~w(retired attached busy owned unknown) do
+      for id <- ~w(retired attached busy owned unknown system-error) do
         tmux = Shuttle.CodexTerminal.tmux_name(id)
         Runner.add_tmux_session(tmux)
         {id, tmux}
@@ -2347,6 +2348,7 @@ defmodule Shuttle.AppWorkersTest do
     write.("attached", false)
     write.("busy", false)
     write.("owned", true)
+    write.("system-error", false)
     Runner.attach_tmux_client(viewers["attached"])
     Runner.attach_tmux_client(viewers["owned"])
     Runner.add_tmux_session("shuttle-codex-0123456789abcdef")
@@ -2356,15 +2358,16 @@ defmodule Shuttle.AppWorkersTest do
     Env.put_app_env(:codex_app_client, BusyApp)
 
     assert Enum.sort(Shuttle.CodexTerminal.sweep(Runner)) ==
-             Enum.sort([viewers["retired"], viewers["attached"]])
+             Enum.sort([viewers["retired"], viewers["attached"], viewers["system-error"]])
 
     for {id, tmux} <- viewers do
-      expected = if id in ["retired", "attached"], do: :gone, else: :alive
+      expected = if id in ["retired", "attached", "system-error"], do: :gone, else: :alive
       assert Shuttle.Tmux.session_status(Runner, tmux) == expected, id
     end
 
     assert Shuttle.Tmux.session_status(Runner, "shuttle-codex-0123456789abcdef") == :alive
     assert {:ok, %{"active" => false}} = AppWorkers.get("retired")
+    assert {:ok, %{"active" => false}} = AppWorkers.get("system-error")
     assert Shuttle.CodexTerminal.sweep(Runner) == []
   end
 

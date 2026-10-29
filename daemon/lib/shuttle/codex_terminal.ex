@@ -39,7 +39,8 @@ defmodule Shuttle.CodexTerminal do
       fn ->
         with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
              true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
-             state when state in [:idle, :not_loaded, :missing] <- AppWorkers.state(id),
+             state when state in [:idle, :not_loaded, :missing, :system_error] <-
+               AppWorkers.state(id),
              {_, 0} <- Tmux.stop(runner, tmux) do
           true
         else

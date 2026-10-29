@@ -105,9 +105,12 @@ defmodule Shuttle.WorkerBackend do
     )
   end
 
-  # A confirmed unloaded/missing thread has no running turn. Idle alone is
-  # still a conversation waiting for input, not a completed assignment.
-  defp completed?(state, _fiber, _start) when state in [:not_loaded, :missing], do: true
+  # Unloaded/missing threads and native system errors cannot be doing work.
+  # Idle alone is still a conversation waiting for input, not a completed assignment.
+  defp completed?(state, _fiber, _start)
+       when state in [:not_loaded, :missing, :system_error],
+       do: true
+
   defp completed?(:idle, fiber, start), do: assignment_ended?(fiber, start)
   defp completed?(_state, _fiber, _start), do: false
 

@@ -3,6 +3,7 @@ defmodule Shuttle.CodexApp.TransportTest do
 
   import Bitwise
 
+  alias Shuttle.{AppWorkers, WorkerBackend}
   alias Shuttle.CodexApp
   alias Shuttle.CodexApp.Transport
 
@@ -573,6 +574,64 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  test "interrupt treats a thread without materialized turns as nothing to interrupt" do
+    thread_id = "00000000-0000-4000-8000-000000000003"
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{
+          "id" => read_id,
+          "method" => "thread/read",
+          "params" => %{"threadId" => ^thread_id, "includeTurns" => true}
+        } = recv_json(socket)
+
+        send_error(socket, read_id, %{
+          "code" => -32_600,
+          "message" =>
+            "thread #{thread_id} is not materialized yet; includeTurns is unavailable before first user message"
+        })
+      end)
+
+    configure_adapter(path)
+    assert :ok = CodexApp.interrupt(thread_id)
+    await_peer(peer)
+  end
+
+  test "interrupt preserves unrelated invalid request errors" do
+    thread_id = "00000000-0000-4000-8000-000000000004"
+    error = %{"code" => -32_600, "message" => "includeTurns has an invalid value"}
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+        send_error(socket, read_id, error)
+      end)
+
+    configure_adapter(path)
+    assert {:error, {:peer, ^error}} = CodexApp.interrupt(thread_id)
+    await_peer(peer)
+  end
+
+  test "interrupt does not accept an unmaterialized error for a different thread" do
+    thread_id = "00000000-0000-4000-8000-000000000005"
+
+    error = %{
+      "code" => -32_600,
+      "message" =>
+        "thread another-thread is not materialized yet; includeTurns is unavailable before first user message"
+    }
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => read_id, "method" => "thread/read"} = recv_json(socket)
+        send_error(socket, read_id, error)
+      end)
+
+    configure_adapter(path)
+    assert {:error, {:peer, ^error}} = CodexApp.interrupt(thread_id)
+    await_peer(peer)
+  end
+
   test "interrupt resumes a successful notLoaded read before inspecting turns" do
     thread_id = "00000000-0000-4000-8000-000000000002"
 
@@ -695,7 +754,7 @@ defmodule Shuttle.CodexApp.TransportTest do
       {%{"type" => "active", "activeFlags" => ["waitingOnUserInput", "waitingOnApproval"]},
        :running, "attention"},
       {%{"type" => "idle"}, :idle, "waiting"},
-      {%{"type" => "systemError"}, :unknown, "attention"},
+      {%{"type" => "systemError"}, :system_error, "attention"},
       {%{"type" => "notLoaded"}, :not_loaded, nil}
     ]
 
@@ -721,6 +780,66 @@ defmodule Shuttle.CodexApp.TransportTest do
       assert %{state: ^state, phase: ^phase} = CodexApp.status("thread-1")
     end
 
+    await_peer(peer)
+  end
+
+  @tag :tmp_dir
+  test "poll retirement releases a thread whose agent loop died", %{tmp_dir: tmp_dir} do
+    thread_id = "dead-loop-thread"
+
+    {path, peer} =
+      initialized_peer(fn socket ->
+        %{"id" => start_id, "method" => "turn/start"} = recv_json(socket)
+
+        send_error(socket, start_id, %{
+          "code" => -32_600,
+          "message" => "failed to submit turn input: internal error; agent loop died unexpectedly"
+        })
+
+        for _ <- 1..2 do
+          %{
+            "id" => read_id,
+            "method" => "thread/read",
+            "params" => %{"threadId" => ^thread_id, "includeTurns" => false}
+          } = recv_json(socket)
+
+          send_result(socket, read_id, %{
+            "thread" => %{
+              "id" => thread_id,
+              "status" => %{"type" => "systemError"}
+            }
+          })
+        end
+      end)
+
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SOCKET", path)
+    configure_adapter(path)
+    Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(tmp_dir, "app-workers"))
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => thread_id,
+        "thread_id" => thread_id,
+        "fiber_id" => "tests/dead-loop",
+        "active" => true,
+        "surface" => "app",
+        "backend_host" => Shuttle.Poller.own_host_id(),
+        "backend_endpoint" => path,
+        "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+      })
+
+    assert {:error,
+            {:app_launch_failed, ^thread_id, {:peer, %{"code" => -32_600, "message" => message}}}} =
+             AppWorkers.start_turn(thread_id, "continue", [])
+
+    assert message =~ "agent loop died"
+
+    assert :retired =
+             WorkerBackend.retire_assignment(nil, AppWorkers.ref(thread_id), %{
+               "status" => "active"
+             })
+
+    assert {:ok, %{"active" => false}} = AppWorkers.get(thread_id)
     await_peer(peer)
   end
 

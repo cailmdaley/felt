@@ -84,6 +84,9 @@ defmodule Shuttle.CodexApp do
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
         resume_for_interrupt(id)
 
+      {:error, {:peer, %{"code" => -32_600, "message" => message}}} = error ->
+        if unmaterialized_thread_error?(message, id), do: :ok, else: error
+
       {:error, _} = error ->
         error
     end
@@ -292,6 +295,13 @@ defmodule Shuttle.CodexApp do
 
   defp interrupt_thread(_id, _thread), do: {:error, {:transport, :malformed_thread_response}}
 
+  defp unmaterialized_thread_error?(message, id) when is_binary(message),
+    do:
+      message ==
+        "thread #{id} is not materialized yet; includeTurns is unavailable before first user message"
+
+  defp unmaterialized_thread_error?(_message, _id), do: false
+
   defp resume_for_interrupt(id) do
     case resume_thread(id) do
       {:ok, thread} ->
@@ -341,6 +351,7 @@ defmodule Shuttle.CodexApp do
       "idle" -> :idle
       "notLoaded" -> :not_loaded
       "missing" -> :missing
+      "systemError" -> :system_error
       _ -> :unknown
     end
   end
