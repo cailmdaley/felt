@@ -28,7 +28,7 @@ There is no shared routing plug: each controller decides for itself. The
 per-controller `@moduledoc` says which, and is the thing to read when this table
 is not enough.
 
-`GET /api/v1/debug/profile?seconds=N` is host-scoped and peer-gated; it blocks for 1–300 seconds (default 30), returns OS CPU, VM microstates, process reductions and layered file/port-call attribution, and rejects concurrent profiles with 409.
+`GET /api/v1/debug/profile?seconds=N` is host-scoped and peer-gated; it blocks for 1–300 seconds (default 30), returns OS CPU, VM microstates, process reductions and layered file/port-call attribution, and rejects concurrent profiles with 409. Add `&mode=cpu` for a bounded 1–10 second window (default 10) with selected function counters and route, peer, status, and duration HTTP counts. Its `forwarded_for_untrusted` value is an untrusted proxy assertion. Profiler work contributes to the measurement window, so exclude that window from steady-rate comparisons.
 
 ## Write plane
 

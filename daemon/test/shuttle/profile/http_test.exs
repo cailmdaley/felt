@@ -128,6 +128,21 @@ defmodule Shuttle.Profile.HTTPTest do
     assert result["overflow"] == 2
   end
 
+  test "a repeated start for one PID replaces the old request start" do
+    {:ok, profile} = HTTP.start()
+    request = conn("/restarted", "GET", 200, {127, 0, 0, 1}, [], %{})
+
+    :telemetry.execute(@start, %{}, %{conn: request})
+    Process.sleep(50)
+    :telemetry.execute(@start, %{}, %{conn: request})
+    :telemetry.execute(@stop, %{}, %{conn: request})
+
+    result = HTTP.finish(profile)
+    assert [%{"count" => 1, "duration_ms" => duration}] = result["groups"]
+    assert duration < 25
+    assert result["dropped"] == 1
+  end
+
   test "owner death detaches the handler" do
     parent = self()
 

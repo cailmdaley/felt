@@ -30,6 +30,10 @@ defmodule Shuttle.Profile.Functions do
     {ShuttleWeb.ConditionalJSON, :send, 2},
     {Shuttle.Runner.Default, :open_port, 3},
     {Jason, :encode!, 1},
+    {Jason, :encode_to_iodata!, 1},
+    {Jason, :encode_to_iodata!, 2},
+    {Jason, :decode, 1},
+    {Jason, :decode, 2},
     {Jason, :decode!, 1},
     {:erlang, :term_to_binary, 1}
   ]

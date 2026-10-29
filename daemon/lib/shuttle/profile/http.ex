@@ -22,18 +22,29 @@ defmodule Shuttle.Profile.HTTP do
     dropped = :atomics.new(1, signed: false)
     caller = self()
     ref = make_ref()
-    collector = spawn(fn -> attach_and_collect(id, owner, caller, ref, buffered, dropped) end)
+
+    {collector, monitor} =
+      spawn_monitor(fn -> attach_and_collect(id, owner, caller, ref, buffered, dropped) end)
 
     receive do
       {:http_profile_started, ^ref, :ok} ->
+        Process.demonitor(monitor, [:flush])
         {:ok, %{id: id, collector: collector, owner: owner}}
 
       {:http_profile_started, ^ref, {:error, reason}} ->
+        Process.demonitor(monitor, [:flush])
         {:error, reason}
     after
       5_000 ->
-        :telemetry.detach(id)
         Process.exit(collector, :kill)
+
+        receive do
+          {:DOWN, ^monitor, :process, ^collector, _reason} -> :ok
+        after
+          1_000 -> :ok
+        end
+
+        :telemetry.detach(id)
         {:error, :start_timeout}
     end
   end
@@ -113,7 +124,16 @@ defmodule Shuttle.Profile.HTTP do
 
         cond do
           Map.has_key?(active, pid) ->
-            collect(id, owner, monitor, buffered, dropped_counter, active, groups, dropped + 1)
+            collect(
+              id,
+              owner,
+              monitor,
+              buffered,
+              dropped_counter,
+              Map.put(active, pid, {started, reductions}),
+              groups,
+              dropped + 1
+            )
 
           map_size(active) >= @max_active ->
             collect(id, owner, monitor, buffered, dropped_counter, active, groups, dropped + 1)

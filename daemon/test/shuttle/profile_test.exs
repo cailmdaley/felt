@@ -100,6 +100,7 @@ defmodule Shuttle.ProfileTest do
     end)
 
     session = await_profile()
+    assert :ok = await_process_trace(session, self())
     conn = get(api_conn(), "/api/v1/version")
     assert conn.status == 200
 
@@ -110,6 +111,11 @@ defmodule Shuttle.ProfileTest do
     assert body["window"]["instrumented"] == true
     assert body["window"]["seconds"] == 10
     assert body["functions"]["available"] == true
+
+    assert Enum.any?(body["functions"]["functions"], fn row ->
+             row["function"] == "Jason.encode_to_iodata!/1" and row["calls"] > 0
+           end)
+
     assert Enum.any?(body["http"]["groups"], &(&1["route"] == "/api/v1/version"))
     refute Map.has_key?(body, "file_calls")
     assert is_binary(body["runtime"]["otp_release"])
@@ -248,6 +254,25 @@ defmodule Shuttle.ProfileTest do
               1 -> await_profile(attempts - 1)
             end
         end
+    end
+  end
+
+  defp await_process_trace(session, pid, attempts \\ 5000)
+  defp await_process_trace(_session, _pid, 0), do: flunk("request process is not traced")
+
+  defp await_process_trace(session, pid, attempts) do
+    case :trace.info(session, pid, :flags) do
+      {:flags, flags} ->
+        if :call in flags do
+          :ok
+        else
+          Process.sleep(1)
+          await_process_trace(session, pid, attempts - 1)
+        end
+
+      _ ->
+        Process.sleep(1)
+        await_process_trace(session, pid, attempts - 1)
     end
   end
 end

@@ -10,6 +10,10 @@ defmodule Shuttle.Profile.FunctionsTest do
     try do
       state = Functions.start(session)
       assert {Jason, :encode!, 1} in state.active
+      assert {Jason, :encode_to_iodata!, 1} in state.active
+      assert {Jason, :encode_to_iodata!, 2} in state.active
+      assert {Jason, :decode, 1} in state.active
+      assert {Jason, :decode, 2} in state.active
 
       test_pid = self()
 

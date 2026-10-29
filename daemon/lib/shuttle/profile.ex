@@ -107,15 +107,13 @@ defmodule Shuttle.Profile do
       started = DateTime.utc_now() |> DateTime.to_iso8601()
       before_ms = msacc_stats(ms)
       :trace.process(session, :all, true, [:call])
-      :trace.process(session, self(), false, [:call])
+      if mode == :file, do: :trace.process(session, self(), false, [:call])
 
       receive do
         {:DOWN, ^owner, :process, ^caller, _} -> {:error, :request_down}
         {:DOWN, ^monitor, :process, ^collector, reason} -> {:error, {:collector_down, reason}}
       after
         duration * 1000 ->
-          if mode == :cpu, do: :trace.process(session, :all, false, [:call])
-
           functions =
             if function_state, do: Shuttle.Profile.Functions.finish(session, function_state)
 
