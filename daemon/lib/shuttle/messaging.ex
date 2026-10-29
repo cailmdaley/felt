@@ -250,7 +250,9 @@ defmodule Shuttle.Messaging do
 
         if record["host"] == host and is_binary(session) and session != "" and
              is_binary(native) and native != "" and is_binary(fiber) and fiber != "" do
-          entry = session_fiber_entry(record["uid"], fiber, if(native != session, do: session))
+          entry =
+            session_fiber_entry(record["uid"], fiber, if(native != session, do: session))
+            |> maybe_map_put("harness", record["harness"])
 
           Map.update(acc, native, {at, entry}, fn {previous_at, previous_entry} ->
             if at >= previous_at, do: {at, entry}, else: {previous_at, previous_entry}
@@ -300,6 +302,7 @@ defmodule Shuttle.Messaging do
         entry =
           session_fiber_entry(record["uid"], fiber, if(transcript != thread, do: transcript))
           |> Map.put("app_worker", true)
+          |> Map.put("harness", "codex")
           |> maybe_map_put("cwd", record["cwd"])
 
         Map.put(acc, thread, entry)

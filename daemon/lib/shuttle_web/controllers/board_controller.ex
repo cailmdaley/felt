@@ -3,9 +3,9 @@ defmodule ShuttleWeb.BoardController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [integer_param: 3, json_with_validator: 3, rotating_file_tokens: 1, bad_param: 2]
+    only: [integer_param: 3, json_with_validator: 3, bad_param: 2]
 
-  alias Shuttle.{Board, BoardFamily, EventStream, Poller, RemoteTemporalRegistry}
+  alias Shuttle.{Board, BoardFamily, Poller, RemoteTemporalRegistry}
 
   def family(conn, params) do
     now = System.system_time(:millisecond)
@@ -26,7 +26,10 @@ defmodule ShuttleWeb.BoardController do
 
           records =
             (Board.all_since(since_ms) ++ remote)
-            |> Enum.filter(&(is_integer(&1["timestamp"]) and &1["timestamp"] >= since_ms))
+            |> Enum.filter(fn
+              %{"timestamp" => timestamp} when is_integer(timestamp) -> timestamp >= since_ms
+              _ -> false
+            end)
 
           host = Poller.own_host_id()
           sessions = BoardFamily.session_index(entries, host)
@@ -46,8 +49,8 @@ defmodule ShuttleWeb.BoardController do
 
   def show(conn, params) do
     with {:ok, since_ms} <- integer_param(params, "since_ms", default: 0) do
-      validator = {since_ms, rotating_file_tokens(EventStream.default_events_file())}
-      json_with_validator(conn, validator, fn -> %{records: Board.all_since(since_ms)} end)
+      records = Board.all_since(since_ms)
+      json_with_validator(conn, {since_ms, records}, fn -> %{records: records} end)
     else
       {:error, {:bad_param, key}} -> bad_param(conn, key)
     end
