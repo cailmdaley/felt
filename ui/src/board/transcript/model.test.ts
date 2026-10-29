@@ -149,13 +149,13 @@ describe('TranscriptModel', () => {
     ])
   })
 
-  it('leaves a send after && unclear when only the compound command result failed', () => {
-    const command = 'make test && shuttle message work/child "The table is ready."'
+  it('does not call an && send not sent when its own failure is indistinguishable from a prerequisite failure', () => {
+    const command = 'true && shuttle message work/child "The table is ready."'
     const model = new TranscriptModel()
     model.append(normalizeRecord({ type: 'assistant', message: { content: [{
       type: 'tool_use', id: 'guarded-send', name: 'Bash', input: { command },
     }] } }))
-    model.append([{ kind: 'result', id: 'guarded-send', text: 'tests failed', isError: true, images: 0,
+    model.append([{ kind: 'result', id: 'guarded-send', text: 'receiver unavailable', isError: true, images: 0,
       commandOutcomes: [{ exitCode: 1, acceptedMessageIds: [] }] }])
     expect(model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'uncertain' })
   })
