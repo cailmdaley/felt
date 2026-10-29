@@ -172,6 +172,7 @@ defmodule Shuttle.TerminalTest do
       Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
       Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
       Env.put_env("SHUTTLE_DATA_DIR", dir)
+      File.ln_s!(System.find_executable("id"), Path.join(dir, "id"))
       File.write!(Path.join(dir, "tmux"), "#!/bin/sh\nexit 1\n")
       File.chmod!(Path.join(dir, "tmux"), 0o755)
       Env.put_env("PATH", dir)
