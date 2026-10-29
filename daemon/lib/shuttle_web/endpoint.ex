@@ -2,7 +2,8 @@ defmodule ShuttleWeb.Endpoint do
   @moduledoc """
   Phoenix endpoint serving the daemon's HTTP API and the static UI bundle.
 
-  The UI HTTP-polls — there is no WebSocket/Channel transport.
+  The board polls JSON routes and can follow transcripts over SSE.
+  The phone audio relay uses a WebSocket.
   """
 
   use Phoenix.Endpoint, otp_app: :shuttle

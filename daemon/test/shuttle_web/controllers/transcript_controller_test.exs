@@ -1,5 +1,5 @@
 defmodule ShuttleWeb.TranscriptControllerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Shuttle.Test.ApiConn
 
   import Phoenix.ConnTest
@@ -9,6 +9,10 @@ defmodule ShuttleWeb.TranscriptControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
   @session "a3edf873-cb1c-40ab-a891-f26f5333b320"
+
+  defmodule ClosedAdapter do
+    def chunk(_state, _body), do: {:error, :closed}
+  end
 
   setup do
     root =
@@ -132,6 +136,185 @@ defmodule ShuttleWeb.TranscriptControllerTest do
              |> json_response(200)
   end
 
+  describe "local stream" do
+    setup do
+      Env.put_app_env(:transcript_stream,
+        tick_ms: 10,
+        max_ms: 160,
+        heartbeat_ms: 50,
+        event_bytes: 5,
+        read_bytes: 6
+      )
+
+      :ok
+    end
+
+    test "batches complete lines with byte offsets, strips CR, and withholds partial lines", %{
+      path: path
+    } do
+      File.write!(path, "skip\na\r\nb\n\npartial")
+
+      conn =
+        local_conn()
+        |> get("/api/v1/transcript/stream", %{"session" => @session, "offset" => "5"})
+
+      assert response(conn, 200) =~ ": open\n\nid: 10\ndata: a\ndata: b\n\n"
+      refute conn.resp_body =~ "partial"
+      assert conn.resp_body =~ ": keepalive\n\n"
+      assert get_resp_header(conn, "content-type") == ["text/event-stream; charset=utf-8"]
+      assert get_resp_header(conn, "cache-control") == ["no-cache, no-transform"]
+      assert get_resp_header(conn, "x-accel-buffering") == ["no"]
+      assert get_resp_header(conn, "x-transcript-offset") == ["5"]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "batch ids account for blank lines between records", %{path: path} do
+      File.write!(path, "a\n\n\nb\n")
+
+      Env.put_app_env(:transcript_stream,
+        tick_ms: 10,
+        max_ms: 30,
+        event_bytes: 2,
+        read_bytes: 100
+      )
+
+      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      assert response(conn, 200) =~ "id: 2\ndata: a\n\nid: 6\ndata: b\n\n"
+    end
+
+    test "registration is released if following raises", %{path: path} do
+      Env.put_app_env(:transcript_stream, max_ms: nil)
+      key = {:local, @session}
+      assert :ok = ShuttleWeb.TranscriptStream.admit(key)
+
+      conn =
+        Plug.Test.conn(:get, "/") |> put_private(:transcript_stream_key, key) |> send_chunked(200)
+
+      assert_raise ArithmeticError, fn -> ShuttleWeb.TranscriptStream.follow(conn, path, 0) end
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "disconnect releases the registration", %{path: path} do
+      key = {:local, @session}
+      assert :ok = ShuttleWeb.TranscriptStream.admit(key)
+
+      conn =
+        Plug.Test.conn(:get, "/") |> put_private(:transcript_stream_key, key) |> send_chunked(200)
+
+      conn = %{conn | adapter: {ClosedAdapter, nil}}
+      ShuttleWeb.TranscriptStream.follow(conn, path, 0)
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "a record larger than the event limit has its own event", %{path: path} do
+      File.write!(path, "oversized\nx\n")
+      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      assert response(conn, 200) =~ "id: 10\ndata: oversized\n\nid: 12\ndata: x\n\n"
+    end
+
+    test "appended records arrive with their offsets", %{path: path} do
+      File.write!(path, "one\n")
+
+      task =
+        Task.async(fn ->
+          Process.sleep(40)
+          File.write!(path, "two\n", [:append])
+        end)
+
+      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      Task.await(task)
+      assert response(conn, 200) =~ "id: 4\ndata: one\n\n"
+      assert conn.resp_body =~ "id: 8\ndata: two\n\n"
+    end
+
+    test "truncation sends reset", %{path: path} do
+      File.write!(path, "one\n")
+
+      task =
+        Task.async(fn ->
+          Process.sleep(40)
+          File.write!(path, "")
+        end)
+
+      conn =
+        local_conn()
+        |> get("/api/v1/transcript/stream", %{"session" => @session, "offset" => "4"})
+
+      Task.await(task)
+      assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":0}\n\n"
+    end
+
+    test "truncation of an unconsumed partial record sends reset", %{path: path} do
+      File.write!(path, "partial record")
+
+      task =
+        Task.async(fn ->
+          Process.sleep(40)
+          File.write!(path, "short")
+        end)
+
+      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      Task.await(task)
+      assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":5}\n\n"
+    end
+
+    test "replacement and deletion send reset", %{path: path} do
+      for replacement <- [true, false] do
+        File.write!(path, "one\n")
+
+        task =
+          Task.async(fn ->
+            Process.sleep(40)
+            File.rename!(path, path <> ".old")
+            if replacement, do: File.write!(path, "new record\n")
+          end)
+
+        conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+        Task.await(task)
+        count = if replacement, do: 11, else: 0
+        assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":#{count}}\n\n"
+        File.rm(path <> ".old")
+      end
+    end
+
+    test "validation and missing receipts match raw", %{bytes: bytes} do
+      for params <- [
+            %{"session" => "bad"},
+            %{"session" => @session, "offset" => "-1"},
+            %{"session" => @session, "offset" => "#{byte_size(bytes) + 1}"},
+            %{"session" => "11111111-2222-3333-4444-555555555555", "offset" => "0"}
+          ] do
+        raw = local_conn() |> get("/api/v1/transcript/raw", params)
+        stream = local_conn() |> get("/api/v1/transcript/stream", params)
+        assert stream.status == raw.status
+        assert Jason.decode!(stream.resp_body) == Jason.decode!(raw.resp_body)
+      end
+    end
+
+    test "capacity rejects the 33rd request and releases registrations" do
+      parent = self()
+
+      tasks =
+        for i <- 1..32 do
+          Task.async(fn ->
+            :ok = ShuttleWeb.TranscriptStream.admit({:local, i})
+            send(parent, :registered)
+
+            receive do
+              :stop -> ShuttleWeb.TranscriptStream.release({:local, i})
+            end
+          end)
+        end
+
+      for _ <- tasks, do: assert_receive(:registered, 1000)
+      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
+      assert json_response(conn, 429) == %{"error" => "stream_capacity"}
+      for task <- tasks, do: send(task.pid, :stop)
+      for task <- tasks, do: Task.await(task)
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+  end
+
   describe "remote host routing" do
     setup do
       StubGetFileClient.start!()
@@ -206,6 +389,21 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert query["session"] == @session
       assert query["offset"] == "42"
       assert query["host"] == "local"
+    end
+
+    test "stream returns unsupported for a configured remote and unreachable for an unknown host" do
+      assert %{"error" => "stream_unsupported", "host" => "candide"} =
+               local_conn()
+               |> get("/api/v1/transcript/stream", %{"session" => @session, "host" => "candide"})
+               |> json_response(501)
+
+      assert %{"availability" => "host_unreachable", "host" => "unknown-host"} =
+               local_conn()
+               |> get("/api/v1/transcript/stream", %{
+                 "session" => @session,
+                 "host" => "unknown-host"
+               })
+               |> json_response(503)
     end
 
     test "unreachable host is explicit" do

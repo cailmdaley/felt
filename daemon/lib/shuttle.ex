@@ -176,6 +176,7 @@ defmodule Shuttle.Application do
   @doc false
   def child_specs do
     core = [
+      {Registry, keys: :duplicate, name: ShuttleWeb.TranscriptStreams},
       {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Shares one felt read among concurrent board requests for the same

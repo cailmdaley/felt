@@ -180,6 +180,8 @@ defmodule ShuttleWeb.Router do
     # Exact native JSONL bytes. Kept outside the JSON pipeline like `/file` so
     # arbitrary harness bytes are relayed without content negotiation.
     get("/transcript/raw", TranscriptController, :raw)
+    # SSE is not subject to JSON content negotiation.
+    get("/transcript/stream", TranscriptController, :stream)
     # The phone page's microphone, relayed into the live `phone` meeting's
     # hark socket. A WebSocket upgrade negotiates no JSON, so it stays outside
     # `:api` like the byte routes above.
