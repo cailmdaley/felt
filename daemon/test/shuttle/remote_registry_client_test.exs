@@ -165,6 +165,38 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
     end
   end
 
+  defmodule TranscriptOwnerPlug do
+    @moduledoc false
+    @behaviour Plug
+    def init(opts), do: opts
+
+    def call(conn, opts) do
+      conn = Plug.Conn.fetch_query_params(conn)
+      offset = String.to_integer(Map.get(conn.query_params, "offset", "0"))
+
+      conn
+      |> Plug.Conn.put_resp_content_type("text/event-stream")
+      |> Plug.Conn.put_resp_header("cache-control", "no-cache, no-transform")
+      |> Plug.Conn.send_chunked(200)
+      |> ShuttleWeb.TranscriptStream.follow(Keyword.fetch!(opts, :path), offset)
+    end
+  end
+
+  defmodule ObservedRelayAdapter do
+    def send_chunked(observer, _status, _headers), do: {:ok, "", {observer, ""}}
+
+    def chunk({observer, body}, bytes) do
+      body = body <> IO.iodata_to_binary(bytes)
+      send(observer, {:hub_body, body})
+      {:ok, body, {observer, body}}
+    end
+  end
+
+  defp await_hub_body(pattern) do
+    assert_receive {:hub_body, body}, @http_timeout_ms
+    if String.contains?(body, pattern), do: body, else: await_hub_body(pattern)
+  end
+
   defp stream_server(opts \\ []) do
     server =
       start_supervised!(
@@ -334,6 +366,68 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       after
         :ok = Default.stream_cancel(id)
       end
+    end
+
+    @tag :tmp_dir
+    test "relays a real owner's backlog, live append and reset through httpc", %{tmp_dir: tmp} do
+      alias ShuttleWeb.TranscriptStream
+      path = Path.join(tmp, "transcript.jsonl")
+      first = ~s({"message":"first — γ×κ"}\n)
+      second = ~s({"message":"appended é"}\n)
+      File.write!(path, first)
+      Shuttle.Test.Env.put_app_env(:write_forward_client, Default)
+
+      Shuttle.Test.Env.put_app_env(:transcript_stream,
+        tick_ms: 10,
+        heartbeat_ms: 1000,
+        max_ms: 5000,
+        relay_connect_ms: @http_timeout_ms,
+        relay_idle_ms: @http_timeout_ms
+      )
+
+      server =
+        start_supervised!(
+          {Bandit, plug: {TranscriptOwnerPlug, path: path}, port: 0, ip: {127, 0, 0, 1}}
+        )
+
+      {:ok, {_ip, port}} = ThousandIsland.listener_info(server)
+      remote = %Shuttle.Remote{name: "owner-a", url: "http://127.0.0.1:#{port}"}
+      observer = self()
+      session = "a3edf873-cb1c-40ab-a891-f26f5333b320"
+
+      relay =
+        Task.async(fn ->
+          conn = %{Plug.Test.conn(:get, "/") | adapter: {ObservedRelayAdapter, observer}}
+
+          result =
+            TranscriptStream.relay(
+              conn,
+              remote,
+              %{"session" => session, "offset" => "0"},
+              session
+            )
+
+          refute Enum.any?(Process.get_keys(), &match?({Default, :stream, _}, &1))
+          result
+        end)
+
+      first_event = "id: #{byte_size(first)}\ndata: #{String.trim_trailing(first)}\n\n"
+
+      assert await_hub_body(first_event) =~ ": open\n\n"
+      assert Process.alive?(relay.pid)
+      File.write!(path, second, [:append])
+
+      second_event =
+        "id: #{byte_size(first <> second)}\ndata: #{String.trim_trailing(second)}\n\n"
+
+      assert await_hub_body(second_event) =~ first_event
+      assert Process.alive?(relay.pid)
+      File.rm!(path)
+      conn = Task.await(relay, @http_timeout_ms)
+      assert conn.status == 200
+      assert conn.resp_body =~ first_event <> second_event
+      assert conn.resp_body =~ "event: reset\ndata: {\"byte_count\":0}\n\n"
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
     end
 
     test "the receiver cannot crash its httpc handler on malformed replies" do

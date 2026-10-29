@@ -1,10 +1,12 @@
 defmodule ShuttleWeb.TranscriptStream do
   @moduledoc """
-  Follows a local JSONL transcript as server-sent events in the request process.
+  Follows local JSONL transcripts and relays remote owners' server-sent events
+  in the request process.
   """
 
   import Plug.Conn
-  alias Shuttle.FileTail
+  alias Shuttle.{FileTail, OriginRouter, Remote}
+  alias ShuttleWeb.TranscriptController
 
   @registry ShuttleWeb.TranscriptStreams
   @defaults [
@@ -23,7 +25,15 @@ defmodule ShuttleWeb.TranscriptStream do
   def admit(key) do
     {:ok, _} = Registry.register(@registry, key, nil)
 
-    if Registry.count(@registry) > config()[:max_streams] do
+    cfg = config()
+
+    remote_full? =
+      case key do
+        {:relay, _} -> Registry.count_match(@registry, key, :_) > cfg[:max_relays_per_remote]
+        {:local, _} -> false
+      end
+
+    if Registry.count(@registry) > cfg[:max_streams] or remote_full? do
       Registry.unregister(@registry, key)
       :busy
     else
@@ -32,6 +42,141 @@ defmodule ShuttleWeb.TranscriptStream do
   end
 
   def release(key), do: Registry.unregister(@registry, key)
+
+  def relay(conn, %Remote{} = remote, query, session) do
+    key = {:relay, remote.name}
+
+    case admit(key) do
+      :busy ->
+        json_response(conn, 429, %{error: "stream_capacity"})
+
+      :ok ->
+        try do
+          cfg = config()
+          client = OriginRouter.forward_client()
+
+          case OriginRouter.forward_stream(
+                 remote,
+                 "/api/v1/transcript/stream",
+                 Map.put(query, "host", "local"),
+                 req_headers: [{"accept", "text/event-stream"}],
+                 connect_timeout_ms: cfg[:relay_connect_ms]
+               ) do
+            {:ok, id} ->
+              try do
+                relay_open(conn, remote, query, session, client, id, cfg)
+              after
+                client.stream_cancel(id)
+                flush_stream(id)
+              end
+
+            {:error, :stream_not_supported} ->
+              unsupported(conn, remote)
+
+            {:error, _} ->
+              TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
+          end
+        after
+          release(key)
+        end
+    end
+  end
+
+  defp relay_open(conn, remote, query, session, client, id, cfg) do
+    receive do
+      {:remote_stream, ^id, {:open, headers, cursor}} ->
+        if event_stream?(headers) do
+          conn =
+            conn
+            |> put_resp_content_type("text/event-stream")
+            |> put_resp_header("cache-control", "no-cache, no-transform")
+            |> put_resp_header("x-accel-buffering", "no")
+            |> put_resp_header("x-transcript-offset", Map.get(query, "offset", "0"))
+            |> send_chunked(200)
+
+          client.stream_next(cursor)
+          relay_loop(conn, client, id, cursor, cfg[:relay_idle_ms])
+        else
+          unsupported(conn, remote)
+        end
+
+      {:remote_stream, ^id, {:response, status, headers, body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"availability" => _}} ->
+            conn |> put_resp_content_type("application/json") |> send_resp(status, body)
+
+          _ when status in [404, 405] ->
+            unsupported(conn, remote)
+
+          _ ->
+            conn |> put_resp_content_type(content_type(headers), nil) |> send_resp(status, body)
+        end
+
+      {:remote_stream, ^id, {:error, _}} ->
+        TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
+
+      {:remote_stream, ^id, :done} ->
+        TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
+    after
+      cfg[:relay_connect_ms] ->
+        TranscriptController.unavailable(conn, session, :host_unreachable, remote.name)
+    end
+  end
+
+  defp relay_loop(conn, client, id, cursor, idle_ms) do
+    receive do
+      {:remote_stream, ^id, {:data, bytes}} ->
+        case chunk(conn, bytes) do
+          {:ok, conn} ->
+            client.stream_next(cursor)
+            relay_loop(conn, client, id, cursor, idle_ms)
+
+          {:error, _} ->
+            conn
+        end
+
+      {:remote_stream, ^id, :done} ->
+        conn
+
+      {:remote_stream, ^id, {:error, _}} ->
+        conn
+    after
+      idle_ms -> conn
+    end
+  end
+
+  defp event_stream?(headers) do
+    headers
+    |> content_type()
+    |> String.split(";", parts: 2)
+    |> hd()
+    |> String.trim()
+    |> String.downcase()
+    |> Kernel.==("text/event-stream")
+  end
+
+  defp content_type(headers) do
+    Enum.find_value(headers, "application/json", fn {name, value} ->
+      if String.downcase(name) == "content-type", do: value
+    end)
+  end
+
+  defp unsupported(conn, remote),
+    do: json_response(conn, 501, %{error: "stream_unsupported", host: remote.name})
+
+  defp json_response(conn, status, payload),
+    do:
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(status, Jason.encode!(payload))
+
+  defp flush_stream(id) do
+    receive do
+      {:remote_stream, ^id, _} -> flush_stream(id)
+    after
+      0 -> :ok
+    end
+  end
 
   def follow(conn, path, offset, opts \\ []) do
     cfg = config()

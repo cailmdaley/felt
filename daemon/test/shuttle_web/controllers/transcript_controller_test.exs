@@ -5,12 +5,18 @@ defmodule ShuttleWeb.TranscriptControllerTest do
   import Phoenix.ConnTest
   import Plug.Conn
 
-  alias Shuttle.Test.{Env, StubGetFileClient}
+  alias Shuttle.Test.{Env, StubGetFileClient, StubStreamClient}
+  alias ShuttleWeb.TranscriptStream
 
   @endpoint ShuttleWeb.Endpoint
   @session "a3edf873-cb1c-40ab-a891-f26f5333b320"
 
   defmodule ClosedAdapter do
+    def chunk(_state, _body), do: {:error, :closed}
+  end
+
+  defmodule RelayClosedAdapter do
+    def send_chunked(state, _status, _headers), do: {:ok, nil, state}
     def chunk(_state, _body), do: {:error, :closed}
   end
 
@@ -160,6 +166,15 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       :ok
     end
 
+    defp mutating_stream_conn(mutate) do
+      local_conn()
+      |> register_before_send(fn conn ->
+        assert conn.status == 200
+        mutate.()
+        conn
+      end)
+    end
+
     test "batches complete lines with byte offsets, strips CR, and withholds partial lines", %{
       path: path
     } do
@@ -238,14 +253,10 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     test "appended records arrive with their offsets", %{path: path} do
       File.write!(path, "one\n")
 
-      task =
-        Task.async(fn ->
-          Process.sleep(40)
-          File.write!(path, "two\n", [:append])
-        end)
+      conn =
+        mutating_stream_conn(fn -> File.write!(path, "two\n", [:append]) end)
+        |> get("/api/v1/transcript/stream", %{"session" => @session})
 
-      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
-      Task.await(task)
       assert response(conn, 200) =~ "id: 4\ndata: one\n\n"
       assert conn.resp_body =~ "id: 8\ndata: two\n\n"
     end
@@ -253,31 +264,20 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     test "truncation sends reset", %{path: path} do
       File.write!(path, "one\n")
 
-      task =
-        Task.async(fn ->
-          Process.sleep(40)
-          File.write!(path, "")
-        end)
-
       conn =
-        local_conn()
+        mutating_stream_conn(fn -> File.write!(path, "") end)
         |> get("/api/v1/transcript/stream", %{"session" => @session, "offset" => "4"})
 
-      Task.await(task)
       assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":0}\n\n"
     end
 
     test "truncation of an unconsumed partial record sends reset", %{path: path} do
       File.write!(path, "partial record")
 
-      task =
-        Task.async(fn ->
-          Process.sleep(40)
-          File.write!(path, "short")
-        end)
+      conn =
+        mutating_stream_conn(fn -> File.write!(path, "short") end)
+        |> get("/api/v1/transcript/stream", %{"session" => @session})
 
-      conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
-      Task.await(task)
       assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":5}\n\n"
     end
 
@@ -285,18 +285,19 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       for replacement <- [true, false] do
         File.write!(path, "one\n")
 
-        task =
-          Task.async(fn ->
-            Process.sleep(40)
-            File.rename!(path, path <> ".old")
-            if replacement, do: File.write!(path, "new record\n")
+        conn =
+          mutating_stream_conn(fn ->
+            if replacement do
+              File.write!(path <> ".replacement", "new record\n")
+              File.rename!(path <> ".replacement", path)
+            else
+              File.rm!(path)
+            end
           end)
+          |> get("/api/v1/transcript/stream", %{"session" => @session})
 
-        conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
-        Task.await(task)
         count = if replacement, do: 11, else: 0
         assert response(conn, 200) =~ "event: reset\ndata: {\"byte_count\":#{count}}\n\n"
-        File.rm(path <> ".old")
       end
     end
 
@@ -334,6 +335,227 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert json_response(conn, 429) == %{"error" => "stream_capacity"}
       for task <- tasks, do: send(task.pid, :stop)
       for task <- tasks, do: Task.await(task)
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+  end
+
+  describe "remote stream relay" do
+    setup do
+      StubStreamClient.start!()
+      Env.put_app_env(:write_forward_client, StubStreamClient)
+      Env.put_app_env(:remotes, [%{name: "owner-a", url: "http://127.0.0.1:19999"}])
+      Env.put_app_env(:transcript_stream, relay_connect_ms: 40, relay_idle_ms: 40)
+      :ok
+    end
+
+    defp remote_stream(params \\ %{}) do
+      local_conn()
+      |> get(
+        "/api/v1/transcript/stream",
+        Map.merge(%{"session" => @session, "host" => "owner-a"}, params)
+      )
+    end
+
+    test "relays chunks verbatim in order with hub headers and flow control" do
+      chunks = [": open\n\n", "id: 8\ndata: γ", "×κ\n\nevent: reset\ndata: {}\n\n"]
+
+      StubStreamClient.set_events(
+        [
+          {:open,
+           [
+             {"Content-Type", "Text/Event-Stream; charset=utf-8"},
+             {"content-encoding", "gzip"},
+             {"cache-control", "public"},
+             {"x-transcript-offset", "999"}
+           ]}
+        ] ++ Enum.map(chunks, &{:data, &1}) ++ [:done]
+      )
+
+      conn = remote_stream(%{"offset" => "42", "origin" => "ignore-me"})
+      assert response(conn, 200) == Enum.join(chunks)
+      assert get_resp_header(conn, "content-type") == ["text/event-stream; charset=utf-8"]
+      assert get_resp_header(conn, "cache-control") == ["no-cache, no-transform"]
+      assert get_resp_header(conn, "x-accel-buffering") == ["no"]
+      assert get_resp_header(conn, "x-transcript-offset") == ["42"]
+      assert get_resp_header(conn, "content-encoding") == []
+      %{url: url, headers: headers, timeout: 40, id: id} = StubStreamClient.last()
+      assert URI.parse(url).path == "/api/v1/transcript/stream"
+
+      assert URI.decode_query(URI.parse(url).query) == %{
+               "session" => @session,
+               "host" => "local",
+               "offset" => "42"
+             }
+
+      assert headers == [{"accept", "text/event-stream"}]
+      assert StubStreamClient.nexts() == [id, id, id, id]
+      assert StubStreamClient.cancelled() == [id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "preserves receipt status and body, including missing, pending and past EOF" do
+      for {status, availability} <- [
+            {404, "transcript_missing"},
+            {409, "identity_pending"},
+            {416, "available_local"},
+            {503, "host_unreachable"}
+          ] do
+        body = Jason.encode!(%{availability: availability, session: @session, byte_count: 4})
+        StubStreamClient.set_events([{:response, status, [], body}])
+        conn = remote_stream()
+        assert response(conn, status) == body
+        assert get_resp_header(conn, "content-type") == ["application/json; charset=utf-8"]
+      end
+    end
+
+    test "old owner 404 and 405 without a receipt become unsupported" do
+      for {status, body} <- [{404, ~s({"errors":{"detail":"Not Found"}})}, {405, "no route"}] do
+        StubStreamClient.set_events([{:response, status, [], body}])
+
+        assert json_response(remote_stream(), 501) == %{
+                 "error" => "stream_unsupported",
+                 "host" => "owner-a"
+               }
+      end
+    end
+
+    test "other non-stream statuses and bodies pass through without encoding headers" do
+      for {status, body} <- [
+            {503, ~s({"error":"booting"})},
+            {429, ~s({"error":"stream_capacity"})}
+          ] do
+        StubStreamClient.set_events([
+          {:response, status,
+           [{"content-type", "application/json"}, {"content-encoding", "gzip"}], body}
+        ])
+
+        conn = remote_stream()
+        assert response(conn, status) == body
+        assert get_resp_header(conn, "content-encoding") == []
+      end
+    end
+
+    test "a non-SSE success is unsupported and never starts a stream" do
+      StubStreamClient.set_events([{:open, [{"content-type", "text/html"}]}])
+      assert %{"error" => "stream_unsupported"} = json_response(remote_stream(), 501)
+      assert StubStreamClient.nexts() == []
+      assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
+    end
+
+    test "immediate and asynchronous transport errors return unreachable receipts" do
+      StubStreamClient.set_error(:econnrefused)
+
+      assert %{"availability" => "host_unreachable", "host" => "owner-a", "session" => @session} =
+               json_response(remote_stream(), 503)
+
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+      StubStreamClient.set_error(nil)
+
+      for event <- [{:error, :closed}, :done] do
+        StubStreamClient.set_events([event])
+        assert %{"availability" => "host_unreachable"} = json_response(remote_stream(), 503)
+        assert StubStreamClient.last().id in StubStreamClient.cancelled()
+        assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+      end
+    end
+
+    @tag :timing
+    test "connect timeout cancels and returns an unreachable receipt" do
+      assert %{"availability" => "host_unreachable"} = json_response(remote_stream(), 503)
+      assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    @tag :timing
+    test "idle timeout cancels an open relay" do
+      StubStreamClient.set_events([{:open, [{"content-type", "text/event-stream"}]}])
+      assert response(remote_stream(), 200) == ""
+      assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "errors after opening end the response and flush only that stream's messages" do
+      foreign = make_ref()
+      send(self(), {:remote_stream, foreign, :done})
+      StubStreamClient.set_cancel_events([{:data, "late bytes"}, :done, {:error, :closed}])
+
+      StubStreamClient.set_events([
+        {:open, [{"content-type", "text/event-stream"}]},
+        {:data, ": open\n\n"},
+        {:error, :closed}
+      ])
+
+      assert response(remote_stream(), 200) == ": open\n\n"
+      id = StubStreamClient.last().id
+      refute_received {:remote_stream, ^id, _}
+      assert_received {:remote_stream, ^foreign, :done}
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "downstream disconnect cancels without asking for more bytes" do
+      StubStreamClient.set_events([
+        {:open, [{"content-type", "text/event-stream"}]},
+        {:data, ": open\n\n"},
+        {:data, "unrequested"}
+      ])
+
+      conn = %{Plug.Test.conn(:get, "/") | adapter: {RelayClosedAdapter, nil}}
+
+      result =
+        ShuttleWeb.TranscriptController.stream(conn, %{"session" => @session, "host" => "owner-a"})
+
+      assert result.status == 200
+      id = StubStreamClient.last().id
+      assert StubStreamClient.nexts() == [id]
+      assert StubStreamClient.cancelled() == [id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "an exception starting the downstream stream still cancels and unregisters" do
+      StubStreamClient.set_events([{:open, [{"content-type", "text/event-stream"}]}])
+      conn = %{Plug.Test.conn(:get, "/") | adapter: {BrokenStartAdapter, nil}}
+
+      assert_raise RuntimeError, "send_chunked failed", fn ->
+        ShuttleWeb.TranscriptController.stream(conn, %{"session" => @session, "host" => "owner-a"})
+      end
+
+      assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "per-owner cap rejects a 17th relay without blocking other owners or local streams" do
+      parent = self()
+
+      tasks =
+        for _ <- 1..16 do
+          Task.async(fn ->
+            :ok = TranscriptStream.admit({:relay, "owner-a"})
+            send(parent, :registered)
+
+            receive do
+              :stop -> TranscriptStream.release({:relay, "owner-a"})
+            end
+          end)
+        end
+
+      for _ <- tasks, do: assert_receive(:registered, 1000)
+      assert json_response(remote_stream(), 429) == %{"error" => "stream_capacity"}
+      assert StubStreamClient.last() == nil
+      assert :ok = TranscriptStream.admit({:relay, "owner-b"})
+      TranscriptStream.release({:relay, "owner-b"})
+      assert :ok = TranscriptStream.admit({:local, @session})
+      TranscriptStream.release({:local, @session})
+      for task <- tasks, do: send(task.pid, :stop)
+      for task <- tasks, do: Task.await(task)
+      assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
+    end
+
+    test "the daemon-wide cap also gates relays before any remote request" do
+      Env.put_app_env(:transcript_stream, max_streams: 1)
+      assert :ok = TranscriptStream.admit({:local, @session})
+      assert json_response(remote_stream(), 429) == %{"error" => "stream_capacity"}
+      assert StubStreamClient.last() == nil
+      TranscriptStream.release({:local, @session})
       assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
     end
   end
@@ -414,7 +636,7 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert query["host"] == "local"
     end
 
-    test "stream returns unsupported for a configured remote and unreachable for an unknown host" do
+    test "a client without streaming returns unsupported and an unknown host is unreachable" do
       assert %{"error" => "stream_unsupported", "host" => "candide"} =
                local_conn()
                |> get("/api/v1/transcript/stream", %{"session" => @session, "host" => "candide"})

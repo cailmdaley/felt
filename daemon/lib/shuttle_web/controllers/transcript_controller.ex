@@ -5,11 +5,11 @@ defmodule ShuttleWeb.TranscriptController do
     * `GET /api/v1/transcript?session=…` returns an availability receipt;
     * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes;
       `offset=N` returns a byte slice for incremental reads;
-    * `GET /api/v1/transcript/stream?session=…` follows local JSONL records as SSE.
+    * `GET /api/v1/transcript/stream?session=…` follows JSONL records as SSE.
 
   The host is selected explicitly with `host=`, or from the session ledger.
-  Remote receipt and raw requests use the same transport as other host-local reads;
-  streaming is available for local transcripts.
+  Remote requests use the same transport as other host-local reads;
+  streams relay the owner's events without interpreting their records.
   No endpoint here interprets transcript records or implements search.
   """
 
@@ -63,8 +63,9 @@ defmodule ShuttleWeb.TranscriptController do
         :local ->
           local_stream(conn, session, offset || 0)
 
-        {:remote, %Remote{name: host}} ->
-          conn |> put_status(501) |> json(%{error: "stream_unsupported", host: host})
+        {:remote, %Remote{} = remote} ->
+          query = %{"session" => session, "offset" => Integer.to_string(offset || 0)}
+          TranscriptStream.relay(conn, remote, query, session)
 
         {:unreachable, host} ->
           unavailable(conn, session, :host_unreachable, host)
@@ -263,7 +264,8 @@ defmodule ShuttleWeb.TranscriptController do
     }
   end
 
-  defp unavailable(conn, session, status, host) do
+  @doc false
+  def unavailable(conn, session, status, host) do
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(http_status(status), Jason.encode!(receipt(session, status, host: host)))
