@@ -19,9 +19,6 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		return nil
 	}
 	_ = a.runEventHook(bytes.NewReader(b))
-	if a.env.Getenv("SHUTTLE_MESSAGES") == "off" {
-		return nil
-	}
 	var input eventHookInput
 	if json.Unmarshal(b, &input) != nil || input.SessionID == "" {
 		return nil
@@ -43,6 +40,17 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if err != nil {
 		return nil
 	}
+	digest := ""
+	if input.HookEventName == "UserPromptSubmit" && a.env.Getenv("SHUTTLE_BOARD") != "off" {
+		a.recordHumanPrompt(input)
+		digest = a.boardDigest(harness, input.SessionID)
+	}
+	if a.env.Getenv("SHUTTLE_MESSAGES") == "off" {
+		if digest != "" {
+			return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: digest}})
+		}
+		return nil
+	}
 	// Pi's extension runs in the harness process and names it; Claude Code and
 	// Codex run this hook as a child, possibly through a shell.
 	receiver := input.NativePID
@@ -50,6 +58,9 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		receiver = messaging.HookReceiverPID()
 	}
 	if messaging.RegisterMailbox(a.env, harness, input.SessionID, host, input.CWD, receiver, input.HookEventName != "SessionEnd") != nil {
+		if digest != "" {
+			return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: digest}})
+		}
 		return nil
 	}
 	if harness == "pi" && input.NativeSocket != "" {
@@ -61,6 +72,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 			input.HookEventName != "SessionEnd")
 	}
 	offer := input.HookEventName == "UserPromptSubmit" || harness != "pi" && (input.HookEventName == "SessionStart" || input.HookEventName == "PreToolUse" || input.HookEventName == "PostToolUse")
+	wrote := false
 	if offer {
 		_ = messaging.OfferMailbox(a.env, harness, input.SessionID, host, func(requests []messaging.Request) error {
 			var context strings.Builder
@@ -68,8 +80,16 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 			for _, r := range requests {
 				fmt.Fprintf(&context, "%s\n\n", messaging.Labeled(r))
 			}
+			if digest != "" {
+				context.WriteString("\n")
+				context.WriteString(digest)
+			}
+			wrote = true
 			return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: context.String()}})
 		})
+	}
+	if !wrote && digest != "" {
+		return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: digest}})
 	}
 	return nil
 }
