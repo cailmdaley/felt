@@ -822,7 +822,10 @@ defmodule Shuttle.DispatcherTest do
     {"tmux", ["new-session" | args]} =
       Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
 
-    assert File.read!(List.last(args)) =~ "Mode: resume"
+    script = File.read!(List.last(args))
+    assert script =~ "Mode: resume"
+    assert script =~ "--resume '#{session}'"
+    refute script =~ " || "
   end
 
   test "stale restoration authorization cannot fall through to a fresh dispatch" do

@@ -220,49 +220,100 @@ defmodule Shuttle.Poller.SessionReconciliation do
     Enum.reduce(Shuttle.AppWorkers.active(), state, fn record, acc ->
       fiber_id = record["fiber_id"]
 
-      if is_binary(fiber_id) and record["felt_store"] in state.felt_stores and
-           Poller.running_key(acc, fiber_id) == nil do
-        fetched =
-          case Poller.fetch_fiber_full(fiber_id, acc) do
-            {:ok, _} = found -> found
-            _ -> Poller.fetch_fiber_full(record["uid"] || fiber_id, acc)
-          end
+      cond do
+        not is_binary(fiber_id) or record["felt_store"] not in state.felt_stores ->
+          acc
 
-        case fetched do
-          {:ok, fiber} ->
-            if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
-                 Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
-              state =
-                adopt_session(acc, fiber["id"], Shuttle.AppWorkers.ref(record["session_uuid"]))
+        app_session_tracked?(acc, fiber_id, record["session_uuid"]) ->
+          restore_terminal_viewer(record, acc.runner)
+          acc
 
-              restore_terminal_viewer(record, acc.runner)
-              state
-            else
-              acc
+        Poller.running_key(acc, fiber_id) != nil ->
+          acc
+
+        true ->
+          fetched =
+            case Poller.fetch_fiber_full(fiber_id, acc) do
+              {:ok, _} = found -> found
+              _ -> Poller.fetch_fiber_full(record["uid"] || fiber_id, acc)
             end
 
-          _ ->
-            acc
-        end
-      else
-        acc
+          case fetched do
+            {:ok, fiber} ->
+              if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
+                   Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
+                state =
+                  adopt_session(
+                    acc,
+                    fiber["id"],
+                    Shuttle.AppWorkers.ref(record["session_uuid"])
+                  )
+
+                restore_terminal_viewer(record, acc.runner)
+                state
+              else
+                acc
+              end
+
+            _ ->
+              acc
+          end
       end
     end)
   end
 
+  defp app_session_tracked?(state, fiber_id, session_uuid) do
+    case Poller.running_key(state, fiber_id) do
+      nil ->
+        false
+
+      key ->
+        get_in(state.running, [key, :session]) == Shuttle.AppWorkers.ref(session_uuid)
+    end
+  end
+
   # The App Server owns the conversation across daemon restarts, but a terminal
-  # viewer belongs to tmux and may have died with its server. Recreate only the
+  # viewer belongs to tmux and may have died with its server. Check every poll:
+  # the backend can still be starting during boot adoption. Recreate only the
   # viewer for CLI-surface records; prepare verifies the exact stored thread and
   # starts its TUI without creating a model turn. App-surface records need none.
-  defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id}, runner)
+  defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id} = record, runner)
        when is_binary(id) do
+    tmux = record["terminal_tmux"] || Shuttle.CodexTerminal.tmux_name(id)
+    callers = Shuttle.Env.callers()
+
     case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-           case Shuttle.CodexTerminal.prepare(id, runner: runner) do
+           Shuttle.Env.adopt_callers(callers)
+           lock = {{__MODULE__, {:restore_terminal_viewer, id}}, self()}
+
+           case :global.trans(
+                  lock,
+                  fn ->
+                    case Shuttle.Tmux.session_status(runner, tmux) do
+                      :gone -> Shuttle.CodexTerminal.prepare(id, runner: runner)
+                      :alive -> :ok
+                      :unknown -> Shuttle.CodexTerminal.prepare(id, runner: runner)
+                    end
+                  end,
+                  [node()],
+                  0
+                ) do
              {:ok, _} ->
+               :ok
+
+             :ok ->
                :ok
 
              {:error, reason} ->
                Logger.warning("Failed to restore Codex terminal for #{id}: #{inspect(reason)}")
+
+             :aborted ->
+               :ok
+
+             other ->
+               Logger.warning(
+                 "Unexpected Codex terminal restoration result for #{id}: #{inspect(other)}"
+               )
            end
          end) do
       {:ok, _pid} ->

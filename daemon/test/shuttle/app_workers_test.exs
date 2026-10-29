@@ -625,7 +625,9 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, ref} = dispatch("tests/terminal")
     terminal = WorkerBackend.tmux(ref)
     Runner.remove_tmux_session(terminal)
+    assert Shuttle.Tmux.session_status(Runner, terminal) == :gone
     calls_before_restart = App.calls()
+    App.set(:read_result, {:error, :backend_not_ready})
 
     {:ok, poller} =
       start_poller!(
@@ -638,7 +640,19 @@ defmodule Shuttle.AppWorkersTest do
     assert %{session: ^ref, context_address: "shuttle://test-host/codex/app-session-1"} =
              Poller.worker_status(poller, "tests/terminal")
 
-    eventually(fn -> Shuttle.Tmux.session_status(Runner, terminal) == :alive end)
+    eventually(
+      fn ->
+        {:ok, record} = AppWorkers.get("app-session-1")
+        record["terminal_error"] != nil
+      end,
+      200
+    )
+
+    assert Shuttle.Tmux.session_status(Runner, terminal) == :gone
+
+    App.set(:read_result, {:ok, %{"id" => "app-session-1", "status" => %{"type" => "idle"}}})
+    send(poller, :run_poll_cycle)
+    eventually(fn -> Shuttle.Tmux.session_status(Runner, terminal) == :alive end, 200)
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
     assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", []}, &1))
     refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))

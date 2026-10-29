@@ -1595,30 +1595,32 @@ defmodule Shuttle.Dispatcher do
 
             resume_command = Agents.build_resume_command(resume_agent, session_id, resume_prompt)
 
-            # A working-turn resume may fall back to a fresh launch. Claude
-            # reuses the requested UUID; Pi chooses a new UUID, whose capture
-            # starts only after the private fallback signal appears. Quiet
-            # restoration has no fallback, so a failed resume stays visible as
+            # Restoration always remains attached to the recorded conversation,
+            # including when it was mid-turn. A failed resume stays visible as
             # a blocked worker instead of waking a new conversation.
             fallback_command =
-              fresh_fallback_command(
-                agent,
-                fiber_id,
-                session_id,
-                prompt_context,
-                Keyword.delete(prompt_opts, :previous_session)
-              )
+              if Keyword.get(opts, :restoration) do
+                nil
+              else
+                fresh_fallback_command(
+                  agent,
+                  fiber_id,
+                  session_id,
+                  prompt_context,
+                  Keyword.delete(prompt_opts, :previous_session)
+                )
+              end
 
             resumed_at = DateTime.utc_now()
 
             fallback_signal =
-              if agent.cli == "pi" and not quiet?,
+              if agent.cli == "pi" and not Keyword.get(opts, :restoration),
                 do: private_fallback_signal(session, resumed_at, session_id),
                 else: nil
 
             command =
               cond do
-                quiet? ->
+                Keyword.get(opts, :restoration) ->
                   resume_command
 
                 fallback_signal ->
