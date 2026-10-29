@@ -284,6 +284,7 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /file-info` | owner-routed | File existence, mtime, and size without downloading bytes — metadata for browser-native artifact refreshes |
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
+| `GET /transcript/stream` | host-routed | Follow complete transcript records as server-sent events |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
@@ -571,6 +572,11 @@ receipt carries `availability` (`available_local`, `available_remote`,
 adds `X-Transcript-Byte-Count` and `X-Transcript-SHA256` headers. Agents should
 use ordinary `jq`/`rg` recipes on that file; Shuttle deliberately does not
 define a transcript reader or search language.
+
+`/transcript/stream` accepts `session`, optional `host`, and a non-negative byte `offset` (default 0).
+Each server-sent event carries complete JSONL records in `data` lines and an `id` equal to the byte offset after its last record; partial trailing lines wait for completion.
+The stream sends comment keepalives while idle and ends with an `event: reset` if the file shrinks, is replaced, or disappears; clients should reread from offset 0 after a reset.
+When a remote owner does not support streaming, the hub returns 501 `stream_unsupported`; clients can fall back to polling `/transcript/raw`.
 
 `/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
 optional `host=<name>`, and answers `{host, links}` with one entry per session
