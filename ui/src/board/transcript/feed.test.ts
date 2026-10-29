@@ -260,6 +260,22 @@ describe('TranscriptFeed stream', () => {
     expect(onReset).toHaveBeenCalledOnce()
   })
 
+  it.each(['upstream_error', 'upstream_idle'])('fails on %s without committing a partial upstream event', async error => {
+    const first = jsonLine('committed').trimEnd()
+    const requests: string[] = []
+    const { reader, onEntries, onReset } = feed(async input => {
+      requests.push(String(input))
+      return requests.length === 1
+        ? sse(`id: 99\ndata: ${first}\n\nid: 199\ndata: {"type":"user"\nevent: error\ndata: {"error":"${error}"}\n\n`)
+        : response(new Uint8Array(), 200, { 'x-transcript-offset': '99' })
+    })
+    expect(await reader.stream()).toBe('failed')
+    await reader.read()
+    expect(offsetFrom(requests[1])).toBe(99)
+    expect(entriesFrom(onEntries)).toMatchObject([{ text: 'committed' }])
+    expect(onReset).not.toHaveBeenCalled()
+  })
+
   it('commits a decoded event when stopped during its time slice', async () => {
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => 100 + clock.mock.calls.length * 10)
     const lines = Array.from({ length: 4 }, (_, i) => `data: ${jsonLine(`line ${i}`).trimEnd()}\n`).join('')

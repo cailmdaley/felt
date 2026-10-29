@@ -469,7 +469,10 @@ defmodule ShuttleWeb.TranscriptControllerTest do
     @tag :timing
     test "idle timeout cancels an open relay" do
       StubStreamClient.set_events([{:open, [{"content-type", "text/event-stream"}]}])
-      assert response(remote_stream(), 200) == ""
+
+      assert response(remote_stream(), 200) ==
+               "\nevent: error\ndata: {\"error\":\"upstream_idle\"}\n\n"
+
       assert StubStreamClient.cancelled() == [StubStreamClient.last().id]
       assert Registry.count(ShuttleWeb.TranscriptStreams) == 0
     end
@@ -485,7 +488,9 @@ defmodule ShuttleWeb.TranscriptControllerTest do
         {:error, :closed}
       ])
 
-      assert response(remote_stream(), 200) == ": open\n\n"
+      assert response(remote_stream(), 200) ==
+               ": open\n\n\nevent: error\ndata: {\"error\":\"upstream_error\"}\n\n"
+
       id = StubStreamClient.last().id
       refute_received {:remote_stream, ^id, _}
       assert_received {:remote_stream, ^foreign, :done}

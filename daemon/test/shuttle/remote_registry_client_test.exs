@@ -506,7 +506,10 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
 
                 refute_received {:remote_stream, ^id, _}
                 assert conn.status == 200
-                assert conn.resp_body == ""
+
+                assert conn.resp_body ==
+                         "\nevent: error\ndata: {\"error\":\"upstream_idle\"}\n\n"
+
                 assert Registry.lookup(ShuttleWeb.TranscriptStreams, {:relay, remote.name}) == []
               after
                 Default.stream_cancel(id)

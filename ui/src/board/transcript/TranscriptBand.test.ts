@@ -1144,6 +1144,33 @@ describe('TranscriptBand', () => {
     expect(fixture.streams).toHaveLength(1)
   })
 
+  it.each(['upstream_error', 'upstream_idle'])('backs off repeated %s events instead of reconnecting immediately', async error => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    const fail = (): void => {
+      const stream = fixture.streams.at(-1)!
+      stream.controller.enqueue(new TextEncoder().encode(`\nevent: error\ndata: {"error":"${error}"}\n\n`))
+      stream.controller.close()
+    }
+    band.follow(target(latestId, { live: true }))
+    await vi.advanceTimersByTimeAsync(50)
+    fail()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.streams).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fixture.raw()).toHaveLength(2)
+    expect(fixture.streams).toHaveLength(2)
+    fail()
+    await vi.advanceTimersByTimeAsync(50)
+    expect(fixture.streams).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(fixture.raw()).toHaveLength(3)
+    expect(fixture.streams).toHaveLength(2)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(fixture.streams).toHaveLength(3)
+  })
+
   it('reconnects a closed stream from its offset and catches up from zero after reset', async () => {
     vi.useFakeTimers()
     const fixture = streamFixture()

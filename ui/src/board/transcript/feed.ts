@@ -134,6 +134,7 @@ export class TranscriptFeed {
           const line = buffer.slice(0, i)
           buffer = buffer.slice(i + (buffer[i] === '\r' && buffer[i + 1] === '\n' ? 2 : 1))
           if (!line) {
+            if (event === 'error') return 'failed'
             if (event === 'reset') {
               this.resetBytes()
               this.onReset()

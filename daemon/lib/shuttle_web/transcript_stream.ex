@@ -150,9 +150,18 @@ defmodule ShuttleWeb.TranscriptStream do
         conn
 
       {:remote_stream, ^id, {:error, _}} ->
-        conn
+        relay_error(conn, "upstream_error")
     after
-      idle_ms -> conn
+      idle_ms -> relay_error(conn, "upstream_idle")
+    end
+  end
+
+  defp relay_error(conn, reason) do
+    # End any partial upstream line, then override its event type before the
+    # blank line dispatches it. The client must not commit a partial data event.
+    case chunk(conn, ["\nevent: error\ndata: ", Jason.encode!(%{error: reason}), "\n\n"]) do
+      {:ok, conn} -> conn
+      {:error, _} -> conn
     end
   end
 

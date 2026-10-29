@@ -576,6 +576,8 @@ define a transcript reader or search language.
 `/transcript/stream` accepts `session`, optional `host`, and a non-negative byte `offset` (default 0).
 Each server-sent event carries complete JSONL records in `data` lines and an `id` equal to the byte offset after its last record; partial trailing lines wait for completion.
 The stream sends comment keepalives while idle and ends with an `event: reset` if the file shrinks, is replaced, or disappears; clients should reread from offset 0 after a reset.
+A hub relay sends `event: error` with `{"error":"upstream_error"}` or `{"error":"upstream_idle"}` before closing on upstream failure or silence; clients should retry with backoff from the last committed event id.
+An upstream response that ends normally closes without an error event.
 When a remote owner does not support streaming, the hub returns 501 `stream_unsupported`; clients can fall back to polling `/transcript/raw`.
 
 `/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
