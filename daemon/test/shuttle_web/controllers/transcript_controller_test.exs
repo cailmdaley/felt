@@ -229,10 +229,10 @@ defmodule ShuttleWeb.TranscriptControllerTest do
       assert ShuttleWeb.TranscriptStream.follow(conn, path, 0) == conn
     end
 
-    test "a record larger than the event limit is read whole", %{path: path} do
+    test "a record larger than the event limit is its own whole event", %{path: path} do
       File.write!(path, "oversized\nx\n")
       conn = local_conn() |> get("/api/v1/transcript/stream", %{"session" => @session})
-      assert response(conn, 200) =~ "id: 12\ndata: oversized\ndata: x\n\n"
+      assert response(conn, 200) =~ "id: 10\ndata: oversized\n\nid: 12\ndata: x\n\n"
     end
 
     test "appended records arrive with their offsets", %{path: path} do

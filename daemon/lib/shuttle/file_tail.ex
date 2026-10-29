@@ -103,7 +103,7 @@ defmodule Shuttle.FileTail do
   @doc """
   Advance with an optional `:max_bytes` cap. A capped read may return
   `{:append, [], new_offset}` when it consumes only complete blank lines.
-  A line exceeding the cap is read with the remainder of the file.
+  A line longer than the cap is returned whole, alone.
   """
   @spec advance(Path.t(), offset(), keyword()) ::
           {:append, [String.t()], offset()} | {:reset, offset()} | :noop
@@ -169,13 +169,37 @@ defmodule Shuttle.FileTail do
     end
   end
 
+  # A slice with no newline holds part of one line longer than the cap; read
+  # on in cap-sized steps until that line ends, so the line arrives whole and
+  # nothing after it is read.
   defp maybe_read_remainder(path, offset, length, capped_length, chunk) do
     if capped_length < length and :binary.match(chunk, "\n") == :nomatch do
-      read_range(path, offset, length)
+      read_through_newline(path, offset, length, capped_length, [chunk])
     else
       {:ok, chunk}
     end
   end
+
+  defp read_through_newline(path, offset, length, read, acc) when read < length do
+    step = min(length - read, max(read, 1))
+
+    case read_range(path, offset + read, step) do
+      {:ok, more} ->
+        case :binary.match(more, "\n") do
+          {pos, 1} ->
+            {:ok, IO.iodata_to_binary(Enum.reverse([binary_part(more, 0, pos + 1) | acc]))}
+
+          :nomatch ->
+            read_through_newline(path, offset, length, read + byte_size(more), [more | acc])
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp read_through_newline(_path, _offset, _length, _read, acc),
+    do: {:ok, IO.iodata_to_binary(Enum.reverse(acc))}
 
   # The complete lines in `chunk` and how many bytes they occupy — everything
   # up to and including the last newline. No newline at all means nothing is
