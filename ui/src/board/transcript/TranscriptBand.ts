@@ -1012,6 +1012,7 @@ export class TranscriptBand {
     this.clearCacheTimer()
     this.closeFull()
     this.stopFollowing()
+    this.clearSentFilesTimer()
     this.clearLoadingTimer()
     if (this.renderFrame !== null) cancelAnimationFrame(this.renderFrame)
     if (this.layoutFrame !== null) cancelAnimationFrame(this.layoutFrame)
@@ -1044,6 +1045,7 @@ export class TranscriptBand {
       this.hasReadCurrent = false
       this.stopFollowing()
       this.following = null
+      this.clearSentFilesTimer()
       this.clearLoadingTimer()
       this.feed?.dispose()
       this.feed = null
@@ -1078,6 +1080,7 @@ export class TranscriptBand {
 
     this.stopFollowing()
     this.following = null
+    this.clearSentFilesTimer()
     this.clearLoadingTimer()
     this.feed?.dispose()
     this.feed = null
@@ -1405,7 +1408,8 @@ export class TranscriptBand {
   }
 
   private sentFilesSoon(): void {
-    if (!this.sentFilesFeed || this.sentFilesTimer !== null) return
+    if (!this.sentFilesFeed) return
+    this.clearSentFilesTimer()
     const feed = this.sentFilesFeed
     this.sentFilesTimer = window.setTimeout(() => {
       this.sentFilesTimer = null
@@ -1417,6 +1421,9 @@ export class TranscriptBand {
     this.stopPollTimer()
     this.followingStopped = true
     this.feed?.stopStream()
+  }
+
+  private clearSentFilesTimer(): void {
     if (this.sentFilesTimer !== null) window.clearTimeout(this.sentFilesTimer)
     this.sentFilesTimer = null
   }

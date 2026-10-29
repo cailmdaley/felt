@@ -1185,6 +1185,46 @@ describe('TranscriptBand', () => {
     expect(fixture.raw()).toHaveLength(1)
   })
 
+  it('debounces sent-file refreshes after the last streamed append so its projection can settle', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true, uid: 'task-uid' }))
+    await vi.advanceTimersByTimeAsync(1400)
+    fixture.append(records('Sending a report', 'Report sent'))
+    await microtasks()
+    await vi.advanceTimersByTimeAsync(100)
+    expect(fixture.sent()).toHaveLength(1) // The connect-time refresh must move behind the append.
+    await vi.advanceTimersByTimeAsync(500)
+    fixture.files([send('/tmp/debounced-report.html', Date.parse('2026-09-26T14:15:00Z'))])
+    await vi.advanceTimersByTimeAsync(899)
+    expect(fixture.sent()).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(51)
+    expect(fixture.sent()).toHaveLength(2)
+    expect(band.el.textContent).toContain('debounced-report.html')
+  })
+
+  it('preserves the delayed sent-file refresh when parking precedes receipt projection', async () => {
+    vi.useFakeTimers()
+    const fixture = streamFixture()
+    const band = makeBand(fixture.fetcher)
+    band.follow(target(latestId, { live: true, uid: 'task-uid' }))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(fixture.sent()).toHaveLength(2)
+    fixture.append(records('Sending the final report', 'Final report sent'))
+    await microtasks()
+    await vi.advanceTimersByTimeAsync(200)
+    band.follow(target(latestId, { uid: 'task-uid' }))
+    await microtasks()
+    expect(fixture.sent()).toHaveLength(3) // The immediate final read predates the receipt projection.
+    await vi.advanceTimersByTimeAsync(400)
+    fixture.files([send('/tmp/parked-report.html', Date.parse('2026-09-26T14:15:00Z'))])
+    await vi.advanceTimersByTimeAsync(950)
+    expect(fixture.sent()).toHaveLength(4)
+    expect(band.el.textContent).toContain('parked-report.html')
+    expect(fixture.raw()).toHaveLength(2)
+  })
+
   it('reads immediately when unfolded, polls only while live, and stops polling when folded', async () => {
     vi.useFakeTimers()
     const requests: string[] = []
