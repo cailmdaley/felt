@@ -570,10 +570,19 @@ defmodule Shuttle.Threads do
 
     Enum.each(records, fn {id, _record, board} ->
       if MapSet.member?(created, id) do
-        case Shuttle.CLI.run(["board", "append"],
-               input: Jason.encode!(board) <> "\n",
-               input_eof: true
-             ) do
+        result =
+          try do
+            Shuttle.CLI.run(["board", "append"],
+              input: Jason.encode!(board) <> "\n",
+              input_eof: true
+            )
+          rescue
+            error -> {:error, Exception.message(error)}
+          catch
+            :exit, reason -> {:error, {:exit, reason}}
+          end
+
+        case result do
           {:ok, _} ->
             :ok
 

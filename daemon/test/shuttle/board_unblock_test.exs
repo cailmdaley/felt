@@ -9,6 +9,10 @@ defmodule Shuttle.BoardUnblockTest do
     end
   end
 
+  defmodule RaisingRunner do
+    def cmd("shuttle", ["board", "append"], _opts), do: raise("input unavailable")
+  end
+
   test "a newly captured unblock posts exactly once, including after acknowledgement" do
     dir = Path.join(System.tmp_dir!(), "board-unblock-#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
@@ -56,6 +60,29 @@ defmodule Shuttle.BoardUnblockTest do
     ThreadOutbox.acknowledge(id)
     assert :ok = Threads.capture_unblocks(entries, "host")
     refute_receive {:board, _, _}, 20
+
+    Shuttle.Test.Env.put_app_env(:felt_runner, RaisingRunner)
+    later = DateTime.add(DateTime.utc_now(), 5, :second) |> DateTime.to_iso8601()
+    blocker = put_in(blocker.fiber["closed_at"], later)
+
+    assert ExUnit.CaptureLog.capture_log(fn ->
+             assert :ok = Threads.capture_unblocks([parent, child, blocker], "host")
+           end) =~ "input unavailable"
+
+    assert [{_, _}] = ThreadOutbox.pending("host")
+  end
+
+  test "runner reports an unavailable input directory without raising" do
+    dir = Path.join(System.tmp_dir!(), "missing-#{System.unique_integer([:positive])}")
+
+    assert {message, 1} =
+             Shuttle.Runner.Default.cmd("sh", ["-c", "true"],
+               input: "x",
+               input_eof: true,
+               input_tmp_dir: dir
+             )
+
+    assert message =~ "cannot create command input"
   end
 
   test "runner supplies EOF after the input" do

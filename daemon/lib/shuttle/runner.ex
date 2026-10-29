@@ -58,26 +58,33 @@ defmodule Shuttle.Runner do
 
       path =
         Path.join(
-          System.tmp_dir!(),
+          Keyword.get(opts, :input_tmp_dir, System.tmp_dir!()),
           "shuttle-input-" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
         )
 
-      {:ok, file} = File.open(path, [:write, :binary, :exclusive])
+      case File.open(path, [:write, :binary, :exclusive]) do
+        {:ok, file} ->
+          try do
+            with :ok <- File.chmod(path, 0o600),
+                 :ok <- IO.binwrite(file, input),
+                 :ok <- File.close(file) do
+              opts = opts |> Keyword.drop([:input_eof, :input, :input_tmp_dir])
 
-      try do
-        File.chmod!(path, 0o600)
-        IO.binwrite(file, input)
-        File.close(file)
-        opts = opts |> Keyword.delete(:input_eof) |> Keyword.delete(:input)
+              cmd_without_eof(
+                "sh",
+                ["-c", "input=$1; shift; exec \"$@\" < \"$input\"", "sh", path, command | args],
+                opts
+              )
+            else
+              {:error, reason} -> {"cannot prepare command input: #{inspect(reason)}", 1}
+            end
+          after
+            File.close(file)
+            File.rm(path)
+          end
 
-        cmd_without_eof(
-          "sh",
-          ["-c", "input=$1; shift; exec \"$@\" < \"$input\"", "sh", path, command | args],
-          opts
-        )
-      after
-        File.close(file)
-        File.rm(path)
+        {:error, reason} ->
+          {"cannot create command input: #{inspect(reason)}", 1}
       end
     end
 
@@ -125,7 +132,8 @@ defmodule Shuttle.Runner do
           # Request-style CLI adapters consume one newline-delimited JSON frame
           # and exit after writing their receipt. Keeping stdin open lets us
           # continue collecting stdout and the exit status from the same port;
-          # no shell, argv exposure, temporary file, or EOF handshake is involved.
+          # this path needs no shell, temporary file, or EOF handshake. Commands
+          # that need EOF use the private input file in `with_input_file/3`.
           if is_binary(input), do: Port.command(port, input)
 
           os_pid =
