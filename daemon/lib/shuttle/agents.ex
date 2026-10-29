@@ -156,6 +156,9 @@ defmodule Shuttle.Agents do
   a positional arg). Without it, resume would land the worker in a session
   with no signal that it was deliberately woken, and the user's directive
   (the transient `user_message` dispatch parameter) would never reach it.
+  Autonomous restoration omits this prompt when durable turn evidence says the
+  previous turn had already ended or its state is ambiguous, and launches that
+  resume interactively so the terminal can wait for the human.
 
   Do not feed pi the prompt on stdin: a piped stdin switches pi from
   interactive to print mode, so a here-string would silently change the

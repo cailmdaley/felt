@@ -623,7 +623,9 @@ defmodule Shuttle.AppWorkersTest do
   test "restart adopts terminal backend identity even with no terminal" do
     terminal_fiber("tests/terminal")
     assert {:ok, ref} = dispatch("tests/terminal")
-    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    terminal = WorkerBackend.tmux(ref)
+    Runner.remove_tmux_session(terminal)
+    calls_before_restart = App.calls()
 
     {:ok, poller} =
       start_poller!(
@@ -636,6 +638,11 @@ defmodule Shuttle.AppWorkersTest do
     assert %{session: ^ref, context_address: "shuttle://test-host/codex/app-session-1"} =
              Poller.worker_status(poller, "tests/terminal")
 
+    eventually(fn -> Shuttle.Tmux.session_status(Runner, terminal) == :alive end)
+    restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
+    assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", []}, &1))
+    refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
+
     snapshot = Poller.snapshot(poller)
 
     assert [
@@ -646,7 +653,7 @@ defmodule Shuttle.AppWorkersTest do
              }
            ] = snapshot.eligible
 
-    assert {:ok, %{created: true}} =
+    assert {:ok, %{created: false}} =
              Shuttle.SessionResume.prepare("app-session-1",
                runner: Runner,
                live_sessions: fn -> ["app-session-1"] end

@@ -180,6 +180,14 @@ defmodule Shuttle.EventStream do
     ArgumentError -> %{}
   end
 
+  @doc "Catch up from the durable hook stream before reading one session's turn phase."
+  @spec catch_up_session_phase(String.t(), atom()) :: String.t() | nil
+  def catch_up_session_phase(session_id, server \\ __MODULE__) when is_binary(session_id) do
+    GenServer.call(server, {:session_phase, session_id}, @read_timeout_ms)
+  catch
+    :exit, _ -> nil
+  end
+
   @doc """
   The sessions whose turn is open, as `session => %{at: ms, harness: name}`.
   An ETS read like `session_activity/1`; a stream that is not running is `%{}`.
@@ -336,6 +344,12 @@ defmodule Shuttle.EventStream do
   def handle_call({:sent_events, _other}, _from, state), do: {:reply, :miss, state}
 
   def handle_call(:events_file, _from, state), do: {:reply, state.events_file, state}
+
+  def handle_call({:session_phase, session_id}, _from, state) do
+    state = state |> follow() |> publish()
+    phase = Map.get(WaitingTracker.phases(state.waiting, state.clock.()), session_id, %{})[:phase]
+    {:reply, phase, state}
+  end
 
   @impl true
   def handle_info(:poll, state) do

@@ -222,10 +222,15 @@ Dispatch sanity ladder:
    active/idle state? → fiber is well-formed and the offline walker sees it.
 2. `shuttle snapshot` lists it under `eligible[]`? → daemon dispatched.
 3. Fiber is `active` but sitting in `pending_launch`? → the daemon restarted
-   and the boot quarantine is armed. `shuttle daemon release`. Check this before
+   and the boot quarantine is armed for fresh autonomous work.
+   Workers already owned by the daemon remain eligible for recovery; quiet
+   workers restore without a new prompt, while workers whose turn was still
+   active resume with a continuation prompt. `shuttle daemon release` allows
+   fresh work. Check this before
    reaching for `make restart` — a restart *re-arms* the quarantine. (On a host
    that opted in with host.json `"quarantine_auto_release": true`, a released
-   daemon killed hard and back within seconds, workers intact, releases itself;
+   daemon killed hard and back within seconds, releases itself when the previous
+   daemon had been released and the churn guard passes;
    the boot log line `boot quarantine auto-released (…)` or `boot quarantine
    held (…)` says which happened and why.)
 4. Fiber is `active` and armed, but in neither `eligible[]` nor

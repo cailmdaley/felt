@@ -120,6 +120,15 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   A durably owned Codex conversation on either surface is exempt from the transcript check: it keeps its identity in the App Server, so it resumes whenever it did not hand off.
   A standing constitution starts fresh on the autonomous loop.
 
+  A dirty-death restoration is separate from launching another turn. The daemon
+  classifies the last durable hook-event state for the session: a `stop` with no
+  later turn activity reopens the same Claude or Pi session with an empty prompt,
+  and reattaches to the same Codex thread without starting a turn. A recorded
+  working phase resumes with the normal continuation prompt. Missing or
+  ambiguous turn evidence reopens quietly. This uses the durable event stream
+  reconstructed at boot, so an idle conversation does not receive a message
+  merely because its terminal or daemon died.
+
   `resume_mode` overrides the autonomous rule: `"previous"` (the board's
   Resume) resumes unconditionally; `"fresh"` (New session) never resumes but
   still names a cut-off session; `"continue"` (`Shuttle.Delivery`, a message

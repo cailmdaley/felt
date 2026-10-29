@@ -232,7 +232,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
           {:ok, fiber} ->
             if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
                  Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
-              adopt_session(acc, fiber["id"], Shuttle.AppWorkers.ref(record["session_uuid"]))
+              state =
+                adopt_session(acc, fiber["id"], Shuttle.AppWorkers.ref(record["session_uuid"]))
+
+              restore_terminal_viewer(record, acc.runner)
+              state
             else
               acc
             end
@@ -245,6 +249,33 @@ defmodule Shuttle.Poller.SessionReconciliation do
       end
     end)
   end
+
+  # The App Server owns the conversation across daemon restarts, but a terminal
+  # viewer belongs to tmux and may have died with its server. Recreate only the
+  # viewer for CLI-surface records; prepare verifies the exact stored thread and
+  # starts its TUI without creating a model turn. App-surface records need none.
+  defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id}, runner)
+       when is_binary(id) do
+    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+           case Shuttle.CodexTerminal.prepare(id, runner: runner) do
+             {:ok, _} ->
+               :ok
+
+             {:error, reason} ->
+               Logger.warning("Failed to restore Codex terminal for #{id}: #{inspect(reason)}")
+           end
+         end) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "Could not schedule Codex terminal restoration for #{id}: #{inspect(reason)}"
+        )
+    end
+  end
+
+  defp restore_terminal_viewer(_record, _runner), do: :ok
 
   # Maps each candidate's worker session name (`<leaf>-<uid>-shuttle`) back to
   # its fiber, so orphan adoption recognizes the workers it launched. A uid is

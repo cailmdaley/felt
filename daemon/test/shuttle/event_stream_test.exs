@@ -76,6 +76,27 @@ defmodule Shuttle.EventStreamTest do
     assert after_read - before < 1_000
   end
 
+  test "catch-up phase reads include a durable stop before the next poll", %{path: path} do
+    append(path, [ev("user_prompt_submit", 0)])
+    name = :event_stream_catch_up_phase
+
+    start_supervised!(
+      {EventStream,
+       events_file: path, name: name, clock: fn -> @t0 end, poll_interval_ms: 3_600_000}
+    )
+
+    assert EventStream.session_activity(name)["s1"].phase == "working"
+    append(path, [ev("stop", 1)])
+
+    assert EventStream.session_activity(name)["s1"].phase == "working"
+    assert EventStream.catch_up_session_phase("s1", name) == "waiting"
+    assert EventStream.session_activity(name)["s1"].phase == "waiting"
+  end
+
+  test "missing event stream evidence stays ambiguous" do
+    assert EventStream.catch_up_session_phase("unknown-session", :missing_event_stream) == nil
+  end
+
   test "seeds from the rotated file then the live one, and matches a fresh fold", %{path: path} do
     append(path <> ".1", [ev("notification", 0), ev("pre_tool_use", 1)])
     append(path, [ev("notification", 2), ev("post_tool_use", 5)])

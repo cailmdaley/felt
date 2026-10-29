@@ -10,7 +10,7 @@ A fiber is eligible for a worker when these conditions hold:
 2. It carries a `shuttle:` block, written by `shuttle install` (oneshot) or `repeat` (standing).
 3. Its `status` is `active`: `open` is a draft, `closed` is awaiting review or finished, and tags never gate anything.
 4. Its `shuttle.host` exactly matches this daemon's host ID.
-5. The boot quarantine is released with `shuttle daemon release`, except for observed live workers and cron-due standing constitutions.
+5. The boot quarantine holds fresh autonomous work until `shuttle daemon release`. Previously-running workers restore automatically: an active turn resumes with its continuation prompt, while a worker whose turn had ended reopens without a new prompt.
 
 Inspect eligible work before releasing: the release applies to the whole host.
 

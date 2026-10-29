@@ -103,6 +103,7 @@ defmodule Shuttle.Dispatcher do
     force = Keyword.get(opts, :force, false)
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
+         :ok <- validate_restoration_request(opts, fiber, prompt_context, force),
          :ok <- check_dispatchable(fiber, force),
          {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
@@ -119,10 +120,14 @@ defmodule Shuttle.Dispatcher do
              runner
            ) do
       resume_intent =
-        resolve_resume_intent(prompt_context, fiber,
-          force: force,
-          resume_mode: Keyword.get(opts, :resume_mode)
-        )
+        if restoration?(opts, fiber, prompt_context, force) do
+          {:previous, Shuttle.Continuation.resumable_session_id(fiber)}
+        else
+          resolve_resume_intent(prompt_context, fiber,
+            force: force,
+            resume_mode: Keyword.get(opts, :resume_mode)
+          )
+        end
 
       previous_session = previous_session_info(fiber, uid)
 
@@ -152,6 +157,8 @@ defmodule Shuttle.Dispatcher do
             user_message: Keyword.get(opts, :user_message),
             developer_instructions: Keyword.get(opts, :developer_instructions),
             runner: runner,
+            restoration: restoration?(opts, fiber, prompt_context, force),
+            turn_phase: Keyword.get(opts, :turn_phase),
             previous_session: previous_session,
             threads: Keyword.get(opts, :threads),
             role: get_in(fiber, ["shuttle", "role"]),
@@ -159,6 +166,56 @@ defmodule Shuttle.Dispatcher do
             model: agent.model
           )
       end
+    end
+  end
+
+  # A restoration flag authorizes only the same dirty continuation observed in
+  # the freshly-read fiber. Manual dispatches and human continuation directives
+  # keep their own resume semantics.
+  defp restoration?(opts, fiber, prompt_context, force) do
+    Keyword.get(opts, :restoration, false) and not force and
+      is_nil(Keyword.get(opts, :resume_mode)) and autonomous_context?(prompt_context) and
+      is_nil(Keyword.get(opts, :user_message)) and
+      Shuttle.Continuation.restoration?(fiber)
+  end
+
+  defp autonomous_context?(:constitution), do: true
+  defp autonomous_context?({:standing_run, _run_id}), do: true
+  defp autonomous_context?(_), do: false
+
+  defp validate_restoration_request(opts, fiber, prompt_context, force) do
+    if Keyword.get(opts, :restoration, false) and
+         not restoration?(opts, fiber, prompt_context, force) do
+      dispatch_refused(
+        :restoration_marker_stale,
+        "the worker's durable continuation marker no longer authorizes restoration; poll again before dispatching"
+      )
+    else
+      :ok
+    end
+  end
+
+  # Hook state is reconstructed from the host's durable event stream at boot.
+  # A positive working phase means the turn was in flight. Missing or closed
+  # evidence reopens quietly, since waking a human's conversation is the costly
+  # ambiguity.
+  defp quiet_restoration?(session_id, opts) do
+    phase =
+      case Keyword.get(opts, :turn_phase) do
+        fun when is_function(fun, 1) ->
+          fun.(session_id)
+
+        _ ->
+          Shuttle.EventStream.catch_up_session_phase(event_session_id(session_id))
+      end
+
+    phase != "working"
+  end
+
+  defp event_session_id(session_id) do
+    case Shuttle.AppWorkers.get(session_id) do
+      {:ok, record} -> record["transcript_session_uuid"] || session_id
+      _ -> session_id
     end
   end
 
@@ -1273,15 +1330,25 @@ defmodule Shuttle.Dispatcher do
           )
         )
 
-        prompt =
-          case intent do
-            :fresh -> render_context_prompt(fiber_id, context, opts)
-            _ -> render_resume_prompt(fiber_id, opts)
-          end
+        if Keyword.get(opts, :restoration) and quiet_restoration?(id, opts) do
+          with :ok <-
+                 Shuttle.AppWorkers.update(id, %{
+                   "launch_state" => "running",
+                   "pending_prompt" => nil,
+                   "last_error" => nil
+                 }),
+               do: finish_app_launch(id, runner)
+        else
+          prompt =
+            case intent do
+              :fresh -> render_context_prompt(fiber_id, context, opts)
+              _ -> render_resume_prompt(fiber_id, opts)
+            end
 
-        case Shuttle.AppWorkers.start_turn(id, prompt, codex_options(agent, work_dir, opts)) do
-          {:ok, _} -> finish_app_launch(id, runner)
-          error -> error
+          case Shuttle.AppWorkers.start_turn(id, prompt, codex_options(agent, work_dir, opts)) do
+            {:ok, _} -> finish_app_launch(id, runner)
+            error -> error
+          end
         end
       else
         # Keep the durable record: a retry must recover this exact identity.
@@ -1518,13 +1585,21 @@ defmodule Shuttle.Dispatcher do
               "Resuming #{fiber_id} session #{session_id} via #{agent.id} → tmux #{session}"
             )
 
-            resume_prompt = render_resume_prompt(fiber_id, prompt_opts)
-            resume_command = Agents.build_resume_command(agent, session_id, resume_prompt)
+            quiet? = Keyword.get(opts, :restoration) and quiet_restoration?(session_id, opts)
+            resume_prompt = if quiet?, do: "", else: render_resume_prompt(fiber_id, prompt_opts)
 
-            # Failed resumes fall back to a fresh launch. Claude reuses the
-            # requested UUID; Pi chooses a new UUID, whose capture starts
-            # only after the private fallback signal appears. The fallback
-            # prompt omits lineage to a transcript the harness cannot resume.
+            resume_agent =
+              if quiet? and agent.cli == "claude",
+                do: Map.put(agent, :headless, false),
+                else: agent
+
+            resume_command = Agents.build_resume_command(resume_agent, session_id, resume_prompt)
+
+            # A working-turn resume may fall back to a fresh launch. Claude
+            # reuses the requested UUID; Pi chooses a new UUID, whose capture
+            # starts only after the private fallback signal appears. Quiet
+            # restoration has no fallback, so a failed resume stays visible as
+            # a blocked worker instead of waking a new conversation.
             fallback_command =
               fresh_fallback_command(
                 agent,
@@ -1542,10 +1617,16 @@ defmodule Shuttle.Dispatcher do
                 else: nil
 
             command =
-              if fallback_signal,
-                do:
-                  "#{resume_command} || { touch #{shell_single_quote(fallback_signal)}; #{fallback_command}; }",
-                else: "#{resume_command} || #{fallback_command}"
+              cond do
+                quiet? ->
+                  resume_command
+
+                fallback_signal ->
+                  "#{resume_command} || { touch #{shell_single_quote(fallback_signal)}; #{fallback_command}; }"
+
+                true ->
+                  "#{resume_command} || #{fallback_command}"
+              end
 
             # claude --resume shows an interactive "you're about to use a
             # previous session" warning that only an Enter keypress at the
@@ -1555,7 +1636,7 @@ defmodule Shuttle.Dispatcher do
             # show this warning — and a headless `-p` resume has no TTY warning
             # page and no human to attach, so both the dismiss send-keys and the
             # wait-for-client gate are skipped for it.
-            headless = Keyword.fetch!(prompt_opts, :headless)
+            headless = resume_agent[:headless] == true
 
             run_script =
               build_run_script(fiber_id, command, agent.id,

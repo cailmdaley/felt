@@ -29,7 +29,8 @@ defmodule Shuttle.DispatcherTest do
       # `:present` (the default — every pre-existing test predates the macOS
       # tmux-server preflight and must be unaffected), `:absent` (tmux's own
       # no-server message) or `:timeout`.
-      tmux_server: :present
+      tmux_server: :present,
+      fiber_overrides: %{}
     }
 
     def start_link(_ \\ []) do
@@ -81,6 +82,12 @@ defmodule Shuttle.DispatcherTest do
 
     def commands do
       Agent.get(__MODULE__, & &1.commands)
+    end
+
+    def override_fiber(id, fiber) do
+      Agent.update(__MODULE__, fn state ->
+        put_in(state.fiber_overrides[id], fiber)
+      end)
     end
 
     def tmux_sessions do
@@ -365,7 +372,9 @@ defmodule Shuttle.DispatcherTest do
         # the parsed fiber fields. The dispatcher reads `shuttle.agent` and
         # `tags` directly off the JSON map.
         "--json" in args ->
-          fiber = @test_fibers[fiber_id]
+          fiber =
+            @test_fibers[fiber_id]
+            |> Map.merge(Map.get(Agent.get(__MODULE__, & &1.fiber_overrides), fiber_id, %{}))
 
           payload =
             %{
@@ -724,6 +733,74 @@ defmodule Shuttle.DispatcherTest do
     assert Enum.any?(commands, fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session"
            end)
+  end
+
+  test "dirty restoration reopens quietly when durable turn evidence is absent" do
+    session = "11111111-2222-3333-4444-555555555555"
+
+    MockRunner.override_fiber("tests/haiku", %{
+      shuttle: %{
+        "resolved" => %{
+          "agent" => %{
+            "id" => "claude-sonnet",
+            "cli" => "claude",
+            "wrapper" => "claude",
+            "model" => "sonnet",
+            "headless" => true
+          }
+        },
+        "runtime" => %{"session_uuid" => session, "dispatched_at" => "2026-10-29T00:00:00Z"}
+      }
+    })
+
+    assert {:ok, _} = Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+
+    {"tmux", ["new-session" | args]} =
+      Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+    script = File.read!(List.last(args))
+    assert script =~ "--resume"
+    assert script =~ session
+    refute script =~ "Mode: resume"
+    refute script =~ "claude -p"
+    assert script =~ "tmux send-keys"
+  end
+
+  test "dirty restoration continues a turn with its resume prompt" do
+    session = "11111111-2222-3333-4444-555555555555"
+
+    MockRunner.override_fiber("tests/haiku", %{
+      shuttle: %{
+        "resolved" => %{
+          "agent" => %{
+            "id" => "claude-sonnet",
+            "cli" => "claude",
+            "wrapper" => "claude",
+            "model" => "sonnet"
+          }
+        },
+        "runtime" => %{"session_uuid" => session, "dispatched_at" => "2026-10-29T00:00:00Z"}
+      }
+    })
+
+    assert {:ok, _} =
+             Dispatcher.dispatch("tests/haiku",
+               runner: MockRunner,
+               restoration: true,
+               turn_phase: fn ^session -> "working" end
+             )
+
+    {"tmux", ["new-session" | args]} =
+      Enum.find(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
+
+    assert File.read!(List.last(args)) =~ "Mode: resume"
+  end
+
+  test "stale restoration authorization cannot fall through to a fresh dispatch" do
+    assert {:error, {:restoration_marker_stale, _}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner, restoration: true)
+
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
   # ── Wrapper preflight ──
