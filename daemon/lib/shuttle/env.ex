@@ -7,9 +7,11 @@ defmodule Shuttle.Env do
   `home/0`, `expand/1` and `cmd/3` instead of `System.get_env/2`,
   `Application.get_env(:shuttle, …)`, `System.find_executable/1`,
   `System.user_home!/0`, `Path.expand/1` and `System.cmd/3`. Executable lookup
-  caches successful PATH resolutions for one minute; the runner invalidates and
-  retries a failed spawn. The VM's immutable home directory is cached too;
-  other production reads use the global value.
+  caches successful PATH resolutions for one minute; a newly installed earlier
+  candidate can remain unseen for that long. The runner invalidates and retries
+  a failed spawn once before any child runs; a non-executable candidate found
+  on retry can be cached again for one minute. The VM's immutable home directory
+  is cached too; other production reads use the global value.
 
   Test builds (`config :shuttle, scoped_env: true`, read at compile time) first
   consult *scoped overrides*: values a test process registers for itself and
@@ -42,9 +44,7 @@ defmodule Shuttle.Env do
   @doc "Executable lookup cached by name, PATH and relative-path working directory."
   @spec find_executable(String.t()) :: String.t() | nil
   def find_executable(name) do
-    key = executable_key(name)
-
-    Shuttle.RuntimeCache.fetch(key, 60_000, fn ->
+    lookup = fn ->
       case {Path.type(name), get("PATH")} do
         {:absolute, _} ->
           System.find_executable(name)
@@ -58,7 +58,12 @@ defmodule Shuttle.Env do
             found -> List.to_string(found)
           end
       end
-    end)
+    end
+
+    case executable_key(name) do
+      nil -> lookup.()
+      key -> Shuttle.RuntimeCache.fetch(key, 60_000, lookup)
+    end
   end
 
   @doc false
@@ -70,9 +75,17 @@ defmodule Shuttle.Env do
     relative? =
       Path.type(name) != :absolute and
         (String.contains?(name, "/") or
-           Enum.any?(String.split(path || "", ":"), &(Path.type(&1) != :absolute)))
+           (is_binary(path) and
+              Enum.any?(String.split(path, ":"), &(Path.type(&1) != :absolute))))
 
-    {__MODULE__, :executable, name, path, if(relative?, do: File.cwd!())}
+    if relative? do
+      case File.cwd() do
+        {:ok, cwd} -> {__MODULE__, :executable, name, path, cwd}
+        {:error, _reason} -> nil
+      end
+    else
+      {__MODULE__, :executable, name, path, nil}
+    end
   end
 
   # The VM's user-home argument is immutable for its lifetime. Scoped HOME

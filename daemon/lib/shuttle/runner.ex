@@ -49,22 +49,18 @@ defmodule Shuttle.Runner do
       {timeout_ms, opts} = Keyword.pop(opts, :timeout_ms, default_timeout_ms())
       opts = opts |> with_scoped_env() |> then(&maybe_clear_inherited_tmux(command, &1))
 
-      # `System.cmd/3` resolves the executable the same way and raises
-      # `ErlangError :enoent` when it's missing; map that documented failure
-      # mode to exit 127 (the shell's "command not found") so PATH problems
-      # degrade like any other failed command instead of crashing the caller.
       # The lookup reads the caller's `PATH` (`Shuttle.Env.find_executable/1`).
       case Shuttle.Env.find_executable(command) do
-        nil -> {"#{command}: command not found", 127}
-        executable -> run_bounded(executable, command, args, opts, timeout_ms)
+        nil ->
+          {"#{command}: command not found", 127}
+
+        executable ->
+          case run_bounded(executable, command, args, opts, timeout_ms) do
+            {:spawn_error, :enoent} -> {"#{command}: command not found", 127}
+            {:spawn_error, :eacces} -> {"#{command}: permission denied", 126}
+            result -> result
+          end
       end
-    rescue
-      error in ErlangError ->
-        case error.original do
-          :enoent -> {"#{command}: command not found", 127}
-          :eacces -> {"#{command}: permission denied", 126}
-          _ -> reraise error, __STACKTRACE__
-        end
     end
 
     defp run_bounded(executable, command, args, opts, timeout_ms) do
@@ -83,59 +79,81 @@ defmodule Shuttle.Runner do
           end
 
       # Any raise here (bad option, unreadable cd, …) propagates to the caller
-      # exactly as bare `System.cmd/3` would — only :enoent and the timeout are
-      # softened into the tuple contract.
-      port = open_port(executable, command, port_opts)
+      # exactly as bare `System.cmd/3` would — only spawn :enoent/:eacces and
+      # the timeout are softened into the tuple contract.
+      case open_port(executable, command, port_opts) do
+        {:error, reason} ->
+          {:spawn_error, reason}
 
-      # Request-style CLI adapters consume one newline-delimited JSON frame and
-      # exit after writing their receipt. Keeping stdin open lets us continue
-      # collecting stdout and the exit status from the same port; no shell,
-      # argv exposure, temporary file, or EOF handshake is involved.
-      if is_binary(input), do: Port.command(port, input)
+        {:ok, port} ->
+          # Request-style CLI adapters consume one newline-delimited JSON frame
+          # and exit after writing their receipt. Keeping stdin open lets us
+          # continue collecting stdout and the exit status from the same port;
+          # no shell, argv exposure, temporary file, or EOF handshake is involved.
+          if is_binary(input), do: Port.command(port, input)
 
-      os_pid =
-        case Port.info(port, :os_pid) do
-          {:os_pid, pid} -> pid
-          _ -> nil
-        end
+          os_pid =
+            case Port.info(port, :os_pid) do
+              {:os_pid, pid} -> pid
+              _ -> nil
+            end
 
-      # Whoever owns the command must reap it: the Poller's stall watchdog
-      # `:kill`s a poll task mid-command, which skips `collect/7`'s own timeout
-      # kill, and closing the port only closes the child's stdin.
-      # Completion-owned mutations opt out of both deadline and owner-death
-      # killing. Their subprocess owns releasing filesystem locks even if its
-      # caller exits; closing a Port alone does not SIGKILL the subprocess.
-      guard =
-        if os_pid && timeout_ms != :infinity,
-          do: spawn_guard(self(), Shuttle.Env.callers(), os_pid)
+          # Whoever owns the command must reap it: the Poller's stall watchdog
+          # `:kill`s a poll task mid-command, which skips `collect/7`'s own timeout
+          # kill, and closing the port only closes the child's stdin.
+          # Completion-owned mutations opt out of both deadline and owner-death
+          # killing. Their subprocess owns releasing filesystem locks even if its
+          # caller exits; closing a Port alone does not SIGKILL the subprocess.
+          guard =
+            if os_pid && timeout_ms != :infinity,
+              do: spawn_guard(self(), Shuttle.Env.callers(), os_pid)
 
-      deadline =
-        if timeout_ms == :infinity,
-          do: :infinity,
-          else: System.monotonic_time(:millisecond) + timeout_ms
+          deadline =
+            if timeout_ms == :infinity,
+              do: :infinity,
+              else: System.monotonic_time(:millisecond) + timeout_ms
 
-      try do
-        collect(port, os_pid, command, args, timeout_ms, deadline, {
-          [],
-          Keyword.get(opts, :max_output_bytes, :infinity)
-        })
-      after
-        if guard, do: send(guard, :released)
+          try do
+            collect(port, os_pid, command, args, timeout_ms, deadline, {
+              [],
+              Keyword.get(opts, :max_output_bytes, :infinity)
+            })
+          after
+            if guard, do: send(guard, :released)
+          end
       end
     end
 
     # Retry only a failed spawn: no child has run, so retry cannot repeat work.
+    # A newly installed earlier-PATH executable may remain unseen for up to
+    # the 60-second lookup cache lifetime. If retry finds a non-executable
+    # candidate, that path can be cached again for the same bounded interval.
     defp open_port(executable, command, port_opts) do
-      Port.open({:spawn_executable, executable}, port_opts)
+      {:ok, Port.open({:spawn_executable, executable}, port_opts)}
     rescue
       error in ErlangError ->
         if error.original in [:enoent, :eacces] do
           Shuttle.Env.invalidate_executable(command)
-          resolved = Shuttle.Env.find_executable(command) || :erlang.error(:enoent)
-          Port.open({:spawn_executable, resolved}, port_opts)
+
+          case Shuttle.Env.find_executable(command) do
+            nil ->
+              {:error, :enoent}
+
+            resolved ->
+              retry_open_port(resolved, port_opts)
+          end
         else
           reraise error, __STACKTRACE__
         end
+    end
+
+    defp retry_open_port(executable, port_opts) do
+      {:ok, Port.open({:spawn_executable, executable}, port_opts)}
+    rescue
+      error in ErlangError ->
+        if error.original in [:enoent, :eacces],
+          do: {:error, error.original},
+          else: reraise(error, __STACKTRACE__)
     end
 
     # An unlinked sentinel that reaps `os_pid`'s process group if `owner` dies

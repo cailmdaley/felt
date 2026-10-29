@@ -58,6 +58,33 @@ defmodule Shuttle.RunnerTest do
     assert {"second", 0} = Shuttle.Runner.Default.cmd(b, [], [])
   end
 
+  test "relative PATH lookup and runner tolerate an unlinked working directory" do
+    script = """
+    detached = Path.join(System.tmp_dir!(), "shuttle-detached-cwd-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(detached)
+    File.cd!(detached)
+    File.rm_rf!(detached)
+    {:error, _reason} = File.cwd()
+
+    # Empty PATH components resolve against cwd. Absolute candidates later in
+    # PATH must remain usable even when cwd no longer names a directory.
+    System.put_env("PATH", "/bin::/usr/bin:")
+    executable = Shuttle.Env.find_executable("sh")
+    true = executable in ["/bin/sh", "/usr/bin/sh"]
+    true = Shuttle.Env.find_executable("sh") in ["/bin/sh", "/usr/bin/sh"]
+    {message, status} = Shuttle.Runner.Default.cmd("sh", ["-c", "printf 'runner ok'"], cd: "/")
+    true = is_binary(message)
+    true = is_integer(status)
+    IO.puts("detached cwd lookup ok")
+    """
+
+    assert {"detached cwd lookup ok\n", 0} =
+             System.cmd("elixir", ["-pa", "_build/test/lib/shuttle/ebin", "-e", script],
+               env: [{"ERL_FLAGS", "+S 2:2"}],
+               stderr_to_stdout: true
+             )
+  end
+
   test "a command that completes within its bound is unaffected" do
     assert {"hi\n", 0} = Shuttle.Runner.Default.cmd("echo", ["hi"], timeout_ms: 5_000)
   end
