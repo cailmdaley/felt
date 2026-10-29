@@ -1,7 +1,7 @@
 defmodule Shuttle.RemoteTemporalRegistry do
   @moduledoc """
-  Holds each configured remote Shuttle daemon's four **temporal** feeds —
-  `/activity`, `/sessions`, `/commits`, `/sent-files/all` — fetching them on
+  Holds each configured remote Shuttle daemon's five **temporal** feeds —
+  `/activity`, `/sessions`, `/commits`, `/sent-files/all`, `/board` — fetching them on
   demand, and persists each to disk so the hub's memory of a remote survives
   both a disconnect and a daemon restart.
 
@@ -64,7 +64,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
   304s until its event stream moves; the window re-anchors at most once per
   quantum. The feed is refetched whole rather than merged incrementally — a
   full refetch is redundant only behind an `If-None-Match`, which is exactly
-  where it happens. Sessions, commits and sent files ask for the whole ledger
+  where it happens. Sessions, commits, sent files and board ask for the whole ledger
   (`since_ms=0`); the composite applies the request's window.
 
   Each activity entry records the window it covers. A composite asking for a
@@ -103,10 +103,10 @@ defmodule Shuttle.RemoteTemporalRegistry do
   @window_ms @window_days * 24 * 60 * 60 * 1_000
   @window_quantum_ms 5 * 60_000
 
-  @feeds [:activity, :sessions, :commits, :sent_files]
+  @feeds [:activity, :sessions, :commits, :sent_files, :board]
 
   @typedoc "The feeds a composite can ask for."
-  @type feed :: :activity | :sessions | :commits | :sent_files
+  @type feed :: :activity | :sessions | :commits | :sent_files | :board
 
   @typedoc """
   One remote's view of one feed, as `entries/2` returns it. `window` is the
@@ -464,11 +464,13 @@ defmodule Shuttle.RemoteTemporalRegistry do
   defp url(remote, :sessions, _window), do: Remote.sessions_url(remote)
   defp url(remote, :commits, _window), do: Remote.commits_url(remote)
   defp url(remote, :sent_files, _window), do: Remote.sent_files_all_url(remote)
+  defp url(remote, :board, _window), do: Remote.board_url(remote)
 
   defp list_key(:activity), do: "buckets"
   defp list_key(:sessions), do: "records"
   defp list_key(:commits), do: "records"
   defp list_key(:sent_files), do: "files"
+  defp list_key(:board), do: "records"
 
   # Conditional fetch, same contract as the fiber registry's: a 304 is SUCCESS
   # with unchanged data, a 200 carries the list and a fresh etag, anything else

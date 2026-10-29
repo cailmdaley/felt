@@ -364,6 +364,10 @@ defmodule Shuttle.Remote do
   @spec commits_url(t()) :: String.t()
   def commits_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/commits?since_ms=0"
 
+  @doc "The host-local board feed, with its full retained window."
+  @spec board_url(t()) :: String.t()
+  def board_url(%__MODULE__{url: url}), do: base(url) <> "/api/v1/board?since_ms=0"
+
   @doc """
   The full `GET /api/v1/sent-files/all` URL for this remote. One line per send
   across every fiber on that host, so the hub asks for the whole stream the way

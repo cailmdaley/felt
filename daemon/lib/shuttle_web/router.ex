@@ -125,6 +125,7 @@ defmodule ShuttleWeb.Router do
     # pushed with SendUserFile on the card, read from the owning host's
     # events.jsonl hook stream. JSON-native, so it lives in the :api pipeline
     # (unlike /file, which serves raw bytes).
+    get("/board", BoardController, :show)
     get("/sent-files/session", SentFilesController, :show_session)
     get("/sent-files", SentFilesController, :show)
     post("/sent-files/clear", SentFilesController, :clear)

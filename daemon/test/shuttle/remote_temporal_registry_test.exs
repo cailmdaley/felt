@@ -166,6 +166,18 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     {clock, advance}
   end
 
+  test "board feed fetches its retained window and persists last good records", %{dir: dir} do
+    record = %{"id" => "brd-test", "type" => "board", "timestamp" => 100}
+    MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [record]})})
+    {pid, name} = start_registry(dir)
+    assert %{items: [^record], stale: false} = candide(name, :board)
+    assert Enum.any?(MockClient.log(), &String.ends_with?(&1, "/api/v1/board?since_ms=0"))
+    GenServer.stop(pid)
+    MockClient.set("/api/v1/board", {:error, :offline})
+    {_pid, restored} = start_registry(dir)
+    assert %{items: [^record], last_error: :offline} = candide(restored, :board)
+  end
+
   test "invalidation bypasses freshness only for the written feed", %{dir: dir} do
     {_pid, name} = start_registry(dir)
     assert %{items: [@sent_file]} = candide(name, :sent_files)
