@@ -16,7 +16,14 @@ defmodule Shuttle.Terminal do
 
   @type status :: :alive | :gone | :unknown
 
-  def primary, do: Tmux
+  def primary do
+    Shuttle.Env.app(:terminal_backend) ||
+      case :persistent_term.get({__MODULE__, :primary}, "tmux") do
+        "tmux" -> Tmux
+        "rex" -> Shuttle.Terminal.Rex
+      end
+  end
+
   def backends, do: [primary()]
   def available?, do: Enum.any?(backends(), & &1.available?())
 

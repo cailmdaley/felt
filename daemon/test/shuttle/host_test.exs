@@ -62,6 +62,32 @@ defmodule Shuttle.HostTest do
     end
   end
 
+  describe "terminal parity" do
+    expected =
+      Path.expand("../fixtures/host_terminal/expected.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+
+    for kase <- expected["cases"] do
+      @terminal_case kase
+      test "terminal: #{kase["name"]}" do
+        kase = @terminal_case
+        dir = Path.expand("../fixtures/host_terminal", __DIR__)
+
+        Shuttle.Test.Env.put_env(
+          "SHUTTLE_HOST_CONFIG_FILE",
+          Path.join(dir, kase["file"] || "absent.json")
+        )
+
+        if kase["error"] do
+          assert_raise ArgumentError, ~r/bad_terminal/, fn -> Host.terminal() end
+        else
+          assert Host.terminal() == kase["terminal"]
+        end
+      end
+    end
+  end
+
   describe "remote_control/0" do
     @describetag :tmp_dir
     setup %{tmp_dir: dir} do

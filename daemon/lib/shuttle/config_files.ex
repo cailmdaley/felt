@@ -66,8 +66,9 @@ defmodule Shuttle.ConfigFiles do
   disagreeing about who this machine is is the worst failure this system has.
   Changing it is a stop-edit-start, which is a shell's job.
 
-  `host.json` is writable here, but the daemon reads it once per boot
-  (`Shuttle.host_class/0`, `Shuttle.listen/0`): a saved class or listen address
+  `host.json` accepts `"terminal": "tmux" | "rex"` (default `"tmux"`).
+  The daemon reads the terminal, class and listen address once per boot:
+  a saved terminal, class or listen address
   takes effect at the next restart, and until then `GET /api/v1/version`
   reports the values the daemon is actually running under.
   """

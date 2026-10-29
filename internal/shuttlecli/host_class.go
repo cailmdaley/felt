@@ -196,6 +196,7 @@ func parsePort(text string) (int, error) {
 type hostSettings struct {
 	ID           string `json:"id"`
 	Class        string `json:"class"`
+	Terminal     string `json:"terminal"`
 	ClassSource  string `json:"class_source"`
 	Listen       string `json:"listen"`
 	ListenSource string `json:"listen_source"`
@@ -287,6 +288,30 @@ func stringKey(doc map[string]json.RawMessage, key, path string) (string, bool, 
 	return s, true, nil
 }
 
+func (a *app) hostTerminal() (string, error) {
+	path, err := a.hostClassFilePath()
+	if err != nil {
+		return "", err
+	}
+	doc, err := readHostFile(path)
+	if err != nil {
+		return "", err
+	}
+	return hostTerminalFromDoc(doc, path)
+}
+
+func hostTerminalFromDoc(doc map[string]json.RawMessage, path string) (string, error) {
+	raw, ok := doc["terminal"]
+	if !ok {
+		return "tmux", nil
+	}
+	var value string
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil || (value != "tmux" && value != "rex") {
+		return "", hostErr("bad_terminal", "%s: invalid terminal %s", path, raw)
+	}
+	return value, nil
+}
+
 // resolveHostSettings resolves class and listener from the environment and
 // the host file. It does not resolve the host id; the verb adds that.
 func (a *app) resolveHostSettings() (hostSettings, error) {
@@ -300,6 +325,10 @@ func (a *app) resolveHostSettings() (hostSettings, error) {
 	}
 
 	doc, err := readHostFile(path)
+	if err != nil {
+		return hostSettings{}, err
+	}
+	s.Terminal, err = hostTerminalFromDoc(doc, path)
 	if err != nil {
 		return hostSettings{}, err
 	}
@@ -425,7 +454,7 @@ The class says who else can reach this machine and sets the default listener
   shared-multi-user    other users log in; the daemon listens on a unix socket
   exposed              reachable from outside; the daemon listens on a unix socket
 
---json prints {id, class, class_source, listen, listen_source, file, data_dir}.
+--json prints {id, class, terminal, class_source, listen, listen_source, file, data_dir}.
 The daemon reads its host id from it at boot, and shells it as the validator:
 a malformed host file fails here, naming its path. data_dir is the resolved
 host-local state directory ($SHUTTLE_DATA_DIR trimmed, a leading ~ expanded,

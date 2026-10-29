@@ -125,7 +125,8 @@ defmodule Shuttle.Host do
   (`:infinity` for no cap). Daemon-only (the Go reader ignores the key).
   """
   @spec max_concurrent_workers(pos_integer() | :infinity) :: pos_integer() | :infinity
-  def max_concurrent_workers(default) when default == :infinity or (is_integer(default) and default > 0) do
+  def max_concurrent_workers(default)
+      when default == :infinity or (is_integer(default) and default > 0) do
     path = config_path()
 
     case read_document(path) do
@@ -304,6 +305,28 @@ defmodule Shuttle.Host do
       {:error, _kind, message} ->
         Logger.warning("#{message}; cannot read transcript_index; keeping it on")
         true
+    end
+  end
+
+  @doc "The configured terminal, read fresh. Invalid values refuse startup."
+  def terminal do
+    path = config_path()
+
+    case read_document(path) do
+      {:ok, doc} ->
+        case Map.fetch(doc, "terminal") do
+          :error ->
+            "tmux"
+
+          {:ok, value} when value in ["tmux", "rex"] ->
+            value
+
+          {:ok, value} ->
+            raise ArgumentError, "bad_terminal: #{path}: invalid terminal #{inspect(value)}"
+        end
+
+      {:error, kind, message} ->
+        raise ArgumentError, "#{kind}: #{message}"
     end
   end
 

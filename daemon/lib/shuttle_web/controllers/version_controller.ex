@@ -24,6 +24,7 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:poller_publication, Shuttle.Poller.published_state_metrics())
       |> Map.merge(health)
       |> Map.put(:host, Shuttle.Poller.daemon_host_id())
+      |> Map.put(:terminal, Shuttle.Terminal.primary().id())
       |> Map.put(:listen, Shuttle.listen())
       |> Map.put(:host_class, Shuttle.Host.class_name(Shuttle.host_class()))
       |> Map.put(:peer_gate, Shuttle.Env.app(:peer_gate, "none"))

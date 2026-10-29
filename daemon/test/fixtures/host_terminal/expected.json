@@ -1,0 +1,9 @@
+{"cases":[
+{"name":"missing file","file":null,"terminal":"tmux"},
+{"name":"missing key","file":"empty.json","terminal":"tmux"},
+{"name":"tmux","file":"tmux.json","terminal":"tmux"},
+{"name":"rex","file":"rex.json","terminal":"rex"},
+{"name":"unknown","file":"unknown.json","error":"bad_terminal"},
+{"name":"number","file":"number.json","error":"bad_terminal"},
+{"name":"null","file":"null.json","error":"bad_terminal"}
+]}

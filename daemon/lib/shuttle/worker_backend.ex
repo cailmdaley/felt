@@ -208,7 +208,7 @@ defmodule Shuttle.WorkerBackend do
   def wire(session, record) do
     case AppWorkers.id(session) do
       nil ->
-        %{surface: "cli", tmux_session: session}
+        %{surface: "cli", tmux_session: session, terminal: terminal_id(session)}
 
       id ->
         record = if is_map(record), do: record, else: %{}
@@ -217,6 +217,7 @@ defmodule Shuttle.WorkerBackend do
         %{
           surface: surface,
           tmux_session: if(surface == "cli", do: record["terminal_tmux"]),
+          terminal: if(surface == "cli", do: terminal_id(record["terminal_tmux"])),
           session_uuid: id,
           thread_id: id,
           transcript_session_uuid: record["transcript_session_uuid"] || id,
@@ -225,6 +226,15 @@ defmodule Shuttle.WorkerBackend do
           terminal_error: record["terminal_error"],
           backend_error: record["backend_error"]
         }
+    end
+  end
+
+  defp terminal_id(nil), do: nil
+
+  defp terminal_id(name) do
+    case Shuttle.Terminal.locate(Shuttle.Runner.Default, name) do
+      nil -> nil
+      backend -> backend.id()
     end
   end
 

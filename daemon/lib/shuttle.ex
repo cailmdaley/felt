@@ -161,6 +161,7 @@ defmodule Shuttle.Application do
     # filter — reads this frozen value and none shells felt for it. A daemon
     # felt cannot name does not boot.
     Shuttle.Poller.freeze_daemon_host_id!()
+    :persistent_term.put({Shuttle.Terminal, :primary}, Shuttle.Host.terminal())
 
     case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
       {:ok, pid} ->

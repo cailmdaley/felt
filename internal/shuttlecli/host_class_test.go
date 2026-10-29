@@ -33,6 +33,49 @@ type hostFixtureCase struct {
 	} `json:"expect"`
 }
 
+func TestHostTerminalFixtureParity(t *testing.T) {
+	data, err := os.ReadFile("../../daemon/test/fixtures/host_terminal/expected.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name     string  `json:"name"`
+			File     *string `json:"file"`
+			Terminal string  `json:"terminal"`
+			Error    string  `json:"error"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range fixture.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			env := testEnv(t)
+			path := filepath.Join(t.TempDir(), "absent.json")
+			if tc.File != nil {
+				path, _ = filepath.Abs(filepath.Join("../../daemon/test/fixtures/host_terminal", *tc.File))
+			}
+			setHostEnvIn(t, env, path, nil, nil)
+			a := newApp(env)
+			got, err := a.hostTerminal()
+			if tc.Error != "" {
+				if !isHostConfigError(err, tc.Error) {
+					t.Fatalf("want %s, got %v", tc.Error, err)
+				}
+				return
+			}
+			if err != nil || got != tc.Terminal {
+				t.Fatalf("got %q, %v", got, err)
+			}
+			settings, err := a.resolveHostSettings()
+			if err != nil || settings.Terminal != tc.Terminal {
+				t.Fatalf("settings: %+v, %v", settings, err)
+			}
+		})
+	}
+}
+
 // TestHostFixtureParity — the Go reader reproduces every case the daemon's
 // reader must also reproduce.
 func TestHostFixtureParity(t *testing.T) {
