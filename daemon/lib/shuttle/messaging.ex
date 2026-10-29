@@ -674,7 +674,9 @@ defmodule Shuttle.Messaging do
            Map.get(cached_session_fiber_index(host).fibers_by_session, native) do
       identifier = pairing["fiber_uid"] || fiber
 
-      case Shuttle.LifecycleService.transition(:clear_ask, identifier, ["--answered-by", from]) do
+      label = if from == "", do: "someone", else: from
+
+      case Shuttle.LifecycleService.transition(:clear_ask, identifier, ["--answered-by", label]) do
         {:ok, _} -> :ok
         error -> Logger.warning("Clearing worker question for #{fiber} failed: #{inspect(error)}")
       end

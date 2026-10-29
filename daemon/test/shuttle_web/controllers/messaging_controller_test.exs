@@ -297,7 +297,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
         Shuttle.Messaging.send_message(%{
           "address" => "shuttle://local/codex/native%2Fid",
           "text" => "Use the conservative cut.",
-          "from" => "reviewer",
+          "from" => if(id == "queued", do: "", else: "reviewer"),
           "message_id" => id,
           "wake" => id != "context_added"
         })
@@ -305,7 +305,8 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert match?({:ok, _, _}, result)
 
       if id in ["accepted", "queued", "submitted", "context_added"] do
-        assert_receive {:cleared_ask, ^store, "reviewer"}
+        expected_label = if id == "queued", do: "someone", else: "reviewer"
+        assert_receive {:cleared_ask, ^store, ^expected_label}
       else
         refute_receive {:cleared_ask, _, _}
       end

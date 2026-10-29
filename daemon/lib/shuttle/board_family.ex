@@ -142,7 +142,9 @@ defmodule Shuttle.BoardFamily do
       end)
 
     if record["fiber"] in [nil, ""] do
-      fiber = get_in(record, ["to", "fiber"]) || get_in(record, ["by", "fiber"])
+      fiber =
+        nonempty(get_in(record, ["to", "fiber"])) || nonempty(get_in(record, ["by", "fiber"]))
+
       if fiber in [nil, ""], do: record, else: Map.put(record, "fiber", fiber)
     else
       record
