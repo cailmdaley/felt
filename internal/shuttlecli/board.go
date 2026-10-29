@@ -86,7 +86,9 @@ func (a *app) boardMessageActor(from string) *boardParty {
 	if _, err := messaging.ParseAddress(from); err == nil {
 		by.Session = from
 		if target := a.messageReplyTarget(from); target != "" {
-			if lookup, err := a.lookupShuttleAddressFibers(target); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
+			if isSessionULID(target) {
+				by.Fiber = target
+			} else if lookup, err := a.lookupShuttleAddressFibers(target); err == nil && !lookup.refused() && len(lookup.Fibers) == 1 {
 				by.Fiber = lookup.Fibers[0].UID
 			}
 		}
@@ -139,6 +141,10 @@ type boardResponse struct {
 	Family  *boardFamily `json:"family"`
 	Viewer  *string      `json:"viewer"`
 	Records []boardRow   `json:"records"`
+}
+
+func boardSingleLine(text string) string {
+	return strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(text)
 }
 
 func boardPhrase(r boardRow) string {
@@ -230,7 +236,7 @@ func (a *app) boardCmd() *cobra.Command {
 		for _, row := range response.Records {
 			line := time.UnixMilli(row.Timestamp).Local().Format("15:04") + "  " + boardPhrase(row)
 			if row.Text != "" {
-				line += ": " + strings.Join(strings.Fields(row.Text), " ")
+				line += ": " + boardSingleLine(row.Text)
 			}
 			fmt.Fprintln(a.env.Stdout, line)
 		}

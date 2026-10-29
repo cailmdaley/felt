@@ -78,6 +78,9 @@ func TestBoardReadsDaemon(t *testing.T) {
 }
 
 func TestBoardText(t *testing.T) {
+	if got := boardSingleLine("a  b\r\nc\td"); got != "a  b c\td" {
+		t.Fatalf("collapsed text: %q", got)
+	}
 	got := boardText(strings.Repeat("é", 1100))
 	if len(got) > 2000 || !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
 		t.Fatalf("invalid trimmed text: %q", got)

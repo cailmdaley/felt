@@ -62,7 +62,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 func boardDigestLine(r boardRow) string {
 	line := "· " + time.UnixMilli(r.Timestamp).Local().Format("15:04") + " " + boardPhrase(r)
 	if r.Text != "" && r.Kind != "closed" && r.Kind != "rested" && r.Kind != "handed_off" && r.Kind != "unblocked" {
-		line += ": " + strconv.Quote(strings.Join(strings.Fields(r.Text), " "))
+		line += ": " + strconv.Quote(boardSingleLine(r.Text))
 	}
 	runes := []rune(line)
 	if len(runes) > 200 {
