@@ -61,7 +61,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 
 func boardDigestLine(r boardRow) string {
 	line := "· " + time.UnixMilli(r.Timestamp).Local().Format("15:04") + " " + boardPhrase(r)
-	if r.Text != "" && r.Kind != "closed" && r.Kind != "rested" && r.Kind != "handed_off" && r.Kind != "unblocked" {
+	if r.Text != "" {
 		line += ": " + strconv.Quote(boardSingleLine(r.Text))
 	}
 	runes := []rune(line)
@@ -70,6 +70,8 @@ func boardDigestLine(r boardRow) string {
 	}
 	return line
 }
+
+const boardDigestLines = 6
 
 func (a *app) boardDigest(harness, session string) string {
 	// Native ids are file names, not paths.
@@ -137,15 +139,14 @@ func (a *app) boardDigest(harness, session string) string {
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "Family board (%s), new since your last turn:\n", label)
-	for i, r := range fresh {
-		if i == 6 {
-			break
-		}
+	// The newest lines carry the current state; older ones are one command away.
+	if len(fresh) > boardDigestLines {
+		fmt.Fprintf(&out, "+%d earlier: shuttle board\n", len(fresh)-boardDigestLines)
+		fresh = fresh[len(fresh)-boardDigestLines:]
+	}
+	for _, r := range fresh {
 		out.WriteString(boardDigestLine(r))
 		out.WriteByte('\n')
-	}
-	if len(fresh) > 6 {
-		fmt.Fprintf(&out, "+%d more: shuttle board\n", len(fresh)-6)
 	}
 	return strings.TrimSuffix(out.String(), "\n")
 }

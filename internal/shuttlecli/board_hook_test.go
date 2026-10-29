@@ -22,7 +22,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	now := time.UnixMilli(1793300000000)
 	rows := []map[string]any{}
 	for i := 0; i < 9; i++ {
-		rows = append(rows, map[string]any{"id": fmt.Sprintf("id%d", i), "timestamp": now.UnixMilli() - 1000, "kind": "post", "member": "worker", "text": strings.Repeat("é", 250), "delivered": i == 0})
+		rows = append(rows, map[string]any{"id": fmt.Sprintf("id%d", i), "timestamp": now.UnixMilli() - 1000, "kind": "post", "member": "worker", "text": fmt.Sprintf("t%d ", i) + strings.Repeat("é", 250), "delivered": i == 0})
 	}
 	var queries []string
 	fail := false
@@ -37,14 +37,21 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	a := newApp(env)
 	a.eventNow = func() time.Time { return now }
 	out := a.boardDigest("pi", "s")
-	if !strings.Contains(out, "Family board (family)") || !strings.Contains(out, "+2 more: shuttle board") {
+	if !strings.Contains(out, "Family board (family)") || !strings.Contains(out, "+2 earlier: shuttle board") {
+		t.Fatal(out)
+	}
+	// The newest six survive the cap; the oldest undelivered two fold into the count.
+	if strings.Contains(out, "t1 ") || strings.Contains(out, "t2 ") || !strings.Contains(out, "t3 ") || !strings.Contains(out, "t8 ") {
 		t.Fatal(out)
 	}
 	lines := strings.Split(out, "\n")
 	if len(lines) != 8 {
 		t.Fatalf("lines %d: %s", len(lines), out)
 	}
-	for _, line := range lines[1:7] {
+	if lines[1] != "+2 earlier: shuttle board" {
+		t.Fatal(lines[1])
+	}
+	for _, line := range lines[2:8] {
 		if len([]rune(line)) > 200 {
 			t.Fatal("line too long")
 		}
