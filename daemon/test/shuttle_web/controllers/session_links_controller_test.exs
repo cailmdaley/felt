@@ -57,9 +57,33 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
   end
 
   defp links(params) do
+    eventually(fn ->
+      body = raw_links(params)
+
+      if Enum.any?(body["links"], &(&1["availability"] == "resolving")),
+        do: :retry,
+        else: {:ok, body}
+    end)
+  end
+
+  defp raw_links(params) do
     local_conn()
     |> get("/api/v1/sessions/links", params)
     |> json_response(200)
+  end
+
+  defp eventually(fun, attempts \\ 300)
+  defp eventually(fun, 0), do: fun.()
+
+  defp eventually(fun, attempts) do
+    case fun.() do
+      {:ok, value} ->
+        value
+
+      :retry ->
+        Process.sleep(5)
+        eventually(fun, attempts - 1)
+    end
   end
 
   test "each harness answers with exactly the link its transcript supports, in request order" do
@@ -87,6 +111,30 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
              missing
 
     assert bridged["availability"] == "available_local"
+  end
+
+  test "a cold lookup returns resolving instead of waiting on transcript work" do
+    body = raw_links(%{"sessions" => @bridged})
+    assert [%{"availability" => availability}] = body["links"]
+    assert availability in ["resolving", "available_local"]
+  end
+
+  test "remote relays preserve pending availability" do
+    StubGetFileClient.start!()
+    Env.put_app_env(:write_forward_client, StubGetFileClient)
+    Env.put_app_env(:remotes, [%{name: "hub-a", url: "http://127.0.0.1:19999"}])
+
+    StubGetFileClient.set_response(
+      {:ok, 200, "application/json",
+       Jason.encode!(%{
+         "links" => [
+           %{"session" => @bridged, "availability" => "resolving", "harness" => nil, "url" => nil}
+         ]
+       })}
+    )
+
+    assert %{"links" => [%{"availability" => "resolving", "url" => nil}]} =
+             raw_links(%{"sessions" => @bridged, "host" => "hub-a"})
   end
 
   test "an explicit host naming this daemon is local" do
@@ -173,6 +221,7 @@ defmodule ShuttleWeb.SessionLinksControllerTest do
       assert %{"session" => @bridged, "url" => nil} = bridged
       # Relayed entries carry exactly the route's fields.
       assert Map.keys(codex) |> Enum.sort() == ["availability", "harness", "session", "url"]
+      assert codex["url"] == nil
       # Asked for but not answered: no link, and said so.
       assert %{"session" => @pi, "availability" => "host_unreachable", "url" => nil} = pi
     end

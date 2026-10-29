@@ -188,9 +188,8 @@ defmodule Shuttle.Application do
       # by UID goes through a known `{store, id}` instead of a store walk.
       Shuttle.FiberAddresses,
       Shuttle.Meeting.Control,
-      # Owns the ETS table past sessions' bridge URLs are cached in, keyed on
-      # each transcript's {mtime, size}. Pure cache: a restart costs one
-      # re-read per session, never a wrong answer.
+      # Resolves bridge links off request paths and publishes ready entries in
+      # ETS; a restart rebuilds them from native transcripts.
       Shuttle.SessionLink,
       # Owns the ETS table for the session-to-fiber peer index; ledger appends
       # invalidate it by file token without persistent_term global GC.

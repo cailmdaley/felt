@@ -268,6 +268,9 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   let origins: TemporalOrigins = {}
   const links = new Map<string, SessionLinkEntry>()
   const drawn = new Map<string, { record: SessionRecord; li: HTMLLIElement }>()
+  let pendingRetry: ReturnType<typeof setTimeout> | undefined
+  let pendingRetryAttempts = 0
+  const maxPendingRetries = 8
 
   /** `POST /api/v1/attach`, the terminal action: success raises Kitty, a
    *  failure is said. */
@@ -395,9 +398,11 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   el.addEventListener(CONVERSATION_OPENING_CHANGED, () => draw([...drawn.values()].map(({ record }) => record)))
 
   /** Ask each host for its rows' links; redraw that host's rows on answer. */
-  const linkUp = (rows: readonly SessionRecord[]): Promise<unknown> =>
-    Promise.all(
-      [...linkRequests(rows, new Set(links.keys()), origins)].flatMap(([host, sessions]) => {
+  const linkUp = async (rows: readonly SessionRecord[]): Promise<void> => {
+    const settled = new Set([...links].filter(([, entry]) => entry.availability !== 'resolving').map(([id]) => id))
+    let hasPending = false
+    await Promise.all(
+      [...linkRequests(rows, settled, origins)].flatMap(([host, sessions]) => {
         const batches: string[][] = []
         for (let i = 0; i < sessions.length; i += LINKS_BATCH) batches.push(sessions.slice(i, i + LINKS_BATCH))
         return batches.map(async (batch) => {
@@ -407,7 +412,11 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
             if (!res.ok) return
             const answered = parseSessionLinks(await res.json())
             const asked = new Set(batch)
-            for (const [id, entry] of answered) if (asked.has(id)) links.set(id, entry)
+            for (const [id, entry] of answered) {
+              if (!asked.has(id)) continue
+              links.set(id, entry)
+              if (entry.availability === 'resolving') hasPending = true
+            }
             draw(batch.map((id) => drawn.get(id)?.record).filter((r): r is SessionRecord => !!r))
           } catch {
             /* a host that cannot answer leaves its rows as they were drawn */
@@ -415,6 +424,25 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
         })
       }),
     )
+    if (hasPending) {
+      if (pendingRetryAttempts < maxPendingRetries && !pendingRetry && el.isConnected && !body.hidden) {
+        pendingRetryAttempts += 1
+        pendingRetry = setTimeout(() => {
+          pendingRetry = undefined
+          if (el.isConnected && !body.hidden) retryPending()
+        }, 750)
+      }
+    } else {
+      pendingRetryAttempts = 0
+    }
+  }
+
+  const retryPending = (): void => {
+    const rows = [...drawn.values()]
+      .filter(({ record }) => links.get(record.session)?.availability === 'resolving')
+      .map(({ record }) => record)
+    if (rows.length > 0) void linkUp(rows)
+  }
 
   const load = async (): Promise<void> => {
     let records: SessionRecord[] = []
@@ -465,6 +493,12 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
     body.hidden = !opening
     toggle.setAttribute('aria-expanded', String(opening))
     el.classList.toggle('kbn-ctl-history-open', opening)
+    if (!opening) {
+      if (pendingRetry) clearTimeout(pendingRetry)
+      pendingRetry = undefined
+    } else if (loaded) {
+      retryPending()
+    }
     if (opening && !loaded) {
       loaded = true
       void load()

@@ -574,16 +574,16 @@ define a transcript reader or search language.
 
 `/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
 optional `host=<name>`, and answers `{host, links}` with one entry per session
-in request order: `session`, `availability` (`available_local`,
+in request order: `session`, `availability` (`resolving`, `available_local`,
 `transcript_missing` or `host_unreachable`), `harness` and `url` — a Claude
 Code transcript's last `remote_session_change` bridge URL, and only when that
-is a `https://claude.ai/` address. A remote's answer is re-checked by the
-daemon that relays it: entries for sessions not asked about are dropped, and a
-URL of any other shape is nulled. The board's card History asks for the
-sessions it lists, one request per host. Each answer is cached against the
-transcript's `{mtime, size}`, so an ended session is read once, and a session
-with no transcript on the host is remembered as missing for a minute. It is a
-sibling of `/transcript` because that receipt hashes the whole file.
+is a `https://claude.ai/` address. A cold lookup returns `resolving` while the
+supervised resolver works outside the request path; the board retries pending
+entries while History stays open. Claude transcripts are read once for their
+observed baseline and then only for appended bytes. A remote's answer is
+re-checked by the daemon that relays it: entries for sessions not asked about
+are dropped, and a URL of any other shape is nulled. It is a sibling of
+`/transcript` because that receipt hashes the whole file.
 
 ## Temporal read plane
 

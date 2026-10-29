@@ -25,6 +25,8 @@ defmodule ShuttleWeb.SessionLinksController do
   sessions, and this route answers a batch in one hop per host.
 
   At most 50 sessions per request; the board asks for the ones it shows.
+  A cold lookup returns `resolving` while the supervised resolver works off
+  the request path.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -94,12 +96,12 @@ defmodule ShuttleWeb.SessionLinksController do
     %{
       session: session,
       availability:
-        if(availability in ["available_local", "transcript_missing"],
+        if(availability in ["available_local", "transcript_missing", "resolving"],
           do: availability,
           else: "transcript_missing"
         ),
       harness: if(is_binary(harness), do: harness),
-      url: if(SessionLink.claude_url?(url), do: url)
+      url: if(harness == "claude-code" and SessionLink.claude_url?(url), do: url)
     }
   end
 

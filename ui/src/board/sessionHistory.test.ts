@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { claudeAppRoute, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
+// @vitest-environment jsdom
+import { describe, expect, it, vi } from 'vitest'
+import { buildSessionHistory, claudeAppRoute, fiberSessions, linkRequests, parseSessionLinks, sessionTargets, sessionWhen } from './sessionHistory.js'
 import type { SessionRecord } from './views/TemporalData.js'
 
 const UID = '01KVTXJ3VQYNZ6TYK342ZHV5CK'
@@ -54,6 +55,75 @@ describe('parseSessionLinks', () => {
     expect(links.get(CLAUDE)?.url).toBe('https://claude.ai/code/session_01X')
     expect(links.get(CODEX)?.harness).toBe('codex')
     expect(parseSessionLinks(null).size).toBe(0)
+  })
+
+  it('keeps resolving as a retryable availability', () => {
+    expect(parseSessionLinks({ links: [{ session: CLAUDE, availability: 'resolving' }] }).get(CLAUDE))
+      .toMatchObject({ availability: 'resolving', url: null })
+  })
+})
+
+describe('session history pending links', () => {
+  it('retries a resolving link while its drawer stays open', async () => {
+    vi.useFakeTimers()
+    const links: unknown[] = []
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/sessions/composite')) {
+        return new Response(JSON.stringify({
+          host: 'ada',
+          records: [{ at: 1, fiber: 'ai/felt/debug', uid: UID, session: CLAUDE, harness: 'claude-code', host: 'ada', kind: 'dispatch' }],
+        }), { status: 200 })
+      }
+      const entry = links.length === 0
+        ? { session: CLAUDE, availability: 'resolving', harness: null, url: null }
+        : { session: CLAUDE, availability: 'available_local', harness: 'claude-code', url: 'https://claude.ai/code/session_01X' }
+      links.push(entry)
+      return new Response(JSON.stringify({ host: 'ada', links: [entry] }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const history = buildSessionHistory({ shuttleBase: 'http://shuttle', uid: UID, desktop: false })
+    document.body.append(history)
+    history.querySelector('button')!.click()
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/sessions/links'))).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(750)
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/sessions/links'))).toHaveLength(2)
+    expect(history.querySelector('a[href^="https://claude.ai/"]')).not.toBeNull()
+    history.remove()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it('cancels the retry timer when the drawer closes', async () => {
+    vi.useFakeTimers()
+    let linkRequests = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/sessions/composite')) {
+        return new Response(JSON.stringify({
+          host: 'ada',
+          records: [{ at: 1, fiber: 'ai/felt/debug', uid: UID, session: CLAUDE, harness: 'claude-code', host: 'ada', kind: 'dispatch' }],
+        }), { status: 200 })
+      }
+      linkRequests += 1
+      const entry = { session: CLAUDE, availability: 'resolving', harness: null, url: null }
+      return new Response(JSON.stringify({ host: 'ada', links: [entry] }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const history = buildSessionHistory({ shuttleBase: 'http://shuttle', uid: UID, desktop: false })
+    document.body.append(history)
+    const toggle = history.querySelector('button')!
+    toggle.click()
+    for (let i = 0; i < 10; i++) await Promise.resolve()
+    expect(linkRequests).toBe(1)
+    toggle.click()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(linkRequests).toBe(1)
+    history.remove()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
   })
 })
 
