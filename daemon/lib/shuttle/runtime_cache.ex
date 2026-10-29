@@ -34,6 +34,10 @@ defmodule Shuttle.RuntimeCache do
     ArgumentError -> []
   end
 
+  def put(key, value, ttl_ms) do
+    put_scoped(Shuttle.Env.scope_key(key), value, System.monotonic_time(:millisecond) + ttl_ms)
+  end
+
   def delete(key) do
     :ets.delete(@table, Shuttle.Env.scope_key(key))
   rescue

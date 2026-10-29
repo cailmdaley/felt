@@ -231,12 +231,7 @@ defmodule Shuttle.WorkerBackend do
 
   defp terminal_id(nil), do: nil
 
-  defp terminal_id(name) do
-    case Shuttle.Terminal.locate(Shuttle.Runner.Default, name) do
-      nil -> nil
-      backend -> backend.id()
-    end
-  end
+  defp terminal_id(name), do: Shuttle.Terminal.observed_id(name)
 
   def tmux(session), do: wire(session).tmux_session
 end

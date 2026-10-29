@@ -3,6 +3,21 @@ defmodule Shuttle.OfficeSnapshotTest do
 
   alias Shuttle.Poller.{DocumentCache, Snapshot, State}
 
+  test "snapshot includes the observed terminal holder" do
+    name = "snapshot-holder-#{System.unique_integer([:positive])}"
+    Shuttle.RuntimeCache.put({Shuttle.Terminal, :holder, name}, "tmux", 10_000)
+    now = DateTime.utc_now()
+
+    state = %State{
+      running: %{
+        name => %{session: name, fiber_id: "test", started_at: now, last_activity_at: now}
+      }
+    }
+
+    assert %{eligible: [%{tmux_session: ^name, terminal: "tmux"}]} =
+             Snapshot.build_snapshot(state)
+  end
+
   test "snapshot rows project the office and boolean seat from cached shuttle fields" do
     for {shuttle, role, seat} <- [
           {%{"role" => "gardener", "seat" => true}, "gardener", true},

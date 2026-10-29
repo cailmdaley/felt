@@ -30,7 +30,13 @@ defmodule Shuttle.Terminal do
   @spec status(module(), String.t(), keyword()) :: status()
   def status(runner, name, opts \\ []) do
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
-    probes = Enum.map(backends, & &1.probe(runner, name))
+    observations = Enum.map(backends, &{&1, &1.probe(runner, name)})
+    probes = Enum.map(observations, &elem(&1, 1))
+
+    remember_holder(
+      name,
+      Enum.find_value(observations, fn {backend, probe} -> if probe == :present, do: backend end)
+    )
 
     cond do
       :present in probes -> :alive
@@ -57,7 +63,20 @@ defmodule Shuttle.Terminal do
 
   def present?(runner, name), do: status(runner, name) != :gone
 
-  def locate(runner, name), do: Enum.find(backends(), &(&1.probe(runner, name) == :present))
+  def locate(runner, name) do
+    backend = Enum.find(backends(), &(&1.probe(runner, name) == :present))
+    remember_holder(name, backend)
+    backend
+  end
+
+  def observed_id(name) do
+    Shuttle.RuntimeCache.fetch({__MODULE__, :holder, name}, 10_000, fn -> nil end)
+  end
+
+  defp remember_holder(name, nil), do: Shuttle.RuntimeCache.delete({__MODULE__, :holder, name})
+
+  defp remember_holder(name, backend),
+    do: Shuttle.RuntimeCache.put({__MODULE__, :holder, name}, backend.id(), 10_000)
 
   @doc "Launch only when the name is positively free; keep its script in the worker's argv."
   def launch(runner, name, cwd, script_text, opts \\ []) do

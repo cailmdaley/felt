@@ -335,6 +335,7 @@ defmodule Shuttle.Poller.Snapshot do
     %{
       tmux_session: backend.tmux_session,
       surface: backend.surface,
+      terminal: backend.terminal,
       session_uuid: app_id || Map.get(meta, :session_uuid),
       thread_id: app_id,
       desktop_link: Shuttle.SessionLink.desktop_url(app_id),

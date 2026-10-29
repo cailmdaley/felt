@@ -92,6 +92,16 @@ defmodule Shuttle.TerminalTest do
     {{"fork: Resource temporarily unavailable", 1}, {"", 0}, "leaf", :unknown, false}
   ]
 
+  test "wire uses observed holder without probing and clears it on uncertainty" do
+    name = "wire-holder-#{System.unique_integer([:positive])}"
+    assert Terminal.status(stub({"", 0}), name) == :alive
+    assert_received {:tmux_args, _}
+    assert %{terminal: "tmux"} = Shuttle.WorkerBackend.wire(name)
+    refute_received {:tmux_args, _}
+    assert Terminal.status(stub({"unavailable", 1}), name) == :unknown
+    assert %{terminal: nil} = Shuttle.WorkerBackend.wire(name)
+  end
+
   test "status is :alive on success, :gone only for absence with no worker, else :unknown" do
     for {tmux, ps, session, expected, scans?} = row <- @session_statuses do
       assert Terminal.status(stub(tmux, ps), session) == expected, inspect(row)
