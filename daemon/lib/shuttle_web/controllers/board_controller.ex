@@ -19,21 +19,30 @@ defmodule ShuttleWeb.BoardController do
       true ->
         with {:ok, since_ms} <- integer_param(params, "since_ms", default: default),
              {:ok, {entries, _, _}} <- thread_inputs() do
-          since_ms = max(since_ms, now - 14 * 86_400_000)
-
-          remote =
-            RemoteTemporalRegistry.entries(:board) |> Map.values() |> Enum.flat_map(& &1.items)
-
-          records =
-            (Board.all_since(since_ms) ++ remote)
-            |> Enum.filter(fn
-              %{"timestamp" => timestamp} when is_integer(timestamp) -> timestamp >= since_ms
-              _ -> false
-            end)
-
           host = Poller.own_host_id()
           sessions = BoardFamily.session_index(entries, host)
-          json(conn, BoardFamily.compose(entries, records, sessions, host, params))
+
+          case BoardFamily.prepare(entries, sessions, host, params) do
+            nil ->
+              json(conn, %{family: nil, viewer: nil, records: []})
+
+            context ->
+              since_ms = max(since_ms, now - 14 * 86_400_000)
+
+              remote =
+                RemoteTemporalRegistry.entries(:board)
+                |> Map.values()
+                |> Enum.flat_map(& &1.items)
+
+              records =
+                (Board.all_since(since_ms) ++ remote)
+                |> Enum.filter(fn
+                  %{"timestamp" => timestamp} when is_integer(timestamp) -> timestamp >= since_ms
+                  _ -> false
+                end)
+
+              json(conn, BoardFamily.compose_prepared(context, records))
+          end
         else
           {:error, {:bad_param, key}} -> bad_param(conn, key)
           {:error, reason} -> conn |> put_status(503) |> json(%{error: reason})

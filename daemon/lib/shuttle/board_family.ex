@@ -49,8 +49,8 @@ defmodule Shuttle.BoardFamily do
     end)
   end
 
-  @doc "Compose a family view from cached entries, records and session bindings."
-  def compose(entries, records, sessions, own_host, params) do
+  @doc "Resolve the viewer before reading board records."
+  def prepare(entries, sessions, own_host, params) do
     by_ref = index(entries)
     all? = params["all"] == "true"
 
@@ -60,42 +60,79 @@ defmodule Shuttle.BoardFamily do
         else: resolve_session(params["session"], own_host, sessions)
 
     viewer = find(by_ref, named)
-    root = if viewer, do: root(viewer, entries)
-    requested_viewer = find(by_ref, params["viewer"]) || viewer
 
-    if not all? and is_nil(root) do
-      %{family: nil, viewer: nil, records: []}
+    if not all? and is_nil(viewer) do
+      nil
     else
-      rows =
-        records
-        |> Enum.reduce(%{}, fn record, acc ->
-          case record do
-            %{"id" => id, "timestamp" => ts} when is_binary(id) and is_integer(ts) ->
-              Map.put_new(acc, id, record)
+      tree = Map.new(entries, &{key(&1), &1})
+      roots = Enum.reduce(entries, %{}, fn entry, acc -> elem(root(entry, tree, acc), 1) end)
+      root = if viewer, do: Map.fetch!(roots, key(viewer))
 
-            _ ->
-              acc
-          end
-        end)
-        |> Map.values()
-        |> Enum.map(&resolve_record(&1, own_host, sessions))
-        |> Enum.filter(fn record ->
-          all? or
-            Enum.any?(
-              [record["fiber"], get_in(record, ["by", "fiber"]), get_in(record, ["to", "fiber"])],
-              fn ref ->
-                case find(by_ref, ref) do
-                  nil -> false
-                  entry -> same?(root(entry, entries), root)
-                end
-              end
-            )
-        end)
-        |> Enum.map(&decorate(&1, by_ref, entries, requested_viewer))
-        |> Enum.sort_by(&{&1["timestamp"], &1["id"]})
-
-      %{family: family(root), viewer: if(viewer, do: viewer.fiber["uid"]), records: rows}
+      %{
+        by_ref: by_ref,
+        tree: tree,
+        roots: roots,
+        root: root,
+        viewer: viewer,
+        requested_viewer: find(by_ref, params["viewer"]) || viewer,
+        all?: all?,
+        sessions: sessions,
+        host: own_host
+      }
     end
+  end
+
+  @doc "Compose a family view from cached entries, records and session bindings."
+  def compose(entries, records, sessions, own_host, params) do
+    case prepare(entries, sessions, own_host, params) do
+      nil -> %{family: nil, viewer: nil, records: []}
+      context -> compose_prepared(context, records)
+    end
+  end
+
+  @doc "Compose records against a prepared family and its memoized ancestry."
+  def compose_prepared(context, records) do
+    %{
+      by_ref: by_ref,
+      tree: tree,
+      roots: roots,
+      root: root,
+      viewer: viewer,
+      requested_viewer: requested_viewer,
+      all?: all?,
+      sessions: sessions,
+      host: own_host
+    } = context
+
+    rows =
+      records
+      |> Enum.reduce(%{}, fn record, acc ->
+        case record do
+          %{"id" => id, "timestamp" => ts} when is_binary(id) and is_integer(ts) ->
+            Map.put_new(acc, id, record)
+
+          _ ->
+            acc
+        end
+      end)
+      |> Map.values()
+      |> Enum.map(&resolve_record(&1, own_host, sessions))
+      |> Enum.filter(fn record ->
+        all? or
+          Enum.any?(
+            [record["fiber"], get_in(record, ["by", "fiber"]), get_in(record, ["to", "fiber"])],
+            fn ref ->
+              case find(by_ref, ref) do
+                nil -> false
+                entry -> same?(Map.fetch!(roots, key(entry)), root)
+              end
+            end
+          )
+      end)
+      |> Enum.map(&decorate(&1, by_ref, tree, roots, requested_viewer))
+      |> Enum.sort_by(&{&1["timestamp"], &1["id"]})
+
+    %{family: family(root), viewer: if(viewer, do: viewer.fiber["uid"]), records: rows}
   end
 
   defp index(entries) do
@@ -114,10 +151,21 @@ defmodule Shuttle.BoardFamily do
   defp same?(a, b),
     do: a.felt_store == b.felt_store and Threads.address(a.fiber) == Threads.address(b.fiber)
 
-  defp root(entry, entries) do
-    case Threads.orchestrator(entry, entries) do
-      nil -> entry
-      parent -> root(parent, entries)
+  defp key(entry), do: {entry.felt_store, Threads.address(entry.fiber)}
+
+  defp root(entry, tree, roots) do
+    case Map.fetch(roots, key(entry)) do
+      {:ok, root} ->
+        {root, roots}
+
+      :error ->
+        {root, roots} =
+          case Threads.orchestrator(entry, tree) do
+            nil -> {entry, roots}
+            parent -> root(parent, tree, roots)
+          end
+
+        {root, Map.put(roots, key(entry), root)}
     end
   end
 
@@ -192,20 +240,20 @@ defmodule Shuttle.BoardFamily do
   defp normalize_harness(value) when value in ["claude", "codex", "pi"], do: value
   defp normalize_harness(_), do: nil
 
-  defp member(index, entries, ref) do
+  defp member(index, roots, ref) do
     case find(index, ref) do
       nil ->
         nil
 
       entry ->
-        root = root(entry, entries)
+        root = Map.fetch!(roots, key(entry))
         parent = Path.dirname(Threads.address(root.fiber))
         id = Threads.address(entry.fiber)
         if parent == ".", do: id, else: String.replace_prefix(id, parent <> "/", "")
     end
   end
 
-  defp decorate(record, index, entries, viewer) do
+  defp decorate(record, index, tree, roots, viewer) do
     by = record["by"] || %{}
     to = record["to"] || %{}
     subject = find(index, record["fiber"])
@@ -214,10 +262,10 @@ defmodule Shuttle.BoardFamily do
     to_entry = find(index, to["fiber"])
 
     actor =
-      nonempty(by["label"]) || member(index, entries, by["fiber"]) || short_session(by["session"]) ||
+      nonempty(by["label"]) || member(index, roots, by["fiber"]) || short_session(by["session"]) ||
         "someone"
 
-    parent = if subject, do: Threads.orchestrator(subject, entries)
+    parent = if subject, do: Threads.orchestrator(subject, tree)
 
     subject_viewer = viewer_uid != nil and subject != nil and subject.fiber["uid"] == viewer_uid
     actor_viewer = viewer_uid != nil and by_entry != nil and by_entry.fiber["uid"] == viewer_uid
@@ -234,8 +282,8 @@ defmodule Shuttle.BoardFamily do
               parent.fiber["uid"] == viewer_uid))
 
     record
-    |> Map.put("member", member(index, entries, record["fiber"]))
-    |> Map.put("to_member", member(index, entries, to["fiber"]))
+    |> Map.put("member", member(index, roots, record["fiber"]))
+    |> Map.put("to_member", member(index, roots, to["fiber"]))
     |> Map.put("actor", actor)
     |> Map.put("delivered", delivered)
   end
