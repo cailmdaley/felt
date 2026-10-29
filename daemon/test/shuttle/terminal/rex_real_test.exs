@@ -8,6 +8,14 @@ defmodule Shuttle.Terminal.RexRealTest do
   @moduletag timeout: 60_000
   @runner Shuttle.Runner.Default
   import Shuttle.Test.IsolatedRex, only: [await: 1]
+  import Shuttle.Test.PollerHelpers
+
+  defmodule ClaimRunner do
+    def cmd(command, args, opts) when command in ["shuttle", "felt"],
+      do: Shuttle.Test.FeltStoreRunner.cmd(command, args, opts)
+
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
 
   setup %{tmp_dir: dir} do
     root = Shuttle.Test.IsolatedRex.start(dir)
@@ -83,6 +91,52 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, []} = Rex.sessions(@runner)
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
     assert bindings == %{}
+  end
+
+  test "a human-labelled native session is claimed canonically and a retry keeps its watcher", %{
+    root: root
+  } do
+    alias Shuttle.Test.{FeltStoreRunner, FiberUid}
+    FeltStoreRunner.start!()
+    store = FeltStoreRunner.felt_root()
+    on_exit(fn -> File.rm_rf(store) end)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.delete_env("SHUTTLE_SESSIONS_FILE")
+    Env.put_app_env(:terminal_backend, Backend)
+    FeltStoreRunner.set_fiber("claimed", make_fiber("claimed"))
+    FeltStoreRunner.set_shuttle("claimed", "kind: oneshot\nagent: claude-sonnet\n", "open")
+
+    {:ok, p} =
+      start_poller!(
+        runner: ClaimRunner,
+        own_host_id: "test-host",
+        felt_stores: [store],
+        poll_interval_ms: 600_000,
+        heartbeat_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(p)
+    path = Path.join(root, "human.sh")
+    File.write!(path, "sleep 60\n")
+
+    assert {:ok, %{"session_id" => sid}} =
+             Rex.create(@runner, Backend.create_spec("probe-human", root, path))
+
+    canonical = FiberUid.session("claimed")
+
+    assert {:ok, %{session: ^canonical}} =
+             Shuttle.Poller.claim_session(p, "claimed", sid, session_uuid: "human-native-uuid")
+
+    worker = Shuttle.Poller.worker_status(p, "claimed")
+    assert {:ok, [%{"session_id" => ^sid, "label" => ^canonical}]} = Rex.sessions(@runner)
+    assert {:ok, %{"bindings" => %{^canonical => %{"session_id" => ^sid}}}} = RexBindings.read()
+
+    assert {:ok, %{session: ^canonical}} =
+             Shuttle.Poller.claim_session(p, "claimed", sid, session_uuid: "human-native-uuid")
+
+    assert Shuttle.Poller.worker_status(p, "claimed").pid == worker.pid
+    assert {"", 0} = Terminal.stop(@runner, canonical, backends: [Backend])
+    assert {:ok, []} = Rex.sessions(@runner)
   end
 
   test "an exited auto-closing block leaves an empty session which the backend removes", %{

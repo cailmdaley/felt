@@ -159,14 +159,18 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   @impl true
-  def rename(runner, from, to) do
-    Shuttle.Terminal.with_lock(to, fn -> rename_locked(runner, from, to) end)
+  def rename(_runner, name, name), do: :ok
+  def rename(runner, from, to), do: rename(runner, from, to, [])
+
+  @doc "Rename a captured native session with an explicit worker block during journal recovery."
+  def rename(runner, from, to, opts) do
+    Shuttle.Terminal.with_lock(to, fn -> rename_locked(runner, from, to, opts) end)
   end
 
-  defp rename_locked(runner, from, to) do
+  defp rename_locked(runner, from, to, opts) do
     Shuttle.Terminal.with_lock({__MODULE__, :rename}, fn ->
       with :ok <- valid_label(to),
-           {:ok, source} <- resolve(runner, from),
+           {:ok, source} <- rename_source(runner, from, opts),
            :ok <- target_free(runner, to, source),
            :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], to),
            :ok <- store(runner, to, source),
@@ -178,6 +182,11 @@ defmodule Shuttle.Terminal.Rex do
     end)
   end
 
+  defp rename_source(runner, "session:" <> _ = sid, block_id: "block:" <> _ = bid),
+    do: live_block(runner, nil, binding(sid, bid))
+
+  defp rename_source(runner, from, []), do: resolve(runner, from)
+
   defp target_free(runner, name, source) do
     with {:ok, doc} <- Bindings.read(),
          {:ok, sessions} <- Rex.sessions(runner) do
@@ -186,7 +195,8 @@ defmodule Shuttle.Terminal.Rex do
       b = doc["bindings"][name]
 
       conflict =
-        (b != nil and b["session_id"] != sid and b["session_id"] in live) or
+        (b != nil and b["session_id"] in live and
+           (b["session_id"] != sid or b["block_id"] != source["block_id"])) or
           Enum.any?(sessions, &(&1["label"] == name and &1["session_id"] != sid))
 
       if conflict, do: {:error, :rename_failed}, else: :ok
@@ -197,6 +207,13 @@ defmodule Shuttle.Terminal.Rex do
   defp remove_old_binding(from, _, b), do: Bindings.delete(from, b)
 
   @impl true
+  def owns_pane?(runner, "session:" <> _ = sid, "block:" <> _ = pane) do
+    case Rex.blocks(runner, sid) do
+      {:ok, blocks} -> Enum.any?(blocks, &(&1["block_id"] == pane))
+      _ -> false
+    end
+  end
+
   def owns_pane?(runner, name, "block:" <> _ = pane) do
     with {:ok, b} <- resolve(runner, name),
          {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
@@ -208,9 +225,14 @@ defmodule Shuttle.Terminal.Rex do
 
   def owns_pane?(_, _, _), do: false
 
+  @doc "Resolve a live immutable address without requiring a worker PID receipt."
+  def address(runner, name) do
+    with {:ok, b} <- resolve(runner, name), do: {:ok, Map.take(b, ~w(session_id block_id))}
+  end
+
   @impl true
   def identity(runner, name) do
-    with {:ok, b} <- resolve(runner, name),
+    with {:ok, b} <- address(runner, name),
          {:ok, procs} <- WorkerProcess.scan(runner),
          {:ok, pid} <- worker_pid(name, b, procs) do
       {:ok, Map.take(b, ["session_id", "block_id"]) |> Map.put("child_pid", pid)}
@@ -306,7 +328,14 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp resolve(runner, "session:" <> _ = sid), do: recover_block(runner, nil, sid)
+  defp resolve(runner, "session:" <> _ = sid) do
+    with {:ok, doc} <- Bindings.read() do
+      case Enum.find(doc["bindings"], fn {_, b} -> b["session_id"] == sid end) do
+        {name, b} -> live_block(runner, name, b)
+        nil -> recover_block(runner, nil, sid)
+      end
+    end
+  end
 
   defp resolve(runner, name) do
     with {:ok, doc} <- Bindings.read(),
@@ -320,7 +349,7 @@ defmodule Shuttle.Terminal.Rex do
             live_block(runner, name, b)
           else
             case Bindings.delete(name, b) do
-              :ok -> {:error, :not_found}
+              :ok -> recover_label(runner, name, sessions)
               error -> error
             end
           end

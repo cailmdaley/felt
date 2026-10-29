@@ -187,6 +187,16 @@ defmodule Shuttle.Terminal.RexTest do
     assert FakeRex.state().sessions[sid()].label == "new-name"
   end
 
+  test "a canonical rename is a no-op and preserves human display labels" do
+    seed()
+    assert :present = Rex.probe(FakeRex, @name)
+    FakeRex.sessions(%{sid() => %{label: "human display", blocks: blocks()}})
+    before = FakeRex.calls()
+    assert :ok = Rex.rename(FakeRex, @name, @name)
+    assert FakeRex.calls() == before
+    assert FakeRex.state().sessions[sid()].label == "human display"
+  end
+
   test "multi-block native sessions refuse an arbitrary worker block" do
     seed()
 

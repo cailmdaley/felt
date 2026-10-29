@@ -225,7 +225,7 @@ defmodule Shuttle.MigrationJournal do
 
   defp backend?(
          %{
-           "type" => "tmux",
+           "type" => type,
            "before" => before,
            "after" => target,
            "aliases" => aliases,
@@ -235,8 +235,9 @@ defmodule Shuttle.MigrationJournal do
          _,
          _,
          _
-       ) do
-    identity?(identity, uuid) and text?(before) and text?(target) and before != target and
+       )
+       when type in ["tmux", "rex"] do
+    identity?(type, identity, uuid) and text?(before) and text?(target) and before != target and
       is_list(aliases) and
       Enum.all?(aliases, fn
         %{"path" => path, "before" => previous, "after" => next} ->
@@ -263,14 +264,27 @@ defmodule Shuttle.MigrationJournal do
 
   defp app_record?(_, _, _, _), do: false
 
-  defp identity?(%{"session_uuid" => uuid, "panes" => panes}, uuid) do
+  defp identity?("tmux", %{"session_uuid" => uuid, "panes" => panes}, uuid) do
     is_list(panes) and panes != [] and
       Enum.all?(panes, fn pane ->
         is_binary(pane) and Regex.match?(~r/^\$[0-9]+\t[0-9]+\t%[0-9]+\t[1-9][0-9]*$/, pane)
       end)
   end
 
-  defp identity?(_, _), do: false
+  defp identity?(
+         "rex",
+         %{"session_uuid" => uuid, "session_id" => sid, "block_id" => bid, "child_pid" => pid},
+         uuid
+       ) do
+    native_ref?(sid, "session:") and native_ref?(bid, "block:") and is_integer(pid) and pid > 0
+  end
+
+  defp identity?(_, _, _), do: false
+
+  defp native_ref?(value, prefix),
+    do:
+      is_binary(value) and String.starts_with?(value, prefix) and
+        token?(String.replace_prefix(value, prefix, ""))
 
   defp resolution?(%{"resolution" => "unresolvable", "reason" => reason}), do: text?(reason)
 
@@ -313,9 +327,9 @@ defmodule Shuttle.MigrationJournal do
 
   defp encode_backend({:app, old, new}), do: %{"type" => "app", "before" => old, "after" => new}
 
-  defp encode_backend({:tmux, old, new, aliases, identity}) do
+  defp encode_backend({:terminal, type, old, new, aliases, identity}) do
     %{
-      "type" => Shuttle.Terminal.Tmux.id(),
+      "type" => type,
       "identity" => identity,
       "before" => old,
       "after" => new,

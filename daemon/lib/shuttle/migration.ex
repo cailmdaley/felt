@@ -1,7 +1,16 @@
 defmodule Shuttle.Migration do
   @moduledoc "Validation and reversible backend changes for a Poller-owned session migration."
-  alias Shuttle.{AppWorkers, Dispatcher, FeltStores, LifecycleStore, Poller, WorkerProcess}
-  alias Shuttle.Terminal.Tmux
+  alias Shuttle.{
+    AppWorkers,
+    Dispatcher,
+    FeltStores,
+    LifecycleStore,
+    Poller,
+    Terminal,
+    WorkerProcess
+  }
+
+  alias Shuttle.Terminal.{Rex, Tmux}
 
   def prepare(state, from_id, to_id, opts) do
     with {:ok, from} <- resolve(state, from_id),
@@ -133,7 +142,7 @@ defmodule Shuttle.Migration do
     if AppWorkers.app?(session) do
       {:error, :surface_unsupported}
     else
-      if Tmux.owns_pane?(runner, session, pane),
+      if Terminal.owns_pane?(runner, session, pane),
         do: :ok,
         else: {:error, :identity_mismatch}
     end
@@ -162,11 +171,12 @@ defmodule Shuttle.Migration do
       if is_nil(canonical) do
         {:error, :uid_missing}
       else
-        with {:ok, procs} <- WorkerProcess.scan(state.runner),
-             {:ok, terminal_identity} <- Tmux.identity(state.runner, worker.session) do
+        with backend when not is_nil(backend) <- Terminal.locate(state.runner, worker.session),
+             {:ok, procs} <- WorkerProcess.scan(state.runner),
+             {:ok, terminal_identity} <- Terminal.identity(state.runner, worker.session) do
           aliases = WorkerProcess.migration_aliases(procs, worker.session, canonical)
           identity = Map.put(terminal_identity, "session_uuid", uuid)
-          {:ok, {:tmux, worker.session, canonical, aliases, identity}}
+          {:ok, {:terminal, backend.id(), worker.session, canonical, aliases, identity}}
         else
           _ -> {:error, :surface_unsupported}
         end
@@ -202,7 +212,9 @@ defmodule Shuttle.Migration do
     end)
   end
 
-  def reconcile_backend(state, %{"backend" => %{"type" => "tmux"} = backend} = entry) do
+  def reconcile_backend(state, %{"backend" => %{"type" => type} = backend} = entry)
+      when type in ["tmux", "rex"] do
+    terminal = if type == "rex", do: Rex, else: Tmux
     forward? = entry["direction"] == "forward"
     from = backend[if(forward?, do: "before", else: "after")]
     to = backend[if(forward?, do: "after", else: "before")]
@@ -213,10 +225,11 @@ defmodule Shuttle.Migration do
         {alias["path"], previous, alias["after"]}
       end)
 
-    # Query tmux directly here: script aliases themselves are being reconciled.
-    with {:ok, source?} <- tmux_exists(state.runner, from),
-         {:ok, dest?} <- tmux_exists(state.runner, to),
-         :ok <- reconcile_name(state.runner, from, to, source?, dest?, backend["identity"]) do
+    # Query the captured backend directly: script aliases are being reconciled.
+    with {:ok, source?} <- terminal_exists(terminal, state.runner, from),
+         {:ok, dest?} <- terminal_exists(terminal, state.runner, to),
+         :ok <-
+           reconcile_name(terminal, state.runner, from, to, source?, dest?, backend["identity"]) do
       if forward?,
         do: WorkerProcess.write_migration_aliases(aliases),
         else: WorkerProcess.restore_migration_aliases(aliases)
@@ -232,7 +245,7 @@ defmodule Shuttle.Migration do
     end
   end
 
-  defp verify_tmux_identity(runner, name, %{"panes" => expected}) do
+  defp verify_identity(Tmux, runner, name, %{"panes" => expected}) do
     with {:ok, %{"panes" => observed}} <- Tmux.identity(runner, name) do
       if Enum.all?(expected, &(&1 in observed)),
         do: :ok,
@@ -240,26 +253,57 @@ defmodule Shuttle.Migration do
     end
   end
 
-  defp verify_tmux_identity(_, _, _), do: {:error, :backend_identity_mismatch}
+  defp verify_identity(Rex, runner, name, expected) do
+    with {:ok, address} <- Rex.address(runner, name),
+         true <- Map.take(expected, ~w(session_id block_id)) == address,
+         {:ok, observed} <- Rex.identity(runner, name),
+         true <- expected["child_pid"] == observed["child_pid"] do
+      :ok
+    else
+      false -> {:error, :backend_identity_mismatch}
+      error -> error
+    end
+  end
 
-  defp tmux_exists(runner, name) do
-    case Tmux.probe(runner, name) do
+  defp verify_identity(_, _, _, _), do: {:error, :backend_identity_mismatch}
+
+  defp terminal_exists(backend, runner, name) do
+    case backend.probe(runner, name) do
       :present -> {:ok, true}
       :absent -> {:ok, false}
       :unknown -> {:error, :backend_unobservable}
     end
   end
 
-  defp reconcile_name(_, _, _, true, true, _), do: {:error, :backend_assignment_conflict}
+  defp reconcile_name(_, _, _, _, true, true, _), do: {:error, :backend_assignment_conflict}
 
-  defp reconcile_name(runner, from, to, true, false, identity) do
-    with :ok <- verify_tmux_identity(runner, from, identity), do: rename(runner, to, identity)
+  defp reconcile_name(backend, runner, from, to, true, false, identity) do
+    with :ok <- verify_identity(backend, runner, from, identity),
+         do: rename(backend, runner, to, identity)
   end
 
-  defp reconcile_name(runner, _, to, false, true, identity),
-    do: verify_tmux_identity(runner, to, identity)
+  defp reconcile_name(backend, runner, _, to, false, true, identity),
+    do: verify_identity(backend, runner, to, identity)
 
-  defp reconcile_name(runner, from, to, false, false, _) do
+  defp reconcile_name(Rex, runner, from, to, false, false, identity) do
+    # A display rename or lost binding cannot hide a still-live captured block.
+    case terminal_exists(Rex, runner, identity["block_id"]) do
+      {:ok, true} ->
+        with :ok <- verify_identity(Rex, runner, identity["block_id"], identity),
+             do: rename(Rex, runner, to, identity)
+
+      {:ok, false} ->
+        absent_worker(runner, from, to)
+
+      error ->
+        error
+    end
+  end
+
+  defp reconcile_name(Tmux, runner, from, to, false, false, _),
+    do: absent_worker(runner, from, to)
+
+  defp absent_worker(runner, from, to) do
     # A completed conversation can be absent, but a failed scan cannot prove it.
     with {:ok, procs} <- WorkerProcess.scan(runner),
          nil <- WorkerProcess.session_process(procs, from),
@@ -270,7 +314,10 @@ defmodule Shuttle.Migration do
     end
   end
 
-  defp rename(runner, to, %{"panes" => [pane | _]}) do
+  defp rename(Rex, runner, to, %{"session_id" => sid, "block_id" => bid}),
+    do: Rex.rename(runner, sid, to, block_id: bid)
+
+  defp rename(Tmux, runner, to, %{"panes" => [pane | _]}) do
     # Target the captured tmux session ID, never a name that can be replaced
     # between verification and this command.
     session_id = pane |> String.split("\t") |> hd()

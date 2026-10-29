@@ -4375,6 +4375,18 @@ defmodule Shuttle.Poller do
     live_session = live_session_for_fiber(state, fiber_id, uid)
 
     cond do
+      running != nil and Shuttle.Terminal.native_ref?(tmux_session) ->
+        # Native addresses survive a claim's rename. Let the backend prove
+        # that the canonical binding still belongs to this exact claimant.
+        with true <- running.session == Dispatcher.session_name(fiber_id, uid),
+             Shuttle.Terminal.Rex <- Shuttle.Terminal.locate(state.runner, running.session),
+             {:ok, source} <- claim_terminal_source(state.runner, tmux_session, opts),
+             :ok <- Shuttle.Terminal.rename(state.runner, source, running.session) do
+          repair_claim_identity(state, fiber_id, running, opts)
+        else
+          _ -> {state, {:error, :already_running}}
+        end
+
       # Idempotent retry: the fiber's running worker is this very session —
       # either by name, or the requested name no longer exists because the
       # first (successful) claim already renamed it. A lost claim response
@@ -4391,7 +4403,9 @@ defmodule Shuttle.Poller do
       # worker is already on the fiber. When the claimer *is* the canonical
       # session (a prior claim renamed it but the watcher failed to start),
       # fall through — registration is the recovery path.
-      live_session != nil and live_session != tmux_session ->
+      live_session != nil and live_session != tmux_session and
+          (not Shuttle.Terminal.native_ref?(tmux_session) or
+             Shuttle.Terminal.locate(state.runner, live_session) != Shuttle.Terminal.Rex) ->
         {state, {:error, :already_running}}
 
       not already_running_session?(state, tmux_session) ->
@@ -4485,7 +4499,7 @@ defmodule Shuttle.Poller do
     canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
     rename_result =
-      case Shuttle.Terminal.rename(state.runner, tmux_session, canonical) do
+      case rename_claim_terminal(state.runner, tmux_session, canonical, opts) do
         :ok ->
           {:ok, canonical}
 
@@ -4503,6 +4517,31 @@ defmodule Shuttle.Poller do
         register_renamed_session(state, fiber_id, fiber, session, agent_id, opts)
     end
   end
+
+  defp rename_claim_terminal(runner, session, canonical, opts) do
+    with {:ok, source} <- claim_terminal_source(runner, session, opts),
+         do: Shuttle.Terminal.rename(runner, source, canonical)
+  end
+
+  defp claim_terminal_source(runner, "session:" <> _ = session, opts) do
+    case opts[:tmux_pane] do
+      nil ->
+        {:ok, session}
+
+      "" ->
+        {:ok, session}
+
+      "block:" <> _ = block ->
+        if Shuttle.Terminal.owns_pane?(runner, session, block),
+          do: {:ok, block},
+          else: {:error, :rename_failed}
+
+      _ ->
+        {:error, :rename_failed}
+    end
+  end
+
+  defp claim_terminal_source(_runner, session, _opts), do: {:ok, session}
 
   defp register_renamed_session(%State{} = state, fiber_id, fiber, session, agent_id, opts) do
     running_meta =

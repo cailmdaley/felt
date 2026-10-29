@@ -137,6 +137,8 @@ defmodule Shuttle.Terminal do
   def owns_pane?(runner, name, pane), do: holder(runner, name).owns_pane?(runner, name, pane)
   def reveal(name, host \\ nil), do: holder(Shuttle.Runner.Default, name).reveal(name, host)
 
+  defp holder(_runner, "session:" <> _), do: Shuttle.Terminal.Rex
+  defp holder(_runner, "block:" <> _), do: Shuttle.Terminal.Rex
   defp holder(runner, name), do: locate(runner, name) || primary()
 
   def native_ref?("session:" <> _), do: true

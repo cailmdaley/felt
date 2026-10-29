@@ -2,7 +2,7 @@ defmodule ShuttleWeb.ClaimController do
   @moduledoc """
   Agent-API endpoint: POST /api/v1/claim
 
-  First-class worker self-claim: registers an already-live tmux session as
+  First-class worker self-claim: registers an already-live terminal session as
   the running worker for a fiber, exactly as if the daemon had dispatched it
   (watcher, exit handling, kanban liveness). The write-and-claim leg of the
   chat-to-card capture flow — the spawned capture session authors its fiber,
@@ -10,10 +10,12 @@ defmodule ShuttleWeb.ClaimController do
 
   Owner-routed like the other write verbs: a claim carrying an `origin` for a
   remote-owned fiber forwards to the owning daemon's identical `/claim`
-  (origin stripped), since only the owner can see the tmux session and run
+  (origin stripped), since only the owner can see the terminal session and run
   the watcher.
 
-  Body: `fiber_id` (required), `tmux_session` (required), `agent` (optional
+  Body: `fiber_id` (required), `tmux_session` (required, a worker name or Rex
+  native session reference), `tmux_pane` (Rex native block reference, required
+  for a multi-block session), `agent` (optional
   registry name; defaults to the fiber's shuttle.agent), `session_uuid`
   (optional harness transcript UUID — written into the dispatch-shaped felt
   history event so Resume previous works on claimed sessions too), `meeting`
@@ -60,6 +62,7 @@ defmodule ShuttleWeb.ClaimController do
         case Shuttle.Poller.claim_session(fiber_id, tmux_session,
                agent: Map.get(params, "agent"),
                surface: Map.get(params, "surface"),
+               tmux_pane: Map.get(params, "tmux_pane"),
                session_uuid: Map.get(params, "session_uuid"),
                meeting: Map.get(params, "meeting")
              ) do
