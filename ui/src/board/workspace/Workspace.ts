@@ -12,6 +12,7 @@ import { deskColumn } from '../deskColumn.js'
 import { normalizeShelfFiles } from '../views/shelfData.js'
 import type { ShelfFile } from '../views/shelfData.js'
 import { fileBytesUrl, renderMarkdown, showToast } from '../utils.js'
+import type { DeskPlacement } from '../deskOrdering.js'
 import { head, RESOURCE_PRIORITY } from '../documentResources.js'
 import { channelLead, leadReceipt, buildChannel, normalizeAbsolutePath, chatDocument, defaultSelection, docKey, fallbackSelection, parseDocKey, proseDocument, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { buildFiberProse } from './FiberProse.js'
@@ -37,6 +38,8 @@ export interface WorkspaceOptions {
   cards(): KanbanCard[]
   /** The active Desk projection, already in the Desk's visible reading order. */
   deskRows(): KanbanCard[]
+  /** The same projection's column and caption for each visible Desk row. */
+  deskPlacement?(card: KanbanCard): DeskPlacement | undefined
   origin(): string
   onVisibility(active: boolean): void
   deskColumn?(card: KanbanCard): SidebarEntry[]
@@ -329,17 +332,26 @@ export class Workspace {
   }
   /** A family's Desk row holds every node's place in the Desk order. */
   private sidebarPlace(card: KanbanCard): string {
-    const column = deskColumn(this.sidebarRoot(card))
+    const root = this.sidebarRoot(card)
+    const column = this.opts.deskPlacement?.(root)?.column ?? deskColumn(root)
     return column === 'scheduled' ? 'resting' : column
   }
   /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
   private sidebarGroup(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
+    const placement = this.opts.deskPlacement?.(root)
+    if (placement) return placement.group
     if (this.sidebarPlace(root) === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(root))![1]
     return this.sidebarColumn(card)
   }
   /** A card's Desk column: In flight holds both its bands' groups. */
   private sidebarColumn(card: KanbanCard): string {
+    const placementColumn = this.opts.deskPlacement?.(this.sidebarRoot(card))?.column
+    if (placementColumn === 'inFlight') return 'In flight'
+    if (placementColumn === 'drafts') return 'Drafts'
+    if (placementColumn === 'awaitingReview') return 'Awaiting review'
+    if (placementColumn === 'roles') return 'Roles'
+    if (placementColumn === 'resting') return 'Resting'
     const column = this.sidebarPlace(card)
     if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'

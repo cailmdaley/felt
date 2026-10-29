@@ -60,7 +60,7 @@ import { hasWorkerToStop } from './KanbanTypes.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from './KanbanModalShared.js'
 import { PINNED_TAG, THREAD_PIN, type ThreadPinRequest } from './ThreadPeek.js'
 import { COLUMN_TITLES, FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, SURFACE_TITLE, boardCards, threadIndexFor, findCardById, findCardColumn, formatDue } from './KanbanSurfaces.js'
-import { deskOrder } from './deskOrdering.js'
+import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
@@ -554,7 +554,8 @@ export class KanbanModal {
       shuttleBase: this.shuttleBase,
       localHost: () => this.lastResponse?.feltHost,
       cards: () => this.workspaceCards(),
-      deskRows: () => deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting).rows,
+      deskRows: () => this.deskProjection.rows,
+      deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
       onVisibility: (active) => this.showWorkspace(active),
@@ -1897,6 +1898,8 @@ export class KanbanModal {
   private render(data: KanbanResponse): void {
     this.surfaces.closeMenu()
     if (!this.body || !this.deskEl) return
+    const order = deskOrder(data, undefined, this.meetingStatus.meeting)
+    this.deskProjection = order
     this.ensureFleetDefaultAgents(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
@@ -1928,7 +1931,6 @@ export class KanbanModal {
     this.pendingDeskData = null
 
     const scrollSnapshot = this.captureScrollSnapshot()
-    const order = deskOrder(data, undefined, this.meetingStatus.meeting)
     const { staleness } = data
 
     this.deskEl.innerHTML = ''
@@ -2035,6 +2037,7 @@ export class KanbanModal {
 
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
+  private deskProjection: DeskOrder = deskOrder(null)
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
   /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */

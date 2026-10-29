@@ -1146,7 +1146,7 @@ describe('workspace reader integration', () => {
     const control = { canJoin: () => true, modes: () => ['call'], current: () => null, join: vi.fn() }
     workspace.dispose()
     const dock = new Dock('', changed, undefined, undefined, { meeting: control as never })
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [managed], origin: () => 'Desk', onVisibility: visibility, dock })
+    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [managed], deskRows: () => [managed], origin: () => 'Desk', onVisibility: visibility, dock })
     workspace.open(managed, 'Desk', chatKey('host-a', 'alpha'))
     await flush()
 

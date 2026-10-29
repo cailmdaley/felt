@@ -14,7 +14,7 @@ interface WorkspaceBoard {
   unmount(): void
   render(data: KanbanResponse): void
   fetchAndRender(): Promise<void>
-  workspace: { update(): void; open(card: KanbanCard, origin?: string): void; returnToOrigin(): void }
+  workspace: { update(): void; open(card: KanbanCard, origin?: string): void; returnToOrigin(): void; reader?: { el: HTMLElement } }
   lastResponse: KanbanResponse | null
   pendingDeskData: KanbanResponse | null
   meetingStatus: { meeting: MeetingRecord | null }
@@ -22,6 +22,7 @@ interface WorkspaceBoard {
   workspaceCards(): KanbanCard[]
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+const flushTasks = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
 
 describe('Desk runtime handoff to the workspace', () => {
   it('updates the workspace without querying the band manager as an open Dock', () => {
@@ -107,12 +108,13 @@ describe('Desk rows in the document workspace', () => {
     }
   })
 
-  it('keeps a hosted meeting card in the same Desk and Reader position', () => {
+  it('keeps a hosted meeting card in the same Desk and Reader position', async () => {
     const host = card({ id: 'draft' })
+    const otherDraft = card({ id: 'other-draft' })
     const working = card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })
     const turn = card({ id: 'turn', status: 'active', workerState: 'running', runtimePhase: 'waiting' })
     const review = card({ id: 'review', status: 'closed' })
-    const data = response({ now: { drafts: [host], inFlight: [working, turn], awaitingReview: [review] } })
+    const data = response({ now: { drafts: [otherDraft, host], inFlight: [working, turn], awaitingReview: [review] } })
     const meeting: MeetingRecord = {
       state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
       fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
@@ -128,8 +130,10 @@ describe('Desk rows in the document workspace', () => {
       board.render(data)
       const drawn = [...board.deskEl!.querySelectorAll<HTMLElement>('[data-fiber-id]')].map(el => el.dataset.fiberId)
       board.workspace.open(host, 'Desk')
-      const reader = (board.workspace as unknown as { sidebarCards(): KanbanCard[] }).sidebarCards().map(card => card.id)
-      expect(drawn).toEqual(['turn', 'draft', 'working', 'review'])
+      await flushTasks()
+      const sidebar = board.workspace.reader!.el.querySelector<HTMLElement>('.ws-sidebar')!
+      const reader = [...sidebar.querySelectorAll<HTMLElement>('.ws-channel-row')].map(row => row.dataset.channelUid)
+      expect(drawn).toEqual(['other-draft', 'turn', 'draft', 'working', 'review'])
       expect(reader).toEqual(drawn)
     } finally {
       board.unmount()
