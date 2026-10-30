@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -26,9 +27,17 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 	storage := felt.NewStorage(root)
 	ref, err := felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
 	if err != nil {
+		// Only an established miss permits owner lookup. Ambiguous queries and
+		// local read failures must keep their original meaning.
+		if _, missing := err.(*felt.NoFiberMatchError); !missing {
+			return nil, nil, felt.Ref{}, err
+		}
 		remote, remoteRef, remoteErr := a.remoteFiber(query, full)
 		if remoteErr != nil {
-			return nil, nil, felt.Ref{}, err
+			if errors.Is(remoteErr, errNoRemoteFiber) {
+				return nil, nil, felt.Ref{}, err
+			}
+			return nil, nil, felt.Ref{}, fmt.Errorf("%v; owner lookup: %w", err, remoteErr)
 		}
 		return remote, nil, remoteRef, nil
 	}
@@ -44,23 +53,37 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 	return fiber, ref.Storage, ref, nil
 }
 
+var errNoRemoteFiber = errors.New("no matching owner fiber")
+
 // remoteFiber resolves a fiber absent from the local Git view through the
 // daemon's composite owner index, then reads its current document from that
 // owner. The returned storage is nil: callers must route mutations to the
 // owner rather than treating the fetched document as a writable mirror.
 func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error) {
+	endpoint, err := a.daemonEndpoint("/api/v1/fibers/composite")
+	if err != nil {
+		return nil, felt.Ref{}, err
+	}
+	index, err := getDaemonJSON[struct {
+		Fibers []compositeFiberRow `json:"fibers"`
+	}](a, endpoint, "parsing composite fibers")
+	if err != nil {
+		return nil, felt.Ref{}, err
+	}
 	var row *compositeFiberRow
-	for _, candidate := range a.compositeFiberRows() {
+	for _, candidate := range index.Fibers {
 		id, _ := candidate.Fiber["id"].(string)
 		slug, _ := candidate.Fiber["slug"].(string)
 		if candidate.Origin != "" && (candidate.Path == query || id == query || slug == query) {
+			if row != nil {
+				return nil, felt.Ref{}, fmt.Errorf("fiber %q is ambiguous across owners %q and %q; use its intrinsic UID", query, row.Origin, candidate.Origin)
+			}
 			copy := candidate
 			row = &copy
-			break
 		}
 	}
 	if row == nil {
-		return nil, felt.Ref{}, fmt.Errorf("fiber %s is not in the local store or daemon index", query)
+		return nil, felt.Ref{}, errNoRemoteFiber
 	}
 	id, _ := row.Fiber["slug"].(string)
 	if id == "" {
@@ -70,7 +93,7 @@ func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error)
 	for i := range segments {
 		segments[i] = url.PathEscape(segments[i])
 	}
-	endpoint, err := a.daemonEndpoint("/api/v1/fibers/" + strings.Join(segments, "/"))
+	endpoint, err = a.daemonEndpoint("/api/v1/fibers/" + strings.Join(segments, "/"))
 	if err != nil {
 		return nil, felt.Ref{}, err
 	}
@@ -103,6 +126,20 @@ func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error)
 		}
 	}
 	f.ID = id
+	// A storage-less document is safe only when every mutating caller must
+	// route to a distinct owner. Hostless and local rows need local storage.
+	blockData, _ := data["shuttle"].(map[string]any)
+	owner, _ := blockData["host"].(string)
+	own, err := a.resolveOwnHost("")
+	if err != nil {
+		return nil, felt.Ref{}, err
+	}
+	if owner == "" || owner == own || owner != row.Origin {
+		return nil, felt.Ref{}, fmt.Errorf("fiber %q has no verified remote owner (origin %q, host %q)", query, row.Origin, owner)
+	}
+	if f.UID == "" {
+		return nil, felt.Ref{}, fmt.Errorf("owner %q returned no intrinsic UID for %s", owner, id)
+	}
 	f.ExtraFields = make(map[string]*yaml.Node)
 	for key, value := range data {
 		if felt.IsNativeFrontmatterKey(key) || key == "slug" || key == "path" || key == "body" || key == "body_start_line" {
