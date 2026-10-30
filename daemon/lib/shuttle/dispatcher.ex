@@ -1432,18 +1432,18 @@ defmodule Shuttle.Dispatcher do
 
   defp resume_sender_capability(:fresh), do: {:ok, Shuttle.AppWorkers.new_sender_capability()}
 
-  defp resume_sender_capability({:previous, id}, opts) when is_list(opts) do
-    case Keyword.get(opts, :sender_capability) do
-      capability when is_binary(capability) and byte_size(capability) == 64 -> {:ok, capability}
-      _ -> resume_sender_capability({:previous, id})
-    end
-  end
-
   defp resume_sender_capability({:previous, id}) when is_binary(id) do
     case Shuttle.AppWorkers.get(id) do
       {:ok, _record} -> Shuttle.AppWorkers.ensure_sender_capability(id)
       {:error, :not_found} -> {:ok, Shuttle.AppWorkers.new_sender_capability()}
       {:error, _} = error -> error
+    end
+  end
+
+  defp resume_sender_capability({:previous, id}, opts) when is_list(opts) do
+    case Keyword.get(opts, :sender_capability) do
+      capability when is_binary(capability) and byte_size(capability) == 64 -> {:ok, capability}
+      _ -> resume_sender_capability({:previous, id})
     end
   end
 
