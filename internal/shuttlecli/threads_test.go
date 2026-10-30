@@ -195,3 +195,22 @@ Draft
 		t.Fatalf("unexpected %s", out)
 	}
 }
+
+func TestThreadsCarriesOwnerDispatchError(t *testing.T) {
+	t.Parallel()
+	var node ThreadNode
+	if err := json.Unmarshal([]byte(`{"id":"hub/failure","state":"Blocked","dispatch_error":"systemError: native_thread_unverified","threads":[]}`), &node); err != nil {
+		t.Fatal(err)
+	}
+	row := toThreadRow(node, false)
+	if got := row.stateLabel(); got != "Blocked · systemError: native_thread_unverified" {
+		t.Fatal(got)
+	}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"dispatch_error":"systemError: native_thread_unverified"`) {
+		t.Fatal(string(encoded))
+	}
+}

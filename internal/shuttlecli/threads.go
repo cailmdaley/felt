@@ -16,7 +16,7 @@ import (
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
-var threadStates = []string{"Waiting", "Unknown", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
+var threadStates = []string{"Blocked", "Waiting", "Unknown", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
 
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
@@ -34,6 +34,7 @@ type ThreadNode struct {
 	Stale           bool         `json:"stale,omitempty"`
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Outcome         string       `json:"outcome,omitempty"`
+	DispatchError   string       `json:"dispatch_error,omitempty"`
 	BlockedOn       string       `json:"blocked_on,omitempty"`
 	Until           string       `json:"until,omitempty"`
 	PendingResults  int          `json:"pending_results,omitempty"`
@@ -70,6 +71,7 @@ type threadRow struct {
 	Stale           bool        `json:"stale,omitempty"`
 	HostUnreachable bool        `json:"host_unreachable,omitempty"`
 	Outcome         string      `json:"outcome,omitempty"`
+	DispatchError   string      `json:"dispatch_error,omitempty"`
 	BlockedOn       string      `json:"blocked_on,omitempty"`
 	Until           string      `json:"until,omitempty"`
 	Unfinished      int         `json:"unfinished"`
@@ -84,7 +86,7 @@ func (a *app) threadsCmd() *cobra.Command {
 		Short: "A constitution's threads, grouped by state",
 		Long: `Lists the threads of a constitution: the constitutions nested under it, as
 the orchestrator's launch prompt and the board's thread rail see them. Direct
-threads are grouped Waiting, To review, Working, Armed, Draft, Resting; each row gives
+threads are grouped Blocked, Waiting, To review, Working, Armed, Draft, Resting; each row gives
 the thread's id, state, name and the first sentence of its outcome, and the
 number of unfinished threads below it. A thread resting until something
 (shuttle rest --until) reads "⏸ until <name>". Archived threads (a tempered or
@@ -181,7 +183,7 @@ func (a *app) fetchThreads(id string) (*threadTree, error) {
 	return &tree, nil
 }
 
-// threadRows orders the direct threads by state, Waiting first (the daemon
+// threadRows orders the direct threads by state, Blocked first (the daemon
 // serves each level in address order, which a stable sort keeps within a
 // state), and counts the archived ones. A state this build does not name
 // follows the named ones, so a newer daemon's rows are never dropped. Under
@@ -214,7 +216,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, OwnerCacheState: n.OwnerCacheState, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, OwnerCacheState: n.OwnerCacheState, Outcome: n.Outcome, DispatchError: n.DispatchError, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -310,6 +312,8 @@ func (row threadRow) stateLabel() string {
 		return row.State + " · host unreachable"
 	case row.Stale:
 		return row.State + " · owner state stale"
+	case row.DispatchError != "":
+		return row.State + " · " + row.DispatchError
 	case row.BlockedOn != "":
 		return row.State + " · ⏸ until " + row.Until
 	}

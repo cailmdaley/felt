@@ -537,6 +537,43 @@ defmodule Shuttle.AppWorkersTest do
            end)
   end
 
+  test "a systemError thread restores its exact viewer and accepts its pending continuation" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    id = AppWorkers.id(ref)
+    assert {:ok, capability} = AppWorkers.sender_capability(id)
+    assert {:ok, initial_record} = AppWorkers.get(id)
+    initial_digest = initial_record["sender_capability_sha256"]
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "systemError"}}})
+    App.set(:resume_result, {:ok, %{"id" => id, "status" => %{"type" => "systemError"}}})
+
+    assert {:ok, %{created: true}} = Shuttle.CodexTerminal.prepare(id, runner: Runner)
+    assert :ok = AppWorkers.deactivate(id)
+    assert {:ok, ^ref} = dispatch("tests/terminal", resume_mode: "previous")
+
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert 2 == Enum.count(App.calls(), &match?({:turn, ^id, _, _}, &1))
+
+    for {:resume, ^id, opts} <- App.calls() do
+      assert opts[:sender_capability] == capability
+    end
+
+    for {:turn, ^id, _prompt, opts} <- App.calls() do
+      assert opts[:sender_capability] == capability
+    end
+
+    assert {:ok, ^capability} = AppWorkers.sender_capability(id)
+
+    assert {:ok,
+            %{
+              "active" => true,
+              "terminal_error" => nil,
+              "pending_prompt" => nil,
+              "sender_capability_sha256" => ^initial_digest
+            }} = AppWorkers.get(id)
+  end
+
   test "unconfirmed initial-turn acknowledgments retain the exact identity and pending prompt" do
     terminal_fiber("tests/terminal")
 
@@ -612,10 +649,17 @@ defmodule Shuttle.AppWorkersTest do
                "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
              })
 
-    App.set(:read_result, {:ok, %{"id" => "other", "status" => %{"type" => "active"}}})
+    for thread <- [
+          %{"id" => "other", "status" => %{"type" => "active"}},
+          %{"id" => "other", "status" => %{"type" => "systemError"}},
+          %{"id" => "app-session-1", "status" => %{"type" => "unknown"}},
+          %{"id" => "app-session-1", "status" => "systemError"}
+        ] do
+      App.set(:read_result, {:ok, thread})
 
-    assert {:error, :native_thread_unverified} =
-             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+      assert {:error, :native_thread_unverified} =
+               Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+    end
 
     assert :alive = WorkerBackend.session_status(Runner, ref)
   end
@@ -695,6 +739,7 @@ defmodule Shuttle.AppWorkersTest do
     eventually(fn -> Shuttle.Terminal.status(RexRunner, terminal) == :alive end, 200)
     assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
+
     assert {:resume, "app-session-1", [sender_capability: ^capability]} =
              Enum.find(restored_calls, &match?({:resume, "app-session-1", _}, &1))
 
@@ -1944,10 +1989,13 @@ defmodule Shuttle.AppWorkersTest do
         "active" => true
       })
 
-    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "idle"}}})
+    for type <- ["idle", "systemError"] do
+      App.set(:calls, [])
+      App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => type}}})
 
-    assert :ok = AppWorkers.recover(id, "tests/loaded", nil, Runner.felt_root())
-    assert [{:read, ^id}] = App.calls()
+      assert :ok = AppWorkers.recover(id, "tests/loaded", nil, Runner.felt_root())
+      assert [{:read, ^id}] = App.calls()
+    end
   end
 
   test "a delayed watcher exit cannot release a replacement using the same conversation" do
@@ -2705,5 +2753,98 @@ defmodule Shuttle.AppWorkersTest do
           Process.sleep(20)
           eventually(fun, attempts - 1)
         )
+  end
+
+  test "native system-error reason clears when the conversation becomes idle" do
+    terminal_fiber("tests/app")
+    {:ok, session} = dispatch("tests/app")
+    App.set(:state, :system_error)
+    assert :system_error = WorkerBackend.observe(session)
+    now = DateTime.utc_now()
+    meta = %{session: session, fiber_id: "tests/app", started_at: now, last_activity_at: now}
+
+    assert %{"key" => %{state: "blocked", launch_error: error}} =
+             Shuttle.Poller.Snapshot.runtime_index(%{"key" => meta}, %{})
+
+    assert error =~ "systemError"
+    App.set(:state, :idle)
+    assert :idle = WorkerBackend.observe(session)
+
+    assert %{"key" => %{state: "running", launch_error: nil}} =
+             Shuttle.Poller.Snapshot.runtime_index(%{"key" => meta}, %{})
+  end
+
+  for {label, thread, resume, error} <- [
+        {"unverifiable", %{"id" => "some-other-thread", "status" => %{"type" => "idle"}}, nil,
+         "native_thread_unverified"},
+        {"systemError resume failure",
+         %{"id" => "app-session-1", "status" => %{"type" => "systemError"}},
+         {:error, :disconnected}, "disconnected"}
+      ] do
+    @tag :system_error_backoff
+    test "#{label} terminal restoration backs off and keeps its durable reason" do
+      terminal_fiber("tests/terminal")
+      {:ok, session} = dispatch("tests/terminal")
+      Runner.remove_tmux_session(WorkerBackend.tmux(session))
+      App.set(:read_result, {:ok, unquote(Macro.escape(thread))})
+      if unquote(Macro.escape(resume)), do: App.set(:resume_result, unquote(Macro.escape(resume)))
+
+      {:ok, poller} =
+        start_poller!(
+          runner: Runner,
+          name: nil,
+          felt_stores: [Runner.felt_root()],
+          poll_interval_ms: 60_000
+        )
+
+      await_boot_cycle!(poller)
+
+      eventually(fn ->
+        case AppWorkers.get("app-session-1") do
+          {:ok, %{"terminal_retry_at" => retry_at}} when is_integer(retry_at) -> true
+          _ -> false
+        end
+      end)
+
+      eventually(fn -> match?([%{state: "blocked"}], Poller.snapshot(poller).eligible) end)
+      assert [%{state: "blocked", launch_error: reason}] = Poller.snapshot(poller).eligible
+      assert reason =~ unquote(error)
+      {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
+      assert entry.runtime.launch_error == reason
+      before = Enum.count(App.calls(), &match?({:read, _}, &1))
+      poll_at = Poller.snapshot(poller).poll_at
+      send(poller, :run_poll_cycle)
+      eventually(fn -> Poller.snapshot(poller).poll_at > poll_at end)
+      await_boot_cycle!(poller)
+      assert before == Enum.count(App.calls(), &match?({:read, _}, &1))
+    end
+  end
+
+  test "boot reopens the exact errored conversation quietly without interrupted-turn evidence" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, session} = dispatch("tests/terminal")
+    id = AppWorkers.id(session)
+    assert {:ok, initial} = AppWorkers.get(id)
+    App.set(:state, :system_error)
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "systemError"}}})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+    # Boot retires the errored assignment and restores the same conversation.
+    # With no interrupted-turn hook evidence, restoration starts no model turn.
+    assert {:ok, record} = AppWorkers.get(id)
+    assert record["active"]
+    assert record["started_at"] != initial["started_at"]
+    assert record["session_uuid"] == id
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert 1 == Enum.count(App.calls(), &match?({:turn, ^id, _, _}, &1))
+    assert %{session: ^session} = Poller.worker_status(poller, "tests/terminal")
   end
 end

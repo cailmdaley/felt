@@ -193,7 +193,9 @@ defmodule Shuttle.Threads do
               fiber: fiber,
               felt_store: if(local?, do: store, else: owner_store),
               path: field(row, :path),
-              pending_results: field(row, :pending_results) || 0
+              pending_results: field(row, :pending_results) || 0,
+              dispatch_error: field(row, :dispatch_error),
+              runtime: field(row, :runtime)
             },
             if(local?, do: %{}, else: %{thread_store: remote_store_key(host, owner_store)})
           )
@@ -304,11 +306,20 @@ defmodule Shuttle.Threads do
   end
 
   @roster_cap 40
-  @state_order ["Unknown", "Waiting", "To review", "Working", "Armed", "Draft", "Resting"]
+  @state_order [
+    "Blocked",
+    "Unknown",
+    "Waiting",
+    "To review",
+    "Working",
+    "Armed",
+    "Draft",
+    "Resting"
+  ]
 
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: counts for its
-  direct threads in board order, then only the Waiting and To review inbox.
+  direct threads in board order, then the Blocked, Waiting and To review inbox.
   `live` and `reachable` are as `tree/5` takes them.
   """
   def roster(fiber_id, felt_store, entries, live, reachable \\ nil) do
@@ -340,9 +351,9 @@ defmodule Shuttle.Threads do
             " — `shuttle threads #{fiber_id}`"
 
         {inbox, {_remaining, omitted}} =
-          Enum.map_reduce(["Waiting", "To review"], {@roster_cap, 0}, fn state,
-                                                                         {remaining,
-                                                                          omitted_total} ->
+          Enum.map_reduce(["Blocked", "Waiting", "To review"], {@roster_cap, 0}, fn state,
+                                                                                    {remaining,
+                                                                                     omitted_total} ->
             members =
               rows
               |> Enum.filter(&(&1["state"] == state))
@@ -356,9 +367,11 @@ defmodule Shuttle.Threads do
               lines =
                 Enum.map(shown, fn row ->
                   detail =
-                    if state == "Waiting",
-                      do: single_line(row["ask"] || "(no question)"),
-                      else: first_sentence(row["outcome"])
+                    case state do
+                      "Blocked" -> single_line(row["dispatch_error"])
+                      "Waiting" -> single_line(row["ask"] || "(no question)")
+                      _ -> first_sentence(row["outcome"])
+                    end
 
                   "- #{relative_id(fiber_id, row["id"])} — #{truncate(detail, 160)}" <>
                     child_count(row)
@@ -423,6 +436,9 @@ defmodule Shuttle.Threads do
   A thread's roster state as written: Armed says when its host is out of
   sight, and a rest says what it waits for.
   """
+  def state_label(%{"state" => state, "dispatch_error" => error}) when is_binary(error),
+    do: "#{state} · #{error}"
+
   def state_label(%{"host_unreachable" => true}), do: "Armed · host unreachable"
 
   def state_label(%{"state" => state, "until" => until}) when is_binary(until) and until != "",
@@ -486,6 +502,14 @@ defmodule Shuttle.Threads do
 
       column = if Map.get(entry, :unknown_owner_state), do: "unknown", else: column(fiber, live?)
 
+      error =
+        Map.get(entry, :dispatch_error) || field(Map.get(entry, :runtime) || %{}, :launch_error)
+
+      state =
+        if error && fiber["status"] == "active" && !Map.get(entry, :unknown_owner_state),
+          do: "Blocked",
+          else: state
+
       blocked = blocked_on(fiber)
 
       %{
@@ -508,6 +532,7 @@ defmodule Shuttle.Threads do
           end,
         "outcome" => fiber["outcome"],
         "ask" => get_in(fiber, ["shuttle", "ask", "text"]),
+        "dispatch_error" => error,
         "blocked_on" => blocked,
         "until" => blocked && blocker_name(blocked, entry.felt_store, by_uid),
         "pending_results" => waiting(entry, live?),

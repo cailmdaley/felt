@@ -106,6 +106,7 @@ defmodule Shuttle.Poller do
   # successful dispatch drops the entry. Shorter window than the resume loop —
   # the fix is usually a one-line config edit, and re-testing costs one probe.
   @preflight_cooldown_ms 300_000
+  @dispatch_failure_cooldown_ms 300_000
 
   @poll_plan_task_inputs [
     :auto_discover_felt_stores,
@@ -402,11 +403,13 @@ defmodule Shuttle.Poller do
         felt_stores: default_stores,
         running: running,
         task_reads: tasks,
+        dispatch_failures: failures,
         pending_results: pending
       } ->
         entries =
           base_entries
           |> stamp_runtime(running, tasks)
+          |> Snapshot.put_dispatch_errors(failures)
           |> stamp_pending_results(%State{pending_results: pending, running: running})
 
         log_cold_feed_once(server, cache)
@@ -1314,6 +1317,7 @@ defmodule Shuttle.Poller do
       felt_stores: state.felt_stores,
       running: state.running,
       task_reads: state.task_reads,
+      dispatch_failures: state.dispatch_failures,
       pending_results: state.pending_results
     }
 
@@ -1411,6 +1415,8 @@ defmodule Shuttle.Poller do
       Enum.map(state.document_cache, fn {_key, cached} ->
         pending_entry(cached.entry, state.pending_results)
       end)
+      |> stamp_runtime(state.running, state.task_reads)
+      |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 
     %{
       entries: entries,
@@ -1947,6 +1953,7 @@ defmodule Shuttle.Poller do
 
         {base
          |> stamp_runtime(state.running, state.task_reads)
+         |> Snapshot.put_dispatch_errors(state.dispatch_failures)
          |> stamp_pending_results(state), state}
       else
         {[], state}
@@ -3500,7 +3507,8 @@ defmodule Shuttle.Poller do
       # `bash -l` every time, so the fiber is parked for a cooldown (it surfaces
       # as `blocked`, carrying the message that names the fix). A force-dispatch
       # bypasses eligible? entirely; a successful dispatch drops the entry.
-      preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
+      preflight_cooldown_open?(state, runtime_key_for_fiber(fiber)) or
+          dispatch_failure_cooldown_open?(state, runtime_key_for_fiber(fiber)) ->
         false
 
       # Standing constitutions have additional preconditions; a oneshot that reaches
@@ -4289,6 +4297,8 @@ defmodule Shuttle.Poller do
       Enum.map(state.document_cache, fn {_key, cached} ->
         pending_entry(cached.entry, state.pending_results)
       end)
+      |> stamp_runtime(state.running, state.task_reads)
+      |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 
     local_store_by_uid =
       for %{fiber: %{"uid" => uid}, felt_store: store} <- entries,
@@ -5145,6 +5155,23 @@ defmodule Shuttle.Poller do
              :transcript_held
            ] ->
         DateTime.diff(DateTime.utc_now(), at, :millisecond) < @preflight_cooldown_ms
+
+      _ ->
+        false
+    end
+  end
+
+  # Failed launches do not produce worker exits for the resume-loop breaker.
+  # Two identical failures establish a loop; park it for five minutes, while
+  # dependency readiness remains a next-poll retry. Force dispatch bypasses
+  # eligibility, and success clears dispatch_failures through register_running.
+  defp dispatch_failure_cooldown_open?(state, runtime_key) do
+    case Map.get(state.dispatch_failures, runtime_key) do
+      %{reason: {:backend_not_ready, _}} ->
+        false
+
+      %{attempts: attempts, attempted_at: %DateTime{} = at} when attempts >= 2 ->
+        DateTime.diff(DateTime.utc_now(), at, :millisecond) < @dispatch_failure_cooldown_ms
 
       _ ->
         false

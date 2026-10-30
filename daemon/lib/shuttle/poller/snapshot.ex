@@ -51,7 +51,7 @@ defmodule Shuttle.Poller.Snapshot do
           # the slug + uid so the row exposes both, unchanged in wire shape.
           fiber_id: entry.fiber_id,
           uid: Map.get(entry, :uid),
-          reason: format_block_reason(entry.reason),
+          reason: dispatch_error(entry.reason),
           attempts: entry.attempts,
           attempted_at: DateTime.to_unix(entry.attempted_at, :millisecond),
           first_attempted_at: DateTime.to_unix(entry.first_attempted_at, :millisecond)
@@ -189,6 +189,44 @@ defmodule Shuttle.Poller.Snapshot do
       |> Enum.reduce(acc, fn key, a -> Map.put_new(a, key, payload) end)
     end)
   end
+
+  @doc "Owner-served dispatch failures, independent of worker liveness."
+  def put_dispatch_errors(entries, failures) do
+    index =
+      Enum.reduce(failures, %{}, fn {key, failure}, acc ->
+        if Map.get(failure, :waiting, false) do
+          acc
+        else
+          error = dispatch_error(failure.reason)
+
+          Enum.reduce([key, failure.fiber_id, failure[:uid]], acc, fn id, result ->
+            if is_binary(id),
+              do: Map.put(result, id, error),
+              else: result
+          end)
+        end
+      end)
+
+    Enum.map(entries, fn entry ->
+      case index_match(entry.fiber, index) do
+        nil -> entry
+        error -> Map.put(entry, :dispatch_error, error)
+      end
+    end)
+  end
+
+  defp dispatch_error({:app_launch_failed, id, reason}) do
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, record} ->
+        record["terminal_error"] || record["backend_error"] || record["last_error"] ||
+          format_block_reason(reason)
+
+      _ ->
+        format_block_reason(reason)
+    end
+  end
+
+  defp dispatch_error(reason), do: format_block_reason(reason)
 
   @doc """
   Stamps a feed entry with its `:runtime` payload if the runtime index has a
@@ -332,6 +370,12 @@ defmodule Shuttle.Poller.Snapshot do
     app_id = Shuttle.AppWorkers.id(meta.session)
     backend = Shuttle.WorkerBackend.wire(meta.session, record)
 
+    error =
+      Map.get(meta, :launch_error) || backend[:terminal_error] || backend[:backend_error] ||
+        if(is_map(record) and record["remote_state"] == "system_error",
+          do: "systemError: the previous Codex turn failed. Resume this conversation to continue."
+        )
+
     %{
       tmux_session: backend.tmux_session,
       surface: backend.surface,
@@ -341,8 +385,8 @@ defmodule Shuttle.Poller.Snapshot do
       desktop_link: Shuttle.SessionLink.desktop_url(app_id),
       transcript_session_uuid: backend[:transcript_session_uuid],
       agent: Map.get(meta, :agent_id),
-      state: Map.get(meta, :state, "running"),
-      launch_error: Map.get(meta, :launch_error),
+      state: if(error, do: "blocked", else: Map.get(meta, :state, "running")),
+      launch_error: error,
       terminal_error: backend[:terminal_error],
       backend_error: backend[:backend_error],
       run_id: Map.get(meta, :run_id),

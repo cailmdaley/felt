@@ -7817,4 +7817,59 @@ defmodule Shuttle.PollerTest do
     MockRunner.remove_tmux_session(session)
     send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
   end
+
+  defmodule FailedLaunchRunner do
+    def cmd("tmux", ["new-session" | _], _opts) do
+      send(Shuttle.Env.app(:failed_launch_test_pid), :failed_launch_probe)
+      {"launch refused", 1}
+    end
+
+    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+  end
+
+  test "identical failed launches back off, then retry, while force bypasses the cooldown" do
+    id = "tests/launch-backoff"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    Env.put_app_env(:failed_launch_test_pid, self())
+
+    {:ok, poller} =
+      start_poller!(
+        runner: FailedLaunchRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    await_boot_cycle!(poller)
+
+    for _ <- 1..2 do
+      assert {:error, _} = Poller.dispatch_fiber(poller, id, [])
+      assert_receive :failed_launch_probe
+    end
+
+    assert [%{attempts: 2, reason: reason}] = Poller.snapshot(poller).blocked
+    assert reason =~ "launch refused"
+    assert {:ok, %{fibers: [entry]}} = Poller.cached_fiber_documents(poller)
+    assert entry.dispatch_error == reason
+    refute Map.has_key?(entry, :runtime)
+    assert {:error, _} = Poller.dispatch_fiber(poller, id, [])
+    refute_receive :failed_launch_probe, 50
+
+    # Expire the remembered attempt, without sleeping through a five-minute wait.
+    :sys.replace_state(poller, fn state ->
+      failures =
+        Map.new(state.dispatch_failures, fn {key, failure} ->
+          {key, %{failure | attempted_at: DateTime.add(failure.attempted_at, -301, :second)}}
+        end)
+
+      %{state | dispatch_failures: failures}
+    end)
+
+    assert {:error, _} = Poller.dispatch_fiber(poller, id, [])
+    assert_receive :failed_launch_probe
+    assert [%{attempts: 3}] = Poller.snapshot(poller).blocked
+    assert {:error, _} = Poller.dispatch_fiber(poller, id, force: true)
+    assert_receive :failed_launch_probe
+  end
 end

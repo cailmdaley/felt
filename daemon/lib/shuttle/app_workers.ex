@@ -472,7 +472,7 @@ defmodule Shuttle.AppWorkers do
          same_fiber?(origin, fiber_id, uid))
   end
 
-  @doc "Reloads a durably owned app thread only when the native server confirms it is not loaded."
+  @doc "Reloads an unloaded owned thread; loaded threads, including failed turns, retain identity."
   def recover(id, fiber_id, uid, store) do
     :global.trans({{__MODULE__, id}, self()}, fn ->
       with true <- valid_id?(id),
@@ -503,7 +503,7 @@ defmodule Shuttle.AppWorkers do
   defp native_thread_before_recovery(id) do
     case call(id, :read_thread) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}} = thread}
-      when type in ["active", "idle", "notLoaded"] ->
+      when type in ["active", "idle", "notLoaded", "systemError"] ->
         {:ok, thread}
 
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
@@ -521,13 +521,13 @@ defmodule Shuttle.AppWorkers do
   end
 
   defp reload_if_not_loaded(_id, %{"status" => %{"type" => type}})
-       when type in ["active", "idle"],
+       when type in ["active", "idle", "systemError"],
        do: :ok
 
   defp reload_if_not_loaded(id, %{"status" => %{"type" => "notLoaded"}}) do
     case call(id, :resume_thread, [[]]) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
-      when type in ["active", "idle"] ->
+      when type in ["active", "idle", "systemError"] ->
         :ok
 
       {:ok, _} ->

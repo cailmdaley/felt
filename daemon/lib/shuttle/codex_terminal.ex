@@ -84,9 +84,12 @@ defmodule Shuttle.CodexTerminal do
   end
 
   defp verified_thread(id) do
+    # A systemError describes a failed turn in a loaded conversation. Native
+    # resume and a new turn still use this exact thread, even while that status
+    # remains visible.
     case AppWorkers.call(id, :read_thread) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
-      when type in ["active", "idle", "notLoaded"] ->
+      when type in ["active", "idle", "notLoaded", "systemError"] ->
         :ok
 
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->

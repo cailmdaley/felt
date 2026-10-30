@@ -26,3 +26,11 @@ it('ignores stale working phases without a live worker, but keeps an outstanding
   const asking = { ...quiet, status: 'active' as const, ask: { text: 'Which?', at: '2026-07-02T12:00:00Z' } }
   expect(stateDot(asking, vi.fn()).dataset.turn).toBe('question')
 })
+
+it('exposes the dispatch failure on the card without requiring a live worker', () => {
+  const reason = 'systemError: the previous Codex turn failed. Resume this conversation to continue.'
+  const dot = stateDot(card({ id: 'failed-dispatch', status: 'active', launchError: reason }), vi.fn())
+  expect(dot.dataset.turn).toBe('blocked')
+  expect(dot.title).toBe(reason)
+  expect(dot.getAttribute('aria-description')).toBe(reason)
+})

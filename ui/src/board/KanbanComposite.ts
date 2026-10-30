@@ -97,6 +97,8 @@ export interface CompositeEntry {
   /** Owner-served liveness — present iff the owning daemon holds a worker for
    * this fiber. The single reconciled liveness observation per fiber. */
   runtime?: CompositeRuntime;
+  /** Owner-served failure before a worker could be registered. */
+  dispatchError?: string;
   /** Owner-served boot-quarantine hold — true iff the owning daemon is
    * withholding this fiber as a genuinely-fresh launch in `pending_launch`
    * (awaiting `shuttle daemon release`). Distinct from `runtime` (a live worker)
@@ -169,7 +171,8 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
 
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
     const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
-    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, held, heldSince, dir, reportPath });
+    const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
+    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};
@@ -202,9 +205,8 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const state = value.state === 'blocked' ? 'blocked' : 'running';
   const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
-  const launchError = typeof value.launch_error === 'string' && value.launch_error.length > 0
-    ? value.launch_error
-    : undefined;
+  const launchError = [value.launch_error, value.terminal_error, value.backend_error]
+    .find((error): error is string => typeof error === 'string' && error.length > 0);
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link
@@ -213,7 +215,7 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
-  return { state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
+  return { state: launchError ? 'blocked' : state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

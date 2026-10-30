@@ -579,6 +579,7 @@ const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unkn
   ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', last_activity_at: now - 18 * 3_600_000 }],
   ['no-signal', 'Live, no hook event yet', { last_activity_at: now - 20 * 3_600_000 }],
   ['blocked', 'Turn could not start', { state: 'blocked', launch_error: 'codex app-server refused the turn: thread not loaded', last_activity_at: now - 12 * 60_000 }],
+  ['system-error', 'Codex turn needs recovery', { state: 'running', backend_error: 'systemError: the previous Codex turn failed. Resume this conversation to continue.', last_activity_at: now - 12 * 60_000 }],
 ]
 
 /**

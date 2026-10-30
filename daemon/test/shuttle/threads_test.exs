@@ -2029,4 +2029,27 @@ defmodule Shuttle.ThreadsTest do
       assert nested_roster =~ "- methodology/covariance/noise-closure — Validated."
     end
   end
+
+  test "thread roster carries the owning daemon's blocked reason", %{store: store} do
+    entries =
+      for {id, error} <- [{"hub", nil}, {"hub/failure", "systemError: native_thread_unverified"}] do
+        %{
+          felt_store: store,
+          fiber: %{
+            "id" => id,
+            "status" => "active",
+            "shuttle" => %{"kind" => "oneshot", "host" => "test-host"}
+          },
+          dispatch_error: error
+        }
+      end
+
+    assert [%{"state" => "Blocked", "dispatch_error" => reason} = row] =
+             Threads.tree("hub", store, entries, MapSet.new())
+
+    assert Threads.state_label(row) == "Blocked · " <> reason
+    roster = Threads.roster("hub", store, entries, MapSet.new())
+    assert roster =~ "1 blocked"
+    assert roster =~ reason
+  end
 end

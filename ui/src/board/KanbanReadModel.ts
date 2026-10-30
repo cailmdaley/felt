@@ -534,7 +534,7 @@ function toCard(
     workerTasks: runtime?.tasks,
     tmuxSession,
     runtimePhase,
-    launchError: entry.runtime?.launchError,
+    launchError: entry.dispatchError ?? entry.runtime?.launchError,
     sessionLink: entry.runtime?.sessionLink,
     desktopLink: entry.runtime?.desktopLink,
     sessionUuid: entry.runtime?.sessionUuid ?? f.shuttleSessionUuid,

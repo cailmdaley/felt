@@ -164,3 +164,28 @@ describe('worker liveness is the daemon runtime, not a tmux name', () => {
     expect(resp.now.inFlight.map((c) => c.id)).toEqual(['stuck', 'busy'])
   })
 })
+
+
+describe('owner dispatch failures', () => {
+  it('shows a blocked reason without inventing a live worker', () => {
+    const feed = parseCompositeFeed({ fibers: [{
+      origin: 'owner', felt_store: '/felt', path: 'idea.md',
+      fiber: { id: 'idea', name: 'Idea', status: 'active', shuttle: { kind: 'oneshot' } },
+      dispatch_error: 'systemError: native thread could not resume',
+    }] })
+    const card = cardFromCompositeEntry(feed.entries[0])
+    expect(card.launchError).toBe('systemError: native thread could not resume')
+    expect(card.workerState).toBeUndefined()
+    expect(hasWorkerToStop(card)).toBe(false)
+  })
+  it.each(['terminal_error', 'backend_error'])('retains durable %s on a live Codex worker', key => {
+    const feed = parseCompositeFeed({ fibers: [{
+      origin: 'owner', felt_store: '/felt', path: 'idea.md',
+      fiber: { id: 'idea', name: 'Idea', status: 'active' },
+      runtime: { state: 'running', session_uuid: 'thread', [key]: 'native_thread_unverified' },
+    }] })
+    expect(cardFromCompositeEntry(feed.entries[0])).toMatchObject({
+      workerState: 'blocked', runtimePhase: 'blocked', launchError: 'native_thread_unverified',
+    })
+  })
+})

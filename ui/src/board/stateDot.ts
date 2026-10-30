@@ -9,7 +9,9 @@ export function stateDot(card: KanbanCard, open: (card: KanbanCard) => void): HT
   dot.type = 'button'
   dot.className = 'constitution-state-dot'
   dot.dataset.turn = turn.turn
+  dot.title = turn.detail
   dot.setAttribute('aria-label', `Open ${card.name} — ${turn.word}`)
+  dot.setAttribute('aria-description', turn.detail)
   dot.addEventListener('pointerdown', event => event.stopPropagation())
   dot.addEventListener('click', event => { event.stopPropagation(); open(card) })
   return dot

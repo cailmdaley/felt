@@ -279,6 +279,21 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # starts its TUI without creating a model turn. App-surface records need none.
   defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id} = record, runner)
        when is_binary(id) do
+    if terminal_retry_due?(record) do
+      schedule_terminal_restore(record, runner, id)
+    end
+  end
+
+  defp restore_terminal_viewer(_record, _runner), do: :ok
+
+  defp terminal_retry_due?(record) do
+    retry_at = record["terminal_retry_at"]
+
+    not is_integer(retry_at) or is_nil(record["terminal_error"]) or
+      retry_at <= System.system_time(:millisecond)
+  end
+
+  defp schedule_terminal_restore(record, runner, id) do
     tmux = record["terminal_tmux"] || Shuttle.CodexTerminal.tmux_name(id)
     callers = Shuttle.Env.callers()
 
@@ -299,12 +314,19 @@ defmodule Shuttle.Poller.SessionReconciliation do
                   0
                 ) do
              {:ok, _} ->
-               :ok
+               Shuttle.AppWorkers.update(id, %{"terminal_retry_at" => nil})
 
              :ok ->
                :ok
 
+             {:error, :backend_not_ready} ->
+               :ok
+
              {:error, reason} ->
+               Shuttle.AppWorkers.update(id, %{
+                 "terminal_retry_at" => System.system_time(:millisecond) + 300_000
+               })
+
                Logger.warning("Failed to restore Codex terminal for #{id}: #{inspect(reason)}")
 
              :aborted ->
@@ -325,8 +347,6 @@ defmodule Shuttle.Poller.SessionReconciliation do
         )
     end
   end
-
-  defp restore_terminal_viewer(_record, _runner), do: :ok
 
   # Maps each candidate's worker session name (`<leaf>-<uid>-shuttle`) back to
   # its fiber, so orphan adoption recognizes the workers it launched. A uid is

@@ -354,7 +354,7 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 		if err == nil {
 			err = fmt.Errorf("codex turn/steer returned incomplete or mismatched acknowledgement")
 		}
-	case "idle":
+	case "idle", "systemError":
 		if req.Wake {
 			var result startResult
 			err = r.call(ctx, "turn/start", map[string]any{"threadId": a.ID, "input": userInput(text), "clientUserMessageId": req.MessageID}, &result)
