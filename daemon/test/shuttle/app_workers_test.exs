@@ -84,7 +84,14 @@ defmodule Shuttle.AppWorkersTest do
               {:ok, %{"id" => Map.get(state, :resume_id, id), "status" => %{"type" => "active"}}}
 
             loaded = %{"id" => id, "status" => %{"type" => "active"}}
-            {result, Map.merge(state, %{state: :idle, read_result: {:ok, loaded}})}
+
+            state =
+              state
+              |> Map.put(:state, :idle)
+              |> Map.delete(:read_result)
+              |> Map.update(:native_threads, %{id => loaded}, &Map.put(&1, id, loaded))
+
+            {result, state}
         end
       end)
     end
@@ -95,7 +102,13 @@ defmodule Shuttle.AppWorkersTest do
 
       Agent.get(
         __MODULE__,
-        &Map.get(&1, :read_result, {:ok, %{"id" => id, "status" => %{"type" => "active"}}})
+        fn state ->
+          thread =
+            get_in(state, [:native_threads, id]) ||
+              %{"id" => id, "status" => %{"type" => "active"}}
+
+          Map.get(state, :read_result, {:ok, thread})
+        end
       )
     end
 
@@ -937,6 +950,7 @@ defmodule Shuttle.AppWorkersTest do
       tmux: Dispatcher.session_name("tests/terminal", saved["uid"])
     )
 
+    App.set(:native_threads, %{id => %{"id" => id, "status" => %{"type" => "notLoaded"}}})
     id
   end
 
@@ -950,7 +964,13 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, ref} = dispatch("tests/terminal", runner: ContextRunner, resume_mode: "previous")
     assert ref == AppWorkers.ref(id)
 
-    assert [{:resume, ^id, opts}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] =
+    assert [
+             {:read, ^id},
+             {:resume, ^id, opts},
+             {:turn, ^id, _, _},
+             {:read, ^id},
+             {:resume, ^id, _}
+           ] =
              App.calls()
 
     assert opts[:developer_instructions] == nil
@@ -990,7 +1010,9 @@ defmodule Shuttle.AppWorkersTest do
     assert record["uid"] == uid
     assert record["felt_store"] == Runner.felt_root()
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
-    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] = App.calls()
+
+    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] =
+             App.calls()
   end
 
   test "embedded migration refuses unknown process observations without native calls" do
@@ -1035,7 +1057,10 @@ defmodule Shuttle.AppWorkersTest do
              dispatch("tests/terminal", runner: ReceiverHolderRunner, resume_mode: "previous")
 
     assert ref == AppWorkers.ref(id)
-    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] = App.calls()
+
+    assert [{:read, ^id}, {:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] =
+             App.calls()
+
     calls = App.calls()
 
     resume_opts =
@@ -1072,7 +1097,7 @@ defmodule Shuttle.AppWorkersTest do
     )
 
     assert {:ok, %{"id" => ^id}} = AppWorkers.import_embedded(id, %{}, [], ReceiverHolderRunner)
-    assert [{:resume, ^id, _}] = App.calls()
+    assert [{:read, ^id}, {:resume, ^id, _}] = App.calls()
     assert {:ok, record} = AppWorkers.get(id)
     assert record["backend_host"] == Poller.own_host_id()
   end
@@ -2737,6 +2762,100 @@ defmodule Shuttle.AppWorkersTest do
     assert nil == AppWorkers.for_fiber(owner["id"], "recreated-uid")
     assert :ok = AppWorkers.deactivate("race")
     assert {:error, :already_claimed} = AppWorkers.claim("race", owner, Runner.felt_root())
+  end
+
+  test "record writes do not invent a native sender binding" do
+    id = "unbound"
+    assert :ok = AppWorkers.put(unbound_record(id))
+    assert {:ok, record} = AppWorkers.get(id)
+    refute record["sender_capability_sha256"]
+    refute File.exists?(Path.join(AppWorkers.root(), id <> ".sender-capability"))
+
+    assert {:error, {:native_sender_binding_unverified, _}} =
+             AppWorkers.call(id, :start_turn, ["must remain unbound", []])
+
+    refute Enum.any?(App.calls(), &match?({:turn, _, _, _}, &1))
+
+    for status <- ["idle", "active", "systemError"] do
+      App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => status}}})
+
+      assert {:error, {:native_sender_binding_unverified, reason}} =
+               AppWorkers.call(id, :resume_thread, [[]])
+
+      assert reason =~ "exact conversation"
+    end
+
+    refute Enum.any?(App.calls(), &match?({:resume, _, _}, &1))
+    assert {:error, :sender_capability_missing} = AppWorkers.sender_capability(id)
+  end
+
+  test "an unloaded owned conversation binds a new capability before exact-ID resume" do
+    id = "cold-unbound"
+    assert :ok = AppWorkers.put(unbound_record(id))
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    assert {:ok, %{"id" => ^id}} = AppWorkers.call(id, :resume_thread, [[]])
+    assert {:ok, capability} = AppWorkers.sender_capability(id)
+    assert [{:read, ^id}, {:resume, ^id, opts}] = App.calls()
+    assert opts[:sender_capability] == capability
+  end
+
+  test "embedded import refuses a new sender binding on a loaded conversation" do
+    id = embedded_fiber()
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "idle"}}})
+
+    assert {:error, {:native_sender_binding_unverified, _}} =
+             AppWorkers.import_embedded(id, %{}, [], Runner)
+
+    assert {:error, :not_found} = AppWorkers.get(id)
+    refute File.exists?(Path.join(AppWorkers.root(), id <> ".sender-capability"))
+    refute Enum.any?(App.calls(), &match?({:resume, _, _}, &1))
+  end
+
+  test "a failed cold binding cannot be retried warm with its pending capability" do
+    id = "failed-cold-binding"
+    assert :ok = AppWorkers.put(unbound_record(id))
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    App.set(:resume_result, {:error, :disconnected})
+    assert {:error, :disconnected} = AppWorkers.call(id, :resume_thread, [[]])
+    assert {:ok, capability} = AppWorkers.sender_capability(id)
+    assert {:ok, %{"sender_capability_pending" => true}} = AppWorkers.get(id)
+    opts = [sender_capability: capability]
+
+    assert {:error, {:native_sender_binding_unverified, _}} =
+             AppWorkers.start_turn(id, "must remain pending", opts)
+
+    assert {:error, {:native_sender_binding_unverified, _}} =
+             AppWorkers.call(id, :start_turn, ["must remain pending", opts])
+
+    refute Enum.any?(App.calls(), &match?({:turn, _, _, _}, &1))
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "idle"}}})
+
+    assert {:error, {:native_sender_binding_unverified, _}} =
+             AppWorkers.call(id, :resume_thread, [[]])
+
+    assert 1 == Enum.count(App.calls(), &match?({:resume, ^id, _}, &1))
+    assert {:ok, ^capability} = AppWorkers.sender_capability(id)
+
+    App.set(:read_result, {:ok, %{"id" => id, "status" => %{"type" => "notLoaded"}}})
+    App.set(:resume_result, {:ok, %{"id" => "other-thread"}})
+    assert {:ok, %{"id" => "other-thread"}} = AppWorkers.call(id, :resume_thread, [[]])
+    assert {:ok, %{"sender_capability_pending" => true}} = AppWorkers.get(id)
+
+    App.set(:resume_result, {:ok, %{"id" => id}})
+    assert {:ok, %{"id" => ^id}} = AppWorkers.call(id, :resume_thread, [[]])
+    assert {:ok, %{"sender_capability_pending" => false}} = AppWorkers.get(id)
+    assert {:ok, ^capability} = AppWorkers.sender_capability(id)
+  end
+
+  defp unbound_record(id) do
+    %{
+      "session_uuid" => id,
+      "thread_id" => id,
+      "backend_host" => Poller.own_host_id(),
+      "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
+      "active" => true
+    }
   end
 
   defp settle(poller), do: eventually(fn -> :sys.get_state(poller).poll_cycles > 0 end)

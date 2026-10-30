@@ -110,16 +110,25 @@ defmodule Shuttle.AppWorkers do
 
   def call(id, operation, args \\ []) do
     with :ok <- check_endpoint(id),
-         {:ok, args} <- resume_options(id, operation, args),
-         do: apply(client(), operation, [id | args])
+         :ok <- check_sender_binding(id, operation),
+         {:ok, args} <- resume_options(id, operation, args) do
+      result = apply(client(), operation, [id | args])
+
+      case {operation, result} do
+        {:resume_thread, {:ok, %{"id" => ^id}}} ->
+          with :ok <- update(id, %{"sender_capability_pending" => false}), do: result
+
+        _ ->
+          result
+      end
+    end
   end
 
   defp resume_options(id, :resume_thread, [opts]) when is_list(opts) do
-    case sender_capability(id) do
-      {:ok, capability} -> {:ok, [Keyword.put(opts, :sender_capability, capability)]}
-      {:error, _} -> ensure_sender_capability(id) |> add_capability(opts)
-    end
+    ensure_sender_capability(id) |> add_capability(opts)
   end
+
+  defp resume_options(id, :resume_thread, []), do: resume_options(id, :resume_thread, [[]])
 
   defp resume_options(_id, _operation, args), do: {:ok, args}
 
@@ -127,6 +136,19 @@ defmodule Shuttle.AppWorkers do
     do: {:ok, [Keyword.put(opts, :sender_capability, capability)]}
 
   defp add_capability({:error, _} = error, _opts), do: error
+
+  defp check_sender_binding(id, :start_turn) do
+    with {:ok, record} <- get(id),
+         {:ok, _capability} <- sender_capability(id) do
+      if record["sender_capability_pending"] == true,
+        do: sender_binding_error(),
+        else: :ok
+    else
+      _ -> sender_binding_error()
+    end
+  end
+
+  defp check_sender_binding(_id, _operation), do: :ok
 
   def status(id) do
     case call(id, :status) do
@@ -218,25 +240,7 @@ defmodule Shuttle.AppWorkers do
   end
 
   def put(%{"session_uuid" => id} = record) do
-    :global.trans({{__MODULE__, id}, self()}, fn ->
-      if record["active"] == true and not is_binary(record["sender_capability_sha256"]) do
-        case sender_capability(id) do
-          {:ok, capability} ->
-            write_record(Map.put(record, "sender_capability_sha256", capability_hash(capability)))
-
-          _ ->
-            capability = new_sender_capability()
-
-            with :ok <- write_sender_capability(id, capability),
-                 do:
-                   write_record(
-                     Map.put(record, "sender_capability_sha256", capability_hash(capability))
-                   )
-        end
-      else
-        write_record(record)
-      end
-    end)
+    :global.trans({{__MODULE__, id}, self()}, fn -> write_record(record) end)
   end
 
   def put_with_sender_capability(%{"session_uuid" => id} = record, capability)
@@ -245,7 +249,9 @@ defmodule Shuttle.AppWorkers do
       with :ok <- write_sender_capability(id, capability),
            :ok <-
              write_record(
-               Map.put(record, "sender_capability_sha256", capability_hash(capability))
+               record
+               |> Map.put("sender_capability_sha256", capability_hash(capability))
+               |> Map.put("sender_capability_pending", false)
              ) do
         :ok
       end
@@ -258,15 +264,22 @@ defmodule Shuttle.AppWorkers do
            :ok <- check_endpoint(record, id) do
         case sender_capability(id) do
           {:ok, capability} ->
-            {:ok, capability}
+            if record["sender_capability_pending"] == true do
+              with :ok <- require_cold_sender_binding(id), do: {:ok, capability}
+            else
+              {:ok, capability}
+            end
 
           _ ->
             capability = new_sender_capability()
 
-            with :ok <- write_sender_capability(id, capability),
+            with :ok <- require_cold_sender_binding(id),
+                 :ok <- write_sender_capability(id, capability),
                  :ok <-
                    write_record(
-                     Map.put(record, "sender_capability_sha256", capability_hash(capability))
+                     record
+                     |> Map.put("sender_capability_sha256", capability_hash(capability))
+                     |> Map.put("sender_capability_pending", true)
                    ) do
               {:ok, capability}
             end
@@ -277,6 +290,29 @@ defmodule Shuttle.AppWorkers do
 
   defp capability_hash(capability),
     do: Base.encode16(:crypto.hash(:sha256, capability), case: :lower)
+
+  # Native warm resume ignores shell policy overrides while clients are attached.
+  # A new capability can only be installed while loading the conversation cold.
+  defp require_cold_sender_binding(id) do
+    result = with :ok <- check_known_endpoint(id), do: client().read_thread(id)
+
+    case result do
+      {:ok, %{"id" => ^id, "status" => %{"type" => "notLoaded"}}} ->
+        :ok
+
+      {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
+        :ok
+
+      _ ->
+        sender_binding_error()
+    end
+  end
+
+  defp sender_binding_error do
+    {:error,
+     {:native_sender_binding_unverified,
+      "Sender identity is not bound to this native Codex thread. Unload this exact conversation while idle, then resume it to bind sender identity."}}
+  end
 
   defp write_record(%{"session_uuid" => id} = record) do
     if Regex.match?(~r/^[A-Za-z0-9_-]+$/, id) do
@@ -335,6 +371,7 @@ defmodule Shuttle.AppWorkers do
 
   def start_turn(id, prompt, opts) do
     with :ok <- check_endpoint(id),
+         :ok <- check_sender_binding(id, :start_turn),
          {:ok, capability} <- sender_capability(id),
          true <- opts[:sender_capability] == capability,
          :ok <- update(id, %{"launch_state" => "starting", "pending_prompt" => prompt}) do
@@ -376,6 +413,7 @@ defmodule Shuttle.AppWorkers do
                {:ok, origin} <- embedded_provenance(id, attributes),
                :ok <- Shuttle.WorkerProcess.check_free(runner, id),
                :ok <- Shuttle.CodexBackend.require_ready(),
+               :ok <- require_cold_sender_binding(id),
                capability = backend_opts[:sender_capability] || new_sender_capability(),
                backend_opts = Keyword.put(backend_opts, :sender_capability, capability),
                {:ok, thread} <- load_embedded(id, backend_opts),
@@ -394,7 +432,9 @@ defmodule Shuttle.AppWorkers do
                :ok <- write_sender_capability(id, capability),
                :ok <-
                  write_record(
-                   Map.put(record, "sender_capability_sha256", capability_hash(capability))
+                   record
+                   |> Map.put("sender_capability_sha256", capability_hash(capability))
+                   |> Map.put("sender_capability_pending", false)
                  ) do
             {:ok, thread}
           end

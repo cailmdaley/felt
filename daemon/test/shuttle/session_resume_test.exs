@@ -20,11 +20,15 @@ defmodule Shuttle.SessionResumeTest do
   @nocwd "fef866ba-b397-4277-a01b-16fcecc2b256"
 
   defmodule App do
-    def read_thread(id), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+    def read_thread(id) do
+      status = Shuttle.Env.app(:session_resume_native_status, "notLoaded")
+      {:ok, %{"id" => id, "status" => %{"type" => status}}}
+    end
 
     def resume_thread(id, opts) do
       send(self(), {:native_resume, id})
       send(self(), {:native_resume_options, id, opts})
+      Shuttle.Test.Env.put_app_env(:session_resume_native_status, "idle")
       {:ok, %{"id" => id}}
     end
   end

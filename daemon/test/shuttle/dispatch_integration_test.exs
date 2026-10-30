@@ -18,15 +18,26 @@ defmodule Shuttle.DispatchIntegrationTest do
   defmodule CodexApp do
     def start_thread(opts) do
       send(self(), {:codex_start, opts})
+      mark_loaded("managed-codex-thread")
       {:ok, %{"id" => "managed-codex-thread"}}
     end
 
     def resume_thread(id, opts) do
       send(self(), {:codex_resume, id, opts})
+      mark_loaded(id)
       {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
     end
 
-    def read_thread(id), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+    def read_thread(id) do
+      loaded = Shuttle.Env.app(:integration_native_loaded_threads, MapSet.new())
+      status = if MapSet.member?(loaded, id), do: "idle", else: "notLoaded"
+      {:ok, %{"id" => id, "status" => %{"type" => status}}}
+    end
+
+    defp mark_loaded(id) do
+      loaded = Shuttle.Env.app(:integration_native_loaded_threads, MapSet.new())
+      Shuttle.Test.Env.put_app_env(:integration_native_loaded_threads, MapSet.put(loaded, id))
+    end
 
     def start_turn(id, prompt, opts) do
       send(self(), {:codex_turn, id, prompt, opts})
