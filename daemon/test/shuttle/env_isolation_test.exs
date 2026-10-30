@@ -87,6 +87,27 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     spawn(fn -> send(parent, {:outside, read.()}) end)
     assert_receive {:outside, {nil, nil}}
 
+    # Concurrent Pollers have independent durable host state as well as
+    # independent in-memory runners; their outbox transaction locks differ.
+    runner = Shuttle.Test.FeltStoreRunner
+    runner.start!()
+    {:ok, poller} = Shuttle.Test.PollerHelpers.start_poller!(
+      runner: runner,
+      felt_stores: [runner.felt_root()],
+      own_host_id: "test-host",
+      poll_interval_ms: 600_000
+    )
+    Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
+    data = Shuttle.data_dir()
+    sessions = Shuttle.Env.get("SHUTTLE_SESSIONS_FILE")
+    send_when_registered(:"shuttle_env_isolation_#{other}", {:host_state, data, sessions})
+    assert_receive {:host_state, peer_data, peer_sessions}, @rendezvous_ms
+    refute data == peer_data
+    refute sessions == peer_sessions
+    assert File.exists?(Path.join(data, "thread-outbox/baseline"))
+    assert Path.dirname(sessions) == data
+    assert GenServer.call(probe, {:task_read, fn -> Shuttle.data_dir() end}) == data
+
     send_peer_done(other)
     assert_receive {:peer_done, ^other}, @rendezvous_ms
   end

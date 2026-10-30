@@ -24,6 +24,14 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     def get(url, _timeout_ms), do: Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
   end
 
+  defmodule DocumentRunner do
+    @behaviour Shuttle.Runner
+    # Document tests have no OS workers; process fallback must not import
+    # sessions from the operator's tmux servers into the test's host world.
+    def cmd("ps", _args, _opts), do: {"", 0}
+    def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
+  end
+
   setup do
     root =
       Path.join(
@@ -1792,6 +1800,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
         # the test's own exit.
         {:ok, pid} =
           Shuttle.Test.PollerHelpers.start_poller!(
+            runner: DocumentRunner,
             poll_interval_ms: 600_000,
             max_concurrent_workers: 0,
             felt_stores: [store]

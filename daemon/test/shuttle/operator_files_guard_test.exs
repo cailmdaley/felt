@@ -34,4 +34,17 @@ defmodule Shuttle.OperatorFilesGuardTest do
 
     assert under_home == [], "operator files under the real home: #{inspect(under_home)}"
   end
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "a real named tmux server lives in the suite namespace" do
+    server = "namespace-#{System.unique_integer([:positive])}"
+    command = fn args -> Shuttle.Env.cmd("tmux", ["-L", server | args], stderr_to_stdout: true) end
+    on_exit(fn -> command.(["kill-server"]) end)
+    assert {_, 0} = command.(["new-session", "-d", "-s", "sentinel", "sleep", "300"])
+    assert {socket, 0} = command.(["display-message", "-p", "\#{socket_path}"])
+    namespace = socket |> String.trim() |> Path.dirname() |> Path.dirname() |> File.stat!()
+    suite = File.stat!(System.tmp_dir!())
+    assert {namespace.inode, namespace.major_device} == {suite.inode, suite.major_device}
+    assert System.get_env("TMUX") == nil
+  end
+
 end

@@ -6,6 +6,10 @@ test_tmp = Path.join(System.tmp_dir!(), "st-#{System.pid()}")
 File.rm_rf!(test_tmp)
 File.mkdir_p!(test_tmp)
 System.put_env("TMPDIR", test_tmp)
+# Real integration probes have a private server world, including callers that
+# use tmux's default socket. An inherited TMUX points at the operator's server.
+System.put_env("TMUX_TMPDIR", test_tmp)
+System.delete_env("TMUX")
 System.at_exit(fn _ -> File.rm_rf(test_tmp) end)
 
 # Task reads use an empty per-VM harness tree unless a test supplies its own.

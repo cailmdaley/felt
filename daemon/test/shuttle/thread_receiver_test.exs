@@ -48,6 +48,7 @@ defmodule Shuttle.ThreadReceiverTest do
     Enum.each([home, data, bin], &File.mkdir_p!/1)
     Env.put_env("HOME", home)
     Env.put_env("SHUTTLE_DATA_DIR", data)
+    Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(data, "sessions.jsonl"))
     Env.put_env("SHUTTLE_HOST", "test-host")
     Env.put_env("SHUTTLE_STORES", dir)
     Env.delete_env("TMUX")

@@ -52,9 +52,11 @@ defmodule Shuttle.Test.PollerHelpers do
   trap exits, so stopping it leaves them heartbeating `runner` (a test's named
   Agent) into later tests, where each heartbeat's `tmux has-session` and
   process scan consumes that test's scripted answers. An `on_exit` stops every
-  watcher whose poller is this one.
+  watcher whose poller is this one. It also stops this Poller's app-supervised
+  delivery tasks before the test's scoped host state is removed.
   """
   def start_poller!(opts) do
+    isolate_host_state!()
     opts = Keyword.put_new_lazy(opts, :daemon_heartbeat_file, &test_heartbeat_file/0)
 
     # No name (or the singleton's own) starts an unnamed Poller and makes it
@@ -82,7 +84,10 @@ defmodule Shuttle.Test.PollerHelpers do
     end
 
     poller_refs = Enum.reject([pid, name], &is_nil/1)
-    on_exit(fn -> stop_watchers_of(poller_refs) end)
+    on_exit(fn ->
+      stop_watchers_of(poller_refs)
+      stop_tasks_of(poller_refs)
+    end)
 
     if scoped?, do: Shuttle.Test.Env.put_server(Shuttle.Poller, pid)
     {:ok, pid}
@@ -117,6 +122,14 @@ defmodule Shuttle.Test.PollerHelpers do
     end
   end
 
+  defp stop_tasks_of(poller_refs) do
+    for task <- Task.Supervisor.children(Shuttle.TaskSupervisor),
+        {:dictionary, dictionary} <- [Process.info(task, :dictionary)],
+        Enum.any?(Keyword.get(dictionary, :"$callers", []), &(&1 in poller_refs)) do
+      Task.Supervisor.terminate_child(Shuttle.TaskSupervisor, task)
+    end
+  end
+
   # A watcher that exits before answering is already gone; one that does not
   # answer would be left running, so that fails the test.
   defp watcher_poller(watcher) do
@@ -131,6 +144,26 @@ defmodule Shuttle.Test.PollerHelpers do
       end
 
       nil
+  end
+
+  # Pollers represent independent hosts in async tests. Sharing a host's outbox
+  # also shares its global transaction lock, even when fiber stores differ.
+  defp isolate_host_state! do
+    scoped = Map.new(Shuttle.Env.child_env())
+
+    unless Map.has_key?(scoped, "SHUTTLE_DATA_DIR") do
+      data = Path.join(System.tmp_dir!(), "poller-data-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(data)
+      Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data)
+      on_exit(fn -> File.rm_rf(data) end)
+    end
+
+    unless Map.has_key?(scoped, "SHUTTLE_SESSIONS_FILE") do
+      Shuttle.Test.Env.put_env(
+        "SHUTTLE_SESSIONS_FILE",
+        Path.join(Shuttle.data_dir(), "sessions.jsonl")
+      )
+    end
   end
 
   @doc "The suite-wide heartbeat path test Pollers write when a test names none."
