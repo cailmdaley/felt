@@ -68,6 +68,52 @@ defmodule Shuttle.OpenerTest do
     refute_received {:kitty, _, _}
   end
 
+  test "long local worker names keep their exact tmux target and a stable compact viewer", %{
+    tmux: tmux
+  } do
+    name =
+      Shuttle.Dispatcher.session_name(String.duplicate("x", 90), "01KVBR5K0FZHZQK18845TZ01Q2")
+
+    assert String.length(name) == 125
+    FakeRex.reply("tmux", {"", 0})
+    assert :ok = Opener.open(name)
+    assert :ok = Opener.open(name)
+    assert [spec] = requests("session.create")
+    assert String.length(spec["label"]) == 127
+    assert String.ends_with?(spec["label"], "@tmux")
+    assert ["bash", "-c", script] = options(spec)["command"]
+    assert script =~ "'#{tmux}' 'attach' '-t' '=#{name}'"
+  end
+
+  test "viewer label boundaries and long host suffixes preserve distinct full targets" do
+    host = String.duplicate("remote", 20)
+    Env.put_app_env(:remotes, [%{name: host, port: 4001, ssh: "login-a"}])
+    # 127-character labels are exact; longer labels are compacted. Names
+    # differing only beyond the retained display prefix cannot dedupe.
+    for {name, destination} <- [
+          {String.duplicate("a", 118), "remote-a"},
+          {String.duplicate("a", 119), "remote-a"},
+          {String.duplicate("a", 124) <> "b", "remote-a"},
+          {String.duplicate("a", 124) <> "c", "remote-a"},
+          {String.duplicate("a", 125), host}
+        ] do
+      Env.put_app_env(:remotes, [%{name: destination, port: 4001, ssh: "login-a"}])
+      assert :ok = Opener.open(name, destination)
+      ["bash", "-c", script] = options(List.last(requests("session.create")))["command"]
+      assert script =~ "=" <> name
+    end
+
+    specs = requests("session.create")
+    assert length(specs) == 5
+    labels = Enum.map(specs, & &1["label"])
+    assert length(Enum.uniq(labels)) == 5
+    assert Enum.all?(labels, &(String.length(&1) <= 127))
+    assert hd(labels) == String.duplicate("a", 118) <> "@remote-a"
+    assert Enum.at(labels, 1) != String.duplicate("a", 119) <> "@remote-a"
+    # Reject controls even when compaction would drop them from the label.
+    assert {:error, _} = Rex.viewer(FakeRex, String.duplicate("a", 130) <> "\n@tmux", ["true"])
+  end
+
   test "remote viewers use the fleet ssh destination and the daemon's ssh agent" do
     assert :ok = Opener.open(@name, "remote-a")
     assert_received {:version, "http://127.0.0.1:4001/api/v1/version", 2000}

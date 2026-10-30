@@ -336,6 +336,40 @@ defmodule Shuttle.Terminal.Rex do
 
   @doc false
   def viewer(runner, label, argv) do
+    if Regex.match?(~r/[\p{Cc}]/u, label) do
+      {:error, "Rex viewer label must contain no control characters"}
+    else
+      viewer_locked(runner, viewer_label(label), argv)
+    end
+  end
+
+  # The tmux target is not a Rex label: adding a host suffix can exceed Rex's
+  # label budget. Keep the destination visible and hash the full identity so
+  # workers whose long names share a prefix still have distinct viewers.
+  defp viewer_label(label) do
+    if String.length(label) < 128 do
+      label
+    else
+      {name, suffix} =
+        case Regex.run(~r/^(.*)(@[^@]*)$/u, label) do
+          [_, name, suffix] -> {name, suffix}
+          nil -> {label, "@viewer"}
+        end
+
+      suffix =
+        if String.length(suffix) > 64,
+          do: String.slice(suffix, 0, 31) <> "~" <> label_hash(suffix),
+          else: suffix
+
+      String.slice(name, 0, 127 - String.length(suffix) - 33) <>
+        "~" <> label_hash(label) <> suffix
+    end
+  end
+
+  defp label_hash(label),
+    do: :crypto.hash(:sha256, label) |> Base.encode16(case: :lower) |> String.slice(0, 32)
+
+  defp viewer_locked(runner, label, argv) do
     Shuttle.Terminal.with_lock({__MODULE__, :viewer, label}, fn ->
       with :ok <- valid_label(label),
            {:ok, sessions} <- Rex.sessions(runner) do

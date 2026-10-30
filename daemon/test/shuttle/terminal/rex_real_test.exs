@@ -96,7 +96,7 @@ defmodule Shuttle.Terminal.RexRealTest do
   test "unbound viewers dedupe while live and destroy their own empty sessions on exit", %{
     root: root
   } do
-    label = "probe-viewer@tmux"
+    label = String.duplicate("probe-viewer-", 10) <> "long-name@tmux"
     receipt = Path.join(root, "viewer-env")
     gate = Path.join(root, "viewer-exit")
     Env.put_env("SSH_AUTH_SOCK", "/tmp/probe-daemon-agent")
@@ -111,7 +111,9 @@ defmodule Shuttle.Terminal.RexRealTest do
     await(fn -> File.exists?(receipt) end)
     assert File.read!(receipt) == "/tmp/probe-daemon-agent"
     assert {:ok, ^sid} = Backend.viewer(@runner, label, command)
-    assert {:ok, [%{"session_id" => ^sid, "label" => ^label}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid, "label" => display_label}]} = Rex.sessions(@runner)
+    assert String.length(display_label) == 127
+    assert String.ends_with?(display_label, "@tmux")
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
     assert bindings == %{}
     File.write!(gate, "exit")
