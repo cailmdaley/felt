@@ -90,7 +90,6 @@
 .chr-corner-month {
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-label);
   letter-spacing: var(--track-kicker);
   line-height: var(--leading-solid);
@@ -144,7 +143,6 @@
   font-size: var(--type-note);
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
 }
@@ -155,6 +153,7 @@
   font-feature-settings: "onum";
   color: var(--kbn-ink-sepia);
 }
+.chr-head-dow-initial { display: none; }
 .chr-head-today .chr-head-dow,
 .chr-head-today .chr-head-num {
   color: var(--kbn-owed);
@@ -213,7 +212,6 @@
   font-family: var(--font-serif);
   font-size: var(--type-title);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink);
   cursor: pointer;
@@ -236,7 +234,6 @@
   font-family: var(--font-serif);
   font-size: var(--type-title);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink);
   outline: none;
@@ -316,7 +313,6 @@
 .chr-face-stats dt {
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
@@ -338,7 +334,6 @@
   margin: 0 0 4px;
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   font-weight: 500;
   letter-spacing: var(--track-kicker);
@@ -449,7 +444,6 @@
 .chr-cycle-tag {
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
@@ -665,7 +659,6 @@
 .chr-era-title {
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   letter-spacing: var(--track-kicker);
   color: var(--kbn-owed);
@@ -712,7 +705,6 @@
   border-radius: 2px;
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   letter-spacing: var(--track-kicker);
   cursor: pointer;
@@ -1226,6 +1218,8 @@ button.chr-name:hover {
    never scrolls sideways. The threshold is the board's one mobile breakpoint
    (`../mobile.ts`). */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
+  .chr-head-dow-full { display: none; }
+  .chr-head-dow-initial { display: inline; }
   /* A phone gutter is a budget, and the name is what it is for: you scan the
      record by reading names, not by reading evidence about them. So the two
      marginal columns stand down — the host note and the `+A −D` commit

@@ -3304,11 +3304,20 @@ class ChronicleView implements TemporalView {
 
       const dow = document.createElement('span')
       dow.className = `chr-head-dow${monthStart && !day.isToday ? ' chr-head-month' : ''}`
-      dow.textContent = day.isToday
+      // A phone's day column is too narrow for a word: it shows the weekday's
+      // initial, and the bearing beside the grid names the month.
+      const full = document.createElement('span')
+      full.className = 'chr-head-dow-full'
+      full.textContent = day.isToday
         ? 'today'
         : monthStart
           ? monthName(day.iso, 'short')
           : day.weekdayLabel
+      const initial = document.createElement('span')
+      initial.className = 'chr-head-dow-initial'
+      initial.textContent = day.weekdayLabel.slice(0, 1)
+      initial.setAttribute('aria-hidden', 'true')
+      dow.append(full, initial)
       const num = document.createElement('span')
       num.className = 'chr-head-num'
       num.textContent = day.label

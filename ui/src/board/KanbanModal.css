@@ -331,7 +331,6 @@
   line-height: var(--leading-solid);
   font-weight: 500;
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   text-transform: none;
   color: var(--kbn-ink);
@@ -459,7 +458,6 @@
   font-size: var(--type-note);
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   color: var(--kbn-ink-faint);
   letter-spacing: var(--track-kicker);
 }
@@ -521,7 +519,7 @@
 .kbn-cyclechip-span {
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc", "onum";
+  font-feature-settings: "onum";
   font-size: var(--type-note);
   letter-spacing: var(--track-kicker);
   line-height: var(--leading-solid);
@@ -1252,7 +1250,6 @@
   line-height: var(--leading-display);
   font-weight: 500;
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   text-transform: none;
   color: var(--kbn-ink);
@@ -1345,7 +1342,6 @@
   font-size: var(--type-label);
   font-weight: 500;
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-muted);
 }
@@ -2072,7 +2068,6 @@
     box-sizing: border-box;
     min-height: var(--ws-phone-target, 44px);
     padding: 7px 9px;
-    letter-spacing: var(--track-nav);
     font-size: var(--type-title);
   }
   .kbn-viewtab-hotkey { display: none; }
@@ -2161,7 +2156,6 @@
     font-size: var(--type-note);
     line-height: var(--leading-solid);
     font-variant-caps: all-small-caps;
-    font-feature-settings: "smcp", "c2sc";
     letter-spacing: var(--track-kicker);
     overflow: hidden;
     text-overflow: ellipsis;

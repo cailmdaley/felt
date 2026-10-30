@@ -27,7 +27,7 @@ const FAMILY_NAME = /\b(EB Garamond|Garamond|Georgia|IBM Plex|Plex Mono|SF Mono|
 /** Selectors that draw a mark from a font rather than text. */
 const MARK = /::?(before|after|marker)|cap\b|initial|ornament|glyph|mark|chevron|close|caret|arrow|icon|bullet/
 
-type Prop = 'size' | 'family' | 'leading' | 'font' | 'track' | 'case' | 'caps'
+type Prop = 'size' | 'family' | 'leading' | 'font' | 'track' | 'case' | 'caps' | 'feature'
 const PROPS: Record<string, Prop> = {
   'font-size': 'size', fontSize: 'size',
   'font-family': 'family', fontFamily: 'family',
@@ -36,9 +36,10 @@ const PROPS: Record<string, Prop> = {
   'letter-spacing': 'track', letterSpacing: 'track',
   'text-transform': 'case', textTransform: 'case',
   'font-variant': 'caps', fontVariant: 'caps', 'font-variant-caps': 'caps', fontVariantCaps: 'caps',
+  'font-feature-settings': 'feature', fontFeatureSettings: 'feature',
 }
-const CSS_PROP = '(?<![\\w$-])(font-size|font-family|font-variant-caps|font-variant|font|line-height|letter-spacing|text-transform)'
-const JS_PROP = '(fontSize|fontFamily|fontVariantCaps|fontVariant|font|lineHeight|letterSpacing|textTransform|font-size|font-family|font-variant-caps|font-variant|line-height|letter-spacing|text-transform)'
+const CSS_PROP = '(?<![\\w$-])(font-size|font-family|font-variant-caps|font-variant|font-feature-settings|font|line-height|letter-spacing|text-transform)'
+const JS_PROP = '(fontSize|fontFamily|fontVariantCaps|fontVariant|fontFeatureSettings|font|lineHeight|letterSpacing|textTransform|font-size|font-family|font-variant-caps|font-variant|font-feature-settings|line-height|letter-spacing|text-transform)'
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -124,8 +125,8 @@ function lineOf(text: string, offset: number): number {
 function shorthand(value: string): { size?: string; leading?: string; family?: string; caps?: string } {
   const tokens = value.split(/\s+/)
   let caps: string | undefined
-  while (tokens.length && /^(italic|oblique|normal|small-caps|all-small-caps|bold|bolder|lighter|\d00)$/.test(tokens[0])) {
-    if (/small-caps/.test(tokens[0])) caps = tokens[0]
+  while (tokens.length && /^(italic|oblique|normal|small-caps|all-small-caps|petite-caps|all-petite-caps|unicase|titling-caps|bold|bolder|lighter|\d00)$/.test(tokens[0])) {
+    if (/caps|unicase/.test(tokens[0])) caps = tokens[0]
     tokens.shift()
   }
   const [size, ...family] = tokens
@@ -139,6 +140,15 @@ function clean(value: string): string {
 
 interface Decl { prop: Prop; value: string; offset: number }
 
+/** Case variants other than the kicker's, in font-variant(-caps) or as OpenType features. */
+const OFF_CAPS = /(?<![\w-])(small-caps|all-petite-caps|petite-caps|unicase|titling-caps)\b/
+const CAPS_FEATURE = /(?<![\w-])(smcp|c2sc|pcap|c2pc|unic|titl)\b/
+
+function capsWhy(value: string): string | undefined {
+  if (OFF_CAPS.test(value)) return 'off-system caps: the kicker is all-small-caps'
+  return /^[a-z- ]+$/.test(value) ? undefined : 'raw caps'
+}
+
 /** Why a declaration's value is off the system, or undefined when it is on it. */
 function judge(prop: Prop, value: string): string | undefined {
   if (KEYWORD.test(value) || value === '') return undefined
@@ -148,12 +158,12 @@ function judge(prop: Prop, value: string): string | undefined {
     case 'leading': return LEADING.test(value) || BOX.test(value) || value === 'normal' ? undefined : 'raw leading'
     case 'track': return TRACK.test(value) || /^(0|normal)$/.test(value) ? undefined : 'raw tracking'
     case 'case': return value === 'none' ? undefined : 'case is the kicker role, not text-transform'
-    case 'caps': return /(?<!all-)small-caps/.test(value) ? 'mixed small caps: the kicker is all-small-caps'
-      : /^[a-z- ]+$/.test(value) ? undefined : 'raw caps'
+    case 'caps': return capsWhy(value)
+    case 'feature': return CAPS_FEATURE.test(value) ? 'caps by feature: the kicker is font-variant-caps: all-small-caps' : undefined
     case 'font': {
       if (value.startsWith('var(--font-')) return undefined
       const { size, leading, family, caps } = shorthand(value)
-      if (caps && caps !== 'all-small-caps') return 'mixed small caps: the kicker is all-small-caps'
+      if (caps) { const why = capsWhy(caps); if (why) return why }
       if (size && !SIZE.test(size) && !GLYPH.test(size)) return 'raw size'
       if (leading && !LEADING.test(leading) && !BOX.test(leading)) return 'raw leading'
       if (family && !FAMILY.test(family)) return 'raw family'
@@ -180,7 +190,9 @@ function declarations(text: string, ctx: Ctx[]): Decl[] {
   }
   // CSS: a .css file, or a template string. The value runs to `;`, `}` or the string's end, across lines.
   for (const m of text.matchAll(new RegExp(`${CSS_PROP}\\s*:\\s*([^;{}\`]*)`, 'g'))) {
+    // A style string in code (cssText, setAttribute('style', …), style="…") is CSS too; its value ends at the quote.
     if (ctx[m.index] === 'css') push(m[1], m[2], m.index)
+    else if (ctx[m.index] === 'str') push(m[1], m[2].split(/['"]/)[0], m.index)
   }
   // SVG and HTML attributes in markup strings: font-size="11".
   for (const m of text.matchAll(/(?<![\w-])(font-size|font-family|letter-spacing|text-transform)\s*=\s*(\\?['"])(.*?)\2/g)) {
@@ -196,7 +208,7 @@ function declarations(text: string, ctx: Ctx[]): Decl[] {
       // A TypeScript type annotation (`font: string`) is not a style.
       if (!/^['"`]/.test(m[3]) && /^(string|number|boolean|undefined|null|[A-Z]\w*(<.*>)?|\w+\[\])\s*$/.test(m[3].trim())) continue
       // Copying a computed font (to measure text on a canvas) reads a role; it does not set one.
-      if (/^getComputedStyle\(/.test(m[3])) continue
+      if (m[2] === 'font' && /^\s*getComputedStyle\([^()]*\)\.font\s*(;|\n|$)/.test(text.slice(m.index + m[0].length - m[3].length))) continue
       push(m[2], m[3], m.index)
     }
   }
@@ -252,6 +264,11 @@ function violations(file: string, source: string, defined: Set<string>): string[
     }
 
     // The kicker is all-small-caps at its tracking token, never at meta size (its caps render near 8px).
+    // Tracking belongs to the caps: a tracking token only beside all-small-caps, never on mono.
+    const families = [...get('family').map(d => d.value), ...fonts.flatMap(f => f.family ? [f.family] : [])]
+    const tracked = get('track').some(d => TRACK.test(d.value))
+    if (tracked && !caps.some(c => /all-small-caps/.test(c))) at(b.offset, `tracking without the kicker's caps: ${b.selector}`)
+    if (tracked && families.some(f => /--font-mono/.test(f))) at(b.offset, `tracking on mono: ${b.selector}`)
     if (caps.some(c => /all-small-caps/.test(c))) {
       if (!get('track').some(d => TRACK.test(d.value))) at(b.offset, `kicker without its tracking token: ${b.selector}`)
       if (sizes.includes('var(--type-meta)')) at(b.offset, `kicker at meta size: ${b.selector}`)
@@ -273,7 +290,7 @@ it('every font size, leading, family, tracking and case names a role from styles
     return violations(file, readFileSync(path, 'utf8'), defined)
   })
   expect(found, `type outside ${OWNER}:\n${found.join('\n')}`).toEqual([])
-})
+}, 30_000)
 
 /** Each form the scan guards: a source that must fail, read as the named file. */
 const MUST_FAIL: [string, string][] = [
@@ -316,6 +333,18 @@ const MUST_FAIL: [string, string][] = [
   ['x.css', '.t { font: var(--type-prose)/var(--ctl-line-height) var(--font-serif); }'],
   ['x.ts', "const css = `.u { content: '/*'; font-size: 13px; }`"],
   ['x.ts', "const re = /`/g\nconst css = `.v { font-size: 13px; }`"],
+  ['x.css', '.w { font-feature-settings: "smcp", "c2sc"; }'],
+  ['x.css', '.x { font-variant-caps: all-small-caps; font-feature-settings: "pcap"; letter-spacing: var(--track-kicker); font-size: var(--type-note); }'],
+  ['x.css', '.y { font-variant-caps: petite-caps; }'],
+  ['x.css', '.z { font-variant-caps: unicase; }'],
+  ['x.ts', "el.style.fontFeatureSettings = '\"smcp\"'"],
+  ['x.css', '.aa { letter-spacing: var(--track-kicker); font-size: var(--type-note); }'],
+  ['x.css', '.ab { font: var(--type-note)/var(--leading-ui) var(--font-mono); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }'],
+  ['x.ts', "el.style.cssText = 'color: red; font-size: 13px'"],
+  ['x.ts', "el.setAttribute('style', 'letter-spacing: .1em')"],
+  ['x.ts', "const html = '<span style=\"font-family: Menlo\">a</span>'"],
+  ['x.ts', 'el.style.fontSize = getComputedStyle(other).fontSize'],
+  ['x.ts', "ruler.font = getComputedStyle(message).font + ' 12px'"],
 ]
 
 const MUST_PASS: [string, string][] = [
@@ -331,6 +360,8 @@ const MUST_PASS: [string, string][] = [
   ['x.ts', "el.style.fontSize = ''"],
   ['x.ts', 'ruler.font = getComputedStyle(message).font'],
   ['x.css', '.ws-col-count { font: var(--type-meta)/var(--leading-ui) var(--font-mono); }'],
+  ['x.css', '.ok { font-feature-settings: "onum"; }'],
+  ['x.ts', "el.style.cssText = 'color: red; font-size: var(--type-note)'"],
 ]
 
 it('the scan catches every form it guards, and passes the system', () => {

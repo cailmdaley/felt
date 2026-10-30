@@ -59,7 +59,6 @@
   line-height: var(--leading-solid);
   font-weight: 500;
   font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
   letter-spacing: var(--track-kicker);
   text-transform: none;
   color: var(--kbn-ink);

@@ -32,7 +32,7 @@
 /* The Desk's column-head treatment: small caps with an illuminated initial. */
 .ws-overview-heading h1 {
   margin: 0; color: var(--ws-ink); font: 500 var(--type-display)/var(--leading-display) var(--font-serif);
-  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: var(--track-kicker);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
 .ws-overview-heading h1 .kbn-cap { color: var(--ws-fresh); font-size: var(--glyph-initial-heading); vertical-align: -.08em; line-height: var(--leading-initial); margin-right: .04em; }
 .ws-overview-summary { margin-top: 12px; font: var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--ws-ink-soft); }
@@ -40,7 +40,7 @@
 .ws-overview-section-title {
   display: flex; align-items: baseline; gap: 12px; margin: 24px 0 12px;
   font: 500 var(--type-title)/var(--leading-solid) var(--font-serif); color: var(--ws-ink);
-  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: var(--track-kicker);
+  font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
   overflow-wrap: anywhere;
 }
 .ws-overview-section-title::after { content: ''; flex: 1; border-top: 1px solid var(--ws-hairline-soft); transform: translateY(-4px); min-width: 16px; }

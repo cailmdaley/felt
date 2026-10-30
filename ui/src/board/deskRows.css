@@ -93,7 +93,7 @@
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }
-  .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; letter-spacing: var(--track-nav); }
+  .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; }
   .kbn-viewtabs .kbn-lens-chip .kbn-cyclechip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (orientation: portrait) {
     .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 260px - env(safe-area-inset-bottom, 0px))); }
