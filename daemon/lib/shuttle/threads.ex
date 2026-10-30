@@ -144,18 +144,23 @@ defmodule Shuttle.Threads do
     local_entries ++ owner_entries
   end
 
-  defp owner_feed_state(%{stale: false} = feed) do
+  defp owner_feed_state(feed) do
     cache = Map.get(feed, :cache, Map.get(feed, "cache")) || %{}
     cache_state = Map.get(cache, :state, Map.get(cache, "state"))
+    last_error = Map.get(feed, :last_error, Map.get(feed, "last_error"))
+    stale? = Map.get(feed, :stale, Map.get(feed, "stale", true))
 
     case cache_state do
-      state when state in [nil, "fresh"] -> :fresh
-      state when state in ["cold", "partial"] -> {:incomplete, state}
-      _ -> :unavailable
+      state when state in ["cold", "partial"] and is_nil(last_error) ->
+        {:incomplete, state}
+
+      state when state in [nil, "fresh"] and stale? == false ->
+        :fresh
+
+      _ ->
+        :unavailable
     end
   end
-
-  defp owner_feed_state(_), do: :unavailable
 
   defp unknown_owner_row(entry, cache_state) do
     Map.merge(entry, %{
@@ -298,7 +303,7 @@ defmodule Shuttle.Threads do
   end
 
   @roster_cap 40
-  @state_order ["Waiting", "To review", "Working", "Armed", "Draft", "Resting"]
+  @state_order ["Unknown", "Waiting", "To review", "Working", "Armed", "Draft", "Resting"]
 
   @doc """
   The `## Threads` block for an orchestrator's launch prompt: counts for its
@@ -383,6 +388,20 @@ defmodule Shuttle.Threads do
   defp count_label({"Draft", 1}, _groups), do: "1 draft"
   defp count_label({"Draft", count}, _groups), do: "#{count} drafts"
   defp count_label({"To review", count}, _groups), do: "#{count} to review"
+
+  defp count_label({"Unknown", count}, groups) do
+    cache_states =
+      groups
+      |> Map.get("Unknown", [])
+      |> Enum.map(& &1["owner_cache_state"])
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.join(", ")
+
+    suffix = if cache_states == "", do: "", else: " (owner cache #{cache_states})"
+    "#{count} unknown#{suffix}"
+  end
+
   defp count_label({"Archived", count}, _groups), do: "#{count} archived"
   defp count_label({state, count}, _groups), do: "#{count} #{String.downcase(state)}"
 

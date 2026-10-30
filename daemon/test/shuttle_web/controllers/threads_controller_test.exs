@@ -10,6 +10,19 @@ defmodule ShuttleWeb.ThreadsControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  alias Shuttle.{Remote, RemoteFiberRegistry}
+
+  defmodule StubFiberClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+    use Agent
+
+    def start_link(_ \\ []), do: Agent.start_link(fn -> %{} end, name: __MODULE__)
+    def set(url, response), do: Agent.update(__MODULE__, &Map.put(&1, url, response))
+
+    @impl true
+    def get(url, _timeout_ms), do: Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
+  end
+
   defmodule QuietRunner do
     @behaviour Shuttle.Runner
     def cmd(_command, _args, _opts), do: {"", 1}
@@ -123,6 +136,40 @@ defmodule ShuttleWeb.ThreadsControllerTest do
 
     assert %{"fiber_id" => "hub", "stale" => true, "host_unreachable" => true} =
              get(api_conn(), "/api/v1/threads/hub") |> json_response(200)
+  end
+
+  test "a cold owner feed leaves mirrored thread state unknown through the Poller reader" do
+    warm!(
+      [
+        entry("hub", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}),
+        entry("hub/child", %{"status" => "active", "shuttle" => %{"host" => "nibi"}})
+      ],
+      []
+    )
+
+    remote = %Remote{name: "nibi", url: "http://localhost:4001"}
+    body = Jason.encode!(%{"host" => "nibi", "fibers" => [], "cache" => %{"state" => "cold"}})
+    start_supervised!(StubFiberClient)
+    StubFiberClient.set(Remote.fibers_url(remote), {:ok, body})
+
+    Shuttle.Test.Env.start_scoped!(
+      {RemoteFiberRegistry,
+       name: nil, remotes: [remote], client: StubFiberClient, auto_poll: false, store_dir: nil},
+      RemoteFiberRegistry
+    )
+
+    :ok = RemoteFiberRegistry.refresh_now()
+
+    assert [
+             %{
+               "id" => "hub/child",
+               "state" => "Unknown",
+               "column" => "unknown",
+               "owner_cache_state" => "cold",
+               "host_unreachable" => false
+             }
+           ] =
+             get(api_conn(), "/api/v1/threads/hub") |> json_response(200) |> Map.fetch!("threads")
   end
 
   test "503 before the first poll warms the cache, and with no Poller" do

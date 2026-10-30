@@ -469,12 +469,6 @@ defmodule Shuttle.Poller do
 
   defp thread_owner_feeds do
     Shuttle.RemoteFiberRegistry.feeds()
-    |> Map.new(fn {host, feed} ->
-      cache = Map.get(feed, :cache, Map.get(feed, "cache"))
-      cache_state = Map.get(cache || %{}, :state, Map.get(cache || %{}, "state"))
-      fresh_cache? = cache_state in [nil, "fresh"]
-      {host, if(fresh_cache?, do: feed, else: %{feed | stale: true})}
-    end)
   catch
     :exit, _ -> %{}
   end
@@ -4282,7 +4276,7 @@ defmodule Shuttle.Poller do
   end
 
   # What an orchestrator's roster is computed from: the cached constitutions,
-  # local and synced, and the running workers' runtime keys.
+  # owner-reconciled rows and the running workers' runtime keys.
   defp cached_thread_inputs(state) do
     {live, reachable} =
       Shuttle.Threads.with_fleet(
@@ -4295,6 +4289,20 @@ defmodule Shuttle.Poller do
       Enum.map(state.document_cache, fn {_key, cached} ->
         pending_entry(cached.entry, state.pending_results)
       end)
+
+    local_store_by_uid =
+      for %{fiber: %{"uid" => uid}, felt_store: store} <- entries,
+          is_binary(uid),
+          into: %{},
+          do: {uid, store}
+
+    entries =
+      Shuttle.Threads.reconcile_owner_feeds(
+        entries,
+        state.own_host_id,
+        local_store_by_uid,
+        thread_owner_feeds()
+      )
 
     {entries, live, reachable}
   end

@@ -1521,6 +1521,10 @@ defmodule Shuttle.ThreadsTest do
                }
              ] =
                Threads.tree("hub", "/local", cold_entries, MapSet.new())
+
+      roster = Threads.roster("hub", "/local", cold_entries, MapSet.new())
+      assert roster =~ "1 unknown (owner cache cold)"
+      refute roster =~ "armed"
     end
 
     test "unavailable owner fallback marks every state stale and host-unreachable" do
