@@ -577,18 +577,31 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   defp board_received_times(items, previous_items, now, :board) do
     received_at = DateTime.to_unix(now, :millisecond)
-    previous = Map.new(previous_items, fn item -> {item["id"], item["received_at"]} end)
 
-    Enum.map(items, fn item ->
-      case {item["id"], previous[item["id"]]} do
-        {id, at} when is_binary(id) and is_integer(at) -> Map.put(item, "received_at", at)
-        {id, _} when is_binary(id) and id != "" -> Map.put(item, "received_at", received_at)
-        _ -> Map.delete(item, "received_at")
-      end
-    end)
+    previous =
+      Enum.reduce(previous_items, %{}, fn
+        %{"id" => id, "received_at" => at}, acc
+        when is_binary(id) and id != "" and is_integer(at) ->
+          Map.put(acc, id, at)
+
+        _item, acc ->
+          acc
+      end)
+
+    Enum.map(items, &board_received_time(&1, previous, received_at))
   end
 
   defp board_received_times(items, _previous_items, _now, _feed), do: items
+
+  defp board_received_time(%{"id" => id} = item, previous, received_at)
+       when is_binary(id) and id != "" do
+    Map.put(item, "received_at", Map.get(previous, id, received_at))
+  end
+
+  defp board_received_time(%{} = item, _previous, _received_at),
+    do: Map.delete(item, "received_at")
+
+  defp board_received_time(item, _previous, _received_at), do: item
 
   # ── Views ──
 

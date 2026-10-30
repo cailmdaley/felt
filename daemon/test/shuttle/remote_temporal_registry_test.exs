@@ -226,6 +226,39 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
              refreshed
   end
 
+  test "malformed board rows survive refreshes and cache restoration", %{dir: dir} do
+    record = %{"id" => "good", "timestamp" => 100, "text" => "first"}
+    rows = [nil, 42, "bad", record]
+    MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => rows})})
+    {pid, name} = start_registry(dir)
+
+    assert %{items: [nil, 42, "bad", %{"id" => "good", "received_at" => received_at}]} =
+             candide(name, :board)
+
+    assert is_integer(received_at)
+    updated = %{record | "text" => "refreshed"}
+
+    MockClient.set(
+      "/api/v1/board",
+      {:ok, Jason.encode!(%{"records" => [nil, 42, "bad", updated]})}
+    )
+
+    assert :ok = RemoteTemporalRegistry.invalidate(name, "candide", :board)
+
+    assert %{items: [nil, 42, "bad", %{"text" => "refreshed", "received_at" => ^received_at}]} =
+             candide(name, :board)
+
+    GenServer.stop(pid)
+    MockClient.set("/api/v1/board", {:error, :offline})
+    {_pid, restored} = start_registry(dir)
+
+    assert %{
+             items: [nil, 42, "bad", %{"text" => "refreshed", "received_at" => ^received_at}],
+             last_error: :offline
+           } =
+             candide(restored, :board)
+  end
+
   test "invalidation bypasses freshness only for the written feed", %{dir: dir} do
     {_pid, name} = start_registry(dir)
     assert %{items: [@sent_file]} = candide(name, :sent_files)
