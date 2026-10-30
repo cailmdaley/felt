@@ -218,7 +218,7 @@ test-linux:
 	scripts/test-linux.sh
 
 mix-test:
-	cd daemon && $(MIX) test
+	cd daemon && MIX_ENV=test $(MIX) do compile --warnings-as-errors + test
 
 # The board's own suite, under a pinned TZ=America/Los_Angeles; the civil-day
 # properties inside it cover every other zone.
