@@ -14,10 +14,11 @@ interface WorkspaceBoard {
   unmount(): void
   render(data: KanbanResponse): void
   fetchAndRender(): Promise<void>
-  workspace: { update(): void; open(card: KanbanCard, origin?: string): void; returnToOrigin(): void; reader?: { el: HTMLElement } }
+  workspace: { update(): void; open(card: KanbanCard, origin?: string): void; returnToOrigin(): void; escapeHome(): void; reader?: { el: HTMLElement } }
   lastResponse: KanbanResponse | null
   pendingDeskData: KanbanResponse | null
   meetingStatus: { meeting: MeetingRecord | null }
+  deskProjection: ReturnType<typeof deskOrder>
   presentMeeting(): void
   deskEl: HTMLDivElement | null
   workspaceCards(): KanbanCard[]
@@ -29,7 +30,7 @@ describe('Desk runtime handoff to the workspace', () => {
   it('updates the workspace without querying the band manager as an open Dock', () => {
     const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
     const update = vi.fn()
-    board.workspace = { update, open: vi.fn(), returnToOrigin: vi.fn() }
+    board.workspace = { update, open: vi.fn(), returnToOrigin: vi.fn(), escapeHome: vi.fn() }
     Object.defineProperty(board, 'dock', { get: () => { throw new Error('The band manager has no open card') } })
     board.syncWorkspaceRuntime()
     expect(update).toHaveBeenCalledOnce()
@@ -88,6 +89,7 @@ describe('Desk rows in the document workspace', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
     const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
     board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
     board.mount(document.body)
     try {
       board.lastResponse = first
@@ -193,6 +195,143 @@ describe('Desk rows in the document workspace', () => {
     }
   })
 
+  it('keeps the index in Desk order and gives an unplaced Reader page an Open run', async () => {
+    const data = response({
+      now: {
+        drafts: [card({ id: 'draft' })],
+        inFlight: [card({ id: 'working', status: 'active', workerState: 'running', runtimePhase: 'working' })],
+        awaitingReview: [card({ id: 'review', status: 'closed' })],
+      },
+      roles: [card({ id: 'roles/seat', shuttleSeat: true, shuttleRole: 'editor', shuttleKind: 'oneshot' })],
+      stash: [card({ id: 'resting/item', effectiveHorizon: 'stashed' })],
+    })
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
+    board.mount(document.body)
+    try {
+      board.lastResponse = data
+      board.render(data)
+      for (const page of [card({ id: 'notes/x' }), card({ id: 'roles/editor' })]) {
+        board.workspace.open(page, 'Desk')
+        await flushTasks()
+        const reader = board.workspace.reader!.el
+        const captions = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-group .kbn-flight-caption')]
+          .map(caption => caption.textContent)
+        const rows = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')]
+          .map(row => row.dataset.channelUid)
+        const index = [...reader.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')]
+          .map(entry => entry.getAttribute('aria-label'))
+
+        expect(captions).toEqual(['Drafts', 'Working', 'Awaiting review', 'Roles', 'Resting', 'Open'])
+        expect(rows).toEqual(['draft', 'working', 'review', 'roles/seat', 'resting/item', page.id])
+        expect(index).toEqual(['Drafts, 1', 'In flight, 1', 'Awaiting review, 1', 'Roles, 1', 'Resting, 1', 'Open, 1'])
+      }
+    } finally {
+      board.unmount()
+    }
+  })
+
+  it('reuses the current projection on a same-host meeting poll and redraws only if the Desk has no list', () => {
+    const host = card({ id: 'meeting-host' })
+    const data = response({ now: { drafts: [host], inFlight: [], awaitingReview: [] } })
+    const meeting: MeetingRecord = {
+      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
+      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
+    }
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
+    board.mount(document.body)
+    try {
+      board.meetingStatus.meeting = meeting
+      board.lastResponse = data
+      board.render(data)
+      expect(board.deskEl!.hasChildNodes()).toBe(true)
+      expect(board.deskEl!.querySelector('.kbn-card--meeting')).not.toBeNull()
+      const projection = board.deskProjection
+      const sync = vi.spyOn(board as any, 'syncWorkspaceRuntime')
+
+      board.meetingStatus.meeting = { ...meeting, tail: ['12:00:00 S1  Still recording'] }
+      board.presentMeeting()
+
+      expect(board.deskProjection).toBe(projection)
+      expect(sync).not.toHaveBeenCalled()
+
+      board.deskEl!.replaceChildren()
+      board.presentMeeting()
+
+      expect(sync).toHaveBeenCalledOnce()
+      expect(board.deskEl!.querySelector('.kbn-section-now')).not.toBeNull()
+    } finally {
+      board.unmount()
+    }
+  })
+
+  it('keeps the Desk projection stable across same-host meeting polls while Reader defers the draw', async () => {
+    const host = card({ id: 'meeting-host' })
+    const data = response({ now: { drafts: [host], inFlight: [], awaitingReview: [] } })
+    const meeting: MeetingRecord = {
+      state: 'live', title: null, started_at: null, tail: [], transcript: null, mirror_host: null,
+      fiber: host.id, joined: false, phone: false, launch: null, tmux_session: null, error: null,
+    }
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
+    board.mount(document.body)
+    try {
+      board.lastResponse = data
+      board.render(data)
+      board.workspace.open(host, 'Desk')
+      await flushTasks()
+      const sync = vi.spyOn(board as any, 'syncWorkspaceRuntime')
+
+      board.meetingStatus.meeting = meeting
+      board.presentMeeting()
+      const projection = board.deskProjection
+      expect(sync).toHaveBeenCalledOnce()
+
+      board.meetingStatus.meeting = { ...meeting, tail: ['12:00:00 S1  Still recording'] }
+      board.presentMeeting()
+
+      expect(board.deskProjection).toBe(projection)
+      expect(sync).toHaveBeenCalledOnce()
+
+      board.workspace.escapeHome()
+      await flushTasks()
+      expect(board.deskEl!.querySelector('.kbn-card--meeting')).not.toBeNull()
+      expect(sync).toHaveBeenCalledTimes(2)
+    } finally {
+      board.unmount()
+    }
+  })
+
+  it('keeps non-Desk thread cards available to transcript search without adding them to Desk order', () => {
+    const draft = card({ id: 'draft' })
+    const foldedThread = card({ id: 'folded-thread', shuttleKind: 'oneshot', status: 'closed' })
+    const data = response({
+      now: { drafts: [draft], inFlight: [], awaitingReview: [] },
+      threads: [foldedThread],
+    })
+    vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    const board = new KanbanModal({ shuttleBase: '' }) as unknown as WorkspaceBoard
+    board.fetchAndRender = vi.fn(async () => {})
+    window.history.replaceState(null, '', '#/desk')
+    board.mount(document.body)
+    try {
+      board.lastResponse = data
+      board.render(data)
+
+      expect(board.workspaceCards()).toBe(board.deskProjection.rows)
+      expect((board.workspace as any).cardForHit({ fibers: [{ id: foldedThread.id }] })).toBe(foldedThread)
+    } finally {
+      board.unmount()
+    }
+  })
+
   it('keeps cycle ghosts out of the sidebar order', () => {
     const draft = card({ id: 'draft' })
     const restingFirst = card({ id: 'resting/first', effectiveHorizon: 'stashed' })
@@ -204,6 +343,7 @@ describe('Desk rows in the document workspace', () => {
       stash: [restingFirst, restingSecond],
       roles: [seat],
     })
+    board.deskProjection = deskOrder(board.lastResponse)
     const deskEl = document.createElement('div')
     board.deskEl = deskEl
     const deskRow = (item: KanbanCard, className: string): HTMLElement => {
@@ -224,6 +364,7 @@ describe('Desk rows in the document workspace', () => {
       deskRow(restingFirst, 'kbn-cluster-item'),
     )
 
+    expect(board.workspaceCards()).toBe(board.deskProjection.rows)
     expect(board.workspaceCards().map(item => item.id)).toEqual(deskOrder(board.lastResponse).rows.map(item => item.id))
   })
 })

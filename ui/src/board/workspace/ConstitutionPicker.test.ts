@@ -115,3 +115,27 @@ it('keeps Desk row order when the current page repeats a caption at the end', ()
   expect(rowIds()).toEqual(['draft', 'working', 'reader-only'])
   expect(groupNames()).toEqual(['Drafts', 'Working', 'Drafts'])
 })
+
+it('keeps a focused row when a draft joins the existing Working run', () => {
+  const draft = card({ id: 'draft' })
+  const worker = card({ id: 'worker', status: 'active', workerState: 'running', runtimePhase: 'working' })
+  let launched = false
+  picker = new ConstitutionPicker({
+    cards: () => [draft, worker],
+    onOpen: vi.fn(),
+    group: item => item.id === 'draft' ? launched ? 'Working' : 'Drafts' : 'Working',
+  })
+  document.body.append(picker.el)
+  picker.refresh(false)
+  const row = picker.el.querySelector<HTMLElement>('[data-channel-uid="worker"]')!
+  row.focus()
+  expect(document.activeElement).toBe(row)
+
+  launched = true
+  picker.refresh(false)
+
+  expect(picker.el.querySelector<HTMLElement>('[data-channel-uid="worker"]')).toBe(row)
+  expect(document.activeElement).toBe(row)
+  expect([...picker.el.querySelectorAll<HTMLElement>('.ws-channel-group .kbn-flight-caption')].map(el => el.textContent))
+    .toEqual(['Working'])
+})

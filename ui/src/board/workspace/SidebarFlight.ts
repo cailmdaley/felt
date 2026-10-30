@@ -3,7 +3,6 @@ import { workspaceMeasure, workspaceToken } from './measures.js'
 
 export interface SidebarEntry {
   card: KanbanCard
-  band?: string
   source?: HTMLElement
 }
 export const cardIdentity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])

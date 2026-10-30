@@ -1,5 +1,6 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
+import { groupRunKey } from './groupJump.js'
 
 export interface ConstitutionPickerOptions {
   cards(): KanbanCard[]
@@ -103,33 +104,48 @@ export class ConstitutionPicker {
     const visible = cards.filter(matches)
     const keys = new Set(visible.map(identity))
     for (const [key, row] of this.rows) if (!keys.has(key)) { row.el.remove(); this.opts.onRemove?.(row.el); this.rows.delete(key) }
-    let listCursor = this.list.firstChild
-    let parent: HTMLElement = this.list
-    let cursor = listCursor
+    const grouped: Array<{ card: KanbanCard; group?: string; groupKey?: string }> = []
+    const liveGroups = new Set<string>()
+    const occurrences = new Map<string, number>()
     let previousGroup: string | undefined
-    let groupRun = 0
     let groupKey: string | undefined
-    const groups = new Set<string>()
     for (const card of visible) {
       const group = this.opts.group?.(card)
       if (group !== previousGroup) {
         if (group) {
-          groupKey = JSON.stringify([++groupRun, group])
-          let box = this.groups.get(groupKey)
+          const occurrence = (occurrences.get(group) ?? 0) + 1
+          occurrences.set(group, occurrence)
+          groupKey = groupRunKey(group, occurrence)
+          liveGroups.add(groupKey)
+        } else groupKey = undefined
+      }
+      grouped.push({ card, group, groupKey })
+      previousGroup = group
+    }
+    for (const [key, box] of this.groups) if (!liveGroups.has(key)) { box.remove(); this.groups.delete(key) }
+    let listCursor = this.list.firstChild
+    let parent: HTMLElement = this.list
+    let cursor = listCursor
+    previousGroup = undefined
+    groupKey = undefined
+    for (const { card, group, groupKey: runKey } of grouped) {
+      if (group !== previousGroup) {
+        if (group) {
+          const key = runKey!
+          groupKey = key
+          let box = this.groups.get(key)
           if (!box) {
             box = document.createElement('div'); box.className = 'ws-channel-group'
-            box.append(document.createElement('h3')); this.groups.set(groupKey, box)
+            box.append(document.createElement('h3')); this.groups.set(key, box)
           }
           box.firstElementChild!.className = 'kbn-flight-caption'
           box.firstElementChild!.textContent = group
-          groups.add(groupKey)
           if (box !== listCursor) this.list.insertBefore(box, listCursor)
           listCursor = box.nextSibling
           parent = box; cursor = box.firstChild!.nextSibling
         } else { groupKey = undefined; parent = this.list; cursor = listCursor }
       }
       previousGroup = group
-      if (groupKey) groups.add(groupKey)
       const key = identity(card)
       const revision = this.opts.revision?.(card) ?? JSON.stringify(card)
       let row = this.rows.get(key)
@@ -174,7 +190,6 @@ export class ConstitutionPicker {
       if (parent === this.list) listCursor = cursor
       this.opts.onRow?.(row.el, card)
     }
-    for (const [group, box] of this.groups) if (!groups.has(group)) { box.remove(); this.groups.delete(group) }
     if (reveal && selected && selected !== this.revealed) this.reveal()
   }
   /** Scroll the current row into view; its scroll margin keeps its group's caption in sight above it. */

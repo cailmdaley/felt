@@ -1048,7 +1048,10 @@ export class Reader {
 
   private readonly stopOf = (card: KanbanCard): string => (this.opts.sidebarColumn ?? this.opts.sidebarBand)?.(card) ?? ''
   private rememberStop(): void {
-    if (this.currentCard) this.groupMemory.set(this.stopOf(this.currentCard), cardIdentity(this.currentCard))
+    if (!this.currentCard) return
+    const identity = cardIdentity(this.currentCard)
+    const stop = groupStops(this.sidebarCards(), this.stopOf).find(run => run.cards.some(card => cardIdentity(card) === identity))
+    if (stop) this.groupMemory.set(stop.key, identity)
   }
   /**
    * The open constitution joins the list it is missing from: right after its
@@ -1077,23 +1080,25 @@ export class Reader {
   }
   /** The index strip names every column, unfiltered by Find, and marks the open constitution's. */
   private renderIndex(): void {
-    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.key) : []
+    const stops = (this.opts.sidebarColumn ?? this.opts.sidebarBand) ? groupStops(this.sidebarCards(), this.stopOf).filter(stop => stop.caption) : []
     const current = this.currentCard && cardIdentity(this.currentCard)
     const keys = new Set(stops.map(stop => stop.key))
     for (const [key, entry] of this.indexEntries) if (!keys.has(key)) { entry.remove(); this.indexEntries.delete(key) }
     stops.forEach((stop, i) => {
       let entry = this.indexEntries.get(stop.key)
       if (!entry) {
-        const key = stop.key
-        entry = button('ws-sidebar-index-entry', '', () => this.jumpToStop(key))
-        entry.append(element('span', 'ws-sidebar-index-name', key), element('span', 'ws-sidebar-index-count'))
-        this.indexEntries.set(key, entry)
+        const runKey = stop.key
+        entry = button('ws-sidebar-index-entry', '', () => this.jumpToStop(runKey))
+        entry.append(element('span', 'ws-sidebar-index-name', stop.caption), element('span', 'ws-sidebar-index-count'))
+        this.indexEntries.set(runKey, entry)
       }
+      const name = entry.firstElementChild as HTMLElement
+      if (name.textContent !== stop.caption) name.textContent = stop.caption
       const count = String(stop.cards.length)
       const tally = entry.lastElementChild as HTMLElement
       if (tally.textContent !== count) tally.textContent = count
-      entry.setAttribute('aria-label', `${stop.key}, ${count}`)
-      entry.title = `${stop.key}\n${ROW_MARKS}`
+      entry.setAttribute('aria-label', `${stop.caption}, ${count}`)
+      entry.title = `${stop.caption}\n${ROW_MARKS}`
       if (stop.cards.some(card => cardIdentity(card) === current)) entry.setAttribute('aria-current', 'location')
       else entry.removeAttribute('aria-current')
       if (this.sidebarIndex.children[i] !== entry) this.sidebarIndex.insertBefore(entry, this.sidebarIndex.children[i] ?? null)

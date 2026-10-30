@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import fc from 'fast-check'
 import { parseCompositeFeed } from './KanbanComposite.js'
 import { buildKanbanResponseFromComposite, byInFlightBand, deriveCycleLens } from './KanbanReadModel.js'
-import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
-import type { KanbanResponse } from './KanbanTypes.js'
+import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
+import { deskCardKey, deskOrder } from './deskOrdering.js'
+import { zone } from './civilDay.js'
+import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 
 function renderer(data: KanbanResponse, openDetail = vi.fn(), openWorker = vi.fn()): KanbanSurfaceRenderer {
@@ -224,6 +227,8 @@ describe('In flight bands', () => {
 })
 
 describe('Resting rendering follows the ordering contract', () => {
+  const paris = zone('Europe/Paris')
+
   it('draws undated before dated, warm before cold in both halves, and return then creation order', () => {
     const data = response({ stash: [
       card({ id: 'cold/undated', cold: true }),
@@ -233,7 +238,83 @@ describe('Resting rendering follows the ordering contract', () => {
       card({ id: 'cold/dated', due: '2026-10-06', cold: true }),
       card({ id: 'warm/undated' }),
     ] })
-    expect(renderedIds(renderer(data).renderStashSection(data.stash, {})))
+    expect(renderedIds(renderer(data).renderStashSection(restingOrder(data.stash), {})))
       .toEqual(['warm/undated', 'cold/undated', 'warm/new-soon', 'warm/old-soon', 'warm/new-late', 'cold/dated'])
+  })
+
+  it('matches the drawn Resting order and ignores feed order and unrelated poll fields', () => {
+    interface SeedCard {
+      path: string[]
+      leaf: number
+      created: string | undefined
+      due: string | undefined
+      cold: boolean
+      origin: string
+      standing: boolean
+    }
+    const seedCard = fc.record({
+      path: fc.array(fc.constantFrom('a', 'b', 'c'), { minLength: 1, maxLength: 3 }),
+      leaf: fc.integer({ min: 0, max: 400 }),
+      created: fc.constantFrom<string | undefined>('2026-10-01T00:00:00Z', '2026-10-02T00:00:00Z', undefined),
+      due: fc.constantFrom<string | undefined>(undefined, '2026-11-01', '2026-11-02'),
+      cold: fc.boolean(),
+      origin: fc.constantFrom('h1', 'h2'),
+      standing: fc.boolean(),
+    })
+    const buildCards = (seeds: SeedCard[]): KanbanCard[] => {
+      const seen = new Set<string>()
+      const cards: KanbanCard[] = []
+      for (const seed of seeds) {
+        const id = [...seed.path, `n${seed.leaf}`].join('/')
+        const identity = JSON.stringify([seed.origin, id])
+        if (seen.has(identity)) continue
+        seen.add(identity)
+        cards.push(card({
+          id, originId: seed.origin, uid: `${seed.origin}-${id}`, createdAt: seed.created,
+          due: seed.due, cold: seed.cold, effectiveHorizon: 'stashed',
+          ...(seed.standing ? {
+            shuttleKind: 'standing', status: 'active',
+            nextLaunchAt: seed.due ? `${seed.due}T08:00:00Z` : undefined,
+          } : {}),
+        }))
+      }
+      return cards
+    }
+    const shuffled = <T,>(items: readonly T[], seed: number): T[] => {
+      const out = [...items]
+      for (let i = out.length - 1; i > 0; i--) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
+        const j = seed % (i + 1)
+        ;[out[i], out[j]] = [out[j], out[i]]
+      }
+      return out
+    }
+    const drawn = (data: KanbanResponse): string[] => {
+      const order = deskOrder(data, paris)
+      const root = renderer(data).renderStashSection(order.resting, data.staleness)
+      return [...root.querySelectorAll<HTMLElement>('[data-card-uid]')]
+        .map(el => JSON.stringify([el.dataset.cardOrigin, el.dataset.cardUid]))
+    }
+
+    fc.assert(fc.property(fc.array(seedCard, { maxLength: 40 }), fc.integer(), (seeds, seed) => {
+      const cards = buildCards(seeds)
+      const stash = cards.filter(item => !item.shuttleKind)
+      const future = cards.filter(item => item.shuttleKind)
+      const initial = response({ stash, timeline: { past: [], futureDated: future } })
+      const initialRows = deskOrder(initial, paris).rows.map(deskCardKey)
+      const resting = deskOrder(initial, paris).resting.flat.map(deskCardKey)
+
+      expect(resting).toEqual(drawn(initial))
+
+      const polled = response({
+        stash: shuffled(stash, seed).map(item => ({ ...item, lastActivityAt: Math.abs(seed), outcome: String(seed) })),
+        timeline: {
+          past: [],
+          futureDated: shuffled(future, seed + 1).map(item => ({ ...item, lastActivityAt: 5 })),
+        },
+      })
+      expect(deskOrder(polled, paris).resting.flat.map(deskCardKey)).toEqual(resting)
+      expect(deskOrder(polled, paris).rows.map(deskCardKey)).toEqual(initialRows)
+    }), { seed: 20261030, numRuns: 400 })
   })
 })

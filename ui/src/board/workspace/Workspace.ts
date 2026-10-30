@@ -333,40 +333,46 @@ export class Workspace {
   private sidebarCards(): KanbanCard[] {
     return this.opts.deskRows()
   }
-  /** A family's Desk row holds every node's place in the Desk order. */
+  /** Resolve a family page through the lead row used by Desk placement. */
   private sidebarRoot(card: KanbanCard): KanbanCard {
     const index = this.opts.threadIndex?.()
     return index ? index.family(index.card(card)).lead : card
   }
-  /** A family's Desk row holds every node's place in the Desk order. */
+  /** Resolve the lead's Desk column, folding scheduled work into Resting. */
   private sidebarPlace(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
     const column = this.opts.deskPlacement?.(root)?.column ?? deskColumn(root)
     return column === 'scheduled' ? 'resting' : column
   }
-  /** A group's caption; the open constitution outside the sidebar's columns is captioned by its own column. */
+  /** A Desk row keeps its Desk caption; an unplaced current page gets its own run. */
   private sidebarGroup(card: KanbanCard): string {
     const root = this.sidebarRoot(card)
     const placement = this.opts.deskPlacement?.(root)
     if (placement) return placement.group
+    if (this.isOpenPage(card)) return 'Open'
     if (this.sidebarPlace(root) === 'inFlight') return IN_FLIGHT_BANDS.find(([band]) => band === inFlightBand(root))![1]
     return this.sidebarColumn(card)
   }
   /** A card's Desk column: In flight holds both its bands' groups. */
   private sidebarColumn(card: KanbanCard): string {
-    const placementColumn = this.opts.deskPlacement?.(this.sidebarRoot(card))?.column
-    if (placementColumn === 'inFlight') return 'In flight'
-    if (placementColumn === 'drafts') return 'Drafts'
-    if (placementColumn === 'awaitingReview') return 'Awaiting review'
-    if (placementColumn === 'roles') return 'Roles'
-    if (placementColumn === 'resting') return 'Resting'
-    const column = this.sidebarPlace(card)
+    const root = this.sidebarRoot(card)
+    const placement = this.opts.deskPlacement?.(root)
+    if (!placement && this.isOpenPage(card)) return 'Open'
+    const column = placement?.column ?? this.sidebarPlace(root)
     if (column === 'inFlight') return 'In flight'
     if (column === 'drafts') return 'Drafts'
     if (column === 'awaitingReview') return 'Awaiting review'
     if (column === 'roles') return 'Roles'
     if (column === 'resting') return 'Resting'
     return fiberPageKicker(card) || 'Reading'
+  }
+  /** The current Reader page is outside the drawn Desk projection. */
+  private isOpenPage(card: KanbanCard): boolean {
+    const current = this.current?.card
+    if (!current || cardIdentity(current) !== cardIdentity(card)) return false
+    const root = this.sidebarRoot(card)
+    if (this.opts.deskPlacement?.(root)) return false
+    return !this.opts.deskRows().some(row => cardIdentity(row) === cardIdentity(root))
   }
   /** The constitutions opened in this session, most recent first, for the Board's Read lately shelf. */
   private readLatelyCards(): KanbanCard[] {

@@ -602,10 +602,9 @@ export class KanbanSurfaceRenderer {
    *  second heading — Resting is still one region, just two temperatures of
    *  the same thing. */
   renderStashSection(
-    stashOrOrder: KanbanCard[] | RestingOrder,
+    order: RestingOrder,
     staleness: Record<string, KanbanOriginStaleness>,
   ): HTMLElement {
-    const order = Array.isArray(stashOrOrder) ? restingOrder(stashOrOrder) : stashOrOrder
     const stash = order.flat
     const section = document.createElement('section')
     section.className = 'kbn-section kbn-section-stash'

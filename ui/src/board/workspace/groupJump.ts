@@ -1,12 +1,22 @@
-/** One group stop: a maximal run of adjacent cards sharing a stop key. */
-export interface GroupStop<T> { key: string; cards: T[] }
+/** A maximal run of adjacent cards sharing a caption. */
+export interface GroupStop<T> { key: string; caption: string; cards: T[] }
+
+/** Stable across the appearance or disappearance of runs with other captions. */
+export function groupRunKey(caption: string, occurrence: number): string {
+  return JSON.stringify([caption, occurrence])
+}
 
 /** The sidebar's group stops in drawn order; an empty group never forms one. */
 export function groupStops<T>(cards: readonly T[], stopOf: (card: T) => string): Array<GroupStop<T>> {
   const stops: Array<GroupStop<T>> = []
+  const occurrences = new Map<string, number>()
   for (const card of cards) {
-    const key = stopOf(card)
-    if (stops.at(-1)?.key !== key) stops.push({ key, cards: [] })
+    const caption = stopOf(card)
+    if (stops.at(-1)?.caption !== caption) {
+      const occurrence = (occurrences.get(caption) ?? 0) + 1
+      occurrences.set(caption, occurrence)
+      stops.push({ key: groupRunKey(caption, occurrence), caption, cards: [] })
+    }
     stops.at(-1)!.cards.push(card)
   }
   return stops

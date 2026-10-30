@@ -554,8 +554,8 @@ export class KanbanModal {
     this.workspace = new Workspace(this.container!, {
       shuttleBase: this.shuttleBase,
       localHost: () => this.lastResponse?.feltHost,
-      cards: () => this.workspaceCards(),
-      deskRows: () => this.deskProjection.rows,
+      cards: () => boardCards(this.lastResponse),
+      deskRows: () => this.workspaceCards(),
       deskPlacement: card => this.deskProjection.placements.get(deskCardKey(card)),
       threadIndex: () => threadIndexFor(this.lastResponse),
       origin: () => this.activeViewId === 'desk' ? 'Desk' : this.activeViewId === 'chronicle' ? 'Chronicle' : 'Board',
@@ -778,18 +778,13 @@ export class KanbanModal {
     return sources.flatMap(source => {
       const card = cards.get(JSON.stringify([source.dataset.cardOrigin, source.dataset.cardUid]))
       if (!card) return []
-      const band = source.closest('.kbn-flight-band')?.querySelector('.kbn-flight-caption')?.textContent ?? undefined
-      return [{ card, band, source }]
+      return [{ card, source }]
     })
   }
 
-  /** Desk order, followed by the remaining board cards. */
+  /** The current Desk rows shared by sidebar ordering and Desk lookup. */
   private workspaceCards(): KanbanCard[] {
-    if (!this.lastResponse) return []
-    const cards = boardCards(this.lastResponse)
-    const ordered = deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting).rows
-    const seen = new Set(ordered.map(card => JSON.stringify([card.originId, card.uid ?? card.id])))
-    return [...ordered, ...cards.filter(card => !seen.has(JSON.stringify([card.originId, card.uid ?? card.id])))]
+    return this.deskProjection.rows
   }
 
   /** Cycle-lens ghosts illustrate another surface; they do not set Desk order. */
@@ -1718,14 +1713,11 @@ export class KanbanModal {
    *  onto or off its card. */
   private presentMeeting(): void {
     const updated = this.surfaces.updateMeetingPresentation()
-    if (!updated && this.lastResponse) {
-      this.render(this.lastResponse)
-      return
-    }
-    if (this.lastResponse) {
-      this.deskProjection = deskOrder(this.lastResponse, undefined, this.meetingStatus.meeting)
-      this.syncWorkspaceRuntime()
-    }
+    const meetingFiber = this.meetingStatus.meeting?.fiber ?? null
+    const hostChanged = meetingFiber !== this.deskMeetingFiber
+    const deskVisible = this.activeViewId === 'desk' && !this.workspace?.isActive
+    const missingList = deskVisible && !this.deskEl?.hasChildNodes()
+    if (this.lastResponse && (hostChanged || (deskVisible && (!updated || missingList)))) this.render(this.lastResponse)
   }
 
   private scheduleMeetingPoll(succeeded = true): void {
@@ -1909,6 +1901,7 @@ export class KanbanModal {
     if (!this.body || !this.deskEl) return
     const order = deskOrder(data, undefined, this.meetingStatus.meeting)
     this.deskProjection = order
+    this.deskMeetingFiber = this.meetingStatus.meeting?.fiber ?? null
     this.ensureFleetDefaultAgents(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
@@ -2047,6 +2040,8 @@ export class KanbanModal {
   /** Stash the latest response so drop handlers can resolve cards by id. */
   private lastResponse: KanbanResponse | null = null
   private deskProjection: DeskOrder = deskOrder(null)
+  /** Meeting fiber used to build the current Desk projection. */
+  private deskMeetingFiber: string | null = null
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
   /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */

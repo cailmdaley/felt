@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KanbanModal } from './KanbanModal.js'
-import { FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer } from './KanbanSurfaces.js'
+import { FALLBACK_DEFAULT_AGENT, KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
 import type { KanbanResponse } from './KanbanTypes.js'
 import { card, response } from './testFixtures.js'
 
@@ -84,10 +84,10 @@ describe('agent names follow each owning fleet default', () => {
     expect(rowAgent(now, 'custom')).toBe('claude-opus')
     expect(rowAgent(now, 'implicit')).toBeNull()
 
-    const resting = renderer.renderStashSection([
+    const resting = renderer.renderStashSection(restingOrder([
       card({ id: 'rest-default', originId: 'alpha', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),
       card({ id: 'rest-custom', originId: 'beta', effectiveHorizon: 'stashed', shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }),
-    ], {})
+    ]), {})
     // A resting line gives its width to the title: the agent rides in its label and title, never inline.
     expect(resting.querySelector('.kbn-cluster-item-agent-name')).toBeNull()
     expect(rowAgent(resting, 'rest-default')).toBeNull()

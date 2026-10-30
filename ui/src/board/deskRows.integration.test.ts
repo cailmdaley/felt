@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KanbanSurfaceRenderer } from './KanbanSurfaces.js'
+import { KanbanSurfaceRenderer, restingOrder } from './KanbanSurfaces.js'
 import type { KanbanCard, KanbanResponse } from './KanbanTypes.js'
 import type { FiberSend } from './fiberSends.js'
 import { card, response } from './testFixtures.js'
@@ -44,7 +44,7 @@ describe('a Resting line takes its verdicts', () => {
   const todo = resting({ id: 'todo', uid: 'U-TODO' })
   const data = response({ stash: [once, standing, todo] })
   it('offers Temper and Discard on a constitution at rest, Discard alone on a standing one, none on a plain note', () => {
-    const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(data.stash, {})
+    const root = new KanbanSurfaceRenderer(options(data)).renderStashSection(restingOrder(data.stash), {})
     document.body.append(root)
     const labels = (id: string) => {
       root.querySelector<HTMLElement>(`[data-fiber-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
@@ -63,7 +63,7 @@ describe('a Resting line takes its verdicts', () => {
     const child = card({ id: 'family/child', orchestrator: 'family', tags: ['pinned'], status: 'active' })
     const data = response({ stash: [root], threads: [child] })
     const surfaces = new KanbanSurfaceRenderer(options(data))
-    const row = surfaces.renderStashSection(data.stash, {}).querySelector<HTMLElement>('[data-fiber-id="family"]')!
+    const row = surfaces.renderStashSection(restingOrder(data.stash), {}).querySelector<HTMLElement>('[data-fiber-id="family"]')!
     const end = row.querySelector<HTMLElement>('.kbn-cluster-item-verdicts')!
     const trees = [...row.querySelectorAll<HTMLElement>(':scope > .kbn-thread-tree')]
     expect(trees).toHaveLength(0)
@@ -72,7 +72,7 @@ describe('a Resting line takes its verdicts', () => {
   })
   it('sends the verdict through the board transition, without opening the card', () => {
     const o = options(data)
-    const root = new KanbanSurfaceRenderer(o).renderStashSection(data.stash, {})
+    const root = new KanbanSurfaceRenderer(o).renderStashSection(restingOrder(data.stash), {})
     document.body.append(root)
     root.querySelector<HTMLElement>('[data-fiber-id="once"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     ;[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(b => b.textContent === 'Discard')!.click()
