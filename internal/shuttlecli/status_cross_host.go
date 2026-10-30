@@ -19,11 +19,8 @@ import (
 //     single-host status output).
 //   - Remote rows have Origin == "<remote name>" — the name from the fleet file.
 //
-// A remote daemon's snapshot only enumerates what is running or a
-// standing constitution — not idle/scheduled one-shot fibers. Cross-host rows therefore
-// reflect runtime state, not the full installed-fiber inventory; the local table
-// (felt-native, this machine's full inventory) is unchanged, so the laptop's
-// installed fibers stay visible alongside remote runtime.
+// Owner document feeds supply the installed constitution inventory, including
+// closed and resting work. Runtime snapshots add schedules and worker records.
 
 // runStatusCrossHost handles `--all` (local + every remote) and `--remote NAME`
 // (filter to one remote). It fetches the composite state from the local daemon,
