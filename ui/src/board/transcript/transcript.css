@@ -532,16 +532,11 @@
 }
 .ws-transcript-message-peer-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-session-chip {
-  display: inline-flex;
-  align-items: baseline;
   min-width: 0;
   max-width: min(24em, 60vw);
   overflow: hidden;
-  padding: 0 5px;
-  border: 1px solid var(--ws-hairline);
-  border-radius: 999px;
-  font: var(--type-note)/var(--leading-ui) var(--font-serif);
   white-space: nowrap;
+  cursor: default;
 }
 .ws-transcript-session-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-session-id { flex: 0 0 auto; white-space: nowrap; }

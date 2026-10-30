@@ -41,7 +41,7 @@ import { KanbanModal } from '../src/board/KanbanModal.js'
 import { scopeTheme } from '../src/board/workspace/themeScope.js'
 import { workshopExample } from './workshop-example.js'
 import { installWorkspaceNativeURLs, NOTE_FIBERS, WORKSPACE_HOST, WORKSPACE_ID, LONG_WORKSPACE_NAME, workspaceExample } from './workspace-fixtures.js'
-import { WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, transcriptSearchHits, type TranscriptScenario } from './transcript-fixtures.js'
+import { workspaceMessageProvenance, WORKSPACE_EARLIER_SESSION, WORKSPACE_LATEST_SESSION, workspaceTranscriptBytes, transcriptSearchHits, type TranscriptScenario } from './transcript-fixtures.js'
 import { openCapture, openStash, openSettings } from '../src/forms/mountForms.js'
 import { showToast } from '../src/board/utils.js'
 import type {
@@ -1666,6 +1666,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       hits: transcriptSearchHits(now),
       errors: [],
     })
+  }
+  if (url.includes('/api/v1/transcript/messages')) {
+    return json({ messages: transcriptScenario === 'messages' ? workspaceMessageProvenance(now) : [] })
   }
   if (url.includes('/api/v1/transcript/raw')) {
     const query = new URL(url, 'http://harness').searchParams

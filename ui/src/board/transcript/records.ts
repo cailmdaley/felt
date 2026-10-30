@@ -1,4 +1,4 @@
-import { sentShuttleMessages, shuttleMessages, type ShuttleMessage } from './messages.js'
+import { sentShuttleMessages, shuttleMessages, shuttleMessageParts, type MessageProvenance, type ShuttleMessage } from './messages.js'
 
 export type UsageEntry = {
   kind: 'usage'
@@ -228,7 +228,7 @@ const PEER_CAVEAT = /\n\s*(?:This came from another Claude session|That "other C
 
 function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entry | null {
   const text = raw
-    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '')
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, match => raw.includes('[Shuttle message ') ? match : '')
     // Claude Code heads a relayed session message with a line of its own and
     // closes it with a paragraph of advice to the model; neither is the message.
     .replace(/^\s*Another Claude session sent a message:\s*/, '')
@@ -335,12 +335,25 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
  * handoffs and rests) arrives as `hook_additional_context`, never as a
  * system-reminder in a user record; explicit Shuttle messages are drawn.
  */
-function claudeAttachment(record: ObjectValue): Entry[] {
+function deliveredContext(text: string, time: number | undefined, provenance: readonly MessageProvenance[]): Entry[] {
+  return shuttleMessageParts(text, provenance).flatMap<Entry>(part => {
+    if (typeof part !== 'string') {
+      const messages = shuttleMessages(part.envelope, time, true, [part])
+      return messages.length ? messages : [event('Context', { text: part.envelope, detail: firstLine(part.envelope) }, time)]
+    }
+    const rest = part.trim()
+    // The hook's fixed introduction isn't message content.
+    if (!rest || /^Messages from other sessions, supplied as peer context\.[^\n]*$/.test(rest)) return []
+    return [event('Context', { text: rest, detail: firstLine(rest) }, time)]
+  })
+}
+
+function claudeAttachment(record: ObjectValue, provenance: readonly MessageProvenance[]): Entry[] {
   const attachment = object(record.attachment)
   if (attachment?.type === 'hook_additional_context') {
     const content = attachment.content
     const text = Array.isArray(content) ? content.filter((part): part is string => typeof part === 'string').join('\n') : string(content) ?? ''
-    return shuttleMessages(text, timestamp(record.timestamp))
+    return deliveredContext(text, timestamp(record.timestamp), provenance)
   }
   if (attachment?.type !== 'queued_command' || (attachment.commandMode ?? 'prompt') !== 'prompt') return []
   const time = timestamp(record.timestamp)
@@ -354,10 +367,7 @@ function claudeAttachment(record: ObjectValue): Entry[] {
       .replace(/^\s*Another Claude session sent a message:\s*/, '')
       .replace(PEER_CAVEAT, '')
       .trim()
-    const deliveries = shuttleMessages(peerText, time, true)
-    if (deliveries.length) return deliveries
-    const detail = /^\[Shuttle message \S+ from ([^;\]]+)/.exec(peerText)?.[1]
-    return peerText ? [event('Message', { detail, text: peerText.replace(/^\[Shuttle message [^\]]*\]\n?/, '') }, time)] : []
+    return deliveredContext(peerText, time, provenance)
   }
   const classified = text ? classifiedClaudeText(text, false, time) : null
   if (classified?.kind === 'prompt') return [{ ...classified, images }]
@@ -365,9 +375,9 @@ function claudeAttachment(record: ObjectValue): Entry[] {
   return images ? [at({ kind: 'prompt' as const, text: '', images, dispatch: false }, time)] : []
 }
 
-function claudeRecord(record: ObjectValue): Entry[] {
+function claudeRecord(record: ObjectValue, provenance: readonly MessageProvenance[]): Entry[] {
   if (record.isSidechain === true) return []
-  if (record.type === 'attachment') return claudeAttachment(record)
+  if (record.type === 'attachment') return claudeAttachment(record, provenance)
   if (!['user', 'assistant', 'system'].includes(String(record.type))) return []
   const message = object(record.message)
   const time = timestamp(record.timestamp)
@@ -424,13 +434,13 @@ function piUserContent(value: unknown, time?: number): Entry[] {
   return [{ kind: 'prompt', text: text.join('\n'), images, dispatch: false, ...(time === undefined ? {} : { at: time }) }]
 }
 
-function piRecord(record: ObjectValue): Entry[] {
+function piRecord(record: ObjectValue, provenance: readonly MessageProvenance[]): Entry[] {
   if (record.type === 'compaction' || record.type === 'context_edit') {
     return [{ ...event('Compacted', {}, timestamp(record.timestamp)), contextReset: true }]
   }
   if (record.type === 'custom_message') {
     const content = string(record.content)
-    if (record.customType === 'shuttle' && content) return shuttleMessages(content, timestamp(record.timestamp))
+    if (record.customType === 'shuttle' && content) return deliveredContext(content, timestamp(record.timestamp), provenance)
     return [event('Context', { detail: string(record.customType), text: content }, timestamp(record.timestamp))]
   }
   if (record.type !== 'message') return []
@@ -560,34 +570,30 @@ function codexRecord(record: ObjectValue): Entry[] {
 }
 
 /** Normalize one native JSONL record by its record shape. Unknown and malformed records are ignored. */
-export function normalizeRecord(raw: unknown): Entry[] {
+export function normalizeRecord(raw: unknown, verified: readonly MessageProvenance[] | number = []): Entry[] {
+  const provenance = Array.isArray(verified) ? verified : []
   try {
     const record = object(raw)
     if (!record || record.isSidechain === true) return []
     const native = ['response_item', 'event_msg', 'compacted'].includes(String(record.type)) ? codexRecord(record)
-      : ['message', 'custom_message', 'compaction', 'context_edit'].includes(String(record.type)) ? piRecord(record)
-      : claudeRecord(record)
-    const seen = new Set<string>()
+      : ['message', 'custom_message', 'compaction', 'context_edit'].includes(String(record.type)) ? piRecord(record, provenance)
+      : claudeRecord(record, provenance)
     const entries = native.flatMap<Entry>(entry => {
       if (entry.kind === 'tool') {
         const messages = sentShuttleMessages(entry)
         return [...messages, ...(messages.length && messages.every(message => message.hideTool) ? [] : [entry])]
       }
       if (entry.kind !== 'prompt' && entry.kind !== 'event') return [entry]
-      const messages = shuttleMessages(entry.text ?? '', entry.at, true)
+      // Claude names injected context in its native record; an ordinary user
+      // record is always a human turn, even when it quotes a real envelope.
+      if (entry.kind === 'prompt') return [entry]
+      if (record.isMeta !== true) return [entry]
+      const text = entry.text ?? ''
+      if (!/^\s*\[Shuttle message /.test(text)) return [entry]
+      const messages = shuttleMessages(text, entry.at, true, provenance)
       if (!messages.length) return [entry]
-      for (const message of messages) seen.add(message.id)
-      return messages
+      return deliveredContext(text, entry.at, provenance)
     })
-    // Hook-supplied context is inside system-reminder blocks, which ordinary
-    // Claude prompt normalization omits. Read deliveries before losing them.
-    if (record.type === 'user') {
-      const message = object(record.message)
-      const source = contentText(message?.content)
-      const reminders = [...source.matchAll(/<system-reminder\b[^>]*>([\s\S]*?)<\/system-reminder\s*>/gi)]
-      const messages = reminders.flatMap(match => shuttleMessages(match[1], timestamp(record.timestamp))).filter(message => !seen.has(message.id))
-      return [...messages, ...entries]
-    }
     return entries
   } catch {
     return []

@@ -89,20 +89,43 @@ function peerFor(target: string): Pick<ShuttleMessage, 'peer' | 'peerSuffix' | '
   return { peer: `Session · ${target.slice(-8)}`, target }
 }
 
-const DELIVERY = /\[Shuttle message ([^\s\]\r\n]+)([^\]\r\n]*)\]\r?\n([\s\S]*?)(?=\r?\n\[Shuttle message |\s*<\/system-reminder\s*>|$)/g
+/** A host-owned record of the complete envelope offered to this receiving session. */
+export interface MessageProvenance { id: string; envelope: string; thread?: boolean }
 
-/** Peer mailboxes and daemon thread results are explicit user-context envelopes. */
-export function shuttleMessages(source: string, at?: number, anchored = false): ShuttleMessage[] {
+/** Match whole ledgered deliveries, so a quoted header cannot introduce a boundary. */
+export function shuttleMessageParts(source: string, provenance: readonly MessageProvenance[]): Array<string | MessageProvenance> {
+  const parts: Array<string | MessageProvenance> = []
+  const trusted = [...provenance].filter(item => item.envelope.startsWith(`[Shuttle message ${item.id}`))
+    .sort((a, b) => b.envelope.length - a.envelope.length)
+  const header = /(?:^|\n)\[Shuttle message /g
+  let consumed = 0
+  for (const match of source.matchAll(header)) {
+    const start = match.index! + (match[0].startsWith('\n') ? 1 : 0)
+    if (start < consumed) continue
+    const delivery = trusted.find(item => source.startsWith(item.envelope, start)
+      && /^(?:\s|<\/system-reminder\s*>|$)/.test(source.slice(start + item.envelope.length)))
+    if (!delivery) continue
+    if (start > consumed) parts.push(source.slice(consumed, start))
+    parts.push(delivery)
+    consumed = start + delivery.envelope.length
+  }
+  if (consumed < source.length) parts.push(source.slice(consumed))
+  return parts
+}
+
+/** Only a complete envelope recorded by the receiving host can name a sender. */
+export function shuttleMessages(source: string, at?: number, anchored = false, provenance: readonly MessageProvenance[] = []): ShuttleMessage[] {
   if (anchored && !/^\s*\[Shuttle message /.test(source)) return []
-  const input = anchored ? source.trimStart() : source
   const messages: ShuttleMessage[] = []
-  const matches = [...input.matchAll(DELIVERY)]
-  for (const match of matches) {
+  for (const part of shuttleMessageParts(source, provenance)) {
+    if (typeof part === 'string') continue
+    const match = /^\[Shuttle message ([^\s\]\r\n]+)([^\]\r\n]*)\]\r?\n([\s\S]*)$/.exec(part.envelope)
+    if (!match || match[1] !== part.id) continue
     const id = match[1]
     const metadata = match[2]
     const body = match[3].trim()
     const result = /^thread ([^\s<>]+) (closed|asked|handed off|rested):[ \t]*([\s\S]*)$/.exec(body)
-    if (id.startsWith('thread-') && result && THREAD_VERB.has(result[2])) {
+    if (part.thread === true && id.startsWith('thread-') && result && THREAD_VERB.has(result[2])) {
       const fiber = result[1]
       messages.push(withTime({
         kind: 'shuttle-message' as const,
@@ -118,7 +141,7 @@ export function shuttleMessages(source: string, at?: number, anchored = false): 
     }
 
     const sender = /(?:^|\s)from\s+([^;\]\r\n]+)/.exec(metadata)?.[1]?.trim()
-    if (!sender || id.startsWith('thread-')) continue
+    if (!sender) continue
     const address = sender.startsWith('shuttle://') ? sender : undefined
     const session = address ? sessionLabel(address) : undefined
     const replyTo = /;\s*reply to\s+([^\]\r\n]+)/.exec(metadata)?.[1]?.trim()

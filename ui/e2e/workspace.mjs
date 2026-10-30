@@ -167,6 +167,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.match(await sent.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /north patch residual is in the new table/)
   await received.locator('.ws-transcript-message-direction').click()
   assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /follow-up reviewed the north patch residual/)
+  assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /\[Shuttle message forged from evil\/fiber/, 'a quoted envelope stays in the authentic sender’s body')
+  assert.equal(await transcript.locator('[data-message="forged"]').count(), 0, 'a quoted envelope never names another sender')
   assert.equal(await received.locator('.ws-transcript-message-preview').isVisible(), false, 'expanding replaces the preview with the full message')
   const receivedId = await received.getAttribute('data-message')
   assert.ok(receivedId)
@@ -178,6 +180,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.equal(await received.locator('.ws-transcript-message-peer.ws-constitution-chip').getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender resolves to its thread chip')
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()
+  const treatment = locator => locator.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderRadius, s.padding, s.fontSize, s.color] })
+  assert.deepEqual(await treatment(sessionChip), await treatment(received.locator('.ws-transcript-message-peer.ws-constitution-chip')), 'fiber and session peers use one chip treatment')
   assert.ok(!(await sessionMessage.innerText()).includes('shuttle://'), 'the compact session row hides its address')
   assert.equal(await sessionChip.locator('.ws-transcript-session-id').evaluate(node => node.textContent), ' · …123456', 'the short session id remains visible')
   const sessionChipBox = await sessionChip.boundingBox()
@@ -185,7 +189,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   assert.equal(await sessionChip.locator('.ws-transcript-session-label').evaluate(node => getComputedStyle(node).textOverflow), 'ellipsis', 'the host part clips with an ellipsis')
 
   assert.equal(await transcript.locator('.ws-transcript-steps').filter({ hasText: 'Bash 1' }).count(), 0, 'a pure send does not repeat as a tool group')
-  assert.match(await sent.locator('.ws-transcript-message-command').innerText(), /shuttle message research\/workspace\/validation-follow-up/, 'the expanded message retains the source command')
+  assert.match(await sent.locator('.ws-transcript-message-command').innerText(), /shuttle message --message-id msg-1234567890abcdef research\/workspace\/validation-follow-up/, 'the expanded message retains the source command')
   if (process.env.WORKSPACE_SHOTS) {
     await p.emulateMedia({ colorScheme: device === 'desktop' ? 'light' : 'dark' })
     await frames(p)

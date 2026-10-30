@@ -1,3 +1,4 @@
+import type { MessageProvenance } from './messages.js'
 import { normalizeRecord, type Entry } from './records.js'
 
 export type StreamEnd = 'closed' | 'reset' | 'unsupported' | 'busy' | 'failed' | 'stopped'
@@ -263,6 +264,17 @@ export class TranscriptFeed {
   }
 
   private async emitLines(lines: string[], epoch: number, slice = { started: now() }): Promise<void> {
+    let provenance: MessageProvenance[] = []
+    if (lines.some(line => line.includes('[Shuttle message '))) {
+      try {
+        const response = await this.fetcher(this.url('messages'), { cache: 'no-store' })
+        const payload: unknown = response.ok ? await response.json() : null
+        if (payload && typeof payload === 'object' && 'messages' in payload && Array.isArray(payload.messages)) {
+          provenance = payload.messages.filter((item): item is MessageProvenance => item && typeof item.id === 'string' && typeof item.envelope === 'string')
+        }
+      } catch { /* A missing or unreachable ledger leaves the native text intact. */ }
+      if (!this.active(epoch)) return
+    }
     let batch: Entry[] = []
     const flush = (): void => {
       if (batch.length) this.onEntries(batch)
@@ -272,7 +284,7 @@ export class TranscriptFeed {
     for (const line of lines) {
       if (line.trim()) {
         try {
-          batch.push(...normalizeRecord(JSON.parse(line) as unknown))
+          batch.push(...normalizeRecord(JSON.parse(line) as unknown, provenance))
         } catch {
           // A malformed JSONL row does not prevent later records from being read.
         }

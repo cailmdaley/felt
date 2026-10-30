@@ -1,4 +1,5 @@
-.ws-constitution-chip {
+.ws-constitution-chip,
+.ws-transcript-session-chip {
   display: inline-flex;
   align-items: center;
   gap: .4em;
