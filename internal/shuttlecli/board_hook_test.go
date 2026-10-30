@@ -162,11 +162,22 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				t.Fatalf("unbound session changed board records: %+v", records)
 			}
 			writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "host", Harness: harness, Session: "other", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "resume", At: 2}})
+			fiber = mustRead(t, st, "f")
+			if err := shuttle.SetNodeField(fiber, "ask", map[string]any{"text": "Continue?", "at": "2026-10-28T10:01:00Z"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Write(fiber); err != nil {
+				t.Fatal(err)
+			}
 			input.Prompt = "continued after session succession"
 			b, _ = json.Marshal(input)
 			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			if records = readBoardRecords(t, sink); len(records) != 3 || records[2].Kind != "human" || records[2].Text != input.Prompt {
+			if records = readBoardRecords(t, sink); len(records) != 3 || records[2].Kind != "answered" || records[2].Text != "Q: Continue? — A: "+input.Prompt {
 				t.Fatalf("successor session records: %+v", records)
+			}
+			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
+			if block.Ask != nil {
+				t.Fatal("successor session did not clear ask")
 			}
 			input.SessionID = "session"
 			input.Prompt = "[Shuttle message machine]"
