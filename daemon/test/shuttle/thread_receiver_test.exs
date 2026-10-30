@@ -3,6 +3,7 @@ defmodule Shuttle.ThreadReceiverTest do
   alias Shuttle.{CLI, Delivery, Dispatcher, FiberDocuments, Poller, Test.Env}
   import Shuttle.Test.PollerHelpers
   @moduletag :tmp_dir
+  @moduletag timeout: 120_000
   @moduletag skip: is_nil(System.find_executable("tmux"))
 
   defmodule IsolatedRunner do
@@ -129,7 +130,7 @@ defmodule Shuttle.ThreadReceiverTest do
       assert {:command_error, 1, detail} = Delivery.flush_context(parent)
       assert detail =~ "session has not registered"
       assert authority!(data) == authority
-      hook!(store, "B")
+      register_receiver!(store, "B")
       assert {:ok, _} = Delivery.flush_context(parent)
       assert hook!(store, "B") =~ "Only B can read this"
       assert pending(data) == []
@@ -179,7 +180,7 @@ defmodule Shuttle.ThreadReceiverTest do
     assert authority!(data) == committed
     state = :sys.get_state(poller)
     refute Map.has_key?(state.running[Poller.running_key(state, "hub")], :identity_error)
-    hook!(store, "B")
+    register_receiver!(store, "B")
     assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
     assert {:ok, _} = Delivery.flush_context(parent)
     assert hook!(store, "B") =~ "Durable B context"
@@ -278,7 +279,7 @@ defmodule Shuttle.ThreadReceiverTest do
 
       # Delivery follows the committed address, so a vanished registry entry
       # does not stall results for the live receiver.
-      if uuid, do: hook!(store, uuid)
+      if uuid, do: register_receiver!(store, uuid)
       assert {:ok, _} = Delivery.flush_context(entry)
       assert Process.alive?(poller)
       assert authority!(data) == committed
@@ -319,7 +320,7 @@ defmodule Shuttle.ThreadReceiverTest do
       end
 
       if uuid == nil do
-        hook!(store, "B")
+        register_receiver!(store, "B")
 
         assert {:ok, %{fibers: [parent]}} =
                  FiberDocuments.get_shuttle("hub", felt_stores: [store])
@@ -386,7 +387,7 @@ defmodule Shuttle.ThreadReceiverTest do
        context do
     %{store: store, data: data, key: key, canonical: canonical} = context
     assert {:ok, _} = CLI.run_in_store(store, ["mark-runtime", "hub", "--session", "A"])
-    hook!(store, "A")
+    register_receiver!(store, "A")
     start_tmux!(canonical)
     root = Path.join([data, "mailboxes", "fiber", mailbox_key(key)])
     File.mkdir_p!(root)
@@ -466,7 +467,7 @@ defmodule Shuttle.ThreadReceiverTest do
     # The retried claim completes the successor's lineage.
     assert {:ok, _} = Poller.claim_session(poller, "hub", canonical, session_uuid: "B")
     assert authority!(data)["ID"] == "B"
-    hook!(store, "B")
+    register_receiver!(store, "B")
     assert {:ok, %{fibers: [parent]}} = FiberDocuments.get_shuttle("hub", felt_stores: [store])
     assert {:ok, _} = Delivery.flush_context(parent)
     assert hook!(store, "B") =~ "Successor only"
@@ -599,7 +600,7 @@ defmodule Shuttle.ThreadReceiverTest do
   end
 
   defp seed_receiver!(store, key, identity, uuid) do
-    hook!(store, uuid)
+    register_receiver!(store, uuid)
 
     assert {:ok, epoch} =
              CLI.run([
@@ -620,13 +621,17 @@ defmodule Shuttle.ThreadReceiverTest do
              ])
   end
 
-  defp hook!(store, uuid) do
+  # Stop registers the harness receiver without offering its mailbox. A
+  # SessionStart used only for setup can consume the result being asserted.
+  defp register_receiver!(store, uuid), do: hook!(store, uuid, "Stop")
+
+  defp hook!(store, uuid, event \\ "SessionStart") do
     cli = Shuttle.Env.find_executable("shuttle")
 
     frame =
       Jason.encode!(%{
         session_id: uuid,
-        hook_event_name: "SessionStart",
+        hook_event_name: event,
         harness: "claude",
         cwd: store
       })
@@ -663,7 +668,10 @@ defmodule Shuttle.ThreadReceiverTest do
         {:dictionary, dict} <- [Process.info(pid, :dictionary)],
         poller in Keyword.get(dict, :"$callers", []) do
       ref = Process.monitor(pid)
-      assert_receive {:DOWN, ^ref, :process, ^pid, reason}
+      # Delivery runs a bounded 32 s command, followed by a pending-count read
+      # under the runner's 60 s command ceiling. Wait for that completion
+      # contract rather than ExUnit's unrelated 10 s message default.
+      assert_receive {:DOWN, ^ref, :process, ^pid, reason}, 95_000
       assert reason in [:normal, :noproc]
     end
   end
