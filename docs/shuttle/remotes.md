@@ -178,10 +178,12 @@ A failed probe says nothing about the remote.
 Use `shuttle remotes list` or the local daemon's `/api/v1/fleet` to check reach; on a shared host, use its private Unix socket for API requests.
 Do not introduce an unauthenticated outbound proxy on a shared machine.
 
-**A remote dispatch needs the owner's store to hold the fiber.**
-Fibers travel by Git; the daemon does not pull.
-After `shuttle install --host <remote>` and `felt sync --push`, the remote's store still lacks the fiber until something there syncs, and `shuttle reopen` fails with `shuttle show … exited 1`.
-Ask a live session on that host (`shuttle message <address> "run felt -C <store> sync"`) or the human to sync, then reopen again.
+**Create remote work through its owning daemon.**
+`shuttle thread --host <remote>` and `shuttle install --host <remote>` send armed work to the owner's existing create and lifecycle routes.
+The owner validates its paths and writes the document into its own store, even when its Git archive lacks the parent path.
+An unreachable owner fails the command without creating a local copy; `--disabled` can keep a local draft.
+A missing fiber returns not-found with the owner and identifier.
+The daemon never runs Git or `felt sync`.
 
 Open the hub's **Settings → Connected hosts** and check that the remote answers.
 Choose the remote host in Settings to inspect its registered stores and projects.
@@ -189,8 +191,8 @@ Use Capture with that host and an existing remote project for a small read-only 
 For a terminal workflow, test SSH attachment as well as board visibility.
 
 The board reads live content from the owning daemon.
-Tailscale and SSH do **not** synchronize your task documents or code.
-Use Git and `felt sync` for shared stores; each task's host still determines which daemon may execute it.
+Owner-routed writes transfer task documents; they do not synchronize code or the shared archive.
+Run Git and `felt sync` explicitly to synchronize those at your own pace; each task's host determines which daemon may execute it.
 Distinct stores on different hosts can also appear together on the board without being merged.
 
 If the remote disappears, check the layers in order: host awake, daemon healthy, Serve or tunnel reachable, then stores and task ownership.

@@ -47,7 +47,9 @@ For two-factor SSH, have the human establish the documented ControlMaster connec
 Verify a return route separately if remote agents must reach the hub.
 
 A discovered HTTPS remote needs an explicit SSH destination for terminal attachment.
-Fleet visibility doesn't copy projects or synchronize fibers; Git/`felt sync` handles shared documents, while `shuttle.host` remains the execution owner.
+Fleet visibility doesn't copy projects or synchronize the archive.
+Armed remote creation transfers its document through the owner daemon; run Git/`felt sync` explicitly for shared archives and code.
+`shuttle.host` remains the execution owner.
 A laptop closing its lid stops local computation and local board availability; only work on an awake remote continues.
 
 ## Configure the conversation view

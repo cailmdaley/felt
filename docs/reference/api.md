@@ -98,14 +98,9 @@ outcome is always kept. A success is 200 with the Shuttle CLI's output as
 text. A Shuttle refusal is 422 with `shuttle exited <status>: <message>`; an
 unknown action or a missing field is 400.
 
-Lifecycle requests, dispatch requests (including remote `reopen`), and `GET /fibers/*id` retry a missing fiber after `felt sync` on the owning daemon's configured stores.
-Each network fetch has a five-second deadline per store; the local merge has no hard-kill deadline and runs to completion to release its Git locks.
-The pull runs through the Poller so Git changes serialize with lifecycle writes.
-Concurrent misses share the pull; a store is attempted at most once per 30 seconds, including failed attempts.
-Requests retry the local lookup even when sharing a recent attempt.
-If the fiber remains absent after a successful pull, the response is 404 with `fiber not found on <host> after sync: <id>`.
-A failed pull with no matching fiber returns 503; read errors and timeouts are not proof of absence.
-The sync only pulls published commits; it cannot fetch an uncommitted or unpushed fiber from another host.
+Lifecycle requests, dispatch requests (including remote `reopen`), and `GET /fibers/*id` return 404 when the owning daemon lacks the document.
+The error names the host and fiber identifier.
+No request runs Git or `felt sync`; remote creation writes the document through `POST /fiber/create`.
 
 `GET /api/v1/version` includes `terminal`, the local host's configured `tmux` or `rex` backend.
 For Rex terminal claims, `tmux_session` and `tmux_pane` carry the native `session:` and `block:` references respectively.

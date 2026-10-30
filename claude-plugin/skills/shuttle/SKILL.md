@@ -46,6 +46,10 @@ Diagonal agrees to 3%. `validate/offdiag.py` loads the mocks; plotting is unfini
 - **`role`** — the office this work belongs to. Its charter, the fiber `roles/<role>` in the shared store, holds the office's playbooks, human gates and the people it serves.
 - **`artifact.html`** — optional, beside the fiber: one living, visual index to its sub-fibers, sent files and findings, rewritten whole each session ([references/artifact.md](references/artifact.md)). Readers prefer it and fall back to `report.html`.
 
+Armed cross-host creation and control go through the owning daemon's existing routes.
+The owner writes its store directly; an unreachable owner fails without a local half-copy.
+`--disabled` supports local drafting, and `felt sync` remains explicit archive synchronization, outside daemon execution.
+
 ## Working as a worker
 
 1. **Survey.** Your launch prompt names your fiber and its `Felt store:` (`<store>` below). `felt -C <store> sync`, then `felt -C <store> show <id>` — fresh, since it may have changed since launch. Read `## Status`, the artifact, and the role's charter. A launch message is the current directive. If the previous session ended without a handoff it was cut off, so Status may lag: check its transcript and the working tree. A standing run (`Run:` in the launch prompt) reads [references/standing-roles.md](references/standing-roles.md) first.

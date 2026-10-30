@@ -86,7 +86,9 @@ context. Role charters under `roles/<role>/` have intrinsic IDs and no host
 owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
 marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
-Host-addressed board requests still use the daemon's routing for that host's
+Armed cross-host creation writes through the owner daemon; dispatch never depends on archive synchronization.
+The daemon never runs Git or `felt sync`, and a missing document returns not-found naming its host and identifier.
+Host-addressed board requests use the daemon's routing for that host's
 current content, artifacts, and execution controls.
 
 A **store** is a `.felt/` directory and everything under it — one namespace,

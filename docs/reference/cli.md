@@ -167,10 +167,9 @@ the daemon speaks directly, see the [HTTP API](api.md).
 Owner routing uses the local document's `shuttle.host`, not the local daemon's snapshot.
 The owner need not have polled the fiber yet.
 The daemon refuses an explicit origin outside its own fleet with 400 naming that origin; it never substitutes a local Git mirror or local file for an unknown destination.
-On a missing lifecycle, dispatch or single-fiber read, the owning daemon attempts `felt sync` on its configured stores and retries.
-Concurrent requests share each pull, attempted at most once per store every 30 seconds, including failures.
-The network fetch has a five-second deadline; the local merge runs to completion without a hard kill so it can release Git's index lock on slow filesystems.
-A successful pull that still cannot find the fiber returns 404 naming the host; a failed pull returns 503 rather than claiming absence.
+A missing lifecycle, dispatch or single-fiber read returns 404 naming the fiber and owning host.
+The daemon never runs Git or `felt sync`.
+Armed remote creation transfers the document directly through `/fiber/create`; lifecycle changes use the owner's existing routes.
 
 ### Install / reshape the contract
 
@@ -178,7 +177,7 @@ A successful pull that still cannot find the fiber returns 404 naming the host; 
 |---|---|
 | `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
 | `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
-| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. Changing `--host` requires `--project-dir`. Explicit remote paths are validated on the owner; if its daemon is unavailable, the supplied path is kept verbatim with a warning on stderr. Creation writes locally: publish with `felt sync --push` before asking the owner to run it. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit. `--take` moves the caller's live session into the child and arms its source for a fresh worker; it requires the caller's host and is incompatible with `--disabled`. If migration fails, the child stays created but disabled |
+| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. Changing `--host` requires `--project-dir`. Armed remote creation goes through the owning daemon, which validates paths and writes the fiber in its own store. An unreachable owner fails creation without writing a local copy. `--disabled` keeps a local draft. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit. `--take` moves the caller's live session into the child and arms its source for a fresh worker; it requires the caller's host and is incompatible with `--disabled`. If migration fails, the child stays created but disabled |
 | `shuttle threads <fiber>` | A constitution's direct threads from this host's daemon, grouped Waiting, Working, Armed, To review, Draft, Resting. Armed is active with no worker running anywhere the daemon can see; `Armed · host unreachable` means its host is out of the daemon's fleet view. Each row gives the id, state, name, the first sentence of the outcome, and the count of unfinished threads below; a thread resting until something reads `⏸ until <name>`; `N waiting for its next worker` counts the thread results and messages queued for a constitution this host owns that has no live worker, on the header for the orchestrator itself and on each row. Archived threads (a tempered or discarded verdict) are a count; `--all` lists them and every deeper level, indented. `--json` adds each thread's board column and `pending_results` |
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
@@ -499,9 +498,10 @@ the existing owner-served file surface.
 Judge reach through the daemon, never with a shell probe.
 On a userspace-Tailscale host, `curl`, `ssh` and `/dev/tcp` from a worker's shell do not route into the tailnet at all and can time out, while the daemon dials through the LocalAPI socket.
 Use `shuttle remotes list` or the local daemon's `/api/v1/fleet` to check reach.
-A remote dispatch also needs the owner's store to hold the fiber: fibers travel by Git, and the daemon does not pull.
-After publishing with `felt sync --push`, ask a session on the owner host or the human to sync that store before reopening; otherwise `shuttle reopen` fails with `shuttle show … exited 1`.
-See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connection) for the sync command and shared-host API access.
+Remote creation and control go through the owning daemon.
+The owner writes an armed constitution into its own store; dispatch does not wait for Git synchronization.
+An unavailable owner fails the request; a missing fiber returns not-found with its host and identifier.
+See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connection) for reach checks and shared-host API access.
 
 | Command | Purpose |
 |---|---|

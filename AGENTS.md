@@ -26,7 +26,9 @@ commit intentional changes and publish with `felt sync --push`. Resolve Git
 conflicts with the work's context. Role charters live under `roles/`
 and have no host owner. A constitution's `shuttle.host` selects the daemon
 allowed to execute it; synchronizing its file does not transfer execution.
-The live board still uses owner-routed APIs for host-local content and control.
+Armed cross-host creation and control use the owner daemon's existing APIs; the owner writes its store directly, independently of Git archive state.
+The daemon never runs Git or `felt sync`; a missing document returns not-found with its host and identifier.
+The live board uses those same owner-routed APIs for host-local content and control.
 
 ## Where everything else lives
 

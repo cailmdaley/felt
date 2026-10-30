@@ -57,7 +57,8 @@ Host, project directory, role, agent and compatible execution surface inherit fr
 Override the agent for the work rather than assuming the orchestrator's model fits every thread.
 An absent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent, while explicit `--surface app` requires Codex.
 Changing `--host` requires `--project-dir` even for a draft: the parent's path belongs to another machine.
-Explicit paths are validated locally, so run the command on the destination host when its directory isn't available here; the owner's store must also receive the fiber before dispatch ([operating.md](operating.md#remote-hosts)).
+Armed remote work is created by its owning daemon, which validates paths on that host and writes its store directly; an unreachable owner fails without a local copy.
+Use `--disabled` for an offline local draft ([operating.md](operating.md#remote-hosts)).
 Host choice is within the orchestrator's authority, not a separate approval gate.
 
 Every thread has a role.
