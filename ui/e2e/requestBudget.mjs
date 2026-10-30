@@ -74,7 +74,7 @@ try {
   // Select three sent recordings: each selected one decodes its waveform once.
   for (let step = 0; step < 3; step++) {
     await selected().getByRole('button', { name: 'Document menu', exact: true }).click()
-    await p.getByRole('button', { name: 'Sent files', exact: true }).click()
+    await p.locator('.ws-reader .ws-menu').getByRole('button', { name: 'Sent files', exact: true }).click()
     const filename = `take-${String(step + 1).padStart(2, '0')}.${step % 2 ? 'wav' : 'mp3'}`
     const recording = p.locator(`.ws-rail-files .ws-rail-file[data-key$="/${filename}"]`)
     if (!await recording.count()) await p.locator('.ws-rail-files [data-part="sent-files-more"]').click()
