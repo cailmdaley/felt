@@ -300,6 +300,7 @@ Uncertain tmux or process observations hold instead of authorizing a launch.
 | `GET /transcript` | host-routed | Availability receipt for a native session transcript, including its authoritative path and digest |
 | `GET /transcript/raw` | host-routed | Exact native JSONL bytes for a session — no parsing or normalization |
 | `GET /transcript/stream` | host-routed | Follow complete transcript records as server-sent events |
+| `GET /transcript/messages` | host-routed | Exact Shuttle message envelopes recorded for a receiving conversation |
 | `GET /sessions/links` | host-routed | For a batch of sessions: transcript present, harness, and a bridged Claude session's claude.ai URL |
 | `GET /peers` | fleet fan-in | Discover addressable live sessions; `?local=true` serves only this daemon's owner-local sessions |
 | `GET /meeting` | host-addressed | Report the selected host's hark availability, supported meeting modes and meeting state |
@@ -594,6 +595,14 @@ The stream sends comment keepalives while idle and ends with an `event: reset` i
 A hub relay sends `event: error` with `{"error":"upstream_error"}` or `{"error":"upstream_idle"}` before closing on upstream failure or silence; clients should retry with backoff from the last committed event id.
 An upstream response that ends normally closes without an error event.
 When a remote owner does not support streaming, the hub returns 501 `stream_unsupported`; clients can fall back to polling `/transcript/raw`.
+
+`/transcript/messages` accepts `session=<uuid>` and optional `host=<name>` with the same routing as transcript reads.
+It returns `{"messages":[{"id":"…","envelope":"[Shuttle message …]\\n…","thread":true}]}` from the host's private message records.
+The optional `thread` flag identifies a recorded lifecycle signal; a message id's spelling alone carries no lifecycle authority.
+Each `envelope` includes its complete body, so a quoted message header cannot create a second attributed row.
+Missing evidence returns an empty array; an unreadable store returns 503.
+Evidence establishes the delivered envelope, while the native record's origin establishes whether the record is eligible for message attribution.
+Ordinary human prompt records retain their prompt boundary even when their text copies a recorded envelope.
 
 `/sessions/links` accepts `sessions=<uuid>,<uuid>,…` (at most 50) and an
 optional `host=<name>`, and answers `{host, links}` with one entry per session

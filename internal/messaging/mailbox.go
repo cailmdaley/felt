@@ -216,6 +216,15 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 	if !MailboxAvailable(env, harness, id, host) {
 		return nil
 	}
+	output := emit
+	emit = func(requests []Request) error {
+		for _, request := range requests {
+			if err := recordEnvelope(env, id, request); err != nil {
+				return err
+			}
+		}
+		return output(requests)
+	}
 	offered := false
 	err := offerMailbox(mailboxDir(env, harness, id), func(r Request) bool {
 		a, err := ParseAddress(r.Address)

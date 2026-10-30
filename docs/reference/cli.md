@@ -87,6 +87,7 @@ shuttle transcript index --rebuild       # discard and rebuild
 shuttle transcript search "socket timeout" --since 30d
 shuttle transcript search "worker launch" --fiber constitutions/worker-threads
 shuttle transcript search "retry" --session <uuid> --harness codex -n 5
+shuttle transcript messages <uuid> --json # host-local delivered envelope evidence
 ```
 
 The daemon builds and refreshes the transcript index in the background.

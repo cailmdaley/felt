@@ -109,6 +109,9 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 		delivery := req
 		delivery.Text = text
 		delivery.Attachments = nil
+		if err := recordEnvelope(env, addr.ID, delivery); err != nil {
+			return dedupSendResult{Receipt: rejected(req, "envelope-store", err.Error()), Err: errCode("preflight_failed", "cannot record message envelope: %v", err)}
+		}
 		var result dedupSendResult
 		if detailed, ok := a.(dedupMetadataSender); ok {
 			result.Receipt, result.Err, result.Metadata = detailed.sendWithDedupMetadata(sendCtx, env, addr, delivery)

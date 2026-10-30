@@ -6,6 +6,7 @@ defmodule ShuttleWeb.TranscriptController do
     * `GET /api/v1/transcript/raw?session=…` returns the exact JSONL bytes;
       `offset=N` returns a byte slice for incremental reads;
     * `GET /api/v1/transcript/stream?session=…` follows JSONL records as SSE.
+    * `GET /api/v1/transcript/messages?session=…` returns host-owned envelope evidence.
 
   The host is selected explicitly with `host=`, or from the session ledger.
   Remote requests use the same transport as other host-local reads;
@@ -18,7 +19,7 @@ defmodule ShuttleWeb.TranscriptController do
   import Plug.Conn
   import ShuttleWeb.RelayHelpers, only: [present?: 1]
 
-  alias Shuttle.{OriginRouter, Poller, Remote, SessionLedger, Transcript}
+  alias Shuttle.{CLI, OriginRouter, Poller, Remote, SessionLedger, Transcript}
   alias ShuttleWeb.TranscriptStream
 
   # Native transcripts can be materially larger than the board/file assets
@@ -50,6 +51,40 @@ defmodule ShuttleWeb.TranscriptController do
         :local -> local_bytes(conn, session, offset)
         {:remote, %Remote{} = remote} -> remote_bytes(conn, session, remote, offset)
         {:unreachable, host} -> unavailable(conn, session, :host_unreachable, host)
+      end
+    else
+      {:error, message} -> conn |> put_status(400) |> json(%{error: message})
+    end
+  end
+
+  def messages(conn, params) do
+    with {:ok, session} <- session_param(params) do
+      case target_host(params, session) do
+        :local ->
+          case CLI.run(["transcript", "messages", session, "--json"]) do
+            {:ok, body} ->
+              conn |> put_resp_content_type("application/json") |> send_resp(200, body)
+
+            {:command_error, _status, _output} ->
+              conn |> put_status(503) |> json(%{error: "message evidence unavailable"})
+
+            {:error, _reason} ->
+              conn |> put_status(503) |> json(%{error: "message evidence unavailable"})
+          end
+
+        {:remote, %Remote{} = remote} ->
+          query = %{"session" => session, "host" => "local"}
+
+          case OriginRouter.forward_get(remote, "/api/v1/transcript/messages", query) do
+            {:forwarded, status, content_type, body} ->
+              conn |> put_resp_content_type(content_type, nil) |> send_resp(status, body)
+
+            {:error, _reason} ->
+              unavailable(conn, session, :host_unreachable, remote.name)
+          end
+
+        {:unreachable, host} ->
+          unavailable(conn, session, :host_unreachable, host)
       end
     else
       {:error, message} -> conn |> put_status(400) |> json(%{error: message})
