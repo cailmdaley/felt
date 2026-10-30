@@ -65,7 +65,7 @@ defmodule Shuttle.CodexTerminal do
           case Terminal.status(runner, tmux) do
             :alive -> {:ok, %{tmux_session: tmux, created: false}}
             :unknown -> {:error, :terminal_visibility_unknown}
-            :gone -> start(id, record, tmux, runner)
+            :gone -> start(id, record, tmux, runner, opts)
           end
         else
           {:ok, _} -> {:error, :not_a_terminal_worker}
@@ -100,13 +100,17 @@ defmodule Shuttle.CodexTerminal do
     end
   end
 
-  defp start(id, record, tmux, runner) do
+  defp start(id, record, tmux, runner, opts) do
     agent = %{id: record["agent_id"], wrapper: record["terminal_wrapper"]}
     cwd = record["cwd"]
 
     with true <-
            (is_binary(agent.wrapper) and is_binary(cwd)) || {:error, :terminal_recipe_missing},
-         :ok <- Dispatcher.preflight_terminal(agent, cwd, runner),
+         :ok <-
+           if(opts[:preflighted],
+             do: :ok,
+             else: Dispatcher.preflight_terminal(agent, cwd, runner)
+           ),
          :ok <- resume_exact(id, 10),
          :ok <-
            Terminal.launch(runner, tmux, cwd, script(id, record, tmux),

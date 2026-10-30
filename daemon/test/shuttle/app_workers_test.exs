@@ -434,6 +434,7 @@ defmodule Shuttle.AppWorkersTest do
     assert record["terminal_tmux"] == "codex-terminal-app-session-1"
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
     assert record["backend_host"] == Poller.own_host_id()
+    assert Enum.count(Runner.commands(), &match?({"bash", ["-lc", _]}, &1)) == 1
 
     start_opts =
       Enum.find_value(App.calls(), fn

@@ -1541,7 +1541,7 @@ defmodule Shuttle.Dispatcher do
   defp finish_app_launch(id, runner) do
     case Shuttle.AppWorkers.get(id) do
       {:ok, %{"surface" => "cli"}} ->
-        case Shuttle.CodexTerminal.prepare(id, runner: runner) do
+        case Shuttle.CodexTerminal.prepare(id, runner: runner, preflighted: true) do
           {:ok, _} ->
             {:ok, Shuttle.AppWorkers.ref(id)}
 
