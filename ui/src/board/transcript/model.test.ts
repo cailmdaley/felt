@@ -363,6 +363,16 @@ describe('TranscriptModel', () => {
     ])
   })
 
+  it('keeps repeated IDs uncertain when one indexed command contains both sends', () => {
+    const command = 'shuttle message work/a first --message-id reused; shuttle message work/b second --message-id reused'
+    const output = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"Error: preflight work/a\\naccepted work/b (reused)"}}'
+    const messages = modelAfterCodexExec([command], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([
+      { fiber: 'work/a', status: 'uncertain' },
+      { fiber: 'work/b', status: 'uncertain' },
+    ])
+  })
+
   it('does not trust an indexed receipt when its corresponding shell command has non-send segments', () => {
     const message = 'shuttle message --message-id wanted work/child "Hi" && echo done'
     const result = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"accepted work/child (wanted)"}}'

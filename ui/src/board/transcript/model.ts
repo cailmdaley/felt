@@ -185,9 +185,16 @@ export class TranscriptModel {
         const repeatedMessageIds = new Set(messages.flatMap(({ message }) => message.messageId
           && messages.some(({ message: other }) => other !== message && other.messageId === message.messageId)
           ? [message.messageId] : []))
-        const indexedMessageIds = new Set([...repeatedMessageIds].filter(id => messages
-          .filter(({ message }) => message.messageId === id)
-          .every(({ message }) => indexedOutcomes.some(outcome => outcome.index === (message.commandIndex ?? 0)))))
+        const indexedMessageIds = new Set([...repeatedMessageIds].filter(id => {
+          const duplicates = messages.filter(({ message }) => message.messageId === id)
+          const indexes = duplicates.map(({ message }) => message.commandIndex ?? 0)
+          return new Set(indexes).size === indexes.length
+            && duplicates.every(({ message }) => {
+              const commandRows = rowsByCommand.get(message.commandIndex ?? 0) ?? []
+              return commandRows.length === 1
+                && indexedOutcomes.some(outcome => outcome.index === (message.commandIndex ?? 0))
+            })
+        }))
         for (const reference of messages) {
           const message = reference.message
           const commandIndex = message.commandIndex ?? 0
