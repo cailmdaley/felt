@@ -9,7 +9,42 @@ import { foldSentFiles, sentDocuments, sentFileRow } from './SentFiles.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
+const SPLIT_STORAGE = 'shuttle:workspace:thread-rail-threads-height'
 const MIN_WIDTH = 220, STEP = 16
+/** The threads region keeps at least its heading and a row; a drawn artifact keeps at least this much beneath it. */
+const MIN_THREADS = 72, MIN_ARTIFACT = 200
+
+/**
+ * One pointer drag on a resize handle: past a 4px latch, `apply` receives the
+ * pointer's travel along `axis`; release commits, and cancel or Escape restores.
+ * While it runs the rail carries the axis's cursor and the artifact's page ignores the pointer.
+ */
+function dragHandle(handle: HTMLElement, e: PointerEvent, axis: 'x' | 'y', rail: HTMLElement, apply: (delta: number) => void, finish: (commit: boolean) => void): void {
+  if (e.button !== 0) return
+  e.preventDefault()
+  const start = axis === 'x' ? e.clientX : e.clientY
+  try { handle.setPointerCapture(e.pointerId) } catch { /* Capture is an enhancement. */ }
+  const marker = axis === 'x' ? 'ws-thread-resizing' : 'ws-thread-splitting'
+  rail.classList.add(marker)
+  let latched = false
+  const move = (ev: PointerEvent): void => {
+    const delta = (axis === 'x' ? ev.clientX : ev.clientY) - start
+    if (!latched && Math.abs(delta) < 4) return
+    latched = true
+    apply(delta)
+  }
+  const end = (commit: boolean): void => {
+    handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up)
+    handle.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', key, true)
+    rail.classList.remove(marker)
+    try { if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId) } catch { /* Already released. */ }
+    if (latched) finish(commit)
+  }
+  const up = (): void => end(true), cancel = (): void => end(false)
+  const key = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); end(false) } }
+  handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up)
+  handle.addEventListener('pointercancel', cancel); window.addEventListener('keydown', key, true)
+}
 import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 import { RailArtifact } from './RailArtifact.js'
 import type { WorkspaceDocument } from './documents.js'
@@ -28,6 +63,8 @@ export class ThreadRail {
   readonly el = document.createElement('aside')
   private readonly scroller = document.createElement('div')
   readonly handle = document.createElement('div')
+  /** The boundary between the threads and a drawn artifact, dragged to share the rail's height between them. */
+  readonly split = document.createElement('div')
   private readonly tree = document.createElement('div')
   private readonly heading = document.createElement('h2')
   private readonly files = document.createElement('section')
@@ -40,6 +77,8 @@ export class ThreadRail {
   private width: number | null = null
   /** The reader stands the rail open beside the stage; the page loads only while the rail is also drawn. */
   private artifactWanted = false
+  /** The reader's chosen threads height in pixels, or the stylesheet's cap. */
+  private threadsHeight: number | null = null
   private card: KanbanCard | null = null
   /** Every thread in the family besides the open one is archived. */
   private familyQuiet = false
@@ -83,12 +122,19 @@ export class ThreadRail {
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
     this.handle.addEventListener('keydown', e => this.resizeKey(e))
     this.handle.addEventListener('dblclick', () => this.setWidth(null, true))
-    this.el.append(this.handle, this.scroller, this.artifact.el, this.files)
+    this.split.className = 'ws-rail-split'; this.split.setAttribute('role', 'separator'); this.split.setAttribute('aria-orientation', 'horizontal')
+    this.split.setAttribute('aria-label', 'Resize threads and artifact'); this.split.title = 'Drag to resize · double-click to reset'; this.split.tabIndex = 0
+    this.split.addEventListener('pointerdown', e => this.splitStart(e))
+    this.split.addEventListener('keydown', e => this.splitKey(e))
+    this.split.addEventListener('dblclick', () => this.setThreadsHeight(null, true))
+    this.el.append(this.handle, this.scroller, this.split, this.artifact.el, this.files)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.fit())
     this.observer?.observe(this.el)
     try {
       const stored = Number(localStorage.getItem(WIDTH_STORAGE))
       if (Number.isFinite(stored) && stored > 0) this.width = stored
+      const split = Number(localStorage.getItem(SPLIT_STORAGE))
+      if (Number.isFinite(split) && split > 0) this.threadsHeight = split
     } catch { /* Storage is optional. */ }
     this.applyWidth()
   }
@@ -113,32 +159,47 @@ export class ThreadRail {
     } catch { /* Storage is optional. */ }
   }
   private resizeStart(e: PointerEvent): void {
-    if (e.button !== 0) return
-    e.preventDefault()
-    const handle = this.handle, startX = e.clientX, startWidth = this.el.getBoundingClientRect().width, before = this.width
-    try { handle.setPointerCapture(e.pointerId) } catch { /* Capture is an enhancement. */ }
-    this.el.classList.add('ws-thread-resizing')
-    let latched = false
+    const startWidth = this.el.getBoundingClientRect().width, before = this.width
     // The handle is the rail's left edge, so dragging left widens it.
-    const move = (ev: PointerEvent): void => {
-      const delta = startX - ev.clientX
-      if (!latched && Math.abs(delta) < 4) return
-      latched = true
+    dragHandle(this.handle, e, 'x', this.el, delta => {
       const { min, max } = this.bounds()
-      this.setWidth(Math.min(max, Math.max(min, startWidth + delta)), false)
-    }
-    const finish = (commit: boolean): void => {
-      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up)
-      handle.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', key, true)
-      this.el.classList.remove('ws-thread-resizing')
-      try { if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId) } catch { /* Already released. */ }
-      if (!latched) return
-      this.setWidth(commit ? this.width : before, commit)
-    }
-    const up = (): void => finish(true), cancel = (): void => finish(false)
-    const key = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(false) } }
-    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up)
-    handle.addEventListener('pointercancel', cancel); window.addEventListener('keydown', key, true)
+      this.setWidth(Math.min(max, Math.max(min, startWidth - delta)), false)
+    }, commit => this.setWidth(commit ? this.width : before, commit))
+  }
+  /** The threads region's height bounds: a row of threads at least, and room left for the artifact and the sent files. */
+  private splitBounds(): { min: number; max: number } {
+    const room = this.el.clientHeight - this.files.getBoundingClientRect().height - this.split.getBoundingClientRect().height - MIN_ARTIFACT
+    return { min: MIN_THREADS, max: Math.max(MIN_THREADS, Math.floor(room)) }
+  }
+  /** The reader's chosen threads height, clamped to the rail; absent, the stylesheet's cap. */
+  private applySplit(): void {
+    if (this.threadsHeight === null) { this.el.style.removeProperty('--ws-rail-threads-height'); this.el.removeAttribute('data-split'); this.split.removeAttribute('aria-valuenow'); return }
+    const { min, max } = this.splitBounds(), height = Math.min(max, Math.max(min, Math.round(this.threadsHeight)))
+    this.el.style.setProperty('--ws-rail-threads-height', `${height}px`); this.el.setAttribute('data-split', '')
+    this.split.setAttribute('aria-valuemin', String(min)); this.split.setAttribute('aria-valuemax', String(max)); this.split.setAttribute('aria-valuenow', String(height))
+  }
+  private setThreadsHeight(height: number | null, persist: boolean): void {
+    this.threadsHeight = height; this.applySplit(); this.fit()
+    if (!persist) return
+    try {
+      if (height === null) localStorage.removeItem(SPLIT_STORAGE)
+      else localStorage.setItem(SPLIT_STORAGE, String(Math.round(height)))
+    } catch { /* Storage is optional. */ }
+  }
+  private splitStart(e: PointerEvent): void {
+    const startHeight = this.scroller.getBoundingClientRect().height, before = this.threadsHeight
+    dragHandle(this.split, e, 'y', this.el, delta => {
+      const { min, max } = this.splitBounds()
+      this.setThreadsHeight(Math.min(max, Math.max(min, startHeight + delta)), false)
+    }, commit => this.setThreadsHeight(commit ? this.threadsHeight : before, commit))
+  }
+  private splitKey(e: KeyboardEvent): void {
+    const { min, max } = this.splitBounds(), now = this.scroller.getBoundingClientRect().height, step = STEP * (e.shiftKey ? 4 : 1)
+    const next = e.key === 'ArrowDown' ? now + step : e.key === 'ArrowUp' ? now - step
+      : e.key === 'Home' ? min : e.key === 'End' ? max : e.key === 'Enter' ? null : undefined
+    if (next === undefined) return
+    e.preventDefault(); e.stopPropagation()
+    this.setThreadsHeight(next === null ? null : Math.min(max, Math.max(min, next)), true)
   }
   private resizeKey(e: KeyboardEvent): void {
     const { min, max } = this.bounds(), now = this.el.getBoundingClientRect().width, step = STEP * (e.shiftKey ? 4 : 1)
@@ -213,9 +274,10 @@ export class ThreadRail {
     this.artifact.setLive(live && !this.el.hidden)
     this.fit()
   }
-  /** Scale the artifact to the rail's width; the stylesheet gives it the height. */
+  /** Scale the artifact to the rail's width and keep the chosen split inside the rail; the stylesheet gives the artifact its height. */
   fit(): void {
     if (this.el.hidden) return
+    this.applySplit()
     this.artifact.resize()
   }
   dispose(): void { this.observer?.disconnect(); this.artifact.dispose() }

@@ -31,7 +31,7 @@ export function registerRailArtifactJourneys(test) {
     await section(page).waitFor()
     const order = await page.locator('.ws-thread-rail').evaluate(rail =>
       [...rail.children].filter(el => el.checkVisibility()).map(el => el.className.split(' ')[0]))
-    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-thread-scroll', 'ws-rail-artifact', 'ws-rail-files'])
+    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-thread-scroll', 'ws-rail-split', 'ws-rail-artifact', 'ws-rail-files'])
     const before = await stageBox(page)
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await page.waitForTimeout(200)
@@ -72,6 +72,27 @@ export function registerRailArtifactJourneys(test) {
     assert.ok(short.filesHeading.top >= short.files.top - 1 && short.filesHeading.bottom <= short.rail.bottom, `the sent files' heading stays in view at 600px: ${JSON.stringify(short)}`)
     assert.ok(short.body.height >= 120, `the artifact keeps a useful height at 600px: ${JSON.stringify(short)}`)
     await page.setViewportSize({ width: 1440, height: 900 })
+
+    // The boundary between the threads and the artifact drags, persists, and resets on double-click.
+    const heights = () => page.evaluate(() => ({ threads: document.querySelector('.ws-thread-scroll').getBoundingClientRect().height, body: document.querySelector('.ws-rail-artifact-body').getBoundingClientRect().height }))
+    const split = page.locator('.ws-rail-split')
+    const start = await heights(), s = await split.boundingBox()
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2 + 60, { steps: 6 })
+    await page.mouse.up()
+    const dragged = await heights()
+    assert.ok(Math.abs(dragged.threads - start.threads - 60) <= 2, `dragging the boundary grows the threads by the drag: ${JSON.stringify({ start, dragged })}`)
+    assert.ok(Math.abs((start.body - dragged.body) - 60) <= 2, `the artifact gives up what the threads take: ${JSON.stringify({ start, dragged })}`)
+    assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:thread-rail-threads-height')), String(Math.round(dragged.threads)))
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2 + 60)
+    await page.mouse.down()
+    await page.mouse.move(s.x + s.width / 2, s.y - 2000, { steps: 6 })
+    await page.mouse.up()
+    assert.ok((await heights()).threads >= 72 - 1, 'the threads keep a row however far the boundary is dragged up')
+    await split.dblclick()
+    assert.ok(Math.abs((await heights()).threads - start.threads) <= 1, 'double-click restores the threads to their own height')
+    assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:thread-rail-threads-height')), null)
 
     // Folding unloads the page and remembers it; unfolding brings it back.
     const toggle = section(page).getByRole('button', { name: 'Artifact', exact: true })

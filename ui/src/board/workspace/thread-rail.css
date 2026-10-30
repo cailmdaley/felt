@@ -19,6 +19,17 @@
 .ws-thread-scroll[hidden] + .ws-rail-artifact[hidden] + .ws-rail-files > .ws-thread-heading { padding-right: 32px; }
 .ws-thread-rail:has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-thread-scroll { max-height: 40%; }
 .ws-rail-artifact[data-fill]:not([hidden]) ~ .ws-rail-files { flex: 0 1 auto; max-height: 30%; }
+/* With threads above a drawn artifact, the boundary between them drags; the reader's height replaces the threads' cap. */
+.ws-rail-split { display: none; position: relative; z-index: 2; flex: none; height: 9px; margin: -4px 0 -5px; cursor: row-resize; touch-action: none; }
+.ws-thread-rail:has(> .ws-thread-scroll:not([hidden])):has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-rail-split { display: block; }
+.ws-rail-split::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--ws-line-width); transform: translateY(-50%);
+  background: transparent; transition: background-color 120ms var(--ws-ease);
+}
+.ws-rail-split:hover::after, .ws-thread-splitting > .ws-rail-split::after { background: var(--ws-hairline); }
+.ws-rail-split:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-rail-split:focus-visible::after { background: var(--ws-focus); }
+.ws-thread-rail[data-split]:has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-thread-scroll { flex: 0 0 var(--ws-rail-threads-height); max-height: none; }
 /* The artifact's page lays out at --ws-artifact-virtual-width and is scaled to the rail, live in place. */
 .ws-rail-artifact { flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px 8px 10px 10px; border-top: 1px solid var(--kbn-rule); }
 .ws-rail-artifact[data-fill] { flex: 1 1 0; min-height: 200px; }
@@ -47,7 +58,7 @@
   width: var(--ws-artifact-virtual-width, 720px); height: calc(100% / var(--ws-artifact-scale, 1));
   transform: scale(var(--ws-artifact-scale, 1)); transform-origin: 0 0;
 }
-.ws-thread-resizing .ws-rail-artifact-body iframe { pointer-events: none; }
+:is(.ws-thread-resizing, .ws-thread-splitting) .ws-rail-artifact-body iframe { pointer-events: none; }
 .ws-rail-file-list { flex: 1 1 auto; padding: 4px 0 16px; }
 .ws-rail-file {
   display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px;
@@ -72,6 +83,7 @@
 .ws-thread-handle:focus { outline: none; }
 .ws-reader.ws-keyboard .ws-thread-handle:focus-visible::after { background: var(--ws-focus); }
 .ws-thread-resizing, .ws-thread-resizing * { cursor: col-resize; user-select: none; }
+.ws-thread-splitting, .ws-thread-splitting * { cursor: row-resize; user-select: none; }
 .ws-thread-group { --tone: var(--kbn-ink-muted); margin: 0; }
 .ws-thread-group[data-thread-details='waiting'] { --tone: var(--kbn-owed-bright); }
 .ws-thread-group[data-thread-details='working'] { --tone: var(--ws-state-working); }
