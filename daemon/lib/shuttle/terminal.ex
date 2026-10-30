@@ -52,7 +52,16 @@ defmodule Shuttle.Terminal do
   @spec status(module(), String.t(), keyword()) :: status()
   def status(runner, name, opts \\ []) do
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
-    observations = Enum.map(backends, &{&1, &1.probe(runner, name)})
+
+    observations =
+      backends
+      |> observation_order(name)
+      |> Enum.reduce_while([], fn backend, acc ->
+        probe = backend.probe(runner, name)
+        observations = [{backend, probe} | acc]
+        if probe == :present, do: {:halt, observations}, else: {:cont, observations}
+      end)
+
     probes = Enum.map(observations, &elem(&1, 1))
 
     remember_holder(
@@ -64,6 +73,22 @@ defmodule Shuttle.Terminal do
       :present in probes -> :alive
       Enum.all?(probes, &(&1 == :absent)) -> absent_status(runner, name, hd(backends))
       true -> :unknown
+    end
+  end
+
+  # Bound Rex addresses win. For unbound names, a positive tmux probe avoids
+  # scanning Rex's session/block labels for every pre-flip worker and viewer.
+  defp observation_order(backends, name) do
+    if Tmux in backends and Shuttle.Terminal.Rex in backends and
+         not native_ref?(name) and not rex_bound?(name),
+       do: [Tmux | List.delete(backends, Tmux)],
+       else: backends
+  end
+
+  defp rex_bound?(name) do
+    case Shuttle.Terminal.RexBindings.read() do
+      {:ok, doc} -> Map.has_key?(doc["bindings"], name)
+      {:error, _} -> false
     end
   end
 
@@ -86,7 +111,9 @@ defmodule Shuttle.Terminal do
   def present?(runner, name), do: status(runner, name) != :gone
 
   def locate(runner, name) do
-    backend = Enum.find(backends(), &(&1.probe(runner, name) == :present))
+    backend =
+      Enum.find(observation_order(backends(), name), &(&1.probe(runner, name) == :present))
+
     remember_holder(name, backend)
     backend
   end
@@ -139,7 +166,10 @@ defmodule Shuttle.Terminal do
   @doc "Hang up the terminal, then wait and signal its worker until positively gone."
   def stop(runner, name, opts \\ []) do
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
-    backend = Enum.find(backends, &(&1.probe(runner, name) == :present)) || hd(backends)
+
+    backend =
+      Enum.find(observation_order(backends, name), &(&1.probe(runner, name) == :present)) ||
+        hd(backends)
 
     case backend.close(runner, name) do
       :ok ->
@@ -219,7 +249,6 @@ defmodule Shuttle.Terminal do
     Enum.reduce_while(backends(), {:ok, []}, fn backend, {:ok, names} ->
       case backend.list(runner) do
         {:ok, listed} ->
-          refresh_layout(runner, backend)
           {:cont, {:ok, Enum.uniq(names ++ listed)}}
 
         {:error, :unknown} = error ->

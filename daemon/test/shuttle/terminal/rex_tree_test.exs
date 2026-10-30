@@ -118,6 +118,81 @@ defmodule Shuttle.Terminal.RexTreeTest do
            end)
   end
 
+  test "listing workers observes Rex once without projecting the tree" do
+    assert :ok = Terminal.launch(FakeRex, "worker", "/tmp", "sleep 30", fiber: "a/design/rex")
+    before = FakeRex.calls()
+    assert {:ok, _} = Terminal.list_workers(FakeRex)
+    calls = FakeRex.calls() -- before
+    assert Enum.count(calls, fn {_, argv, _} -> "session.list" in argv end) == 1
+
+    refute Enum.any?(calls, fn {_, argv, _} ->
+             "session.set_label" in argv or "session.move" in argv
+           end)
+  end
+
+  test "unbound tmux workers and viewers do not scan Rex on status or locate" do
+    tools = Path.join(Shuttle.data_dir(), "tools")
+    File.mkdir_p!(tools)
+    File.write!(Path.join(tools, "tmux"), "#!/bin/sh\nexit 0\n")
+    File.chmod!(Path.join(tools, "tmux"), 0o755)
+    Env.put_env("PATH", tools)
+    FakeRex.reply("tmux", {"", 0})
+
+    for name <- ["old-worker", "resume-session", "codex-terminal-thread"], _ <- 1..3 do
+      assert :alive = Terminal.status(FakeRex, name)
+      assert Terminal.locate(FakeRex, name) == Terminal.Tmux
+    end
+
+    assert Enum.all?(FakeRex.calls(), fn {bin, _, _} -> bin == "tmux" end)
+  end
+
+  test "refresh resolves ledger identity once and persists the fiber", %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(dir, "sessions.jsonl"))
+
+    Shuttle.SessionLedger.record(
+      fiber: "work/fork",
+      session: "transcript",
+      thread_id: "thread",
+      kind: :dispatch
+    )
+
+    assert :ok = Backend.launch(FakeRex, "codex-terminal-thread", "/tmp", "worker.sh", [])
+    RexTree.refresh(FakeRex)
+
+    assert {:ok, %{"bindings" => %{"codex-terminal-thread" => %{"fiber" => "work/fork"}}}} =
+             RexBindings.read()
+
+    File.rm!(Path.join(dir, "sessions.jsonl"))
+    RexTree.refresh(FakeRex)
+    assert {:ok, [%{"label" => "work/fork"}]} = Rex.sessions(FakeRex)
+  end
+
+  test "Rex I/O during refresh does not hold the bindings lock" do
+    assert :ok = Terminal.launch(FakeRex, "worker", "/tmp", "sleep 30", fiber: "a/design/rex")
+    parent = self()
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "session.list" ->
+        send(parent, {:projection_paused, self()})
+
+        receive do
+          :continue -> :ok
+        after
+          5_000 -> raise "projection barrier timed out"
+        end
+
+      _ ->
+        :ok
+    end)
+
+    projection = Task.async(fn -> RexTree.refresh(FakeRex) end)
+    assert_receive {:projection_paused, projector}, 2_000
+    update = Task.async(fn -> RexBindings.put_fiber("worker", "a/design/rex/thread") end)
+    assert Task.yield(update, 1_000) == {:ok, :ok}
+    send(projector, :continue)
+    assert Task.await(projection) == :ok
+  end
+
   test "viewer bindings survive display drift and never reuse same-labelled unowned sessions" do
     label = "worker@remote-a"
 

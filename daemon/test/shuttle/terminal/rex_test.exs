@@ -327,6 +327,45 @@ defmodule Shuttle.Terminal.RexTest do
     assert File.read!(RexBindings.path()) == "broken"
   end
 
+  test "unchanged binding updates and prunes preserve the file inode" do
+    own_seed()
+    assert {:ok, doc} = RexBindings.read()
+    assert {:ok, before} = File.stat(RexBindings.path())
+    assert :ok = RexBindings.put(@name, doc["bindings"][@name], doc["server"])
+    assert :ok = RexBindings.prune(doc, [sid()])
+    assert :ok = RexBindings.delete("missing", %{})
+    assert {:ok, after_stat} = File.stat(RexBindings.path())
+    assert after_stat.inode == before.inode
+  end
+
+  test "removing bindings deletes only their unreferenced PID receipts" do
+    own_seed()
+    assert {:ok, doc} = RexBindings.read()
+    receipt = RexBindings.pid_path(bid())
+    File.mkdir_p!(Path.dirname(receipt))
+    File.write!(receipt, "receipt")
+    stale = Map.put(doc["bindings"][@name], "created_at", "stale")
+    assert :ok = RexBindings.delete(@name, stale)
+    assert File.exists?(receipt)
+    assert :ok = RexBindings.delete(@name, doc["bindings"][@name])
+    refute File.exists?(receipt)
+    own_seed()
+    File.write!(receipt, "receipt")
+    assert {:ok, snapshot} = RexBindings.read()
+    assert :ok = RexBindings.prune(snapshot, [])
+    refute File.exists?(receipt)
+  end
+
+  test "stale ledger resolution cannot overwrite a replaced binding's fiber" do
+    own_seed()
+    assert {:ok, doc} = RexBindings.read()
+    old = doc["bindings"][@name]
+    replacement = Map.merge(old, %{"block_id" => "block:new", "fiber" => "work/new"})
+    assert :ok = RexBindings.put(@name, replacement, doc["server"])
+    assert :ok = RexBindings.put_fiber(@name, "work/stale", old)
+    assert {:ok, %{"bindings" => %{@name => ^replacement}}} = RexBindings.read()
+  end
+
   test "an exited worker cannot adopt or paste into a surviving human pane on later probes" do
     seed()
     assert :present = Rex.probe(FakeRex, @name)

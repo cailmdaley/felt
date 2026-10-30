@@ -30,16 +30,19 @@ defmodule Shuttle.Terminal.RexBindings do
     end)
   end
 
-  def put_fiber(name, fiber) when is_binary(fiber) and fiber != "" do
+  def put_fiber(name, fiber, observed \\ nil)
+
+  def put_fiber(name, fiber, observed) when is_binary(fiber) and fiber != "" do
     update(fn doc ->
       case doc["bindings"][name] do
         nil -> doc
+        b when observed != nil and b != observed -> doc
         b -> put_in(doc, ["bindings", name], Map.put(b, "fiber", fiber))
       end
     end)
   end
 
-  def put_fiber(_, _), do: :ok
+  def put_fiber(_, _, _), do: :ok
 
   def put_viewer(key, binding, server) do
     update(fn doc ->
@@ -73,9 +76,33 @@ defmodule Shuttle.Terminal.RexBindings do
   defp update(fun) do
     Shuttle.Terminal.with_lock({__MODULE__, path()}, fn ->
       with {:ok, doc} <- read() do
-        write(fun.(doc))
+        updated = fun.(doc)
+
+        if updated == doc do
+          :ok
+        else
+          with :ok <- write(updated) do
+            remove_receipts(doc, updated)
+            :ok
+          end
+        end
       end
     end)
+  end
+
+  def pid_path(block),
+    do: Path.join([Shuttle.data_dir(), "terminals", "rex-pids", block <> ".pid"])
+
+  defp remove_receipts(before, after_doc) do
+    removed = MapSet.difference(block_ids(before), block_ids(after_doc))
+    Enum.each(removed, &File.rm(pid_path(&1)))
+  end
+
+  defp block_ids(doc) do
+    for kind <- ["bindings", "viewers"],
+        {_, binding} <- doc[kind] || %{},
+        into: MapSet.new(),
+        do: binding["block_id"]
   end
 
   defp write(doc) do

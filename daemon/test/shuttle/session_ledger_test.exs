@@ -26,6 +26,48 @@ defmodule Shuttle.SessionLedgerTest do
   defp lines(path), do: path |> File.read!() |> String.split("\n", trim: true)
   defp decoded(path), do: Enum.map(lines(path), &Jason.decode!/1)
 
+  test "terminal lookup matches durable identities newest-first across rotation", %{path: path} do
+    uid = "01KVBR5K0FZHZQK18845TZ01Q2"
+
+    SessionLedger.record(
+      path: path,
+      fiber: "work/old",
+      session: "old",
+      uid: uid,
+      tmux: "old-name",
+      kind: :dispatch
+    )
+
+    File.rename!(path, path <> ".1")
+
+    SessionLedger.record(
+      path: path,
+      fiber: "work/new",
+      session: "transcript",
+      thread_id: "thread",
+      uid: uid,
+      tmux: "capture-name",
+      kind: :claim
+    )
+
+    File.write!(path, "invalid unrelated line\n{}\n", [:append])
+
+    assert %{"fiber" => "work/new"} =
+             SessionLedger.latest_for_terminal("renamed-#{uid}-shuttle", path: path)
+
+    assert %{"fiber" => "work/new"} =
+             SessionLedger.latest_for_terminal("capture-name", path: path)
+
+    assert %{"fiber" => "work/new"} =
+             SessionLedger.latest_for_terminal("resume-transcript", path: path)
+
+    assert %{"fiber" => "work/new"} =
+             SessionLedger.latest_for_terminal("codex-terminal-thread", path: path)
+
+    assert %{"fiber" => "work/old"} = SessionLedger.latest_for_terminal("old-name", path: path)
+    assert nil == SessionLedger.latest_for_terminal("unrelated", path: path)
+  end
+
   describe "record/1" do
     test "snapshots the office and resolved execution recipe on the new row", %{path: path} do
       SessionLedger.record(

@@ -127,18 +127,25 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def probe(runner, name) do
-    owned? = match?({:ok, %{"bindings" => %{^name => _}}}, Bindings.read())
+    before = current_binding(name)
 
     case resolve(runner, name) do
       {:ok, _} ->
         :present
 
       {:error, reason} when reason in [:not_found, :server_absent] ->
-        if owned?, do: Shuttle.Terminal.RexTree.refresh(runner)
+        if before != current_binding(name), do: Shuttle.Terminal.RexTree.refresh(runner)
         :absent
 
       {:error, _} ->
         :unknown
+    end
+  end
+
+  defp current_binding(name) do
+    case Bindings.read() do
+      {:ok, doc} -> doc["bindings"][name]
+      {:error, _} -> nil
     end
   end
 
@@ -331,8 +338,7 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp pid_path(block),
-    do: Path.join([Shuttle.data_dir(), "terminals", "rex-pids", block <> ".pid"])
+  defp pid_path(block), do: Bindings.pid_path(block)
 
   def reveal(name, _host), do: reveal_with(Env.app(:rex_runner, Shuttle.Runner.Default), name)
 
@@ -668,9 +674,10 @@ defmodule Shuttle.Terminal.Rex do
             {:error, :not_found}
           end
         else
-          # Retain the missing block's address while human panes survive.
-          # Later probes must not recover them as the departed worker.
-          {:error, :not_found}
+          # Only the block label can recover a worker; unrelated human panes
+          # are neither adopted nor destroyed after its address is retired.
+          with :ok <- if(name, do: Bindings.delete(name, b), else: :ok),
+               do: {:error, :not_found}
         end
       end
     end

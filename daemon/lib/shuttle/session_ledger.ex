@@ -279,6 +279,43 @@ defmodule Shuttle.SessionLedger do
 
   def latest_for_uid(_uid, _opts), do: nil
 
+  @doc "Newest terminal identity match, decoding only lines containing a candidate identity."
+  def latest_for_terminal(name, opts \\ []) do
+    path = Keyword.get(opts, :path, default_path())
+    uid = Shuttle.ULID.from_tmux(name)
+    candidates = [{"tmux", name}] ++ if(uid, do: [{"uid", uid}], else: [])
+
+    candidates =
+      case name do
+        "codex-terminal-" <> id -> candidates ++ [{"thread_id", id}, {"session", id}]
+        "resume-" <> id -> candidates ++ [{"session", id}]
+        _ -> candidates
+      end
+
+    [path, path <> @rotated_suffix]
+    |> Enum.filter(&File.regular?/1)
+    |> Enum.find_value(&newest_terminal_match(&1, candidates))
+  end
+
+  defp newest_terminal_match(file, candidates) do
+    file
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.reverse()
+    |> Enum.find_value(fn line ->
+      with true <- Enum.any?(candidates, fn {_, value} -> String.contains?(line, value) end),
+           {:ok, record} when is_map(record) <- Jason.decode(line),
+           true <- is_binary(record["fiber"]) and record["fiber"] != "",
+           true <- Enum.any?(candidates, fn {key, value} -> record[key] == value end) do
+        record
+      else
+        _ -> nil
+      end
+    end)
+  rescue
+    _ -> nil
+  end
+
   # Newest-first scan of one ledger file for the line whose `key` equals
   # `needle`. A `"uid"` match additionally requires a non-empty session — a
   # lineage rung is only useful if it names a transcript.

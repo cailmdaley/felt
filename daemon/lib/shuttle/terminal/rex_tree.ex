@@ -30,7 +30,14 @@ defmodule Shuttle.Terminal.RexTree do
   end
 
   @doc "Resolve a worker's path from structural ledger identity, never its display label."
-  def fiber_for(name, records \\ SessionLedger.read_since(0)) do
+  def fiber_for(name) do
+    case SessionLedger.latest_for_terminal(name) do
+      %{"fiber" => fiber} -> fiber
+      nil -> nil
+    end
+  end
+
+  def fiber_for(name, records) do
     uid = Shuttle.ULID.from_tmux(name)
 
     records
@@ -56,7 +63,7 @@ defmodule Shuttle.Terminal.RexTree do
   @doc "Refresh display only; a failed projection cannot invalidate a successful terminal mutation."
   def refresh(runner) do
     result =
-      Terminal.with_lock({Bindings, Bindings.path()}, fn ->
+      Terminal.with_lock({__MODULE__, :projection}, fn ->
         with {:ok, doc} <- Bindings.read(),
              {:ok, sessions} <- Rex.sessions(runner),
              {:ok, entries} <- live_entries(runner, doc, sessions) do
@@ -77,7 +84,7 @@ defmodule Shuttle.Terminal.RexTree do
 
     workers =
       for {name, b} <- doc["bindings"],
-          fiber = b["fiber"] || fiber_for(name),
+          fiber = b["fiber"] || resolve_fiber(name, b),
           is_binary(fiber) and fiber != "",
           do: Map.merge(b, %{"fiber" => fiber, "suffix" => ""})
 
@@ -105,6 +112,12 @@ defmodule Shuttle.Terminal.RexTree do
         {:cont, {:ok, acc}}
       end
     end)
+  end
+
+  defp resolve_fiber(name, binding) do
+    fiber = fiber_for(name)
+    Bindings.put_fiber(name, fiber, binding)
+    fiber
   end
 
   defp project(runner, entries, sessions) do
