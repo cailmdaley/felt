@@ -15,15 +15,42 @@
  *   note     14  serif   secondary lines: an outcome under a row, a crumb, a
  *                        caption, a hint; and the chat's compact rows (steps,
  *                        messages, chips, sent files), so a row reads as one.
- *   meta     12  mono    ids, timestamps, counts, keys, paths and states the
- *                        machine wrote. Set in serif it is an eyebrow (a group
- *                        head such as "Your turn", in small caps) or a whisper
- *                        (an italic drop hint).
- *   code   .9em  mono    code set inside any of the above, relative to it.
+ *   meta     12  mono    ids, clock times, counts, keys, paths and states the
+ *                        machine wrote, untracked and in the case they were
+ *                        written. In serif it is only a whisper (an italic drop
+ *                        hint), never a kicker: small caps at 12 render near 8px.
+ *   code   .8em  mono    inline code inside any of the above. Plex's x-height
+ *                        is .52 of its size and Garamond's .40, so .8em sets
+ *                        code on the same x-height as the words around it.
+ *   code-block 14 mono   a block of code, the same everywhere: tool output in
+ *                        the chat, the reader, the file viewer, the overview.
+ *                        At 14 its x-height matches prose at 18.
  *
- * Mono is for what a machine wrote or a person types: code, ids, timestamps,
+ * Mono is for what a machine wrote or a person types: code, ids, clock times,
  * counts, keys. A word a person reads as a label is serif, at its row's role.
- * Glyph tokens size marks drawn from a font (a cross, a dropcap), not text.
+ * A bare count ("3", "12 steps" as a tally) is mono meta; a number inside a
+ * phrase ("2 need you") reads in the phrase's family.
+ *
+ * Times are formatted only by board/civilDay.ts: a clock time is 24h HH:MM, a
+ * relative one "4m ago"; both are set as mono meta.
+ *
+ * Case and tracking. Text is set in the case it was written; text-transform is
+ * never used. There are two label treatments, both all-small-caps:
+ *
+ *   kicker   all-small-caps, --track-kicker. Section and group heads,
+ *            eyebrows ("Your turn"), rail groups, settings group heads, a
+ *            pasted block's label, a Chronicle day name. At --type-note in
+ *            chrome; the same treatment sets the Desk's column heads and a
+ *            view's title at --type-display.
+ *   nav      all-small-caps, --track-nav, at --type-title: the view tabs
+ *            (Desk, Chronicle, Board), whose small caps then stand as tall as
+ *            capitals at label size.
+ *
+ * Everything else is untracked (letter-spacing 0, or nothing). Mono is never
+ * tracked: its advance is already even.
+ *
+ * Glyph tokens size marks drawn from a font (a cross, a dropcap, a chevron),
+ * never text.
  */
 :root {
   --font-serif: 'EB Garamond', Garamond, Georgia, serif;
@@ -38,7 +65,12 @@
   --type-label: 15px;
   --type-note: 14px;
   --type-meta: 12px;
-  --type-code: 0.9em;
+  --type-code: 0.8em;
+  --type-code-block: 14px;
+
+  /* Tracking, the third half of a label role (see Case and tracking above). */
+  --track-kicker: 0.06em;
+  --track-nav: 0.1em;
 
   /* Leading, the other half of each role. Prose reads at --leading-prose; a
      line of chrome (a row, a label, a note) at --leading-ui; titles and lines
@@ -63,7 +95,6 @@
   --glyph-initial-heading: 0.73em;
   --glyph-ornament: 0.56em;
   --glyph-close: 20px;
-  --glyph-mark: 15px;
   --glyph-small: 11px;
 }
 
