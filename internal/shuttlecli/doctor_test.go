@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,9 +44,7 @@ func TestDoctorRexReceipt(t *testing.T) {
 				"'api call server.apple.privacy_status -') [ \"$(/bin/cat)\" = '{}' ] || exit 8; reply=" + shellQuote(tc.privacy) + ";;\n" +
 				"'client ls --json') reply=" + shellQuote(tc.clients) + ";;\n*) exit 7;;\nesac\n" +
 				"[ \"$reply\" != ABSENT ] || { echo 'server is not running' >&2; exit 4; }\n[ \"$reply\" != FAIL ] || exit 1\nprintf '%s\\n' \"$reply\"\n"
-			if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
-				t.Fatal(err)
-			}
+			sysenvtest.LinkScript(t, bin, script)
 			env.Set("SHUTTLE_REX_BIN", bin)
 			env.Set("SHUTTLE_REX_SERVER", "unix:///doctor-test.sock")
 			a := newApp(env)
@@ -158,9 +157,7 @@ func writeShuttleVersion(t *testing.T, path, build string) {
 		t.Fatal(err)
 	}
 	script := fmt.Sprintf("#!/bin/sh\n[ \"$1\" = \"--version\" ] || exit 2\nprintf 'shuttle version %%s\\n' %q\n", build)
-	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.LinkScript(t, path, script)
 }
 
 func TestCombineDoctorReceiptStatusPriorities(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -69,9 +70,7 @@ case "$*" in
   *) exit 99 ;;
 esac
 `
-	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.LinkScript(t, bin, script)
 	env.Set("SHUTTLE_REX_BIN", bin)
 	env.Set("SHUTTLE_REX_SERVER", "unix:///tmp/test-isolated-rex.sock")
 	env.Set("REX_TEST_CALLS", log)
@@ -85,9 +84,7 @@ func TestTerminalBackendsAndMixedHolders(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.LinkScript(t, filepath.Join(bin, "tmux"), "#!/bin/sh\nexit 0\n")
 	env.Set("PATH", bin)
 	if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0600); err != nil {
 		t.Fatal(err)
@@ -152,9 +149,7 @@ func TestTerminalObservationHostConfigFallback(t *testing.T) {
 			bin := t.TempDir()
 			const name = "task-01ARZ3NDEKTSV4RRFFQ69G5FAV-shuttle"
 			script := "#!/bin/sh\ncase \"$1\" in\nls) printf '%s\\n' '" + name + "';;\nhas-session|kill-session) exit 0;;\n*) exit 99;;\nesac\n"
-			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0755); err != nil {
-				t.Fatal(err)
-			}
+			sysenvtest.LinkScript(t, filepath.Join(bin, "tmux"), script)
 			env.Set("PATH", bin)
 			var stdout, stderr bytes.Buffer
 			env.Stdout, env.Stderr = &stdout, &stderr
