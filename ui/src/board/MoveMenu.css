@@ -47,19 +47,19 @@
   gap: 6px;
   padding: 2px 14px 7px;
   font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: var(--type-note);
+  font-variant-caps: all-small-caps;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-graphite-faint);
 }
-/* "MOVE TO" never shrinks — it is two words and the title of the menu. Only
+/* "Move to" never shrinks — it is two words and the title of the menu. Only
  * the card name beside it gives way. */
 .kbn-move-heading-text {
   flex: 0 0 auto;
   white-space: nowrap;
 }
-/* The card being moved, riding in the "MOVE TO" heading: the menu's subject,
- * not its title, so it drops the heading's uppercase mono voice and takes the
+/* The card being moved, riding in the "Move to" heading: the menu's subject,
+ * not its title, so it drops the heading's kicker caps and takes the
  * ellipsis when a fiber name runs long. */
 .kbn-move-heading-sub {
   flex: 1 1 auto;
@@ -68,7 +68,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-transform: none;
-  letter-spacing: 0.02em;
   color: var(--kbn-graphite-pale);
 }
 /* Between the Now columns and everything else. A hairline, because the two

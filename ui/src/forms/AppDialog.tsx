@@ -240,7 +240,6 @@ export function AppDialog({
                   margin: 0,
                   fontSize: 'var(--type-prose)',
                   fontWeight: 600,
-                  letterSpacing: '0.01em',
                   lineHeight: 'var(--leading-tight)',
                 }}
               >
@@ -252,7 +251,7 @@ export function AppDialog({
                     fontFamily: 'var(--font-serif)',
                     fontSize: 'var(--type-note)',
                     fontVariant: 'all-small-caps',
-                    letterSpacing: '0.06em',
+                    letterSpacing: 'var(--track-kicker)',
                     color: 'var(--kbn-graphite-faint)',
                   }}
                 >

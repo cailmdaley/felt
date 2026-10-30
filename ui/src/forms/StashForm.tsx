@@ -718,10 +718,10 @@ export function injectStashFormStyles(): void {
       color: var(--kbn-graphite-soft);
     }
     .stash-receipt-key {
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
+      font-variant-caps: all-small-caps;
+      letter-spacing: var(--track-kicker);
       color: var(--kbn-owed-bright);
-      font-size: var(--type-meta);
+      font-size: var(--type-note);
     }
     .stash-receipt-sep {
       color: var(--kbn-graphite-pale);
@@ -854,7 +854,6 @@ export function injectStashFormStyles(): void {
     .stash-parent-option-id {
       font-family: var(--font-mono);
       font-size: var(--type-meta);
-      letter-spacing: 0.02em;
       color: var(--kbn-graphite-muted);
     }
     .stash-parent-option[data-depth="1"] .stash-parent-option-name {

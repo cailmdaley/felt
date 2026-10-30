@@ -54,9 +54,9 @@ const SHEET = `
 }
 .set-hostbar-label {
   font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+  font-size: var(--type-note);
+  font-variant-caps: all-small-caps;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-graphite-faint);
   flex: 0 0 auto;
 }
@@ -137,7 +137,7 @@ const SHEET = `
 
 .set-railgroup { display: flex; flex-direction: column; gap: 2px; }
 .set-railgroup + .set-railgroup { margin-top: 20px; }
-.set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-serif); font-size: var(--type-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--kbn-graphite-faint); }
+.set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-serif); font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-graphite-faint); }
 .set-pane-heading { margin-bottom: 22px; }
 .set-pane-heading h2 { font-size: var(--type-display); font-weight: 500; line-height: var(--leading-tight); margin: 0 0 8px; }
 .set-pane-heading p { margin: 0; color: var(--kbn-graphite-muted); font-size: var(--type-label); line-height: var(--leading-ui); max-width: 36rem; }
@@ -181,9 +181,9 @@ const SHEET = `
 }
 .set-section-label {
   font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  font-size: var(--type-note);
+  font-variant-caps: all-small-caps;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-owed);
   margin: 20px 0 7px;
 }
@@ -353,9 +353,9 @@ const SHEET = `
 .set-facts dt {
   color: var(--kbn-graphite-muted);
   font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font-size: var(--type-note);
+  font-variant-caps: all-small-caps;
+  letter-spacing: var(--track-kicker);
 }
 .set-facts dd {
   margin: 0;
@@ -385,8 +385,6 @@ const SHEET = `
   gap: 8px;
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   color: var(--kbn-graphite-faint);
 }
 .set-file > summary::-webkit-details-marker { display: none; }

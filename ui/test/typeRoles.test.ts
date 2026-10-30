@@ -195,6 +195,8 @@ function declarations(text: string, ctx: Ctx[]): Decl[] {
       if (ctx[m.index] !== 'code' && !(ctx[m.index] === 'str' && /^['"]/.test(m[0]))) continue
       // A TypeScript type annotation (`font: string`) is not a style.
       if (!/^['"`]/.test(m[3]) && /^(string|number|boolean|undefined|null|[A-Z]\w*(<.*>)?|\w+\[\])\s*$/.test(m[3].trim())) continue
+      // Copying a computed font (to measure text on a canvas) reads a role; it does not set one.
+      if (/^getComputedStyle\(/.test(m[3])) continue
       push(m[2], m[3], m.index)
     }
   }
@@ -336,6 +338,7 @@ const MUST_PASS: [string, string][] = [
   ['x.ts', "const url = 'https://example.com/*'; // a comment: font-size: 13px"],
   ['x.ts', 'interface A { font: string; fontSize?: number }'],
   ['x.ts', "el.style.fontSize = ''"],
+  ['x.ts', 'ruler.font = getComputedStyle(message).font'],
   ['x.css', '.ws-col-count { font: var(--type-meta)/var(--leading-ui) var(--font-mono); }'],
 ]
 

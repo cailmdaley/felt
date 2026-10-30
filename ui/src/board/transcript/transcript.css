@@ -607,7 +607,7 @@
 }
 .ws-transcript-sent-file-item:hover { border-color: var(--ws-ink-muted); }
 /* The kind is a word in the chip's own voice, quieter than the name. */
-.ws-transcript-sent-kind { color: var(--ws-ink-muted); font: inherit; font-variant: all-small-caps; letter-spacing: .04em; }
+.ws-transcript-sent-kind { color: var(--ws-ink-muted); font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-transcript-sent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-sent-thumb { display: block; width: 36px; height: 24px; object-fit: cover; background: var(--ws-paper); }
 
@@ -623,7 +623,7 @@
   color: var(--ws-ink-soft);
   font-size: var(--type-note);
 }
-.ws-transcript-checklist-heading { font: var(--type-meta)/var(--leading-prose) var(--font-serif); font-variant: all-small-caps; letter-spacing: .04em; color: var(--ws-ink-muted); }
+.ws-transcript-checklist-heading { font: var(--type-note)/var(--leading-prose) var(--font-serif); font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); }
 .ws-transcript-checklist ul { list-style: none; margin: 6px 0 0; padding: 0; }
 .ws-transcript-checklist li { display: flex; gap: 8px; padding: 2px 0; }
 .ws-transcript-task-mark { flex: 0 0 1em; }

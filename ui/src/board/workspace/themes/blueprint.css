@@ -55,7 +55,6 @@
   color: var(--ws-ink-muted);
   background-color: var(--ws-paper);
   font-family: var(--font-mono);
-  text-transform: uppercase;
 }
 [data-part="label-bar"] .ws-label-title {
   font-family: var(--font-mono);
@@ -83,8 +82,6 @@
   color: var(--ws-ink);
   font-family: var(--font-mono);
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 [data-part="prose"] {
@@ -100,8 +97,6 @@
   font-family: var(--font-mono);
   font-weight: 500;
   font-style: normal;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 :scope[data-part="folio"] {
@@ -162,7 +157,6 @@
 :scope[data-part="since-row"] .ws-overview-change-name {
   color: var(--ws-ink);
   font-family: var(--font-mono);
-  text-transform: uppercase;
 }
 :scope[data-part="since-row"] .ws-overview-change-outcome { color: var(--ws-ink-soft); }
 :scope[data-part="since-row"] .ws-overview-change-summary { color: var(--ws-owed); }

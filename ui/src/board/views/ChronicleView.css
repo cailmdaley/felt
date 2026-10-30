@@ -92,17 +92,13 @@
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-label);
-  letter-spacing: 0.07em;
+  letter-spacing: var(--track-kicker);
   line-height: var(--leading-solid);
   color: var(--kbn-ink-umber);
   white-space: nowrap;
 }
 .chr-corner-count {
-  font-family: var(--font-serif);
-  font-variant-caps: all-small-caps;
-  font-feature-settings: "smcp", "c2sc";
-  font-size: var(--type-note);
-  letter-spacing: 0.06em;
+  font: var(--type-meta)/var(--leading-solid) var(--font-mono);
   color: var(--kbn-ink-faint);
 }
 
@@ -135,7 +131,6 @@
 .chr-head-month {
   color: var(--kbn-owed);
   font-weight: 600;
-  letter-spacing: 0.02em;
 }
 .chr-head-weekend { background: var(--kbn-plate); }
 .chr-head-week { border-right-color: color-mix(in srgb, var(--kbn-ink-muted) 42%, transparent); }
@@ -146,11 +141,11 @@
   box-shadow: inset 1.5px 0 0 var(--kbn-owed), inset -1.5px 0 0 var(--kbn-owed);
 }
 .chr-head-dow {
-  font-size: var(--type-meta);
+  font-size: var(--type-note);
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.05em;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
 }
 .chr-head-num {
@@ -219,7 +214,7 @@
   font-size: var(--type-title);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.045em;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-ink);
   cursor: pointer;
 }
@@ -242,7 +237,7 @@
   font-size: var(--type-title);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.045em;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-ink);
   outline: none;
 }
@@ -271,7 +266,6 @@
   flex: 1 1 auto;
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  letter-spacing: 0.02em;
   color: var(--kbn-ink-muted);
 }
 .chr-face-close {
@@ -323,8 +317,8 @@
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: var(--type-meta);
-  letter-spacing: 0.06em;
+  font-size: var(--type-note);
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
 }
 .chr-face-stats dd {
@@ -347,7 +341,7 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
   font-weight: 500;
-  letter-spacing: 0.09em;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-you);
 }
 .chr-face-line {
@@ -456,8 +450,8 @@
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  font-size: var(--type-meta);
-  letter-spacing: 0.07em;
+  font-size: var(--type-note);
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-ink-faint);
 }
 
@@ -673,7 +667,7 @@
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
-  letter-spacing: 0.07em;
+  letter-spacing: var(--track-kicker);
   color: var(--kbn-owed);
 }
 .chr-era-text {
@@ -720,7 +714,7 @@
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-note);
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-kicker);
   cursor: pointer;
 }
 .chr-era-cancel {
@@ -784,7 +778,6 @@
   text-align: left;
   font-family: var(--font-serif);
   font-size: var(--type-prose);
-  letter-spacing: 0.006em;
   line-height: var(--chr-row-h);
   color: var(--kbn-ink);
   background: none;
@@ -817,7 +810,6 @@ button.chr-name:hover {
   flex: 0 1 auto;
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  letter-spacing: 0.015em;
   color: var(--kbn-ink-faint);
   max-width: 96px;
   overflow: hidden;
@@ -856,7 +848,6 @@ button.chr-name:hover {
   font-family: var(--font-mono);
   font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
   color: var(--kbn-ink-dun);
 }
 /* The line count, at the gutter's outer edge — the same ledger column one step
@@ -871,7 +862,6 @@ button.chr-name:hover {
   font-family: var(--font-mono);
   font-size: var(--type-meta);
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
   white-space: nowrap;
   color: var(--kbn-ink-faint);
 }

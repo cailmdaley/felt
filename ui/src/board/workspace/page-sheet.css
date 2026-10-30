@@ -13,7 +13,7 @@
 .ws-page-sheet-head { margin: 0 0 12px; flex: none; }
 .ws-page-sheet h2 { font: var(--type-title)/var(--leading-tight) var(--font-serif); margin: 0; }
 .ws-page-sheet-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 24px; }
-.ws-phone-threads h3, .ws-sent-files h3 { margin: 20px 0 8px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); letter-spacing: .06em; text-transform: uppercase; }
+.ws-phone-threads h3, .ws-sent-files h3 { margin: 20px 0 8px; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-reader .ws-phone-threads .kbn-thread-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; min-height: var(--ws-phone-target); padding: 8px; border-top: 1px solid var(--ws-hairline-soft); text-align: left; }
 .ws-reader .ws-phone-threads .kbn-thread-row[aria-current='page'] { background: var(--ws-fill); box-shadow: inset 2px 0 var(--ws-ink); }
 .ws-phone-threads .kbn-thread-name { font: var(--type-label)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); }

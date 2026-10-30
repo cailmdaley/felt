@@ -78,8 +78,8 @@
 
 [data-part="fiber-title"] {
   color: var(--ws-ink);
-  font-variant-caps: small-caps;
-  letter-spacing: 0.035em;
+  font-variant-caps: all-small-caps;
+  letter-spacing: var(--track-kicker);
 }
 [data-part="fiber-title"]::after {
   content: "✦";
@@ -157,7 +157,7 @@
   border-inline-start: 2px solid var(--ws-accent);
   border-block-end-color: var(--ws-hairline-soft);
 }
-:scope[data-part="since-row"] .ws-overview-change-name { color: var(--ws-ink); font-variant-caps: small-caps; }
+:scope[data-part="since-row"] .ws-overview-change-name { color: var(--ws-ink); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 :scope[data-part="since-row"] .ws-overview-change-outcome { color: var(--ws-ink-soft); }
 :scope[data-part="since-row"] .ws-overview-change-summary { color: var(--ws-owed); }
 

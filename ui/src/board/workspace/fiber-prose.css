@@ -1,4 +1,4 @@
-.ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: .06em; }
+.ws-fiber-prose .ws-prose-header { border: 0; margin: 0 0 8px; padding: 0; font: var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-fiber-prose > h1 { font-size: var(--type-display); margin-bottom: 20px; }
 .ws-fiber-prose .kbn-detail-lede { background: transparent; padding-block: 0; font-size: var(--type-title); line-height: var(--leading-tight); margin: 0 0 20px; }
 .ws-outcome-preview { overflow: hidden; margin-bottom: 20px; }
@@ -16,7 +16,7 @@
 .ws-role-ledger { margin: 0 0 20px; }
 .ws-role-caption {
   margin: 0; color: var(--ws-ink-muted);
-  font: var(--type-meta)/var(--leading-tight) var(--font-serif); letter-spacing: .06em; text-transform: uppercase;
+  font: var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
 .ws-role-holds .ws-role-caption { margin-bottom: var(--ws-small-gap); }
 .ws-role-hold-list { list-style: none; margin: 0; padding: 0; }
@@ -39,13 +39,13 @@
 .ws-role-hold[data-column='composted'] .ws-role-dot { border-color: var(--ws-hairline); }
 .ws-role-hold[data-column='composted'] .ws-role-hold-name { color: var(--ws-ink-muted); }
 .ws-role-hold-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ws-role-hold-column { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.ws-role-hold-column { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-mono); white-space: nowrap; }
 .ws-role-hold-outcome {
   grid-column: 2 / -1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
   color: var(--ws-ink-muted); font-weight: 400;
 }
 .ws-role-more {
   margin: var(--ws-small-gap) 0 0; padding: 0; border: 0; background: transparent; cursor: pointer; color: var(--ws-ink-muted);
-  font: var(--type-meta)/var(--leading-tight) var(--font-serif); letter-spacing: .06em; text-transform: uppercase;
+  font: var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
 .ws-role-more:is(:hover, :focus-visible) { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }

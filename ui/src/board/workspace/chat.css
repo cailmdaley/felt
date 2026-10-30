@@ -69,7 +69,7 @@
   --tone: var(--ws-ink-muted);
   flex: none; min-width: 10ch; padding: 1px 0; text-align: center;
   color: var(--tone);
-  font: 500 var(--type-label)/var(--leading-prose) var(--font-serif); font-variant: small-caps; letter-spacing: .04em; white-space: nowrap;
+  font: 500 var(--type-label)/var(--leading-prose) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap;
 }
 .ws-chat-state[hidden] { display: none; }
 .ws-chat-state[data-state='question'] { --tone: var(--ws-state-question); }

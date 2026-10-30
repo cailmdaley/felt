@@ -23,7 +23,7 @@
 .ws-overview .ws-key-selected { outline: 2px solid var(--ws-ink); outline-offset: 3px; border-radius: var(--overview-radius); }
 .ws-overview :focus-visible { outline: var(--ws-focus-width) dashed var(--ws-focus); outline-offset: 3px; border-radius: var(--overview-radius); }
 .ws-overview-meta {
-  font: 400 var(--type-meta)/var(--leading-ui) var(--font-mono); letter-spacing: .02em; color: var(--ws-ink-faint);
+  font: 400 var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-faint);
 }
 .ws-overview-inner { max-width: var(--overview-width); margin: 0 auto; padding: 0 var(--overview-gutter) 80px; animation: ws-overview-rise var(--ws-crossing) var(--ws-ease); transform: translate3d(var(--ws-page-x, 0px), var(--ws-page-y, 0px), 0); }
 @keyframes ws-overview-rise { from { opacity: 0; transform: var(--ws-settle); } }
@@ -32,7 +32,7 @@
 /* The Desk's column-head treatment: small caps with an illuminated initial. */
 .ws-overview-heading h1 {
   margin: 0; color: var(--ws-ink); font: 500 var(--type-display)/var(--leading-display) var(--font-serif);
-  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: .06em;
+  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: var(--track-kicker);
 }
 .ws-overview-heading h1 .kbn-cap { color: var(--ws-fresh); font-size: var(--glyph-initial-heading); vertical-align: -.08em; line-height: var(--leading-initial); margin-right: .04em; }
 .ws-overview-summary { margin-top: 12px; font: var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--ws-ink-soft); }
@@ -40,7 +40,7 @@
 .ws-overview-section-title {
   display: flex; align-items: baseline; gap: 12px; margin: 24px 0 12px;
   font: 500 var(--type-title)/var(--leading-solid) var(--font-serif); color: var(--ws-ink);
-  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: .06em;
+  font-variant-caps: all-small-caps; font-feature-settings: "smcp", "c2sc"; letter-spacing: var(--track-kicker);
   overflow-wrap: anywhere;
 }
 .ws-overview-section-title::after { content: ''; flex: 1; border-top: 1px solid var(--ws-hairline-soft); transform: translateY(-4px); min-width: 16px; }
@@ -73,7 +73,7 @@
 .ws-overview-change-open:hover .ws-overview-change-name { text-decoration: underline; text-decoration-color: var(--ws-hairline); text-underline-offset: .15em; }
 .ws-overview-changes-empty { margin: 8px 0 16px; font-style: italic; color: var(--ws-ink-muted); }
 .ws-overview-latest { margin: 12px 0 0; }
-.ws-overview-latest > summary { cursor: pointer; width: fit-content; min-height: 44px; display: list-item; align-content: center; color: var(--ws-ink-muted); font-variant-caps: all-small-caps; }
+.ws-overview-latest > summary { cursor: pointer; width: fit-content; min-height: 44px; display: list-item; align-content: center; color: var(--ws-ink-muted); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-overview-ribbon { display: flex; gap: 16px; overflow-x: auto; padding: 4px 4px 10px; max-width: 100%; scrollbar-width: thin; }
 .ws-overview-rib { flex: none; width: var(--overview-ribbon-width); text-align: left; display: grid; gap: 6px; align-content: start; }
 .ws-overview-rib .ws-overview-thumb { width: var(--overview-ribbon-width); height: var(--overview-ribbon-height); }
@@ -82,7 +82,7 @@
 .ws-overview-rib-footer { display: flex; justify-content: space-between; gap: 8px; min-width: 0; margin-top: -2px; }
 /* Read lately: one quiet line of names under the files, most recent first. */
 .ws-overview-read { display: flex; align-items: baseline; gap: 4px 20px; flex-wrap: wrap; margin: 4px 0 0; }
-.ws-overview-read-title { margin: 0; font: inherit; color: var(--ws-ink-muted); font-variant-caps: all-small-caps; letter-spacing: .025em; white-space: nowrap; }
+.ws-overview-read-title { margin: 0; font: inherit; color: var(--ws-ink-muted); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); white-space: nowrap; }
 .ws-overview-read-list { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 20px; min-width: 0; }
 .ws-overview .ws-overview-read-item { display: inline-flex; align-items: baseline; gap: 6px; max-width: 32ch; min-height: 36px; text-align: left; }
 .ws-overview-read-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink-soft); }
@@ -92,7 +92,7 @@
 /* Lookup controls live inside the section rule, not in dashboard plates. */
 .ws-overview-controls { display: flex; align-items: center; gap: 24px; margin: 20px 0 0; border-bottom: 1px solid var(--ws-hairline); }
 .ws-overview-lens { display: flex; gap: 20px; min-width: 0; }
-.ws-overview-lens button { position: relative; min-height: var(--ws-phone-target); font: 500 var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: .025em; color: var(--ws-ink-muted); white-space: nowrap; }
+.ws-overview-lens button { position: relative; min-height: var(--ws-phone-target); font: 500 var(--type-label)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); color: var(--ws-ink-muted); white-space: nowrap; }
 .ws-overview-lens button + button::before { content: '·'; position: absolute; left: -12px; color: var(--ws-ink-muted); }
 .ws-overview-lens button:hover { color: var(--ws-ink); }
 .ws-overview-lens button[aria-checked='true'] { color: var(--ws-ink); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 6px; }

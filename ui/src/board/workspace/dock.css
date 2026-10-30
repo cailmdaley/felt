@@ -313,7 +313,7 @@
 }
 .ws-dock .ws-select-group { display: flex; flex-direction: column; gap: 1px; }
 .ws-dock .ws-select-group + .ws-select-group { margin-top: 4px; padding-top: 4px; border-top: var(--ws-line-width) solid var(--ws-hairline-soft); }
-.ws-dock .ws-select-group-label { padding: 2px 8px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: .03em; }
+.ws-dock .ws-select-group-label { padding: 2px 8px; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 .ws-dock .ws-select-option {
   display: block; width: 100%; padding: 4px 8px; border: 0; border-radius: var(--ws-control-radius);
   background: transparent; color: var(--ws-ink); text-align: left; white-space: nowrap; cursor: pointer;

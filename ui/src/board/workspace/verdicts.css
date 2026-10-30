@@ -8,7 +8,7 @@
 .ws-verdict-undo {
   position: absolute; inset: 0; display: flex; align-items: center; gap: var(--ws-small-gap);
   white-space: nowrap; pointer-events: auto; text-box: trim-both cap alphabetic;
-  color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-serif); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
   animation: ws-verdict-leave 600ms ease calc(var(--ws-verdict-left, 4000ms) - 600ms) forwards;
 }
 .ws-verdict-undo[data-fresh] {
@@ -60,7 +60,7 @@
    pill does, with no underline at rest. */
 .ws-fiber-prose .ws-fiber-roles {
   flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-box: trim-both cap alphabetic;
-  color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-tight) var(--font-serif); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-tight) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
 .ws-fiber-roles .ws-fiber-role + .ws-fiber-role::before { content: '·'; margin-inline: var(--ws-small-gap); }
 .ws-fiber-prose .ws-fiber-roles a.kbn-wikilink-live { color: inherit; text-decoration: none; }

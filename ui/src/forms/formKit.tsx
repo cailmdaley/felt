@@ -10,8 +10,8 @@
  * meeting row, the slug receipt, tags, parent picker and kind segments — stays
  * in that form's own sheet.
  *
- * The type scale: 19px title (AppDialog), 17px for the lead field, 15px for
- * controls, 11px uppercase labels.
+ * Type comes from styles/type.css: the lead field at --type-prose, controls at
+ * --type-label, and labels as kickers (all-small-caps at --type-note).
  */
 
 import type { ReactNode } from 'react'
@@ -253,10 +253,10 @@ export function injectFormKitStyles(): void {
       display: inline-flex;
       align-items: baseline;
       gap: 6px;
-      font-size: var(--type-meta);
+      font-size: var(--type-note);
       font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      font-variant-caps: all-small-caps;
+      letter-spacing: var(--track-kicker);
       color: var(--kbn-graphite-soft);
       line-height: var(--leading-solid);
     }
@@ -264,7 +264,6 @@ export function injectFormKitStyles(): void {
       font-family: var(--font-serif);
       font-size: var(--type-meta);
       font-weight: 400;
-      letter-spacing: 0.12em;
       color: var(--kbn-graphite-pale);
       padding: 1px 4px;
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
@@ -321,7 +320,6 @@ export function injectFormKitStyles(): void {
     .form-mono {
       font-family: var(--font-mono);
       font-size: var(--type-note);
-      letter-spacing: 0.02em;
     }
     .form-hint {
       font-size: var(--type-meta);
@@ -413,7 +411,6 @@ export function injectFormKitStyles(): void {
     .form-btn {
       font-family: var(--font-serif);
       font-size: var(--type-label);
-      letter-spacing: 0.01em;
       padding: 6px 18px;
       border-radius: 3px;
       border: 1px solid transparent;
