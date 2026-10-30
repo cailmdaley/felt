@@ -16,3 +16,7 @@ func processStartToken(int) string { return "" }
 func processSignalZero(int) error { return errors.New("unsupported process identity probe") }
 
 func processParent(int) (int, string, bool) { return 0, "", false }
+
+func processTTYDev(int) (int32, bool) { return 0, false }
+
+func processTTYPath(int, int, int32) string { return "" }

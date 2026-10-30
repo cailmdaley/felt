@@ -36,6 +36,42 @@ func processAlive(pid int, start string) bool {
 
 func processSignalZero(pid int) error { return syscall.Kill(pid, 0) }
 
+func processTTYDev(pid int) (int32, bool) {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if err != nil {
+		return 0, false
+	}
+	return linuxTTYDev(string(b))
+}
+
+// linuxTTYDev reads tty_nr (field 7) after the final closing parenthesis of
+// comm, which may itself contain spaces and parentheses. The suffix starts
+// at field 3 (state), so tty_nr is index 4. Zero means no controlling tty.
+func linuxTTYDev(stat string) (int32, bool) {
+	closeParen := strings.LastIndexByte(stat, ')')
+	if closeParen < 0 {
+		return 0, false
+	}
+	fields := strings.Fields(stat[closeParen+1:])
+	if len(fields) <= 4 {
+		return 0, false
+	}
+	dev, err := strconv.ParseInt(fields[4], 10, 32)
+	return int32(dev), err == nil && dev != 0
+}
+
+func processTTYPath(pid int, euid int, dev int32) string {
+	for _, fd := range []string{"0", "1", "2"} {
+		path, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/fd/" + fd)
+		if err == nil && (strings.HasPrefix(path, "/dev/pts/") || strings.HasPrefix(path, "/dev/tty")) && matchesTTY(path, euid, dev) {
+			return path
+		}
+	}
+	// An agent can redirect all three standard streams while retaining its
+	// controlling terminal, so the fd links are only a fast path.
+	return findTTY("/dev/pts/*", euid, dev)
+}
+
 func processStartToken(pid int) string {
 	start, _ := linuxProcessStartTime(pid)
 	return start

@@ -30,7 +30,8 @@ func processAlive(pid int, start string) bool {
 // kinfoProc reads struct kinfo_proc for pid through sysctl
 // {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid}. The layout is the 64-bit one
 // shared by amd64 and arm64: 648 bytes, p_starttime at 0, p_comm at 243,
-// e_ppid at 560. A pid with no process returns zero bytes.
+// e_ppid at 560, e_tdev (int32, NODEV = -1) at 572. A pid with no process
+// returns zero bytes.
 func kinfoProc(pid int) ([]byte, bool) {
 	if pid <= 0 {
 		return nil, false
@@ -46,6 +47,19 @@ func kinfoProc(pid int) ([]byte, bool) {
 }
 
 func processSignalZero(pid int) error { return syscall.Kill(pid, 0) }
+
+func processTTYDev(pid int) (int32, bool) {
+	b, ok := kinfoProc(pid)
+	if !ok {
+		return 0, false
+	}
+	dev := int32(binary.LittleEndian.Uint32(b[572:576]))
+	return dev, dev != -1
+}
+
+func processTTYPath(_ int, euid int, dev int32) string {
+	return findTTY("/dev/ttys*", euid, dev)
+}
 
 func processStartToken(pid int) string {
 	b, ok := kinfoProc(pid)
