@@ -188,3 +188,17 @@ func TestStatusTableDoesNotTreatUnknownOrColdOwnerAsEmpty(t *testing.T) {
 		})
 	}
 }
+
+func TestThreadIncompleteOwnerCacheReportsUnknown(t *testing.T) {
+	for _, cache := range []string{"cold", "partial"} {
+		node := ThreadNode{ID: "task", State: "Unknown", Stale: true, OwnerCacheState: cache}
+		rows, _ := threadRows([]ThreadNode{node}, true)
+		if len(rows) != 1 || rows[0].HostUnreachable || rows[0].OwnerCacheState != cache || rows[0].stateLabel() != "Unknown · owner cache "+cache {
+			t.Fatalf("incomplete owner cache mislabeled: %#v", rows)
+		}
+	}
+	row := threadRow{State: "Unknown", Stale: true}
+	if got := row.stateLabel(); strings.Contains(got, "unreachable") || strings.Contains(got, "local copy") {
+		t.Fatalf("staleness invented an outage: %s", got)
+	}
+}

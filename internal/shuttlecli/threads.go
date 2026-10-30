@@ -16,7 +16,7 @@ import (
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
-var threadStates = []string{"Waiting", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
+var threadStates = []string{"Waiting", "Unknown", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
 
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
@@ -30,6 +30,7 @@ type ThreadNode struct {
 	Host            string       `json:"host,omitempty"`
 	Column          string       `json:"column"`
 	State           string       `json:"state"`
+	OwnerCacheState string       `json:"owner_cache_state,omitempty"`
 	Stale           bool         `json:"stale,omitempty"`
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Outcome         string       `json:"outcome,omitempty"`
@@ -48,6 +49,7 @@ type threadTree struct {
 	Name            string       `json:"name,omitempty"`
 	FeltStore       string       `json:"felt_store,omitempty"`
 	PendingResults  int          `json:"pending_results,omitempty"`
+	OwnerCacheState string       `json:"owner_cache_state,omitempty"`
 	Stale           bool         `json:"stale,omitempty"`
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Threads         []ThreadNode `json:"threads"`
@@ -64,6 +66,7 @@ type threadRow struct {
 	Host            string      `json:"host,omitempty"`
 	Column          string      `json:"column"`
 	State           string      `json:"state"`
+	OwnerCacheState string      `json:"owner_cache_state,omitempty"`
 	Stale           bool        `json:"stale,omitempty"`
 	HostUnreachable bool        `json:"host_unreachable,omitempty"`
 	Outcome         string      `json:"outcome,omitempty"`
@@ -94,6 +97,8 @@ The roster comes from this host's daemon (GET /api/v1/threads/<id>), which
 classifies threads by the board's rules using each owner's feed. A local copy
 is used only while its owner is unavailable and reads "local copy; owner
 unreachable" in every state; --json carries stale and host_unreachable.
+A reachable owner's incomplete cache reads Unknown with its cache state,
+without claiming that the host is unreachable.
 A thread is Working when its worker runs on this host or on a remote the daemon
 polls fresh, and Armed when it is active with no worker running. "N waiting for its next worker" counts the
 thread results and messages queued for a constitution with no live worker,
@@ -112,14 +117,15 @@ board column and pending_results.`,
 			rows, archived := threadRows(tree.Threads, all)
 			if a.json {
 				return a.outputJSON(map[string]any{
-					"stale":            tree.Stale,
-					"host_unreachable": tree.HostUnreachable,
-					"fiber_id":         tree.FiberID,
-					"uid":              tree.UID,
-					"name":             tree.Name,
-					"pending_results":  tree.PendingResults,
-					"threads":          rows,
-					"archived":         archived,
+					"owner_cache_state": tree.OwnerCacheState,
+					"stale":             tree.Stale,
+					"host_unreachable":  tree.HostUnreachable,
+					"fiber_id":          tree.FiberID,
+					"uid":               tree.UID,
+					"name":              tree.Name,
+					"pending_results":   tree.PendingResults,
+					"threads":           rows,
+					"archived":          archived,
 				})
 			}
 			a.printThreads(tree, rows, archived, all)
@@ -208,7 +214,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, OwnerCacheState: n.OwnerCacheState, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -246,8 +252,12 @@ func (a *app) printThreads(tree *threadTree, rows []threadRow, archived int, all
 	if tree.PendingResults > 0 {
 		header += fmt.Sprintf("  (%s)", waitingLabel(tree.PendingResults))
 	}
-	if tree.Stale {
+	if tree.OwnerCacheState != "" {
+		header += " [owner cache " + tree.OwnerCacheState + "]"
+	} else if tree.HostUnreachable {
 		header += " [local copy; owner unreachable]"
+	} else if tree.Stale {
+		header += " [owner state stale]"
 	}
 	fmt.Fprintln(out, header)
 	if len(rows) == 0 && archived == 0 {
@@ -292,10 +302,14 @@ func printThreadRow(a *app, row threadRow, depth int) {
 // (Shuttle.Threads.state_label/1).
 func (row threadRow) stateLabel() string {
 	switch {
-	case row.Stale:
+	case row.OwnerCacheState != "":
+		return row.State + " · owner cache " + row.OwnerCacheState
+	case row.Stale && row.HostUnreachable:
 		return row.State + " · local copy; owner unreachable"
 	case row.HostUnreachable:
 		return row.State + " · host unreachable"
+	case row.Stale:
+		return row.State + " · owner state stale"
 	case row.BlockedOn != "":
 		return row.State + " · ⏸ until " + row.Until
 	}
