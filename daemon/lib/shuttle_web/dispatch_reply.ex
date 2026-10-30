@@ -37,16 +37,6 @@ defmodule ShuttleWeb.DispatchReply do
   def render(fiber_id, {:error, {:fiber_not_found, message}}),
     do: {404, %{dispatched: false, reason: "fiber_not_found", fiber_id: fiber_id, error: message}}
 
-  def render(fiber_id, {:error, {:store_sync_failed, errors}}),
-    do:
-      {503,
-       %{
-         dispatched: false,
-         reason: "store_sync_failed",
-         fiber_id: fiber_id,
-         error: inspect(errors)
-       }}
-
   def render(fiber_id, {:error, {:backend_not_ready, message}}) do
     {503,
      %{

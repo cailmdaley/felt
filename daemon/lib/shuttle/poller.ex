@@ -2114,10 +2114,6 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp transition_call({:sync_missing_stores, stores}, _from, state) do
-    {:reply, Shuttle.StoreSync.sync(stores), state}
-  end
-
   defp transition_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
@@ -5792,18 +5788,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  @doc "Pull missing documents through the Poller's lifecycle serialization boundary."
-  def sync_missing_stores(stores) do
-    server = GenServer.whereis(Shuttle.Env.server(__MODULE__))
-
-    if is_nil(server) or server == self() do
-      Shuttle.StoreSync.sync(stores)
-    else
-      GenServer.call(server, {:sync_missing_stores, stores}, :infinity)
-    end
-  end
-
-  # Runtime reads stay local; only interactive requests pull a missing fiber.
+  # Runtime reads stay local.
   @doc false
   def fetch_fiber_full(fiber_id, state) do
     host = owning_store(fiber_id, state)
@@ -5822,17 +5807,14 @@ defmodule Shuttle.Poller do
         {:ok, fiber}
 
       {:error, reason} ->
-        case Shuttle.FeltStores.resolve_with_sync(fiber_id, state.felt_stores) do
+        case Shuttle.FeltStores.resolve_fiber(fiber_id, state.felt_stores) do
           {:ok, %{store: store, fiber_id: address}} ->
             with {:ok, output} <- run_shuttle(store, state.runner, ["show", address, "--json"]),
                  {:ok, fiber} <- Jason.decode(output),
                  do: {:ok, fiber}
 
           {:error, :not_found} ->
-            {:error, {:fiber_not_found, Shuttle.FeltStores.missing_after_sync(fiber_id)}}
-
-          {:error, :sync_failed, errors} ->
-            {:error, {:store_sync_failed, errors}}
+            {:error, {:fiber_not_found, "fiber not found on #{state.own_host_id}: #{fiber_id}"}}
 
           _ ->
             {:error, reason}

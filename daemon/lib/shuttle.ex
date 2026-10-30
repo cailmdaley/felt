@@ -184,7 +184,6 @@ defmodule Shuttle.Application do
       # fiber, and among concurrent misses for a store's listing.
       Shuttle.SingleFlight,
       Shuttle.RuntimeCache,
-      Shuttle.StoreSync,
       Shuttle.FiberIndex,
       # Owns the ETS tables of fiber addresses, polled and learned, so a read
       # by UID goes through a known `{store, id}` instead of a store walk.

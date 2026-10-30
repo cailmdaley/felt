@@ -5,137 +5,62 @@ defmodule ShuttleWeb.CrossHostSyncControllerTest do
   @endpoint ShuttleWeb.Endpoint
   @moduletag :tmp_dir
 
-  defmodule CountingRunner do
-    def cmd("felt", ["-C", _store, "sync", "--fetch-timeout", "5s"] = args, opts) do
-      Agent.update(Shuttle.Env.app(:sync_counter), &(&1 + 1))
-      Shuttle.Runner.Default.cmd("felt", args, opts)
+  defmodule NoSyncRunner do
+    def cmd("felt", args, opts) do
+      if "sync" in args, do: Agent.update(Shuttle.Env.app(:sync_counter), &(&1 + 1))
+      Shuttle.Runner.Default.cmd("felt", args, Keyword.put_new(opts, :stderr_to_stdout, true))
     end
 
-    def cmd(executable, args, opts) when executable in ["felt", "shuttle"],
-      do: Shuttle.Runner.Default.cmd(executable, args, opts)
-
-    def cmd("tmux", _args, _opts), do: {"no server running on /tmp/test-tmux", 1}
-    def cmd("ps", _args, _opts), do: {"", 0}
-    def cmd(_executable, _args, _opts), do: {"", 1}
+    def cmd(executable, args, opts), do: Shuttle.Runner.Default.cmd(executable, args, opts)
   end
 
   setup %{tmp_dir: root} do
-    origin = Path.join(root, "origin.git")
-    writer = Path.join(root, "writer")
     owner = Path.join(root, "owner")
-    git!(root, ["init", "--bare", origin])
-    git!(root, ["clone", origin, writer])
-    File.mkdir_p!(Path.join(writer, ".felt"))
-    File.write!(Path.join(writer, ".felt/.keep"), "")
-    git!(writer, ["add", "."])
-    git!(writer, ["commit", "-m", "Initialize store"])
-    git!(writer, ["push", "-u", "origin", "HEAD"])
-    git!(root, ["clone", origin, owner])
-    # The fiber is published only after the owner's clone, reproducing store lag.
-    File.mkdir_p!(Path.join(writer, ".felt/work/task"))
-
-    File.write!(Path.join(writer, ".felt/work/task/task.md"), """
-    ---
-    id: 01J00000000000000000000000
-    name: Remote work
-    status: open
-    shuttle:
-      kind: oneshot
-      host: worker
-      agent: claude-opus
-      project_dir: #{owner}
-    ---
-
-    Work from the owning host.
-    """)
-
-    git!(writer, ["add", "."])
-    git!(writer, ["commit", "-m", "Publish remote thread"])
-    git!(writer, ["push"])
+    File.mkdir_p!(Path.join(owner, ".felt"))
+    File.write!(Path.join(owner, ".felt/.keep"), "")
     counter = start_supervised!({Agent, fn -> 0 end})
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", owner)
-    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "worker")
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", Path.join(root, "shuttle-data"))
     Shuttle.Test.Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(root, "sessions.jsonl"))
     Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
-    Shuttle.Test.Env.put_app_env(:felt_runner, CountingRunner)
+    Shuttle.Test.Env.put_app_env(:felt_runner, NoSyncRunner)
     Shuttle.Test.Env.put_app_env(:sync_counter, counter)
     {:ok, owner: owner, counter: counter}
   end
 
-  for action <- ["resume", "reopen", "set-outcome"] do
-    test "#{action} pulls an absent published fiber before writing", %{
-      owner: owner,
-      counter: counter
-    } do
-      action = unquote(action)
-      params = %{"action" => action, "fiber" => "work/task", "outcome" => "Done"}
-      conn = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(params))
-      assert conn.status == 200, conn.resp_body
-      content = File.read!(Path.join(owner, ".felt/work/task/task.md"))
+  test "missing fiber reads and lifecycle requests return host-qualified not-found without syncing",
+       %{
+         counter: counter,
+         owner: owner
+       } do
+    conn = get(api_conn(), "/api/v1/fibers/absent")
+    assert conn.status == 404
+    assert Jason.decode!(conn.resp_body)["error"] =~ "fiber not found on test-host: absent"
 
-      if action == "set-outcome",
-        do: assert(content =~ "outcome: Done"),
-        else: assert(content =~ "status: active")
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "resume", "fiber" => "absent"})
+      )
 
-      assert Agent.get(counter, & &1) == 1
-    end
-  end
+    assert conn.status == 404
+    assert conn.resp_body =~ "fiber not found on test-host: absent"
 
-  test "show pulls once and missing requests share the cooldown", %{counter: counter} do
-    conn = get(api_conn(), "/api/v1/fibers/work/task?body=true")
-    assert conn.status == 200, conn.resp_body
-
-    assert [%{"fiber" => %{"name" => "Remote work", "body" => body}}] =
-             Jason.decode!(conn.resp_body)["fibers"]
-
-    assert body =~ "Work from the owning host."
-
-    for id <- ["absent-one", "absent-two"] do
-      conn = get(api_conn(), "/api/v1/fibers/#{id}")
-      assert conn.status == 404, conn.resp_body
-      assert Jason.decode!(conn.resp_body)["error"] =~ "fiber not found on test-host after sync"
-    end
-
-    assert Agent.get(counter, & &1) == 1
-  end
-
-  test "missing lifecycle requests return a clear 404 after one pull", %{counter: counter} do
-    for action <- ["resume", "reopen", "close"] do
-      conn =
-        post(
-          api_conn(),
-          "/api/v1/lifecycle",
-          Jason.encode!(%{"action" => action, "fiber" => "absent"})
-        )
-
-      assert conn.status == 404, conn.resp_body
-      assert conn.resp_body =~ "fiber not found on test-host after sync"
-    end
-
-    assert Agent.get(counter, & &1) == 1
-  end
-
-  test "dispatch pulls on a miss inside the real Poller and reports absent fibers", %{
-    owner: owner,
-    counter: counter
-  } do
     {:ok, poller} =
       Shuttle.Test.PollerHelpers.start_poller!(
-        runner: CountingRunner,
+        runner: NoSyncRunner,
         felt_stores: [owner],
         own_host_id: "test-host",
         poll_interval_ms: 600_000
       )
 
     Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
-    conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => "work/task"}))
-    assert conn.status == 422, conn.resp_body
-    assert File.exists?(Path.join(owner, ".felt/work/task/task.md"))
     conn = post(api_conn(), "/api/v1/dispatch", Jason.encode!(%{"fiber_id" => "absent"}))
-    assert conn.status == 404, conn.resp_body
-    assert Jason.decode!(conn.resp_body)["error"] =~ "fiber not found on test-host after sync"
-    assert Agent.get(counter, & &1) == 1
+    assert conn.status == 404
+    assert Jason.decode!(conn.resp_body)["error"] =~ "fiber not found on test-host: absent"
+    assert Agent.get(counter, & &1) == 0
   end
 
   test "project directory validation runs in the owner environment", %{owner: owner} do
@@ -188,16 +113,5 @@ defmodule ShuttleWeb.CrossHostSyncControllerTest do
 
     assert conn.status == 400
     assert [_only_forward] = client.posts()
-  end
-
-  defp git!(cwd, args) do
-    {output, status} =
-      System.cmd("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid" | args],
-        cd: cwd,
-        stderr_to_stdout: true
-      )
-
-    assert status == 0, output
-    output
   end
 end

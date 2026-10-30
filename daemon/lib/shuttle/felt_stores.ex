@@ -323,34 +323,17 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  @doc "Resolve an interactive lifecycle request, pulling its store on a miss."
+  @doc "Resolve an interactive lifecycle request from the local store."
   def resolve_request(identifier) do
-    case resolve_with_sync(identifier) do
+    case resolve_fiber(identifier) do
       {:ok, resolved} -> {:ok, resolved}
-      {:error, :not_found} -> {:error, :not_found, missing_after_sync(identifier)}
+      {:error, :not_found} -> {:error, :not_found, missing_on_host(identifier)}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
-      {:error, :sync_failed, errors} -> {:error, :timeout, "felt sync failed: #{inspect(errors)}"}
     end
   end
 
-  @doc "Resolve a request's missing fiber after one bounded, rate-limited store pull."
-  def resolve_with_sync(identifier, stores \\ configured_stores()) do
-    case resolve_fiber(identifier, stores) do
-      {:error, :not_found} ->
-        errors = Shuttle.Poller.sync_missing_stores(stores)
-
-        case resolve_fiber(identifier, stores) do
-          {:error, :not_found} when errors != [] -> {:error, :sync_failed, errors}
-          result -> result
-        end
-
-      result ->
-        result
-    end
-  end
-
-  def missing_after_sync(identifier),
-    do: "fiber not found on #{Shuttle.Poller.own_host_id()} after sync: #{identifier}"
+  def missing_on_host(identifier),
+    do: "fiber not found on #{Shuttle.Poller.own_host_id()}: #{identifier}"
 
   @doc """
   As `resolve_fiber/1`, but resolves against an explicit `stores` list

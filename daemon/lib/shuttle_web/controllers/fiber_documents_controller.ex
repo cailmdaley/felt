@@ -205,7 +205,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
   # it, a direct felt read instead of a walk of the store (`Shuttle.FiberAddresses`).
   defp show_local(conn, id, with_body?, routed?) do
     case Shuttle.SingleFlight.run({:fiber_get, id, with_body?}, fn ->
-           get_after_sync(id, with_body?)
+           get_local(id, with_body?)
          end) do
       {:ok, body} ->
         case owning_remote(body, routed?) do
@@ -214,7 +214,7 @@ defmodule ShuttleWeb.FiberDocumentsController do
         end
 
       {:error, :not_found} ->
-        conn |> put_status(404) |> json(%{error: Shuttle.FeltStores.missing_after_sync(id)})
+        conn |> put_status(404) |> json(%{error: Shuttle.FeltStores.missing_on_host(id)})
 
       {:error, errors} ->
         conn
@@ -223,18 +223,12 @@ defmodule ShuttleWeb.FiberDocumentsController do
     end
   end
 
-  defp get_after_sync(id, with_body?) do
+  defp get_local(id, with_body?) do
     opts = [with_body: with_body?, address: Shuttle.FiberAddresses.lookup(id)]
 
     case Shuttle.FiberDocuments.get(id, opts) do
       {:ok, %{fibers: []}} ->
-        errors = Shuttle.Poller.sync_missing_stores(Shuttle.FeltStores.configured_stores())
-
-        case Shuttle.FiberDocuments.get(id, opts) do
-          {:ok, %{fibers: []}} when errors == [] -> {:error, :not_found}
-          {:ok, %{fibers: []}} -> {:error, inspect(errors)}
-          result -> result
-        end
+        {:error, :not_found}
 
       result ->
         result
