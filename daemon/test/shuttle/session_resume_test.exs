@@ -263,6 +263,11 @@ defmodule Shuttle.SessionResumeTest do
 
       body = File.read!(script)
       assert body =~ "unset ROOTDIR"
+
+      assert body =~
+               ~S([ -n "${TMUX_PANE:-}" ] && tmux set-option -p -t "$TMUX_PANE" allow-passthrough on 2>/dev/null || true)
+
+      assert {"", 0} = System.cmd("bash", ["-n", "-c", body])
       assert body =~ "tmux list-clients -t '#{tmux}'"
       assert body =~ "--resume '#{@claude}' || {"
       File.rm(script)
@@ -301,6 +306,8 @@ defmodule Shuttle.SessionResumeTest do
       body = rex_script()
       assert body =~ "unset TMUX TMUX_PANE"
       assert body =~ "export PATH="
+      refute body =~ "allow-passthrough"
+      assert {"", 0} = System.cmd("bash", ["-n", "-c", body])
       assert body =~ "--session '#{@pi}'"
       refute body =~ "list-clients"
       refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))

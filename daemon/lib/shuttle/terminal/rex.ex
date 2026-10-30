@@ -514,6 +514,7 @@ defmodule Shuttle.Terminal.Rex do
 
     %{
       wait_for_viewer: "",
+      passthrough: "",
       submit_key:
         "( sleep 2; #{executable} #{flags} send-key -s \"$REX_SESSION\" -b \"$REX_BLOCK\" enter ) &\n",
       env:

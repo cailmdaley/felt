@@ -947,7 +947,12 @@ defmodule Shuttle.DispatchIntegrationTest do
              )
 
     script = read_run_script()
-    [resume_half | _] = String.split(script, " || ", parts: 2)
+
+    [resume_half | _] =
+      script
+      |> String.replace(Dispatcher.passthrough_block(), "")
+      |> String.split(" || ", parts: 2)
+
     assert resume_half =~ "pi"
     assert resume_half =~ "--session 'pi-resume-session-444'"
     assert resume_half =~ "Mode: resume"

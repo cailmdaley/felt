@@ -2349,7 +2349,7 @@ defmodule Shuttle.Dispatcher do
     set -e
     trap 'rm -f "$0"' EXIT
 
-    #{snippets.env}#{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{fiber_key_block}#{wait_for_client_block}
+    #{snippets.env}#{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{snippets.passthrough}#{fiber_key_block}#{wait_for_client_block}
     echo ""
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"
 
@@ -2414,6 +2414,12 @@ defmodule Shuttle.Dispatcher do
           RELEASE_BOOT_SCRIPT_CLEAN RELEASE_DISTRIBUTION RELEASE_PROG RELEASE_COMMAND
     unset AI_AGENT PI_SESSION_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID
     """
+  end
+
+  @doc false
+  def passthrough_block do
+    ~S([ -n "${TMUX_PANE:-}" ] && tmux set-option -p -t "$TMUX_PANE" allow-passthrough on 2>/dev/null || true) <>
+      "\n"
   end
 
   @doc false

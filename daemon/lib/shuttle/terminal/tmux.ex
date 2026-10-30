@@ -180,7 +180,8 @@ defmodule Shuttle.Terminal.Tmux do
     %{
       wait_for_viewer: wait,
       submit_key: ~s|( sleep 2; tmux send-keys -t '#{name}' Enter ) &\n    |,
-      env: ""
+      env: "",
+      passthrough: Shuttle.Dispatcher.passthrough_block()
     }
   end
 

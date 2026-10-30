@@ -1679,6 +1679,48 @@ defmodule Shuttle.DispatcherTest do
     refute prompt =~ "Exit Contract"
   end
 
+  @tag :tmp_dir
+  test "tmux dispatch enables pane passthrough safely, including headless workers", %{
+    tmp_dir: dir
+  } do
+    line =
+      ~S([ -n "${TMUX_PANE:-}" ] && tmux set-option -p -t "$TMUX_PANE" allow-passthrough on 2>/dev/null || true)
+
+    script =
+      Dispatcher.build_run_script("tests/haiku", "true", "pi",
+        terminal: Shuttle.Terminal.Tmux,
+        headless: true
+      )
+
+    assert script =~ line
+    assert :binary.match(script, "unset ROOTDIR") < :binary.match(script, line)
+    assert {"", 0} = System.cmd("bash", ["-n", "-c", script])
+
+    File.write!(
+      Path.join(dir, "tmux"),
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RECEIPT\"\nexit 1\n"
+    )
+
+    File.chmod!(Path.join(dir, "tmux"), 0o755)
+    receipt = Path.join(dir, "receipt")
+    probe = "set -e\n" <> Dispatcher.passthrough_block() <> "echo survived"
+    env = [{"PATH", dir}, {"RECEIPT", receipt}]
+
+    assert {"survived\n", 0} =
+             System.cmd("/bin/bash", ["-c", probe], env: [{"TMUX_PANE", nil} | env])
+
+    refute File.exists?(receipt)
+
+    assert {"survived\n", 0} =
+             System.cmd("/bin/bash", ["-c", probe], env: [{"TMUX_PANE", "%12"} | env])
+
+    assert File.read!(receipt) == "set-option\n-p\n-t\n%12\nallow-passthrough\non\n"
+
+    rex = Dispatcher.build_run_script("tests/haiku", "true", "pi", terminal: Shuttle.Terminal.Rex)
+    refute rex =~ "allow-passthrough"
+    assert {"", 0} = System.cmd("bash", ["-n", "-c", rex])
+  end
+
   test "build_run_script scrubs the daemon's own release ERTS from the worker env" do
     root = "/opt/shuttle it's/bin/rel"
 

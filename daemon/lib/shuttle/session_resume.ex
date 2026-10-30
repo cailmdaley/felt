@@ -301,7 +301,7 @@ defmodule Shuttle.SessionResume do
     #!/bin/bash
     trap 'rm -f "$0"' EXIT
 
-    #{snippets.env}#{Dispatcher.erts_scrub_block()}#{snippets.wait_for_viewer}
+    #{snippets.env}#{Dispatcher.erts_scrub_block()}#{snippets.passthrough}#{snippets.wait_for_viewer}
     #{plan.command} || {
       status=$?
       echo ""
