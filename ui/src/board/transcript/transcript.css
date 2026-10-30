@@ -138,7 +138,7 @@
 .ws-dock .ws-transcript-sessions { display: contents; }
 .ws-dock .ws-transcript-sessions .kbn-ctl-history-toggle { flex: none; width: auto; margin-left: auto; }
 .ws-dock .ws-transcript-sessions .kbn-ctl-sessions { flex: 0 0 100%; order: 1; min-width: 0; padding-bottom: 6px; }
-.ws-dock .ws-transcript-sessions .kbn-ctl-history-chevron::before { content: '▾'; font-size: var(--glyph-small); }
+.kbn-ctl-history-chevron { font-size: var(--glyph-small); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-note {
   margin: 6px 0 0;
   color: var(--ws-ink-muted);
@@ -559,7 +559,7 @@
 .ws-transcript-message-time { order: 1; flex: 0 0 auto; margin-left: auto; font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
 /* With a time, the chevron rides on it at the row's right edge. */
 .ws-transcript-message-toggle:has(> .ws-transcript-message-time)::after { display: none; }
-.ws-transcript-message-time::before { content: '⌄'; margin-right: 5px; color: var(--ws-ink-faint, var(--ws-ink-muted)); font-family: var(--font-serif); }
+.ws-transcript-message-time::before { content: '⌄'; position: relative; top: -0.08em; margin-right: 5px; color: var(--ws-ink-faint, var(--ws-ink-muted)); font-family: var(--font-serif); }
 .ws-transcript-message-toggle[data-expanded='true'] > .ws-transcript-message-time::before { content: '⌃'; }
 .ws-transcript-message-detail { margin: 5px 0 1px; padding-left: 9px; border-left: 1px solid var(--ws-hairline); color: var(--ws-ink-soft); }
 .ws-transcript-message-detail[hidden], .ws-transcript-message-thread-state[hidden], .ws-transcript-message-text[hidden], .ws-transcript-message-source[hidden], .ws-transcript-message-command[hidden], .ws-transcript-message-outcome[hidden] { display: none; }

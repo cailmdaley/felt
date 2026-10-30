@@ -34,9 +34,7 @@
   margin: 0; color: var(--ws-ink); font: 500 var(--type-display)/var(--leading-display) var(--font-serif);
   font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker);
 }
-.ws-overview-heading h1 .kbn-cap { color: var(--ws-fresh); vertical-align: -.08em; line-height: var(--leading-initial); margin-right: .04em; }
-.ws-overview-heading h1 .kbn-cap::first-letter,
-.ws-overview-heading h1 .kbn-cap::before { font-size: var(--glyph-initial-heading); }
+.ws-overview-heading h1 .kbn-cap { color: var(--ws-fresh); font-size: var(--glyph-initial-heading); vertical-align: -.08em; line-height: var(--leading-initial); margin-right: .04em; }
 .ws-overview-summary { margin-top: 12px; font: var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--ws-ink-soft); }
 .ws-overview-hostmark { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-overview-section-title {

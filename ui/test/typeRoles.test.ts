@@ -27,6 +27,14 @@ const KEYWORD = /^(inherit|unset|initial|revert)$/
 const FAMILY_NAME = /\b(EB Garamond|Garamond|Georgia|IBM Plex|Plex Mono|SF Mono|Menlo|Monaco|Consolas|Courier|ui-monospace|ui-serif|ui-sans-serif|system-ui|-apple-system|BlinkMacSystemFont|Helvetica|Arial|sans-serif|monospace|cursive|fantasy)\b|(?<![\w-])serif\b/
 /** Pseudo-elements that draw a mark rather than text. */
 const MARK_PSEUDO_ELEMENTS = new Set(['before', 'after', 'marker', 'first-letter'])
+/** A glyph token may size only the board's named illuminated initial spans. */
+const GLYPH_TEXT_SELECTORS = new Set([
+  '.kbn-cap',
+  '.kbn-col-title .kbn-cap',
+  '.kbn-view-title .kbn-cap',
+  '.ws-overview-heading h1 .kbn-cap',
+  '.kbn-ctl-history-chevron',
+])
 
 type Prop = 'size' | 'family' | 'leading' | 'font' | 'track' | 'case' | 'caps' | 'feature'
 const PROPS: Record<string, Prop> = {
@@ -378,7 +386,7 @@ function violations(file: string, source: string, defined: Set<string>): string[
     const caps = [...get('caps').map(d => d.value), ...fonts.flatMap(f => f.caps ? [f.caps] : [])]
 
     // A glyph token sizes a mark, never text.
-    if (sizes.some(s => GLYPH.test(s)) && !markSelector(b.selector)) at(b.offset, `glyph token on text: ${b.selector}`)
+    if (sizes.some(s => GLYPH.test(s)) && !markSelector(b.selector) && !GLYPH_TEXT_SELECTORS.has(b.selector)) at(b.offset, `glyph token on text: ${b.selector}`)
 
     // A line box from geometry is for a box: a mark, or one line that cannot wrap.
     const nowrap = /white-space\s*:\s*(nowrap|pre)(?![\w-])/.test(b.body)

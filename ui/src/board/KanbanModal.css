@@ -39,6 +39,7 @@
   color: var(--kbn-you);
   position: relative;
   display: inline-block;
+  font-size: var(--glyph-initial);
   line-height: var(--leading-initial);
   letter-spacing: 0;
   /* Sits the cap on the body baseline rather than floating slightly
@@ -50,11 +51,9 @@
   font-variant: normal;
   font-weight: 500;
 }
-.kbn-cap::first-letter { font-size: var(--glyph-initial); }
 .kbn-cap::before {
   content: attr(data-letter);
   font-family: var(--font-initials-frill);
-  font-size: var(--glyph-initial);
   /* EBGI F1 is pure frill/framing — the F1 glyph alone isn't a
      readable letter, just the decorative flourishes that surround
      the position a letter would occupy. So this layer sits ON TOP
@@ -1267,12 +1266,11 @@
      cap at 0.73em × 38px → ~28px. Ratio-locked to the body size in
      em, so raising `.kbn-col-title`'s font-size carries the
      illumination up with the word. */
+  font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
   line-height: var(--leading-initial);
 }
-.kbn-col-title .kbn-cap::first-letter,
-.kbn-col-title .kbn-cap::before { font-size: var(--glyph-initial-heading); }
 /* Awaiting title bodies stay default iron-gall too — only the dropcap
    carries the column pigment, like a rubricated initial on otherwise plain
    manuscript text. The pigment is the dropcap's job; the body is the body's. */
@@ -2070,7 +2068,6 @@
     box-sizing: border-box;
     min-height: var(--ws-phone-target, 44px);
     padding: 7px 9px;
-    font-size: var(--type-note);
   }
   .kbn-viewtab-hotkey { display: none; }
   .kbn-viewtabs-views { gap: 4px; }
@@ -2359,6 +2356,10 @@
      its own thumb-sized line, and the band reads as a list of offices. */
   .kbn-roles-row { flex-direction: column; align-items: stretch; padding: 0 8px 8px; }
   .kbn-role-chip { max-width: none; width: 100%; min-height: 44px; box-sizing: border-box; }
+}
+
+@media (max-width: 340px) {
+  .kbn-viewtab { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
 }
 
 /* ── Touch, wherever it happens ────────────────────────────────────────────

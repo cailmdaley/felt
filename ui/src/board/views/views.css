@@ -65,12 +65,11 @@
   margin: 0;
 }
 .kbn-view-title .kbn-cap {
+  font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
   line-height: var(--leading-initial);
 }
-.kbn-view-title .kbn-cap::first-letter,
-.kbn-view-title .kbn-cap::before { font-size: var(--glyph-initial-heading); }
 
 .kbn-view-body {
   flex: 1 1 auto;
