@@ -254,6 +254,8 @@
   .ws-chat-acts { justify-content: flex-start; }
   .ws-chat-acts > .ws-chat-settings { width: 36px; height: var(--ws-phone-target); }
   .ws-chat-acts > .ws-chat-refs { margin-left: 0; }
+  /* The verbs never squeeze under ⚙: their overflow is what sends ⚙ to the title row. */
+  .ws-chat-acts > .kbn-ctl-verdict { flex: none; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
   .ws-chat-head > .ws-chat-leave { align-self: center; }
   .ws-chat-title { -webkit-line-clamp: 2; }
