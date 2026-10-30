@@ -5,9 +5,12 @@ import { buildChannel, channelLead } from './documents.js'
 
 const viewers: HTMLElement[] = []
 const disposed: HTMLElement[] = []
+const navigators = new Map<HTMLElement, (href: string) => void>()
+const navigateOf = (el: HTMLElement) => navigators.get(el)!
 vi.mock('../FileViewerPanel.js', () => ({
-  buildFileViewer: (_base: string, path: string, owner: string) => {
-    const el = document.createElement('div'); el.dataset.path = path; el.dataset.owner = owner; viewers.push(el); return el
+  buildFileViewer: (_base: string, path: string, owner: string, _load: unknown, _text: unknown, options: { onNavigate?: (href: string) => void }) => {
+    const el = document.createElement('div'); el.dataset.path = path; el.dataset.owner = owner; viewers.push(el)
+    navigators.set(el, options.onNavigate ?? (() => {})); return el
   },
   disposeFileViewer: (el: HTMLElement | null) => { if (el) disposed.push(el) },
 }))
@@ -89,6 +92,27 @@ describe('RailArtifact', () => {
     expect(again.isExpanded).toBe(false); expect(viewers).toHaveLength(1)
     again.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-toggle')!.click()
     expect(viewers).toHaveLength(2)
+  })
+  it('keeps only its heading while the artifact fills the stage, and draws the page again after', () => {
+    const section = new RailArtifact(''), d = doc('/notes/artifact.html')
+    section.show(d, vi.fn()); section.setLive(true)
+    section.show(d, vi.fn(), true)
+    expect(section.el.hidden).toBe(false); expect(section.present).toBe(true)
+    expect(section.el.querySelector<HTMLElement>('.ws-rail-artifact-body')!.hidden).toBe(true)
+    expect(disposed).toEqual([viewers[0]])
+    expect(section.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-toggle')!.disabled).toBe(true)
+    section.show(d, vi.fn(), false)
+    expect(viewers).toHaveLength(2)
+  })
+  it('follows its links through the reader and refits when unfolded', () => {
+    const navigate = vi.fn(), section = new RailArtifact('', navigate), refit = vi.fn(), d = doc('/notes/artifact.html')
+    section.onUnfold = refit
+    section.show(d, vi.fn()); section.setLive(true)
+    const toggle = section.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-toggle')!
+    toggle.click(); refit.mockClear(); toggle.click()
+    expect(refit).toHaveBeenCalled()
+    navigateOf(viewers.at(-1)!)('plots/fig.png')
+    expect(navigate).toHaveBeenCalledWith(d, 'plots/fig.png')
   })
   it('opens the full page from its own control', () => {
     const section = new RailArtifact(''), open = vi.fn(), d = doc('/notes/artifact.html')

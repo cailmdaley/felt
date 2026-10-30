@@ -62,9 +62,10 @@ export class ThreadRail {
   private index: ThreadIndex | null = null
   private readonly open: (card: KanbanCard) => void
   private readonly layout: () => void
-  constructor(open: (card: KanbanCard) => void, layout: () => void, shuttleBase = '') {
+  constructor(open: (card: KanbanCard) => void, layout: () => void, shuttleBase = '', navigate?: (source: WorkspaceDocument, href: string) => void) {
     this.open = open; this.layout = layout
-    this.artifact = new RailArtifact(shuttleBase)
+    this.artifact = new RailArtifact(shuttleBase, navigate)
+    this.artifact.onUnfold = () => this.fit()
     this.el.className = 'ws-thread-rail'
     this.el.setAttribute('aria-label', 'Thread tree')
     // The rail shows and hides from the reader's corner toggle; its heading only names it.
@@ -200,10 +201,9 @@ export class ThreadRail {
     }
   }
   /** The artifact the rail leads with, or none. */
-  showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void): void {
-    this.artifact.show(doc, openFull)
+  showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void, onStage = false): void {
+    this.artifact.show(doc, openFull, onStage)
     this.applyPresence()
-    this.fit()
   }
   /** Load the artifact while the rail stands open beside the stage; unload it otherwise. */
   setArtifactLive(live: boolean): void {
@@ -232,6 +232,7 @@ export class ThreadRail {
   private applyPresence(): void {
     this.el.hidden = window.matchMedia(MOBILE_MEDIA).matches || !this.present
     this.scroller.hidden = !this.hasFamily
+    this.fit()
   }
   private paint(): void {
     if (!this.card || !this.scope) return
