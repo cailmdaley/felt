@@ -65,6 +65,10 @@ type ReceiptComponent struct {
 	// Shadowed lists other felt executables on PATH whose build differs from
 	// the resolved one; any entry makes the component a mismatch.
 	Shadowed []ReceiptFeltCopy `json:"shadowed,omitempty"`
+	// CodexTrust accounts for Codex hook trust on the hooks component. An
+	// unsupported Codex or an uninspected live App Server is advisory and
+	// leaves the component healthy.
+	CodexTrust *ReceiptCodexTrust `json:"codex_trust,omitempty"`
 }
 
 type ReceiptFeltCopy struct {
@@ -151,7 +155,14 @@ machine-readable receipt.`,
 				for _, bundle := range receipt.Bundles {
 					fmt.Fprintf(a.env.Stdout, "%s plugin: %s\n", bundle.Harness, bundle.Status)
 				}
-				fmt.Fprintf(a.env.Stdout, "hooks: %s\ngeneration: %s\n", receipt.Hooks.Status, receipt.Generation.Status)
+				fmt.Fprintf(a.env.Stdout, "hooks: %s\n", receipt.Hooks.Status)
+				if trust := receipt.Hooks.CodexTrust; trust != nil {
+					fmt.Fprintf(a.env.Stdout, "codex hook trust: %s\n", trust.State)
+					if trust.Note != "" {
+						fmt.Fprintf(a.env.Stdout, "note: %s\n", trust.Note)
+					}
+				}
+				fmt.Fprintf(a.env.Stdout, "generation: %s\n", receipt.Generation.Status)
 				if receipt.Repair != "" {
 					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
 				}
@@ -495,6 +506,7 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 	if len(bundles) == 0 {
 		return ReceiptComponent{Status: receiptMissing, Repair: "enable a felt Claude or Codex plugin with `felt setup claude` or `felt setup codex`"}
 	}
+	var codexTrust *ReceiptCodexTrust
 	for _, b := range bundles {
 		if b.Status != receiptHealthy {
 			return ReceiptComponent{Status: b.Status, Repair: b.Repair}
@@ -504,12 +516,14 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
 		}
 		if b.Harness == "codex" {
-			if err := a.codexHookTrust(false); err != nil {
-				return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("%v; run `felt setup codex --trust-hooks`, then rerun the receipt", err)}
+			trust := a.codexHookTrust(false)
+			codexTrust = trust.receipt()
+			if repair := trust.repair(); repair != "" {
+				return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: repair, CodexTrust: codexTrust}
 			}
 		}
 	}
-	return ReceiptComponent{Status: receiptHealthy}
+	return ReceiptComponent{Status: receiptHealthy, CodexTrust: codexTrust}
 }
 
 func hookFilesCompatible(pluginRoot string) bool {

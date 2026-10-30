@@ -1,8 +1,10 @@
 package feltcli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,14 +28,21 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
+	codexHome := filepath.Join(root, "codex")
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(root, "control.sock")
 	env.Set("HOME", root)
-	env.Set("CODEX_HOME", root)
-	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(root, "control.sock"))
-	env.Chdir(root)
+	env.Set("CODEX_HOME", codexHome)
+	env.Set("SHUTTLE_CODEX_SOCKET", socket)
+	// Setup may run from a project; trust must not depend on it.
+	env.Chdir(repoRoot(t))
 	a := testApp(t, env)
 	source := repoRoot(t)
-	// Install a private copy, including the same generation marker setup uses.
-	candidate := filepath.Join(root, "source")
+	// Promote a private sealed generation where setup puts it.
+	candidate := filepath.Join(root, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	plugin := filepath.Join(candidate, "claude-plugin")
 	for _, name := range []string{".claude-plugin", "claude-plugin"} {
 		if err := copyTree(filepath.Join(source, name), filepath.Join(candidate, name)); err != nil {
 			t.Fatal(err)
@@ -46,11 +55,30 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 	if err := sealPluginGeneration(candidate, identity); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"plugin", "marketplace", "add", candidate}, {"plugin", "add", codexPluginRef}} {
-		out, err := a.runCodexCLIQuiet(args...)
+	reseal := func() {
+		t.Helper()
+		digest, err := pluginPayloadDigest(plugin)
 		if err != nil {
-			t.Fatalf("codex %v: %v\n%s", args, err, out)
+			t.Fatal(err)
 		}
+		identity.PayloadSHA256 = digest
+		if err := writePluginGeneration(candidate, identity); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reinstall := func() {
+		t.Helper()
+		for _, args := range [][]string{{"plugin", "remove", codexPluginRef}, {"plugin", "add", codexPluginRef}} {
+			if out, err := a.runCodexCLIQuiet(args...); err != nil {
+				t.Fatalf("codex %v: %v\n%s", args, err, out)
+			}
+		}
+	}
+	if out, err := a.runCodexCLIQuiet("plugin", "marketplace", "add", candidate); err != nil {
+		t.Fatalf("codex marketplace add: %v\n%s", err, out)
+	}
+	if out, err := a.runCodexCLIQuiet("plugin", "add", codexPluginRef); err != nil {
+		t.Fatalf("codex plugin add: %v\n%s", err, out)
 	}
 	observer, err := a.openCodexTrustRPC()
 	if err != nil {
@@ -70,6 +98,9 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		t.Fatal("Codex did not discover the private felt plugin's hooks")
 	}
 	loaded := filepath.Dir(filepath.Dir(initial[0].SourcePath))
+	if cache, err := a.verifiedCodexCacheRoot(); err != nil || cache != loaded {
+		t.Fatalf("verified cache %q (%v) is not the root Codex loads, %q", cache, err, loaded)
+	}
 	if err := requireFeltCodexTrust(initial); err == nil {
 		t.Fatal("fresh plugin is already trusted")
 	}
@@ -81,28 +112,52 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 	}}, &result); err != nil {
 		t.Fatal(err)
 	}
-	// With no socket, setup uses an ephemeral stdio server. An observer that
-	// was already running must see the write without being reinitialized.
-	if err := a.codexHookTrust(true); err != nil {
+	configPath := filepath.Join(codexHome, "config.toml")
+
+	// Laundering control: bytes in the cache that are not the promoted
+	// generation get no trust, and the config is not touched.
+	script := filepath.Join(loaded, "hooks", "session.sh")
+	original, err := os.ReadFile(script)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(script, append(bytes.Clone(original), []byte("\necho tampered\n")...), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(configPath)
+	if r := a.codexHookTrust(true); r.State != codexTrustUnverified {
+		t.Fatalf("tampered cache = %+v, want unverified", r)
+	}
+	if after, _ := os.ReadFile(configPath); !bytes.Equal(before, after) {
+		t.Fatal("tampered cache changed the Codex config")
+	}
+	if err := os.WriteFile(script, original, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A stale socket left by a dead server: the ephemeral stdio server writes
+	// and verifies, the live server is uninspected, and an observer that was
+	// already running sees the write without being reinitialized.
+	stale, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.(*net.UnixListener).SetUnlinkOnClose(false)
+	stale.Close()
+	if r := a.codexHookTrust(true); r.State != codexTrustTrusted || r.Live != codexLiveUninspected {
+		t.Fatalf("stale socket trust = %+v", r)
 	}
 	if err := requireFeltCodexTrust(list()); err != nil {
 		t.Fatalf("ephemeral write was not visible: %v", err)
 	}
-	markerPath := filepath.Join(loaded, pluginGenerationMarkerName)
-	marker, err := os.ReadFile(markerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(markerPath, append(marker, '\n'), 0644); err != nil {
-		t.Fatal(err)
-	}
+	os.Remove(socket)
 
-	// A real, isolated long-lived Unix App Server proves the WebSocket verification
-	// path and stays up through every write.
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	// A real, isolated long-lived Unix App Server proves the WebSocket path
+	// and stays up through every write.
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	server := env.CommandContext(ctx, "codex", "app-server", "--listen", "unix://"+env.Getenv("SHUTTLE_CODEX_SOCKET"))
+	server := env.CommandContext(ctx, "codex", "app-server", "--listen", "unix://"+socket)
+	server.Dir = root
 	if err := server.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +165,7 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		if _, err := os.Stat(env.Getenv("SHUTTLE_CODEX_SOCKET")); err == nil {
+		if _, err := os.Stat(socket); err == nil {
 			break
 		}
 		select {
@@ -119,38 +174,20 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 			t.Fatal("private Codex server did not create its socket")
 		}
 	}
-	if err := a.codexHookTrust(false); err == nil {
-		t.Fatal("live server accepted untrusted hooks")
-	}
-	if err := a.codexHookTrust(true); err != nil {
-		t.Fatal(err)
-	}
-	if err := requireFeltCodexTrust(list()); err != nil {
-		t.Fatalf("already running stdio server did not reread trust: %v", err)
-	}
-	if err := a.codexHookTrust(false); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.codexHookTrust(true); err != nil {
-		t.Fatalf("idempotent trust: %v", err)
+	if r := a.codexHookTrust(false); r.State != codexTrustTrusted || r.Live != codexLiveVerified {
+		t.Fatalf("live view of trusted hooks = %+v", r)
 	}
 
 	// Reinstalling identical bytes, including the marker, preserves both hashes.
-	if err := os.WriteFile(filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName), append(marker, '\n'), 0644); err != nil {
-		t.Fatal(err)
-	}
-	before := list()
-	if _, err := a.runCodexCLIQuiet("plugin", "remove", codexPluginRef); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.runCodexCLIQuiet("plugin", "add", codexPluginRef); err != nil {
-		t.Fatal(err)
-	}
+	unchanged := list()
+	reinstall()
 	for i, h := range list() {
-		if h.CurrentHash != before[i].CurrentHash || h.TrustStatus != "trusted" {
+		if h.CurrentHash != unchanged[i].CurrentHash || h.TrustStatus != "trusted" {
 			t.Fatalf("identical reinstall invalidates trust: %#v", h)
 		}
 	}
+	// Each change goes through the promoted source and a reinstall, as setup
+	// delivers it.
 	mutations := []struct {
 		name   string
 		mutate func()
@@ -160,37 +197,38 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 			if err := writePluginGeneration(candidate, identity); err != nil {
 				t.Fatal(err)
 			}
-			data, _ := os.ReadFile(filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName))
-			if err := os.WriteFile(filepath.Join(loaded, pluginGenerationMarkerName), data, 0644); err != nil {
-				t.Fatal(err)
-			}
 		}},
 		{"unrelated file", func() {
-			if err := os.WriteFile(filepath.Join(loaded, "unused.txt"), []byte("content"), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(plugin, "unused.txt"), []byte("content"), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			reseal()
 		}},
 		{"hook script", func() {
-			path := filepath.Join(loaded, "hooks", "session.sh")
+			path := filepath.Join(plugin, "hooks", "session.sh")
 			data, _ := os.ReadFile(path)
-			if err := os.WriteFile(path, append(data, []byte("\n# content change\n")...), 0755); err != nil {
+			if err := os.WriteFile(path, append(data, []byte("\n# content change\n")...), 0o755); err != nil {
 				t.Fatal(err)
 			}
+			reseal()
 		}},
 		{"hook definition", func() {
-			path := filepath.Join(loaded, "hooks", "hooks.json")
+			path := filepath.Join(plugin, "hooks", "hooks.json")
 			data, _ := os.ReadFile(path)
 			data = []byte(strings.ReplaceAll(string(data), `"command": "`, `"command": "true && `))
-			if err := os.WriteFile(path, data, 0644); err != nil {
+			if err := os.WriteFile(path, data, 0o644); err != nil {
 				t.Fatal(err)
 			}
+			reseal()
 		}},
 	}
 	for _, m := range mutations {
 		before := list()
 		m.mutate()
+		reinstall()
 		after := list()
 		if m.name == "hook definition" {
+			// A running server keeps the definitions it loaded.
 			fresh, err := a.openCodexTrustRPC()
 			if err != nil {
 				t.Fatal(err)
@@ -216,17 +254,17 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		} else if oldDefinition != newDefinition {
 			t.Fatalf("%s changed hook definition hash", m.name)
 		}
-		if err := a.codexHookTrust(false); err == nil {
-			t.Fatalf("receipt accepted %s mutation", m.name)
+		if r := a.codexHookTrust(false); r.State != codexTrustFailed {
+			t.Fatalf("receipt accepted %s mutation: %+v", m.name, r)
 		}
-		if err := a.codexHookTrust(true); err != nil {
-			t.Fatalf("repairing %s trust: %v", m.name, err)
+		if r := a.codexHookTrust(true); r.State != codexTrustTrusted || r.Live != codexLiveVerified {
+			t.Fatalf("repairing %s trust: %+v", m.name, r)
 		}
-		if err := a.codexHookTrust(false); err != nil {
-			t.Fatal(err)
+		if r := a.codexHookTrust(false); r.State != codexTrustTrusted {
+			t.Fatalf("after %s repair: %+v", m.name, r)
 		}
 	}
-	configData, err := os.ReadFile(filepath.Join(root, "config.toml"))
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,5 +283,5 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		t.Fatal("trust changed another plugin's approval")
 	}
 	// The exact number varies with Codex's supported hook events.
-	t.Logf("Codex trust verified for %d hooks; stdio persistence, live socket, identical reinstall, marker/content/definition invalidation", len(initial))
+	t.Logf("Codex trust verified for %d hooks; laundering refusal, stale socket, stdio persistence, live socket, identical reinstall, marker/content/definition invalidation", len(initial))
 }

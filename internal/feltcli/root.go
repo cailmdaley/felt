@@ -26,6 +26,9 @@ type app struct {
 	// probeTimeout bounds how long felt update waits for a sibling shuttle or
 	// brew to report its version or prefix.
 	probeTimeout time.Duration
+	// trustTimeout bounds each Codex App Server session the hook-trust step
+	// opens; zero means defaultCodexTrustTimeout.
+	trustTimeout time.Duration
 }
 
 func newApp(env *sysenv.Env) *app {

@@ -12,8 +12,7 @@ func TestCodexNativeInstallAndRestoreRecordHookTrust(t *testing.T) {
 		t.Run(operation, func(t *testing.T) {
 			t.Parallel()
 			env, _ := testEnv(t)
-			hook := trustHook(codexPluginRef, codexPluginRef+":hooks/hooks.json:stop:0:0", "modified")
-			requests := fakeCodexTrust(t, env, []codexTrustHook{hook})
+			f := fakeCodexTrust(t, env, []codexTrustHook{feltHook("stop", "modified")})
 			a := testApp(t, env)
 			source := t.TempDir()
 			var err error
@@ -28,13 +27,7 @@ func TestCodexNativeInstallAndRestoreRecordHookTrust(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writes := 0
-			for _, req := range requests() {
-				if string(req["method"]) == `"config/batchWrite"` {
-					writes++
-				}
-			}
-			if writes != 1 {
+			if writes := countMethod(f.requests(t), "config/batchWrite"); writes != 1 {
 				t.Fatalf("%s wrote trust %d times, want 1", operation, writes)
 			}
 		})

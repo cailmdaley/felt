@@ -113,9 +113,10 @@ hooks as the Claude Code plugin. Re-running updates it.
 
 The source is chosen as for felt setup claude; felt validates it, promotes it
 to a local generation, and registers that with codex plugin marketplace add
-and codex plugin add. Felt records trust for its own plugin hooks using Codex's
-App Server hashes and config API; other hooks' trust is untouched.
---trust-hooks repairs trust without reinstalling the plugin.
+and codex plugin add. Felt then records trust for its own plugin hooks using
+Codex's App Server hashes and config API (Codex 0.166.0 or newer), only after
+verifying that Codex's cache holds the promoted generation; other hooks' trust
+is untouched. --trust-hooks repairs trust without reinstalling the plugin.
 --uninstall removes the plugin and its marketplace.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			source, _ := cmd.Flags().GetString("source")
@@ -126,10 +127,7 @@ App Server hashes and config API; other hooks' trust is untouched.
 			}
 			trustOnly, _ := cmd.Flags().GetBool("trust-hooks")
 			if trustOnly {
-				if _, err := a.env.LookPath("codex"); err != nil {
-					return nil
-				}
-				return a.withPluginPromotionLock(func() error { return a.codexHookTrust(true) })
+				return a.trustCodexHooks()
 			}
 
 			marketplaceSource, err := a.resolveSetupSource(source)
@@ -861,9 +859,10 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 
 	if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 		return fmt.Errorf("installing %s: %w\n"+
-			"  felt installs through Codex's native plugin commands, verified on\n"+
-			"  codex-cli 0.147.0. Upgrade Codex if `codex plugin add` is unknown.",
-			codexPluginRef, err)
+			"  felt installs through Codex's native plugin commands and trusts its\n"+
+			"  hooks through Codex's App Server API, which need codex-cli ≥ %s.\n"+
+			"  Upgrade Codex if `codex plugin add` is unknown.",
+			codexPluginRef, err, codexHookTrustMinimum)
 	}
 
 	// Same trust boundary as the Claude path: a promotion may only commit
