@@ -165,7 +165,7 @@ function messageTranscript(now: number): string {
     assistant(now, -29_000, [{ type: 'tool_use', id: toolId, name: 'Bash', input: {
       command: 'shuttle message research/workspace/validation-follow-up "The north patch residual is in the new table."',
     } }]),
-    user(now, -28_800, [{ type: 'tool_result', tool_use_id: toolId, content: 'accepted msg-1234567890abcdef' }]),
+    user(now, -28_800, [{ type: 'tool_result', tool_use_id: toolId, content: 'accepted shuttle://fixture-host/claude/123e4567-e89b-12d3-a456-426614174000 (msg-1234567890abcdef)' }]),
     line({ type: 'attachment', timestamp: timestamp(now, -28_000), attachment: {
       type: 'queued_command',
       prompt: '[Shuttle message msg-abcdef1234567890 from shuttle://umber-workstation/codex/follow-up-session; reply to research/workspace/validation-follow-up]\nThe follow-up reviewed the north patch residual; its table is ready.',

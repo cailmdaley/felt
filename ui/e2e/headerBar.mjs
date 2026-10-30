@@ -101,6 +101,13 @@ export function registerHeaderBarJourneys(test) {
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
+      if (width === 701) await page.waitForFunction(() => {
+        const head = document.querySelector('.ws-selected .ws-chat-head')
+        const refs = head?.querySelector('.ws-chat-refs')
+        const acts = head?.querySelector('.ws-chat-acts')
+        const refsBox = refs?.getBoundingClientRect(), actsBox = acts?.getBoundingClientRect()
+        return refs?.parentElement === acts && refsBox && actsBox && refsBox.top >= actsBox.top - 1
+      })
       assert.deepEqual(await visibleHeaderVerbs(header), ['Close for review', 'Rest'], `In flight draws only its verbs at ${width}`)
       // Narrow cards reserve the title row for navigation and identity; references join the action row.
       const rows = await header.evaluate(el => {
@@ -243,7 +250,10 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(reviewInk.pigment && reviewInk.ink, `Close for review resolves both verdict colors: ${JSON.stringify(reviewInk)}`)
     assert.notEqual(reviewInk.color, reviewInk.plain, `Close for review uses its verdict ink rather than plain text ink: ${JSON.stringify(reviewInk)}`)
     await page.setViewportSize({ width: 320, height: 844 })
-    await page.waitForFunction(() => document.querySelector('.ws-selected .ws-chat-head')?.dataset.compact === 'true')
+    await page.waitForFunction(() => {
+      const head = document.querySelector('.ws-selected .ws-chat-head')
+      return head?.querySelector('.ws-chat-settings')?.parentElement === head
+    })
     const settings = header.locator('.ws-chat-settings')
     const settingsLayout = await header.evaluate(el => {
       const actions = el.querySelector('.ws-chat-acts'), gear = el.querySelector('.ws-chat-settings')

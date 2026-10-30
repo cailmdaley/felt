@@ -141,6 +141,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     const rows = transcript.locator('.ws-transcript-shuttle-message')
     assert.equal(await rows.count(), 3, 'the sent message and both kinds of incoming message have their own rows')
     assert.equal(await rows.nth(0).getAttribute('data-direction'), 'sent')
+    assert.equal(await rows.nth(0).getAttribute('data-status'), 'sent', 'the CLI receipt marks the message as sent')
     assert.equal(await rows.nth(1).getAttribute('data-direction'), 'received')
     assert.equal(await rows.nth(0).locator('.ws-transcript-message-detail').isVisible(), false, 'sent text starts collapsed')
     assert.equal(await rows.nth(1).locator('.ws-transcript-message-detail').isVisible(), false, 'received text starts collapsed')

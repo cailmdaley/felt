@@ -216,7 +216,7 @@ describe('TranscriptBand', () => {
     expect(row.querySelector<HTMLElement>('.ws-transcript-message-detail')!.hidden).toBe(false)
 
     items.push({ type: 'user', timestamp: '2026-09-26T14:04:00.000Z', message: { content: [{
-      type: 'tool_result', tool_use_id: 'send-call', content: 'accepted (msg-42)',
+      type: 'tool_result', tool_use_id: 'send-call', content: 'accepted shuttle://host/claude/session-42 (msg-42)',
     }] } })
     await (band as unknown as { readNow(): Promise<boolean> }).readNow()
     await settle()

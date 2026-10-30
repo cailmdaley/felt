@@ -25,10 +25,12 @@ export type Entry =
   | { kind: 'text'; text: string; at?: number; model?: string }
   | { kind: 'thinking'; text: string; at?: number }
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
-  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageIds?: string[]; unknownMessageIds?: string[]; commandOutcomes?: CommandOutcome[]; at?: number }
+  | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageReceipts?: ShuttleMessageReceipt[]; unknownMessageReceipts?: ShuttleMessageReceipt[]; commandOutcomes?: CommandOutcome[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
-export type CommandOutcome = { index?: number; exitCode?: number; output?: string; acceptedMessageIds: string[]; unknownMessageIds?: string[] }
+export type ShuttleMessageReceipt = { id: string; target?: string }
+
+export type CommandOutcome = { index?: number; exitCode?: number; output?: string; acceptedMessageReceipts: ShuttleMessageReceipt[]; unknownMessageReceipts: ShuttleMessageReceipt[] }
 
 type ObjectValue = Record<string, unknown>
 
@@ -106,17 +108,6 @@ function resultContent(value: unknown): { text: string; images: number; pictures
 const ACCEPTED_MESSAGE_STATUSES = new Set(['accepted', 'submitted', 'queued', 'context_added', 'subscribed', 'queued_for_next_worker'])
 const UNKNOWN_MESSAGE_STATUSES = new Set(['unknown'])
 
-function parenthesizedReceiptId(line: string): string | undefined {
-  const value = line.trimEnd()
-  if (!value.endsWith(')')) return undefined
-  let depth = 0
-  for (let index = value.length - 1; index >= 0; index--) {
-    if (value[index] === ')') depth++
-    else if (value[index] === '(' && --depth === 0) return value.slice(index + 1, -1).trim() || undefined
-  }
-  return undefined
-}
-
 function jsonObjects(text: string): ObjectValue[] {
   const values: ObjectValue[] = []
   let start = -1
@@ -150,29 +141,32 @@ function jsonObjects(text: string): ObjectValue[] {
   return values
 }
 
-function receiptMessageIds(text: string, statuses: Set<string>): string[] {
-  const ids = new Set<string>()
+function receiptMessages(text: string, statuses: Set<string>): ShuttleMessageReceipt[] {
+  const receipts = new Map<string, ShuttleMessageReceipt>()
   for (const receipt of jsonObjects(text)) {
     const status = string(receipt.status)?.toLowerCase()
     const id = string(receipt.message_id)
-    if (status && statuses.has(status) && id) ids.add(id)
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const status = /^\s*([a-z_]+)\b/i.exec(line)?.[1]?.toLowerCase()
-    if (status && statuses.has(status)) {
-      const id = parenthesizedReceiptId(line)
-      if (id) ids.add(id)
+    if (status && statuses.has(status) && id) {
+      const target = string(receipt.address) || string(receipt.fiber)
+      receipts.set(id, { id, ...(target ? { target } : {}) })
     }
   }
-  return [...ids]
-}
-
-function acceptedMessageIds(text: string): string[] {
-  return receiptMessageIds(text, ACCEPTED_MESSAGE_STATUSES)
-}
-
-function unknownMessageIds(text: string): string[] {
-  return receiptMessageIds(text, UNKNOWN_MESSAGE_STATUSES)
+  for (const line of text.split(/\r?\n/)) {
+    const queued = /^\s*queued for (\S+)'s next worker \(([^()]*)\)\s*$/.exec(line)
+    if (queued && statuses.has('queued') && queued[2].trim()) {
+      const id = queued[2].trim()
+      receipts.set(id, { id, target: queued[1] })
+      continue
+    }
+    const match = /^\s*([a-z_]+)(?:\s+(\S+))?\s+\(([^()]*)\)\s*$/.exec(line)
+    const status = match?.[1]?.toLowerCase()
+    const id = match?.[3]?.trim()
+    if (status && statuses.has(status) && id) {
+      const target = match?.[2]
+      receipts.set(id, { id, ...(target ? { target } : {}) })
+    }
+  }
+  return [...receipts.values()]
 }
 
 function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
@@ -185,17 +179,22 @@ function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
     : index !== undefined && typeof nested?.exit_code === 'number' && typeof nested.output === 'string' ? nested : undefined
   if (!result) return undefined
   const output = string(result.output) ?? ''
+  const acceptedMessageReceipts = receiptMessages(output, ACCEPTED_MESSAGE_STATUSES)
+  const unknownMessageReceipts = receiptMessages(output, UNKNOWN_MESSAGE_STATUSES)
   return {
     ...(index === undefined ? {} : { index }),
     exitCode: result.exit_code as number,
     output,
-    acceptedMessageIds: acceptedMessageIds(output),
-    unknownMessageIds: unknownMessageIds(output),
+    acceptedMessageReceipts,
+    unknownMessageReceipts,
   }
 }
 
 function codexCommandOutcomes(text: string, exitCode?: unknown): CommandOutcome[] | undefined {
-  if (typeof exitCode === 'number') return [{ exitCode, output: text, acceptedMessageIds: acceptedMessageIds(text), unknownMessageIds: unknownMessageIds(text) }]
+  if (typeof exitCode === 'number') return [{ exitCode, output: text,
+    acceptedMessageReceipts: receiptMessages(text, ACCEPTED_MESSAGE_STATUSES),
+    unknownMessageReceipts: receiptMessages(text, UNKNOWN_MESSAGE_STATUSES),
+  }]
   // The Codex `exec` wrapper serializes each exec_command result after this header.
   const wrapperOutput = /^Script completed\r?\n[\s\S]*?\r?\nOutput:\r?\n([\s\S]*)$/i.exec(text)?.[1]?.trim()
   if (!wrapperOutput) return undefined
@@ -304,8 +303,8 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
       const result = resultContent(block.content)
       const id = string(block.tool_use_id)
       if (id) {
-        const receipts = acceptedMessageIds(result.text)
-        const unknowns = unknownMessageIds(result.text)
+        const accepted = receiptMessages(result.text, ACCEPTED_MESSAGE_STATUSES)
+        const unknown = receiptMessages(result.text, UNKNOWN_MESSAGE_STATUSES)
         results.push(at({
           kind: 'result' as const,
           id,
@@ -313,8 +312,8 @@ function claudeUser(record: ObjectValue, message: ObjectValue, time?: number): E
           isError: block.is_error === true,
           images: result.images,
           ...(result.pictures ? { pictures: result.pictures } : {}),
-          ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
-          ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
+          ...(accepted.length ? { acceptedMessageReceipts: accepted } : {}),
+          ...(unknown.length ? { unknownMessageReceipts: unknown } : {}),
         }, time))
       }
     }
@@ -445,11 +444,11 @@ function piRecord(record: ObjectValue): Entry[] {
     const result = resultContent(content)
     const id = string(message.toolCallId)
     if (!id) return []
-    const receipts = acceptedMessageIds(result.text)
-    const unknowns = unknownMessageIds(result.text)
+    const accepted = receiptMessages(result.text, ACCEPTED_MESSAGE_STATUSES)
+    const unknown = receiptMessages(result.text, UNKNOWN_MESSAGE_STATUSES)
     return [at({ kind: 'result' as const, id, ...result, isError: message.isError === true,
-      ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
-      ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
+      ...(accepted.length ? { acceptedMessageReceipts: accepted } : {}),
+      ...(unknown.length ? { unknownMessageReceipts: unknown } : {}),
     }, time)]
   }
   if (role !== 'assistant') return []
@@ -542,12 +541,12 @@ function codexRecord(record: ObjectValue): Entry[] {
       if (!id) return []
       const result = resultContent(payload.output)
       const commandOutcomes = codexCommandOutcomes(result.text, payload.exit_code)
-      const receipts = acceptedMessageIds(result.text)
-      const unknowns = unknownMessageIds(result.text)
+      const accepted = receiptMessages(result.text, ACCEPTED_MESSAGE_STATUSES)
+      const unknown = receiptMessages(result.text, UNKNOWN_MESSAGE_STATUSES)
       return [at({ kind: 'result' as const, id, ...result,
         isError: payload.is_error === true || commandOutcomes?.some(outcome => outcome.exitCode !== undefined && outcome.exitCode !== 0) === true,
-        ...(receipts.length ? { acceptedMessageIds: receipts } : {}),
-        ...(unknowns.length ? { unknownMessageIds: unknowns } : {}),
+        ...(accepted.length ? { acceptedMessageReceipts: accepted } : {}),
+        ...(unknown.length ? { unknownMessageReceipts: unknown } : {}),
         ...(commandOutcomes ? { commandOutcomes } : {}),
       }, time)]
     }
