@@ -142,6 +142,8 @@ var machinePromptPrefixes = []string{
 	"[Shuttle message ",
 	"<task-notification",
 	"<teammate-message",
+	// Claude Code's subagent hand-back.
+	"<agent-message",
 	"Another Claude session sent a message:",
 	"[SYSTEM NOTIFICATION",
 	"<system-notification",

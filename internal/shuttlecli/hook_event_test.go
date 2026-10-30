@@ -146,6 +146,7 @@ func TestEventMachinePrompt(t *testing.T) {
 	}{
 		{"task notification", "<task-notification> <task-id>abc</task-id> done", true},
 		{"teammate message", `<teammate-message teammate_id="lead">go</teammate-message>`, true},
+		{"subagent hand-back", "<agent-message from=\"a5068aecfb37db2d9\">\n[Subagent hand-back] The text below is the final report", true},
 		{"relayed teammate message", "Another Claude session sent a message: <teammate-message>hi", true},
 		{"system notification", "[SYSTEM NOTIFICATION] budget exhausted", true},
 		{"leading whitespace still matches", "\n  <task-notification> x", true},
