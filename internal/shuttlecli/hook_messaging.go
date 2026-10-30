@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		return nil
 	}
 	var input eventHookInput
-	if json.Unmarshal(b, &input) != nil {
+	if json.NewDecoder(bytes.NewReader(b)).Decode(&input) != nil {
 		return nil
 	}
 	a.reportProgramStatus(input)

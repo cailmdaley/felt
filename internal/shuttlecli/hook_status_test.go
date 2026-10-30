@@ -281,9 +281,41 @@ func TestProgramStatusIndependentOfEvents(t *testing.T) {
 	}
 }
 
+func TestProgramStatusFirstHookValue(t *testing.T) {
+	t.Parallel()
+	for _, suffix := range []string{" trailing", `{"hook_event_name":"SessionEnd","session_id":"other"}`} {
+		t.Run(suffix, func(t *testing.T) {
+			env, path := eventStream(t)
+			env.Set("TMUX", "socket")
+			env.Set("TMUX_PANE", "%1")
+			env.Set("SHUTTLE_MESSAGES", "off")
+			a := newApp(env)
+			a.eventReceiverPID = func() int { return 123 }
+			a.programStatusTTY = func(int) string { return "/dev/test-tty" }
+			writes := 0
+			a.programStatusWrite = func(_ string, b []byte) error {
+				writes++
+				if !bytes.Contains(b, []byte("state=done:app=claude-code")) {
+					t.Errorf("status did not use first object: %q", b)
+				}
+				return nil
+			}
+			var stdout bytes.Buffer
+			payload := `{"hook_event_name":"Stop","harness":"claude","session_id":"first"}` + suffix
+			if err := a.runEventAndMessageHook(strings.NewReader(payload), &stdout); err != nil {
+				t.Fatal(err)
+			}
+			lines := readEventLines(t, path)
+			if writes != 1 || stdout.Len() != 0 || len(lines) != 1 || lines[0]["type"] != "stop" || lines[0]["sessionId"] != "first" {
+				t.Fatalf("writes=%d stdout=%q events=%+v; want only the first hook", writes, stdout.String(), lines)
+			}
+		})
+	}
+}
+
 func TestProgramStatusMalformedHookSilent(t *testing.T) {
 	t.Parallel()
-	for _, payload := range []string{`not JSON`, `{"hook_event_name":"Stop"`, `{"hook_event_name":"Stop","harness":"claude","native_pid":"bad"}`, `{"hook_event_name":"Stop","harness":"claude"} trailing`} {
+	for _, payload := range []string{`not JSON`, `{"hook_event_name":"Stop"`, `{"hook_event_name":"Stop","harness":"claude","native_pid":"bad"}`} {
 		env, path := eventStream(t)
 		env.Set("TMUX", "socket")
 		a := newApp(env)
