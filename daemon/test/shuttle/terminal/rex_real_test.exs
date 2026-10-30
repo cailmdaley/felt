@@ -94,6 +94,37 @@ defmodule Shuttle.Terminal.RexRealTest do
   end
 
   @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  test "the auxiliary anchor answers on the daemon's custom TMUX_TMPDIR without an explicit socket" do
+    # Keep the default socket short enough for macOS's Unix-socket path limit.
+    tmpdir =
+      Path.join(
+        "/tmp",
+        "rex-anchor-" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+      )
+
+    File.mkdir_p!(tmpdir)
+    tmux = Shuttle.Env.find_executable("tmux")
+    Env.put_env("TMUX_TMPDIR", tmpdir)
+    Env.put_app_env(:os_type, {:unix, :darwin})
+    Env.put_app_env(:terminal_backend, Backend)
+
+    on_exit(fn ->
+      System.cmd(tmux, ["kill-server"],
+        env: [{"TMUX_TMPDIR", tmpdir}, {"TMUX", nil}, {"TMUX_PANE", nil}],
+        stderr_to_stdout: true
+      )
+
+      File.rm_rf!(tmpdir)
+    end)
+
+    assert :absent = Shuttle.TmuxServer.presence(@runner)
+    assert :ok = Shuttle.TmuxServer.ensure_available(@runner)
+    assert :present = Shuttle.TmuxServer.presence(@runner)
+    assert {"shuttle-anchor\n", 0} = @runner.cmd("tmux", ["ls", "-F", "\#{session_name}"], [])
+    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+  end
+
+  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
   test "a Rex background anchor outlives its launcher with no Rex identity in tmux", %{root: root} do
     tmux = Shuttle.Env.find_executable("tmux")
     socket = Path.join(root, "anchor.sock")

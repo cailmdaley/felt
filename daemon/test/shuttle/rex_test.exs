@@ -129,6 +129,45 @@ defmodule Shuttle.RexTest do
     refute File.exists?(Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "terminals/rex.json"))
   end
 
+  test "background launch replaces Rex Server's tmux socket directory with the daemon's", %{
+    tmp_dir: dir
+  } do
+    receipt = Path.join(dir, "socket-env")
+
+    for value <- [nil, Path.join(dir, "daemon tmux's socket")] do
+      if value, do: Env.put_env("TMUX_TMPDIR", value), else: Env.delete_env("TMUX_TMPDIR")
+
+      assert :ok =
+               Rex.run_background(
+                 [
+                   "/bin/bash",
+                   "-c",
+                   "printf '%s' \"${TMUX_TMPDIR-unset}\" > \"$1\"",
+                   "--",
+                   receipt
+                 ],
+                 FakeRex
+               )
+
+      {_, _, opts} =
+        FakeRex.calls()
+        |> Enum.filter(fn {_, args, _} -> "session.create" in args end)
+        |> List.last()
+
+      spec = Jason.decode!(opts[:input])
+
+      ["/bin/bash", "-c", script] =
+        hd(spec["initial_windows"])["layout"]["block"]["options"]["command"]
+
+      assert {_, 0} =
+               System.cmd("/bin/bash", ["-c", script],
+                 env: [{"TMUX_TMPDIR", "/server-side-tmux"}]
+               )
+
+      assert File.read!(receipt) == (value || "unset")
+    end
+  end
+
   test "background launch propagates create failure without launching another backend" do
     FakeRex.reply("session.create", {"maximum sessions reached", 1})
     assert {:error, message} = Rex.run_background(["/absolute/tmux"], FakeRex)

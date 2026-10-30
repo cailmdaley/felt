@@ -98,7 +98,7 @@ defmodule Shuttle.Rex do
           " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
 
       exports =
-        Enum.map_join(~w(PATH SSH_AUTH_SOCK), "", fn key ->
+        Enum.map_join(~w(PATH SSH_AUTH_SOCK TMUX_TMPDIR), "", fn key ->
           case Env.get(key) do
             nil -> "unset #{key}\n"
             value -> "export #{key}=#{quote_sh(value)}\n"

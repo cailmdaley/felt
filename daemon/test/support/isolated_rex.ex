@@ -24,8 +24,10 @@ defmodule Shuttle.Test.IsolatedRex do
         :binary,
         :exit_status,
         :stderr_to_stdout,
+        # A block that starts tmux without -S must never adopt the operator's
+        # default server, even when an environment-forwarding regression lands.
         args:
-          ["-i" | env] ++
+          ["-i", "TMUX_TMPDIR=#{root}" | env] ++
             [
               Rex.bin(),
               "server",
