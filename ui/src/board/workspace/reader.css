@@ -299,7 +299,7 @@
 .ws-document-state > p:first-child { margin: 0; font: italic var(--type-title)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); }
 .ws-document-state a, .ws-document-state button { align-self: flex-start; padding: var(--ws-small-gap) var(--ws-inset); border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); color: var(--ws-ink-soft); background: var(--ws-paper); text-decoration: none; font: var(--type-label)/var(--leading-ui) var(--font-serif); letter-spacing: 0; }
 .ws-document-state a:hover, .ws-document-state button:hover { border-color: var(--ws-ink-faint); color: var(--ws-ink); }
-.ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--type-meta)/var(--leading-ui) var(--font-mono); letter-spacing: var(--ws-mono-tracking); z-index: 2; }
+.ws-document-status { position: absolute; top: var(--ws-inset); right: var(--ws-inset); background: var(--ws-paper); color: var(--ws-owed); border: var(--ws-line-width) solid var(--ws-owed); border-radius: var(--ws-control-radius); padding: var(--ws-small-gap); font: var(--type-label)/var(--leading-ui) var(--font-serif); z-index: 2; }
 
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-reader { top: 0; --ws-stage-inset: 0px; --ws-stage-top: 0px; --ws-prose-padding: 24px 16px 48px; --ws-phone-bar-height: calc(var(--ws-phone-nav-height) + env(safe-area-inset-top)); }

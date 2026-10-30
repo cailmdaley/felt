@@ -698,9 +698,8 @@
   background: transparent;
   border: 0.5px solid color-mix(in srgb, var(--kbn-owed) 35%, transparent);
   border-radius: 8px;
-  font-family: var(--font-mono);
+  font-family: var(--font-serif);
   font-size: var(--type-meta);
-  letter-spacing: 0.04em;
   color: color-mix(in srgb, var(--kbn-owed-bright) 60%, var(--kbn-ink));
   cursor: pointer;
   white-space: nowrap;

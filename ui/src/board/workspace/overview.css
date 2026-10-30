@@ -114,7 +114,7 @@
 .ws-overview-folio[data-density='full'] { height: 310px; padding-top: 6px; }
 .ws-overview-folio[data-density='full'] .ws-overview-thumb { height: 156px; aspect-ratio: auto; }
 .ws-overview-folio-open { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0 !important; width: 100%; text-align: left; }
-.ws-overview-folio-conversation { flex: none; min-height: 28px !important; padding: 2px 6px !important; color: var(--ws-ink-faint); font: var(--type-meta)/var(--leading-tight) var(--font-mono); white-space: nowrap; }
+.ws-overview-folio-conversation { flex: none; min-height: 28px !important; padding: 2px 6px !important; color: var(--ws-ink-faint); font: var(--type-label)/var(--leading-tight) var(--font-serif); white-space: nowrap; }
 .ws-overview-folio-conversation:hover, .ws-overview-folio-conversation:focus-visible { color: var(--ws-ink); text-decoration: underline; text-underline-offset: 3px; }
 .ws-overview-stack { position: relative; isolation: isolate; margin: 0 6px 12px 0; flex: none; }
 .ws-overview-stack::before, .ws-overview-stack::after { content: ''; position: absolute; inset: 0; border: 1px solid var(--ws-hairline); border-radius: var(--overview-radius); background: var(--ws-sheet); z-index: -1; }

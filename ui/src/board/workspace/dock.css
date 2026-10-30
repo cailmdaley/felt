@@ -260,7 +260,7 @@
 .ws-dock .kbn-ctl-foot .kbn-ctl-btn { padding: 4px 8px; }
 .ws-dock .kbn-ctl-foot:has(.kbn-detail-error:not([style*='display: none']), .kbn-detail-save-status:not(:empty)) { grid-column: 1 / -1; }
 .ws-dock .kbn-ctl-foot .kbn-detail-error { flex-basis: 100%; }
-.ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--type-meta) var(--font-mono); }
+.ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--type-label) var(--font-serif); }
 .ws-dock .kbn-detail-save-status-saving { font-style: italic; }
 .ws-dock .kbn-detail-transcript { padding: 8px 0; border-block: var(--ws-line-width) solid var(--ws-hairline); }
 /* The meeting's line is one voice: its state, its name and Stop, all set as labels. */

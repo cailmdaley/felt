@@ -10,7 +10,7 @@
 .ws-audio-page {
   width: 100%; min-width: 0;
   color: var(--ws-ink); background: var(--ws-paper);
-  font: var(--type-meta)/var(--leading-ui) var(--font-mono);
+  font: var(--type-label)/var(--leading-ui) var(--font-serif);
 }
 .ws-content .kbn-fileview-audio .kbn-media-page > .ws-audio-page {
   padding: var(--ws-prose-padding); margin-block: auto;

@@ -6,6 +6,7 @@
 .ws-search-hit:focus-visible { background: var(--ws-hover); outline: 1px solid var(--ws-focus); outline-offset: -1px; }
 .ws-search-snippet { margin: 0 0 4px; font: var(--type-label)/var(--leading-ui) var(--font-serif); line-height: var(--leading-ui); overflow-wrap: anywhere; }
 .ws-search-snippet mark { background: color-mix(in srgb, var(--ws-fresh) 22%, transparent); color: inherit; }
-.ws-search-meta, .ws-search-note { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); }
+.ws-search-meta { font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-muted); }
+.ws-search-note { font: var(--type-label)/var(--leading-prose) var(--font-serif); color: var(--ws-ink-muted); }
 .ws-search-meta button { color: inherit; font: inherit; border: 0; background: none; cursor: pointer; text-decoration: underline; }
 .ws-search-note { padding: 8px 12px; }

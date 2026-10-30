@@ -329,8 +329,8 @@ const SHEET = `
   border-radius: 3px;
   background: color-mix(in srgb, var(--kbn-graphite) 5%, transparent);
   border: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent);
-  font-family: var(--font-mono);
-  font-size: var(--type-meta);
+  font-family: var(--font-serif);
+  font-size: var(--type-label);
   line-height: var(--leading-prose);
   color: var(--kbn-graphite-soft);
   white-space: pre-wrap;
