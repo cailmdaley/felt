@@ -9,6 +9,10 @@ export interface ShuttleMessage {
   peer: string
   /** Unverified sender text supplied as a claim alongside the actual caller. */
   claimedSender?: string
+  /** The receiving host could not verify the caller; the row marks it quietly. */
+  unverified?: boolean
+  /** `fiber` is the verified sending session's own fiber, so the sender is named by it. */
+  senderIsFiber?: boolean
   /** A fiber candidate, resolved into the board's existing constitution chip when available. */
   fiber?: string
   /** The original address or target, retained for future detail views. */
@@ -172,15 +176,19 @@ export function shuttleMessages(source: string, at?: number, anchored = false, p
     const session = address ? sessionLabel(address) : undefined
     const replyTo = /;\s*reply to\s+([^\]\r\n]+)/.exec(metadata)?.[1]?.trim()
     const fiber = replyTo ? fiberCandidate(replyTo) : undefined
+    // A verified session's reply target is its own bound fiber: the sender, by name.
+    const senderIsFiber = !!(session && fiber && !claimedSender)
     messages.push(withTime({
       kind: 'shuttle-message' as const,
       id,
       direction: 'received' as const,
-      peer: session?.peer ?? senderLabel(sender),
+      peer: senderIsFiber ? leaf(fiber!) : sender === 'unverified' ? '?' : session?.peer ?? senderLabel(sender),
       ...(claimedSender ? { claimedSender: senderLabel(claimedSender) } : {}),
+      ...(sender === 'unverified' ? { unverified: true } : {}),
+      ...(senderIsFiber ? { senderIsFiber: true } : {}),
       ...(fiber ? { fiber } : {}),
       ...(address ? { address } : {}),
-      ...(session?.peerSuffix ? { peerSuffix: session.peerSuffix } : {}),
+      ...(session?.peerSuffix && !senderIsFiber ? { peerSuffix: session.peerSuffix } : {}),
       ...(replyTo ? { target: replyTo } : {}),
       text: body,
     }, at))

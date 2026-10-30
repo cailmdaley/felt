@@ -37,6 +37,18 @@ describe('delivered Shuttle messages', () => {
     })])
   })
 
+  it('names a verified session sender by its own fiber, and an unverified one only by a quiet mark', () => {
+    const verified = '[Shuttle message msg-v from shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
+    expect(shuttleMessages(verified, undefined, false, [ledger(verified)])).toEqual([expect.objectContaining({
+      peer: 'cosmo-val', senderIsFiber: true, fiber: 'science/cosmo-val', address: 'shuttle://nibi/claude/abc-123',
+    })])
+    expect(shuttleMessages(verified, undefined, false, [ledger(verified)])[0]).not.toHaveProperty('peerSuffix')
+    const unverified = '[Shuttle message msg-u from unverified; claims to be shuttle://nibi/claude/abc-123; reply to science/cosmo-val]\nDone.'
+    const [row] = shuttleMessages(unverified, undefined, false, [ledger(unverified)])
+    expect(row).toEqual(expect.objectContaining({ peer: '?', unverified: true, claimedSender: 'shuttle://nibi/claude/abc-123', fiber: 'science/cosmo-val' }))
+    expect(row).not.toHaveProperty('senderIsFiber')
+  })
+
   it.each([
     ['Claude hook attachment', (text: string) => ({ type: 'attachment', timestamp: time, attachment: { type: 'hook_additional_context', content: text } })],
     ['Claude peer queued meta', (text: string) => ({ type: 'attachment', timestamp: time, attachment: { type: 'queued_command', prompt: text, commandMode: 'prompt', isMeta: true, origin: { kind: 'peer' } } })],

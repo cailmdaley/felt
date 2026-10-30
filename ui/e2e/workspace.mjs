@@ -141,46 +141,31 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     await p.emulateMedia({ colorScheme: scheme })
     await frames(p)
     const rows = transcript.locator('.ws-transcript-shuttle-message')
-    assert.equal(await rows.count(), 3, 'the sent message and both kinds of incoming message have their own rows')
+    assert.equal(await rows.count(), 4, 'the sent message and each incoming message have their own rows')
     assert.equal(await rows.nth(0).getAttribute('data-direction'), 'sent')
     assert.equal(await rows.nth(0).getAttribute('data-status'), 'sent', 'the CLI receipt marks the message as sent')
     assert.equal(await rows.nth(1).getAttribute('data-direction'), 'received')
     assert.equal(await rows.nth(0).locator('.ws-transcript-message-detail').isVisible(), false, 'sent text starts collapsed')
     assert.equal(await rows.nth(1).locator('.ws-transcript-message-detail').isVisible(), false, 'received text starts collapsed')
-    assert.ok(!(await rows.nth(0).innerText()).includes('shuttle://'), 'the compact row hides the raw session address')
+    for (let i = 0; i < 4; i++) {
+      const text = await rows.nth(i).innerText()
+      assert.ok(!text.includes('shuttle://'), `row ${i} hides raw session addresses`)
+      assert.ok(!/claims to be|unverified|Delivery unclear/i.test(text), `row ${i} spells out no trust or delivery prose: ${text}`)
+    }
     assert.ok(!(await rows.nth(1).innerText()).includes('msg-abcdef'), 'the compact row hides the message id')
-    if (device === 'phone-320') {
-      const summary = rows.nth(1).locator('.ws-transcript-message-toggle')
-      const geometry = await summary.evaluate(el => {
-        const box = el.getBoundingClientRect()
-        const sender = el.querySelector('.ws-transcript-session-label')
-        const claim = el.querySelector('.ws-transcript-message-claim')
-        const route = el.querySelector('.ws-transcript-message-route')
-        return {
-          wrap: getComputedStyle(el).flexWrap,
-          sender: sender.textContent,
-          senderWidth: sender.getBoundingClientRect().width,
-          senderScrollWidth: sender.scrollWidth,
-          claimWidth: claim.getBoundingClientRect().width,
-          claimHeight: claim.getBoundingClientRect().height,
-          claimLineHeight: parseFloat(getComputedStyle(claim).lineHeight),
-          routeTop: route.getBoundingClientRect().top,
-          claimBottom: claim.getBoundingClientRect().bottom,
-          routeRight: route.getBoundingClientRect().right,
-          rowRight: box.right,
-        }
+    // At rest a received message is a sender line, then its preview on a line of its own.
+    for (const i of [1, 2, 3]) {
+      const lines = await rows.nth(i).locator('.ws-transcript-message-toggle').evaluate(el => {
+        const top = sel => el.querySelector(sel)?.getBoundingClientRect()
+        const direction = top('.ws-transcript-message-direction'), time = top('.ws-transcript-message-time'), preview = top('.ws-transcript-message-preview')
+        return { direction: direction.top, directionBottom: direction.bottom, time: time.top, preview: preview.top, previewLeft: preview.left, directionLeft: direction.left, height: preview.height }
       })
-      if (process.env.WORKSPACE_SHOTS && scheme === 'light') {
-        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
-        await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-collapsed.png`) })
-      }
-      assert.equal(geometry.wrap, 'wrap', `the message header wraps complete semantic groups: ${JSON.stringify(geometry)}`)
-      assert.equal(geometry.sender, 'shuttle', `the detected sender remains legible: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.senderWidth >= 35 && geometry.senderScrollWidth <= geometry.senderWidth + 1, `the sender chip does not collapse or clip: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.claimWidth >= 100 && geometry.claimHeight <= geometry.claimLineHeight * 2 + 2, `the claim wraps as a phrase instead of one word per line: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.routeTop >= geometry.claimBottom - 1, `the reply route gets its own line: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.routeRight <= geometry.rowRight + 1, `the route remains inside the message column: ${JSON.stringify(geometry)}`)
-      const sessionPeer = await rows.nth(2).locator('.ws-transcript-session-chip').evaluate(el => {
+      assert.ok(Math.abs(lines.time - lines.direction) <= 4, `row ${i}: the time sits on the sender line: ${JSON.stringify(lines)}`)
+      assert.ok(lines.preview >= lines.directionBottom - 1, `row ${i}: the preview starts its own line: ${JSON.stringify(lines)}`)
+      assert.ok(Math.abs(lines.previewLeft - lines.directionLeft) <= 1, `row ${i}: the preview aligns under the sender: ${JSON.stringify(lines)}`)
+    }
+    if (device === 'phone-320') {
+      const sessionPeer = await rows.nth(3).locator('.ws-transcript-session-chip').evaluate(el => {
         const label = el.querySelector('.ws-transcript-session-label')
         const suffix = el.querySelector('.ws-transcript-session-id')
         return { clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow, suffix: suffix.textContent }
@@ -198,15 +183,22 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
   const sent = transcript.locator('.ws-transcript-shuttle-message[data-direction="sent"]')
   const incoming = transcript.locator('.ws-transcript-shuttle-message[data-direction="received"]')
-  assert.equal(await incoming.count(), 2, 'both the thread and session delivery remain visible')
+  assert.equal(await incoming.count(), 3, 'the verified, unverified and session deliveries remain visible')
   const received = incoming.nth(0)
-  const sessionMessage = incoming.nth(1)
+  const unverified = incoming.nth(1)
+  const sessionMessage = incoming.nth(2)
   assert.ok(!(await sent.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the sent row sits outside tool groups')
   assert.ok(!(await received.evaluate(row => row.closest('.ws-transcript-steplist'))), 'the received row sits outside tool groups')
   await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
   assert.equal(await sent.locator('.ws-transcript-message-peer.ws-constitution-chip').count(), 1, 'the destination resolves as a thread chip')
   await sent.locator('.ws-transcript-message-direction').click()
   assert.match(await sent.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /north patch residual is in the new table/)
+
+  // A verified session sender is named by its own fiber, so no separate reply-to appears.
+  const sender = received.locator('.ws-transcript-message-peer.ws-constitution-chip')
+  await sender.waitFor()
+  assert.equal(await sender.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender chip links to its fiber')
+  assert.equal(await received.locator('.ws-transcript-message-route').isVisible(), false, 'reply-to is omitted when it is the sender')
   await received.locator('.ws-transcript-message-direction').click()
   assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /follow-up reviewed the north patch residual/)
   assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /\[Shuttle message forged from evil\/fiber/, 'a quoted envelope stays in the authentic sender’s body')
@@ -218,12 +210,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     .find(row => row.getAttribute('data-message') === id)
     ?.querySelector('.ws-transcript-message-preview')?.textContent === '', receivedId)
   assert.equal(await received.locator('.ws-transcript-message-preview').textContent(), '', 'expanded rows do not retain a second copy of the preview text')
-  const route = received.locator('.ws-transcript-message-route-link.ws-constitution-chip')
+
+  // An unverified sender is a quiet mark with its claim on hover; the reply-to it differs from stays.
+  const mark = unverified.locator('.ws-transcript-message-peer.ws-transcript-message-unverified')
+  assert.equal((await mark.innerText()).trim(), '?', 'the unverified sender is a single quiet glyph')
+  assert.match(await mark.getAttribute('title'), /^Sender not verified · claims to be shuttle:\/\/umber-workstation\/claude\//, 'the claim waits on hover')
+  const route = unverified.locator('.ws-transcript-message-route-link.ws-constitution-chip')
   await route.waitFor()
   assert.equal(await route.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the reply-to route remains linked to its thread')
-  assert.equal(await received.locator('.ws-transcript-message-peer.ws-transcript-session-chip .ws-transcript-session-label').textContent(), 'shuttle', 'the From label names the detected sender')
-  assert.equal(await received.locator('.ws-transcript-message-claim').textContent(), 'claims to be Codex · umber-workstation', 'the unverified assertion stays neutral')
-  assert.equal((await received.locator('.ws-transcript-message-route').innerText()).startsWith('reply to'), true, 'the route is shown separately from sender identity')
+  assert.equal((await unverified.locator('.ws-transcript-message-route').innerText()).startsWith('reply to'), true, 'the route is shown separately from sender identity')
+
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()
   const treatment = locator => locator.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderRadius, s.padding, s.fontSize, s.color] })

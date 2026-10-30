@@ -57,8 +57,6 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   direction.className = 'ws-transcript-message-direction'
   const peer = document.createElement('span')
   peer.className = 'ws-transcript-message-peer'
-  const claim = document.createElement('span')
-  claim.className = 'ws-transcript-message-claim'
   const route = document.createElement('span')
   route.className = 'ws-transcript-message-route'
   const preview = document.createElement('span')
@@ -78,7 +76,10 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   outcome.className = 'ws-transcript-message-outcome'
   outcome.dataset.mentionIgnore = ''
   detail.append(text, source, command, outcome)
-  toggle.append(direction, peer, claim, route, threadState, preview)
+  const head = document.createElement('span')
+  head.className = 'ws-transcript-message-head'
+  head.append(direction, peer, route, threadState)
+  toggle.append(head, preview)
   expander.append(toggle, detail)
   row.append(expander)
   expander.addEventListener('toggle', () => {
@@ -100,9 +101,8 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   const toggle = row.querySelector<HTMLElement>('.ws-transcript-message-toggle')!
   const preview = row.querySelector<HTMLElement>('.ws-transcript-message-preview')!
   const threadState = row.querySelector<HTMLElement>('.ws-transcript-message-thread-state')!
-  const claim = row.querySelector<HTMLElement>('.ws-transcript-message-claim')!
   let route = row.querySelector<HTMLElement>('.ws-transcript-message-route')!
-  const linkedPeerFiber = entry.fiber && (entry.direction === 'sent' || entry.verb) ? entry.fiber : undefined
+  const linkedPeerFiber = entry.fiber && (entry.direction === 'sent' || entry.verb || entry.senderIsFiber) ? entry.fiber : undefined
   const expanded = expander.open
   const rowClass = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
   if (row.className !== rowClass) row.className = rowClass
@@ -165,7 +165,13 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   }
   if (linkedPeerFiber) setAttr(peer, 'data-fiber', linkedPeerFiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
-  if (entry.direction === 'received' && !entry.verb && entry.fiber) {
+  peer.classList.toggle('ws-transcript-message-unverified', !!entry.unverified && !linkedPeerFiber)
+  const claimTitle = entry.unverified
+    ? `Sender not verified${entry.claimedSender ? ` · claims to be ${entry.claimedSender}` : ''}`
+    : entry.claimedSender ? `Claims to be ${entry.claimedSender}` : ''
+  if (claimTitle) setAttr(peer, 'title', claimTitle)
+  else if (peer.hasAttribute('title')) peer.removeAttribute('title')
+  if (entry.direction === 'received' && !entry.verb && entry.fiber && !entry.senderIsFiber) {
     route.classList.add('ws-transcript-message-route')
     let link = route.querySelector<HTMLAnchorElement>(':scope > .ws-transcript-message-route-link')
     if (!link) {
@@ -188,17 +194,16 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   }
   const directionText = entry.direction === 'received'
     ? '← From'
-    : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'uncertain' ? '↯ Delivery unclear' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
+    : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
   if (direction.textContent !== directionText) direction.textContent = directionText
-  const claimText = entry.claimedSender ? `claims to be ${entry.claimedSender}` : ''
-  if (claim.textContent !== claimText) claim.textContent = claimText
-  setHidden(claim, !claimText)
   const toggleText = entry.direction === 'received' && !expanded
     ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
     : ''
   if (preview.textContent !== toggleText) preview.textContent = toggleText
   setAttr(toggle, 'data-direction', entry.direction)
-  const action = entry.direction === 'received' ? `Expand message from ${entry.peer}` : `Expand message to ${entry.peer}`
+  const action = entry.direction === 'received'
+    ? `Expand message from ${entry.unverified ? 'an unverified sender' : entry.peer}`
+    : `Expand message to ${entry.peer}`
   setAttr(toggle, 'aria-label', entry.verb ? `${action} · ${entry.verb}` : action)
   setAttr(toggle, 'aria-expanded', String(expanded))
   setAttr(toggle, 'data-expanded', String(expanded))
@@ -217,16 +222,17 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   setHidden(source, !entry.source || !!entry.text)
   if (command.textContent !== (entry.rawCommand ?? '')) command.textContent = entry.rawCommand ?? ''
   setHidden(command, !entry.rawCommand)
-  const outcomeText = entry.status === 'failed' || entry.status === 'uncertain' ? entry.outcomeText ?? '' : ''
+  const outcomeText = entry.status === 'failed' ? entry.outcomeText ?? '' : ''
   if (outcome.textContent !== outcomeText) outcome.textContent = outcomeText
   setHidden(outcome, !outcomeText)
-  let stamp = toggle.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
+  const head = row.querySelector<HTMLElement>('.ws-transcript-message-head')!
+  let stamp = head.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
   if (entry.at === undefined) stamp?.remove()
   else {
     if (!stamp) {
       stamp = document.createElement('time')
       stamp.className = 'ws-transcript-message-time'
-      toggle.append(stamp)
+      head.append(stamp)
     }
     const when = clock(entry.at)
     if (stamp.textContent !== when.text) stamp.textContent = when.text

@@ -14,7 +14,7 @@ describe('messages queued while the worker worked', () => {
       : []))
     expect(plain).toMatchObject([{ kind: 'prompt', text: 'remind me about blocked on?', images: 0, dispatch: false }])
     expect(pictured).toMatchObject([{ kind: 'prompt', text: '[Image #11] this is ugly', images: 1 }])
-    expect(peer).toMatchObject([{ kind: 'shuttle-message', direction: 'received', peer: 'Claude · host-b · ession', fiber: 'project-x', address: 'shuttle://host-b/claude/chair-session', target: 'project-x', text: 'The chair\'s tree is clean.' }])
+    expect(peer).toMatchObject([{ kind: 'shuttle-message', direction: 'received', peer: 'project-x', senderIsFiber: true, fiber: 'project-x', address: 'shuttle://host-b/claude/chair-session', target: 'project-x', text: 'The chair\'s tree is clean.' }])
     expect(task).toEqual([])
   })
 })
