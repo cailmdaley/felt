@@ -454,21 +454,20 @@ test('Phone 375 Desk folio keeps its full label and count clear of the active ac
     const name = segment.querySelector('.kbn-folio-name')
     const count = segment.querySelector('.kbn-folio-count')
     const action = segment.querySelector('.kbn-col-action')
-    const label = action?.querySelector('.kbn-col-action-label')
     const rect = el => { const box = el.getBoundingClientRect(); return { left: box.left, right: box.right, width: box.width, clientWidth: el.clientWidth, scrollWidth: el.scrollWidth } }
     return {
       tabName: name?.textContent,
       tabLabel: segment.getAttribute('aria-label'),
       count: count?.textContent,
       actionLabel: action?.getAttribute('aria-label'),
-      actionTextDisplay: label ? getComputedStyle(label).display : null,
+      actionText: action?.textContent,
       tab: rect(segment), name: rect(name), countBox: rect(count), action: rect(action),
     }
   })
   assert.equal(layout.tabName, 'In flight')
   assert.match(layout.tabLabel, /^In flight \(/)
   assert.equal(layout.actionLabel, 'New idea — speak it into a card')
-  assert.equal(layout.actionTextDisplay, 'none')
+  assert.equal(layout.actionText, '✶')
   assert.ok(layout.name.scrollWidth <= layout.name.clientWidth + 1, 'the full tab name fits')
   assert.ok(layout.name.right <= layout.countBox.left + 1, 'the count follows the name')
   assert.ok(layout.countBox.right <= layout.action.left + 1, 'the action follows the count')

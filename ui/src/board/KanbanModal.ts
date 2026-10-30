@@ -638,8 +638,8 @@ export class KanbanModal {
    * Build the kanban DOM into `this.container`: the banner, the body (tab
    * strip, drag horizon, Desk, view host) and the live region.
    *
-   * There is no masthead. Three actions — Stash `+`, New idea `✶`, and
-   * Refresh `↻` — live in the lane heads (see
+   * There is no masthead. Two actions — Stash `+` and New idea `✶` — live
+   * in the lane heads (see
    * KanbanSurfaceRenderer.makeColumnAction). The page begins at the tab
    * strip; the body's top padding is its only top margin.
    */

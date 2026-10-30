@@ -27,7 +27,7 @@ it('a fresh phone Desk opens on In flight and names every tab exactly as its col
   expect(segs[1].querySelector('.kbn-folio-count')?.textContent).toBe('1')
 })
 
-it('names the Stash and New idea actions beside their glyphs and leaves Awaiting review quiet', () => {
+it('draws the Stash and New idea actions as bare glyphs named for assistive tech and leaves Awaiting review quiet', () => {
   const stash = vi.fn(), idea = vi.fn()
   const data = response({ now: {
     drafts: [card({ id: 'draft' })],
@@ -38,7 +38,7 @@ it('names the Stash and New idea actions beside their glyphs and leaves Awaiting
     stopDragAutoScroll: () => {}, transition: () => {}, setSurface: () => {}, openDetail: vi.fn(), onStashClick: stash, onNewIdeaClick: idea })
   const root = renderer.renderNowSection(data.now, {})
   const actions = [...root.querySelectorAll<HTMLButtonElement>('.kbn-col-action')]
-  expect(actions.map(action => action.textContent)).toEqual(['+Stash', '✶New idea'])
+  expect(actions.map(action => action.textContent)).toEqual(['+', '✶'])
   expect(actions.map(action => action.getAttribute('aria-label'))).toEqual(['Stash a new fiber', 'New idea — speak it into a card'])
   expect(root.querySelector('.kbn-col-action-awaitingReview')).toBeNull()
   actions[0].click(); actions[1].click()

@@ -54,7 +54,24 @@
  *
  * Glyph tokens size marks drawn from a font (a cross, a dropcap, a chevron),
  * never text.
+ *
+ * Faces. EB Garamond and IBM Plex Mono load from Google Fonts in index.html.
+ * The illuminated initials ship with the board (ui/public/fonts/, served at
+ * /fonts/) and are declared here: EB Garamond Initials F2 is the letter's
+ * body and F1 the flourish laid over it. A face's family is a literal name,
+ * because an @font-face descriptor cannot read a custom property.
  */
+@font-face {
+  font-family: 'EBGI F1';
+  src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');
+  font-display: swap;
+}
+@font-face {
+  font-family: 'EBGI F2';
+  src: url('/fonts/EBGaramond-InitialsF2.otf') format('opentype');
+  font-display: swap;
+}
+
 :root {
   --font-serif: 'EB Garamond', Garamond, Georgia, serif;
   --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;

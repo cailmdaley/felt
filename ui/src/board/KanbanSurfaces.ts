@@ -1249,26 +1249,27 @@ export class KanbanSurfaceRenderer {
 
   /**
    * The per-lane head action — one tinted pill at the column head's right
-   * edge, naming the verb that feeds the lane (color = lane identity):
+   * edge, carrying the glyph of the verb that feeds the lane (color = lane
+   * identity):
    *
    *   Drafts    → Stash `+`    (ochre)  onStashClick
    *   In flight → New idea `✶` (cobalt) onNewIdeaClick
    *
    * Returns null for a lane whose callback isn't wired (read-only context) —
-   * those heads render title + count alone. Each action names its verb beside
-   * the glyph and stops click propagation (the head is itself a focusable drop
+   * those heads render title + count alone. The verb is the button's accessible
+   * name and tooltip, not visible text. Each action stops click propagation (the head is itself a focusable drop
    * target).
    */
   private makeColumnAction(kind: NowColumnKind): HTMLButtonElement | null {
     const spec =
       kind === 'drafts'
         ? this.o.onStashClick && {
-            glyph: '+', text: 'Stash', modifier: 'drafts',
+            glyph: '+', modifier: 'drafts',
             label: 'Stash a new fiber', onClick: this.o.onStashClick,
           }
         : kind === 'inFlight'
           ? this.o.onNewIdeaClick && {
-              glyph: '✶', text: 'New idea', modifier: 'inFlight',
+              glyph: '✶', modifier: 'inFlight',
               label: 'New idea — speak it into a card', onClick: this.o.onNewIdeaClick,
             }
           : null
@@ -1280,10 +1281,8 @@ export class KanbanSurfaceRenderer {
     const glyph = document.createElement('span')
     glyph.className = 'kbn-col-action-glyph'
     glyph.textContent = spec.glyph
-    const text = document.createElement('span')
-    text.className = 'kbn-col-action-label'
-    text.textContent = spec.text
-    btn.append(glyph, text)
+    glyph.setAttribute('aria-hidden', 'true')
+    btn.append(glyph)
     btn.setAttribute('aria-label', spec.label)
     btn.title = spec.label
     btn.addEventListener('click', (e) => {

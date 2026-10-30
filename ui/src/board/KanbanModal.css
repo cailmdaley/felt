@@ -11,22 +11,6 @@
   --kbn-mobile-short-max: 500px;
 }
 
-/* EB Garamond Initials F1 / F2 — the two-layer dropcap fonts. F2 is
-   the character body; F1 is the flourish overlay (vine + cartouche)
-   drawn on top at low opacity. Pattern adapted from
-   cailmdaley.github.io's science-ai.astro and vellum's .illuminated
-   class. Files live in ui/public/fonts/, served by the daemon at /fonts/. */
-@font-face {
-  font-family: var(--font-initials-frill);
-  src: url('/fonts/EBGaramond-InitialsF1.otf') format('opentype');
-  font-display: swap;
-}
-@font-face {
-  font-family: var(--font-initials);
-  src: url('/fonts/EBGaramond-InitialsF2.otf') format('opentype');
-  font-display: swap;
-}
-
 /* Kanban dropcap — wraps a single capital letter with the layered
    F2/F1 treatment. KanbanModal.ts injects:
      <span class="kbn-cap" data-letter="D">D</span>...
@@ -1285,13 +1269,14 @@
 }
 
 /* ── Per-lane head actions ────────────────────────────────────────────────
-   Stash and New idea stay named beside their glyphs; polling and ⌘R keep the
-   board current without a third lane action. */
+   Stash and New idea are bare glyphs in a tinted disc; the verb lives in the
+   button's accessible name and tooltip. Polling and ⌘R keep the board
+   current without a third lane action. */
 .kbn-col-action {
   flex-shrink: 0;
-  min-height: 28px;
-  padding: 3px 10px;
-  gap: 5px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
   border-radius: 999px;
   color: var(--kbn-on-pigment);
   box-shadow: 0 2px 4px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
@@ -1325,7 +1310,6 @@
 .kbn-col-action-inFlight:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
 .kbn-col-action-glyph { flex: 0 0 auto; line-height: var(--leading-solid); }
-.kbn-col-action-label { font: 500 var(--type-label)/var(--leading-solid) var(--font-serif); }
 .kbn-col-list {
   flex: 1;
   overflow-y: auto;
@@ -2233,12 +2217,9 @@
   .kbn-folio-seg-active .kbn-col-action {
     display: inline-flex;
     flex: 0 0 auto;
-    min-height: 26px;
-    padding: 3px 7px;
+    width: 26px;
+    height: 26px;
     margin-left: 2px;
-  }
-  .kbn-folio-seg-active .kbn-col-action-label {
-    font-size: var(--type-meta);
   }
 
   /* ── Cards, compact ────────────────────────────────────────────────────
@@ -2464,10 +2445,4 @@
     padding: 7px 10px;
     gap: 4px;
   }
-}
-
-/* The narrow phone folio keeps its full tab name and count beside the action glyph. */
-@media (max-width: 430px) {
-  .kbn-folio-seg-active .kbn-col-action-label { display: none; }
-  .kbn-folio-seg-active .kbn-col-action { padding-inline: 4px; }
 }

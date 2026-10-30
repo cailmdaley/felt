@@ -365,6 +365,11 @@ function violations(file: string, source: string, defined: Set<string>): string[
     if (why) at(d.offset, `${why}: ${d.value}`)
   }
 
+  // Faces are declared in type.css alone.
+  if (file.endsWith('.css')) for (const m of text.matchAll(/@font-face\b/g)) {
+    if (ctx[m.index] === 'css') at(m.index, 'font face outside type.css')
+  }
+
   // Family names live in type.css alone, in any string or stylesheet.
   for (const m of text.matchAll(new RegExp(FAMILY_NAME, 'g'))) {
     if (ctx[m.index] !== 'code') at(m.index, `family name: ${m[0]}`)
@@ -499,6 +504,7 @@ const MUST_FAIL: [string, string][] = [
   ['x.ts', "const s = { ['letterSpacing']: '.1em' }"],
   ['x.css', '.ad { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }\n.ad { font-size: var(--type-meta); }'],
   ['x.css', '.ae { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-nav); }'],
+  ['x.css', "@font-face { font-family: var(--font-initials); src: url('/fonts/x.otf'); }"],
 ]
 
 const MUST_PASS: [string, string][] = [
@@ -532,6 +538,21 @@ it.each(MUST_FAIL)('the type scan rejects off-system form #%#', (file, source) =
 })
 it.each(MUST_PASS)('the type scan accepts role form #%#', (file, source) => {
   expect(violations(file, source, PROBE_TOKENS), `${file}: ${source}`).toEqual([])
+})
+
+it('every family a token names first is a face type.css declares or index.html loads', () => {
+  const owner = readFileSync(join(SRC, OWNER), 'utf8')
+  const html = readFileSync(resolve('index.html'), 'utf8')
+  const faces = [...owner.matchAll(/@font-face\s*{([^}]*)}/g)].map(m => {
+    const family = /font-family\s*:\s*([^;]+);/.exec(m[1])?.[1].trim() ?? ''
+    // A descriptor cannot read var(): a face named through one never registers.
+    expect(family, `@font-face family must be a literal name: ${family}`).toMatch(/^(['"])[^'"]+\1$/)
+    return family.slice(1, -1)
+  })
+  const loaded = [...html.matchAll(/family=([^:&"]+)/g)].map(m => decodeURIComponent(m[1].replace(/\+/g, ' ')))
+  const leads = [...owner.matchAll(/--font-[a-z-]+\s*:\s*(['"])([^'"]+)\1/g)].map(m => m[2])
+  expect(leads).toContain('EBGI F2')
+  for (const name of leads) expect([...faces, ...loaded], `--font-* leads with ${name}`).toContain(name)
 })
 
 it('only styles/type.css defines the type tokens', () => {
