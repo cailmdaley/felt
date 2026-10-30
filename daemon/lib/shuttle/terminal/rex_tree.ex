@@ -24,10 +24,13 @@ defmodule Shuttle.Terminal.RexTree do
     do: is_map(row["shuttle"]) or "constitution" in (row["tags"] || [])
 
   @doc "Read the fiber tree at launch; an unreadable tree cannot authorize a different family."
-  def resolve(nil), do: {:ok, nil}
+  def resolve(fiber, opts \\ [])
+  def resolve(nil, _opts), do: {:ok, nil}
 
-  def resolve(fiber) do
-    with {:ok, %{fibers: entries}} <- Shuttle.FiberDocuments.list() do
+  def resolve(fiber, opts) do
+    stores = if opts[:felt_store], do: [felt_stores: [opts[:felt_store]]], else: []
+
+    with {:ok, %{fibers: entries}} <- Shuttle.FiberDocuments.list(stores) do
       rows = Enum.map(entries, & &1.fiber)
       row = Enum.find(rows, &((&1["slug"] || &1["id"]) == fiber or &1["id"] == fiber))
       path = if row, do: row["slug"] || row["id"], else: fiber
@@ -177,10 +180,10 @@ defmodule Shuttle.Terminal.RexTree do
     entries
     |> Enum.group_by(& &1.session_id)
     |> Enum.reduce_while(:ok, fn {sid, windows}, :ok ->
-      # A binding without a family keeps its physical placement. Its window
-      # can still display its fiber, without claiming the containing session.
+      # A binding without a family keeps its physical placement and uses its
+      # fiber's last two segments for its per-worker session display.
       root = hd(windows).family
-      label = if root, do: display_label(session_label(root)), else: labels[sid]
+      label = display_label(session_label(root || hd(windows).fiber))
 
       result =
         with {:ok, view} <- Rex.windows(runner, sid),

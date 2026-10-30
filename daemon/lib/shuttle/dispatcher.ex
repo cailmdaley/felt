@@ -1723,6 +1723,7 @@ defmodule Shuttle.Dispatcher do
                 run_script,
                 runner,
                 opts[:fiber] || fiber_id,
+                felt_store,
                 fn ->
                   record_dispatch_session(
                     fiber_id,
@@ -1785,29 +1786,38 @@ defmodule Shuttle.Dispatcher do
 
         # Store the session UUID in the dispatch marker so "Resume previous"
         # and the autonomous continuation heuristic can recover it.
-        spawn_and_record(session, work_dir, run_script, runner, opts[:fiber] || fiber_id, fn ->
-          store_session_id(
-            fiber_id,
-            session_uuid,
-            runner,
-            Keyword.merge(opts,
-              felt_store: felt_store,
-              run_id: Keyword.get(opts, :run_id),
-              tmux: session,
-              harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-              uid: Keyword.get(opts, :uid),
-              ledger_kind: :dispatch
+        spawn_and_record(
+          session,
+          work_dir,
+          run_script,
+          runner,
+          opts[:fiber] || fiber_id,
+          felt_store,
+          fn ->
+            store_session_id(
+              fiber_id,
+              session_uuid,
+              runner,
+              Keyword.merge(opts,
+                felt_store: felt_store,
+                run_id: Keyword.get(opts, :run_id),
+                tmux: session,
+                harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                uid: Keyword.get(opts, :uid),
+                ledger_kind: :dispatch
+              )
             )
-          )
-        end)
+          end
+        )
     end
   end
 
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
-  defp spawn_and_record(session, work_dir, run_script, runner, fiber_id, record_fun) do
+  defp spawn_and_record(session, work_dir, run_script, runner, fiber_id, felt_store, record_fun) do
     case Shuttle.Terminal.launch(runner, session, work_dir, run_script,
            fiber: fiber_id,
+           felt_store: felt_store,
            preflighted: true
          ) do
       :ok ->

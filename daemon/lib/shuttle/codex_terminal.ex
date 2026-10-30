@@ -118,6 +118,7 @@ defmodule Shuttle.CodexTerminal do
          :ok <-
            Terminal.launch(runner, tmux, cwd, script(id, record, tmux),
              fiber: record["fiber_id"],
+             felt_store: record["felt_store"],
              preflighted: true
            ) do
       AppWorkers.update(id, %{"terminal_error" => nil})
