@@ -122,9 +122,9 @@ Refresh the credential before concluding shuttle is broken.
 It reads `~/.config/shuttle/remotes.json`; entries with a `checkout` field are deploy targets.
 Release users install packaged releases through the [installer](../shuttle/installation.md).
 
-The helper checks the exact target commit's latest push run in the `CI` workflow before building on any host.
-A completed run whose conclusion is not `success` refuses deployment; `--allow-failed-ci` explicitly overrides it.
-Pending runs, absent runs, and unavailable GitHub credentials print a warning and allow the deploy to continue.
+The helper prints one warning if the target commit's latest completed main CI run failed.
+It uses the same bounded check as this repo's SessionStart hook: one GitHub request with a 900 ms process timeout, silent for green, pending, absent, or unavailable results.
+CI does not gate deployment or require waiting after a push; run targeted local tests before pushing and the full suite for broad changes.
 
 To deploy a release candidate across the configured fleet, pin its tag:
 

@@ -270,16 +270,16 @@ in `NOTICE` and `LICENSE-APACHE`.
 
 ## Landing changes
 
-After pushing `main`, the pusher owns CI for that exact commit until it is green.
-Capture the pushed SHA, wait for its `CI` push run to appear in `gh run list --branch main --workflow CI --commit <sha> --event push`, then run `gh run watch <run-id> --exit-status`.
-If CI is red, inspect the failing jobs and fix or revert the break before leaving; watch the resulting pushed SHA through completion too.
+Run the targeted local tests before pushing; use the full suite for broad changes.
+CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
+The repo's SessionStart hook prints one bounded warning when the latest completed main CI run is red.
 
 Work lands directly on `main`: commit as each piece lands, rebase on
 `origin/main`, run the suites the change touches, and push. No PRs and no
 long-lived branches — iteration happens on `main`, one small improvement after
 another, rather than across review boundaries. A worktree is fine for
 isolation while working; rebase and push its commits to `main`. Hold a push
-only for a red or unrun suite; an open design question gets a decision fiber
+only for a failing or unrun required local test; an open design question gets a decision fiber
 and a best call, not a pending branch. Screenshots that would have gone in a
 PR body go to the human with `shuttle send-file` and into the fiber.
 

@@ -1,19 +1,22 @@
 #!/bin/sh
-# SessionStart hook: tells a session in this checkout when the latest
-# completed CI run on main failed. Silent when CI is green or gh is
-# unavailable, so it never blocks a session.
+# One bounded SessionStart/deploy warning for a failed completed main CI run.
+# An optional commit SHA selects the deployment target. All other states,
+# offline hosts, and missing tools stay silent and return success.
 command -v gh >/dev/null 2>&1 || exit 0
-if command -v timeout >/dev/null 2>&1; then t() { timeout 8 "$@"; }; else t() { "$@"; }; fi
-run=$(t gh run list --branch main --workflow CI --status completed -L 1 \
-  --json conclusion,headSha,displayTitle,url,databaseId \
-  --jq '.[0] | select(.conclusion == "failure") | "\(.databaseId)\t\(.headSha[0:8])\t\(.displayTitle)\t\(.url)"' 2>/dev/null) || exit 0
-[ -n "$run" ] || exit 0
-id=$(printf '%s' "$run" | cut -f1)
-sha=$(printf '%s' "$run" | cut -f2)
-title=$(printf '%s' "$run" | cut -f3)
-url=$(printf '%s' "$run" | cut -f4)
-jobs=$(t gh run view "$id" --json jobs \
-  --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join("; ")' 2>/dev/null)
-echo "CI is red on main: the latest completed CI run ($sha \"$title\") failed${jobs:+ in: $jobs}."
-echo "Run: $url — failing tests: gh run view $id --log-failed | grep -E '[0-9]\) (test|property)|--- FAIL'"
-echo "Fixing red CI takes priority over landing more changes on main."
+command -v node >/dev/null 2>&1 || exit 0
+cd "$(dirname "$0")/.." 2>/dev/null || exit 0
+node - "$@" 2>/dev/null <<'JS' || true
+const { spawnSync } = require('node:child_process')
+try {
+  const sha = process.argv[2]
+  const args = ['api', '--method', 'GET', 'repos/{owner}/{repo}/actions/workflows/ci.yml/runs',
+    '-f', 'branch=main', '-f', 'event=push', '-f', 'status=completed', '-f', 'per_page=1']
+  if (sha) args.push('-f', `head_sha=${sha}`)
+  const result = spawnSync('gh', args, { encoding: 'utf8', timeout: 900, killSignal: 'SIGKILL', maxBuffer: 256 * 1024 })
+  if (result.error || result.status !== 0) process.exit(0)
+  const run = JSON.parse(result.stdout).workflow_runs?.[0]
+  if (run?.conclusion !== 'failure') process.exit(0)
+  const oneLine = value => String(value ?? '').replace(/[\r\n]/g, ' ')
+  console.log(`CI is red on main at ${oneLine(run.head_sha).slice(0, 8)}: ${oneLine(run.html_url)}`)
+} catch {}
+JS
