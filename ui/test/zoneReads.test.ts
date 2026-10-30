@@ -93,23 +93,44 @@ it('reads the local zone only through civilDay.ts', () => {
   expect(reads, 'route these through a civilDay.ts helper that takes a Zone').toEqual([])
 })
 
+/** A clock or relative age formatted by hand: the forms only civilDay.ts may write. */
+function clockFormats(file: string, source: string): string[] {
+  const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  const found: string[] = []
+  const visit = (node: ts.Node): void => {
+    const clock = ts.isPropertyAccessExpression(node) && /^(toLocaleTimeString|getHours|getMinutes)$/.test(node.name.text)
+    const hour = ts.isPropertyAssignment(node) && /^(hour|minute|hour12|timeStyle)$/.test(node.name.getText(sf))
+    const relative = (ts.isTemplateExpression(node) && node.templateSpans.some(span => /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(span.literal.text)))
+      || (ts.isStringLiteral(node) && /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(node.text))
+    if (clock || hour || relative) found.push(`${file}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`)
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return found
+}
+
 it('formats clocks and relative ages only in civilDay.ts', () => {
   const violations = sources(SRC).flatMap((path) => {
     const file = relative(SRC, path).split('\\').join('/')
     if (file === OWNER) return []
-    const sf = ts.createSourceFile(file, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true)
-    const found: string[] = []
-    const visit = (node: ts.Node): void => {
-      const clock = ts.isPropertyAccessExpression(node) && node.name.text === 'toLocaleTimeString'
-      const hour = ts.isPropertyAssignment(node) && node.name.getText(sf) === 'hour' && ts.isStringLiteral(node.initializer) && node.initializer.text === '2-digit'
-      const relative = ts.isTemplateExpression(node) && node.templateSpans.some(span => /^m ago\b/.test(span.literal.text))
-      if (clock || hour || relative) found.push(`${file}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`)
-      ts.forEachChild(node, visit)
-    }
-    visit(sf)
-    return found
+    return clockFormats(file, readFileSync(path, 'utf8'))
   })
   expect(violations).toEqual([])
+})
+
+it('sees the clock formats it exists to catch', () => {
+  const mustFail = [
+    'const t = new Date(ms).toLocaleTimeString()',
+    "const o = { hour: '2-digit', minute: '2-digit' }",
+    "const o = { hour: 'numeric' }",
+    'const t = `${d.getHours()}:${m}`',
+    'const a = `${n}m ago`',
+    'const a = `${n}h ago`',
+    'const a = `${n}d ago`',
+    'const a = n + \'s ago\'',
+  ]
+  expect(mustFail.filter(src => clockFormats('x.ts', src).length === 0)).toEqual([])
+  expect(clockFormats('x.ts', "const word = 'a while ago'; const u = d.getUTCHours()")).toEqual([])
 })
 
 it('sees the reads it exists to catch', () => {

@@ -885,7 +885,7 @@ export function injectStashFormStyles(): void {
     }
     .stash-segment {
       display: flex;
-      align-items: center;
+      align-items: baseline;
       gap: 7px;
       padding: 0 10px;
       line-height: var(--leading-tight);

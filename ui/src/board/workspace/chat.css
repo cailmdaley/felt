@@ -160,11 +160,11 @@
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
-  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--type-meta); color: var(--ws-ink-muted);
+  order: 2; justify-content: flex-end; margin: 4px 0 0; font-size: var(--type-meta); color: var(--ws-ink-muted);
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
-/* The bubble already says who spoke; the line under it keeps the time, at the column's right edge like every chat time. */
-.ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
+/* The bubble already says who spoke; the line under it keeps the time. */
+.ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-author-you { display: none; }
 /* The session's brief is not your turn: a quiet line at the column's left, opening into plain text. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you.ws-transcript-msg-brief { align-self: stretch; align-items: flex-start; max-width: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-brief > .ws-transcript-kicker { order: 0; justify-content: flex-start; margin: 0; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
@@ -174,7 +174,6 @@
 .ws-chat .ws-transcript-sent:empty { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-sending { opacity: .72; }
 .ws-chat .ws-transcript-sending { font-style: italic; }
-.ws-chat .ws-transcript-msg-sending .ws-transcript-sending + .ws-transcript-author-you + .ws-transcript-sep { display: inline; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent { padding: 0; border: 0; border-radius: 0; background: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-agent .ws-transcript-kicker { display: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-prose { font: var(--type-prose)/var(--leading-prose) var(--font-serif); }

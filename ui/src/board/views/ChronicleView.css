@@ -98,7 +98,7 @@
   white-space: nowrap;
 }
 .chr-corner-count {
-  font: var(--type-meta)/var(--leading-solid) var(--font-mono);
+  font: var(--type-note)/var(--leading-solid) var(--font-serif);
   color: var(--kbn-ink-faint);
 }
 

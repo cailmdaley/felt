@@ -1,4 +1,4 @@
-import { clockTime } from '../civilDay.js'
+import { clockTime, formatInstant } from '../civilDay.js'
 import { documentLabelMetadata, lastSent, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 
 /** Receipt-backed files, newest first. */
@@ -6,8 +6,6 @@ export function sentDocuments(channel: Channel): WorkspaceDocument[] {
   return channel.documents.filter(doc => doc.provenance.some(p => p.kind === 'sent'))
     .sort((a, b) => (lastSent(b) ?? 0) - (lastSent(a) ?? 0) || a.key.localeCompare(b.key))
 }
-
-const FULL: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }
 
 /** A narrow column's stamp: the time today, the date otherwise, the year only when it differs. */
 export function compactStamp(at: number, now = Date.now()): string {
@@ -27,7 +25,7 @@ export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: 
   if (at !== undefined) {
     time.dateTime = new Date(at).toISOString()
     time.textContent = compact ? compactStamp(at) : `${new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${clockTime(at)}`
-    if (compact) time.title = new Date(at).toLocaleString(undefined, FULL)
+    if (compact) time.title = `${formatInstant(at, { month: 'short', day: 'numeric' })}, ${clockTime(at)}`
   } else time.textContent = 'Date unknown'
   row.append(label, time)
   if (fresh.has(doc.key)) {

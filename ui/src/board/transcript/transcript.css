@@ -222,6 +222,7 @@
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief > .ws-transcript-kicker { cursor: pointer; margin: 0; color: var(--ws-ink-muted); font-family: var(--font-serif); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief .ws-transcript-author-dispatch { color: inherit; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief > .ws-transcript-kicker::after { content: '▸'; font-size: var(--glyph-small); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief > .ws-transcript-kicker .ws-transcript-clock { order: 1; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief.ws-transcript-brief-open > .ws-transcript-kicker::after { content: '▾'; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief > .ws-transcript-kicker:hover { color: var(--ws-ink); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg-brief .ws-transcript-prompt-text { margin-top: 6px; max-height: none; }
@@ -576,7 +577,7 @@
 /* A sent-file row is its time and its chips; the chips carry the only frame. */
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg.ws-transcript-sent-file {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   gap: 10px;
   margin: 0;
   padding: 0;

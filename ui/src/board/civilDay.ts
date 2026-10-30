@@ -158,6 +158,7 @@ export function clockTime(ms: number, z = hostZone()): string {
 
 /** Format an instant's age; optionally show seconds for live polling. Future instants read as now. */
 export function ago(ms: number, now = Date.now(), options: { seconds?: boolean } = {}): string {
+  if (!Number.isFinite(ms)) return ''
   const elapsed = Math.max(0, now - ms)
   if (elapsed < 60_000) return options.seconds ? `${Math.floor(elapsed / 1000)}s ago` : 'just now'
   if (elapsed < HOUR_MS) return `${Math.floor(elapsed / 60_000)}m ago`

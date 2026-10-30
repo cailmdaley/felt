@@ -209,7 +209,8 @@
   gap: 6px;
   font-family: var(--font-serif);
   font-size: var(--type-title);
-  line-height: var(--leading-solid);
+  line-height: calc(var(--type-label) * var(--leading-tight));
+  white-space: nowrap;
   font-weight: 400;
   font-variant-caps: all-small-caps;
   letter-spacing: var(--track-nav);
@@ -1993,7 +1994,7 @@
    foot: the meta row keeps its chips' height and gives way to the undo line
    (workspace/verdicts.css), set in the actor chip's size. */
 .kbn-card-meta[data-verdict-pending] { min-height: 19px; }
-.kbn-card-meta > .ws-verdict-undo { font-size: var(--type-meta); }
+.kbn-card-meta > .ws-verdict-undo { font-size: var(--type-note); }
 
 /* ══════════════════════════════════════════════════════════════════════════
    THE DESK AT PHONE WIDTH

@@ -263,6 +263,8 @@ export function injectFormKitStyles(): void {
     .form-optional {
       font-family: var(--font-serif);
       font-size: var(--type-meta);
+      font-variant-caps: normal;
+      letter-spacing: 0;
       font-weight: 400;
       color: var(--kbn-graphite-pale);
       padding: 1px 4px;
