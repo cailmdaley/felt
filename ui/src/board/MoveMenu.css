@@ -67,7 +67,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: none;
+  font-variant-caps: normal;
+  letter-spacing: 0;
   color: var(--kbn-graphite-pale);
 }
 /* Between the Now columns and everything else. A hairline, because the two

@@ -43,7 +43,7 @@ describe('workspace style contracts', () => {
   })
   it('draws the dock from workspace tokens alone', () => {
     const dock = read('dock.css').replace(/\/\*[\s\S]*?\*\//g, '')
-    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl|type|font|glyph|leading|rhythm)-[\w-]+)\s*:/g)].map(m => m[1]))
+    const declarations = new Set([...`${tokens}\n${dock}`.matchAll(/(--(?:ws|ctl|type|font|glyph|leading|rhythm|track)-[\w-]+)\s*:/g)].map(m => m[1]))
     for (const token of [...dock.matchAll(/var\((--[\w-]+)/g)].map(m => m[1])) expect(declarations.has(token), token).toBe(true)
     expect(dock).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|url\(/i)
   })

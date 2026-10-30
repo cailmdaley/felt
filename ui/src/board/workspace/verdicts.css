@@ -19,7 +19,7 @@
   font: inherit; letter-spacing: inherit; text-transform: inherit;
 }
 .ws-verdict-undo button:hover { color: var(--ws-ink); }
-.ws-verdict-undo kbd { font: inherit; text-transform: none; }
+.ws-verdict-undo kbd { font: inherit; font-variant-caps: normal; letter-spacing: 0; }
 .ws-verdict-undo button:focus-visible { outline: 1px dashed var(--ws-focus); outline-offset: 2px; }
 /* The fiber page's pair sits at its line's right end; so does the line. */
 .kbn-ctl-verdict > .ws-verdict-undo { justify-content: flex-end; }
