@@ -249,10 +249,10 @@ export function AppDialog({
               {eyebrow && (
                 <span
                   style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 'var(--type-meta)',
-                    letterSpacing: '0.16em',
-                    textTransform: 'uppercase',
+                    fontFamily: 'var(--font-serif)',
+                    fontSize: 'var(--type-note)',
+                    fontVariant: 'all-small-caps',
+                    letterSpacing: '0.06em',
                     color: 'var(--kbn-graphite-faint)',
                   }}
                 >

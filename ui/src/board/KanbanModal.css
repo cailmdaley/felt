@@ -1466,7 +1466,7 @@
 .kbn-meeting-line + .kbn-meeting-line { margin-top: 2px; }
 .kbn-meeting-speaker {
   color: var(--kbn-tempered-ink);
-  font-family: var(--font-mono);
+  font-family: var(--font-serif);
   font-size: inherit;
   font-weight: 600;
 }

@@ -21,7 +21,7 @@ const EXEMPT: Record<string, string> = {}
 const SIZE = /^var\(--(type|glyph)-[a-z-]+\)$/
 const FAMILY = /^var\(--font-(serif|mono|initials|initials-frill)\)$/
 const LEADING = /^var\(--leading-[a-z]+\)$/
-const BOX = /^(\d+(\.\d+)?px|calc\(.*\)|var\(--[a-z-]+-(h|height|target)\)|normal)$/
+const BOX = /^(\d+(\.\d+)?px|calc\(.*var\(--.*\)|var\(--[a-z-]+-(h|height|target)\)|normal)$/
 const KEYWORD = /^(inherit|unset|initial)$/
 
 function files(dir: string): string[] {
@@ -94,6 +94,17 @@ it('the scan catches the shapes it guards', () => {
     '.ok2 { font: italic 500 var(--type-label)/var(--leading-prose) var(--font-serif); }',
     '.ok4 { line-height: 24px; }',
     '.ok3 { font: inherit; }',
+    '.g { line-height: calc(1.5); }',
   ].join('\n')
-  expect(violations('x.css', sample).map(v => v.split('  ')[0].split(':')[1])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
+  expect(violations('x.css', sample).map(v => v.split('  ')[0].split(':')[1])).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '14'])
+})
+
+it('only styles/type.css defines the type tokens', () => {
+  const define = /(?<![\w-])--(type|leading|font|glyph|rhythm)-[a-z-]+\s*:/
+  const found = files(SRC).flatMap((path) => {
+    const file = relative(SRC, path)
+    if (file === OWNER) return []
+    return readFileSync(path, 'utf8').split('\n').flatMap((line, i) => define.test(line) ? [`${file}:${i + 1}  ${line.trim()}`] : [])
+  })
+  expect(found, `type tokens redefined outside ${OWNER}:\n${found.join('\n')}`).toEqual([])
 })

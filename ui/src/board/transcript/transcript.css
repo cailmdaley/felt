@@ -64,7 +64,7 @@
   background: var(--ws-machine);
   animation: ws-transcript-pulse 1.6s ease-in-out infinite;
 }
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-label { margin-left: -4px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-label { margin-left: -4px; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-fact {
   flex: none;
   color: var(--ws-ink-muted);
@@ -203,12 +203,12 @@
   gap: 5px;
   margin-bottom: 2px;
   color: var(--ws-ink-muted);
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-you,
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-dispatch { color: var(--ws-you); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-agent { color: var(--ws-machine); }
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-clock { color: var(--ws-ink-muted); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-clock { color: var(--ws-ink-muted); font: var(--type-meta) var(--font-mono); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text {
   max-height: 4.6em;
   overflow: hidden;
@@ -365,7 +365,7 @@
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-name { flex: none; color: var(--ws-ink-soft); font-weight: 500; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-summary {
   min-width: 0;
-  font: var(--type-code) var(--font-mono);
+  font: var(--type-code)/var(--leading-ui) var(--font-mono);
   overflow: hidden;
   color: var(--ws-ink-muted);
   text-overflow: ellipsis;
@@ -416,7 +416,7 @@
   background: transparent;
   color: var(--ws-ink-muted);
   text-align: left;
-  font: var(--type-meta)/var(--leading-prose) var(--font-serif);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-event .ws-transcript-expand:hover,
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-think .ws-transcript-expand:hover { color: var(--ws-ink); }
@@ -493,6 +493,8 @@
   margin-bottom: 2px;
   color: var(--ws-ink-faint, var(--ws-ink-muted));
   font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+  font-variant: all-small-caps;
+  letter-spacing: .04em;
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }
 
@@ -519,6 +521,7 @@
 }
 .ws-transcript-session-chip { padding: 0 5px; border: 1px solid var(--ws-hairline); border-radius: 999px; font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .ws-transcript-message-toggle {
+  flex: 1 1 0;
   min-width: 0;
   padding: 0;
   border: 0;
@@ -534,7 +537,7 @@
 .ws-transcript-message-toggle::after { content: ' ▸'; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
 .ws-transcript-message-toggle[data-expanded='true']::after { content: ' ▾'; }
 .ws-transcript-message-toggle:hover { color: var(--ws-ink); }
-.ws-transcript-message-time { flex: 0 0 auto; font: var(--type-meta) var(--font-mono); }
+.ws-transcript-message-time { flex: 0 0 auto; margin-left: auto; font: var(--type-meta) var(--font-mono); }
 .ws-transcript-message-detail { margin: 5px 0 1px; padding-left: 9px; border-left: 1px solid var(--ws-hairline); color: var(--ws-ink-soft); }
 .ws-transcript-message-detail[hidden], .ws-transcript-message-verb[hidden], .ws-transcript-message-text[hidden] { display: none; }
 .ws-transcript-message-verb { display: block; margin-bottom: 3px; font: var(--type-note)/var(--leading-ui) var(--font-serif); }
@@ -590,7 +593,7 @@
   color: var(--ws-ink-soft);
   font-size: var(--type-note);
 }
-.ws-transcript-checklist-heading { font: var(--type-meta)/var(--leading-prose) var(--font-serif); color: var(--ws-ink-muted); }
+.ws-transcript-checklist-heading { font: var(--type-meta)/var(--leading-prose) var(--font-serif); font-variant: all-small-caps; letter-spacing: .04em; color: var(--ws-ink-muted); }
 .ws-transcript-checklist ul { list-style: none; margin: 6px 0 0; padding: 0; }
 .ws-transcript-checklist li { display: flex; gap: 8px; padding: 2px 0; }
 .ws-transcript-task-mark { flex: 0 0 1em; }

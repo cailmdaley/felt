@@ -276,7 +276,7 @@
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
   /* On the phone the pair are icons beside ⚙, named by their labels to assistive tech. */
-  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; min-height: 44px; gap: 0; padding: 0; }
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 36px; min-height: var(--ws-phone-target); gap: 0; padding: 0; }
   .ws-chat-refs > .ws-chat-constitution::after, .ws-chat-refs .ws-report-label { display: none; }
   .ws-report-preview { width: 24px; height: 18px; min-height: 0; aspect-ratio: auto; }
   .ws-report-label { font-size: var(--type-meta); }
