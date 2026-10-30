@@ -71,6 +71,10 @@ func validateThreadSignalWithBackoff(ctx context.Context, env *sysenv.Env, reque
 	}
 	current, err := check(ctx, request)
 	if err != nil {
+		var skew threadSignalSkewError
+		if errors.As(err, &skew) {
+			return false, err
+		}
 		bytes, _ := json.Marshal(threadValidationFailure{RetryAt: time.Now().Add(threadValidationRetryDelay)})
 		return false, errors.Join(err, mailboxWrite(path+".json", bytes, false))
 	}

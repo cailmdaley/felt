@@ -20,6 +20,8 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
+const mailboxRetention = 14 * 24 * time.Hour
+
 // Supported harness hook interfaces accept additional context without starting
 // a turn. These host-local mailboxes preserve messages until a receiving hook can
 // offer them. An offer is not evidence that the model read or acted on it.
@@ -96,6 +98,11 @@ type mailboxEntry struct {
 	// successor with PossibleRepeat when its outcome cannot be established.
 	AttemptAddress string `json:"attempt_address,omitempty"`
 	PossibleRepeat bool   `json:"possible_repeat,omitempty"`
+}
+
+type mailboxPendingItem struct {
+	path  string
+	entry mailboxEntry
 }
 
 func mailboxKey(s string) string {
@@ -216,6 +223,9 @@ func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
 	if r.Wake {
 		return rejected(r, transport, "hook mailboxes cannot wake a session"), errCode("wake_required", "hook mailboxes cannot wake a session")
 	}
+	if requestExpired(r, time.Now()) {
+		return rejected(r, transport, "thread notice expired"), errCode("expired", "thread notice is outside the 14-day retention window")
+	}
 	if err := enqueueMailbox(mailboxDir(env, a.Harness, a.ID), r); err != nil {
 		return rejected(r, transport, err.Error()), err
 	}
@@ -312,6 +322,9 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		return nil
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if err := pruneOffered(dir, time.Now()); err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(filepath.Join(dir, "pending"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -319,11 +332,7 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 	if err != nil {
 		return err
 	}
-	type item struct {
-		path  string
-		entry mailboxEntry
-	}
-	items := []item{}
+	items := []mailboxPendingItem{}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
@@ -337,10 +346,19 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		if json.Unmarshal(b, &entry) != nil || entry.Request.MessageID == "" || len(entry.Request.Text) > 64<<10 {
 			continue
 		}
+		if mailboxEntryExpired(entry, time.Now()) {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if err := syncDir(filepath.Join(dir, "pending")); err != nil {
+				return err
+			}
+			continue
+		}
 		if !accepts(entry.Request) {
 			continue
 		}
-		items = append(items, item{path, entry})
+		items = append(items, mailboxPendingItem{path, entry})
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].entry.QueuedAt == items[j].entry.QueuedAt {
@@ -367,10 +385,16 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		}
 		wg.Wait()
 		cancel()
-		items = []item{}
+		items = []mailboxPendingItem{}
 		for i, it := range candidates {
 			isCurrent, err := checks[i].current, checks[i].err
 			if err != nil {
+				var skew threadSignalSkewError
+				if errors.As(err, &skew) {
+					it.entry.Request.Text = withStalenessCaveat(it.entry.Request.Text)
+					items = append(items, it)
+					continue
+				}
 				if validationErr == nil {
 					validationErr = err
 				}
@@ -399,10 +423,17 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 	}
 	// Only accepted requests consume the output window. Unverifiable owners
 	// retain their entries without preventing newer, healthy notices from flowing.
-	selected := []item{}
+	selected := []mailboxPendingItem{}
 	batch := []Request{}
 	size := 0
+	lifecycleSelected := false
 	for _, it := range items {
+		if !each && hasThreadSignalValidation(it.entry.Request) {
+			if lifecycleSelected {
+				continue
+			}
+			lifecycleSelected = true
+		}
 		if size+len(it.entry.Request.Text) > 64<<10 {
 			break
 		}
@@ -414,19 +445,41 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		}
 	}
 	items = selected
-	n := len(items)
-	if n == 0 {
-		return validationErr
-	}
 	offeredDir := filepath.Join(dir, "offered")
 	if err := ensureDir(offeredDir, 0700); err != nil {
 		return err
 	}
 	if !each {
+		if current != nil {
+			fresh := items[:0]
+			for _, it := range items {
+				if hasThreadSignalValidation(it.entry.Request) {
+					var currentNow bool
+					var checkErr error
+					it, currentNow, checkErr = validateMailboxItem(dir, it, current)
+					if checkErr != nil {
+						validationErr = errors.Join(validationErr, checkErr)
+						continue
+					}
+					if !currentNow {
+						continue
+					}
+				}
+				fresh = append(fresh, it)
+			}
+			items = fresh
+			batch = batch[:0]
+			for _, it := range items {
+				batch = append(batch, it.entry.Request)
+			}
+		}
+		if len(items) == 0 {
+			return validationErr
+		}
 		if err := emit(batch); err != nil {
 			return err
 		}
-		for _, it := range items[:n] {
+		for _, it := range items {
 			if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
 				return err
 			}
@@ -440,7 +493,19 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		return validationErr
 	}
 	var deliveryErr error
-	for _, it := range items[:n] {
+	for _, it := range items {
+		if current != nil && hasThreadSignalValidation(it.entry.Request) {
+			var currentNow bool
+			var checkErr error
+			it, currentNow, checkErr = validateMailboxItem(dir, it, current)
+			if checkErr != nil {
+				validationErr = errors.Join(validationErr, checkErr)
+				continue
+			}
+			if !currentNow {
+				continue
+			}
+		}
 		if err := emit([]Request{it.entry.Request}); err != nil {
 			if deliveryErr == nil {
 				deliveryErr = err
@@ -458,6 +523,150 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		}
 	}
 	return errors.Join(validationErr, deliveryErr)
+}
+
+func mailboxEntryExpired(entry mailboxEntry, now time.Time) bool {
+	if requestExpired(entry.Request, now) {
+		return true
+	}
+	request := entry.Request
+	if request.ThreadSignal == nil && request.RetainedAt == "" && !isUnblockedNotice(request.Text) && !hasThreadSignalValidation(request) {
+		return false
+	}
+	const earliestRecordedQueue = int64(946684800000000000) // 2000-01-01 UTC
+	return entry.QueuedAt >= earliestRecordedQueue && now.Sub(time.Unix(0, entry.QueuedAt)) > mailboxRetention
+}
+
+func validateMailboxItem(dir string, it mailboxPendingItem, current func(context.Context, Request) (bool, error)) (mailboxPendingItem, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	isCurrent, err := current(ctx, it.entry.Request)
+	cancel()
+	if err != nil {
+		var skew threadSignalSkewError
+		if errors.As(err, &skew) {
+			it.entry.Request.Text = withStalenessCaveat(it.entry.Request.Text)
+			return it, true, nil
+		}
+		return it, false, err
+	}
+	if !isCurrent {
+		if err := moveToOffered(dir, it.path); err != nil {
+			return it, false, err
+		}
+		return it, false, nil
+	}
+	return it, true, nil
+}
+
+func moveToOffered(dir, path string) error {
+	offeredDir := filepath.Join(dir, "offered")
+	if err := ensureDir(offeredDir, 0700); err != nil {
+		return err
+	}
+	if err := os.Rename(path, filepath.Join(offeredDir, filepath.Base(path))); err != nil {
+		return err
+	}
+	if err := syncDir(filepath.Join(dir, "pending")); err != nil {
+		return err
+	}
+	return syncDir(offeredDir)
+}
+
+func pruneOffered(dir string, now time.Time) error {
+	offeredDir := filepath.Join(dir, "offered")
+	entries, err := os.ReadDir(offeredDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cutoff := now.Add(-mailboxRetention)
+	changed := false
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().Before(cutoff) {
+			if err := os.Remove(filepath.Join(offeredDir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			changed = true
+		}
+	}
+	if changed {
+		return syncDir(offeredDir)
+	}
+	return nil
+}
+
+// PruneOfferedMailboxes expires retained delivery bodies across active and
+// dormant mailboxes. The shared marker bounds the tree walk to once per hour.
+func PruneOfferedMailboxes(env *sysenv.Env, now time.Time) error {
+	data := dataDir(env)
+	root := filepath.Join(data, "mailboxes")
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(data, "mailbox-retention.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	marker := filepath.Join(data, "mailbox-retention")
+	if info, err := os.Stat(marker); err == nil && now.Sub(info.ModTime()) < time.Hour {
+		return nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	harnesses, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, harness := range harnesses {
+		if !harness.IsDir() {
+			continue
+		}
+		mailboxes, err := os.ReadDir(filepath.Join(root, harness.Name()))
+		if err != nil {
+			return err
+		}
+		for _, mailbox := range mailboxes {
+			if !mailbox.IsDir() {
+				continue
+			}
+			if err := pruneMailboxOfferedLocked(filepath.Join(root, harness.Name(), mailbox.Name()), now); err != nil {
+				return err
+			}
+		}
+	}
+	return mailboxWrite(marker, []byte(now.UTC().Format(time.RFC3339Nano)), false)
+}
+
+func pruneMailboxOfferedLocked(dir string, now time.Time) error {
+	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil
+		}
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	return pruneOffered(dir, now)
 }
 
 // mailboxSessions returns hook-registered receivers for one harness and host

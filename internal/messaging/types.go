@@ -56,6 +56,7 @@ type Request struct {
 	NotifyAddress string        `json:"notify_address,omitempty"`
 	Wake          bool          `json:"wake"`
 	MessageID     string        `json:"message_id"`
+	RetainedAt    string        `json:"retained_at,omitempty"`
 	ThreadSignal  *ThreadSignal `json:"thread_signal,omitempty"`
 	// threadSignalVerified carries owner validation through a native send without
 	// exposing lifecycle authority in the sender-controlled request frame.

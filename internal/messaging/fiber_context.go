@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -24,6 +26,9 @@ type fiberMailboxLink struct {
 func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 	if fiber == "" || r.MessageID == "" || r.Text == "" || len(r.Text) > 64<<10 {
 		return errCode("invalid_request", "fiber context requires a key, message id and text (at most 64 KiB)")
+	}
+	if requestExpired(r, time.Now()) {
+		return nil
 	}
 	root := mailboxDir(env, "fiber", fiber)
 	if err := ensureDir(root, 0700); err != nil {
@@ -49,6 +54,23 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
 	}
 	return enqueueMailbox(root, r)
+}
+
+func requestExpired(request Request, now time.Time) bool {
+	stamps := []string{request.RetainedAt}
+	if request.ThreadSignal != nil {
+		stamps = append(stamps, request.ThreadSignal.Stamp)
+	}
+	for _, stamp := range stamps {
+		if stamp == "" {
+			continue
+		}
+		retainedAt, err := time.Parse(time.RFC3339Nano, stamp)
+		if err == nil && now.Sub(retainedAt) > mailboxRetention {
+			return true
+		}
+	}
+	return false
 }
 
 // PendingFiberContext counts the context a fiber's mailbox holds that no
@@ -442,6 +464,9 @@ func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) 
 	cmd := env.CommandContext(ctx, "shuttle", "thread-signal-current", string(bytes))
 	output, err := cmd.Output()
 	if err != nil {
+		if isThreadSignalContractSkew(err) {
+			return false, threadSignalSkewError{err: fmt.Errorf("checking current thread signal %s: %w", request.MessageID, err)}
+		}
 		return false, fmt.Errorf("checking current thread signal %s: %w", request.MessageID, err)
 	}
 	var answer struct {
@@ -454,6 +479,50 @@ func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) 
 		return false, fmt.Errorf("checking current thread signal %s: response has no current field", request.MessageID)
 	}
 	return *answer.Current, nil
+}
+
+type threadSignalSkewError struct{ err error }
+
+func (e threadSignalSkewError) Error() string { return e.err.Error() }
+func (e threadSignalSkewError) Unwrap() error { return e.err }
+
+func isThreadSignalContractSkew(err error) bool {
+	message := err.Error()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && len(exitErr.Stderr) > 0 {
+		message += " " + string(exitErr.Stderr)
+	}
+	lowerMessage := strings.ToLower(message)
+	if strings.Contains(lowerMessage, "unknown command") && strings.Contains(lowerMessage, "thread-signal-current") {
+		return true
+	}
+	if !strings.Contains(lowerMessage, "/api/v1/thread-signals/current") {
+		return false
+	}
+	const status = "returned 404:"
+	index := strings.Index(lowerMessage, status)
+	if index < 0 {
+		return false
+	}
+	var response struct {
+		Errors struct {
+			Detail string `json:"detail"`
+		} `json:"errors"`
+	}
+	return json.Unmarshal([]byte(strings.TrimSpace(message[index+len(status):])), &response) == nil && response.Errors.Detail == "Not Found"
+}
+
+func hasThreadSignalValidation(request Request) bool {
+	return strings.HasPrefix(request.MessageID, "thread-") && !isUnblockedNotice(request.Text)
+}
+
+const staleThreadSignalCaveat = "Staleness caveat: this host's shuttle CLI and daemon do not share the thread-signal validation route, so this lifecycle notice could not be checked for currentness.\n\n"
+
+func withStalenessCaveat(text string) string {
+	if strings.HasPrefix(text, staleThreadSignalCaveat) {
+		return text
+	}
+	return staleThreadSignalCaveat + text
 }
 
 func isUnblockedNotice(text string) bool {

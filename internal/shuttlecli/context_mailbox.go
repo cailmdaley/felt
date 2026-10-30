@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"io"
 	"strconv"
+	"time"
 )
 
 func (a *app) contextMailboxCmd() *cobra.Command {
@@ -18,6 +19,7 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	var from string
 	var fromClaim string
 	var threadSignal string
+	var retainedAt string
 	var proofAddress string
 	var senderProofStdin bool
 	var replyTo string
@@ -44,7 +46,8 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 		}
 		request := messaging.Request{
 			MessageID: args[1], Text: args[2], From: detected, FromClaim: claim,
-			Wake: wake, ReplyTo: replyTo, NotifyAddress: notifyAddress,
+			RetainedAt: retainedAt,
+			Wake:       wake, ReplyTo: replyTo, NotifyAddress: notifyAddress,
 			NotifyWhenIdle: notifyWhenIdle, NotifyWake: notifyWake,
 		}
 		if threadSignal != "" {
@@ -96,8 +99,12 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	put.Flags().BoolVar(&notifyWhenIdle, "notify-when-idle", false, "Subscribe for idle notification")
 	put.Flags().BoolVar(&notifyWake, "notify-wake", false, "Wake on an idle notification")
 	put.Flags().StringVar(&threadSignal, "thread-signal", "", "Thread lifecycle signal JSON for delivery-time validation")
+	put.Flags().StringVar(&retainedAt, "retained-at", "", "Origin timestamp used to expire replayed thread context")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if err := messaging.PruneOfferedMailboxes(a.env, time.Now()); err != nil {
+			return err
+		}
 		// One JSON object, key => count. A key whose mailbox cannot be read
 		// names itself on stderr and is left out, so the others still count.
 		counts := make(map[string]int, len(args))
