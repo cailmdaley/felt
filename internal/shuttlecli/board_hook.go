@@ -18,7 +18,6 @@ import (
 )
 
 type boardCursor struct {
-	At   int64    `json:"at"`
 	Seen []string `json:"seen"`
 }
 
@@ -115,28 +114,24 @@ func (a *app) boardDigest(harness, session string) string {
 		return ""
 	}
 	path := filepath.Join(dir, "board-cursors", harness+"-"+session+".json")
+	pruneBoardCursors(filepath.Dir(path), a.eventNow())
 	var cursor boardCursor
 	if b, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(b, &cursor)
-	}
-	now := a.eventNow().UnixMilli()
-	since := now - int64((6*time.Hour)/time.Millisecond)
-	// A failed fetch leaves the cursor, so a long outage never widens the
-	// window past a new session's.
-	if cursor.At > 0 {
-		since = max(since, cursor.At-int64((10*time.Minute)/time.Millisecond))
 	}
 	endpoint, err := a.daemonEndpoint("/api/v1/board/family")
 	if err != nil {
 		return ""
 	}
-	q := url.Values{"session": {harness + ":" + session}, "since_ms": {strconv.FormatInt(since, 10)}}
+	// The daemon bounds retention by its own clock. An ID cursor catches
+	// arrivals whose writer clock predates the viewer's last successful turn.
+	q := url.Values{"session": {harness + ":" + session}, "since_ms": {"0"}}
 	body, err := a.getDaemon(endpoint+"?"+q.Encode(), 1500*time.Millisecond)
 	if err != nil {
 		return ""
 	}
 	var response boardResponse
-	if json.Unmarshal(body, &response) != nil {
+	if json.Unmarshal(body, &response) != nil || response.Family == nil {
 		return ""
 	}
 	seen := make(map[string]bool, len(cursor.Seen))
@@ -144,7 +139,7 @@ func (a *app) boardDigest(harness, session string) string {
 		seen[id] = true
 	}
 	var fresh []boardRow
-	next := boardCursor{At: now, Seen: []string{}}
+	next := boardCursor{Seen: []string{}}
 	nextSeen := map[string]bool{}
 	for _, r := range response.Records {
 		if r.ID == "" {
@@ -154,7 +149,7 @@ func (a *app) boardDigest(harness, session string) string {
 			fresh = append(fresh, r)
 		}
 		seen[r.ID] = true
-		if r.Timestamp >= now-int64((10*time.Minute)/time.Millisecond) && !nextSeen[r.ID] {
+		if !nextSeen[r.ID] {
 			next.Seen = append(next.Seen, r.ID)
 			nextSeen[r.ID] = true
 		}

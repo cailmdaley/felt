@@ -42,6 +42,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	}
 	digest := ""
 	if input.HookEventName == "UserPromptSubmit" && a.env.Getenv("SHUTTLE_BOARD") != "off" {
+		input.Harness = harness
 		a.recordHumanPrompt(input)
 		digest = a.boardDigest(harness, input.SessionID)
 	}

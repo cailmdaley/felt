@@ -56,7 +56,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 			t.Fatal("line too long")
 		}
 	}
-	if queries[0] != fmt.Sprint(now.Add(-6*time.Hour).UnixMilli()) {
+	if queries[0] != "0" {
 		t.Fatal(queries)
 	}
 	path := filepath.Join(env.Getenv("SHUTTLE_DATA_DIR"), "board-cursors", "pi-s.json")
@@ -71,7 +71,7 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	if out = a.boardDigest("pi", "s"); out != "" {
 		t.Fatalf("replayed %q", out)
 	}
-	if queries[1] != fmt.Sprint(now.Add(-10*time.Minute).UnixMilli()) {
+	if queries[1] != "0" {
 		t.Fatal(queries)
 	}
 	before, _ = os.ReadFile(path)
@@ -105,6 +105,10 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			}})
 			a := newApp(env)
 			input := eventHookInput{HookEventName: "UserPromptSubmit", Harness: harness, SessionID: "session", Prompt: "this one"}
+			if harness == "codex" {
+				input.Harness = ""
+				input.Model = "gpt-6.1-sol"
+			}
 			input.Prompt = "/compact"
 			b, _ := json.Marshal(input)
 			var output bytes.Buffer
