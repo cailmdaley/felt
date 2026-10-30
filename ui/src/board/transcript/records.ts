@@ -229,7 +229,7 @@ const PEER_CAVEAT = /\n\s*(?:This came from another Claude session|That "other C
 
 function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entry | null {
   const text = raw
-    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '')
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?(?:<\/system-reminder\s*>|$)/gi, '')
     // Claude Code heads a relayed session message with a line of its own and
     // closes it with a paragraph of advice to the model; neither is the message.
     .replace(/^\s*Another Claude session sent a message:\s*/, '')

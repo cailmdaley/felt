@@ -139,6 +139,12 @@ describe('harness wrappers in Claude Code user text', () => {
       .toEqual([expect.objectContaining({ kind: 'prompt', text: 'Please look at this.' })])
   })
 
+  it('removes an unclosed reminder through the end of the prompt', () => {
+    expect(user('Measure the shear.\n<system-reminder priority="high">Hidden context.'))
+      .toEqual([expect.objectContaining({ kind: 'prompt', text: 'Measure the shear.' })])
+    expect(user('<system-reminder>Hidden context.')).toEqual([])
+  })
+
   it('reads shell escapes and command stderr as events', () => {
     expect(user('<bash-input>git status</bash-input>')).toEqual([{ kind: 'event', label: 'Shell', detail: 'git status', text: 'git status' }])
     expect(user('<bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>')).toEqual([{ kind: 'event', label: 'Shell output', text: 'clean' }])
