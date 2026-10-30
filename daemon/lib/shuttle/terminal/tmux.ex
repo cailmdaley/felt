@@ -161,9 +161,6 @@ defmodule Shuttle.Terminal.Tmux do
   end
 
   @impl true
-  def reveal(name, host), do: Shuttle.Kitty.open(name, host)
-
-  @impl true
   def script(name) do
     # Detached tmux starts at its default size, and scrollback does not reflow.
     # Wait up to 10s for a human-sized, non-control client before drawing.

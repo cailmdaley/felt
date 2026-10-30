@@ -7,8 +7,8 @@ defmodule Shuttle.SessionResume do
   `prepare/2` runs on the host that ran the session, since the transcript the
   harness resumes from lives there. It starts (or finds) a terminal
   running the harness's own resume for that session id; the caller then
-  attaches a kitty tab to it with `Shuttle.Kitty.open/2`, over ssh when the
-  host is remote, exactly as the Aloft pill attaches to a live worker.
+  opens it through `Shuttle.Opener.open/2`, using this host's display backend,
+  exactly as the Aloft pill opens a live worker.
 
   ## The command
 

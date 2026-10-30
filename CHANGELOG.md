@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
+- Shuttle supports Rex as its terminal backend with `"terminal": "rex"` in `host.json`.
 
 ### Fixed
 

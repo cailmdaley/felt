@@ -1112,7 +1112,7 @@ defmodule Shuttle.Dispatcher do
   defp resume_terminal_held(session_id, tmux) do
     dispatch_refused(
       :session_open_in_resume,
-      "session #{session_id} is open in tmux #{tmux} (a resume from the card's History). " <>
+      "session #{session_id} is open in terminal #{tmux} (a resume from the card's History). " <>
         "Close that terminal, or attach to it, before this fiber's worker resumes the same session."
     )
   end
@@ -2418,6 +2418,7 @@ defmodule Shuttle.Dispatcher do
 
   @doc false
   def passthrough_block do
+    # Passthrough trusts pane output to send raw terminal controls to the outer terminal.
     ~S([ -n "${TMUX_PANE:-}" ] && tmux set-option -p -t "$TMUX_PANE" allow-passthrough on 2>/dev/null || true) <>
       "\n"
   end

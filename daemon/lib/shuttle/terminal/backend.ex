@@ -16,9 +16,9 @@ defmodule Shuttle.Terminal.Backend do
   @callback rename(runner(), String.t(), String.t()) :: :ok | {:error, atom()}
   @callback owns_pane?(runner(), String.t(), String.t()) :: boolean()
   @callback identity(runner(), String.t()) :: {:ok, map()} | {:error, :backend_unobservable}
-  @callback reveal(String.t(), String.t() | nil) :: :ok | {:error, String.t()}
   @callback script(String.t()) :: %{
               wait_for_viewer: String.t(),
+              passthrough: String.t(),
               submit_key: String.t(),
               env: String.t()
             }
