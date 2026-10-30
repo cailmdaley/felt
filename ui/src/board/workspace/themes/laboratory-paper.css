@@ -26,7 +26,6 @@
     0 1px 2px rgb(41 51 45 / 10%),
     0 28px 64px -14px rgb(41 51 45 / 25%);
   --ws-mask: var(--ws-ink);
-  --ws-mono-tracking: 0.08em;
   --ws-lab-grid: rgb(70 91 75 / 12%);
   --ws-margin-rule: rgb(41 51 45 / 28%);
   --ws-radius: 5px;

@@ -60,7 +60,7 @@
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
-  letter-spacing: 0.06em;
+  letter-spacing: var(--track-kicker);
   text-transform: none;
   color: var(--kbn-ink);
   margin: 0;
@@ -92,7 +92,6 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-row);
-  letter-spacing: 0.01em;
   padding: 40px 8px;
 }
 /* Retry, on the chassis's "daemon is not answering" page. A quiet inline
@@ -109,9 +108,9 @@
   padding: 0 0 1px;
   cursor: pointer;
   font-family: var(--font-serif);
-  font-size: var(--type-meta);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: var(--type-note);
+  letter-spacing: var(--track-kicker);
+  font-variant-caps: all-small-caps;
   font-style: normal;
   color: color-mix(in srgb, var(--kbn-you) 88%, var(--kbn-ink));
   transition: color 120ms ease, border-color 120ms ease;

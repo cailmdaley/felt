@@ -43,9 +43,6 @@
   --ws-red: var(--ws-owed);
   --ws-stop: var(--kbn-error);
 
-  /* The Desk's mono register (view tabs, counts): small, tracked, upright. */
-  --ws-mono-tracking: 0.08em;
-
   --ws-crossing: 280ms;
   --ws-veil-time: var(--ws-crossing);
   /* A released page swipe settles within a crossing; the reader shortens it for fast flicks. */

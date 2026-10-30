@@ -886,10 +886,10 @@ export function injectStashFormStyles(): void {
     }
     .stash-segment {
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 7px;
       padding: 0 10px;
-      line-height: 30px;
+      line-height: var(--leading-tight);
       border-radius: 2px;
       cursor: pointer;
       color: var(--kbn-graphite-muted);

@@ -46,7 +46,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font: var(--type-meta)/var(--leading-ui) var(--font-mono);
-  letter-spacing: var(--ws-mono-tracking);
 }
 .ws-transcript-pane .ws-transcript-reading { margin-left: auto; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-live-dot {
@@ -365,7 +364,7 @@
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-name { flex: none; color: var(--ws-ink-soft); font-weight: 500; }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-tool-summary {
   min-width: 0;
-  font: var(--type-code-block)/var(--leading-ui) var(--font-mono);
+  font: var(--type-code)/var(--leading-ui) var(--font-mono);
   overflow: hidden;
   color: var(--ws-ink-muted);
   text-overflow: ellipsis;

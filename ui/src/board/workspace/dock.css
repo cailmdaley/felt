@@ -138,7 +138,6 @@
    the line of the text. It is the same size focused or not; only text that
    wraps grows it, downward, and the verbs ride its last line. */
 .ws-dock .kbn-ctl-composer {
-  --ctl-line-height: 24px;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: end;
@@ -153,8 +152,8 @@
 /* The field opens with a faint prompt chevron that stays; text begins just
    after it, on the first line. */
 .ws-dock .kbn-ctl-composer::before {
-  content: '›'; position: absolute; left: 10px; top: calc(3px + (var(--ctl-h) - var(--ctl-line-height)) / 2);
-  font: var(--type-prose)/var(--ctl-line-height) var(--font-serif); color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent);
+  content: '›'; position: absolute; left: 10px; top: calc(3px + (var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2);
+  font: var(--type-prose)/var(--leading-prose) var(--font-serif); color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent);
   pointer-events: none;
 }
 .ws-dock .kbn-ctl-composer:focus-within::before { color: var(--ws-ink-muted); }
@@ -167,12 +166,12 @@
   height: var(--ctl-h);
   min-height: var(--ctl-h);
   max-height: 35vh;
-  padding: calc((var(--ctl-h) - var(--ctl-line-height)) / 2) 7px calc((var(--ctl-h) - var(--ctl-line-height)) / 2) 22px;
+  padding: calc((var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2) 7px calc((var(--ctl-h) - var(--type-prose) * var(--leading-prose)) / 2) 22px;
   border: none;
   outline: none;
   background: transparent;
   resize: none;
-  font: var(--type-prose)/var(--ctl-line-height) var(--font-serif);
+  font: var(--type-prose)/var(--leading-prose) var(--font-serif);
 }
 .ws-dock .kbn-ctl-composer .kbn-ctl-images { grid-column: 1 / -1; grid-row: 2; }
 .ws-dock .kbn-ctl-composer-foot { grid-column: 2; grid-row: 1; display: flex; min-width: 0; align-items: center; gap: var(--ws-small-gap); }

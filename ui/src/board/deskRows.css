@@ -87,13 +87,13 @@
   .kbn-folio .kbn-folio-seg { gap: 6px; color: var(--kbn-ink-muted); }
   .kbn-folio .kbn-folio-seg.kbn-folio-seg-active { color: var(--kbn-ink); }
   .kbn-folio .kbn-folio-name { font-size: var(--type-note); font-variant-caps: normal; font-feature-settings: normal; letter-spacing: 0; overflow: visible; text-overflow: clip; }
-  .kbn-folio .kbn-folio-count { font-family: inherit; font-size: var(--type-note); color: var(--kbn-ink-muted); }
+  .kbn-folio .kbn-folio-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; color: var(--kbn-ink-muted); }
   .kbn-col-list .kbn-card > .kbn-card-meta:not(:empty) { gap: 5px; padding: 0; }
   .kbn-col-list .kbn-card > .kbn-card-meta .kbn-card-report { display: none; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lensbar { width: auto; min-width: 0; }
   .kbn-viewtabs .kbn-viewtabs-lens .kbn-lens-chip { flex: 0 1 auto; min-width: 0; max-width: 100%; }
   .kbn-viewtabs .kbn-lens-chip :is(.kbn-cyclechip-span, .kbn-lens-chip-count) { display: none; }
-  .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; letter-spacing: 0.05em; }
+  .kbn-viewtabs .kbn-viewtab { padding-inline: 7px; letter-spacing: var(--track-nav); }
   .kbn-viewtabs .kbn-lens-chip .kbn-cyclechip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   @media (orientation: portrait) {
     .kbn-now-board > .kbn-col { height: max(58vh, calc(100dvh - 260px - env(safe-area-inset-bottom, 0px))); }

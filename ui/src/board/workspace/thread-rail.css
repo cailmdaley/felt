@@ -56,7 +56,7 @@
 .ws-reader.ws-keyboard .ws-rail-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-rail-file[aria-current='page'] { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-rail-files-empty { margin: 0; padding: 4px 8px; color: var(--kbn-ink-muted); font-size: var(--type-note); font-style: italic; }
-.ws-thread-heading, .ws-rail-artifact-toggle { margin: 0; padding: 4px 8px; font: inherit; font-variant: small-caps; letter-spacing: .03em; color: var(--kbn-ink-muted); }
+.ws-thread-heading, .ws-rail-artifact-toggle { margin: 0; padding: 4px 8px; font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted); }
 .ws-thread-heading:focus { outline: none; }
 .ws-thread-handle { position: absolute; top: 0; bottom: 0; left: -4px; z-index: 3; width: 9px; cursor: col-resize; touch-action: none; }
 .ws-thread-handle::after {
@@ -73,7 +73,7 @@
 .ws-thread-group > summary {
   display: flex; align-items: baseline; gap: 8px; list-style: none; cursor: pointer;
   margin-top: 14px; padding: 5px 8px 6px;
-  font-size: var(--type-note); font-variant: small-caps; letter-spacing: .05em; font-weight: 400; color: var(--tone);
+  font-size: var(--type-note); font-variant: all-small-caps; letter-spacing: var(--track-kicker); font-weight: 400; color: var(--tone);
   border-bottom: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
 }
 .ws-thread-group:first-child > summary { margin-top: 6px; }
@@ -83,7 +83,7 @@
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .8;
 }
 .ws-thread-group[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
-.ws-thread-group-count { font-variant: normal; font-size: var(--type-meta); letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--tone); }
+.ws-thread-group-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--tone); }
 .ws-thread-group > summary:hover { background: var(--ws-hover); }
 .ws-reader.ws-keyboard .ws-thread-group > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-thread-group > summary:focus { outline: none; }

@@ -26,7 +26,6 @@
     0 1px 2px rgb(0 0 0 / 32%),
     0 28px 64px -14px rgb(0 0 0 / 64%);
   --ws-mask: #fff;
-  --ws-mono-tracking: 0.1em;
   --ws-blueprint-grid: rgb(145 210 229 / 7%);
   --ws-blueprint-mark: rgb(174 223 235 / 7%);
   --ws-page-cut: 12px;
@@ -60,7 +59,6 @@
 }
 [data-part="label-bar"] .ws-label-title {
   font-family: var(--font-mono);
-  letter-spacing: var(--ws-mono-tracking);
 }
 
 [data-part="page-frame"] {
