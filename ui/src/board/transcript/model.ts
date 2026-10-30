@@ -61,28 +61,8 @@ function updateTimes(turn: Turn, time: number | undefined): void {
   turn.endedAt = turn.endedAt === undefined ? time : Math.max(turn.endedAt, time)
 }
 
-function isShuttleAddress(target: string | undefined): boolean {
-  return !!target && /^shuttle:\/\/[^/\s]+\/[^/\s]+\/[^/?#\s]+(?:[?#][^\s]*)?$/.test(target)
-}
-
-function isNativeSessionId(target: string | undefined): boolean {
-  return !!target && (/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(target) || /^[0-9a-f]{24,}$/i.test(target))
-}
-
-function shuttleAddressSession(address: string): string | undefined {
-  if (!isShuttleAddress(address)) return undefined
-  try {
-    const segments = new URL(address).pathname.split('/').filter(Boolean)
-    return segments.length === 2 ? decodeURIComponent(segments[1]) : undefined
-  } catch {
-    return undefined
-  }
-}
-
 function receiptMatchesTarget(receipt: ShuttleMessageReceipt, message: ShuttleMessage): boolean {
-  if (!receipt.target) return false
-  if (receipt.target === message.target) return true
-  return isNativeSessionId(message.target) && shuttleAddressSession(receipt.target) === message.target
+  return !!receipt.target && receipt.target === message.target
 }
 
 function matchedReceipts(
@@ -118,27 +98,6 @@ function matchedReceipts(
       for (const message of candidates) matched.add(message)
       for (const index of indexes) usedReceipts.add(index)
     }
-  }
-
-  const remainingMessages = messages.filter(message => !matched.has(message))
-  const remainingIndexes = receipts.flatMap((_, index) => !usedReceipts.has(index) ? [index] : [])
-  const remainingAreAddresses = remainingIndexes.every(index => isShuttleAddress(receipts[index].target))
-  const fiberMessages = remainingMessages.filter(message => message.fiber && !message.messageId)
-  if (remainingIndexes.length > 0 && remainingAreAddresses
-    && fiberMessages.length === remainingMessages.length
-    && fiberMessages.length === remainingIndexes.length
-    && (fiberMessages.length === 1 || completeSendGroup)) {
-    for (const message of fiberMessages) matched.add(message)
-    for (const index of remainingIndexes) usedReceipts.add(index)
-  }
-
-  const finalMessages = messages.filter(message => !matched.has(message))
-  const finalIndexes = receipts.flatMap((_, index) => !usedReceipts.has(index) ? [index] : [])
-  if (finalIndexes.length > 0 && finalIndexes.length === finalMessages.length
-    && finalIndexes.every(index => !receipts[index].target)
-    && finalMessages.every(message => !message.messageId)
-    && (finalMessages.length === 1 || completeSendGroup)) {
-    for (const message of finalMessages) matched.add(message)
   }
 
   return matched
@@ -213,7 +172,8 @@ export class TranscriptModel {
         }
         const allSegmentsAreMessages = messages.length > 0 && [...rowsByCommand.values()].every(rows =>
           rows.length === (rows[0].message.commandSegmentCount ?? 1))
-        const topLevelReceiptsTrusted = messages.every(({ message }) => !message.resultMayBeUnattributed)
+        const topLevelReceiptsTrusted = allSegmentsAreMessages && !explicitlyIndexed
+          && messages.every(({ message }) => !message.resultMayBeUnattributed)
         const topLevelAcceptedReceipts = topLevelReceiptsTrusted ? entry.acceptedMessageReceipts ?? [] : []
         const topLevelUnknownReceipts = topLevelReceiptsTrusted ? entry.unknownMessageReceipts ?? [] : []
         const topLevelAcceptedMatches = matchedReceipts(
@@ -226,25 +186,27 @@ export class TranscriptModel {
           const message = reference.message
           const commandIndex = message.commandIndex ?? 0
           const commandRows = rowsByCommand.get(commandIndex) ?? []
+          const commandIsPureSend = commandRows.length > 0
+            && commandRows.length === (message.commandSegmentCount ?? 1)
           const matchingOutcomes = message.resultMayBeUnattributed ? [] : indexedOutcomes.filter(outcome => outcome.index !== undefined
             ? outcome.index === commandIndex
             : indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1)
           const outcomeText = matchingOutcomes.length === 1 ? matchingOutcomes[0].output ?? entry.text : entry.text
-          const topAccepted = message.resultMayBeUnattributed && !message.messageId ? [] : (entry.acceptedMessageReceipts ?? []).map(receipt => receipt.id)
-          const topUnknown = message.resultMayBeUnattributed && !message.messageId ? [] : (entry.unknownMessageReceipts ?? []).map(receipt => receipt.id)
-          const commandAcceptedReceipts = matchingOutcomes.flatMap(outcome => outcome.acceptedMessageReceipts)
-          const commandUnknownReceipts = matchingOutcomes.flatMap(outcome => outcome.unknownMessageReceipts)
+          const topAccepted = topLevelReceiptsTrusted ? (entry.acceptedMessageReceipts ?? []).map(receipt => receipt.id) : []
+          const topUnknown = topLevelReceiptsTrusted ? (entry.unknownMessageReceipts ?? []).map(receipt => receipt.id) : []
+          const commandAcceptedReceipts = commandIsPureSend ? matchingOutcomes.flatMap(outcome => outcome.acceptedMessageReceipts) : []
+          const commandUnknownReceipts = commandIsPureSend ? matchingOutcomes.flatMap(outcome => outcome.unknownMessageReceipts) : []
           const commandAcceptedMatches = matchedReceipts(
             commandAcceptedReceipts,
             commandRows.map(row => row.message),
-            commandRows.length > 0 && commandRows.length === (message.commandSegmentCount ?? 1),
+            commandIsPureSend,
           )
           const commandUnknownMatches = matchedReceipts(
             commandUnknownReceipts,
             commandRows.map(row => row.message),
-            commandRows.length > 0 && commandRows.length === (message.commandSegmentCount ?? 1),
+            commandIsPureSend,
           )
-          const explicitIdOutcomes = message.messageId ? indexedOutcomes : []
+          const explicitIdOutcomes = message.messageId && commandIsPureSend ? matchingOutcomes : []
           const acceptedIds = [...topAccepted, ...commandAcceptedReceipts.map(receipt => receipt.id), ...explicitIdOutcomes.flatMap(outcome => outcome.acceptedMessageReceipts.map(receipt => receipt.id))]
           const receiptMatches = message.messageId
             ? acceptedIds.includes(message.messageId)

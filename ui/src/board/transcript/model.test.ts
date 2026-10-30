@@ -33,13 +33,13 @@ function modelAfterCodexExec(commands: string[], output: string): TranscriptMode
   return model
 }
 
-function modelAfterBash(command: string, output: string): TranscriptModel {
+function modelAfterBash(command: string, output: string, isError = false): TranscriptModel {
   const model = new TranscriptModel()
   model.append(normalizeRecord({ type: 'assistant', message: { content: [{
     type: 'tool_use', id: 'bash-send', name: 'Bash', input: { command },
   }] } }))
   model.append(normalizeRecord({ type: 'user', message: { content: [{
-    type: 'tool_result', tool_use_id: 'bash-send', content: output,
+    type: 'tool_result', tool_use_id: 'bash-send', content: output, is_error: isError,
   }] } }))
   return model
 }
@@ -158,7 +158,7 @@ describe('TranscriptModel', () => {
 
   it('keeps an explicit unknown Shuttle receipt unclear despite its nonzero exit status', () => {
     const messages = modelAfterCodexExec(
-      ['shuttle message work/child "The table is ready."'],
+      ['shuttle message --message-id msg-abc work/child "The table is ready."'],
       'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1,"output":"unknown shuttle://host/codex/session (msg-abc)"}',
     ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
     expect(messages).toMatchObject([{ status: 'uncertain' }])
@@ -298,12 +298,45 @@ describe('TranscriptModel', () => {
     expect(messages).toMatchObject([{ status: 'uncertain' }])
   })
 
-  it.each(['|| true', '; true', '| tail'])('matches a resolved message receipt through `%s`', (suffix) => {
+  it('does not turn receipt-shaped output from another shell segment into a send receipt', () => {
+    const model = modelAfterBash(
+      'shuttle message work/child "Hi"; echo "accepted (ok)"',
+      'accepted (ok)',
+      true,
+    )
+    expect(model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message'))
+      .toMatchObject({ status: 'uncertain' })
+  })
+
+  it('does not treat a targetless accepted line as a receipt for a plain send', () => {
+    const model = modelAfterBash('shuttle message work/child "Hi"', 'accepted (ok)')
+    expect(model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message'))
+      .toMatchObject({ status: 'uncertain' })
+  })
+
+  it('does not trust an indexed receipt when its corresponding shell command has non-send segments', () => {
+    const message = 'shuttle message --message-id wanted work/child "Hi" && echo done'
+    const result = 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":0,"output":"accepted work/child (wanted)"}}'
+    const messages = modelAfterCodexExec([message], result).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: 'uncertain', messageId: 'wanted' }])
+  })
+
+  it('does not trust a JSON receipt from a recovery command in a compound shell segment', () => {
+    const receipt = JSON.stringify({ status: 'accepted', fiber: 'work/child', message_id: 'msg-1234567890abcdef' })
+    const model = modelAfterCodexExec(
+      ['shuttle message work/child "Hi" || cat notes.txt'],
+      `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({ exit_code: 0, output: receipt })}`,
+    )
+    expect(model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message'))
+      .toMatchObject({ status: 'uncertain' })
+  })
+
+  it.each(['|| true', '; true', '| tail'])('does not trust a resolved message receipt through `%s`', (suffix) => {
     const messages = modelAfterCodexExec(
       [`shuttle message work/child "The table is ready." ${suffix}`],
       'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":0,"output":"accepted shuttle://host/claude/123e4567-e89b-12d3-a456-426614174000 (msg-1234567890abcdef)"}',
     ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
-    expect(messages).toMatchObject([{ fiber: 'work/child', status: 'sent' }])
+    expect(messages).toMatchObject([{ fiber: 'work/child', status: 'uncertain' }])
   })
 
   it('does not treat an accepted lifecycle receipt as a message receipt', () => {
@@ -346,7 +379,7 @@ describe('TranscriptModel', () => {
     ])
   })
 
-  it('matches a JSON queued receipt through its fiber field and a shell wrapper', () => {
+  it('does not trust a JSON queued receipt through a shell wrapper', () => {
     const receipt = JSON.stringify({
       status: 'queued_for_next_worker',
       fiber: 'work/child',
@@ -356,10 +389,10 @@ describe('TranscriptModel', () => {
       ['shuttle message work/child "The table is ready." || true'],
       `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({ exit_code: 0, output: receipt })}`,
     ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
-    expect(messages).toMatchObject([{ fiber: 'work/child', status: 'sent' }])
+    expect(messages).toMatchObject([{ fiber: 'work/child', status: 'uncertain' }])
   })
 
-  it('marks complete multi-send calls sent from their session-address receipts', () => {
+  it('does not resolve session-address receipts to fiber-target sends', () => {
     const model = modelAfterBash([
       'shuttle message work/first "First result."',
       'shuttle message work/second "Second result."',
@@ -369,8 +402,8 @@ describe('TranscriptModel', () => {
     ].join('\n'))
     const messages = model.turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
     expect(messages).toMatchObject([
-      { fiber: 'work/first', status: 'sent' },
-      { fiber: 'work/second', status: 'sent' },
+      { fiber: 'work/first', status: 'uncertain' },
+      { fiber: 'work/second', status: 'uncertain' },
     ])
   })
 
@@ -383,7 +416,7 @@ describe('TranscriptModel', () => {
     expect(messages).toMatchObject([{ status: 'uncertain' }])
   })
 
-  it('matches a native session ID to the session in its receipt address', () => {
+  it('does not resolve a native session ID through a receipt address', () => {
     const target = '123e4567-e89b-12d3-a456-426614174000'
     const messages = modelAfterCodexExec(
       [`shuttle message ${target} "The table is ready." || true`],
@@ -392,7 +425,7 @@ describe('TranscriptModel', () => {
         output: `accepted shuttle://host/claude/${target} (msg-1234567890abcdef)`,
       })}`,
     ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
-    expect(messages).toMatchObject([{ status: 'sent' }])
+    expect(messages).toMatchObject([{ status: 'uncertain' }])
   })
 
   it('does not match a native session ID to a different session receipt', () => {
