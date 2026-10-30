@@ -19,6 +19,7 @@ import (
 	"github.com/cailmdaley/felt/internal/clistreams"
 	"github.com/cailmdaley/felt/internal/feltcli"
 	"github.com/cailmdaley/felt/internal/messaging"
+	"github.com/cailmdaley/felt/internal/progstatus"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
@@ -136,6 +137,10 @@ type app struct {
 	eventRand         func() int
 	eventReceiverPID  func() int
 	eventProcessBirth func(int) string
+	// programStatusTTY resolves the receiver's tty; programStatusWrite attempts
+	// one nonblocking report. The default writer refuses isolated environments.
+	programStatusTTY   func(int) string
+	programStatusWrite func(string, []byte) error
 	// httpProxy picks the proxy for a daemon request that is not the local
 	// socket: net/http's ProxyFromEnvironment.
 	httpProxy func(*http.Request) (*url.URL, error)
@@ -161,6 +166,13 @@ func newApp(env *sysenv.Env) *app {
 		eventRand:                 func() int { return mathrand.Intn(32768) },
 		httpProxy:                 http.ProxyFromEnvironment,
 		versionProbeTimeout:       3 * time.Second,
+	}
+	a.programStatusTTY = func(pid int) string { return messaging.ProcessTTY(pid, a.env.EUID()) }
+	a.programStatusWrite = func(path string, b []byte) error {
+		if !a.env.Live() {
+			return errors.New("terminal program status requires a live environment")
+		}
+		return progstatus.Write(path, b)
 	}
 	a.detectTmuxOrigin = a.probeTmuxOrigin
 	a.loginEnvCapture = a.captureLoginEnv

@@ -48,7 +48,12 @@ and creates the directory; SHUTTLE_EVENTS=off disables recording outright.
 
 Exits 0 on every path, including malformed input. Supported Claude and Codex hooks
 offer queued peer messages as additionalContext; Stop never wakes the session.
-SHUTTLE_MESSAGES=off disables mailbox registration and delivery.`,
+SHUTTLE_MESSAGES=off disables mailbox registration and delivery.
+
+Inside tmux, Claude and Pi hooks also send terminal program status (OSC 7501).
+Direct terminals use the harness's native reporter; Codex hooks never emit status.
+SHUTTLE_PROGRAM_STATUS=off (or 0) disables status independently of event recording
+and peer messages.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runEventAndMessageHook(a.env.Stdin, a.env.Stdout)
@@ -93,6 +98,8 @@ type eventHookInput struct {
 	// `idle_prompt` means "nobody has typed in a while" rather than "I am
 	// blocked on you".
 	NotificationType string `json:"notification_type"`
+	// Message is notification display text, decoded only for terminal status.
+	Message string `json:"message"`
 	// Stop's and SubagentStop's own account of what they are leaving running:
 	// the harness's whole background-task registry, not only detached Bash. A
 	// turn that ends with work outstanding is not idle — it is waiting on
@@ -216,7 +223,16 @@ func countBackgroundTasks(raw json.RawMessage) int {
 // failure — unparseable stdin, unknown event name, disabled stream, unwritable
 // file — returns nil without output.
 func (a *app) runEventHook(stdin io.Reader) error {
-	line, ok := a.renderEventLine(stdin)
+	var input eventHookInput
+	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
+		return nil
+	}
+	return a.recordEvent(input)
+}
+
+// recordEvent appends an already decoded event to the activity stream.
+func (a *app) recordEvent(input eventHookInput) error {
+	line, ok := a.renderEvent(input)
 	if !ok {
 		return nil
 	}
@@ -235,6 +251,10 @@ func (a *app) renderEventLine(stdin io.Reader) (string, bool) {
 	if err := json.NewDecoder(stdin).Decode(&input); err != nil {
 		return "", false
 	}
+	return a.renderEvent(input)
+}
+
+func (a *app) renderEvent(input eventHookInput) (string, bool) {
 	eventType, known := eventTypes[input.HookEventName]
 	if !known {
 		return "", false

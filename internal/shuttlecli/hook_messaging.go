@@ -1,7 +1,6 @@
 package shuttlecli
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,9 +17,13 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if err != nil || len(b) > 4<<20 {
 		return nil
 	}
-	_ = a.runEventHook(bytes.NewReader(b))
 	var input eventHookInput
-	if json.Unmarshal(b, &input) != nil || input.SessionID == "" {
+	if json.Unmarshal(b, &input) != nil {
+		return nil
+	}
+	a.reportProgramStatus(input)
+	_ = a.recordEvent(input)
+	if input.SessionID == "" {
 		return nil
 	}
 	// SubagentStop is an async recorder, not a parent receiver lifecycle
