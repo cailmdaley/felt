@@ -250,6 +250,10 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(reviewInk.pigment && reviewInk.ink, `Close for review resolves both verdict colors: ${JSON.stringify(reviewInk)}`)
     assert.notEqual(reviewInk.color, reviewInk.plain, `Close for review uses its verdict ink rather than plain text ink: ${JSON.stringify(reviewInk)}`)
     await page.setViewportSize({ width: 320, height: 844 })
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ws-chat-head')?.dataset.compact === 'true')
+    // Settings gives way only when the verbs exhaust row two. Narrow the head until they do, so the
+    // check holds whatever the type's metrics make of 320px.
+    await header.evaluate(el => { el.style.maxWidth = '250px' })
     await page.waitForFunction(() => {
       const head = document.querySelector('.ws-selected .ws-chat-head')
       return head?.querySelector('.ws-chat-settings')?.parentElement === head
