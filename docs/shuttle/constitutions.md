@@ -256,6 +256,22 @@ Work that should wait for an orchestrator is a draft thread:
 It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
 Containment relates the work; it does not gate dispatch.
 
+Thread lifecycle notices are acknowledged individually and checked against
+the owning thread's current document before delivery.
+A handoff remains current after its successor dispatches, until another
+handoff, close or rest replaces it.
+Unavailable owners retain their notices for retry, with a shared 30-second
+validation backoff across hook processes.
+Healthy notices can pass deferred notices, so delivery order can differ from
+queue order.
+An older owner's missing validation endpoint, or an unresolved legacy notice,
+allows delivery without validation.
+
+A delivery with an unknown outcome stays pinned to its original conversation.
+When that conversation explicitly ends, a successor can receive it with a
+possible-repeat warning.
+`shuttle doctor` reports fiber context pending for at least ten minutes.
+
 ## Human in the loop
 
 Every dispatch runs autonomously; shuttle offers no interactive mode. When work

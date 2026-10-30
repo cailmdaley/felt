@@ -92,9 +92,10 @@ type mailboxEntry struct {
 	Request  Request `json:"request"`
 	QueuedAt int64   `json:"queued_at"`
 	// AttemptAddress pins a direct fiber-context send across a lost receipt
-	// and worker handoff. A successor must resolve the same message ID against
-	// that destination before it may redirect a conclusive rejection.
+	// and worker handoff. A retired destination may roll forward to its
+	// successor with PossibleRepeat when its outcome cannot be established.
 	AttemptAddress string `json:"attempt_address,omitempty"`
+	PossibleRepeat bool   `json:"possible_repeat,omitempty"`
 }
 
 func mailboxKey(s string) string {
@@ -347,18 +348,7 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 		}
 		return items[i].entry.QueuedAt < items[j].entry.QueuedAt
 	})
-	candidates := []item{}
-	size := 0
-	for _, it := range items {
-		if len(candidates) > 0 && size+len(it.entry.Request.Text) > 64<<10 {
-			break
-		}
-		candidates = append(candidates, it)
-		size += len(it.entry.Request.Text)
-		if len(candidates) == 16 {
-			break
-		}
-	}
+	candidates := items
 	var validationErr error
 	if current != nil {
 		validationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -407,12 +397,24 @@ func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Req
 	} else {
 		items = candidates
 	}
+	// Only accepted requests consume the output window. Unverifiable owners
+	// retain their entries without preventing newer, healthy notices from flowing.
+	selected := []item{}
 	batch := []Request{}
-	n := 0
+	size := 0
 	for _, it := range items {
+		if size+len(it.entry.Request.Text) > 64<<10 {
+			break
+		}
+		selected = append(selected, it)
 		batch = append(batch, it.entry.Request)
-		n++
+		size += len(it.entry.Request.Text)
+		if len(selected) == 16 {
+			break
+		}
 	}
+	items = selected
+	n := len(items)
 	if n == 0 {
 		return validationErr
 	}
