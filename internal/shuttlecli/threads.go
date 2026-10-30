@@ -30,6 +30,7 @@ type ThreadNode struct {
 	Host            string       `json:"host,omitempty"`
 	Column          string       `json:"column"`
 	State           string       `json:"state"`
+	Stale           bool         `json:"stale,omitempty"`
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Outcome         string       `json:"outcome,omitempty"`
 	BlockedOn       string       `json:"blocked_on,omitempty"`
@@ -42,12 +43,14 @@ type ThreadNode struct {
 // PendingResults counts what waits in the orchestrator's own mailbox while it
 // has no live worker.
 type threadTree struct {
-	FiberID        string       `json:"fiber_id"`
-	UID            string       `json:"uid,omitempty"`
-	Name           string       `json:"name,omitempty"`
-	FeltStore      string       `json:"felt_store,omitempty"`
-	PendingResults int          `json:"pending_results,omitempty"`
-	Threads        []ThreadNode `json:"threads"`
+	FiberID         string       `json:"fiber_id"`
+	UID             string       `json:"uid,omitempty"`
+	Name            string       `json:"name,omitempty"`
+	FeltStore       string       `json:"felt_store,omitempty"`
+	PendingResults  int          `json:"pending_results,omitempty"`
+	Stale           bool         `json:"stale,omitempty"`
+	HostUnreachable bool         `json:"host_unreachable,omitempty"`
+	Threads         []ThreadNode `json:"threads"`
 }
 
 // threadRow is one thread in `shuttle threads --json`: the node with the count
@@ -61,6 +64,7 @@ type threadRow struct {
 	Host            string      `json:"host,omitempty"`
 	Column          string      `json:"column"`
 	State           string      `json:"state"`
+	Stale           bool        `json:"stale,omitempty"`
 	HostUnreachable bool        `json:"host_unreachable,omitempty"`
 	Outcome         string      `json:"outcome,omitempty"`
 	BlockedOn       string      `json:"blocked_on,omitempty"`
@@ -87,11 +91,11 @@ discarded verdict) are a count.
 indented under its orchestrator in containment order.
 
 The roster comes from this host's daemon (GET /api/v1/threads/<id>), which
-classifies threads by the board's rules over its cached constitutions. A
-thread is Working when its worker runs on this host or on a remote the daemon
-polls fresh, and Armed when it is active with no worker running; "Armed · host
-unreachable" means the daemon cannot currently see its host, so whether a
-worker runs there is unknown. "N waiting for its next worker" counts the
+classifies threads by the board's rules using each owner's feed. A local copy
+is used only while its owner is unavailable and reads "local copy; owner
+unreachable" in every state; --json carries stale and host_unreachable.
+A thread is Working when its worker runs on this host or on a remote the daemon
+polls fresh, and Armed when it is active with no worker running. "N waiting for its next worker" counts the
 thread results and messages queued for a constitution with no live worker,
 on the orchestrator's header line and on each thread this host owns; arming
 it releases them. --json prints the orchestrator and its rows, each with its
@@ -108,12 +112,14 @@ board column and pending_results.`,
 			rows, archived := threadRows(tree.Threads, all)
 			if a.json {
 				return a.outputJSON(map[string]any{
-					"fiber_id":        tree.FiberID,
-					"uid":             tree.UID,
-					"name":            tree.Name,
-					"pending_results": tree.PendingResults,
-					"threads":         rows,
-					"archived":        archived,
+					"stale":            tree.Stale,
+					"host_unreachable": tree.HostUnreachable,
+					"fiber_id":         tree.FiberID,
+					"uid":              tree.UID,
+					"name":             tree.Name,
+					"pending_results":  tree.PendingResults,
+					"threads":          rows,
+					"archived":         archived,
 				})
 			}
 			a.printThreads(tree, rows, archived, all)
@@ -202,7 +208,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, Outcome: n.Outcome, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -239,6 +245,9 @@ func (a *app) printThreads(tree *threadTree, rows []threadRow, archived int, all
 	header := fmt.Sprintf("%s  %s", tree.FiberID, tree.Name)
 	if tree.PendingResults > 0 {
 		header += fmt.Sprintf("  (%s)", waitingLabel(tree.PendingResults))
+	}
+	if tree.Stale {
+		header += " [local copy; owner unreachable]"
 	}
 	fmt.Fprintln(out, header)
 	if len(rows) == 0 && archived == 0 {
@@ -283,8 +292,10 @@ func printThreadRow(a *app, row threadRow, depth int) {
 // (Shuttle.Threads.state_label/1).
 func (row threadRow) stateLabel() string {
 	switch {
+	case row.Stale:
+		return row.State + " · local copy; owner unreachable"
 	case row.HostUnreachable:
-		return "Armed · host unreachable"
+		return row.State + " · host unreachable"
 	case row.BlockedOn != "":
 		return row.State + " · ⏸ until " + row.Until
 	}

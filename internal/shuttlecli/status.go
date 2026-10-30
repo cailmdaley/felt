@@ -43,6 +43,8 @@ type FiberStatus struct {
 	NextDueAt string `json:"next_due_at,omitempty"`
 	LastRunAt string `json:"last_run_at,omitempty"`
 	Stale     bool   `json:"stale,omitempty"`
+	Source    string `json:"source,omitempty"`
+	ReadError string `json:"read_error,omitempty"`
 	// AgentProblem says why the block's agent cannot launch: it names an id
 	// the registry does not know. Empty when the agent resolves.
 	AgentProblem string `json:"agent_problem,omitempty"`
@@ -50,6 +52,7 @@ type FiberStatus struct {
 
 // shuttleEntry is one shuttle-bearing fiber discovered by the in-process walk.
 type shuttleEntry struct {
+	Fiber   *felt.Felt
 	FiberID string
 	UID     string
 	Status  string
@@ -64,9 +67,11 @@ func (a *app) statusCmd() *cobra.Command {
 		Short: "Status overview, or a detailed report for one fiber",
 		Long: `With no argument, prints a table of every fiber with a shuttle: block in the
 stores this machine dispatches (-C when set, else SHUTTLE_STORES, else the
-~/.config/shuttle/stores.json registry). State is running (read from tmux), idle,
-scheduled (a standing constitution), paused (a draft), or closed. next_due_at comes
-from the daemon, so only the cross-host table (--all, --remote) fills it.
+~/.config/shuttle/stores.json registry). Local workers are observed through their
+execution backend. Remote-owned state and workers come from owner daemon feeds.
+--all and --remote include the owners' complete constitution inventory.
+When an owner is unreachable, a local copy is explicitly marked stale;
+an owner that answers not-found never falls back to that copy.
 
 With a fiber, prints the block's key fields, any running worker, and whether
 it is eligible for dispatch, naming the verb that would make it so when it is
@@ -81,7 +86,7 @@ The daemon's boot quarantine can still hold an eligible fiber until
   shuttle status <fiber>         # one fiber`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// The single-fiber report is a local read of one fiber, so the flags that
+			// The single-fiber report reads one owner, so the flags that
 			// shape the multi-fiber walk have nothing to act on.
 			if len(args) == 1 {
 				for _, flag := range []string{"all", "remote", "include-orphans"} {
@@ -107,6 +112,10 @@ The daemon's boot quarantine can still hold an eligible fiber until
 				return fmt.Errorf("listing fibers: %w", err)
 			}
 
+			own, err := a.resolveOwnHost("")
+			if err != nil {
+				return err
+			}
 			live, err := a.liveTerminalSessions()
 			if err != nil {
 				return fmt.Errorf("observing worker terminals: %w", err)
@@ -114,9 +123,29 @@ The daemon's boot quarantine can still hold an eligible fiber until
 			owners := sessionOwnerMap(entries)
 			reg := a.statusAgentRegistry()
 
+			var ownerFeed *statusFeed
+			for _, entry := range entries {
+				if entry.Block.Host != "" && entry.Block.Host != own {
+					ownerFeed, _ = a.fetchStatusFeed()
+					if ownerFeed == nil {
+						ownerFeed = &statusFeed{}
+					}
+					break
+				}
+			}
 			rows := make([]FiberStatus, 0, len(entries))
 			seenSessions := map[string]bool{}
 			for _, entry := range entries {
+				if entry.Block.Host != "" && entry.Block.Host != own {
+					row, err := a.statusRemoteRow(entry, ownerFeed)
+					if err != nil {
+						return err
+					}
+					if row.FiberID != "" {
+						rows = append(rows, row)
+					}
+					continue
+				}
 				session := shuttleTmuxSessionName(entry.FiberID, entry.UID)
 				running := session != "" && live[session] && owners[session] == entry.FiberID
 				if running {
@@ -269,6 +298,11 @@ func (a *app) runStatusOneFiber(query string) error {
 	if err != nil {
 		return err
 	}
+	read, err := a.readStatusOwner(f, st != nil, nil)
+	if err != nil {
+		return err
+	}
+	f = read.Fiber
 	block, ok, err := shuttle.BlockOf(f)
 	if err != nil {
 		return err
@@ -279,9 +313,12 @@ func (a *app) runStatusOneFiber(query string) error {
 
 	statusNow := f.Status
 	armed := statusNow == felt.StatusActive
-	session, running, err := a.liveWorkerSession(f)
-	if err != nil {
-		return err
+	session, running := read.Session, read.Running
+	if read.Source == "local" {
+		session, running, err = a.liveWorkerSession(f)
+		if err != nil {
+			return err
+		}
 	}
 	column := shuttle.Column(f, block, running, time.Now())
 	until := blockerName(st, block.BlockedOn)
@@ -289,13 +326,17 @@ func (a *app) runStatusOneFiber(query string) error {
 
 	if a.json {
 		out := map[string]any{
-			"fiber_id": f.ID,
-			"kind":     block.Kind,
-			"host":     block.Host,
-			"status":   statusNow,
-			"armed":    armed,
-			"running":  running,
-			"dispatch": a.dispatchAssessment(f, block, column, until),
+			"runtime_known": read.Source == "local" || read.RuntimeKnown,
+			"source":        read.Source,
+			"stale":         read.Stale,
+			"read_error":    read.Error,
+			"fiber_id":      f.ID,
+			"kind":          block.Kind,
+			"host":          block.Host,
+			"status":        statusNow,
+			"armed":         armed,
+			"running":       running,
+			"dispatch":      a.dispatchAssessment(f, block, column, until),
 			// The board's Desk column and the review verdict (null when none).
 			"column":  column,
 			"verdict": nil,
@@ -326,6 +367,11 @@ func (a *app) runStatusOneFiber(query string) error {
 	}
 
 	fmt.Fprintf(a.env.Stdout, "shuttle: fiber %s\n\n", f.ID)
+	if read.Stale {
+		fmt.Fprintf(a.env.Stdout, "! local copy; owner %s unreachable: %s\n\n", block.Host, read.Error)
+	} else if read.Source == "owner" && !read.RuntimeKnown {
+		fmt.Fprintln(a.env.Stdout, "! owner document read; worker observation unavailable")
+	}
 	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
 	if problem != "" {
 		fmt.Fprintf(a.env.Stdout, "  ! agent:     %s (shuttle set-agent %s <agent>)\n", problem, f.ID)
@@ -547,6 +593,7 @@ func (a *app) listShuttleFibers(store string) ([]shuttleEntry, error) {
 			id = canonical
 		}
 		entries = append(entries, shuttleEntry{
+			Fiber:   f,
 			FiberID: id,
 			UID:     f.UID,
 			Status:  f.Status,
@@ -659,8 +706,12 @@ func (a *app) printStatusTable(rows []FiberStatus, showClosed bool) {
 		if r.AgentProblem != "" {
 			agent += " !"
 		}
+		state := r.State
+		if r.Stale {
+			state += " [local copy; owner unreachable]"
+		}
 		fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n",
-			shuttleTruncateID(r.FiberID, 50), r.Kind, r.State, next, agent)
+			shuttleTruncateID(r.FiberID, 50), r.Kind, state, next, agent)
 	}
 	for _, r := range rows {
 		if r.AgentProblem != "" {

@@ -39,7 +39,27 @@ func (a *app) runStatusCrossHost(o statusOptions) error {
 		}
 	}
 
-	rows := compositeRows(composite, o.remote)
+	rows, err := a.ownerInventoryRows(o.remote)
+	if err != nil {
+		return err
+	}
+	// Runtime-only records still describe active workers outside the inventory.
+	seen := map[string]bool{}
+	for _, row := range rows {
+		seen[row.Origin+":"+row.FiberID] = true
+	}
+	for _, row := range compositeRows(composite, o.remote) {
+		if seen[row.Origin+":"+row.FiberID] {
+			for i := range rows {
+				if rows[i].Origin == row.Origin && rows[i].FiberID == row.FiberID {
+					rows[i].NextDueAt = row.NextDueAt
+					rows[i].LastRunAt = row.LastRunAt
+				}
+			}
+		} else if row.FiberID == "" || row.Running {
+			rows = append(rows, row)
+		}
+	}
 
 	sort.Slice(rows, func(i, j int) bool {
 		// Local first, then remotes alphabetically; within each origin sort by
@@ -248,7 +268,7 @@ func (a *app) printCrossHostTable(rows []FiberStatus, c *CompositeState, only st
 		kind := shuttleNonEmpty(r.Kind, "-")
 		state := r.State
 		if r.Stale {
-			state = state + " [stale]"
+			state = state + " [stale: " + shuttleNonEmpty(r.Source, "owner unreachable") + "]"
 		}
 		fmt.Fprintf(a.env.Stdout, "%-12s  %-50s  %-9s  %-16s  %-18s  %s\n",
 			shuttleTruncateID(origin, 12), shuttleTruncateID(r.FiberID, 50), kind, state, next, agent)
