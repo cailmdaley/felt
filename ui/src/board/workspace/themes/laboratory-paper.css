@@ -96,7 +96,7 @@
   display: inline-block;
   margin-inline-end: 0.55em;
   color: var(--ws-ink-muted);
-  font: 500 var(--type-meta)/1 var(--font-mono);
+  font: 500 var(--type-meta)/var(--leading-solid) var(--font-mono);
   letter-spacing: 0.08em;
   vertical-align: 0.18em;
 }

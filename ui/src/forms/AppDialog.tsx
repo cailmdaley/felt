@@ -241,7 +241,7 @@ export function AppDialog({
                   fontSize: 'var(--type-prose)',
                   fontWeight: 600,
                   letterSpacing: '0.01em',
-                  lineHeight: 1.2,
+                  lineHeight: 'var(--leading-tight)',
                 }}
               >
                 {title}

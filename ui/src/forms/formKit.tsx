@@ -258,7 +258,7 @@ export function injectFormKitStyles(): void {
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--kbn-graphite-soft);
-      line-height: 1;
+      line-height: var(--leading-solid);
     }
     .form-optional {
       font-family: var(--font-serif);
@@ -270,7 +270,7 @@ export function injectFormKitStyles(): void {
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 10%, transparent);
       border-radius: 2px;
     }
-    .form-help { font-size: var(--type-meta); line-height: 1.4; color: var(--kbn-graphite-muted); }
+    .form-help { font-size: var(--type-meta); line-height: var(--leading-ui); color: var(--kbn-graphite-muted); }
     /* One rule for every select. Custom chevron, so the boxes are identical
        rather than at the mercy of native select metrics, and border-box
        sizing, so each control fills its track exactly. */
@@ -281,7 +281,7 @@ export function injectFormKitStyles(): void {
       box-sizing: border-box;
       font-family: var(--font-serif);
       font-size: var(--type-label);
-      line-height: 1.3;
+      line-height: var(--leading-tight);
       color: var(--kbn-graphite);
       background-color: var(--kbn-blank);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -300,7 +300,7 @@ export function injectFormKitStyles(): void {
     }
     .form-textarea {
       resize: vertical;
-      line-height: 1.45;
+      line-height: var(--leading-ui);
     }
     .form-input::placeholder,
     .form-textarea::placeholder {

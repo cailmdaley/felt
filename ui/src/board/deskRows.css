@@ -38,7 +38,7 @@
   min-width: 0;
   font-size: var(--type-row);
   font-weight: 500;
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   display: block;
   white-space: nowrap;
   overflow: hidden;
@@ -66,7 +66,7 @@
   color: var(--kbn-ink-muted);
   font-family: var(--font-serif);
   font-size: var(--type-meta);
-  line-height: 1;
+  line-height: var(--leading-solid);
 }
 .kbn-card-report[data-unseen] { position: relative; color: var(--kbn-ink-soft); }
 .kbn-card-report[data-unseen]::after {

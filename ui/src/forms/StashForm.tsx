@@ -764,7 +764,7 @@ export function injectStashFormStyles(): void {
       cursor: pointer;
       font-size: var(--type-note);
       padding: 0 4px;
-      line-height: 1;
+      line-height: var(--leading-solid);
       border-radius: 50%;
     }
     .stash-chip-x:hover {

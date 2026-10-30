@@ -6,7 +6,7 @@
   color: var(--kbn-ink-muted);
 }
 .kbn-until-chip {
-  display: inline-block; max-width: 100%; vertical-align: bottom; line-height: 1.35;
+  display: inline-block; max-width: 100%; vertical-align: bottom; line-height: var(--leading-ui);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-style: normal; cursor: pointer; color: var(--kbn-ink-soft, var(--kbn-ink));
   border: 1px solid var(--kbn-rule); border-radius: 3px; padding: 0 4px;

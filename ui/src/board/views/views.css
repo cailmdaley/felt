@@ -56,7 +56,7 @@
 .kbn-view-title {
   font-family: var(--font-serif);
   font-size: var(--type-display);
-  line-height: 1.0;
+  line-height: var(--leading-solid);
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -69,7 +69,7 @@
   font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
-  line-height: 0.82;
+  line-height: var(--leading-initial);
 }
 
 .kbn-view-body {

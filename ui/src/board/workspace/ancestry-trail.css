@@ -1,5 +1,5 @@
 /* A thread's ancestry: muted serif links divided by slashes on one line, each truncating as room runs out. */
-.ws-ancestry { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 0 6px; overflow: hidden; min-width: 0; color: var(--ws-ink-muted); font: var(--type-label)/1.4 var(--font-serif); }
+.ws-ancestry { display: flex; align-items: baseline; flex-wrap: nowrap; gap: 0 6px; overflow: hidden; min-width: 0; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-ancestry[hidden] { display: none; }
 .ws-ancestry .ws-ancestry-link {
   flex: 0 1 auto; min-width: 2.5em; max-width: 22em; padding: 0; border: 0 !important; background: transparent; color: inherit; cursor: pointer;

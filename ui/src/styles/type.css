@@ -40,11 +40,17 @@
   --type-meta: 12px;
   --type-code: 0.9em;
 
-  /* Leading. Prose reads at --leading-prose; a single line of chrome at
-     --leading-ui; titles and anything set solid at --leading-tight. */
-  --leading-tight: 1.2;
-  --leading-ui: 1.35;
+  /* Leading, the other half of each role. Prose reads at --leading-prose; a
+     line of chrome (a row, a label, a note) at --leading-ui; titles and lines
+     that wrap tight at --leading-tight; a control whose box sets its height at
+     --leading-solid. Display caps and dropped initials sit under 1, so the
+     letter's own shape sets the line. */
   --leading-prose: 1.5;
+  --leading-ui: 1.4;
+  --leading-tight: 1.2;
+  --leading-solid: 1;
+  --leading-display: 0.87;
+  --leading-initial: 0.82;
 
   /* Vertical rhythm in the chat: the space between two prose paragraphs, and
      the tighter step that separates the compact rows between them (message

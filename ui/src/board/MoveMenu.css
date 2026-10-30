@@ -93,7 +93,7 @@
   padding: 7px 14px;
   font-family: inherit;
   font-size: var(--type-note);
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   color: var(--kbn-ink);
   text-align: left;
   cursor: pointer;

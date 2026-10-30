@@ -449,7 +449,7 @@ export function injectCaptureFormStyles(): void {
       min-height: 8.5rem;
       font-family: var(--font-serif);
       font-size: var(--type-prose);
-      line-height: 1.5;
+      line-height: var(--leading-prose);
       color: var(--kbn-graphite);
       background: var(--kbn-blank);
       border: 1px solid color-mix(in srgb, var(--kbn-graphite) 20%, transparent);
@@ -478,7 +478,7 @@ export function injectCaptureFormStyles(): void {
       max-width: 100%;
       color: var(--kbn-graphite-muted);
       font-size: var(--type-meta);
-      line-height: 1.25;
+      line-height: var(--leading-tight);
       overflow-wrap: anywhere;
     }
     .capture-meeting-row {

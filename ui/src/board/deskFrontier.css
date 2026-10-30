@@ -3,15 +3,15 @@
 .kbn-card-crumb-root { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .kbn-card-crumb button { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; cursor: pointer; }
 .kbn-card-crumb button:hover { color: var(--kbn-ink); }
-.kbn-thread-count { flex: none; display: inline-flex; font: 600 var(--type-note)/1 var(--font-serif); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
+.kbn-thread-count { flex: none; display: inline-flex; font: 600 var(--type-note)/var(--leading-solid) var(--font-serif); font-variant-numeric: tabular-nums; white-space: nowrap; background: transparent; border: 0; padding: 2px 3px; cursor: pointer; }
 .kbn-count-working { color: var(--kbn-agent); }
 .kbn-count-needs { color: var(--kbn-owed); }
-.kbn-row-elapsed { flex: none; font: 400 var(--type-meta)/1 var(--font-mono); font-variant-numeric: oldstyle-nums tabular-nums; text-transform: uppercase; color: var(--kbn-ink-muted); white-space: nowrap; }
+.kbn-row-elapsed { flex: none; font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: oldstyle-nums tabular-nums; text-transform: uppercase; color: var(--kbn-ink-muted); white-space: nowrap; }
 /* The others asking the same thing: one indented line each, under the title. */
 .kbn-family-asks { grid-column: 2 / -1; flex-basis: 100%; min-width: 0; display: flex; flex-direction: column; gap: 1px; margin-top: 3px; padding-left: 2px; border-left: 1px solid color-mix(in srgb, var(--kbn-ink) 14%, transparent); }
 .kbn-family-ask { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 6px; }
 .kbn-family-ask .constitution-state-dot { transform: scale(0.8); }
-.kbn-family-ask-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; font-size: var(--type-meta); line-height: 1.5; color: var(--kbn-ink-soft); background: transparent; border: 0; padding: 0; cursor: pointer; }
+.kbn-family-ask-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; font-size: var(--type-meta); line-height: var(--leading-prose); color: var(--kbn-ink-soft); background: transparent; border: 0; padding: 0; cursor: pointer; }
 .kbn-family-ask-name:hover { color: var(--kbn-ink); }
 .kbn-family-more { align-self: flex-start; font: inherit; font-size: var(--type-meta); color: var(--kbn-ink-muted); background: transparent; border: 0; padding: 0 0 0 6px; cursor: pointer; }
 .kbn-family-more:hover { color: var(--kbn-ink); }

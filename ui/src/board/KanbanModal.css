@@ -41,7 +41,7 @@
   position: relative;
   display: inline-block;
   font-size: var(--glyph-initial);
-  line-height: 0.78;
+  line-height: var(--leading-initial);
   letter-spacing: 0;
   /* Sits the cap on the body baseline rather than floating slightly
      above it. Each typographic context overrides with its own tuned
@@ -211,7 +211,7 @@
   gap: 6px;
   font-family: var(--font-serif);
   font-size: var(--type-label);
-  line-height: 1.2;
+  line-height: var(--leading-tight);
   font-weight: 400;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -328,7 +328,7 @@
   margin: 0;
   font-family: var(--font-serif);
   font-size: var(--type-title);
-  line-height: 1.0;
+  line-height: var(--leading-solid);
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -441,7 +441,7 @@
   padding: 1px 1px 2px;
   border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 18%, transparent);
   position: relative;
-  line-height: 1;
+  line-height: var(--leading-solid);
 }
 .kbn-timeline-day-weekend { background: color-mix(in srgb, var(--kbn-shade) 4%, transparent); }
 .kbn-timeline-day-today {
@@ -511,7 +511,7 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-note);
-  line-height: 1.05;
+  line-height: var(--leading-solid);
   color: var(--kbn-owed-umber);
   white-space: nowrap;
   overflow: hidden;
@@ -523,7 +523,7 @@
   font-feature-settings: "smcp", "c2sc", "onum";
   font-size: var(--type-meta);
   letter-spacing: 0.05em;
-  line-height: 1.05;
+  line-height: var(--leading-solid);
   color: var(--kbn-ink-faint);
   white-space: nowrap;
 }
@@ -571,7 +571,7 @@
 .kbn-viewtabs-find:focus-within { border-color: color-mix(in srgb, var(--kbn-ink-muted) 60%, transparent); background: color-mix(in srgb, var(--kbn-paper) 60%, transparent); }
 .kbn-viewtabs-find input {
   flex: 1; min-width: 0; height: 100%; padding: 0 6px 0 9px; border: 0; outline: none; background: transparent;
-  font: var(--type-label)/1 var(--font-serif); color: var(--kbn-ink);
+  font: var(--type-label)/var(--leading-solid) var(--font-serif); color: var(--kbn-ink);
 }
 .kbn-viewtabs-find input::placeholder { color: var(--kbn-ink-faint); }
 .kbn-viewtabs-find input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
@@ -608,7 +608,7 @@
   font-family: var(--font-serif);
   font-variant-emoji: text;
   font-size: var(--type-row);
-  line-height: 1;
+  line-height: var(--leading-solid);
   color: var(--kbn-ink-faint);
   transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
 }
@@ -792,7 +792,7 @@
 .kbn-role-chip-name {
   /* A notch under `.kbn-card-name` (14.5px): the same object, quieter. */
   font-size: var(--type-note);
-  line-height: 1.1;
+  line-height: var(--leading-solid);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -944,7 +944,7 @@
   font-family: var(--font-mono);
   color: var(--kbn-ink-muted);
 }
-.kbn-rest-keys { margin: 0; font-size: var(--type-meta); color: var(--kbn-ink-muted); line-height: 1.4; }
+.kbn-rest-keys { margin: 0; font-size: var(--type-meta); color: var(--kbn-ink-muted); line-height: var(--leading-ui); }
 .kbn-rest-confirm {
   font: inherit;
   color: var(--kbn-parchment);
@@ -1073,7 +1073,7 @@
   font-size: var(--type-note);
   color: var(--kbn-ink-sepia);
   cursor: pointer;
-  line-height: 1.28;
+  line-height: var(--leading-tight);
 }
 /* `display: flex` above outranks the UA's `[hidden] { display: none }`, so the
    overflow items past "+N more" stayed visible while reporting themselves
@@ -1255,7 +1255,7 @@
      block runs from the baseline to 0.60em above it, inside the
      strut's own ascent), so line-height alone holds the box — the
      larger type spends its extra size on ink, not on chrome. */
-  line-height: 0.868;
+  line-height: var(--leading-display);
   font-weight: 500;
   font-variant-caps: all-small-caps;
   font-feature-settings: "smcp", "c2sc";
@@ -1278,7 +1278,7 @@
   font-size: var(--glyph-initial-heading);
   vertical-align: -0.08em;
   margin-right: 0.04em;
-  line-height: 0.82;
+  line-height: var(--leading-initial);
 }
 /* Awaiting title bodies stay default iron-gall too — only the dropcap
    carries the column pigment, like a rubricated initial on otherwise plain
@@ -1302,7 +1302,7 @@
   color: var(--kbn-on-pigment);
   box-shadow: 0 2px 4px color-mix(in srgb, var(--kbn-shade) 18%, transparent);
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
   font-family: var(--font-serif);
   cursor: pointer;
   display: flex;
@@ -1330,8 +1330,8 @@
 }
 .kbn-col-action-inFlight:hover { background: color-mix(in srgb, var(--kbn-agent) 93%, var(--kbn-blank)); }
 .kbn-col-action-inFlight:focus-visible { box-shadow: 0 0 0 3px color-mix(in srgb, var(--kbn-agent) 40%, transparent); }
-.kbn-col-action-glyph { flex: 0 0 auto; line-height: 1; }
-.kbn-col-action-label { font: 500 var(--type-label)/1 var(--font-serif); }
+.kbn-col-action-glyph { flex: 0 0 auto; line-height: var(--leading-solid); }
+.kbn-col-action-label { font: 500 var(--type-label)/var(--leading-solid) var(--font-serif); }
 .kbn-col-list {
   flex: 1;
   overflow-y: auto;
@@ -1459,7 +1459,7 @@
   background: color-mix(in srgb, var(--kbn-blank) 55%, transparent);
   color: var(--kbn-graphite-deep);
   font-size: var(--type-label);
-  line-height: 1.35;
+  line-height: var(--leading-ui);
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -1597,7 +1597,7 @@
   background: var(--kbn-paper-bright);
   font-family: var(--font-serif);
   font-size: var(--type-meta);
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   color: var(--kbn-ink-sepia);
   white-space: nowrap;
   overflow: hidden;
@@ -1616,7 +1616,7 @@
   flex-shrink: 0;
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  line-height: 1;
+  line-height: var(--leading-solid);
   text-align: center;
   color: var(--kbn-owed-bright);
 }
@@ -1630,7 +1630,7 @@
   flex: 1;
   font-size: var(--type-note);
   font-weight: 600;
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   text-align: left;
   color: inherit;
 }
@@ -1644,11 +1644,11 @@
      the title block, not a row of its own. The card-level gap (6px)
      would otherwise leave it floating. */
   margin-top: -6px;
-  line-height: 1.2;
+  line-height: var(--leading-tight);
 }
 .kbn-card-outcome {
   font-size: var(--type-meta);
-  line-height: 1.4;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink-soft);
   /* Truncate at N lines with an ellipsis. Aligns the cutoff to a line
      boundary (no half-cropped letters) and signals truncation explicitly.
@@ -1669,7 +1669,7 @@
 .kbn-card-outcome h4 {
   margin: 0.45em 0 0.18em;
   font-size: inherit;
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   font-weight: 600;
 }
 .kbn-card-outcome ul,
@@ -1842,7 +1842,7 @@
   border-radius: 3px;
   background: transparent;
   color: var(--kbn-ink-soft);
-  font: 400 var(--type-meta)/1 var(--font-mono);
+  font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   text-decoration: none;
@@ -1872,12 +1872,12 @@
   background: transparent;
   box-shadow: inset 0 0 0 1.5px var(--worker-dot);
 }
-.kbn-card-worker .ws-worker-state { font: 400 var(--type-meta)/1 var(--font-mono); }
+.kbn-card-worker .ws-worker-state { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); }
 .kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
-.kbn-card-worker .ws-worker-elapsed { font: 400 var(--type-meta)/1 var(--font-mono); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
+.kbn-card-worker .ws-worker-elapsed { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
 .kbn-card-worker .ws-worker-elapsed:empty { display: none; }
 .kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }
-.kbn-card-worker .ws-worker-via { font: 400 var(--type-meta)/1 var(--font-mono); color: var(--kbn-ink-muted); }
+.kbn-card-worker .ws-worker-via { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--kbn-ink-muted); }
 .kbn-card-worker .ws-worker-via::before { content: '· '; }
 /* A working turn breathes in its dot alone. */
 .kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
@@ -1891,7 +1891,7 @@
    the worker pill's type, unplated; its glyph and a pigmented ink say the
    state, since no worker's dot is there to carry it. */
 .kbn-card-phase {
-  font: 400 var(--type-meta)/1 var(--font-mono);
+  font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono);
   font-variant-numeric: var(--worker-figures);
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2179,7 +2179,7 @@
   .kbn-folio-name {
     font-family: var(--font-serif);
     font-size: var(--type-note);
-    line-height: 1;
+    line-height: var(--leading-solid);
     font-variant-caps: all-small-caps;
     font-feature-settings: "smcp", "c2sc";
     letter-spacing: 0.05em;
@@ -2200,7 +2200,7 @@
      the illumination dims, it doesn't change colour. */
   .kbn-folio-name .kbn-cap {
     font-size: var(--type-label);
-    line-height: 1;
+    line-height: var(--leading-solid);
     vertical-align: -0.04em;
     margin-right: 0.06em;
   }
@@ -2279,7 +2279,7 @@
   }
   .kbn-card-name {
     font-size: var(--type-note);
-    line-height: 1.3;
+    line-height: var(--leading-tight);
   }
   /* One line, and it is the TAIL that matters — `…/constitutions/den-gate`
      tells you where you are, `felt/docs/dev/…` does not. `direction: rtl` on a
@@ -2289,7 +2289,7 @@
      the descenders off every `p`, `g` and `y` in the path. */
   .kbn-card-id {
     font-size: var(--type-meta);
-    line-height: 1.6;
+    line-height: var(--leading-prose);
     word-break: normal;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2300,7 +2300,7 @@
   }
   .kbn-card-outcome {
     font-size: var(--type-meta);
-    line-height: 1.55;
+    line-height: var(--leading-prose);
     -webkit-line-clamp: 1;
   }
   /* The row clips sideways only, so a verdict's touch target can reach past its plate vertically. */
@@ -2352,7 +2352,7 @@
     flex: 0 0 auto;
     color: color-mix(in srgb, var(--kbn-owed-bright) 85%, transparent);
     font-size: var(--type-meta);
-    line-height: 1;
+    line-height: var(--leading-solid);
     transition: transform 160ms ease;
   }
   .kbn-bandhead-fold::before { content: '▾'; }

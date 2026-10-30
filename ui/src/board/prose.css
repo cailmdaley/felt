@@ -12,7 +12,7 @@
   /* The base size sets the reading scale; every heading below is em-relative,
      so this one number carries the whole hierarchy. */
   font-size: var(--type-note);
-  line-height: 1.62;
+  line-height: var(--leading-prose);
   color: var(--kbn-graphite);
 }
 @container kbn-detail (max-width: 600px) {
@@ -48,7 +48,7 @@
 .kbn-detail-prose h4 {
   font-family: var(--font-serif);
   font-weight: 600;
-  line-height: 1.2;
+  line-height: var(--leading-tight);
   color: var(--kbn-ink);
   margin: 1.7em 0 0.5em;
 }
@@ -145,7 +145,7 @@
   border-radius: 6px;
   overflow-x: auto;
   font-size: var(--type-code);
-  line-height: 1.5;
+  line-height: var(--leading-prose);
 }
 .kbn-detail-prose pre.md-code-block code {
   font-family: var(--font-mono);

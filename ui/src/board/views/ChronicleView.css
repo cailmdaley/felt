@@ -93,7 +93,7 @@
   font-feature-settings: "smcp", "c2sc";
   font-size: var(--type-label);
   letter-spacing: 0.07em;
-  line-height: 1.1;
+  line-height: var(--leading-solid);
   color: var(--kbn-ink-umber);
   white-space: nowrap;
 }
@@ -119,7 +119,7 @@
   justify-content: flex-end;
   gap: 0;
   padding: 0 0 3px;
-  line-height: 1;
+  line-height: var(--leading-solid);
   background: var(--kbn-parchment);
   border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 16%, transparent);
   border-bottom: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
@@ -263,7 +263,7 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-row);
-  line-height: 1.34;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink-sepia);
 }
 
@@ -280,7 +280,7 @@
   border: 0;
   background: none;
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
   color: var(--kbn-ink-faint);
   cursor: pointer;
 }
@@ -291,7 +291,7 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-row);
-  line-height: 1.34;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink-sepia);
   max-width: 74ch;
 }
@@ -354,7 +354,7 @@
   margin: 0 0 2px;
   font-family: var(--font-serif);
   font-size: var(--type-label);
-  line-height: 1.36;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink-sepia);
   max-width: 92ch;
 }
@@ -488,7 +488,7 @@
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
   color: var(--kbn-owed-umber);
   text-align: left;
   white-space: nowrap;
@@ -645,7 +645,7 @@
   background: transparent;
   font-family: var(--font-serif);
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
   color: var(--kbn-owed);
   opacity: 0.7;
   cursor: pointer;
@@ -688,7 +688,7 @@
   background: var(--kbn-paper-bright);
   font-family: var(--font-serif);
   font-size: var(--type-label);
-  line-height: 1.45;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink);
   outline: none;
 }
@@ -766,7 +766,7 @@
   flex: 0 0 auto;
   font-style: normal;
   font-size: var(--type-meta);
-  line-height: 1;
+  line-height: var(--leading-solid);
 }
 .chr-state-draft { color: var(--kbn-ink-muted); opacity: 0.75; }
 .chr-state-inFlight { color: var(--kbn-agent); }
@@ -843,7 +843,7 @@ button.chr-name:hover {
   padding: 0 3px;
   margin-top: 0;
   max-width: 108px;
-  line-height: 1.5;
+  line-height: var(--leading-prose);
   align-self: center;
 }
 /* The span, as a ledger column: mono, right-aligned, always in the same place
@@ -954,7 +954,7 @@ button.chr-name:hover {
   align-items: center;
   justify-content: center;
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
   pointer-events: none;
 }
 .chr-end { color: var(--kbn-tempered, var(--kbn-tempered)); }
@@ -989,7 +989,7 @@ button.chr-name:hover {
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-note);
-  line-height: 1.2;
+  line-height: var(--leading-tight);
   color: var(--kbn-ink-muted);
 }
 .chr-key-item {
@@ -1031,7 +1031,7 @@ button.chr-name:hover {
 .chr-key-glyph {
   font-style: normal;
   font-size: var(--type-note);
-  line-height: 1;
+  line-height: var(--leading-solid);
 }
 .chr-key-due { color: var(--kbn-owed-bright, var(--kbn-owed-bright)); }
 .chr-key-launch { color: var(--kbn-agent); opacity: 0.75; }
@@ -1081,7 +1081,7 @@ button.chr-name:hover {
   cursor: pointer;
   font-family: var(--font-serif);
   font-size: var(--type-prose);
-  line-height: 1;
+  line-height: var(--leading-solid);
   color: var(--kbn-ink-faint);
   transition: color 90ms ease-out;
 }
@@ -1205,7 +1205,7 @@ button.chr-name:hover {
   font-family: var(--font-serif);
   font-style: italic;
   font-size: var(--type-note);
-  line-height: 1.35;
+  line-height: var(--leading-ui);
   color: var(--kbn-ink-muted);
 }
 

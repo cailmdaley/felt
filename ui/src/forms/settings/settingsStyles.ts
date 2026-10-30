@@ -85,7 +85,7 @@ const SHEET = `
   background: color-mix(in srgb, var(--kbn-owed-bright) 9%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--kbn-owed) 30%, transparent);
   font-size: var(--type-note);
-  line-height: 1.45;
+  line-height: var(--leading-ui);
 }
 .set-discard { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .set-discard > span { flex: 1 1 16rem; }
@@ -115,7 +115,7 @@ const SHEET = `
   cursor: pointer;
   font-family: var(--font-serif);
   font-size: var(--type-label);
-  line-height: 1.25;
+  line-height: var(--leading-tight);
   color: var(--kbn-graphite-soft);
   display: flex;
   align-items: baseline;
@@ -139,8 +139,8 @@ const SHEET = `
 .set-railgroup + .set-railgroup { margin-top: 20px; }
 .set-railgroup-label { padding: 5px 10px 8px; font-family: var(--font-serif); font-size: var(--type-meta); letter-spacing: .12em; text-transform: uppercase; color: var(--kbn-graphite-faint); }
 .set-pane-heading { margin-bottom: 22px; }
-.set-pane-heading h2 { font-size: var(--type-display); font-weight: 500; line-height: 1.15; margin: 0 0 8px; }
-.set-pane-heading p { margin: 0; color: var(--kbn-graphite-muted); font-size: var(--type-label); line-height: 1.4; max-width: 36rem; }
+.set-pane-heading h2 { font-size: var(--type-display); font-weight: 500; line-height: var(--leading-tight); margin: 0 0 8px; }
+.set-pane-heading p { margin: 0; color: var(--kbn-graphite-muted); font-size: var(--type-label); line-height: var(--leading-ui); max-width: 36rem; }
 .set-opening-options { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
 .set-opening-options legend { padding: 0 0 10px; }
 .set-opening-choice { display: flex; align-items: center; gap: 12px; border: 1px solid color-mix(in srgb, var(--kbn-graphite) 15%, transparent); border-radius: 4px; padding: 14px 16px; cursor: pointer; background: color-mix(in srgb, var(--kbn-blank) 22%, transparent); }
@@ -153,10 +153,10 @@ const SHEET = `
 .set-opening-default { margin-left: auto; font-family: var(--font-serif); font-size: var(--type-meta); color: var(--kbn-owed-deep); }
 .set-appearance-dark { margin-top: 26px; }
 .set-appearance-swatch { width: 34px; height: 34px; border-radius: 3px; flex-shrink: 0; display: grid; place-items: center; font-size: var(--type-meta); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kbn-blank) 8%, transparent); }
-.set-opening-guidance { line-height: 1.5; font-size: var(--type-note); color: var(--kbn-graphite-soft); margin: 14px 0 20px; }
-.set-opening-tip { font-size: var(--type-label); line-height: 1.45; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding: 16px 0 10px; }
+.set-opening-guidance { line-height: var(--leading-prose); font-size: var(--type-note); color: var(--kbn-graphite-soft); margin: 14px 0 20px; }
+.set-opening-tip { font-size: var(--type-label); line-height: var(--leading-ui); border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding: 16px 0 10px; }
 .set-opening-tip strong { display: block; font-weight: 500; margin-bottom: 3px; }
-.set-opening-details { margin-top: 22px; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding-top: 12px; color: var(--kbn-graphite-soft); font-size: var(--type-note); line-height: 1.5; }
+.set-opening-details { margin-top: 22px; border-top: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent); padding-top: 12px; color: var(--kbn-graphite-soft); font-size: var(--type-note); line-height: var(--leading-prose); }
 .set-opening-details summary { cursor: pointer; padding: 4px 0; }
 .set-opening-details p { margin: 10px 0; }
 
@@ -171,7 +171,7 @@ const SHEET = `
 .set-lede {
   margin: 0 0 14px;
   font-size: var(--type-note);
-  line-height: 1.45;
+  line-height: var(--leading-ui);
   color: var(--kbn-graphite-soft);
   max-width: 44rem;
 }
@@ -225,7 +225,7 @@ const SHEET = `
 }
 .set-row-note {
   font-size: var(--type-meta);
-  line-height: 1.4;
+  line-height: var(--leading-ui);
   color: var(--kbn-graphite-muted);
   word-break: break-word;
 }
@@ -260,7 +260,7 @@ const SHEET = `
 .set-textarea {
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  line-height: 1.5;
+  line-height: var(--leading-prose);
   resize: vertical;
   white-space: pre;
   overflow-wrap: normal;
@@ -319,7 +319,7 @@ const SHEET = `
   border: 1px solid color-mix(in srgb, var(--kbn-alarm) 50%, transparent);
   color: var(--kbn-error);
   font-size: var(--type-note);
-  line-height: 1.45;
+  line-height: var(--leading-ui);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -331,7 +331,7 @@ const SHEET = `
   border: 1px solid color-mix(in srgb, var(--kbn-graphite) 12%, transparent);
   font-family: var(--font-mono);
   font-size: var(--type-meta);
-  line-height: 1.5;
+  line-height: var(--leading-prose);
   color: var(--kbn-graphite-soft);
   white-space: pre-wrap;
   word-break: break-word;
@@ -452,7 +452,7 @@ const SHEET = `
     white-space: normal;
     overflow: visible;
     font-size: var(--type-meta);
-    line-height: 1.35;
+    line-height: var(--leading-ui);
   }
   .set-pane { padding: 14px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
   /* iOS zooms the page for any field under 16px and will not zoom back — and
@@ -467,7 +467,7 @@ const SHEET = `
      the sheet, at roughly 32px. (No backticks in this file: it is one big
      template literal, and one would end it.) */
   .set-input, .set-select { min-height: 44px; padding: 8px 10px; }
-  .set-textarea { line-height: 1.35; }
+  .set-textarea { line-height: var(--leading-ui); }
   /* 44px, including — especially — the destructive one. The remove control had
      40 while the safe controls had 44, which is exactly backwards: a miss on
      Add costs a keystroke, a miss on ✕ costs a store. */
