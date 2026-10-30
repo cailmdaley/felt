@@ -135,8 +135,8 @@ defmodule Shuttle.RemoteRegistryTest do
   # ── Remote struct ──
 
   # A clock the test owns: `clock` reads it, `advance.(ms)` moves it forward.
-  defp fake_clock do
-    agent = start_supervised!({Agent, fn -> DateTime.utc_now() end}, id: make_ref())
+  defp fake_clock(initial \\ DateTime.utc_now()) do
+    agent = start_supervised!({Agent, fn -> initial end}, id: make_ref())
     clock = fn -> Agent.get(agent, & &1) end
     advance = fn ms -> Agent.update(agent, &DateTime.add(&1, ms, :millisecond)) end
     {clock, advance}
@@ -286,7 +286,9 @@ defmodule Shuttle.RemoteRegistryTest do
       {:ok, 304, [{"etag", etag}], ""}
     ])
 
-    {clock, advance} = fake_clock()
+    # The 304 crosses a second boundary while its microsecond field decreases.
+    # Timestamp freshness must use chronological, rather than struct, ordering.
+    {clock, advance} = fake_clock(~U[2026-10-30 01:55:30.970346Z])
     remote = candide_remote(poll_interval_ms: 50)
 
     registry =
@@ -306,7 +308,7 @@ defmodule Shuttle.RemoteRegistryTest do
 
     assert second.snapshot == first.snapshot
     assert second.stale == false
-    assert second.last_polled_at > first.last_polled_at
+    assert DateTime.compare(second.last_polled_at, first.last_polled_at) == :gt
     assert second.recovery.state == :healthy
 
     assert ConditionalClient.requests() == [

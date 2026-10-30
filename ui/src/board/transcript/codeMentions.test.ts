@@ -7,8 +7,12 @@ import source from './fixtures/claude-shuttle-thread-command.jsonl?raw'
 const session = 'a3edf873-cb1c-40ab-a891-f26f5333b320'
 let bands: TranscriptBand[] = []
 let runtimes: ReturnType<typeof mentionRuntime>[] = []
+let observers: MutationObserver[] = []
 
 afterEach(() => {
+  for (const observer of observers) observer.disconnect()
+  observers = []
+  vi.restoreAllMocks()
   for (const runtime of runtimes) runtime.dispose()
   for (const band of bands) band.dispose()
   runtimes = []; bands = []
@@ -24,8 +28,18 @@ function makeBand(items: unknown[], inline = true): TranscriptBand {
   return band
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 12; i++) await Promise.resolve()
+async function settle(band: TranscriptBand): Promise<void> {
+  // Initial step groups paint after the feed is ready and queued entries drain.
+  // Decoding may yield to a timer between records, before the next frame.
+  await new Promise<void>(resolve => {
+    const ready = (): boolean => !!band.el.querySelector('.ws-transcript-steps, [data-spawn-preview]')
+    if (ready()) { resolve(); return }
+    const observer = new MutationObserver(() => {
+      if (ready()) { observer.disconnect(); resolve() }
+    })
+    observers.push(observer)
+    observer.observe(band.el, { childList: true, subtree: true })
+  })
   await new Promise(resolve => requestAnimationFrame(() => resolve(null)))
 }
 
@@ -40,14 +54,18 @@ const spawnRecords = (output?: string, isError = false): unknown[] => [
 ]
 
 it('shows a plain-output spawn as live thread chips, and leaves the folded command in the expanded detail', async () => {
+  // Progress records exercise decoding across multiple frames even on a fast host.
+  let clock = 0
+  vi.spyOn(performance, 'now').mockImplementation(() => clock += 10)
   const records = source.trim().split('\n').map(line => JSON.parse(line) as unknown)
   const items = [
+    ...Array.from({ length: 32 }, () => ({ type: 'progress' })),
     { type: 'user', timestamp: '2026-10-22T22:40:00.000Z', message: { content: 'Open the two threads.' } },
     ...records,
     { type: 'assistant', timestamp: '2026-10-22T22:59:00.000Z', message: { model: 'claude-opus', content: [{ type: 'text', text: 'Opened project-x/cloe-backends under the chair.' }] } },
   ]
   const band = makeBand(items)
-  await settle()
+  await settle(band)
   const open = vi.fn()
   const mentions = mentionRuntime(band.el, open)
   runtimes.push(mentions)
@@ -86,7 +104,7 @@ it('reads the id from a --json spawn and draws it when the poll has its row', as
   const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
   tool.message.content[0].input.command += ' --json'
   const band = makeBand(items)
-  await settle()
+  await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn())
   runtimes.push(mentions)
   mentions.update([row('project-x/other-child', 'Working', 'working')])
@@ -103,7 +121,7 @@ it('reads the id from a --json spawn and draws it when the poll has its row', as
 
 it('draws nothing when a spawn result is missing or failed', async () => {
   const missing = makeBand(spawnRecords())
-  await settle()
+  await settle(missing)
   const missingMentions = mentionRuntime(missing.el, vi.fn())
   runtimes.push(missingMentions)
   missingMentions.update([row('project-x/new-child', 'Waiting', 'idle')])
@@ -112,7 +130,7 @@ it('draws nothing when a spawn result is missing or failed', async () => {
   expect(missing.el.textContent).not.toContain('shuttle thread')
 
   const failed = makeBand(spawnRecords('project-x/new-child', true))
-  await settle()
+  await settle(failed)
   const failedMentions = mentionRuntime(failed.el, vi.fn())
   runtimes.push(failedMentions)
   failedMentions.update([row('project-x/new-child', 'Waiting', 'idle')])
@@ -129,20 +147,20 @@ it.each([
   const items = spawnRecords(output)
   const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
   tool.message.content[0].input.command += ' --json'
-  const band = makeBand(items); await settle()
+  const band = makeBand(items); await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
   mentions.update([{ ...row('project-x/moved/json-child', 'Working', 'working'), uid: '01ABCDEFGHJKMNPQRSTVWXYZ12' }])
   expect(band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')?.dataset.constitution).toBe('project-x/moved/json-child')
 })
 
 it('resolves an older plain spawn after nesting only when its leaf is unique', async () => {
-  const band = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const band = makeBand(spawnRecords('project-x/new-child')); await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
   mentions.update([row('project-x/nested/new-child', 'Working', 'working')])
   const chip = band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip')!
   expect(chip.dataset.constitution).toBe('project-x/nested/new-child')
   // A fresh unresolved chip must not guess between duplicate leaves.
-  const other = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const other = makeBand(spawnRecords('project-x/new-child')); await settle(other)
   const otherMentions = mentionRuntime(other.el, vi.fn()); runtimes.push(otherMentions)
   otherMentions.update([row('a/new-child', 'Working', 'working'), row('b/new-child', 'Working', 'working')])
   expect(other.el.querySelector('.ws-transcript-spawn-chip:not([hidden])')).toBeNull()
@@ -152,7 +170,7 @@ it('does not treat a search for shuttle thread as a spawn', async () => {
   const items = spawnRecords('project-x/new-child')
   const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
   tool.message.content[0].input.command = "grep -l 'shuttle thread' files"
-  const band = makeBand(items); await settle()
+  const band = makeBand(items); await settle(band)
   expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
 })
 
@@ -160,7 +178,7 @@ it('does not attribute another command’s IDs to a spawn', async () => {
   const items = spawnRecords('project-x/other\nproject-x/new-child')
   const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
   tool.message.content[0].input.command = 'felt ls --ids && shuttle thread project-x "New child"'
-  const band = makeBand(items); await settle()
+  const band = makeBand(items); await settle(band)
   expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
 })
 
@@ -173,21 +191,21 @@ it('rejects JSON from mixed commands and ambiguous output', async () => {
     const items = spawnRecords(output)
     const tool = items[1] as { message: { content: Array<{ input: { command: string } }> } }
     tool.message.content[0].input.command = command
-    const band = makeBand(items); await settle()
+    const band = makeBand(items); await settle(band)
     expect(band.el.querySelector('.ws-transcript-spawn-chip')).toBeNull()
   }
 })
 
 it('uses the plain output UID across a move even when the leaf is ambiguous', async () => {
   const band = makeBand(spawnRecords('Thread UID: project-x/new-child 01ABCDEFGHJKMNPQRSTVWXYZ12\nproject-x/new-child'))
-  await settle()
+  await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
   mentions.update([{ ...row('project-x/moved/new-child', 'Working', 'working'), uid: '01ABCDEFGHJKMNPQRSTVWXYZ12' }, row('other/new-child', 'Working', 'working')])
   expect(band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')?.dataset.constitution).toBe('project-x/moved/new-child')
 })
 
 it('shows the preview spawn row, a list item kept in place, only while its spawn resolves', async () => {
-  const band = makeBand(spawnRecords('project-x/new-child'), false); await settle()
+  const band = makeBand(spawnRecords('project-x/new-child'), false); await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
   const group = band.el.querySelector<HTMLElement>('[data-spawn-preview]')!
   expect(group.tagName).toBe('LI')
@@ -201,7 +219,7 @@ it('shows the preview spawn row, a list item kept in place, only while its spawn
 })
 
 it('keeps a resolved spawn chip in place when a receipt lands earlier in its turn', async () => {
-  const band = makeBand(spawnRecords('project-x/new-child')); await settle()
+  const band = makeBand(spawnRecords('project-x/new-child')); await settle(band)
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
   mentions.update([row('project-x/new-child', 'Working', 'working')])
   const chip = band.el.querySelector<HTMLAnchorElement>('.ws-transcript-spawn-chip:not([hidden])')!
@@ -209,7 +227,7 @@ it('keeps a resolved spawn chip in place when a receipt lands earlier in its tur
   // A receipt timed before the spawn splices in ahead of it, shifting the spawn's step index.
   const accept = (band as unknown as { acceptSentFiles(session: string, files: unknown[]): void }).acceptSentFiles.bind(band)
   accept(session, [{ fullPath: '/tmp/early.png', basename: 'early.png', timestamp: Date.parse('2026-10-22T22:40:30Z'), sessionId: session }])
-  await settle()
+  await settle(band)
   expect(band.el.querySelector('.ws-transcript-sent-file')).not.toBeNull()
   expect(chip.isConnected).toBe(true)
   expect(chip.hidden).toBe(false)
@@ -217,7 +235,7 @@ it('keeps a resolved spawn chip in place when a receipt lands earlier in its tur
 
 it('reuses a resolved spawn chip when its group expands and folds again', async () => {
   const band = makeBand(spawnRecords('project-x/new-child\nThread UID: project-x/new-child 01KTESTFIBER000000000000001'))
-  await settle()
+  await settle(band)
   const pane = band.el.querySelector<HTMLElement>('.ws-transcript-pane')!
   const mentions = mentionRuntime(pane, vi.fn()); runtimes.push(mentions)
   mentions.update([row('project-x/new-child', 'Working', 'working')])
@@ -235,7 +253,7 @@ it('reuses a resolved spawn chip when its group expands and folds again', async 
 
 it('keeps a bottom-following transcript at the bottom when a spawn chip resolves', async () => {
   const band = makeBand(spawnRecords('project-x/new-child\nThread UID: project-x/new-child 01KTESTFIBER000000000000001'))
-  await settle()
+  await settle(band)
   const scroller = band.el.querySelector<HTMLElement>('.ws-transcript-scroll')!
   const chip = band.el.querySelector<HTMLElement>('.ws-transcript-spawn-chip')!
   Object.defineProperties(scroller, {
@@ -247,7 +265,7 @@ it('keeps a bottom-following transcript at the bottom when a spawn chip resolves
   const mentions = mentionRuntime(band.el, vi.fn()); runtimes.push(mentions)
 
   mentions.update([row('project-x/new-child', 'Working', 'working')])
-  await settle()
+  await settle(band)
 
   expect(chip.hidden).toBe(false)
   expect(scroller.scrollTop).toBe(scroller.scrollHeight - scroller.clientHeight)
