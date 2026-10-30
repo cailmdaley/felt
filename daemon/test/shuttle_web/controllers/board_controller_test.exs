@@ -9,7 +9,20 @@ defmodule ShuttleWeb.BoardControllerTest do
   defmodule FakePoller do
     use GenServer
     def start_link(entries), do: GenServer.start_link(__MODULE__, entries)
-    def init(entries), do: {:ok, entries}
+
+    # Readers find the Poller's state in its published ETS table.
+    def init(entries) do
+      table = :ets.new(__MODULE__, [:set, :public, read_concurrency: true])
+
+      :ets.insert(
+        table,
+        {:thread_inputs,
+         %{entries: entries, local_live: MapSet.new(), own_host_id: "host", fleet: nil}}
+      )
+
+      :persistent_term.put({:shuttle_poller_published_state, self()}, table)
+      {:ok, entries}
+    end
 
     def handle_call(:thread_inputs, _from, entries),
       do: {:reply, {:ok, {entries, MapSet.new(), nil}}, entries}
