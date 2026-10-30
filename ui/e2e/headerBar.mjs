@@ -79,7 +79,7 @@ async function captureCurrentMeetingStates(page) {
       window.dispatchEvent(new StorageEvent('storage', { key: 'shuttle.appearance', newValue: stored }))
     }, scheme)
     await page.waitForFunction(scheme => {
-      const reader = document.querySelector('.ws-selected .ws-reader')
+      const reader = document.querySelector('.ws-reader')
       return document.documentElement.dataset.wsAppearance === scheme &&
         reader?.dataset.wsThemeName === (scheme === 'dark' ? 'night-chart' : 'portolan')
     }, scheme)
