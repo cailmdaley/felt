@@ -80,6 +80,32 @@ defmodule Shuttle.FrontmatterEditTest do
       assert out =~ ~s(    expr: "0 8 * * *")
     end
 
+    test "nested runtime maps can be updated without dropping unknown fields or inline maps" do
+      for indent <- [2, 4] do
+        pad = String.duplicate(" ", indent)
+
+        fm =
+          "name: test\nshuttle:\n#{pad}host: testhost\n#{pad}runtime: {handed_off_at: old, custom: keep}\n#{pad}kind: oneshot\n"
+
+        {:ok, before} = YamlElixir.read_from_string(fm)
+        runtime = Map.put(before["shuttle"]["runtime"], "thread_exit_verb", "rearmed")
+
+        out = FrontmatterEdit.apply(fm, [{:put_nested, "shuttle", "runtime", runtime}])
+        {:ok, after_edit} = YamlElixir.read_from_string(out)
+
+        assert after_edit["shuttle"]["runtime"] == %{
+                 "handed_off_at" => "old",
+                 "custom" => "keep",
+                 "thread_exit_verb" => "rearmed"
+               }
+
+        assert after_edit["shuttle"]["host"] == "testhost"
+        assert after_edit["name"] == "test"
+        assert out =~ "#{pad}host: testhost"
+        assert out =~ "#{pad}kind: oneshot"
+      end
+    end
+
     test "no-op edits are byte-identical (idempotency contract)" do
       # Deleting an absent key and re-putting an identical value is a no-op.
       out = FrontmatterEdit.apply(@fm, [{:delete, "tempered"}, {:put, "status", "open"}])

@@ -42,10 +42,13 @@ defmodule Shuttle.LifecycleStore do
     with {:ok, path, raw_fm, frontmatter, body} <- FiberDoc.read(fiber_id),
          {:ok, shuttle} <- shuttle_block(frontmatter),
          :ok <- require_standing(shuttle) do
+      runtime = get_in(frontmatter, ["shuttle", "runtime"]) || %{}
+
       ops =
         [
           {:put, "status", "closed"},
           {:put, "closed-at", DateTime.to_iso8601(DateTime.utc_now())},
+          {:put_nested, "shuttle", "runtime", Map.put(runtime, "thread_exit_verb", "closed")},
           {:delete, "tempered"}
         ] ++ evict_runtime_ops()
 
@@ -80,7 +83,7 @@ defmodule Shuttle.LifecycleStore do
       if Map.get(frontmatter, "status") == "active" do
         {:ok, "#{fiber_id} already active\n"}
       else
-        FiberDoc.write!(path, raw_fm, body, rearm_ops() ++ evict_runtime_ops())
+        FiberDoc.write!(path, raw_fm, body, rearm_ops(frontmatter) ++ evict_runtime_ops())
         conclude_run(fiber_id, opts)
         {:ok, "re-armed #{fiber_id} (status: active) for force-dispatch\n"}
       end
@@ -193,8 +196,15 @@ defmodule Shuttle.LifecycleStore do
   #
   # The outcome is never blanked on re-arm: the last run's digest stays the card
   # headline until the next run overwrites it.
-  defp rearm_ops do
-    [{:put, "status", "active"}, {:delete, "tempered"}, {:delete, "closed-at"}]
+  defp rearm_ops(frontmatter) do
+    runtime = get_in(frontmatter, ["shuttle", "runtime"]) || %{}
+
+    [
+      {:put, "status", "active"},
+      {:delete, "tempered"},
+      {:delete, "closed-at"},
+      {:put_nested, "shuttle", "runtime", Map.put(runtime, "thread_exit_verb", "rearmed")}
+    ]
   end
 
   # Drop the `@runtime_keys` from inside the `shuttle:` block.

@@ -328,16 +328,76 @@ func TestShuttleReopen_ToActive(t *testing.T) {
 	dir, storage := newStore(t)
 	yes := true
 	seedShuttleRole(t, storage, "f", felt.StatusClosed, oneshot(), &yes)
+	f := mustRead(t, storage, "f")
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", "2026-07-05T12:05:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatal(err)
+	}
 
 	if out, err := runIn(t, env, dir, "reopen", "f"); err != nil {
 		t.Fatalf("reopen: %v\n%s", err, out)
 	}
-	f := mustRead(t, storage, "f")
+	f = mustRead(t, storage, "f")
 	if f.Status != felt.StatusActive {
 		t.Fatalf("status = %q, want active", f.Status)
 	}
 	if readTempered(f) != nil || f.ClosedAt != nil {
 		t.Fatal("reopen must clear tempered + closed-at")
+	}
+	if got := shuttleRuntimeMap(t, f)["thread_exit_verb"]; got != "rearmed" {
+		t.Fatalf("legacy closed rearm marker = %v, want rearmed", got)
+	}
+}
+
+func TestShuttleReopen_ActivePreservesHandoffSignal(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusActive, oneshot(), nil)
+	f := mustRead(t, storage, "f")
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", "2026-07-05T12:05:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := runIn(t, env, dir, "reopen", "f", "--local"); err != nil {
+		t.Fatalf("reopen active fiber: %v\n%s", err, out)
+	}
+	f = mustRead(t, storage, "f")
+	if got := shuttleRuntimeMap(t, f)["thread_exit_verb"]; got != "handed off" {
+		t.Fatalf("active handoff marker = %v, want handed off", got)
+	}
+}
+
+func TestShuttleReopen_LegacyRestedSuppressesOldExit(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, oneshot(), nil)
+	f := mustRead(t, storage, "f")
+	if err := f.SetExtraField("horizon", "stashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := shuttle.SetRuntimeField(f, "handed_off_at", "2026-07-05T12:05:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, err := runIn(t, env, dir, "reopen", "f", "--local"); err != nil {
+		t.Fatalf("reopen rested fiber: %v\n%s", err, out)
+	}
+	f = mustRead(t, storage, "f")
+	if got := shuttleRuntimeMap(t, f)["thread_exit_verb"]; got != "rearmed" {
+		t.Fatalf("legacy rest rearm marker = %v, want rearmed", got)
 	}
 }
 

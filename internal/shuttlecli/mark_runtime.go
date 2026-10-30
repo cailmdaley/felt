@@ -25,11 +25,13 @@ func (a *app) markRuntimeCmd() *cobra.Command {
 	var markRuntimeRunID string
 	var markRuntimeHandedOffAt string
 	var markRuntimeMeeting string
+	var markRuntimeThreadExitVerb string
 	markRuntimeCmd := &cobra.Command{
 		Use:   "mark-runtime <fiber>",
 		Short: "Stamp machine-managed shuttle.runtime fields (daemon-facing)",
 		Long: `Sets the shuttle.runtime continuation fields named by flags
-(--dispatched-at, --session, --run-id, --handed-off-at, --meeting), nested under
+(--dispatched-at, --session, --run-id, --handed-off-at, --meeting,
+--thread-exit-verb), nested under
 shuttle.runtime, preserving config and any unspecified runtime key. An empty
 flag value removes that key. This is the daemon's channel for writing
 continuation state: the daemon shells it rather than editing the fiber file, so
@@ -52,6 +54,7 @@ touches tmux.`,
 				{"run-id", "run_id", markRuntimeRunID},
 				{"handed-off-at", "handed_off_at", markRuntimeHandedOffAt},
 				{"meeting", "meeting", markRuntimeMeeting},
+				{"thread-exit-verb", "thread_exit_verb", markRuntimeThreadExitVerb},
 			}
 
 			set := false
@@ -65,7 +68,7 @@ touches tmux.`,
 				set = true
 			}
 			if !set {
-				return fmt.Errorf("mark-runtime: pass at least one of --dispatched-at/--session/--run-id/--handed-off-at/--meeting")
+				return fmt.Errorf("mark-runtime: pass at least one of --dispatched-at/--session/--run-id/--handed-off-at/--meeting/--thread-exit-verb")
 			}
 
 			if err := st.Write(f); err != nil {
@@ -80,5 +83,6 @@ touches tmux.`,
 	markRuntimeCmd.Flags().StringVar(&markRuntimeRunID, "run-id", "", "Standing-role run id → shuttle.runtime.run_id")
 	markRuntimeCmd.Flags().StringVar(&markRuntimeHandedOffAt, "handed-off-at", "", "RFC3339 UTC clean-exit instant → shuttle.runtime.handed_off_at")
 	markRuntimeCmd.Flags().StringVar(&markRuntimeMeeting, "meeting", "", "Launch id of the meeting this fiber scribes → shuttle.runtime.meeting")
+	markRuntimeCmd.Flags().StringVar(&markRuntimeThreadExitVerb, "thread-exit-verb", "", "Lifecycle exit kind → shuttle.runtime.thread_exit_verb")
 	return markRuntimeCmd
 }

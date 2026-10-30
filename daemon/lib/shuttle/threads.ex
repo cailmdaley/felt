@@ -916,13 +916,19 @@ defmodule Shuttle.Threads do
   @doc "Validate a queued lifecycle notice against its owner's fresh document, never the poll cache."
   def signal_current(params, opts \\ []) do
     signal = params["signal"]
+    modern? = is_map(signal) and is_binary(signal["owner"])
     reference = if is_map(signal), do: signal["uid"], else: legacy_reference(params["text"])
+    lookup_opts = if modern?, do: opts, else: Keyword.put(opts, :all_matches, true)
 
     with ref when is_binary(ref) and ref != "" <- reference,
-         {:ok, %{fibers: entries}} <- FiberDocuments.get_shuttle(ref, opts) do
+         {:ok, %{fibers: entries}} <-
+           FiberDocuments.get_shuttle(ref, lookup_opts) do
       case entries do
         [] -> missing_signal(params)
         [entry] -> validate_on_owner(entry, params, opts)
+        # A legacy slug can name different fibers in different stores. With no
+        # unique owner document, deliver the queued notice without validation.
+        _ when not modern? -> {:ok, true}
         _ -> {:error, :ambiguous_thread}
       end
     else
@@ -935,19 +941,29 @@ defmodule Shuttle.Threads do
   defp missing_signal(params) do
     # A newly created remote thread need not have reached this mirror yet.
     owner = get_in(params, ["signal", "owner"])
+    modern? = is_map(params["signal"]) and is_binary(owner)
 
-    case {owner, params["forwarded"], OriginRouter.route_host(owner)} do
-      {host, forwarded, {:remote, remote}} when is_binary(host) and forwarded != true ->
+    case {modern?, owner, params["forwarded"], OriginRouter.route_host(owner)} do
+      {_, host, forwarded, {:remote, remote}} when is_binary(host) and forwarded != true ->
         forward_validation(remote, params)
 
-      {_, _, :local} ->
+      {false, _, _, _} ->
+        {:ok, true}
+
+      {true, _, true, _} ->
         {:ok, false}
 
-      {_, true, _} ->
+      # A structured signal with a pinned local owner is stale when that
+      # owner's authoritative document is missing. Legacy notices without an
+      # owner are delivered unvalidated above.
+      {true, _, _, :local} ->
         {:ok, false}
 
-      {_, _, {:error, _} = error} ->
+      {true, _, _, {:error, _} = error} ->
         error
+
+      {true, _, _, {:remote, _}} ->
+        {:error, :owner_changed}
     end
   end
 
@@ -991,6 +1007,7 @@ defmodule Shuttle.Threads do
          {:ok, %{"current" => current}} when is_boolean(current) <- Jason.decode(body) do
       {:ok, current}
     else
+      {:forwarded, 404, _body} -> {:ok, true}
       error -> {:error, {:validation_unavailable, error}}
     end
   end
@@ -1038,7 +1055,8 @@ defmodule Shuttle.Threads do
 
     runtime = get_in(fiber, ["shuttle", "runtime"]) || %{}
     handed = runtime["handed_off_at"]
-    dispatched = runtime["dispatched_at"]
+    exit_verb = runtime["thread_exit_verb"]
+    handoff_current? = is_binary(handed) and exit_verb in [nil, "handed off"]
 
     exit =
       cond do
@@ -1051,8 +1069,7 @@ defmodule Shuttle.Threads do
         fiber["status"] == "open" && fiber["horizon"] == "stashed" && handed ->
           [{"rested", handed, fiber["outcome"] || "", false}]
 
-        fiber["status"] == "active" && is_binary(handed) &&
-            (is_nil(dispatched) || handed >= dispatched) ->
+        fiber["status"] == "active" && handoff_current? ->
           [{"handed off", handed, fiber["outcome"] || "", false}]
 
         true ->

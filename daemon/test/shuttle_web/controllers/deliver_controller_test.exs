@@ -296,6 +296,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
   end
 
   test "a remote-owned constitution is delivered by its owner" do
+    signal = %{"uid" => "child-uid", "verb" => "closed", "stamp" => "stamp", "owner" => "test-host"}
     stub_forward(
       "cineca",
       "http://localhost:4002",
@@ -307,7 +308,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
       api_conn()
       |> post(
         "/api/v1/deliver",
-        Jason.encode!(%{"fiber_id" => "tests/remote", "text" => "hello", "origin" => "cineca"})
+        Jason.encode!(%{"fiber_id" => "tests/remote", "text" => "hello", "origin" => "cineca",
+          "context_only" => true, "wake" => false, "message_id" => "thread-forwarded", "thread_signal" => signal})
       )
       |> json_response(200)
 
@@ -318,6 +320,10 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Jason.decode!(last.body) == %{
              "fiber_id" => "tests/remote",
              "text" => "hello",
+             "context_only" => true,
+             "wake" => false,
+             "message_id" => "thread-forwarded",
+             "thread_signal" => signal,
              "from" => "unverified",
              "from_claim" => ""
            }

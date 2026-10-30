@@ -312,6 +312,9 @@ this host is killed.` + workerExitIdentityHelp,
 			if err := shuttle.SetRuntimeField(f, "handed_off_at", restedAt); err != nil {
 				return fmt.Errorf("stamping handed_off_at: %w", err)
 			}
+			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rested"); err != nil {
+				return fmt.Errorf("stamping thread_exit_verb: %w", err)
+			}
 			if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
 				return err
 			}
@@ -526,6 +529,9 @@ func rearmStanding(f *felt.Felt) error {
 	}
 	if err := shuttle.SetRuntimeField(f, "handed_off_at", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("stamping handed_off_at: %w", err)
+	}
+	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed"); err != nil {
+		return fmt.Errorf("stamping thread_exit_verb: %w", err)
 	}
 	return nil
 }
@@ -807,6 +813,9 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 				quietStamp = f.ClosedAt.Format(time.RFC3339Nano)
 			}
 			if err := shuttle.SetRuntimeField(f, "quiet_closed_at", quietStamp); err != nil {
+				return err
+			}
+			if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "closed"); err != nil {
 				return err
 			}
 			if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {

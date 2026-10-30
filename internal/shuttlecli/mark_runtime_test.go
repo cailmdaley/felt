@@ -78,6 +78,7 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 
 	out, err := runIn(t, env, dir, "mark-runtime", "f",
 		"--handed-off-at", "2026-07-05T12:05:00Z",
+		"--thread-exit-verb", "rearmed",
 	)
 	if err != nil {
 		t.Fatalf("mark-runtime with the daemon's exact handoff argv must succeed: %v\n%s", err, out)
@@ -86,6 +87,9 @@ func TestShuttleMarkRuntime_DaemonHandoffArgv(t *testing.T) {
 	rt := shuttleRuntimeMap(t, mustRead(t, storage, "f"))
 	if got, _ := rt["handed_off_at"].(string); got != "2026-07-05T12:05:00Z" {
 		t.Fatalf("shuttle.runtime.handed_off_at = %q, want %q", got, "2026-07-05T12:05:00Z")
+	}
+	if got := rt["thread_exit_verb"]; got != "rearmed" {
+		t.Fatalf("shuttle.runtime.thread_exit_verb = %v, want rearmed", got)
 	}
 }
 

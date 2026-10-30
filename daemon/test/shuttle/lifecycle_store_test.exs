@@ -14,6 +14,7 @@ defmodule Shuttle.LifecycleStoreTest do
           assert fm["status"] == "closed"
           assert is_binary(fm["closed-at"])
           refute Map.has_key?(fm, "tempered")
+          assert fm["shuttle"]["runtime"]["thread_exit_verb"] == "closed"
         end,
         status: "active"
       )
@@ -126,6 +127,8 @@ defmodule Shuttle.LifecycleStoreTest do
           assert {:ok, parsed} = YamlElixir.read_from_string(frontmatter_of(written))
           assert parsed["outcome"] == @rich_outcome
           assert parsed["shuttle"]["kind"] == "standing"
+          assert parsed["shuttle"]["runtime"]["custom_marker"] == "keep"
+          assert parsed["shuttle"]["runtime"]["thread_exit_verb"] == "closed"
           refute Map.has_key?(parsed["shuttle"], "next_due_at")
           refute Map.has_key?(parsed["shuttle"], "last_run_at")
         end,
@@ -169,6 +172,8 @@ defmodule Shuttle.LifecycleStoreTest do
       kind: standing
       host: testhost
       agent: claude-opus
+      runtime:
+        custom_marker: keep
       next_due_at: 2026-06-15T08:00:00Z
       last_run_at: 2026-06-14T08:00:00Z
       schedule:
@@ -280,6 +285,8 @@ defmodule Shuttle.LifecycleStoreTest do
       kind: standing
       host: testhost
       agent: claude-sonnet
+      runtime:
+        custom_marker: keep
       schedule:
         expr: "0 8 * * *"
         tz: Europe/Paris

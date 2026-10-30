@@ -269,7 +269,10 @@ defmodule Shuttle.Continuation do
   @spec mark_handed_off(module(), String.t(), String.t()) :: :ok | {:error, term()}
   def mark_handed_off(runner, felt_store, fiber_id)
       when is_binary(felt_store) and felt_store != "" and is_binary(fiber_id) and fiber_id != "" do
-    mark_runtime(runner, felt_store, fiber_id, [{"--handed-off-at", iso_now()}])
+    mark_runtime(runner, felt_store, fiber_id, [
+      {"--handed-off-at", iso_now()},
+      {"--thread-exit-verb", "rearmed"}
+    ])
   end
 
   def mark_handed_off(_runner, _felt_store, _fiber_id), do: :ok

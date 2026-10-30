@@ -180,11 +180,55 @@ defmodule Shuttle.FiberDocuments do
     stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
     with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
 
-    with :miss <- address_lookup(stores, id, Keyword.get(opts, :address), with_body?, cli),
-         :miss <- fast_lookup(stores, id, with_body?, cli) do
-      scan_lookup(stores, id, with_body?, cli)
+    if Keyword.get(opts, :all_matches, false) do
+      scan_lookup_all(stores, id, with_body?, cli)
     else
-      {:ok, entry} -> {:ok, envelope(stores, [entry])}
+      with :miss <- address_lookup(stores, id, Keyword.get(opts, :address), with_body?, cli),
+           :miss <- fast_lookup(stores, id, with_body?, cli) do
+        scan_lookup(stores, id, with_body?, cli)
+      else
+        {:ok, entry} -> {:ok, envelope(stores, [entry])}
+      end
+    end
+  end
+
+  # Signal validation must not let a slug collision pick whichever store
+  # happens to come first. This exhaustive mode is deliberately opt-in; normal
+  # document reads retain their first-store semantics.
+  defp scan_lookup_all(stores, id, with_body?, cli) do
+    results =
+      Enum.map(stores, fn store ->
+        with {:ok, rows} <-
+               SingleFlight.run({:fiber_ls, cli, store}, fn -> ls_rows(store, cli) end) do
+          {:ok, Enum.map(rows, &{store, &1})}
+        end
+      end)
+
+    errors = Enum.flat_map(results, &store_errors/1)
+
+    matches =
+      results
+      |> Enum.flat_map(fn
+        {:ok, rows} -> rows
+        _ -> []
+      end)
+      |> Enum.filter(fn {store, row} ->
+        Enum.any?(entry_for(store, row, :field), &entry_matches_id?(&1, id))
+      end)
+
+    entries =
+      Enum.reduce_while(matches, {:ok, []}, fn {store, row}, {:ok, entries} ->
+        case matched_entry(store, row, with_body?, cli) do
+          {:ok, entry} -> {:cont, {:ok, [entry | entries]}}
+          {:error, error} -> {:halt, {:error, [error]}}
+        end
+      end)
+
+    case {errors, entries} do
+      {[_ | _], _} -> {:error, errors}
+      {[], {:ok, [_ | _] = entries}} -> {:ok, envelope(stores, Enum.reverse(entries))}
+      {[], {:ok, []}} -> {:ok, envelope(stores, [])}
+      {[], error} -> error
     end
   end
 

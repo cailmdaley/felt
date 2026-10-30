@@ -37,9 +37,17 @@ func setTempered(f *felt.Felt, value *bool) error {
 // unclose moves a fiber to status (open or active), clearing the review
 // verdict and closed-at: the card leaves Awaiting review entirely.
 func unclose(f *felt.Felt, status string) error {
+	wasClosed := f.Status == felt.StatusClosed
+	wasResting := f.Status == felt.StatusOpen && horizonStashed(f)
 	f.Status = status
 	f.ClosedAt = nil
-	return setTempered(f, nil)
+	if err := setTempered(f, nil); err != nil {
+		return err
+	}
+	if wasClosed || wasResting {
+		return shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed")
+	}
+	return nil
 }
 
 // setClosedAtIfMissing stamps closed-at = now only when it is absent:

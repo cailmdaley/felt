@@ -43,6 +43,10 @@ func TestWorkerExitInfersMigratedPane(t *testing.T) {
 					target, untouched = untouched, target
 				}
 				f := mustRead(t, st, target)
+				wantExit := map[string]string{"handoff": "handed off", "close": "closed", "rest": "rested"}[verb]
+				if got := shuttleRuntimeMap(t, f)["thread_exit_verb"]; got != wantExit {
+					t.Fatalf("thread_exit_verb = %v, want %q", got, wantExit)
+				}
 				switch verb {
 				case "close":
 					if f.Status != felt.StatusClosed {

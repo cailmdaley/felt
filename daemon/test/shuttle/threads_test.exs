@@ -664,6 +664,81 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  test "a handoff notice survives dispatch; later handoff, rest and close supersede it", %{
+    store: store
+  } do
+    for superseding <- ["handoff", "rest", "close"] do
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+      assert {:ok, _} = CLI.run_in_store(store, ["handoff", "hub/child"])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(entries, "test-host")
+      child = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/child"))
+      stamp = get_in(child.fiber, ["shuttle", "runtime", "handed_off_at"])
+
+      [{id, record} | _] =
+        Enum.filter(Shuttle.ThreadOutbox.pending("test-host"), fn {_id, record} ->
+          get_in(record, ["signal", "verb"]) == "handed off" and
+            get_in(record, ["signal", "stamp"]) == stamp
+        end)
+
+      params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
+      assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+
+      later = DateTime.utc_now() |> DateTime.add(5, :second) |> DateTime.to_iso8601()
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, ["mark-runtime", "hub/child", "--dispatched-at", later])
+
+      assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+
+      args =
+        if superseding == "handoff",
+          do: [superseding, "hub/child"],
+          else: [superseding, "hub/child", "--local"]
+
+      assert {:ok, _} = CLI.run_in_store(store, args)
+      assert {:ok, false} = Threads.signal_current(params, felt_stores: [store])
+
+      if superseding in ["rest", "close"] do
+        assert {:ok, _} =
+                 CLI.run_in_store(store, [
+                   "mark-runtime",
+                   "hub/child",
+                   "--thread-exit-verb",
+                   ""
+                 ])
+
+        assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+        assert {:ok, false} = Threads.signal_current(params, felt_stores: [store])
+      end
+    end
+  end
+
+  test "a second close after rearming publishes a new signal", %{store: store} do
+    assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: first_entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(first_entries, "test-host")
+    [{first_id, _}] = Shuttle.ThreadOutbox.pending("test-host")
+    Threads.retry_results("test-host")
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+
+    assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: second_entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(second_entries, "test-host")
+
+    assert [{second_id, %{"signal" => %{"verb" => "closed"}}}] =
+             Enum.reject(Shuttle.ThreadOutbox.pending("test-host"), fn {id, _} ->
+               id == first_id
+             end)
+
+    refute second_id == first_id
+
+    Threads.retry_results("test-host")
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+  end
+
   test "validation follows the child's owner and keeps unavailable signals pending", %{
     store: store
   } do
@@ -719,6 +794,56 @@ defmodule Shuttle.ThreadsTest do
              Threads.signal_current(Map.put(params, "forwarded", true), felt_stores: [store])
 
     assert StubPostClient.last() == nil
+  end
+
+  test "an old owner validation endpoint returning 404 delivers unvalidated", %{store: store} do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "child-host", port: 43210}])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+    [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+    child = Path.join(store, ".felt/hub/child/child.md")
+    File.write!(child, String.replace(File.read!(child), "host: test-host", "host: child-host"))
+    StubPostClient.set_response({:ok, 404, "not found"})
+    params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
+
+    assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+  end
+
+  test "a legacy notice with no owner or local mirror is delivered unvalidated", %{store: store} do
+    params = %{
+      "text" => "thread hub/not-yet-synced closed: done",
+      "message_id" => "thread-legacy"
+    }
+
+    assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+
+    ownerless = %{
+      "signal" => %{"uid" => "not-yet-synced-uid", "verb" => "closed", "stamp" => "old"},
+      "text" => params["text"],
+      "message_id" => params["message_id"]
+    }
+
+    assert {:ok, true} = Threads.signal_current(ownerless, felt_stores: [store])
+  end
+
+  test "a legacy slug collision across stores is not validated against the first store", %{
+    store: store
+  } do
+    second = store <> "-collision"
+    File.mkdir_p!(second)
+    File.cp_r!(Path.join(store, ".felt"), Path.join(second, ".felt"))
+    on_exit(fn -> File.rm_rf(second) end)
+
+    params = %{
+      "text" => "thread hub/child closed: old result",
+      "message_id" => "thread-legacy-collision"
+    }
+
+    assert {:ok, true} = Threads.signal_current(params, felt_stores: [store, second])
   end
 
   test "results reach only the nearest orchestrator and never propagate automatically", %{

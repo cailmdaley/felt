@@ -120,11 +120,9 @@ func (a *app) canonicalPath(p string) (string, error) {
 // stampHandedOff sets shuttle.runtime.handed_off_at = <now RFC3339 UTC> in the
 // fiber's frontmatter, surgically (shuttle.SetRuntimeField touches only that one
 // nested key, so the daemon-written session_uuid / dispatched_at ride through),
-// and writes atomically. This is the clean-exit
-// signal: the daemon compares handed_off_at against dispatched_at to decide
-// fresh-vs-resume at the next dispatch. RFC3339Nano with a trailing Z (UTC) — the
-// Elixir reader parses it via DateTime.from_iso8601, and the comparison is on the
-// wire value, so sub-second precision is exact.
+// and writes atomically. This records a clean worker exit. thread_exit_verb
+// identifies whether the exit was a handoff, close or rest; dispatching a
+// successor leaves that kind intact so a pending handoff notice remains current.
 //
 // Operates on the file at `path` directly (read -> Parse -> stamp -> Marshal ->
 // atomic rename) rather than through Storage, because SHUTTLE_FIBER_PATH may name
@@ -178,6 +176,9 @@ func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
 	}
 	at := time.Now().UTC().Format(time.RFC3339Nano)
 	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
+		return "", err
+	}
+	if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off"); err != nil {
 		return "", err
 	}
 	data, err := f.Marshal()

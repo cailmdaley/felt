@@ -193,6 +193,8 @@ defmodule Shuttle.ContinuationTest do
       assert [{"shuttle", args, _}] = RecordingRunner.calls()
       assert ["-C", "/loom", "mark-runtime", "demo/task" | rest] = args
       assert "--handed-off-at" in rest
+      assert "--thread-exit-verb" in rest
+      assert "rearmed" in rest
       # Shuttle resolves its own host from local state, so the daemon does not
       # pass an explicit --host override.
       refute "--host" in rest
