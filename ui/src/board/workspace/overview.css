@@ -127,7 +127,7 @@
 .ws-overview-folio .ws-overview-thumb { aspect-ratio: 16 / 10.5; width: 100%; }
 .ws-overview-thumb-body { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: var(--ws-paper); }
 .ws-overview-thumb .kbn-thumbnail-image img { object-fit: cover; object-position: center top; }
-.ws-overview-thumb pre { margin: 0; padding: 26px 30px; font: var(--type-meta)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-overview-thumb pre { margin: 0; padding: 26px 30px; font: var(--type-code-block)/var(--leading-prose) var(--font-mono); color: var(--ws-ink-soft); white-space: pre-wrap; overflow-wrap: anywhere; }
 .ws-overview-folio-text { min-width: 0; flex: 1; display: flex; flex-direction: column; }
 .ws-overview-folio-title { font: 500 var(--type-prose)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); min-width: 0; }
 .ws-overview-folio-title > :last-child { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }

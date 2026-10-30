@@ -259,7 +259,7 @@ const SHEET = `
 }
 .set-textarea {
   font-family: var(--font-mono);
-  font-size: var(--type-meta);
+  font-size: var(--type-code-block);
   line-height: var(--leading-prose);
   resize: vertical;
   white-space: pre;

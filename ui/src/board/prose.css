@@ -144,7 +144,7 @@
   color: var(--kbn-code-ink);
   border-radius: 6px;
   overflow-x: auto;
-  font-size: var(--type-code);
+  font-size: var(--type-code-block);
   line-height: var(--leading-prose);
 }
 .kbn-detail-prose pre.md-code-block code {
