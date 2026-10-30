@@ -200,7 +200,7 @@ func (a *app) prepareWorkerTerminal(f *felt.Felt) (string, error) {
 func (a *app) attachCmd() *cobra.Command {
 	attachCmd := &cobra.Command{
 		Use:   "attach <fiber>",
-		Short: "Attach to a running worker's tmux session",
+		Short: "Attach to a running worker's terminal",
 		Long: `Resolves the fiber to its worker's tmux session name and execs
 'tmux attach'. Resolves the fiber from any directory, like session-name.
 Exits with a clear error if no session is live.`,

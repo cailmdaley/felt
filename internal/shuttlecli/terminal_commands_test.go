@@ -65,6 +65,13 @@ func TestRexHandoffClosesOnlyOwnBoundBlockAfterWrite(t *testing.T) {
 	}
 }
 
+func TestAttachSummaryIsBackendNeutral(t *testing.T) {
+	t.Parallel()
+	if got := testApp(t).attachCmd().Short; got != "Attach to a running worker's terminal" {
+		t.Fatalf("attach summary = %q", got)
+	}
+}
+
 func TestRexAttachOpensThroughDaemonAndRejectsSSH(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"local", "ssh", "refused", "prepared-viewer"} {
