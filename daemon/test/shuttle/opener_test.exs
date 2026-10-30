@@ -245,25 +245,28 @@ defmodule Shuttle.OpenerTest do
     assert FakeRex.calls() == []
   end
 
-  test "remote Rex is explicitly unsupported on both displays" do
+  test "remote Rex is explicitly unsupported on a Rex display" do
     Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
-
-    for display <- [Rex, Tmux] do
-      Env.put_app_env(:terminal_backend, display)
-
-      assert {:error, "opening a worker on a remote Rex server is not supported yet"} =
-               Opener.open(@name, "remote-a")
-    end
-
+    assert {:error, "opening a worker on a remote Rex server is not supported yet"} =
+             Opener.open(@name, "remote-a")
     refute_received {:kitty, _, _}
     assert FakeRex.calls() == []
   end
 
-  test "old version defaults to tmux; unavailable or malformed version fails closed" do
+  test "kitty remote attach does not consult the remote daemon" do
     Env.put_app_env(:terminal_backend, Tmux)
+
+    for reply <- [{:error, :timeout}, {:ok, "bad json"}, {:ok, ~s({"terminal":"rex"})}] do
+      Env.put_app_env(:opener_version, reply)
+      assert :ok = Opener.open(@name, "remote-a")
+      assert_received {:kitty, @name, "remote-a"}
+      refute_received {:version, _, _}
+    end
+  end
+
+  test "Rex display defaults old versions to tmux and refuses uncertain versions" do
     Env.put_app_env(:opener_version, {:ok, "{}"})
     assert :ok = Opener.open(@name, "remote-a")
-    assert_received {:kitty, @name, "remote-a"}
 
     for reply <- [
           {:error, :timeout},

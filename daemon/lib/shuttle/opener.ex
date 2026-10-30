@@ -42,14 +42,13 @@ defmodule Shuttle.Opener do
   end
 
   defp open_remote(name, host, remote) do
-    with :ok <- remote_tmux(remote) do
-      if Terminal.primary() == Rex do
-        with {:ok, destination} <- Kitty.ssh_destination(host) do
-          Rex.reveal_tmux(name, host, destination, fiber: remote_fiber(name, remote))
-        end
-      else
-        kitty().open(name, host)
+    if Terminal.primary() == Rex do
+      with :ok <- remote_tmux(remote),
+           {:ok, destination} <- Kitty.ssh_destination(host) do
+        Rex.reveal_tmux(name, host, destination, fiber: remote_fiber(name, remote))
       end
+    else
+      kitty().open(name, host)
     end
   end
 
