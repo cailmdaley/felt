@@ -36,7 +36,8 @@ It is not a guaranteed conversation-specific mobile deep link.
 
 ## Rex
 
-On a Rex-configured host, `shuttle attach <fiber>` asks the local daemon to select the worker in the Rex app; it does not render the worker in the calling TTY.
+For a Rex-held worker, `shuttle attach <fiber>` asks the local daemon to select the worker in the Rex app; it does not render the worker in the calling TTY.
+A tmux-held worker attaches in the calling TTY, including on a Rex-configured host.
 The board opens local Rex workers in the app and opens local or remote tmux workers in Rex viewer sessions, using SSH for remote tmux.
 Opening a worker held by a remote Rex server is not supported; use a Rex client on that host.
 [Installation](installation.md#rex-terminal-backend) covers the required app settings and privacy grant.

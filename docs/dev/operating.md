@@ -52,7 +52,8 @@ Uncertain tmux visibility holds rather than launching a duplicate; the missing-s
 ## Terminal backends
 
 `shuttle host --json` and `GET /api/v1/version` report the host's selected `terminal`, `tmux` or `rex`.
-On Rex, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; a remote Rex worker cannot be opened through SSH.
+For a Rex-held worker, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; a remote Rex worker cannot be opened through SSH.
+A tmux-held worker attaches in the calling TTY, including on a Rex-configured host.
 The local board's Rex opener can view remote tmux workers over SSH.
 `shuttle claim` inside a Rex block sends its native session and block references; the daemon binds them to the worker name.
 See [Rex setup](../shuttle/installation.md#rex-terminal-backend) for privacy and app configuration.
