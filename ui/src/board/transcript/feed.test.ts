@@ -179,13 +179,17 @@ describe('TranscriptFeed', () => {
       return response(offset === 0 ? body : new Uint8Array(), 200, { 'x-transcript-offset': String(offset) })
     })
     const { reader, onEntries } = feed(fetcher)
-    expect(await reader.read()).toBe(true)
-    expect(parse).toHaveBeenCalledTimes(2)
-    for (let tick = 0; tick < 239; tick++) expect(await reader.read()).toBe(false)
-    expect(fetcher).toHaveBeenCalledTimes(240)
-    expect(parse).toHaveBeenCalledTimes(2)
-    expect(entriesFrom(onEntries)).toEqual([{ kind: 'prompt', text: 'the transcript remains unchanged', images: 0, dispatch: false }])
-    reader.dispose()
+    try {
+      expect(await reader.read()).toBe(true)
+      expect(parse).toHaveBeenCalledTimes(2)
+      for (let tick = 0; tick < 239; tick++) expect(await reader.read()).toBe(false)
+      expect(fetcher).toHaveBeenCalledTimes(240)
+      expect(parse).toHaveBeenCalledTimes(2)
+      expect(entriesFrom(onEntries)).toEqual([{ kind: 'prompt', text: 'the transcript remains unchanged', images: 0, dispatch: false }])
+    } finally {
+      parse.mockRestore()
+      reader.dispose()
+    }
   })
 })
 
@@ -437,22 +441,96 @@ it('spends at most one 500 ms evidence wait across a batch of candidate records'
 })
 
 it('normalizes candidate records against evidence arriving before their batch is flushed', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
+  const messages = ['first-id', 'second-id'].map(id => ({ id, envelope: `[Shuttle message ${id} from shuttle]\n${id}` }))
+  const lines = messages.map(({ envelope }) => JSON.stringify({
+    type: 'attachment', attachment: { type: 'hook_additional_context', content: envelope },
+  }))
+  const raw = lines.join('\n') + '\n'
+  let releaseInitial!: (value: Response) => void
+  const initial = new Promise<Response>(resolve => { releaseInitial = resolve })
+  const transcript = response(raw, 200, { 'x-transcript-offset': '0' })
+  vi.spyOn(transcript, 'arrayBuffer').mockResolvedValue(new TextEncoder().encode(raw).buffer)
+  const ledger = (payload: { messages: typeof messages; cursor: string }): Response => {
+    const result = Response.json(payload)
+    vi.spyOn(result, 'json').mockResolvedValue(payload)
+    return result
+  }
+  let releaseEvidence!: (value: { messages: typeof messages; cursor: string }) => void
+  const evidence = ledger({ messages, cursor: '2' })
+  vi.mocked(evidence.json).mockReturnValue(new Promise(resolve => { releaseEvidence = resolve }))
+  let lookups = 0
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>()
+  const parse = JSON.parse
+  const parsing = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+    // Deliver the ledger body between normalization of the first record and the batch flush.
+    if (text === lines[1]) {
+      expect(onEntries).not.toHaveBeenCalled()
+      releaseEvidence({ messages, cursor: '2' })
+    }
+    return parse(text, reviver)
+  })
+  const { reader, onEntries } = feed(async input => {
+    if (String(input).includes('/messages?')) {
+      lookups++
+      return lookups === 1 ? initial : evidence
+    }
+    return transcript
+  }, { onReplaceRecord, provenance: true })
+  try {
+    const read = reader.read()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(lookups).toBe(1)
+    expect(vi.getTimerCount()).toBe(1)
+    expect(onEntries).not.toHaveBeenCalled()
+    releaseInitial(ledger({ messages: [], cursor: '1' }))
+    await read
+    expect(entriesFrom(onEntries).filter(entry => entry.kind === 'shuttle-message').map(entry => entry.id)).toEqual(['first-id', 'second-id'])
+    expect(lookups).toBe(2)
+    expect(onReplaceRecord).not.toHaveBeenCalled()
+  } finally {
+    reader.dispose()
+    parsing.mockRestore()
+    vi.useRealTimers()
+  }
+})
+
+it('replaces both flushed candidate records when their evidence arrives after the wait budget', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] })
   const messages = ['first-id', 'second-id'].map(id => ({ id, envelope: `[Shuttle message ${id} from shuttle]\n${id}` }))
   const raw = messages.map(({ envelope }) => JSON.stringify({
     type: 'attachment', attachment: { type: 'hook_additional_context', content: envelope },
   })).join('\n') + '\n'
-  let lookups = 0
-  const { reader, onEntries } = feed(async input => {
-    if (String(input).includes('/messages?')) {
-      lookups++
-      return Response.json(lookups === 1 ? { messages: [], cursor: '1' } : { messages, cursor: '2' })
-    }
-    return response(raw, 200, { 'x-transcript-offset': '0' })
-  }, { provenance: true })
-  await reader.read()
-  expect(entriesFrom(onEntries).filter(entry => entry.kind === 'shuttle-message').map(entry => entry.id)).toEqual(['first-id', 'second-id'])
-  expect(lookups).toBe(2)
-  reader.dispose()
+  let release!: (value: Response) => void
+  const pending = new Promise<Response>(resolve => { release = resolve })
+  const transcript = response(raw, 200, { 'x-transcript-offset': '0' })
+  vi.spyOn(transcript, 'arrayBuffer').mockResolvedValue(new TextEncoder().encode(raw).buffer)
+  const rendered = new Map<number, Entry[]>()
+  const onEntries = vi.fn<(entries: Entry[]) => void>(entries => {
+    for (const entry of entries) rendered.set(entry.sourceRecord!, [entry])
+  })
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>((record, entries) => rendered.set(record, entries))
+  const { reader, onReset } = feed(async input => String(input).includes('/messages?')
+    ? pending
+    : transcript, { onEntries, onReplaceRecord, provenance: true })
+  try {
+    const read = reader.read()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(onEntries).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(501)
+    await read
+    expect(entriesFrom(onEntries).map(entry => entry.kind)).toEqual(['event', 'event'])
+    const evidence = Response.json({ messages, cursor: '2' })
+    vi.spyOn(evidence, 'json').mockResolvedValue({ messages, cursor: '2' })
+    release(evidence)
+    await vi.advanceTimersByTimeAsync(0)
+    expect([...rendered.values()].flat().filter(entry => entry.kind === 'shuttle-message').map(entry => entry.id)).toEqual(['first-id', 'second-id'])
+    expect(onReplaceRecord).toHaveBeenCalledTimes(2)
+    expect(onReset).not.toHaveBeenCalled()
+  } finally {
+    reader.dispose()
+    vi.useRealTimers()
+  }
 })
 
 it('retries a failed ledger lookup while the transcript is quiet', async () => {
