@@ -93,6 +93,21 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
+  test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do
+    Env.put_app_env(:terminal_backend, Backend)
+    fiber = "work/" <> String.duplicate("x", 120)
+    name = Shuttle.Dispatcher.session_name(fiber, "01KVBR5K0FZHZQK18845TZ01Q2")
+    assert :ok = Terminal.launch(@runner, name, root, "sleep 60\n", fiber: fiber)
+    on_exit(fn -> File.rm(WorkerProcess.script_path(name)) end)
+    assert {:ok, %{"bindings" => %{^name => binding}}} = RexBindings.read()
+    assert {:ok, [%{"label" => display}]} = Rex.sessions(@runner)
+    assert String.length(display) <= 127
+    assert {:ok, [%{"label" => index}]} = Rex.blocks(@runner, binding["session_id"])
+    assert index == Backend.worker_label(name)
+    assert String.length(index) == 127
+    assert {"", 0} = Terminal.stop(@runner, name, backends: [Backend])
+  end
+
   @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
   test "the auxiliary anchor answers on the daemon's custom TMUX_TMPDIR without an explicit socket" do
     # Keep the default socket short enough for macOS's Unix-socket path limit.
@@ -329,7 +344,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, []} = Rex.sessions(@runner)
   end
 
-  test "an empty worker session is reclaimed after its binding is lost", %{root: root} do
+  test "an empty worker session is preserved after its binding is lost", %{root: root} do
     name = "probe-lost-#{System.unique_integer([:positive])}-shuttle"
     path = WorkerProcess.script_path(name)
     File.write!(path, "exit 0\n")
@@ -339,6 +354,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert :ok = RexBindings.delete(name, b)
     await(fn -> Rex.blocks(@runner, b["session_id"]) == {:ok, []} end)
     assert :absent = Backend.probe(@runner, name)
-    assert {:ok, []} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => sid}]} = Rex.sessions(@runner)
+    assert sid == b["session_id"]
   end
 end

@@ -153,7 +153,7 @@ defmodule Shuttle.Terminal.Rex do
   def list(runner) do
     with {:ok, doc} <- Bindings.read(),
          {:ok, sessions} <- Rex.sessions(runner),
-         :ok <- Bindings.prune(doc, Enum.map(sessions, & &1["session_id"])) do
+         :ok <- prune_bindings(runner, doc, Enum.map(sessions, & &1["session_id"])) do
       ids = MapSet.new(sessions, & &1["session_id"])
       bound = for {name, b} <- doc["bindings"], MapSet.member?(ids, b["session_id"]), do: name
 
@@ -174,6 +174,14 @@ defmodule Shuttle.Terminal.Rex do
     else
       {:error, :server_absent} -> {:ok, []}
       _ -> {:error, :unknown}
+    end
+  end
+
+  defp prune_bindings(runner, snapshot, live_ids) do
+    with :ok <- Bindings.prune(snapshot, live_ids),
+         {:ok, current} <- Bindings.read() do
+      if current != snapshot, do: Shuttle.Terminal.RexTree.refresh(runner)
+      :ok
     end
   end
 
