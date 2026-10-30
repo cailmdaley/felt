@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { findBrowser, sharedBrowser } from '../e2e/sharedBrowser.mjs'
+import { findBrowser, sharedBrowser, system as browserSystem } from '../e2e/sharedBrowser.mjs'
 import { getBrowser } from '../e2e/browser.mjs'
 
 const fast = { readyMs: 300, pollMs: 5, probeMs: 50, graceMs: 60, killMs: 60, lockMs: 10_000 }
@@ -30,7 +30,7 @@ function world({ processes = [], answers = 'ours', exitOn = 'SIGTERM' } = {}) {
       signals.push([pid, signal])
       if (signal === exitOn || signal === 'SIGKILL') table = table.filter(item => !(item.pid === pid || signal === 'SIGTERM' && item.ppid === pid))
     },
-    spawn: async (path, args) => { spawned.push([path, args]) },
+    spawn: async (path, args) => { spawned.push([path, args]); return { exitCode: 1, signalCode: null } },
     locate: async () => '/fake/chrome',
   })
   writeFileSync(browser.logFile, `DevTools listening on ws://127.0.0.1:${port}${browserId}\n`)
@@ -100,12 +100,111 @@ describe('health: an endpoint that does not answer never causes a kill', () => {
   it('a live browser whose probe times out is reported, not killed', async () => {
     const w = world({ answers: 'hang' })
     w.table = ours(w.browser.profileDir)
-    await expect(w.browser.endpoint()).rejects.toThrow(/pid 202 is running but .* does not answer/)
+    writeFileSync(w.browser.logFile, 'Chrome is waiting for its debugger\n')
+    await expect(w.browser.endpoint()).rejects.toThrow(/pid 202 is running but .* does not answer[\s\S]*Chrome is waiting for its debugger/)
     expect((await w.browser.status()).state).toBe('unresponsive')
     expect(await w.browser.reap(0)).toEqual({ result: 'unresponsive', pid: 202 })
     expect(w.signals).toEqual([])
     expect(w.spawned).toEqual([])
     w.cleanup()
+  })
+
+  for (const endpointReadyDuringMiss of [false, true]) {
+    it(`waits for its live child when startup's process snapshot is missing and CDP is ${endpointReadyDuringMiss ? 'ready' : 'not ready'}`, async () => {
+      const stateDir = temporary()
+      let launched = false, snapshots = 0, launches = 0
+      const browser = sharedBrowser({
+        port, stateDir, times: fast,
+        processes: () => launched && ++snapshots > 1 ? ours(browser.profileDir) : [],
+        fetch: async () => {
+          if (!launched || !endpointReadyDuringMiss && snapshots <= 1) throw new Error('ECONNREFUSED')
+          return new Response(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}${browserId}` }))
+        },
+        kill: () => { throw new Error('must not signal a live starting child') },
+        locate: async () => '/fake/chrome',
+        spawn: async () => { launches++; launched = true; return { exitCode: null, signalCode: null } },
+      })
+      writeFileSync(browser.logFile, `DevTools listening on ws://127.0.0.1:${port}${browserId}\n`)
+      try {
+        expect(await browser.endpoint()).toBe(`ws://127.0.0.1:${port}${browserId}`)
+        expect(launches).toBe(1)
+      } finally { rmSync(stateDir, { recursive: true, force: true }) }
+    })
+  }
+
+  it('reports actual child exit and preserves its stderr in the thrown error', async () => {
+    const stateDir = temporary(), launches = []
+    const browser = sharedBrowser({
+      port, stateDir, times: { ...fast, readyMs: 5000 },
+      processes: () => [],
+      fetch: async () => { throw new Error('ECONNREFUSED') },
+      kill: () => { throw new Error('must not signal a dead child') },
+      locate: async () => '/fake/chrome',
+      spawn: async (_path, _args, logFd) => {
+        const child = await browserSystem.spawn(process.execPath, ['-e', "process.stderr.write('chrome startup diagnostic\\n'); process.exitCode = 17"], logFd)
+        launches.push(child)
+        return child
+      },
+    })
+    try {
+      await expect(browser.endpoint()).rejects.toThrow(/Chrome exited.*exit 17[\s\S]*chrome startup diagnostic/)
+      expect(launches).toHaveLength(1)
+      expect(launches[0].exitCode).toBe(17)
+    } finally { rmSync(stateDir, { recursive: true, force: true }) }
+  })
+
+  it('reports a signalled child as exited and includes its startup diagnostic', async () => {
+    const stateDir = temporary()
+    const browser = sharedBrowser({
+      port, stateDir, times: fast,
+      processes: () => [], fetch: async () => { throw new Error('ECONNREFUSED') },
+      kill: () => { throw new Error('must not signal a dead child') },
+      locate: async () => '/fake/chrome',
+      spawn: async () => {
+        writeFileSync(browser.logFile, 'killed during Chrome startup\n')
+        return { exitCode: null, signalCode: 'SIGKILL' }
+      },
+    })
+    try { await expect(browser.endpoint()).rejects.toThrow(/Chrome exited.*SIGKILL[\s\S]*killed during Chrome startup/) }
+    finally { rmSync(stateDir, { recursive: true, force: true }) }
+  })
+
+  for (const answers of ['nothing', 'ours']) {
+    it(`keeps a missing process identity distinct from child death when CDP answers ${answers}`, async () => {
+      const stateDir = temporary()
+      let launched = false, launches = 0
+      const browser = sharedBrowser({
+        port, stateDir, times: { ...fast, readyMs: 30 },
+        processes: () => [],
+        fetch: async () => {
+          if (!launched || answers === 'nothing') throw new Error('ECONNREFUSED')
+          return new Response(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}${browserId}` }))
+        },
+        kill: () => { throw new Error('must not signal a live starting child') },
+        locate: async () => '/fake/chrome',
+        spawn: async () => { launches++; launched = true; return { exitCode: null, signalCode: null } },
+      })
+      writeFileSync(browser.logFile, `startup still incomplete\nDevTools listening on ws://127.0.0.1:${port}${browserId}\n`)
+      try {
+        const error = await browser.endpoint().catch(error => error)
+        expect(error).toBeInstanceOf(Error)
+        expect(error.message).toMatch(/process identity.*unavailable/)
+        expect(error.message).toContain('startup still incomplete')
+        expect(error.message).not.toMatch(/exited|did not start/)
+        expect(launches).toBe(1)
+      } finally { rmSync(stateDir, { recursive: true, force: true }) }
+    })
+  }
+
+  it('requires the injected launcher to return child lifecycle evidence', async () => {
+    const stateDir = temporary()
+    const browser = sharedBrowser({
+      port, stateDir, times: fast,
+      processes: () => [], fetch: async () => { throw new Error('ECONNREFUSED') },
+      locate: async () => '/fake/chrome', spawn: async () => undefined,
+    })
+    try { await expect(browser.endpoint()).rejects.toThrow(/spawn must return a child process/) }
+    finally { rmSync(stateDir, { recursive: true, force: true }) }
   })
 
   it('a healthy owned browser hands out its endpoint', async () => {

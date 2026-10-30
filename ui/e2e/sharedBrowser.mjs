@@ -29,6 +29,7 @@ export const system = {
     const child = spawnProcess(path, args, { detached: true, stdio: ['ignore', 'ignore', logFd] })
     await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail) })
     child.unref()
+    return child
   },
 }
 
@@ -126,30 +127,47 @@ export function sharedBrowser({
     await mkdir(profileDir, { recursive: true, mode: 0o700 })
     const browserPath = await locate()
     const log = await open(logFile, 'a', 0o600)
-    try { await spawn(browserPath, args, log.fd) } finally { await log.close() }
+    let child
+    try { child = await spawn(browserPath, args, log.fd) } finally { await log.close() }
+    if (!child || !('exitCode' in child) || !('signalCode' in child)) {
+      throw new TypeError('shared-browser spawn must return a child process with exitCode and signalCode')
+    }
     await touch()
+    return child
   }
 
   // Starts the browser if none is running and returns its CDP endpoint. Never kills a live browser.
   async function endpoint() {
     return withLock(async () => {
       const until = Date.now() + times.readyMs
-      let launched = false
-      for (;;) {
-        const list = processes(), root = rootOf(list), health = await probe()
-        if (root && health?.ours) { await touch(); return health.endpoint }
-        if (!root && health) throw new Error(`Port ${port} is served by a browser shared-browser did not start`)
-        if (!root) {
-          if (launched) throw new Error(`Chrome exited before its DevTools endpoint answered; see ${logFile}`)
-          await terminate(list) // helpers whose browser process is gone
-          await launch()
-          launched = true
-        } else if (Date.now() >= until) {
-          throw new Error(health
-            ? `Port ${port} is served by a browser shared-browser did not start, while its own pid ${root.pid} runs; bin/shared-browser stop clears it`
-            : `Shared browser pid ${root.pid} is running but http://127.0.0.1:${port}/json/version does not answer; bin/shared-browser stop clears it`)
+      let launched = false, child
+      try {
+        for (;;) {
+          const list = processes(), root = rootOf(list), health = await probe()
+          if (root && health?.ours) { await touch(); return health.endpoint }
+          if (health && !health.ours) throw new Error(`Port ${port} is served by a browser shared-browser did not start${root ? `, while its own pid ${root.pid} runs; bin/shared-browser stop clears it` : ''}`)
+          if (!root) {
+            // An owned endpoint or a live child can outlast a missing process-table snapshot.
+            if (health?.ours) {
+              if (Date.now() >= until) throw new Error(`Chrome's owned DevTools endpoint answers but its process identity is unavailable`)
+            } else if (launched) {
+              if (child.exitCode !== null || child.signalCode !== null) {
+                throw new Error(`Chrome exited before its DevTools endpoint answered (${child.signalCode ?? `exit ${child.exitCode}`})`)
+              }
+              if (Date.now() >= until) throw new Error(`Chrome is still starting but its process identity and DevTools endpoint are unavailable`)
+            } else {
+              await terminate(list) // helpers whose browser process is gone
+              child = await launch()
+              launched = true
+            }
+          } else if (Date.now() >= until) {
+            throw new Error(`Shared browser pid ${root.pid} is running but http://127.0.0.1:${port}/json/version does not answer; bin/shared-browser stop clears it`)
+          }
+          await sleep(times.pollMs)
         }
-        await sleep(times.pollMs)
+      } catch (error) {
+        const diagnostic = await readFile(logFile, 'utf8').catch(() => '')
+        throw new Error(`${error.message}; see ${logFile}${diagnostic ? `\nChrome stderr (log tail):\n${diagnostic.slice(-8000)}` : '\nChrome stderr is empty or unavailable'}`, { cause: error })
       }
     })
   }
