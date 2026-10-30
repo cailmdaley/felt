@@ -57,7 +57,9 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
 ## Critical invariants
 
 - **A host's terminal backend launches its workers.** `host.json` selects `terminal` (`tmux` by default or `rex`); Shuttle's worker name is the identity each backend renders.
-  On Rex, the daemon-written binding to session and block IDs is authoritative; labels are display and recovery indices.
+  On Rex, the daemon-written binding to session, window and block IDs is authoritative.
+  Each constitution family has one session and each worker or viewer has one window; only block labels retain worker names for recovery.
+  Family placement is fixed at launch, and closing a worker removes its window, then its session only if empty and daemon-created.
   A Rex host also observes and stops existing tmux workers when tmux is available.
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
   Claude and Pi workers use the selected terminal backend.

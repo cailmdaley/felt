@@ -15,6 +15,8 @@ The `*-live.mjs` probes require a live daemon and are opt-in, separate from this
 
 `daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.
 They run when Rex is installed and skip when it is absent.
+The daemon suite launches sibling workers without a live family root, checks one session with ordered, labelled windows, then stops both and checks that the owned session is gone.
+`terminal/rex_families_test.exs` covers family resolution, concurrent sibling launches, window-local close, exact-window reveal, viewer tabs and human-window preservation with the fixture-backed runner.
 Point all test CLI calls at that socket, stop the isolated server in cleanup, and never create or destroy sessions on the operator's server.
 
 ## What a test is for

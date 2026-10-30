@@ -218,7 +218,14 @@ Per-worker agent `env` is also refused because tools execute in the shared serve
 ## Terminal backend and macOS ownership
 
 The host's `terminal` setting selects tmux (default) or Rex for launches.
-Rex uses a daemon-written binding from worker name to session and block IDs; its session labels present the fiber tree, while block and window labels retain worker names for recovery.
+Rex groups workers into one session per constitution family, with one window (tab) per worker or viewer.
+The family is the topmost constitution ancestor in the fiber tree at launch, or the fiber itself when it has none; the root needs no live worker.
+The session label is the family's last two path segments.
+Tabs sort by fiber path and display each leaf, with `└ ` and em-space indentation for constitution levels below the root, plus ` @host` for remote viewers.
+A daemon-written binding from worker name to session, window and block IDs is authoritative; only the block label retains the worker name for recovery.
+Launches and empty-session cleanup share a per-family lock.
+Stop closes the worker's window and destroys an empty session only when Shuttle created it; human and label-recovered sessions are preserved.
+Per-worker session bindings retain their addresses until their workers end, and refiling a live worker does not move it into another family.
 Rex workers start under Rex Server; the daemon starts an absent Rex app and refuses dispatch if the server remains unavailable.
 On Rex hosts, existing tmux workers remain observable and stoppable when tmux is installed.
 Auxiliary tmux services use a Rex-launched anchor on Rex hosts and a Kitty-launched anchor on tmux hosts.

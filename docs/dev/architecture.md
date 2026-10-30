@@ -337,8 +337,11 @@ kickstart`, so on a Linux hub a quiet remote skips the bounce and advances to
 the cascade's ssh check.
 
 **Terminal backends and opening.** `Shuttle.Terminal` launches through the host's configured backend (`tmux` by default, `rex` when selected) and retains tmux as an observation and stop backend on Rex hosts when available.
-The worker name is Shuttle's identity; Rex's daemon-written session/block binding is authoritative, while labels are display and recovery indices.
-`Shuttle.Opener` selects Rex or Kitty for the local display: Rex opens local Rex sessions and provides viewers for local or remote tmux sessions.
+The worker name is Shuttle's identity; Rex's daemon-written session/window/block binding is authoritative.
+A Rex session holds a constitution family, resolved from the topmost constitution ancestor at launch, and each worker or viewer has its own window.
+Session labels name the family; tab labels and order present its fiber tree; block labels retain worker names for recovery.
+Shuttle closes worker windows independently and destroys only empty daemon-created sessions.
+`Shuttle.Opener` selects Rex or Kitty for the local display: Rex selects a local worker's session and window, and provides viewer windows for local or remote tmux sessions.
 Remote Rex opening is not supported.
 The Codex App Server, Remote Control host and Hark meetings retain tmux for dead panes, options and respawn; daemon supervision loops also retain tmux.
 
