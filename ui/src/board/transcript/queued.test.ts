@@ -8,7 +8,10 @@ const lines = source.trim().split('\n').map(line => JSON.parse(line) as unknown)
 
 describe('messages queued while the worker worked', () => {
   it('reads a human message as the human\'s prompt, with its images, and another session\'s as a delivery', () => {
-    const [plain, pictured, peer, task] = lines.map(normalizeRecord)
+    const peerEnvelope = '[Shuttle message msg-1165a5c8e1effd4bbedccc80502ef237 from shuttle://host-b/claude/chair-session; reply to project-x]\nThe chair\'s tree is clean.'
+    const [plain, pictured, peer, task] = lines.map((record, index) => normalizeRecord(record, index === 2
+      ? [{ id: 'msg-1165a5c8e1effd4bbedccc80502ef237', envelope: peerEnvelope }]
+      : []))
     expect(plain).toMatchObject([{ kind: 'prompt', text: 'remind me about blocked on?', images: 0, dispatch: false }])
     expect(pictured).toMatchObject([{ kind: 'prompt', text: '[Image #11] this is ugly', images: 1 }])
     expect(peer).toMatchObject([{ kind: 'shuttle-message', direction: 'received', peer: 'project-x', fiber: 'project-x', address: 'shuttle://host-b/claude/chair-session', target: 'project-x', text: 'The chair\'s tree is clean.' }])

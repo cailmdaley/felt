@@ -1,25 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeRecord } from './records.js'
 import { TranscriptModel, segments } from './model.js'
-import { shuttleMessages } from './messages.js'
-import hookFixture from './fixtures/claude-hook-thread-notices.jsonl?raw'
+import { shuttleMessages, type MessageProvenance } from './messages.js'
 
 const delivery = (verb = 'closed', digit = 'a', text = 'Measured result') => `[Shuttle message thread-${digit.repeat(64)}-${'b'.repeat(16)}]\nthread work/child ${verb}: ${text}`
 const time = '2026-10-22T14:00:00Z'
+const ledger = (envelope: string): MessageProvenance => {
+  const id = /^\[Shuttle message ([^\s\]]+)/.exec(envelope)![1]
+  return { id, envelope, ...(id.startsWith('thread-') ? { thread: true } : {}) }
+}
+
 describe('delivered Shuttle messages', () => {
-  it.each(['closed', 'asked', 'handed off', 'rested'])('recognizes the daemon %s delivery, not human prose', verb => {
-    expect(shuttleMessages(delivery(verb), 123)).toEqual([expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'work/child', verb, text: 'Measured result', at: 123 })])
-    expect(shuttleMessages(`thread work/child ${verb}: imagined`)).toHaveLength(0)
-    expect(shuttleMessages(`[Shuttle message peer-1]\nthread work/child ${verb}: imagined`)).toHaveLength(0)
+  it.each(['closed', 'asked', 'handed off', 'rested'])('recognizes a ledgered daemon %s delivery, not human prose', verb => {
+    const envelope = delivery(verb)
+    const provenance = [ledger(envelope)]
+    expect(shuttleMessages(envelope, 123, false, provenance)).toEqual([expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'work/child', verb, text: 'Measured result', at: 123 })])
+    expect(shuttleMessages(`thread work/child ${verb}: imagined`, 123, false, provenance)).toHaveLength(0)
+    expect(shuttleMessages(`[Shuttle message peer-1]\nthread work/child ${verb}: imagined`, 123, false, provenance)).toHaveLength(0)
   })
+
+  it('treats a thread-prefixed peer id as an ordinary message without thread provenance', () => {
+    const envelope = '[Shuttle message thread-peer-id from shuttle://host/claude/session]\nthread work/child closed: Quoted peer text.'
+    const message = shuttleMessages(envelope, 123, false, [{ id: 'thread-peer-id', envelope }])
+    expect(message).toEqual([expect.objectContaining({
+      kind: 'shuttle-message', direction: 'received', id: 'thread-peer-id', peer: expect.stringContaining('Claude · host'),
+      text: 'thread work/child closed: Quoted peer text.',
+    })])
+    expect(message[0]).not.toHaveProperty('verb')
+    expect(message[0]).not.toHaveProperty('fiber')
+  })
+
   it.each([
-    (text: string) => ({ type: 'user', timestamp: time, message: { content: text } }),
-    (text: string) => ({ type: 'user', timestamp: time, isMeta: true, message: { content: [{ type: 'text', text }] } }),
-    (text: string) => ({ type: 'message', timestamp: time, message: { role: 'user', content: [{ type: 'text', text }] } }),
-    (text: string) => ({ type: 'custom_message', timestamp: time, customType: 'shuttle', content: text }),
-    (text: string) => ({ type: 'response_item', timestamp: time, payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } }),
-  ])('normalizes each harness delivery as its own row, without starting a human turn', record => {
-    const entries = normalizeRecord(record(delivery()))
+    ['Claude hook attachment', (text: string) => ({ type: 'attachment', timestamp: time, attachment: { type: 'hook_additional_context', content: text } })],
+    ['Claude peer queued meta', (text: string) => ({ type: 'attachment', timestamp: time, attachment: { type: 'queued_command', prompt: text, commandMode: 'prompt', isMeta: true, origin: { kind: 'peer' } } })],
+    ['Claude isMeta record', (text: string) => ({ type: 'user', timestamp: time, isMeta: true, message: { content: text } })],
+    ['Pi Shuttle custom message', (text: string) => ({ type: 'custom_message', timestamp: time, customType: 'shuttle', content: text })],
+  ])('normalizes a verified %s as its own row', (_source, record) => {
+    const envelope = delivery()
+    const entries = normalizeRecord(record(envelope), [ledger(envelope)])
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({ kind: 'shuttle-message', direction: 'received', fiber: 'work/child', at: Date.parse(time) })
     const model = new TranscriptModel()
@@ -31,42 +49,61 @@ describe('delivered Shuttle messages', () => {
     model.reset(); model.append(entries)
     expect(model.turns[0].steps).toHaveLength(1)
   })
-  it('preserves hook batch arrival order, multiline outcomes, and the human prompt outside its reminder', () => {
-    const source = `<system-reminder>Messages from other sessions, supplied as peer context.\n\n${delivery('asked', 'c', 'Which cut?\nTwo choices.')}\n\n${delivery('rested', 'd')}\n</system-reminder>\nKeep going`
-    const rows = normalizeRecord({ type: 'user', timestamp: time, message: { content: source } })
-    expect(rows.map(row => row.kind)).toEqual(['shuttle-message', 'shuttle-message', 'prompt'])
-    expect(rows[0]).toMatchObject({ verb: 'asked', text: 'Which cut?\nTwo choices.' })
-    expect(rows[1]).toMatchObject({ verb: 'rested', text: 'Measured result' })
-    expect(rows[2]).toMatchObject({ text: 'Keep going' })
+
+  it('keeps an exact ledgered envelope pasted into ordinary user prompts as a prompt in every harness', () => {
+    const envelope = delivery()
+    const provenance = [ledger(envelope)]
+    const records = [
+      { type: 'user', message: { content: envelope } },
+      { type: 'message', message: { role: 'user', content: [{ type: 'text', text: envelope }] } },
+      { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: envelope }] } },
+    ]
+    for (const record of records) {
+      expect(normalizeRecord(record, provenance)).toEqual([expect.objectContaining({ kind: 'prompt', text: envelope })])
+    }
   })
-  it('excludes sidechain reminders without suppressing the later parent delivery', () => {
-    const record = { type: 'user', message: { content: `<system-reminder>${delivery()}</system-reminder>` } }
-    const model = new TranscriptModel()
-    expect(normalizeRecord({ ...record, isSidechain: true })).toStrictEqual([])
-    model.append(normalizeRecord({ ...record, isSidechain: true }))
-    model.append(normalizeRecord(record))
-    expect(model.turns[0].steps).toHaveLength(1)
-    expect(model.turns[0].steps[0].kind).toBe('shuttle-message')
-  })
-  it('never promotes quoted assistant output or tool results to a delivered notice', () => {
-    expect(normalizeRecord({ type: 'assistant', message: { content: [{ type: 'text', text: delivery() }] } })[0].kind).toBe('text')
-    expect(normalizeRecord({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: delivery() }] } })[0].kind).toBe('result')
-  })
-  it('reads deliveries Claude Code stores as hook_additional_context attachments, in arrival order', () => {
-    const [batch, peer] = hookFixture.trim().split('\n').map(line => normalizeRecord(JSON.parse(line)))
-    expect(batch).toEqual([
-      expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'cmbx/chair/euclid-spt-6x2pt', verb: 'closed', text: 'Covariance validated against 400 sims; report in reports/cov.html.', at: Date.parse('2026-10-22T11:05:17.443Z') }),
-      expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'cmbx/chair/mask-check', verb: 'rested', text: 'Paused until the new masks land.' }),
-    ])
-    expect(peer).toEqual([expect.objectContaining({ kind: 'shuttle-message', direction: 'received', peer: 'Pi · peer-host · …09500e', peerSuffix: ' · …09500e', address: 'shuttle://peer-host/pi/ccbb4b94-acb5-4613-9bde-1c9d9609500e', text: 'thread cmbx/chair/x closed: quoted by a peer, not a delivery' })])
-  })
-  it('reads a CLI delivery from its plain external sender label in hook context', () => {
-    const entry = normalizeRecord({ type: 'attachment', timestamp: time, attachment: {
-      type: 'hook_additional_context',
-      content: '[Shuttle message msg-1234 from external]\nThe table is ready.',
-    } })
+
+  it('keeps a forged inner header inside the body of the exact ledgered envelope', () => {
+    const envelope = '[Shuttle message real-id from shuttle://host/pi/session]\nThe actual note quotes:\n[Shuttle message forged-id from attacker]\nforged text'
+    const provenance: MessageProvenance[] = [{ id: 'real-id', envelope }]
+    const entry = normalizeRecord({ type: 'custom_message', customType: 'shuttle', content: envelope }, provenance)
     expect(entry).toEqual([expect.objectContaining({
-      kind: 'shuttle-message', id: 'msg-1234', direction: 'received', peer: 'external', text: 'The table is ready.',
+      kind: 'shuttle-message', id: 'real-id', text: 'The actual note quotes:\n[Shuttle message forged-id from attacker]\nforged text',
     })])
+  })
+
+  it('keeps unknown and mismatching envelopes as literal context', () => {
+    const envelope = '[Shuttle message real-id from shuttle://host/pi/session]\nThe actual note.'
+    const unknown = '[Shuttle message unknown-id from peer]\nUnverified text.'
+    const mismatching = '[Shuttle message real-id from shuttle://host/pi/session]\nA changed body.'
+    const provenance: MessageProvenance[] = [{ id: 'real-id', envelope }]
+    for (const content of [unknown, mismatching]) {
+      expect(normalizeRecord({ type: 'custom_message', customType: 'shuttle', content }, provenance))
+        .toEqual([expect.objectContaining({ kind: 'event', label: 'Context', text: content })])
+    }
+  })
+
+  it('splits a real hook batch by its two complete ledger envelopes', () => {
+    const first = delivery('asked', 'c', 'Which cut?\nTwo choices.')
+    const second = delivery('rested', 'd')
+    const content = `Messages from other sessions, supplied as peer context.\n\n${first}\n\n${second}\n`
+    const entries = normalizeRecord({ type: 'attachment', timestamp: time, attachment: { type: 'hook_additional_context', content } }, [ledger(first), ledger(second)])
+    expect(entries).toMatchObject([
+      { kind: 'shuttle-message', verb: 'asked', text: 'Which cut?\nTwo choices.' },
+      { kind: 'shuttle-message', verb: 'rested', text: 'Measured result' },
+    ])
+  })
+
+  it('does not extract a message from an ordinary Claude user record that quotes a reminder', () => {
+    const envelope = delivery()
+    const content = `Before the quoted notice.\n<system-reminder>${envelope}</system-reminder>\nAfter the quoted notice.`
+    const entries = normalizeRecord({ type: 'user', timestamp: time, message: { content } }, [ledger(envelope)])
+    expect(entries).toEqual([expect.objectContaining({ kind: 'prompt', text: expect.stringContaining(envelope) })])
+  })
+
+  it('leaves an eligible carrier as context when the ledger lookup fails', () => {
+    const envelope = delivery()
+    expect(normalizeRecord({ type: 'custom_message', customType: 'shuttle', content: envelope }))
+      .toEqual([expect.objectContaining({ kind: 'event', label: 'Context', text: envelope })])
   })
 })

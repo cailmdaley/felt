@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeRecord } from './records.js'
+import type { MessageProvenance } from './messages.js'
 
 const time = '2026-10-29T20:00:00Z'
 const command = 'shuttle message research/workspace/validation-follow-up "Confirm the north patch cut."'
+const provenance = (envelope: string): MessageProvenance => {
+  const id = /^\[Shuttle message ([^\s\]]+)/.exec(envelope)![1]
+  return { id, envelope, ...(id.startsWith('thread-') ? { thread: true } : {}) }
+}
 
 describe('Shuttle messages in transcripts', () => {
   it.each([
@@ -62,13 +67,11 @@ describe('Shuttle messages in transcripts', () => {
     })
   })
 
-  it.each([
-    ['Claude Code', { type: 'attachment', timestamp: time, attachment: { type: 'queued_command', commandMode: 'prompt', isMeta: true,
-      origin: { kind: 'peer' }, prompt: '[Shuttle message msg-1234 from shuttle://host-b/codex/peer-session; reply to research/workspace/validation-follow-up]\nThe north patch looks stable.' } }],
-    ['Pi', { type: 'message', timestamp: time, message: { role: 'user', content: [{ type: 'text', text: '[Shuttle message msg-1234 from shuttle://host-b/codex/peer-session; reply to research/workspace/validation-follow-up]\nThe north patch looks stable.' }] } }],
-    ['Codex', { type: 'response_item', timestamp: time, payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '[Shuttle message msg-1234 from shuttle://host-b/codex/peer-session; reply to research/workspace/validation-follow-up]\nThe north patch looks stable.' }] } }],
-  ])('reads an incoming %s message as a delivery, not a user turn', (_harness, record) => {
-    expect(normalizeRecord(record)).toEqual([expect.objectContaining({
+  it('reads a ledgered Claude peer queued message as a delivery, not a user turn', () => {
+    const envelope = '[Shuttle message msg-1234 from shuttle://host-b/codex/peer-session; reply to research/workspace/validation-follow-up]\nThe north patch looks stable.'
+    const record = { type: 'attachment', timestamp: time, attachment: { type: 'queued_command', commandMode: 'prompt', isMeta: true,
+      origin: { kind: 'peer' }, prompt: envelope } }
+    expect(normalizeRecord(record, [provenance(envelope)])).toEqual([expect.objectContaining({
       kind: 'shuttle-message', id: 'msg-1234', direction: 'received', peer: 'validation-follow-up',
       fiber: 'research/workspace/validation-follow-up',
       address: 'shuttle://host-b/codex/peer-session',
@@ -76,11 +79,11 @@ describe('Shuttle messages in transcripts', () => {
     })])
   })
 
-  it.each([
-    ['Pi', { type: 'message', message: { role: 'user', content: [{ type: 'text', text: '[Shuttle message msg-one from peer]\nFirst delivery.\n\n[Shuttle message msg-two from peer]\nSecond delivery.' }] } }],
-    ['Codex', { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '[Shuttle message msg-one from peer]\nFirst delivery.\n\n[Shuttle message msg-two from peer]\nSecond delivery.' }] } }],
-  ])('keeps every anchored delivery in a batched %s user record', (_harness, record) => {
-    expect(normalizeRecord(record)).toMatchObject([
+  it('keeps a Pi custom Shuttle message with two ledgered deliveries split into rows', () => {
+    const first = '[Shuttle message msg-one from peer]\nFirst delivery.'
+    const second = '[Shuttle message msg-two from peer]\nSecond delivery.'
+    const record = { type: 'custom_message', customType: 'shuttle', content: `${first}\n\n${second}` }
+    expect(normalizeRecord(record, [provenance(first), provenance(second)])).toMatchObject([
       { kind: 'shuttle-message', id: 'msg-one', direction: 'received', text: 'First delivery.' },
       { kind: 'shuttle-message', id: 'msg-two', direction: 'received', text: 'Second delivery.' },
     ])
@@ -247,7 +250,7 @@ describe('Shuttle messages in transcripts', () => {
 
   it('reads a delivered thread result as a message from that thread', () => {
     const result = `[Shuttle message thread-${'a'.repeat(64)}]\nthread research/workspace/child closed: The table is ready.`
-    expect(normalizeRecord({ type: 'user', timestamp: time, message: { content: result } })).toEqual([expect.objectContaining({
+    expect(normalizeRecord({ type: 'user', timestamp: time, isMeta: true, message: { content: result } }, [provenance(result)])).toEqual([expect.objectContaining({
       kind: 'shuttle-message', direction: 'received', peer: 'child', fiber: 'research/workspace/child',
       verb: 'closed', text: 'The table is ready.',
     })])
