@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValidatedLifecycleNativeDeliveryRetainsThreadEvidence(t *testing.T) {
@@ -153,5 +154,64 @@ func TestEnvelopeWriteFailurePreventsDelivery(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEnvelopeIncrementalReadAndRetention(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	old := Request{MessageID: "old", From: "sender", Text: "expired"}
+	retained := Request{MessageID: "retained", From: "sender", Text: "retained"}
+	fresh := Request{MessageID: "fresh", From: "sender", Text: "fresh"}
+	for _, req := range []Request{old, retained, fresh} {
+		if err := recordEnvelope(env, "receiver", req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	for _, item := range []struct {
+		id string
+		at time.Time
+	}{{"old", now.Add(-15 * 24 * time.Hour)}, {"retained", now.Add(-time.Hour)}} {
+		path := filepath.Join(envelopeDir(env, "receiver"), mailboxKey(item.id)+".json")
+		if err := os.Chtimes(path, item.at, item.at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := DeliveredEnvelopesSince(env, "receiver", now.Add(-time.Minute))
+	if err != nil || !reflect.DeepEqual(got, []DeliveredEnvelope{{ID: fresh.MessageID, Envelope: Labeled(fresh)}}) {
+		t.Fatalf("increment: %+v %v", got, err)
+	}
+	expired := filepath.Join(envelopeDir(env, "receiver"), mailboxKey("old")+".json")
+	if _, err := os.Stat(expired); !os.IsNotExist(err) {
+		t.Fatalf("expired envelope retained: %v", err)
+	}
+	got, err = DeliveredEnvelopes(env, "receiver")
+	if err != nil || !reflect.DeepEqual(got, []DeliveredEnvelope{{ID: fresh.MessageID, Envelope: Labeled(fresh)}, {ID: retained.MessageID, Envelope: Labeled(retained)}}) {
+		t.Fatalf("retained evidence: %+v %v", got, err)
+	}
+}
+
+func TestNewEnvelopePrunesInactiveSessionEvidence(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	req := Request{MessageID: "expired", From: "sender", Text: "body"}
+	if err := recordEnvelope(env, "inactive", req); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-15 * 24 * time.Hour)
+	dir := envelopeDir(env, "inactive")
+	path := filepath.Join(dir, mailboxKey(req.MessageID)+".json")
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(dir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := recordEnvelope(env, "active", Request{MessageID: "new", Text: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("inactive evidence retained: %v", err)
 	}
 }

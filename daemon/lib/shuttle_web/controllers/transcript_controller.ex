@@ -61,7 +61,10 @@ defmodule ShuttleWeb.TranscriptController do
     with {:ok, session} <- session_param(params) do
       case target_host(params, session) do
         :local ->
-          case CLI.run(["transcript", "messages", session, "--json"]) do
+          args = ["transcript", "messages", session, "--json"]
+          args = if params["since"], do: args ++ ["--since", params["since"]], else: args
+
+          case CLI.run(args) do
             {:ok, body} ->
               conn |> put_resp_content_type("application/json") |> send_resp(200, body)
 
@@ -73,7 +76,7 @@ defmodule ShuttleWeb.TranscriptController do
           end
 
         {:remote, %Remote{} = remote} ->
-          query = %{"session" => session, "host" => "local"}
+          query = Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
 
           case OriginRouter.forward_get(remote, "/api/v1/transcript/messages", query) do
             {:forwarded, status, content_type, body} ->

@@ -39,6 +39,14 @@ defmodule ShuttleWeb.TranscriptMessagesControllerTest do
     assert_received {:argv, ["transcript", "messages", @session, "--json"]}
   end
 
+  test "passes an incremental cursor to the host-local reader" do
+    local_conn()
+    |> get("/api/v1/transcript/messages", %{"session" => @session, "host" => "local", "since" => "123456"})
+    |> json_response(200)
+
+    assert_received {:argv, ["transcript", "messages", @session, "--json", "--since", "123456"]}
+  end
+
   test "rejects invalid sessions before reading evidence" do
     local_conn()
     |> get("/api/v1/transcript/messages", %{"session" => "../../escape"})
@@ -70,13 +78,14 @@ defmodule ShuttleWeb.TranscriptMessagesControllerTest do
 
     assert response(
              local_conn()
-             |> get("/api/v1/transcript/messages", %{"session" => @session, "host" => "owner-a"}),
+             |> get("/api/v1/transcript/messages", %{"session" => @session, "host" => "owner-a", "since" => "123456"}),
              200
            ) == payload
 
     assert %{url: url} = StubGetFileClient.last()
     assert url =~ "/api/v1/transcript/messages?"
     assert url =~ "host=local"
+    assert url =~ "since=123456"
     assert url =~ "session=#{@session}"
     refute_received {:argv, _}
   end
