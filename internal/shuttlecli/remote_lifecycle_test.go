@@ -677,6 +677,51 @@ func TestRemoteInstallSourceWithoutUIDUsesOwnerIdentity(t *testing.T) {
 	}
 }
 
+func TestRemoteInstallAndRepeatReportUncertainCreateResponse(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"install", "repeat"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			seedPlainFiber(t, st, "handwritten", "source body")
+			var creates requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/project-dir/resolve":
+					_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
+				case "/api/v1/lifecycle":
+					http.Error(w, `{"error":"fiber not found on worker"}`, http.StatusNotFound)
+				case "/api/v1/fiber/create":
+					creates.record(t, r)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"handwritten","uid":`))
+				default:
+					t.Errorf("unexpected request %s", r.URL.String())
+					http.NotFound(w, r)
+				}
+			}))
+
+			args := []string{verb, "handwritten", "--host", "worker", "--project-dir", "/remote/project"}
+			if verb == "repeat" {
+				args = append(args, "--schedule", "0 9 * * *", "--tz", "UTC")
+			}
+			_, _, err := executeIn(t, env, dir, args...)
+			if err == nil {
+				t.Fatal("expected malformed owner identity response to fail")
+			}
+			for _, phrase := range []string{"may have been applied", "may already exist", "inspect it on worker before retrying"} {
+				if !strings.Contains(err.Error(), phrase) {
+					t.Fatalf("error %q does not contain uncertainty guidance %q", err, phrase)
+				}
+			}
+			if creates.last() == nil {
+				t.Fatal("owner create endpoint was not reached")
+			}
+		})
+	}
+}
+
 func TestRemoteCreateRefusesChangingExistingUID(t *testing.T) {
 	t.Parallel()
 	env := remoteLifecycleEnv(t)
