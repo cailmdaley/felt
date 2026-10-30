@@ -13,12 +13,12 @@ defmodule ShuttleWeb.FiberController do
   its own `shuttle.host`, so a remote stash is born owned by the right daemon.
 
   Placement and identity belong to felt, not to this controller. The local write
-  shells out to `felt add ... --top-level`, which mints the intrinsic ULID, owns
-  the on-disk layout, and rejects duplicates. The controller then reads felt's
-  carried `path` back via `felt show -j` and splices the non-native frontmatter
-  (the `shuttle:` block and any other custom keys) into the file felt wrote —
-  exactly the read-then-edit-the-markdown flow felt prescribes for non-native
-  frontmatter. There is no hand-built path and no reverse-derivation of layout.
+  shells out to `felt add ... --top-level`, which mints an intrinsic ULID, owns
+  the on-disk layout, and rejects duplicates. The controller reads felt's
+  carried path and UID through `felt show -j`, then applies custom frontmatter
+  and any transferred identity and native metadata in one atomic write.
+  The Shuttle block becomes visible with that document's final identity.
+  There is no hand-built path and no reverse-derivation of layout.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -26,10 +26,9 @@ defmodule ShuttleWeb.FiberController do
 
   alias Shuttle.{FeltStores, FrontmatterEdit, OriginRouter}
 
-  # Frontmatter keys felt owns natively and writes itself on `felt add`. Anything
-  # the caller supplies outside this set is non-native and gets spliced into the
-  # file after felt creates it. (`id`/`created-at` are felt-minted, never caller-
-  # supplied; they round out the set of keys we must not re-inject.)
+  # These native keys are initialized through felt add. Transfer identity and
+  # source timestamps are restored with the custom fields in the final patch;
+  # they are excluded from the generic splice to avoid duplicate YAML keys.
   @felt_native_keys ~w(id name status tags outcome due created-at)
 
   def create(conn, params) do
