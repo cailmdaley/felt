@@ -2265,10 +2265,13 @@ test('Phone page swipe follows the finger, snaps back short of the threshold and
   await waitForTrackSettlement(p)
   const original = await selected(p).getAttribute('data-key')
   const rest = await p.locator('.ws-track').evaluate(el => new DOMMatrix(getComputedStyle(el).transform).m41)
+  const reportText = await (await reportDocument(p)).locator('body > p').first().boundingBox()
+  assert.ok(reportText, 'the report prose provides a stable noninteractive swipe surface')
+  const y = reportText.y + reportText.height / 2
   const cdp = await p.context().newCDPSession(p)
-  const touch = (type, x, y = 420) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, radiusX: 1, radiusY: 1 }] })
-  await touch('touchStart', 100)
-  for (const x of [108, 120, 140, 160]) { await touch('touchMove', x); await p.waitForTimeout(30) }
+  const touch = (type, x, touchY = y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y: touchY, radiusX: 1, radiusY: 1 }] })
+  await touch('touchStart', 100, y)
+  for (const x of [108, 120, 140, 160]) { await touch('touchMove', x, y); await p.waitForTimeout(30) }
   await poll(p, () => document.querySelector('.ws-stage').classList.contains('ws-swiping'))
   const held = await p.locator('.ws-track').evaluate(el => new DOMMatrix(getComputedStyle(el).transform).m41)
   assert.ok(Math.abs(held - (rest + 60)) <= 2, `the track follows the finger (${rest} → ${held})`)
@@ -2277,8 +2280,8 @@ test('Phone page swipe follows the finger, snaps back short of the threshold and
   await touch('touchEnd')
   await poll(p, rest => Math.abs(new DOMMatrix(getComputedStyle(document.querySelector('.ws-track')).transform).m41 - rest) < 1, rest)
   assert.equal(await selected(p).getAttribute('data-key'), original, 'a short, slow release snaps back')
-  await touch('touchStart', 80)
-  for (const x of [90, 140, 200, 260, 310]) { await touch('touchMove', x); await p.waitForTimeout(16) }
+  await touch('touchStart', 80, y)
+  for (const x of [90, 140, 200, 260, 310]) { await touch('touchMove', x, y); await p.waitForTimeout(16) }
   await touch('touchEnd')
   assert.notEqual(await selected(p).getAttribute('data-key'), original, 'a long release commits')
   assert.ok(await p.locator('.ws-stage').evaluate(el => el.classList.contains('ws-swipe-release')), 'the commit settles on the release curve')
