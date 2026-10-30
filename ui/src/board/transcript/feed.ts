@@ -18,6 +18,8 @@ export interface TranscriptFeedOptions {
 const DECODE_CHUNK_BYTES = 64 * 1024
 const TIME_SLICE_MS = 8
 
+type EvidenceSnapshot = { value?: Promise<MessageProvenance[]> }
+
 function now(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
 }
@@ -254,25 +256,32 @@ export class TranscriptFeed {
 
   private async decode(bytes: Uint8Array, epoch: number): Promise<void> {
     const slice = { started: now() }
+    const evidence: EvidenceSnapshot = {}
     for (let offset = 0; offset < bytes.byteLength; offset += DECODE_CHUNK_BYTES) {
       this.pendingLine += this.decoder.decode(bytes.subarray(offset, Math.min(bytes.byteLength, offset + DECODE_CHUNK_BYTES)), { stream: true })
       const lines = this.pendingLine.split('\n')
       this.pendingLine = lines.pop() ?? ''
-      await this.emitLines(lines, epoch, slice)
+      await this.emitLines(lines, epoch, slice, evidence)
       if (!this.active(epoch)) return
     }
   }
 
-  private async emitLines(lines: string[], epoch: number, slice = { started: now() }): Promise<void> {
+  private async loadProvenance(): Promise<MessageProvenance[]> {
+    try {
+      const response = await this.fetcher(this.url('messages'), { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+      const payload: unknown = response.ok ? await response.json() : null
+      if (payload && typeof payload === 'object' && 'messages' in payload && Array.isArray(payload.messages)) {
+        return payload.messages.filter((item): item is MessageProvenance => item && typeof item.id === 'string' && typeof item.envelope === 'string')
+      }
+    } catch { /* A missing or unreachable ledger leaves the native text intact. */ }
+    return []
+  }
+
+  private async emitLines(lines: string[], epoch: number, slice = { started: now() }, evidence: EvidenceSnapshot = {}): Promise<void> {
     let provenance: MessageProvenance[] = []
     if (lines.some(line => line.includes('[Shuttle message '))) {
-      try {
-        const response = await this.fetcher(this.url('messages'), { cache: 'no-store' })
-        const payload: unknown = response.ok ? await response.json() : null
-        if (payload && typeof payload === 'object' && 'messages' in payload && Array.isArray(payload.messages)) {
-          provenance = payload.messages.filter((item): item is MessageProvenance => item && typeof item.id === 'string' && typeof item.envelope === 'string')
-        }
-      } catch { /* A missing or unreachable ledger leaves the native text intact. */ }
+      evidence.value ??= this.loadProvenance()
+      provenance = await evidence.value
       if (!this.active(epoch)) return
     }
     let batch: Entry[] = []

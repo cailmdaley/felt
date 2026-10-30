@@ -374,3 +374,17 @@ it.each([true, false])('checks the receiving host ledger before attributing nati
   expect(ledger.searchParams.get('host')).toBe('candide')
   reader.dispose()
 })
+
+it('reads one evidence snapshot for a transcript spanning many decode slices', async () => {
+  const envelopes = Array.from({length: 16}, (_, i) => ({id: `m-${i}`, envelope: `[Shuttle message m-${i} from sender]\n${'x'.repeat(64_000)}`}))
+  const raw = envelopes.map(({envelope}) => JSON.stringify({type:'attachment', attachment:{type:'hook_additional_context',content:envelope}})).join('\n')+'\n'
+  let lookups = 0
+  const {reader, onEntries} = feed(async input => {
+    if (String(input).includes('/messages?')) { lookups++; return Response.json({messages:envelopes}) }
+    return response(raw, 200, {'x-transcript-offset':'0'})
+  })
+  await reader.read()
+  expect(lookups).toBe(1)
+  expect(entriesFrom(onEntries).filter(entry=>entry.kind==='shuttle-message')).toHaveLength(16)
+  reader.dispose()
+})
