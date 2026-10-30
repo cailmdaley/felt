@@ -31,7 +31,7 @@ export function registerRailArtifactJourneys(test) {
     await section(page).waitFor()
     const order = await page.locator('.ws-thread-rail').evaluate(rail =>
       [...rail.children].filter(el => el.checkVisibility()).map(el => el.className.split(' ')[0]))
-    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-thread-scroll', 'ws-rail-split', 'ws-rail-artifact', 'ws-rail-files'])
+    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-thread-scroll', 'ws-rail-split', 'ws-rail-artifact', 'ws-rail-split', 'ws-rail-files'])
     const before = await stageBox(page)
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await page.waitForTimeout(200)
@@ -75,7 +75,7 @@ export function registerRailArtifactJourneys(test) {
 
     // The boundary between the threads and the artifact drags, persists, and resets on double-click.
     const heights = () => page.evaluate(() => ({ threads: document.querySelector('.ws-thread-scroll').getBoundingClientRect().height, body: document.querySelector('.ws-rail-artifact-body').getBoundingClientRect().height }))
-    const split = page.locator('.ws-rail-split')
+    const split = page.locator('.ws-rail-split').first()
     const start = await heights(), s = await split.boundingBox()
     await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2)
     await page.mouse.down()
@@ -93,6 +93,36 @@ export function registerRailArtifactJourneys(test) {
     await split.dblclick()
     assert.ok(Math.abs((await heights()).threads - start.threads) <= 1, 'double-click restores the threads to their own height')
     assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:thread-rail-threads-height')), null)
+
+    // The boundary below the artifact sizes the sent files the same way.
+    const below = page.locator('.ws-rail-split').nth(1)
+    const filesHeight = () => page.evaluate(() => document.querySelector('.ws-rail-files').getBoundingClientRect().height)
+    const filesStart = await filesHeight(), b = await below.boundingBox()
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2 - 40, { steps: 6 })
+    await page.mouse.up()
+    assert.ok(Math.abs(await filesHeight() - filesStart - 40) <= 2, 'dragging the lower boundary up grows the sent files')
+    assert.equal(await page.evaluate(() => localStorage.getItem('shuttle:workspace:thread-rail-files-height')), String(Math.round(filesStart + 40)))
+    await below.dblclick()
+    assert.ok(Math.abs(await filesHeight() - filesStart) <= 1, 'double-click restores the sent files to their own height')
+
+    // Every region folds from its heading like the artifact; the artifact takes what a folded neighbour gives up.
+    const rail = page.locator('.ws-thread-rail')
+    const sectionBox = () => page.evaluate(() => document.querySelector('.ws-rail-artifact').getBoundingClientRect().toJSON())
+    for (const [name, list] of [['Threads', '.ws-thread-tree'], ['Sent files', '.ws-rail-file-list']]) {
+      const fold = rail.getByRole('button', { name, exact: true })
+      assert.equal(await fold.getAttribute('aria-expanded'), 'true', `${name} opens by default`)
+      const open = await sectionBox()
+      await fold.click()
+      assert.equal(await fold.getAttribute('aria-expanded'), 'false')
+      assert.equal(await rail.locator(list).isVisible(), false, `folding ${name} hides its list`)
+      const folded = await sectionBox()
+      assert.ok(folded.height > open.height + 20, `the artifact grows into what folded ${name} gives up: ${JSON.stringify({ open, folded })}`)
+      assert.equal(await page.locator('.ws-rail-split:visible').count(), 1, `the boundary beside folded ${name} stands down`)
+      await fold.click()
+      assert.equal(await rail.locator(list).isVisible(), true)
+    }
 
     // Folding unloads the page and remembers it; unfolding brings it back.
     const toggle = section(page).getByRole('button', { name: 'Artifact', exact: true })

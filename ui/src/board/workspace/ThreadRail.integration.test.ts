@@ -96,7 +96,7 @@ it('preserves focused rows and open groups across live repaints without stealing
     expect(document.activeElement).toBe(outside)
     rail.el.querySelector<HTMLButtonElement>('details[data-thread-details="armed"] .kbn-thread-row')!.focus()
     rail.show(root, new ThreadIndex([root, { ...draft, orchestrator: root.id }]))
-    expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-heading'))
+    expect(document.activeElement).toBe(rail.el.querySelector('.ws-thread-heading > .ws-rail-fold'))
   } finally { rail.el.remove(); outside.remove(); vi.unstubAllGlobals() }
 })
 

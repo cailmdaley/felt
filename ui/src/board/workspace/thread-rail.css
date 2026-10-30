@@ -6,51 +6,61 @@
   font: var(--type-label)/var(--leading-tight) var(--font-serif);
 }
 .ws-thread-rail[hidden] { display: none; }
-/* Threads lead, sized to their content up to a cap, their heading fixed and their tree scrolling.
-   An artifact drawn beneath them takes every pixel left over; the sent files close the rail at their natural height, capped.
-   Without a drawn artifact the sent files take the rest. */
+/* Threads lead, then the artifact, then sent files; each list scrolls on its own beneath a fixed heading.
+   One region takes the rail's free height (data-fill): a drawn artifact, else open sent files, else open threads.
+   Beside a drawn artifact, threads and files keep their natural height up to a cap, or the height the reader dragged them to. */
 .ws-thread-tree, .ws-rail-file-list { min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--ws-hairline) transparent; }
-.ws-thread-scroll { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; max-height: 62%; padding: 12px 8px 12px 10px; }
-.ws-thread-scroll[hidden] { display: none; }
-.ws-thread-scroll > .ws-thread-heading { flex: none; padding-right: 32px; }
+.ws-thread-tree[hidden], .ws-rail-file-list[hidden] { display: none; }
+.ws-thread-scroll, .ws-rail-files, .ws-rail-artifact { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: none; padding: 10px 8px 10px 10px; border-top: 1px solid var(--kbn-rule); }
+:is(.ws-thread-scroll, .ws-rail-files, .ws-rail-artifact)[hidden] { display: none; }
+.ws-thread-scroll { flex: 0 1 auto; max-height: 62%; }
 .ws-thread-tree { flex: 0 1 auto; padding-bottom: 4px; }
-.ws-rail-files { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 10px 8px 0 10px; border-top: 1px solid var(--kbn-rule); }
-.ws-thread-scroll[hidden] + .ws-rail-artifact[hidden] + .ws-rail-files { border-top: 0; padding-top: 12px; }
-.ws-thread-scroll[hidden] + .ws-rail-artifact[hidden] + .ws-rail-files > .ws-thread-heading { padding-right: 32px; }
-.ws-thread-rail:has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-thread-scroll { max-height: 40%; }
-.ws-rail-artifact[data-fill]:not([hidden]) ~ .ws-rail-files { flex: 0 1 auto; max-height: 30%; }
-/* With threads above a drawn artifact, the boundary between them drags; the reader's height replaces the threads' cap. */
-.ws-rail-split { display: none; position: relative; z-index: 2; flex: none; height: 9px; margin: -4px 0 -5px; cursor: row-resize; touch-action: none; }
-.ws-thread-rail:has(> .ws-thread-scroll:not([hidden])):has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-rail-split { display: block; }
+.ws-rail-files { padding-bottom: 0; }
+.ws-rail-file-list { flex: 1 1 auto; padding: 4px 0 16px; }
+.ws-thread-rail[data-fill='artifact'] > .ws-thread-scroll { max-height: 40%; }
+.ws-thread-rail[data-fill='threads'] > .ws-thread-scroll { max-height: none; }
+.ws-thread-rail[data-fill='files'] > .ws-rail-files { flex: 1 1 0; }
+.ws-thread-rail[data-fill='artifact'] > .ws-rail-files { flex: 0 1 auto; max-height: 30%; }
+.ws-thread-rail[data-fill='artifact'] > .ws-rail-artifact { flex: 1 1 0; min-height: 200px; }
+.ws-thread-rail[data-fill] > [data-sized] { flex: 0 0 var(--ws-rail-region-height); max-height: none; }
+/* The first region meets the rail's top, its heading clear of the corner toggle floating over its end. */
+.ws-thread-rail > [data-lead] { border-top: 0; padding-top: 12px; }
+.ws-thread-rail > [data-lead] > :is(.ws-thread-heading, .ws-rail-artifact-head) { padding-right: 32px; }
+/* The boundaries above and below a drawn artifact drag; each overlays the rule between its regions. */
+.ws-rail-split { position: relative; z-index: 2; flex: none; height: 9px; margin: -4px 0 -5px; cursor: row-resize; touch-action: none; }
+.ws-rail-split[hidden] { display: none; }
 .ws-rail-split::after {
   content: ''; position: absolute; left: 0; right: 0; top: 50%; height: var(--ws-line-width); transform: translateY(-50%);
   background: transparent; transition: background-color 120ms var(--ws-ease);
 }
-.ws-rail-split:hover::after, .ws-thread-splitting > .ws-rail-split::after { background: var(--ws-hairline); }
+.ws-rail-split:hover::after, .ws-thread-splitting > .ws-rail-split:focus::after { background: var(--ws-hairline); }
 .ws-rail-split:focus { outline: none; }
 .ws-reader.ws-keyboard .ws-rail-split:focus-visible::after { background: var(--ws-focus); }
-.ws-thread-rail[data-split]:has(> .ws-rail-artifact[data-fill]:not([hidden])) > .ws-thread-scroll { flex: 0 0 var(--ws-rail-threads-height); max-height: none; }
 /* The artifact's page lays out at --ws-artifact-virtual-width and is scaled to the rail, live in place. */
-.ws-rail-artifact { flex: none; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 10px 8px 10px 10px; border-top: 1px solid var(--kbn-rule); }
-.ws-rail-artifact[data-fill] { flex: 1 1 0; min-height: 200px; }
-.ws-rail-artifact[hidden] { display: none; }
-.ws-thread-scroll[hidden] + .ws-rail-artifact { border-top: 0; padding-top: 12px; }
 .ws-rail-artifact-head { flex: none; display: flex; align-items: center; gap: 4px; min-width: 0; }
-.ws-thread-scroll[hidden] + .ws-rail-artifact > .ws-rail-artifact-head { padding-right: 32px; }
-.ws-rail-artifact-toggle { display: flex; flex: 1 1 auto; align-items: baseline; min-width: 0; text-align: left; background: transparent; border: 0; border-radius: var(--ws-control-radius); cursor: pointer; }
-.ws-rail-artifact-toggle::before {
+/* Every region's heading is the same fold: a chevron and the region's name in small capitals. */
+.ws-thread-heading { flex: none; margin: 0; padding: 0; font: inherit; }
+.ws-rail-fold {
+  display: flex; flex: 1 1 auto; align-items: baseline; width: 100%; min-width: 0; margin: 0; padding: 4px 8px; text-align: left;
+  font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted);
+  background: transparent; border: 0; border-radius: var(--ws-control-radius); cursor: pointer;
+}
+.ws-rail-fold::before {
   content: ''; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 8px 0 2px;
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .8;
 }
-.ws-rail-artifact-folded .ws-rail-artifact-toggle::before { transform: rotate(-45deg); }
+.ws-rail-fold[aria-expanded='false']::before { transform: rotate(-45deg); }
+.ws-rail-fold:not(:disabled):hover { background: var(--ws-hover); color: var(--kbn-ink); }
+.ws-rail-fold:focus { outline: none; }
+.ws-reader.ws-keyboard .ws-rail-fold:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 /* While the artifact fills the stage the section keeps its heading, so the rail holds its shape. */
 .ws-rail-artifact-staged .ws-rail-artifact-toggle { cursor: default; }
 .ws-rail-artifact-staged .ws-rail-artifact-toggle::before { visibility: hidden; }
 .ws-rail-artifact-staged .ws-rail-artifact-toggle::after { content: 'on the stage'; margin-left: 8px; font-variant: normal; font-style: italic; letter-spacing: 0; font-size: var(--type-meta); }
-.ws-rail-artifact-toggle:hover, .ws-rail-artifact-full:hover { background: var(--ws-hover); color: var(--kbn-ink); }
+.ws-rail-artifact-full:hover { background: var(--ws-hover); color: var(--kbn-ink); }
 .ws-rail-artifact-full { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--kbn-ink-muted); cursor: pointer; }
-.ws-reader.ws-keyboard :is(.ws-rail-artifact-toggle, .ws-rail-artifact-full):focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
-:is(.ws-rail-artifact-toggle, .ws-rail-artifact-full):focus { outline: none; }
+.ws-reader.ws-keyboard .ws-rail-artifact-full:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
+.ws-rail-artifact-full:focus { outline: none; }
 .ws-rail-artifact-body { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; margin-top: 6px; border: 1px solid var(--kbn-rule); border-radius: 3px; background: var(--kbn-rag, var(--kbn-paper)); }
 .ws-rail-artifact-body[hidden] { display: none; }
 .ws-rail-artifact-page {
@@ -59,7 +69,6 @@
   transform: scale(var(--ws-artifact-scale, 1)); transform-origin: 0 0;
 }
 :is(.ws-thread-resizing, .ws-thread-splitting) .ws-rail-artifact-body iframe { pointer-events: none; }
-.ws-rail-file-list { flex: 1 1 auto; padding: 4px 0 16px; }
 .ws-rail-file {
   display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px;
   text-align: left; font: inherit; font-size: var(--type-row); color: var(--kbn-ink); background: transparent; border: 0; cursor: pointer;
@@ -72,8 +81,6 @@
 .ws-reader.ws-keyboard .ws-rail-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-rail-file[aria-current='page'] { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-rail-files-empty { margin: 0; padding: 4px 8px; color: var(--kbn-ink-muted); font-size: var(--type-note); font-style: italic; }
-.ws-thread-heading, .ws-rail-artifact-toggle { margin: 0; padding: 4px 8px; font: inherit; font-variant: all-small-caps; letter-spacing: var(--track-kicker); color: var(--kbn-ink-muted); }
-.ws-thread-heading:focus { outline: none; }
 .ws-thread-handle { position: absolute; top: 0; bottom: 0; left: -4px; z-index: 3; width: 9px; cursor: col-resize; touch-action: none; }
 .ws-thread-handle::after {
   content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: var(--ws-line-width); transform: translateX(-50%);

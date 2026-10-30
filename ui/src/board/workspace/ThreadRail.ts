@@ -9,50 +9,20 @@ import { foldSentFiles, sentDocuments, sentFileRow } from './SentFiles.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
-const SPLIT_STORAGE = 'shuttle:workspace:thread-rail-threads-height'
-const MIN_WIDTH = 220, STEP = 16
-/** The threads region keeps at least its heading and a row; a drawn artifact keeps at least this much beneath it. */
-const MIN_THREADS = 72, MIN_ARTIFACT = 200
-
-/**
- * One pointer drag on a resize handle: past a 4px latch, `apply` receives the
- * pointer's travel along `axis`; release commits, and cancel or Escape restores.
- * While it runs the rail carries the axis's cursor and the artifact's page ignores the pointer.
- */
-function dragHandle(handle: HTMLElement, e: PointerEvent, axis: 'x' | 'y', rail: HTMLElement, apply: (delta: number) => void, finish: (commit: boolean) => void): void {
-  if (e.button !== 0) return
-  e.preventDefault()
-  const start = axis === 'x' ? e.clientX : e.clientY
-  try { handle.setPointerCapture(e.pointerId) } catch { /* Capture is an enhancement. */ }
-  const marker = axis === 'x' ? 'ws-thread-resizing' : 'ws-thread-splitting'
-  rail.classList.add(marker)
-  let latched = false
-  const move = (ev: PointerEvent): void => {
-    const delta = (axis === 'x' ? ev.clientX : ev.clientY) - start
-    if (!latched && Math.abs(delta) < 4) return
-    latched = true
-    apply(delta)
-  }
-  const end = (commit: boolean): void => {
-    handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up)
-    handle.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', key, true)
-    rail.classList.remove(marker)
-    try { if (handle.hasPointerCapture(e.pointerId)) handle.releasePointerCapture(e.pointerId) } catch { /* Already released. */ }
-    if (latched) finish(commit)
-  }
-  const up = (): void => end(true), cancel = (): void => end(false)
-  const key = (ev: KeyboardEvent): void => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); end(false) } }
-  handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up)
-  handle.addEventListener('pointercancel', cancel); window.addEventListener('keydown', key, true)
-}
+const MIN_WIDTH = 220
+/** A sized region keeps at least its heading and a row; a drawn artifact keeps at least this much between them. */
+const MIN_REGION = 72, MIN_ARTIFACT = 200
 import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
 import { RailArtifact } from './RailArtifact.js'
+import { HANDLE_STEP, RailFold, RailSplit, dragHandle } from './RailRegions.js'
 import type { WorkspaceDocument } from './documents.js'
 
 /**
  * The reader's right-hand column: the open constitution's threads first, then
  * its artifact, live, scaled to the rail's width and filling the height the
- * other two leave, then its sent files, each region scrolling on its own.
+ * other two leave, then its sent files. Each region opens with a heading that
+ * folds it, scrolls on its own, and is sized against the artifact by a
+ * draggable boundary.
  *
  * The threads region is a view of the open constitution's whole family, from the top-level
  * constitution down: inside a thread the same family stays, the open thread
@@ -63,12 +33,13 @@ export class ThreadRail {
   readonly el = document.createElement('aside')
   private readonly scroller = document.createElement('div')
   readonly handle = document.createElement('div')
-  /** The boundary between the threads and a drawn artifact, dragged to share the rail's height between them. */
-  readonly split = document.createElement('div')
+  /** The boundaries above and below a drawn artifact, each sizing the region on its far side. */
+  readonly splitAbove: RailSplit
+  readonly splitBelow: RailSplit
+  private readonly threadsFold: RailFold
+  private readonly filesFold: RailFold
   private readonly tree = document.createElement('div')
-  private readonly heading = document.createElement('h2')
   private readonly files = document.createElement('section')
-  private readonly filesHeading = document.createElement('h2')
   private readonly fileList = document.createElement('div')
   private signature = ''
   private filesSignature = ''
@@ -77,8 +48,6 @@ export class ThreadRail {
   private width: number | null = null
   /** The reader stands the rail open beside the stage; the page loads only while the rail is also drawn. */
   private artifactWanted = false
-  /** The reader's chosen threads height in pixels, or the stylesheet's cap. */
-  private threadsHeight: number | null = null
   private card: KanbanCard | null = null
   /** Every thread in the family besides the open one is archived. */
   private familyQuiet = false
@@ -106,35 +75,32 @@ export class ThreadRail {
   constructor(open: (card: KanbanCard) => void, layout: () => void, shuttleBase = '', navigate?: (source: WorkspaceDocument, href: string) => void) {
     this.open = open; this.layout = layout
     this.artifact = new RailArtifact(shuttleBase, navigate)
-    this.artifact.onUnfold = () => this.fit()
+    this.artifact.onLayout = () => this.fit()
     this.el.className = 'ws-thread-rail'
     this.el.setAttribute('aria-label', 'Thread tree')
-    // The rail shows and hides from the reader's corner toggle; its heading only names it.
-    this.heading.className = 'ws-thread-heading'; this.heading.textContent = 'Threads'; this.heading.tabIndex = -1
+    this.threadsFold = new RailFold('Threads', 'shuttle:workspace:rail-threads-open', () => this.fit())
+    this.filesFold = new RailFold('Sent files', 'shuttle:workspace:rail-files-open', () => this.fit())
     this.tree.className = 'ws-thread-tree'
-    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.heading, this.tree)
-    this.filesHeading.className = 'ws-thread-heading'; this.filesHeading.textContent = 'Sent files'; this.filesHeading.tabIndex = -1
+    this.scroller.className = 'ws-thread-scroll'; this.scroller.append(this.threadsFold.heading, this.tree)
     this.fileList.className = 'ws-rail-file-list'
     this.files.className = 'ws-rail-files'; this.files.setAttribute('aria-label', 'Sent files')
-    this.files.append(this.filesHeading, this.fileList)
+    this.files.append(this.filesFold.heading, this.fileList)
     this.handle.className = 'ws-thread-handle'; this.handle.setAttribute('role', 'separator'); this.handle.setAttribute('aria-orientation', 'vertical')
     this.handle.setAttribute('aria-label', 'Resize thread tree'); this.handle.title = 'Drag to resize · double-click to reset'; this.handle.tabIndex = 0
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
     this.handle.addEventListener('keydown', e => this.resizeKey(e))
     this.handle.addEventListener('dblclick', () => this.setWidth(null, true))
-    this.split.className = 'ws-rail-split'; this.split.setAttribute('role', 'separator'); this.split.setAttribute('aria-orientation', 'horizontal')
-    this.split.setAttribute('aria-label', 'Resize threads and artifact'); this.split.title = 'Drag to resize · double-click to reset'; this.split.tabIndex = 0
-    this.split.addEventListener('pointerdown', e => this.splitStart(e))
-    this.split.addEventListener('keydown', e => this.splitKey(e))
-    this.split.addEventListener('dblclick', () => this.setThreadsHeight(null, true))
-    this.el.append(this.handle, this.scroller, this.split, this.artifact.el, this.files)
+    // Each boundary leaves the artifact its minimum beside whatever the region across from it holds.
+    const room = (other: HTMLElement): { min: number; max: number } =>
+      ({ min: MIN_REGION, max: Math.max(MIN_REGION, Math.floor(this.el.clientHeight - (other.hidden ? 0 : other.getBoundingClientRect().height) - MIN_ARTIFACT)) })
+    this.splitAbove = new RailSplit(this.el, { label: 'Resize threads and artifact', storage: 'shuttle:workspace:thread-rail-threads-height', region: this.scroller, below: false, bounds: () => room(this.files), changed: () => this.fit() })
+    this.splitBelow = new RailSplit(this.el, { label: 'Resize artifact and sent files', storage: 'shuttle:workspace:thread-rail-files-height', region: this.files, below: true, bounds: () => room(this.scroller), changed: () => this.fit() })
+    this.el.append(this.handle, this.scroller, this.splitAbove.el, this.artifact.el, this.splitBelow.el, this.files)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.fit())
     this.observer?.observe(this.el)
     try {
       const stored = Number(localStorage.getItem(WIDTH_STORAGE))
       if (Number.isFinite(stored) && stored > 0) this.width = stored
-      const split = Number(localStorage.getItem(SPLIT_STORAGE))
-      if (Number.isFinite(split) && split > 0) this.threadsHeight = split
     } catch { /* Storage is optional. */ }
     this.applyWidth()
   }
@@ -166,43 +132,8 @@ export class ThreadRail {
       this.setWidth(Math.min(max, Math.max(min, startWidth - delta)), false)
     }, commit => this.setWidth(commit ? this.width : before, commit))
   }
-  /** The threads region's height bounds: a row of threads at least, and room left for the artifact and the sent files. */
-  private splitBounds(): { min: number; max: number } {
-    const room = this.el.clientHeight - this.files.getBoundingClientRect().height - this.split.getBoundingClientRect().height - MIN_ARTIFACT
-    return { min: MIN_THREADS, max: Math.max(MIN_THREADS, Math.floor(room)) }
-  }
-  /** The reader's chosen threads height, clamped to the rail; absent, the stylesheet's cap. */
-  private applySplit(): void {
-    if (this.threadsHeight === null) { this.el.style.removeProperty('--ws-rail-threads-height'); this.el.removeAttribute('data-split'); this.split.removeAttribute('aria-valuenow'); return }
-    const { min, max } = this.splitBounds(), height = Math.min(max, Math.max(min, Math.round(this.threadsHeight)))
-    this.el.style.setProperty('--ws-rail-threads-height', `${height}px`); this.el.setAttribute('data-split', '')
-    this.split.setAttribute('aria-valuemin', String(min)); this.split.setAttribute('aria-valuemax', String(max)); this.split.setAttribute('aria-valuenow', String(height))
-  }
-  private setThreadsHeight(height: number | null, persist: boolean): void {
-    this.threadsHeight = height; this.applySplit(); this.fit()
-    if (!persist) return
-    try {
-      if (height === null) localStorage.removeItem(SPLIT_STORAGE)
-      else localStorage.setItem(SPLIT_STORAGE, String(Math.round(height)))
-    } catch { /* Storage is optional. */ }
-  }
-  private splitStart(e: PointerEvent): void {
-    const startHeight = this.scroller.getBoundingClientRect().height, before = this.threadsHeight
-    dragHandle(this.split, e, 'y', this.el, delta => {
-      const { min, max } = this.splitBounds()
-      this.setThreadsHeight(Math.min(max, Math.max(min, startHeight + delta)), false)
-    }, commit => this.setThreadsHeight(commit ? this.threadsHeight : before, commit))
-  }
-  private splitKey(e: KeyboardEvent): void {
-    const { min, max } = this.splitBounds(), now = this.scroller.getBoundingClientRect().height, step = STEP * (e.shiftKey ? 4 : 1)
-    const next = e.key === 'ArrowDown' ? now + step : e.key === 'ArrowUp' ? now - step
-      : e.key === 'Home' ? min : e.key === 'End' ? max : e.key === 'Enter' ? null : undefined
-    if (next === undefined) return
-    e.preventDefault(); e.stopPropagation()
-    this.setThreadsHeight(next === null ? null : Math.min(max, Math.max(min, next)), true)
-  }
   private resizeKey(e: KeyboardEvent): void {
-    const { min, max } = this.bounds(), now = this.el.getBoundingClientRect().width, step = STEP * (e.shiftKey ? 4 : 1)
+    const { min, max } = this.bounds(), now = this.el.getBoundingClientRect().width, step = HANDLE_STEP * (e.shiftKey ? 4 : 1)
     const next = e.key === 'ArrowLeft' ? now + step : e.key === 'ArrowRight' ? now - step
       : e.key === 'Home' ? min : e.key === 'End' ? max : e.key === 'Enter' ? null : undefined
     if (next === undefined) return
@@ -260,7 +191,8 @@ export class ThreadRail {
     }
     if (focus !== undefined) {
       const target = [...this.fileList.querySelectorAll<HTMLElement>('.ws-rail-file')].find(el => el.dataset.key === focus)
-      ;(target ?? this.filesHeading).focus({ preventScroll: true })
+      if (target) target.focus({ preventScroll: true })
+      else this.filesFold.focus()
     }
   }
   /** The artifact the rail shows, or none. */
@@ -274,10 +206,23 @@ export class ThreadRail {
     this.artifact.setLive(live && !this.el.hidden)
     this.fit()
   }
-  /** Scale the artifact to the rail's width and keep the chosen split inside the rail; the stylesheet gives the artifact its height. */
+  /**
+   * Lay the regions out: which one takes the rail's free height (a drawn
+   * artifact, else open sent files, else open threads), which leads (and so
+   * leaves room for the corner toggle), and which boundaries stand. Then scale
+   * the artifact to the rail's width.
+   */
   fit(): void {
+    const threads = this.hasFamily, artifact = this.artifact.present, fills = this.artifact.fills
+    this.scroller.hidden = !threads
+    this.tree.hidden = !this.threadsFold.open
+    this.fileList.hidden = !this.filesFold.open
+    this.el.dataset.fill = fills ? 'artifact' : this.filesFold.open ? 'files' : threads && this.threadsFold.open ? 'threads' : 'none'
+    const lead = threads ? this.scroller : artifact ? this.artifact.el : this.files
+    for (const region of [this.scroller, this.artifact.el, this.files]) region.toggleAttribute('data-lead', region === lead)
     if (this.el.hidden) return
-    this.applySplit()
+    this.splitAbove.apply(fills && threads && this.threadsFold.open)
+    this.splitBelow.apply(fills && this.filesFold.open)
     this.artifact.resize()
   }
   dispose(): void { this.observer?.disconnect(); this.artifact.dispose() }
@@ -291,12 +236,11 @@ export class ThreadRail {
   /** Bring the sent files into view and give their heading focus. */
   focusFiles(): void {
     this.fileList.scrollTop = 0
-    this.filesHeading.focus({ preventScroll: true })
+    this.filesFold.focus()
   }
   /** A rail with nothing to draw hides; the threads region stands only for a family. */
   private applyPresence(): void {
     this.el.hidden = window.matchMedia(MOBILE_MEDIA).matches || !this.present
-    this.scroller.hidden = !this.hasFamily
     this.artifact.setLive(this.artifactWanted && !this.el.hidden)
     this.fit()
   }
@@ -384,7 +328,8 @@ export class ThreadRail {
     if (arriving && currentRow && typeof currentRow.scrollIntoView === 'function') currentRow.scrollIntoView({ block: 'nearest' })
     if (focus) {
       const target = [...this.tree.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
-      ;(target ?? this.heading).focus({ preventScroll: true })
+      if (target) target.focus({ preventScroll: true })
+      else this.threadsFold.focus()
     }
   }
 }

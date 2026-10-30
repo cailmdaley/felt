@@ -16,14 +16,14 @@ describe('workspace style contracts', () => {
         rules.set(selector, decls)
       }
     })
-    const threads = rules.get('.ws-thread-scroll')!, tree = rules.get('.ws-thread-tree')!, files = rules.get('.ws-rail-files')!, list = rules.get('.ws-rail-file-list')!
+    const tree = rules.get('.ws-thread-tree')!, list = rules.get('.ws-rail-file-list')!
     for (const scroller of [tree, list]) { expect(scroller.get('overflow')).toBe('auto'); expect(scroller.get('min-height')).toBe('0') }
-    expect(threads.get('flex')).toBe('0 1 auto'); expect(threads.get('min-height')).toBe('0'); expect(threads.get('max-height')).toMatch(/%$/)
-    expect(files.get('flex')).toBe('1 1 0'); expect(files.get('min-height')).toBe('0')
-    const fill = rules.get('.ws-rail-artifact[data-fill]')!
-    expect(fill.get('flex')).toBe('1 1 0'); expect(parseFloat(fill.get('min-height')!)).toBeGreaterThan(0)
-    const filesBeside = rules.get('.ws-rail-artifact[data-fill]:not([hidden]) ~ .ws-rail-files')!
-    expect(filesBeside.get('flex')).toBe('0 1 auto'); expect(filesBeside.get('max-height')).toMatch(/%$/)
+    const fill = (region: string, kind: string) => rules.get(`.ws-thread-rail[data-fill='${kind}'] > ${region}`)!
+    expect(rules.get('.ws-thread-scroll')!.get('flex')).toBe('0 1 auto'); expect(rules.get('.ws-thread-scroll')!.get('max-height')).toMatch(/%$/)
+    expect(fill('.ws-rail-artifact', 'artifact').get('flex')).toBe('1 1 0'); expect(parseFloat(fill('.ws-rail-artifact', 'artifact').get('min-height')!)).toBeGreaterThan(0)
+    expect(fill('.ws-rail-files', 'artifact').get('flex')).toBe('0 1 auto'); expect(fill('.ws-rail-files', 'artifact').get('max-height')).toMatch(/%$/)
+    expect(fill('.ws-rail-files', 'files').get('flex')).toBe('1 1 0')
+    expect(rules.get('.ws-thread-rail[data-fill] > [data-sized]')!.get('flex')).toBe('0 0 var(--ws-rail-region-height)')
     expect(rules.get('.ws-thread-rail')!.get('flex-direction')).toBe('column')
   })
   it('keeps the ready PDF thumbnail glyph visible', () => {

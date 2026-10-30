@@ -49,8 +49,8 @@ export class RailArtifact {
 
   private readonly shuttleBase: string
   private readonly navigate: (source: WorkspaceDocument, href: string) => void
-  /** The rail asks to be refitted when unfolding gives the body a size again. */
-  onUnfold: () => void = () => {}
+  /** The rail lays its regions out again when the page folds, unfolds or goes to the stage. */
+  onLayout: () => void = () => {}
   /**
    * `navigate` follows the page's own links (relative and file links), as the
    * full page does; its reader keys reach the reader through the rail.
@@ -62,7 +62,7 @@ export class RailArtifact {
     this.el.hidden = true
     this.head.className = 'ws-rail-artifact-head'
     this.toggle.type = 'button'
-    this.toggle.className = 'ws-rail-artifact-toggle'
+    this.toggle.className = 'ws-rail-fold ws-rail-artifact-toggle'
     this.toggle.textContent = 'Artifact'
     this.toggle.addEventListener('click', () => this.setExpanded(!this.expanded, true))
     this.full.type = 'button'
@@ -81,6 +81,8 @@ export class RailArtifact {
   /** Whether there is an artifact to show; independent of whether it is loaded. */
   get present(): boolean { return this.doc !== null }
   get isExpanded(): boolean { return this.expanded }
+  /** The page is drawn here, so the rail gives the section its free height. */
+  get fills(): boolean { return this.doc !== null && this.expanded && !this.onStage }
 
   /**
    * The document the section stands for, or none; a different one replaces the
@@ -138,9 +140,9 @@ export class RailArtifact {
   private paintBody(): void {
     const open = this.expanded && !this.onStage
     this.body.hidden = !open
-    this.el.toggleAttribute('data-fill', open)
-    if (open) { this.mountIfWanted(); this.onUnfold() }
+    if (open) this.mountIfWanted()
     else this.unmount()
+    this.onLayout()
   }
 
   private mountIfWanted(): void {

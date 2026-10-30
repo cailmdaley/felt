@@ -91,7 +91,7 @@ describe('RailArtifact', () => {
   })
   it('follows its links through the reader and refits when unfolded', () => {
     const navigate = vi.fn(), section = new RailArtifact('', navigate), refit = vi.fn(), d = doc('/notes/artifact.html')
-    section.onUnfold = refit
+    section.onLayout = refit
     section.show(d, vi.fn()); section.setLive(true)
     const toggle = section.el.querySelector<HTMLButtonElement>('.ws-rail-artifact-toggle')!
     toggle.click(); refit.mockClear(); toggle.click()
