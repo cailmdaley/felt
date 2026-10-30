@@ -811,7 +811,7 @@ defmodule Shuttle.Messaging do
 
   defp validate_receipt(receipt, request, expected_address) do
     if Map.get(receipt, "message_id") == request.raw["message_id"] and
-         Map.get(receipt, "address") == expected_address and
+         receipt_names_target?(Map.get(receipt, "address"), expected_address) and
          Map.get(receipt, "status") in @receipt_statuses and
          valid_wake_receipt?(receipt, request) and
          is_binary(Map.get(receipt, "transport")) and
@@ -821,6 +821,23 @@ defmodule Shuttle.Messaging do
        do: :ok,
        else: :error
   end
+
+  # A receiving daemon canonicalizes the forwarded `shuttle://local/...` to its
+  # own host id, which need not match the name this host gives the remote; the
+  # harness and native id still identify the one session the hub addressed.
+  defp receipt_names_target?(address, expected) when is_binary(address) do
+    address == expected or
+      case {parse_address(address), parse_address(expected)} do
+        {{:ok, got}, {:ok, want}} ->
+          Harnesses.normalize(got.harness) == Harnesses.normalize(want.harness) and
+            got.native == want.native
+
+        _ ->
+          false
+      end
+  end
+
+  defp receipt_names_target?(_address, _expected), do: false
 
   defp valid_wake_receipt?(receipt, request) do
     if Map.get(request.raw, "wake", false) do

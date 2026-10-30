@@ -154,8 +154,15 @@ defmodule ShuttleWeb.MessagingControllerTest do
     end
 
     def post("http://remote.test/api/v1/messages", body, "application/json", _timeout) do
-      request = Jason.decode!(body)
-      send(Process.whereis(__MODULE__), {:forwarded, request})
+      forwarded = Jason.decode!(body)
+      send(Process.whereis(__MODULE__), {:forwarded, forwarded})
+      # A real receiving daemon echoes the address canonicalized to its own host id.
+      request =
+        Map.update!(
+          forwarded,
+          "address",
+          &String.replace_prefix(&1, "shuttle://local/", "shuttle://actual-remote/")
+        )
 
       case request["message_id"] do
         "rejected" ->
@@ -201,6 +208,15 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
         "malformed" ->
           {:ok, 500, Jason.encode!(%{error: "lost receipt"})}
+
+        "other-session" ->
+          {:ok, 200,
+           Jason.encode!(%{
+             message_id: "other-session",
+             address: "shuttle://actual-remote/pi/someone-else",
+             status: "accepted",
+             transport: "pi"
+           })}
 
         status when status in ["queued", "context_added", "submitted"] ->
           transport = if status in ["queued", "submitted"], do: "claude-native", else: "peer"
@@ -931,6 +947,24 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     assert_receive {:forwarded, %{"address" => "shuttle://local/claude/native%2Fid"}}
     assert receipt["address"] == "shuttle://edge/claude/native%2Fid"
+  end
+
+  test "a remote receipt naming its own host for the addressed session is valid" do
+    request = %{
+      "address" => "shuttle://edge/pi/p%2F1",
+      "text" => "hello",
+      "wake" => false,
+      "message_id" => "canonical-echo"
+    }
+
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert receipt["status"] == "accepted"
+    assert receipt["address"] == request["address"]
+
+    other = %{request | "message_id" => "other-session"}
+    receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(other)) |> json_response(502)
+    assert receipt["status"] == "unknown"
+    assert receipt["detail"] =~ "malformed message receipt"
   end
 
   test "omitted wake defaults to an active task request" do
