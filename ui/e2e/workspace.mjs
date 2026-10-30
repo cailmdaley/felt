@@ -8,6 +8,8 @@ import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { registerRailArtifactJourneys } from './railArtifact.mjs'
+import { registerCapGeometryJourneys } from './capGeometry.mjs'
+import { registerRenderedTypeJourneys } from './renderedType.mjs'
 
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
@@ -2149,17 +2151,18 @@ for (const width of [320, 390]) {
     }
     const type = await p.locator('.kbn-viewtab').first().evaluate(el => {
       const actual = getComputedStyle(el).fontSize
-      const roles = ['--type-note', '--type-title'].map(role => {
-        const probe = document.createElement('span')
-        probe.style.fontSize = `var(${role})`
-        document.body.append(probe)
-        const size = getComputedStyle(probe).fontSize
-        probe.remove()
-        return size
-      })
-      return { actual, roles }
+      const role = innerWidth <= 340 ? '--type-note' : '--type-title'
+      const track = innerWidth <= 340 ? '--track-kicker' : '--track-nav'
+      const probe = document.createElement('span')
+      probe.style.fontSize = `var(${role})`
+      probe.style.letterSpacing = `var(${track})`
+      document.body.append(probe)
+      const expected = { size: getComputedStyle(probe).fontSize, tracking: getComputedStyle(probe).letterSpacing }
+      probe.remove()
+      return { actual, expected, tracking: getComputedStyle(el).letterSpacing }
     })
-    assert.ok(type.roles.includes(type.actual), `view tabs use a type role: ${JSON.stringify(type)}`)
+    assert.equal(type.actual, type.expected.size, `view tabs use the exact role for this width: ${JSON.stringify(type)}`)
+    assert.equal(type.tracking, type.expected.tracking, `view tabs use their role tracking: ${JSON.stringify(type)}`)
     assert.ok(box.x >= 0 && box.x + box.width <= width, `Settings stays inside the ${width}px viewport: ${JSON.stringify(box)}`)
   }, { width, height: 844 })
 }
@@ -3261,6 +3264,8 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
 registerRailArtifactJourneys(test)
+registerCapGeometryJourneys(test, { open, choose, headerAction })
+registerRenderedTypeJourneys(test, { open, choose, headerAction })
 
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))
 const started = performance.now()
