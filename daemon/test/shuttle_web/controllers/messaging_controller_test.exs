@@ -960,29 +960,74 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["address"] == "shuttle://edge/claude/native%2Fid"
   end
 
-  test "a sender verified by its own host arrives verified across hosts, once" do
-    sender = "shuttle://edge/claude/sender-session"
+  test "a forward of a verified local sender leaves single-use evidence for the receiver", %{
+    host: host
+  } do
+    sender = "shuttle://#{host}/claude/sender-session"
 
     send_request = %{
       "address" => "shuttle://edge/pi/p%2F1",
       "text" => "the mask batch finished",
       "from" => sender,
+      "from_claim" => "a label the sender chose",
       "sender_proof" => "verified-test-proof",
       "wake" => false,
-      "message_id" => "attested-1"
+      "message_id" => "attested-out"
     }
 
     api_conn() |> post("/api/v1/messages", Jason.encode!(send_request)) |> json_response(200)
-    assert_receive {:forwarded, %{"message_id" => "attested-1"} = forwarded}
+    assert_receive {:forwarded, %{"message_id" => "attested-out"} = forwarded}
     assert forwarded["from"] == "unverified"
-    assert forwarded["from_claim"] == sender
+    assert forwarded["from_claim"] == sender, "the claim forwarded is the verified sender"
     refute Map.has_key?(forwarded, "sender_proof")
     refute Map.has_key?(forwarded, "attested_sender")
 
-    # This daemon now receives the forward, as the target host would.
+    redeem = fn overrides ->
+      Shuttle.Messaging.redeem_forward_attestation(
+        Map.merge(
+          %{
+            "message_id" => "attested-out",
+            "from" => sender,
+            "address" => "shuttle://edge-own-name/pi/p%2F1",
+            "digest" => Shuttle.Messaging.Attestations.digest("the mask batch finished", [])
+          },
+          overrides
+        )
+      )
+    end
+
+    refute redeem.(%{"digest" => Shuttle.Messaging.Attestations.digest("other text", [])})
+    refute redeem.(%{"address" => "shuttle://edge-own-name/pi/someone-else"})
+    refute redeem.(%{"from" => "shuttle://#{host}/claude/another"})
+    assert redeem.(%{}), "the receiver names the target under its own host id"
+    refute redeem.(%{}), "evidence is single-use"
+  end
+
+  test "a forward claiming a sender another host verified arrives verified, once" do
+    sender = "shuttle://edge/claude/sender-session"
+    text = "the mask batch finished"
+
+    # The edge host's daemon verified and forwarded this; its evidence awaits redemption.
+    :ok =
+      Shuttle.Messaging.Attestations.put("attested-in", %{
+        from: sender,
+        harness: "pi",
+        native: "p/1",
+        digest: Shuttle.Messaging.Attestations.digest(text, [])
+      })
+
+    forwarded = %{
+      "address" => "shuttle://local/pi/p%2F1",
+      "text" => text,
+      "from" => "unverified",
+      "from_claim" => sender,
+      "wake" => false,
+      "message_id" => "attested-in"
+    }
+
     receive_forward = fn frame ->
       api_conn() |> post("/api/v1/messages", Jason.encode!(frame)) |> json_response(200)
-      assert_receive {:local_message_frame, %{"message_id" => "attested-1"} = local}
+      assert_receive {:local_message_frame, %{"message_id" => "attested-in"} = local}
       local
     end
 

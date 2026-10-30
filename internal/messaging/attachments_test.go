@@ -116,6 +116,21 @@ func TestAttachmentValidationRejectsMalformedInput(t *testing.T) {
 	}
 }
 
+func TestRequestHashCountsAVerifiedSenderAndItsClaimOnce(t *testing.T) {
+	t.Parallel()
+	verified := Request{Address: "shuttle://h/codex/x", Text: "hello", From: "shuttle://nibi/claude/s", Wake: true}
+	claimed := verified
+	claimed.From, claimed.FromClaim = "unverified", "shuttle://nibi/claude/s"
+	if requestHash(verified) != requestHash(claimed) {
+		t.Fatal("a cross-host retry verified on one attempt and not the other must dedupe as one message")
+	}
+	other := claimed
+	other.FromClaim = "shuttle://nibi/claude/other"
+	if requestHash(other) == requestHash(verified) {
+		t.Fatal("a different claimed sender is a different request")
+	}
+}
+
 func TestRequestHashWithoutAttachmentsIsCompatible(t *testing.T) {
 	t.Parallel()
 	req := Request{Address: "shuttle://h/codex/x", Text: "hello", From: "sender", Wake: true, MessageID: "ignored"}

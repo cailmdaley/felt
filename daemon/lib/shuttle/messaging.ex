@@ -17,7 +17,8 @@ defmodule Shuttle.Messaging do
 
   @local_message_timeout_ms 32_000
   @remote_message_timeout_ms 42_000
-  @attestation_timeout_ms 8_000
+  # Redeemed inside the sender's remote forward, ahead of local delivery's own budget.
+  @attestation_timeout_ms 4_000
   @local_files_timeout_ms 60_000
   @remote_files_timeout_ms 90_000
   @local_discovery_timeout_ms 10_000
@@ -517,6 +518,8 @@ defmodule Shuttle.Messaging do
         {:ok, request}
 
       verified ->
+        # The verified sender is the claim the receiver redeems.
+        request = %{request | raw: Map.put(request.raw, "from_claim", "")}
         attest_forward(request)
         unverified_sender(request, callback)
 
@@ -545,7 +548,9 @@ defmodule Shuttle.Messaging do
   # forwarded as a claim, and this host keeps the evidence for the receiver to
   # redeem through its own route here.
   defp attest_forward(request) do
-    with {:ok, target} <- parse_address(request.address) do
+    with {:ok, sender} <- parse_address(request.raw["from"]),
+         true <- sender.host == Poller.own_host_id(),
+         {:ok, target} <- parse_address(request.address) do
       Attestations.put(
         request.raw["message_id"],
         attestation(request.raw["from"], target, request)

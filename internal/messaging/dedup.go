@@ -30,7 +30,14 @@ type record struct {
 	ClaudeQueueContentHash string  `json:"claude_queue_content_hash,omitempty"`
 }
 
+// requestHash identifies a request across retries. The sender counts once,
+// whether it arrived verified or as an unverified claim: a cross-host retry can
+// be verified on one attempt and not on another while being the same message.
 func requestHash(r Request) string {
+	sender, claim := r.From, r.FromClaim
+	if sender == "unverified" {
+		sender, claim = r.FromClaim, ""
+	}
 	b, _ := json.Marshal(struct {
 		Address, Text, From string
 		Wake                bool
@@ -40,7 +47,7 @@ func requestHash(r Request) string {
 		NotifyAddress       string       `json:"notify_address,omitempty"`
 		NotifyWhenIdle      bool         `json:"notify_when_idle,omitempty"`
 		NotifyWake          bool         `json:"notify_wake,omitempty"`
-	}{r.Address, r.Text, r.From, r.Wake, r.Attachments, r.ReplyTo, r.FromClaim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake})
+	}{r.Address, r.Text, sender, r.Wake, r.Attachments, r.ReplyTo, claim, r.NotifyAddress, r.NotifyWhenIdle, r.NotifyWake})
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }
