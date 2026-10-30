@@ -635,7 +635,15 @@ what keeps the route cheap: `Shuttle.EventStream` holds the histogram in
 memory, folded once from both files and then only over appended bytes, and a
 request reads its window out of that.
 
-`/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking. It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`. A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock. An externally cleared ask about the viewer is not delivered. The default window is 24 hours, or six hours for `all=true`, limited to up to 14 days and bounded by the two retained event files. Remote records are served from the last cached feed while a due refresh runs asynchronously.
+`/board/family` accepts `fiber=<id|slug|uid>` or `session=<harness>:<id>` (required unless `all=true`), `since_ms`, and optional `viewer=<uid>` for delivery marking.
+It returns `{family, viewer, records}`; records are deduplicated by id and carry `member`, `to_member`, `actor`, and `delivered`.
+A record is delivered when the viewer is its subject, actor or recipient, or is the orchestrator of a thread's ask, close, handoff, rest or unblock.
+An externally cleared ask about the viewer is not delivered.
+The default window is 24 hours, or six hours for `all=true`, limited to up to 14 days and bounded by the two retained event files.
+Remote records carry `received_at`, the viewer daemon's first receipt time, preserved across refreshes and restarts.
+The family view filters and orders remote records by that time, so a delayed host or a skewed writer clock cannot hide an arrival behind the viewer's cursor.
+Remote records are served from the last cached feed while a due refresh runs asynchronously.
+Hook digests request the retained window and deduplicate record IDs; an unresolved viewer leaves its cursor unchanged.
 
 `/sent-files` is owner-routed like `/file` — one fiber's trail is read on the
 host that owns the fiber; its LOCAL leg carries a weak `ETag` and honors
