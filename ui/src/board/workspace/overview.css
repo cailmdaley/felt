@@ -46,7 +46,7 @@
 .ws-overview-section-title::after { content: ''; flex: 1; border-top: 1px solid var(--ws-hairline-soft); transform: translateY(-4px); min-width: 16px; }
 .ws-overview-section-count {
   order: 2; font: 400 var(--type-meta)/var(--leading-tight) var(--font-mono);
-  font-variant-caps: normal; color: var(--ws-ink-muted);
+  font-variant-caps: normal; letter-spacing: 0; color: var(--ws-ink-muted);
 }
 
 /* One constitution absorbs a delivery batch; its documents remain individually addressable. */

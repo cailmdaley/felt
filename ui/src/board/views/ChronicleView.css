@@ -442,6 +442,7 @@
   border-right: 0.5px solid color-mix(in srgb, var(--kbn-ink-muted) 30%, transparent);
 }
 .chr-cycle-tag {
+  line-height: var(--leading-ui);
   font-family: var(--font-serif);
   font-variant-caps: all-small-caps;
   font-size: var(--type-note);
@@ -724,13 +725,8 @@
 
 /* ── The row gutter ─────────────────────────────────────────────────────── */
 
-/* One line of a page. Everything in the gutter shares a single baseline —
-   the name sets it (its line box is the whole row, so the baseline lands on
-   the row's optical center, where the lifeline runs), and the marginalia hang
-   off it. That is why the name keeps `line-height: var(--chr-row-h)` and the
-   container aligns on `baseline` rather than centering: the name, the host
-   note, the span and the lifeline all sit on one invisible rule that carries
-   the eye from the gutter out into the days. */
+/* The name's padded box fills the row while its text keeps the UI leading.
+   Baseline alignment hangs the host note and span from that same line. */
 .chr-label {
   position: sticky;
   left: 0;
@@ -770,11 +766,13 @@
   text-align: left;
   font-family: var(--font-serif);
   font-size: var(--type-prose);
-  line-height: var(--chr-row-h);
+  line-height: var(--leading-ui);
+  box-sizing: border-box;
+  height: var(--chr-row-h);
   color: var(--kbn-ink);
   background: none;
   border: 0;
-  padding: 0;
+  padding: calc((var(--chr-row-h) - 1lh) / 2) 0;
   margin: 0;
   cursor: pointer;
 }
@@ -799,6 +797,7 @@ button.chr-name:hover {
    name's baseline rather than sitting beside it as an equal, and it is the
    first thing the eye is allowed to skip. */
 .chr-note {
+  line-height: var(--leading-ui);
   flex: 0 1 auto;
   font-family: var(--font-mono);
   font-size: var(--type-meta);
@@ -834,6 +833,7 @@ button.chr-name:hover {
    so the numbers stack down the gutter's inner edge and can be compared
    without being read one at a time. */
 .chr-span {
+  line-height: var(--leading-ui);
   flex: 0 0 auto;
   min-width: 28px;
   text-align: right;

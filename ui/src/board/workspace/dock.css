@@ -253,7 +253,7 @@
 .ws-dock .kbn-detail-parent-dropdown { position: absolute; top: calc(100% + 3px); left: 0; right: 0; z-index: 2; max-height: 220px; overflow-y: auto; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); }
 .ws-dock .kbn-detail-parent-option { display: flex; flex-direction: column; width: 100%; padding: 8px; border: none; background: transparent; text-align: left; }
 .ws-dock .kbn-detail-parent-option:hover { background: var(--ws-hover); }
-.ws-dock .kbn-detail-parent-option-id { font: var(--type-meta) var(--font-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
+.ws-dock .kbn-detail-parent-option-id { font: var(--type-meta)/var(--leading-ui) var(--font-mono); color: var(--ws-ink-muted); overflow-wrap: anywhere; }
 .ws-dock .kbn-detail-parent-empty { cursor: default; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-ctl-foot { grid-column: 4; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--ws-small-gap); }
 .ws-dock :is(.kbn-detail-controls-toggle, .kbn-ctl-foot .kbn-ctl-btn) { min-height: var(--ctl-h); display: flex; align-items: center; }
@@ -280,7 +280,7 @@
 .ws-dock .kbn-ctl-history-reading { display: flex; align-items: center; gap: 8px; font: inherit; }
 .ws-dock .kbn-ctl-history-open .kbn-ctl-history-chevron { transform: rotate(180deg); }
 .ws-dock .kbn-ctl-session-list { list-style: none; margin: 0; padding: 0; }
-.ws-dock .kbn-ctl-session { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; padding: 8px 0; border-top: var(--ws-line-width) solid var(--ws-hairline); font: var(--type-meta) var(--font-mono); }
+.ws-dock .kbn-ctl-session { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; padding: 8px 0; border-top: var(--ws-line-width) solid var(--ws-hairline); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
 .ws-dock :is(.kbn-ctl-session-when, .kbn-ctl-session-kind, .kbn-ctl-session-host) { color: var(--ws-ink-muted); }
 .ws-dock :is(.kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { display: inline-block; padding: 4px 0; border: none; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-decoration: underline; text-underline-offset: 3px; }
 .ws-dock :is(.kbn-ctl-session-agent, .kbn-ctl-session-live) { color: var(--ws-agent); }

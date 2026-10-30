@@ -209,7 +209,7 @@
   gap: 6px;
   font-family: var(--font-serif);
   font-size: var(--type-title);
-  line-height: calc(var(--type-label) * var(--leading-tight));
+  line-height: var(--leading-solid);
   white-space: nowrap;
   font-weight: 400;
   font-variant-caps: all-small-caps;
@@ -235,6 +235,7 @@
    without reading as part of the name. Quieter than the label at rest;
    picks up the cinnabar border on the active tab. */
 .kbn-viewtab-hotkey {
+  line-height: var(--leading-ui);
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -1046,6 +1047,7 @@
   padding-top: 10px;
 }
 .kbn-cluster-empty {
+  line-height: var(--leading-ui);
   grid-column: 1 / -1;
   text-align: center;
   font-family: var(--font-serif);
@@ -1275,6 +1277,7 @@
    carries the column pigment, like a rubricated initial on otherwise plain
    manuscript text. The pigment is the dropcap's job; the body is the body's. */
 .kbn-col-count {
+  line-height: var(--leading-ui);
   font-family: var(--font-mono);
   font-size: var(--type-meta);
   color: var(--kbn-ink-muted);
@@ -1337,6 +1340,7 @@
   min-width: 0;
 }
 .kbn-flight-caption {
+  line-height: var(--leading-ui);
   margin: 0 0 6px;
   font-family: var(--font-serif);
   font-size: var(--type-label);

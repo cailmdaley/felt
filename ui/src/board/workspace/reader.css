@@ -318,7 +318,7 @@
   .ws-head-worker .ws-worker-dot { position: static; translate: none; width: 9px; height: 9px; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
   /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
-  .ws-return { position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
+  .ws-return { line-height: var(--leading-solid); position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
   .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
   .ws-channel-title { display: flex; align-items: center; justify-content: center; text-align: center; flex: 1; min-height: var(--ws-phone-target); line-height: var(--leading-tight); padding: 0; }
   .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle) { display: none !important; }
