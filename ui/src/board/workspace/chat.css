@@ -98,7 +98,7 @@
 .ws-reader .ws-header-icon[hidden] { display: none; }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
-:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
+:is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
 .ws-header-overflow { display: flex; align-items: center; gap: 8px; }
 .ws-header-overflow:empty { display: none; }
 .ws-settings-menu .ws-header-overflow { padding: 4px 8px; border-bottom: 1px solid var(--ws-hairline-soft); }

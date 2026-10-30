@@ -31,24 +31,27 @@
 }
 @media (prefers-reduced-motion: reduce) { .ws-verdict-undo, .ws-verdict-undo[data-fresh] { animation: none; } }
 
-/* Verdict verbs wear their pigment wherever the workspace offers them (the
-   recipe and pigments live with the Desk's, in KanbanModal.css). */
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
+/* Temper and Discard carry verdict pigment wherever the workspace offers
+   them. Other lifecycle verbs keep the shared neutral ink. */
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
   color: var(--verdict-ink); background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
 }
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
   color: var(--verdict-ink); background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
 }
-:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):focus-visible {
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):focus-visible {
   outline: 2px solid var(--verdict-pigment); outline-offset: 2px;
+}
+:is(.ws-dock, .ws-reader) .kbn-ctl-btn:is(.kbn-ctl-review, .kbn-ctl-rest) {
+  color: var(--ws-ink-muted, var(--kbn-ink-muted));
 }
 .ws-verdict-word { color: var(--verdict-ink); }
 /* The fiber page's status line: the kicker, the roles, the worker pill, then
    Rest, Temper and Discard at the line's right end. It is one line on a wide
-   page; the roles give way when it runs out. Outside review the three are
-   verbs in their pigments (Rest the held blue), plated only under the
-   pointer; awaiting review they are the page's plates, slim enough to sit on
-   the kicker's line. The line is centred on its glyphs: the kicker's box is
+   page; the roles give way when it runs out. Temper and Discard carry their
+   verdict pigments; Rest stays neutral. Awaiting review, the verdicts are the
+   page's plates, slim enough to sit on the kicker's line. The line is centred
+   on its glyphs: the kicker's box is
    trimmed to its small capitals and the pill's words to their capitals, so
    their middles meet. */
 .ws-fiber-prose .ws-prose-header { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ws-small-gap) var(--ws-gap); }
@@ -80,17 +83,17 @@
   background: transparent; font: var(--type-label)/var(--leading-tight) var(--font-serif); letter-spacing: 0; text-transform: none; cursor: pointer;
 }
 .ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) { background: transparent; border-color: transparent !important; }
-.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); border-color: transparent !important; }
+.ws-reader .ws-fiber-acts .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) { background: var(--verdict-tint); border-color: transparent !important; }
 /* Discard, the rare verb, steps back toward the muted ink until the review
    it belongs to. */
 .ws-reader .ws-fiber-acts:not([data-column='awaitingReview']) .kbn-ctl-btn.kbn-ctl-discard:not(:hover, :focus-visible) {
   color: color-mix(in srgb, var(--verdict-ink) 55%, var(--ws-ink-muted));
 }
 .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-verdict { gap: 6px; }
-.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) {
   min-height: 28px; padding: 0 12px; background: var(--verdict-tint); border-color: var(--verdict-edge) !important;
 }
-.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
+.ws-reader .ws-fiber-acts[data-column='awaitingReview'] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard):hover:not(:disabled) {
   background: var(--verdict-tint-strong); border-color: var(--verdict-pigment) !important;
 }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
@@ -100,7 +103,8 @@
   .ws-fiber-prose .ws-fiber-acts { flex: 1 1 auto; }
   .ws-fiber-acts .ws-fiber-worker { display: none; }
   .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-rest, .kbn-ctl-temper, .kbn-ctl-discard) {
-    min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px; border-color: var(--verdict-edge) !important;
+    min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); padding-inline: 14px;
   }
+  .ws-reader .ws-fiber-acts[data-column] .kbn-ctl-btn:is(.kbn-ctl-temper, .kbn-ctl-discard) { border-color: var(--verdict-edge) !important; }
   .ws-fiber-acts .kbn-ctl-verdict { gap: var(--ws-small-gap); }
 }

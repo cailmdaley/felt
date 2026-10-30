@@ -18,29 +18,170 @@ async function openRoot(page) {
 }
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
   buttons.filter(button => button.checkVisibility()).map(button => button.getAttribute('aria-label')))
+const assertLifecycleInk = async (header, scheme) => {
+  const renderedTheme = await header.evaluate(el => ({
+    appearance: document.documentElement.dataset.wsAppearance,
+    pageTheme: el.closest('.ws-reader')?.dataset.wsThemeName,
+  }))
+  assert.equal(renderedTheme.appearance, scheme, `the document resolves to ${scheme}: ${JSON.stringify(renderedTheme)}`)
+  assert.equal(renderedTheme.pageTheme, scheme === 'dark' ? 'night-chart' : 'portolan', `the selected page uses the ${scheme} bundled theme: ${JSON.stringify(renderedTheme)}`)
+  const verbs = await header.locator('.kbn-ctl-verdict button').evaluateAll(buttons => buttons
+    .filter(button => button.checkVisibility())
+    .map(button => {
+      const style = getComputedStyle(button)
+      return {
+        label: button.getAttribute('aria-label'),
+        pigment: style.getPropertyValue('--verdict-pigment').trim(),
+        color: style.color,
+      }
+    }))
+  const neutral = await header.evaluate(el => {
+    const sample = document.createElement('span')
+    sample.style.cssText = 'position:fixed;left:-9999px;color:var(--ws-ink-muted)'
+    el.append(sample)
+    const color = getComputedStyle(sample).color
+    sample.remove()
+    return color
+  })
+  for (const verb of verbs) {
+    if (['Temper', 'Discard'].includes(verb.label)) {
+      assert.ok(verb.pigment, `${verb.label} carries verdict pigment`)
+    } else {
+      assert.equal(verb.pigment, '', `${verb.label} has no verdict pigment: ${JSON.stringify(verb)}`)
+      assert.equal(verb.color, neutral, `${verb.label} uses the shared neutral ink: ${JSON.stringify(verb)}`)
+    }
+  }
+}
+async function captureMeetingState(page, scene, width, scheme) {
+  if (!process.env.WORKSPACE_SHOTS) return
+  const height = width < 500 ? 844 : 900
+  await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+  await page.waitForFunction(width => window.innerWidth === width, width)
+  await page.mouse.move(width - 2, height - 2)
+  await page.screenshot({
+    path: resolve(process.env.WORKSPACE_SHOTS, `meeting-${scene}-${width}-${scheme}.png`),
+    animations: 'disabled',
+  })
+}
+async function captureCurrentMeetingStates(page) {
+  if (!process.env.WORKSPACE_SHOTS) return
+  for (const scheme of ['light', 'dark']) {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    if (scheme === 'dark' && await page.locator('.ws-selected .kbn-ctl-meet-chip').count()) {
+      await page.locator('.ws-selected .kbn-ctl-meet-chip').click()
+      await page.locator('.ws-selected .ws-chat-head').getByRole('heading', { name: title, exact: true }).waitFor()
+    }
+    await page.evaluate(scheme => {
+      localStorage.setItem('shuttle:workspace:sidebar', 'false')
+      localStorage.setItem('shuttle:workspace:rail', 'false')
+      const stored = JSON.stringify({ mode: scheme, dark: 'night-chart' })
+      localStorage.setItem('shuttle.appearance', stored)
+      window.dispatchEvent(new StorageEvent('storage', { key: 'shuttle.appearance', newValue: stored }))
+    }, scheme)
+    await page.waitForFunction(scheme => {
+      const reader = document.querySelector('.ws-selected .ws-reader')
+      return document.documentElement.dataset.wsAppearance === scheme &&
+        reader?.dataset.wsThemeName === (scheme === 'dark' ? 'night-chart' : 'portolan')
+    }, scheme)
+    const composer = page.locator('.ws-selected .kbn-ctl-composer')
+    const chip = composer.locator('.kbn-ctl-meet-chip')
+    await chip.waitFor({ state: 'visible' })
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
+      await captureMeetingState(page, 'host-chip', width, scheme)
+      await chip.click()
+      await composer.locator('.kbn-ctl-meet-stop').waitFor({ state: 'visible' })
+      await page.waitForFunction(() => document.querySelector('.ws-selected .kbn-detail-transcript')?.hidden)
+      await captureMeetingState(page, 'collapsed-stop', width, scheme)
+      await chip.click()
+      await page.locator('.ws-selected .kbn-detail-transcript').waitFor({ state: 'visible' })
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const rail = page.locator('.ws-thread-rail')
+    if (!await rail.isVisible()) {
+      await page.locator('.ws-rail-toggle').click()
+      await rail.waitFor({ state: 'visible' })
+    }
+    await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
+    const header = page.locator('.ws-selected .ws-chat-head')
+    await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
+      await captureMeetingState(page, 'review-verbs', width, scheme)
+      if (width < 500) {
+        await header.evaluate(el => { el.style.maxWidth = '250px' })
+        await page.waitForFunction(() => {
+          const head = document.querySelector('.ws-selected .ws-chat-head')
+          return head?.querySelector('.ws-chat-settings')?.parentElement === head
+        })
+      } else {
+        const reader = page.locator('.ws-reader')
+        const sidebar = page.locator('.ws-sidebar')
+        const sidebarToggle = page.locator('.ws-sidebar-toggle:not(.ws-rail-toggle)')
+        const rail = page.locator('.ws-thread-rail')
+        const originalSidebarWidth = await reader.evaluate(el => el.style.getPropertyValue('--ws-sidebar-width'))
+        const originalRailWidth = await rail.evaluate(el => el.style.getPropertyValue('--ws-thread-rail-width'))
+        if (!await sidebar.isVisible()) await sidebarToggle.click()
+        await sidebar.waitFor({ state: 'visible' })
+        await reader.evaluate(el => el.style.setProperty('--ws-sidebar-width', '460px'))
+        await rail.evaluate(el => el.style.setProperty('--ws-thread-rail-width', '460px'))
+        await page.waitForFunction(() => {
+          const head = document.querySelector('.ws-selected .ws-chat-head')
+          return head?.clientWidth <= 560 && head.querySelector('.ws-chat-settings')?.parentElement === head.querySelector('.ws-chat-acts')
+        })
+        await captureMeetingState(page, 'gear-moved', width, scheme)
+        await reader.evaluate((el, value) => value ? el.style.setProperty('--ws-sidebar-width', value) : el.style.removeProperty('--ws-sidebar-width'), originalSidebarWidth)
+        await rail.evaluate((el, value) => value ? el.style.setProperty('--ws-thread-rail-width', value) : el.style.removeProperty('--ws-thread-rail-width'), originalRailWidth)
+        await sidebarToggle.click()
+        await sidebar.waitFor({ state: 'hidden' })
+      }
+      if (width < 500) await captureMeetingState(page, 'gear-moved', width, scheme)
+      await header.evaluate(el => { el.style.maxWidth = '' })
+    }
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await header.locator('.ws-chat-back').click()
+    await header.getByRole('heading', { name: title, exact: true }).waitFor()
+    await header.locator('.ws-chat-leave').click()
+    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
+    const foreignChip = page.locator('.ws-selected .kbn-ctl-meet-chip')
+    await foreignChip.waitFor({ state: 'visible' })
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
+      await captureMeetingState(page, 'foreign-chip', width, scheme)
+    }
+  }
+}
 export function registerHeaderBarJourneys(test) {
-  test('Lifecycle state selects the header verbs while each card remains openable', async page => {
+  test('Lifecycle state selects the header verbs; only verdicts carry pigment', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
+      const scheme = new URLSearchParams(location.search).get('e2e-appearance') || 'light'
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
       localStorage.setItem('shuttle:workspace:rail', 'true')
+      localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
     })
-    await page.goto(url)
-    await openRoot(page)
-    const header = page.locator('.ws-selected .ws-chat-head')
-    assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], 'Awaiting review offers its verdicts')
-    const visits = [
-      ['Response analysis', ['Close for review', 'Rest']],
-      ['Draft the validation plan', ['Launch', 'Rest']],
-      ['Next validation', ['Resume', 'New session']],
-      ['Accepted pilot', ['Resume', 'New session']],
-      ['Discarded pilot', ['Resume', 'New session']],
-    ]
-    for (const [name, verbs] of visits) {
-      if (name === 'Accepted pilot') await page.locator('.ws-thread-rail summary').filter({ hasText: 'Archived' }).click()
-      await page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name }).click()
-      await header.getByRole('heading', { name, exact: true }).waitFor()
-      assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
+    for (const scheme of ['light', 'dark']) {
+      await page.goto(`${url}&e2e-appearance=${scheme}`)
+      await openRoot(page)
+      const header = page.locator('.ws-selected .ws-chat-head')
+      assert.deepEqual(await visibleHeaderVerbs(header), ['Temper', 'Discard'], 'Awaiting review offers its verdicts')
+      await assertLifecycleInk(header, scheme)
+      const visits = [
+        ['Response analysis', ['Close for review', 'Rest']],
+        ['Draft the validation plan', ['Launch', 'Rest']],
+        ['Next validation', ['Resume', 'New session']],
+        ['Accepted pilot', ['Resume', 'New session']],
+        ['Discarded pilot', ['Resume', 'New session']],
+      ]
+      for (const [name, verbs] of visits) {
+        if (name === 'Accepted pilot') await page.locator('.ws-thread-rail summary').filter({ hasText: 'Archived' }).click()
+        await page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name }).click()
+        await header.getByRole('heading', { name, exact: true }).waitFor()
+        assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
+        await assertLifecycleInk(header, scheme)
+      }
     }
   }, { width: 1000, height: 900 })
   test('Header breakpoint crossings preserve visible focus and hand overflow focus to Settings', async page => {
@@ -235,21 +376,19 @@ export function registerHeaderBarJourneys(test) {
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     await assertActions(['Close for review', 'Rest'])
     const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
-      const plain = document.createElement('span')
-      plain.style.color = 'var(--ws-ink)'
-      el.parentElement.append(plain)
-      const styles = getComputedStyle(el)
+      const neutral = document.createElement('span')
+      neutral.style.color = 'var(--ws-ink-muted, var(--kbn-ink-muted))'
+      el.parentElement.append(neutral)
       const result = {
-        pigment: styles.getPropertyValue('--verdict-pigment').trim(),
-        ink: styles.getPropertyValue('--verdict-ink').trim(),
-        color: styles.color,
-        plain: getComputedStyle(plain).color,
+        pigment: getComputedStyle(el).getPropertyValue('--verdict-pigment').trim(),
+        color: getComputedStyle(el).color,
+        neutral: getComputedStyle(neutral).color,
       }
-      plain.remove()
+      neutral.remove()
       return result
     })
-    assert.ok(reviewInk.pigment && reviewInk.ink, `Close for review resolves both verdict colors: ${JSON.stringify(reviewInk)}`)
-    assert.notEqual(reviewInk.color, reviewInk.plain, `Close for review uses its verdict ink rather than plain text ink: ${JSON.stringify(reviewInk)}`)
+    assert.equal(reviewInk.pigment, '', `Close for review has no verdict pigment: ${JSON.stringify(reviewInk)}`)
+    assert.equal(reviewInk.color, reviewInk.neutral, `Close for review uses neutral lifecycle ink: ${JSON.stringify(reviewInk)}`)
     await page.setViewportSize({ width: 320, height: 844 })
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-chat-head')?.dataset.compact === 'true')
     // Settings gives way only when the verbs exhaust row two. Narrow the head until they do, so the
@@ -394,6 +533,7 @@ export function registerHeaderBarJourneys(test) {
     await foreignChip.click()
     await foreignHeader.getByRole('heading', { name: title, exact: true }).waitFor()
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible(), 'the chip opens on the meeting host chat')
+    await captureCurrentMeetingStates(page)
   }, { width: 1000, height: 900 })
   test('× leaves the chat for the Desk and writes nothing', async page => {
     await page.addInitScript(() => {
