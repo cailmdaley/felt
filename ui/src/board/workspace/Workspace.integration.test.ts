@@ -8,7 +8,7 @@ import { projectDeskFrontier } from '../KanbanReadModel.js'
 import { deskOrder } from '../deskOrdering.js'
 import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
-import { chatKey, docKey } from './documents.js'
+import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
@@ -1142,44 +1142,6 @@ describe('workspace reader integration', () => {
     await flush()
     const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/dispatch'))!
     expect(JSON.parse(String(request[1]?.body))).toMatchObject({ fiber_id: 'b/task', origin: 'host-a', user_message: 'Keep this draft' })
-  })
-
-  it('Escape closes Meeting controls through the selected chat and keeps its focus', async () => {
-    const originalBodyCards = bodyCards, originalBoardCards = boardCards
-    const managed = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', status: 'active' as const, sessionUuid: 'meeting-session' }
-    bodyCards = boardCards = [managed]
-    onTestFinished(() => { bodyCards = originalBodyCards; boardCards = originalBoardCards })
-    const control = { canJoin: () => true, modes: () => ['call'], current: () => null, join: vi.fn() }
-    workspace.dispose()
-    const dock = new Dock('', changed, undefined, undefined, { meeting: control as never })
-    workspace = new Workspace(document.body, { shuttleBase: '', cards: () => [managed], deskRows: () => [managed], origin: () => 'Desk', onVisibility: visibility, dock })
-    workspace.open(managed, 'Desk', chatKey('host-a', 'alpha'))
-    await flush()
-
-    const band = dock.bandFor(managed)
-    const dismiss = vi.spyOn(band, 'handleEscape')
-    const menu = band.el.querySelector<HTMLDetailsElement>('.kbn-ctl-meet-overflow')!
-    const more = menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')!
-    more.click()
-    more.focus()
-    expect(workspace.reader.document?.kind).toBe('chat')
-    expect(menu.open).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-
-    expect(dismiss).toHaveBeenCalled()
-    expect(workspace.isActive).toBe(true)
-    expect(workspace.reader.document?.kind).toBe('chat')
-    expect(menu.open).toBe(false)
-    expect(document.activeElement).toBe(more)
-
-    more.click()
-    const switchInput = menu.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
-    switchInput.focus()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(workspace.isActive).toBe(true)
-    expect(workspace.reader.document?.kind).toBe('chat')
-    expect(menu.open).toBe(false)
-    expect(document.activeElement).toBe(more)
   })
 
   it('Escape gives inline and reader popovers first refusal, then collapses and returns', async () => {

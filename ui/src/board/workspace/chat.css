@@ -196,7 +196,6 @@
 .ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-detail-directive { grid-column: 1 / -1; min-height: calc(var(--ctl-h) + 8px); }
 .ws-chat .ws-chat-compose .kbn-ctl-composer .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; }
 .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { min-width: 0; max-width: 100%; box-sizing: border-box; flex-wrap: nowrap; justify-content: flex-start; container-type: inline-size; }
-.ws-chat .kbn-ctl-meet-panel { width: min(320px, 100cqw); }
 .ws-chat .ws-chat-compose .kbn-ctl-sends { min-width: 0; max-width: 100%; flex: none; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; }
 .ws-chat .ws-chat-compose .kbn-ctl-sends > .kbn-ctl-btn { min-width: 0; max-width: 100%; }
 .ws-chat .ws-chat-compose .kbn-ctl-composer.kbn-ctl-composer-meeting-armed .kbn-ctl-composer-foot { flex-wrap: wrap; }

@@ -43,9 +43,9 @@ const defer = <T,>() => {
   const promise = new Promise<T>((yes) => { resolve = yes })
   return { promise, resolve }
 }
-/** Turn the composer's Meeting switch on. */
+/** Arm the composer's Meeting button. */
 const arm = (meeting: HTMLElement): void => {
-  meeting.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
+  meeting.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
 }
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 let board: KanbanModal
@@ -123,7 +123,7 @@ describe('board phone meeting card wiring', () => {
     state.meetingStatus = { available: true, modes: [...modes], meeting: null }
     const menu = state.dock.buildMeeting(card({ id: 'science/task' }), document.createElement('div'), sendWith())
     expect(menu.querySelector('[role="radio"]')).toBeNull()
-    expect(menu.querySelector<HTMLInputElement>('input')!.disabled).toBe(!enabled)
+    expect(menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.disabled).toBe(!enabled)
     expect(menu.hidden).toBe(false)
     arm(menu)
     menu.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()

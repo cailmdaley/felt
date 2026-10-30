@@ -112,7 +112,7 @@ async function openScenario(name, query, selectChat) {
     const observer = new MutationObserver(records => {
       for (const record of records) {
         mutations++
-        if (record.target instanceof Element && record.target.closest('.kbn-ctl-meet-switch')) {
+        if (record.target instanceof Element && record.target.closest('.kbn-ctl-meet-arm')) {
           meetingControlMutations++
         }
         const key = `${record.target.nodeName}.${record.target.className ?? ''}`

@@ -191,32 +191,29 @@
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:disabled { cursor: default; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip[hidden] { display: none; }
-/* Meeting setup lives in a compact menu; New session and Resume stay visible. */
+/* Meeting arming stays visible beside the session verbs. */
 .ws-dock .kbn-ctl-meet { display: contents; }
-.ws-dock .kbn-ctl-meet-overflow { position: relative; display: block; flex: none; }
-.ws-dock .kbn-ctl-meet-overflow > summary { display: grid; place-items: center; box-sizing: border-box; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-title)/var(--leading-solid) var(--font-serif); cursor: pointer; list-style: none; }
-.ws-dock .kbn-ctl-meet-overflow > summary::-webkit-details-marker { display: none; }
-.ws-dock .kbn-ctl-meet-overflow > summary:hover { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet-overflow > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-ink); outline-offset: 2px; }
-.ws-dock .kbn-ctl-meet-panel { position: absolute; bottom: calc(100% + var(--ws-small-gap)); left: 0; z-index: 10; display: none; box-sizing: border-box; width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 420px); overflow: auto; padding: 8px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); box-shadow: var(--ws-shadow-low); }
-.ws-dock .kbn-ctl-meet-overflow[open] > .kbn-ctl-meet-panel { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
-.ws-dock .kbn-ctl-meet-overflow[open] .kbn-ctl-meet { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
-.ws-dock .kbn-ctl-meet-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; box-sizing: border-box; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); white-space: nowrap; cursor: pointer; margin-right: auto; }
-.ws-dock .kbn-ctl-meet-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
-.ws-dock .kbn-ctl-meet-switch:has(input:disabled) { opacity: .55; cursor: default; }
-.ws-dock .kbn-ctl-meet-switch:has(input:focus-visible) { outline: var(--ws-focus-width) solid var(--ws-ink); outline-offset: 2px; }
-.ws-dock .kbn-ctl-meet-track { position: relative; flex: none; box-sizing: border-box; width: 22px; height: 12px; border: var(--ws-line-width) solid currentColor; border-radius: 6px; }
-.ws-dock .kbn-ctl-meet-track::after { content: ''; position: absolute; top: 1px; left: 1px; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-.ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-switch { color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track { background: var(--ws-ink); border-color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet-on .kbn-ctl-meet-track::after { left: 11px; background: var(--ws-paper); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm {
+  display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px;
+  min-width: var(--ctl-h); min-height: var(--ctl-h); padding-inline: 9px;
+  border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: var(--ws-control-radius);
+  background: var(--ws-fill); color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif);
+  white-space: nowrap;
+}
+.ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { border-color: var(--ws-ink) !important; background: var(--ws-fill); color: var(--ws-ink); }
+.ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
+@container (max-width: 360px) {
+  .ws-chat .kbn-ctl-meet-arm { width: var(--ctl-h); padding-inline: 0; }
+  .ws-chat .kbn-ctl-meet-arm .kbn-ctl-meet-label { display: none; }
+}
 /* A finger leaves :hover behind on what it tapped; only a pointer hovers. */
 @media (hover: none) {
   .ws-dock .kbn-ctl-composer .kbn-ctl-secondary:hover { background-color: transparent; }
 }
 @media (hover: hover) {
   .ws-dock .kbn-ctl-composer .kbn-ctl-btn:hover:not(:disabled) { color: var(--ws-ink); background-color: var(--ws-hover); }
-  .ws-dock .kbn-ctl-meet-switch:hover:not(:has(input:disabled)) { color: var(--ws-ink); background: var(--ws-hover); }
+  .ws-dock .kbn-ctl-meet-arm:hover:not(:disabled) { color: var(--ws-ink); background: var(--ws-hover); }
 }
 .ws-dock .kbn-detail-directive::placeholder { color: color-mix(in srgb, var(--ws-ink-muted) 50%, transparent); }
 .ws-dock .kbn-ctl-composer-drop { border-style: dashed; border-color: var(--ws-ink); }

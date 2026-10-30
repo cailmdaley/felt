@@ -282,19 +282,20 @@ export function registerHeaderBarJourneys(test) {
       await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'resting-seat-phone-light.png') })
     }
   }, { width: 390, height: 844 })
-  test('Composer footer stays on one row and its Meeting menu fits at every width', async page => {
+  test('Meeting, New session and Resume stay visible in the composer at every width', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'true')
       localStorage.setItem('shuttle:workspace:rail', 'true')
     })
     await page.goto(url); await openRoot(page)
-    for (const width of [1440, 1000, 701, 390]) {
-      await page.setViewportSize({ width, height: 900 })
+    for (const width of [1440, 1000, 701, 390, 320]) {
+      await page.setViewportSize({ width, height: width < 500 ? 844 : 900 })
       const composer = page.locator('.ws-selected .kbn-ctl-composer')
+      const arm = composer.locator('.kbn-ctl-meet-arm')
       const geometry = await composer.evaluate(el => {
         const rect = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => {
           const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, center: r.top + r.height / 2 }
         })
         return { left: rect.left, right: rect.right, controls }
@@ -302,27 +303,30 @@ export function registerHeaderBarJourneys(test) {
       assert.equal(geometry.controls.length, 3)
       assert.ok(geometry.controls.every(r => r.left >= geometry.left && r.right <= geometry.right), JSON.stringify(geometry))
       const centers = geometry.controls.map(r => r.center)
-      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `one footer row at ${width}: ${centers}`)
-      const more = composer.locator('.kbn-ctl-meet-more')
-      await more.click()
-      await composer.locator('.kbn-ctl-meet-switch input').check()
-      const panel = await composer.locator('.kbn-ctl-meet-panel').boundingBox(), box = await composer.boundingBox()
-      assert.ok(panel.x >= box.x && panel.x + panel.width <= box.x + box.width + 1, `Meeting menu fits its composer at ${width}`)
-      await more.focus(); await page.keyboard.press('Escape')
-      assert.ok(await composer.locator('.kbn-ctl-meet-overflow').evaluate(el => !el.open))
-      assert.ok(await more.evaluate(el => document.activeElement === el))
+      assert.ok(Math.max(...centers) - Math.min(...centers) < 1, `Meeting, New session and Resume share one footer row at ${width}: ${centers}`)
+      assert.equal(await arm.getAttribute('aria-label'), 'Meeting')
+      assert.equal(await arm.getAttribute('aria-pressed'), 'false')
+      assert.equal(await composer.locator('.kbn-ctl-meet-overflow').count(), 0)
+      if (width <= 320) assert.equal(await composer.locator('.kbn-ctl-meet-label').isVisible(), false)
+      if (process.env.WORKSPACE_SHOTS && [1440, 390, 320].includes(width)) {
+        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+        await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `meeting-composer-control-${width}-light.png`) })
+      }
+      await arm.click()
+      assert.equal(await arm.getAttribute('aria-pressed'), 'true')
       const armed = await composer.evaluate(el => {
         const box = el.getBoundingClientRect()
-        const controls = [...el.querySelectorAll('.kbn-ctl-meet-more, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
+        const controls = [...el.querySelectorAll('.kbn-ctl-meet-arm, .kbn-ctl-sends > button')].filter(node => node.checkVisibility()).map(node => node.getBoundingClientRect())
         return { fits: controls.every(r => r.left >= box.left && r.right <= box.right), centers: controls.map(r => r.top + r.height / 2), startVisible: el.querySelector('.kbn-ctl-meet-primary').checkVisibility(), armedChipHidden: el.querySelector('.kbn-ctl-meet-chip').hidden }
       })
       assert.ok(armed.startVisible && armed.armedChipHidden && armed.fits, `armed actions remain visible inside the composer at ${width}: ${JSON.stringify(armed)}`)
       const rows = new Set(armed.centers.map(center => Math.round(center)))
       assert.ok(rows.size <= 2, `armed footer uses at most two rows at ${width}: ${JSON.stringify(armed.centers)}`)
-      await more.click(); await composer.locator('.kbn-ctl-meet-switch input').uncheck(); await more.click()
+      await arm.click()
+      assert.equal(await arm.getAttribute('aria-pressed'), 'false')
     }
   }, { width: 1440, height: 900 })
-  test('A meeting started from the composer stays visible with Stop after closing its menu', async page => {
+  test('A meeting started from the visible composer action stays visible with Stop', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
@@ -332,13 +336,9 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(`${url}&meeting=idle`)
     await openRoot(page)
     const composer = page.locator('.ws-selected .kbn-ctl-composer')
-    await composer.locator('.kbn-ctl-meet-more').click()
-    await composer.getByRole('switch').check()
+    await composer.locator('.kbn-ctl-meet-arm').click()
     await composer.getByRole('button', { name: 'Start meeting', exact: true }).click()
-    const menu = composer.locator('.kbn-ctl-meet-overflow')
     await page.waitForFunction(() => document.querySelector('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')?.checkVisibility())
-    if (await menu.evaluate(el => el.open)) await menu.locator('summary').click()
-    assert.equal(await menu.evaluate(el => el.open), false)
     const stop = page.locator('.ws-selected .kbn-detail-transcript-meta .kbn-detail-transcript-stop')
     await stop.waitFor({ state: 'visible' })
     assert.equal(await stop.innerText(), 'Stop')

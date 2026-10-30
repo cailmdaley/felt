@@ -1,5 +1,5 @@
-/** Build with `npm run harness:board`, then run `node scripts/check-meeting-menu.mjs`.
- * Checks the single Meeting toggle against the offline daemon on desktop and phone.
+/** Build with `npm run harness:board`, then run `node scripts/check-meeting-button.mjs`.
+ * Checks the visible Meeting arm button against the offline daemon on desktop and phone.
  */
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
@@ -24,8 +24,8 @@ try {
     const meeting = controls.locator('.kbn-ctl-meet')
     if (mobile) await controls.locator('.kbn-detail-directive').focus()
     await meeting.waitFor({ state: 'visible' })
-    const toggle = meeting.getByRole('switch')
-    assert.equal(await toggle.isChecked(), false)
+    const toggle = meeting.getByRole('button', { name: 'Meeting', exact: true })
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
     assert.equal(await meeting.getByRole('radio').count(), 0)
     assert.ok((await meeting.textContent()).includes('recorder-host'))
     await page.evaluate(() => {
@@ -36,13 +36,15 @@ try {
         return original(input, init)
       }
     })
-    await toggle.check()
+    await toggle.click()
     assert.equal(await meeting.getByRole('radio').count(), 0)
     assert.ok(await meeting.getByRole('button', { name: 'Start meeting', exact: true }).isVisible())
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'true')
     assert.deepEqual(await page.evaluate(() => window.joins), [], 'arming records nothing')
-    await toggle.uncheck()
+    await toggle.click()
+    assert.equal(await toggle.getAttribute('aria-pressed'), 'false')
     assert.equal(await meeting.getByRole('button', { name: 'Start meeting', exact: true }).isVisible(), false)
-    await toggle.check()
+    await toggle.click()
     if (process.env.MEETING_SCREENSHOT_DIR) {
       await page.screenshot({ path: `${process.env.MEETING_SCREENSHOT_DIR}/meeting-${mobile ? 'phone' : 'desktop'}.png` })
     }
@@ -85,7 +87,7 @@ try {
       assert.deepEqual(await page.evaluate(() => window.captures[0].meeting), { mode: 'call', language: 'fr' })
     }
     assert.deepEqual(errors, [])
-    console.log(`${mobile ? 'phone' : 'desktop'}: single Meeting toggle; conditional Capture language select${mobile ? '' : '; call Join and French Capture observed'}`)
+    console.log(`${mobile ? 'phone' : 'desktop'}: visible Meeting arm button; conditional Capture language select${mobile ? '' : '; call Join and French Capture observed'}`)
     await page.close()
   }
 } finally {

@@ -177,7 +177,7 @@ describe('anchored pickers', () => {
     expect(band.el.querySelector('.ws-select-picker')).toBeNull()
     expect(document.activeElement).toBe(effort)
   })
-  it('offers Meeting in its overflow while keeping both session verbs available', async () => {
+  it('keeps the Meeting arm button beside both session verbs', async () => {
     let recording: { title: string; state: 'live' } | null = null
     let canJoin = true
     const join = vi.fn(async () => ({ error: null, delivered: true }))
@@ -186,14 +186,13 @@ describe('anchored pickers', () => {
     const meetingBand = meetingDock.bandFor(task({ sessionUuid: 'session-1', status: 'active' }))
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
-    const toggle = q<HTMLInputElement>('.kbn-ctl-meet-switch input')
+    const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
     const field = q<HTMLTextAreaElement>('textarea')
-    expect([toggle.getAttribute('role'), toggle.checked]).toEqual(['switch', false])
+    expect([toggle.tagName, toggle.getAttribute('aria-pressed')]).toEqual(['BUTTON', 'false'])
     expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-primary').hidden]).toEqual([false, true])
 
-    q<HTMLElement>('.kbn-ctl-meet-more').click()
-    expect(q<HTMLDetailsElement>('.kbn-ctl-meet-overflow').open).toBe(true)
     toggle.click()
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
     expect([q('.kbn-ctl-sends').hidden, q('.kbn-ctl-meet-primary').hidden]).toEqual([false, false])
     expect(q('.kbn-ctl-meet-chip').hidden).toBe(true)
     expect((q('.kbn-ctl-meet-chip') as HTMLButtonElement).disabled).toBe(true)
@@ -205,15 +204,15 @@ describe('anchored pickers', () => {
     expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function))
     expect(writes()).toEqual([])
     await flush()
-    expect(toggle.checked).toBe(false)
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
 
-    // A recording elsewhere holds the switch off, naming it on hover.
+    // A recording elsewhere holds the button off and names the recording.
     toggle.click()
     recording = { title: 'Standup', state: 'live' }
     canJoin = false
     meetingDock.syncMeeting()
-    expect([toggle.checked, toggle.disabled, q('.kbn-ctl-meet-switch').title]).toEqual([false, true, 'Recording: Standup'])
+    expect([toggle.getAttribute('aria-pressed'), toggle.disabled, toggle.title]).toEqual(['false', true, 'Recording: Standup'])
     expect(q('.kbn-ctl-meet-chip').hidden).toBe(false)
     expect(q('.kbn-ctl-meet-chip').textContent).toBe('Meeting · Standup')
     expect(q('.kbn-ctl-sends').hidden).toBe(false)
@@ -249,17 +248,17 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
-  it('keeps the switch on when a meeting fails to start', async () => {
+  it('keeps Meeting armed when a recording fails to start', async () => {
     const control = { canJoin: () => true, modes: () => ['call', 'phone'], current: () => null, join: vi.fn(async () => ({ error: 'hark unavailable', delivered: false })) }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)
-    const toggle = meetingBand.el.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
+    const toggle = meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     toggle.click()
     meetingBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-primary')!.click()
     await flush()
     expect(meetingBand.el.querySelector('.kbn-ctl-compose > .kbn-detail-error:last-child')!.textContent).toBe('hark unavailable')
-    expect(toggle.checked).toBe(true)
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
     meetingDock.reset()
   })
 
@@ -270,8 +269,7 @@ describe('anchored pickers', () => {
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
-    q<HTMLElement>('.kbn-ctl-meet-more').click()
-    q<HTMLInputElement>('.kbn-ctl-meet-switch input').click()
+    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
     vi.mocked(fetch).mockImplementation(async () => response({ error: 'dispatch failed' }, 500))
     q<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)').click()
     await flush()
@@ -289,8 +287,7 @@ describe('anchored pickers', () => {
     const meetingBand = meetingDock.bandFor(task())
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
-    q<HTMLElement>('.kbn-ctl-meet-more').click()
-    const toggle = q<HTMLInputElement>('.kbn-ctl-meet-switch input')
+    const toggle = q<HTMLButtonElement>('.kbn-ctl-meet-arm')
     toggle.click()
     q<HTMLTextAreaElement>('textarea').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(join).toHaveBeenCalledTimes(1)
@@ -304,23 +301,23 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
-  it('keeps Meeting controls in an accessible overflow menu and shows the hosted recording outside it', () => {
+  it('keeps Meeting as a visible accessible button and shows the hosted recording beside it', () => {
     let recording: Record<string, unknown> | null = null
     const control = { canJoin: () => true, modes: () => ['call'], current: () => recording, join: vi.fn(), stop: vi.fn() }
     const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const band = meetingDock.bandFor(task())
     document.body.append(band.el)
     const foot = band.el.querySelector<HTMLElement>('.kbn-ctl-composer-foot')!
-    const menu = foot.querySelector<HTMLDetailsElement>('.kbn-ctl-meet-overflow')!
-    const more = menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')!
-    expect([...foot.children].map(child => child.className)).toEqual(['kbn-ctl-meet-overflow', 'kbn-ctl-btn kbn-ctl-meet-chip', 'kbn-ctl-btn kbn-detail-transcript-stop kbn-ctl-meet-stop', 'kbn-ctl-sends'])
-    expect(more.getAttribute('aria-label')).toBe('Meeting controls')
-    expect(menu.querySelector('.kbn-ctl-meet-switch input')).not.toBeNull()
-    more.click()
-    expect(menu.open).toBe(true)
-    expect(band.handleEscape()).toBe(true)
-    expect(menu.open).toBe(false)
-    expect(document.activeElement).toBe(more)
+    const arm = foot.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
+    expect([...foot.children].map(child => child.className)).toEqual(['kbn-ctl-btn kbn-ctl-meet-chip', 'kbn-ctl-btn kbn-detail-transcript-stop kbn-ctl-meet-stop', 'kbn-ctl-sends'])
+    const sends = foot.querySelector<HTMLElement>('.kbn-ctl-sends')!
+    expect(sends.firstElementChild).toBe(arm.closest('.kbn-ctl-meet'))
+    expect(sends.children[1]).toBe(sends.querySelector(':scope > .kbn-ctl-send:not(.kbn-ctl-resume)'))
+    expect(sends.children[2]).toBe(sends.querySelector(':scope > .kbn-ctl-resume'))
+    expect(arm.getAttribute('aria-label')).toBe('Meeting')
+    expect(arm.getAttribute('aria-pressed')).toBe('false')
+    expect(arm.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
+    expect(band.el.querySelector('.kbn-ctl-meet-overflow')).toBeNull()
 
     recording = { title: 'Night sky', state: 'live', fiber: 'a/task', tail: [] }
     meetingDock.syncMeeting()
@@ -329,10 +326,8 @@ describe('anchored pickers', () => {
     expect((chip as HTMLButtonElement).disabled).toBe(false)
     expect(chip.tagName).toBe('BUTTON')
     expect(chip.classList.contains('kbn-ctl-btn')).toBe(true)
-    expect(band.el.querySelector('.kbn-detail-transcript')?.closest('.kbn-ctl-meet-panel')).toBeNull()
+    expect(band.el.querySelector('.kbn-detail-transcript')?.closest('.kbn-ctl-composer')).toBeNull()
     expect(band.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')?.hidden).toBe(false)
-    menu.querySelector<HTMLElement>('.kbn-ctl-meet-more')?.click()
-    expect(menu.querySelector('.kbn-detail-transcript')).toBeNull()
     expect(band.el.querySelector('.ws-chat-compose .kbn-detail-transcript')).not.toBeNull()
     meetingDock.reset()
   })
@@ -412,8 +407,7 @@ describe('anchored pickers', () => {
     const meetingBand = meetingDock.bandFor(task({ id: 'roles/surveyor', uid: 'surveyor', sessionUuid: 'prior', status: 'open', shuttleSeat: true, shuttleRole: 'surveyor', effectiveHorizon: 'stashed' }))
     document.body.append(meetingBand.el)
     const q = <T extends HTMLElement>(selector: string): T => meetingBand.el.querySelector<T>(selector)!
-    q<HTMLElement>('.kbn-ctl-meet-more').click()
-    q<HTMLInputElement>('.kbn-ctl-meet-switch input').click()
+    q<HTMLButtonElement>('.kbn-ctl-meet-arm').click()
     const start = q<HTMLButtonElement>('.kbn-ctl-meet-primary')
     expect(start.textContent).toBe('Start meeting ↵')
     expect(q<HTMLButtonElement>('.kbn-ctl-resume').hidden).toBe(false)
@@ -422,8 +416,7 @@ describe('anchored pickers', () => {
     const liveDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
     const liveBand = liveDock.bandFor(task({ sessionUuid: 'running', workerState: { state: 'running' } as never }))
     document.body.append(liveBand.el)
-    liveBand.el.querySelector<HTMLElement>('.kbn-ctl-meet-more')!.click()
-    liveBand.el.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
+    liveBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
     expect(liveBand.el.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume):not(.kbn-ctl-meet-primary)')!.title).toContain('cutting the live worker')
     liveDock.reset()
     q<HTMLButtonElement>('.ws-header-session[aria-label="New session"]').click()

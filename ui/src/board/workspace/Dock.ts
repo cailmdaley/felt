@@ -471,7 +471,6 @@ export class Dock {
   private meetingGlobalStop: HTMLButtonElement | null = null
   private meetingPaneCollapsed = false
   private meetingPaneIdentity: string | null = null
-  private dismissMeetingOverflow: (() => boolean) | null = null
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
@@ -666,7 +665,6 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.constitutionButton = this.openConstitution = null
-    this.dismissMeetingOverflow = null
     this.transcriptPane = this.guidance = null
     this.meetingPaint = this.composerBusy = null
     this.meetingChip = null
@@ -726,7 +724,6 @@ export class Dock {
 
   handleEscape(): boolean {
     if (dismissSelectPicker()) return true
-    if (this.dismissMeetingOverflow?.()) return true
     if (this.transcriptBand?.closeFull()) return true
     if (this.dismissConversation?.() || this.dismissParent?.()) return true
     return this.drawerClose?.() ?? false
@@ -1336,6 +1333,7 @@ export class Dock {
     const fresh = ctlButton('', 'kbn-ctl-send')
     const resume = ctlButton('Resume', 'kbn-ctl-send kbn-ctl-resume')
     let meetingStartButton: HTMLButtonElement | undefined
+    let meetingControl: HTMLElement | undefined
     const sends = document.createElement('span')
     sends.className = 'kbn-ctl-sends'
     this.composerPaint = () => {
@@ -1361,8 +1359,9 @@ export class Dock {
         : resumable ? `Resume the previous session (⌥↵)${warmUntil === undefined ? '' : ` · cache warm until ${clockTime(warmUntil)}`}` : ''
       if (warmUntil === undefined) delete resume.dataset.cache; else resume.dataset.cache = 'warm'
       resume.hidden = false
-      const ordered = armed && meetingStartButton ? [meetingStartButton, ...(live ? [resume, fresh] : [fresh, resume])] : live ? [resume, fresh] : [fresh, resume]
-      if (ordered.some((button, index) => sends.children[index] !== button) || sends.children.length !== ordered.length) sends.replaceChildren(...ordered)
+      const ordered = live ? [resume, fresh] : [fresh, resume]
+      const controls = [...(meetingControl ? [meetingControl] : []), ...ordered]
+      if (controls.some((control, index) => sends.children[index] !== control) || sends.children.length !== controls.length) sends.replaceChildren(...controls)
       if (meetingStartButton) meetingStartButton.hidden = !armed
       box.classList.toggle('kbn-ctl-composer-meeting-armed', armed)
       // A live worker is resumed only to hand it a message; attaching to it
@@ -1441,20 +1440,9 @@ export class Dock {
       },
     }
 
-    // The footer keeps Meeting controls behind its own menu and both session
-    // actions visible beside it.
+    // Meeting arming and session actions stay visible together in the footer.
     const foot = document.createElement('div')
     foot.className = 'kbn-ctl-composer-foot'
-    const meetingOverflow = document.createElement('details')
-    meetingOverflow.className = 'kbn-ctl-meet-overflow'
-    meetingOverflow.hidden = !this.meeting
-    const more = document.createElement('summary')
-    more.className = 'kbn-ctl-meet-more'
-    more.textContent = '⋯'
-    more.setAttribute('aria-label', 'Meeting controls')
-    const meetingPanel = document.createElement('div')
-    meetingPanel.className = 'kbn-ctl-meet-panel'
-    meetingOverflow.append(more, meetingPanel)
     const meetChip = document.createElement('button')
     meetChip.type = 'button'
     meetChip.className = 'kbn-ctl-btn kbn-ctl-meet-chip'
@@ -1485,36 +1473,16 @@ export class Dock {
       void this.meeting?.stop?.(current)
     })
     this.meetingGlobalStop = meetingStop
-    const dismissMenu = (): boolean => {
-      if (!meetingOverflow.open) return false
-      meetingOverflow.open = false
-      more.focus({ preventScroll: true })
-      return true
-    }
-    const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !dismissMenu()) return
-      event.preventDefault()
-      event.stopPropagation()
-    }
-    this.dismissMeetingOverflow = dismissMenu
-    const closeOutside = (event: Event): void => {
-      if (meetingOverflow.open && event.target instanceof Node && !meetingOverflow.contains(event.target)) meetingOverflow.open = false
-    }
-    document.addEventListener('pointerdown', closeOutside)
-    meetingOverflow.addEventListener('keydown', closeOnEscape)
-    this.composerDisposers.push(() => {
-      document.removeEventListener('pointerdown', closeOutside)
-      meetingOverflow.removeEventListener('keydown', closeOnEscape)
-      if (this.dismissMeetingOverflow === dismissMenu) this.dismissMeetingOverflow = null
-    })
     const meeting = this.meeting ? this.buildMeeting(card, err, send, (armed, controls) => {
       if (!armed && meetingStartButton) controls.append(meetingStartButton)
       this.composerPaint?.()
       fit()
     }) : null
     meetingStartButton = meeting?.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start') ?? undefined
-    if (meeting) meetingPanel.append(meeting)
-    foot.append(meetingOverflow, meetChip, meetingStop, sends)
+    meetingControl = meeting ?? undefined
+    this.composerPaint()
+    foot.append(meetChip, meetingStop)
+    foot.append(sends)
 
     this.composerSend = send
     this.composerError = err
@@ -1593,33 +1561,40 @@ export class Dock {
   }
 
   /**
-   * Meeting, for this constitution: a switch in the composer's control row.
-   * Off by default. On, Enter and the primary composer button start recording on the
+   * Meeting, for this constitution: a button in the composer's control row.
+   * Off by default. Once armed, Enter and the primary composer button start recording on the
    * daemon — nothing records before that press; mobile opens this tab's mic in
    * the press's gesture and keeps its controls on the board. The composer's
    * message, with its images' lines, becomes the meeting's note, and the
    * worker — live or not — receives the meeting as a joined constitution.
    *
-   * One meeting records at a time. While any does, the switch stays in its
-   * place, off and inert, naming the recording on hover. The switch is also
+   * One meeting records at a time. While any does, the button stays in its
+   * place, off and inert, naming the recording on hover. The button is also
    * disabled when the device's required audio mode is unavailable.
    * It follows the board's meeting poll.
-   * `onArm` hears the switch so the primary composer button can name its action.
+   * `onArm` hears the button so the primary composer action can name its job.
    */
   private buildMeeting(card: KanbanCard, err: HTMLElement, send: ComposerSend, onArm: (armed: boolean, controls: HTMLElement) => void = () => {}): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'kbn-ctl-meet'
-    const toggle = document.createElement('label')
-    toggle.className = 'kbn-ctl-meet-switch'
-    const input = document.createElement('input')
-    input.type = 'checkbox'
-    input.setAttribute('role', 'switch')
-    const track = document.createElement('span')
-    track.className = 'kbn-ctl-meet-track'
-    track.setAttribute('aria-hidden', 'true')
+    const armButton = ctlButton('Meeting', 'kbn-ctl-meet-arm')
+    armButton.setAttribute('aria-label', 'Meeting')
+    armButton.setAttribute('aria-pressed', 'false')
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    icon.setAttribute('viewBox', '0 0 16 16')
+    icon.setAttribute('aria-hidden', 'true')
+    icon.setAttribute('focusable', 'false')
+    const glyph = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+    glyph.setAttribute('d', 'M8 1.5a2 2 0 0 0-2 2v4.25a2 2 0 0 0 4 0V3.5a2 2 0 0 0-2-2ZM3.5 7.75a4.5 4.5 0 0 0 9 0M8 12.25v2.25M5.5 14.5h5')
+    glyph.setAttribute('fill', 'none')
+    glyph.setAttribute('stroke', 'currentColor')
+    glyph.setAttribute('stroke-width', '1.35')
+    glyph.setAttribute('stroke-linecap', 'round')
+    icon.append(glyph)
     const word = document.createElement('span')
+    word.className = 'kbn-ctl-meet-label'
     word.textContent = 'Meeting'
-    toggle.append(input, track, word)
+    armButton.replaceChildren(icon, word)
     const requiredMode = (): MeetingMode => isMobileViewport() ? 'phone' : 'call'
     const canJoin = (): boolean => !!this.meeting?.canJoin() && this.meeting.modes().includes(requiredMode())
     const startButton = ctlButton('Start meeting', 'kbn-ctl-send kbn-ctl-meet-start kbn-ctl-meet-primary')
@@ -1628,13 +1603,13 @@ export class Dock {
     let armed = false
     const arm = (on: boolean): void => {
       armed = on
-      input.checked = on
-      wrap.classList.toggle('kbn-ctl-meet-on', on)
+      armButton.setAttribute('aria-pressed', String(on))
+      armButton.classList.toggle('kbn-ctl-meet-on', on)
       startButton.hidden = !on
       onArm(on, wrap)
     }
     arm(false)
-    input.addEventListener('change', () => arm(input.checked))
+    armButton.addEventListener('click', () => arm(!armed))
     this.meetingArmed = () => armed
 
 
@@ -1646,16 +1621,18 @@ export class Dock {
       if (word.textContent !== label) word.textContent = label
       const current = control.current()
       const recording = current !== null && current.state !== 'failed'
-      const held = starting || send.busy() || !canJoin()
-      input.disabled = held
+      const held = starting || send.busy() || recording || !canJoin()
+      armButton.disabled = held
       startButton.disabled = held
-      toggle.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : ''
-      if (!canJoin() && input.checked && !starting) arm(false)
+      armButton.title = recording ? `Recording: ${current.title?.trim() || 'a meeting'}` : armed ? 'Meeting armed; Enter starts recording' : 'Arm a meeting'
+      if (recording) armButton.setAttribute('aria-label', `Meeting recording: ${current.title?.trim() || 'a meeting'}`)
+      else armButton.setAttribute('aria-label', 'Meeting')
+      if ((recording || !canJoin()) && armed && !starting) arm(false)
     }
     this.meetingPaint = paint
 
     const start = (): void => {
-      if (!input.checked || starting || send.busy() || !canJoin()) return
+      if (!armed || starting || send.busy() || !canJoin()) return
       starting = true
       send.setBusy(true)
       this.paintLabel(startButton, 'Starting…')
@@ -1691,7 +1668,7 @@ export class Dock {
     }
     this.meetingStart = start
     startButton.addEventListener('click', e => { e.stopPropagation(); start() })
-    wrap.append(toggle, startButton)
+    wrap.append(armButton, startButton)
     paint()
     return wrap
   }

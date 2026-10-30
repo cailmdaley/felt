@@ -278,7 +278,7 @@ describe('the composer takes pasted images', () => {
     paste(textarea(), [png('one.png')])
     resume().click()
 
-    const opener = composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
+    const opener = composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
     expect(fresh().disabled).toBe(true)
     expect(opener.disabled).toBe(true)
     expect(composer.querySelector<HTMLButtonElement>('.kbn-ctl-image-remove')!.disabled).toBe(true)
@@ -310,7 +310,7 @@ describe('the composer takes pasted images', () => {
     fetch.mockReturnValueOnce(upload.promise)
     textarea().value = 'first thought'
     paste(textarea(), [png('one.png')])
-    composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.click()
+    composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.click()
     composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
 
     textarea().value = 'first thought, and a second'
@@ -332,8 +332,8 @@ describe('the composer takes pasted images', () => {
     }
     mount({ meeting })
     const start = (): void => {
-      const meetingSwitch = composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!
-      if (!meetingSwitch.checked) meetingSwitch.click()
+      const meetingArm = composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!
+      if (meetingArm.getAttribute('aria-pressed') !== 'true') meetingArm.click()
       composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-start')!.click()
     }
     fetch.mockResolvedValue(uploaded('/srv/a.png'))
@@ -341,7 +341,7 @@ describe('the composer takes pasted images', () => {
     paste(textarea(), [png('one.png')])
 
     start()
-    await vi.waitFor(() => expect(composer.querySelector<HTMLInputElement>('.kbn-ctl-meet-switch input')!.disabled).toBe(false))
+    await vi.waitFor(() => expect(composer.querySelector<HTMLButtonElement>('.kbn-ctl-meet-arm')!.disabled).toBe(false))
     expect(chips()).toHaveLength(1)
     expect(textarea().value).toBe('note')
 

@@ -265,17 +265,20 @@ try {
   assert.ok(await page.getByText('reshape refused').isVisible(), 'the refusal is shown')
   await page.evaluate(() => window.restoreFetch())
 
-  // Meeting arms a single Start verb; desktop records call audio only.
+  // The visible Meeting button arms a single Start verb; desktop records call audio only.
   await page.evaluate(() => { window.settingWrites = [] })
   const message = page.getByRole('textbox', { name: 'Message for the next worker', exact: true })
-  const meeting = dock.getByRole('switch', { name: /Meeting/ })
-  await meeting.check()
+  const meeting = dock.locator('.kbn-ctl-meet-arm')
+  assert.equal(await meeting.getAttribute('aria-label'), 'Meeting')
+  await meeting.click()
+  assert.equal(await meeting.getAttribute('aria-pressed'), 'true')
   assert.equal(await dock.locator('.kbn-ctl-meet [role="radio"]').count(), 0, 'Meeting has no mode picker')
   assert.equal((await page.evaluate(() => window.settingWrites)).length, 0, 'arming Meeting starts nothing')
-  await meeting.uncheck()
+  await meeting.click()
+  assert.equal(await meeting.getAttribute('aria-pressed'), 'false')
   assert.equal(await dock.getByRole('button', { name: 'Start meeting', exact: true }).isVisible(), false)
   await message.fill('null tests review')
-  await meeting.check()
+  await meeting.click()
   await dock.getByRole('button', { name: 'Start meeting', exact: true }).click()
   await page.waitForFunction(() => window.settingWrites.some(write => write.url.endsWith('/api/v1/meeting/join')))
   const joins = (await page.evaluate(() => window.settingWrites)).filter(write => write.url.endsWith('/api/v1/meeting/join'))
@@ -283,7 +286,7 @@ try {
   assert.deepEqual({ mode: joins[0].body.meeting.mode, note: joins[0].body.note }, { mode: 'call', note: 'null tests review' })
   assert.equal(await message.inputValue(), '', 'the note is spent once the meeting starts')
   assert.ok(await meeting.isVisible() && await meeting.isDisabled(), 'while a meeting records, Meeting stays in place, inert')
-  assert.match(await dock.locator('.kbn-ctl-meet-switch').getAttribute('title'), /^Recording: /)
+  assert.match(await dock.locator('.kbn-ctl-meet-arm').getAttribute('title'), /^Recording: /)
 
   // Resume carries the message exactly as written.
   await page.evaluate(() => { window.settingWrites = [] })
@@ -412,7 +415,7 @@ try {
   assert.deepEqual(touchErrors, [])
   await touch.close()
 
-  console.log('Capture/Stash/session choices, phone submit, live settings without dispatch, inline fiber controls, history fold and session actions, phone reader scrolling, Standing confirmation, parent Escape, kind rollback, due-follows-kind, meeting menu, Resume and Discard passed')
+  console.log('Capture/Stash/session choices, phone submit, live settings without dispatch, inline fiber controls, history fold and session actions, phone reader scrolling, Standing confirmation, parent Escape, kind rollback, due-follows-kind, visible Meeting action, Resume and Discard passed')
 } finally {
   await browser.close()
 }
