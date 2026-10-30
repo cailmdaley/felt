@@ -80,14 +80,18 @@ A failed authority write aborts the transition instead of reporting success.
 ## Stores and views
 
 Fiber documents synchronize through ordinary Git. Workers use `felt sync`
-before substantive work, edit locally, and publish committed changes with
-`felt sync --push`. A worker resolves relevant conflicts with the work's
+before substantive work and publish committed changes with
+`felt sync --push`. The syncing agent first commits the store's dirty fiber
+changes, whoever wrote them, including daemon lifecycle writes. Mixed commits
+are fine. A worker resolves relevant conflicts with the work's
 context. Role charters under `roles/<role>/` have intrinsic IDs and no host
 owner. A task's optional `shuttle.role` names one role charter; `shuttle.seat`
 marks whether the constitution is a seat of that office.
 Synchronizing a constitution does not change its `shuttle.host` dispatch gate.
 Armed cross-host creation writes through the owner daemon; dispatch never depends on archive synchronization.
 The daemon never runs Git or `felt sync`, and a missing document returns not-found naming its host and identifier.
+Remote-owned live state comes from the owner daemon. An unreachable-owner
+fallback to an archive copy is explicitly marked stale.
 Host-addressed board requests use the daemon's routing for that host's
 current content, artifacts, and execution controls.
 

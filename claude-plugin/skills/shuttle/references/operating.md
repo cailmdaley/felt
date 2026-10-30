@@ -153,6 +153,13 @@ See [setup.md](setup.md) and the public [remote setup guide](https://cailmdaley.
 From a hub, `shuttle reopen <fiber> --message "<directive>"` starts a worker on the fiber's own host, with the directive as its From User; the other lifecycle verbs reach remote fibers the same way.
 
 Cards from a remote host reach the hub's board over this transport, not through git.
+
+Remote-owned live state in `shuttle threads` and `shuttle status` comes from
+the owner daemon. If that owner is unreachable, an archive fallback is marked
+stale; it is not evidence of the owner's current armed, closed or rested state.
+The syncing agent commits all dirty fiber changes in the store, including
+daemon lifecycle writes, before `felt sync`; mixed commits are fine. The daemon
+never commits.
 If a remote card is missing, debug the tunnel and the store registration; pushing the store won't make it appear.
 
 ## When a card is missing

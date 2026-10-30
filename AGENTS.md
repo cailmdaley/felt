@@ -21,13 +21,15 @@ felt owns fiber storage and generic frontmatter. shuttle owns the network and
 orchestration; the daemon is the production dispatcher.
 
 **Fibers are ordinary Git-synchronized documents; execution is host-owned.**
-Run `felt sync` before substantive work, read and edit the local store, then
-commit intentional changes and publish with `felt sync --push`. Resolve Git
+Before `felt sync`, agents commit the store's dirty fiber changes, including
+other sessions' edits and daemon lifecycle writes; mixed commits are fine.
+Sync before substantive work and publish with `felt sync --push`. Resolve Git
 conflicts with the work's context. Role charters live under `roles/`
 and have no host owner. A constitution's `shuttle.host` selects the daemon
 allowed to execute it; synchronizing its file does not transfer execution.
 Armed cross-host creation and control use the owner daemon's existing APIs; the owner writes its store directly, independently of Git archive state.
 The daemon never runs Git or `felt sync`; a missing document returns not-found with its host and identifier.
+Remote-owned live state comes from the owner daemon; an unreachable-owner fallback to an archive copy is explicitly marked stale.
 The live board uses those same owner-routed APIs for host-local content and control.
 
 ## Where everything else lives
