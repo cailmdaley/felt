@@ -41,8 +41,9 @@ const target = (session: string, patch: Partial<TranscriptTarget> = {}): Transcr
 const fixtureFetch = (itemsBySession: Record<string, unknown[]>, requests: string[] = []): typeof fetch =>
   vi.fn<typeof fetch>(async (input) => {
     const url = String(input)
-    requests.push(url)
     const parsed = new URL(url)
+    if (parsed.pathname.endsWith('/messages')) return Response.json({ messages: [], cursor: '0' })
+    requests.push(url)
     const bytes = encoded(itemsBySession[parsed.searchParams.get('session') ?? ''] ?? [])
     const offset = Number(parsed.searchParams.get('offset') ?? 0)
     return new Response(bytes.slice(offset), {
@@ -57,6 +58,7 @@ const sessionAndFilesFetch = (
   requests: string[] = [],
 ): typeof fetch => vi.fn<typeof fetch>(async (input) => {
   const url = new URL(String(input))
+  if (url.pathname.endsWith('/messages')) return Response.json({ messages: [], cursor: '0' })
   requests.push(url.toString())
   if (url.pathname.endsWith('/sent-files/session')) {
     return new Response(JSON.stringify({ files: files() }), { headers: { ETag: `"files-${files().length}"` } })
@@ -78,6 +80,7 @@ const streamFixture = () => {
   let files: unknown[] = []
   const fetcher = vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(String(input))
+    if (url.pathname.endsWith('/messages')) return Response.json({ messages: [], cursor: '0' })
     requests.push(url.toString())
     if (url.pathname.endsWith('/sent-files/session')) return new Response(JSON.stringify({ files }))
     if (url.pathname.endsWith('/transcript/stream')) {
@@ -669,7 +672,8 @@ describe('TranscriptBand', () => {
   it('shows stopped-session warmth and context, and expires while folded without polling', async () => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
     vi.setSystemTime(new Date('2026-10-09T13:52:00Z'))
-    const fetcher = fixtureFetch({ [latestId]: [captured(claudeUsage)[0]] })
+    const requests: string[] = []
+    const fetcher = fixtureFetch({ [latestId]: [captured(claudeUsage)[0]] }, requests)
     const band = makeBand(fetcher)
     band.follow(target(latestId))
     await settle()
@@ -698,7 +702,7 @@ describe('TranscriptBand', () => {
     expect(cache.title).toMatch(/^Cache cold since \d\d:\d\d/)
     expect(cache.dataset.cache).toBe('cold')
     expect(cache.style.getPropertyValue('--ws-cache-left')).toBe('0')
-    expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(requests).toHaveLength(1)
   })
 
   it('tells its owner when the facts change and says how long the shown session\'s cache stays warm', async () => {
@@ -834,7 +838,7 @@ describe('TranscriptBand', () => {
     band.follow(target(latestId))
     await settle()
 
-    expect(requests[0]).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
+    expect(requests.find(url => url.includes('/api/v1/transcript/raw?'))).toContain(`/api/v1/transcript/raw?session=${latestId}&offset=0&host=candide`)
     expect(band.el.hidden).toBe(false)
     const content = document.createElement('div')
     content.className = 'ws-content'

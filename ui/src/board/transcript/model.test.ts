@@ -45,6 +45,36 @@ function modelAfterBash(command: string, output: string, isError = false): Trans
 }
 
 describe('TranscriptModel', () => {
+  it('replaces one late-attributed native record in place without duplicating an already-seen message id', () => {
+    const model = new TranscriptModel()
+    model.append([
+      { kind: 'prompt', text: 'Keep reading', images: 0, dispatch: false },
+      { kind: 'event', label: 'Context', text: '[Shuttle message m-1]', sourceRecord: 7 },
+      { kind: 'text', text: 'Later text.' },
+    ])
+    expect(model.replaceRecord(7, [{ kind: 'shuttle-message', id: 'm-1', direction: 'received', peer: 'shuttle', text: 'Delivery', sourceRecord: 7 }])).toBe(0)
+    expect(model.turns[0].steps.map(step => step.kind)).toEqual(['shuttle-message', 'text'])
+    expect(model.replaceRecord(7, [{ kind: 'shuttle-message', id: 'm-1', direction: 'received', peer: 'shuttle', text: 'Delivery', sourceRecord: 7 }])).toBe(0)
+    expect(model.turns[0].steps.map(step => step.kind)).toEqual(['shuttle-message', 'text'])
+  })
+
+  it('keeps a late message replacement anchored after sent-file rows are inserted', () => {
+    const model = new TranscriptModel()
+    model.append([
+      { kind: 'prompt', text: 'Keep reading', images: 0, dispatch: false, at: 1 },
+      { kind: 'event', label: 'Context', text: '[Shuttle message m-2]', at: 2, sourceRecord: 8 },
+      { kind: 'text', text: 'Later text.', at: 4 },
+    ])
+    model.setSentFiles([{
+      kind: 'sent-file', id: 'receipt', sessionId: 'session', at: 3, timestamp: 3,
+      files: [{ fullPath: '/tmp/receipt.png', basename: 'receipt.png', timestamp: 3, sessionId: 'session' }],
+    }])
+    expect(model.turns[0].steps.map(step => step.kind)).toEqual(['event', 'sent-file', 'text'])
+    expect(model.replaceRecord(8, [{ kind: 'shuttle-message', id: 'm-2', direction: 'received', peer: 'shuttle', text: 'Delivery', at: 2, sourceRecord: 8 }])).toBe(0)
+    expect(model.turns[0].steps.map(step => step.kind)).toEqual(['shuttle-message', 'sent-file', 'text'])
+    expect(model.turns[0].steps[1]).toMatchObject({ kind: 'sent-file', id: 'receipt' })
+  })
+
   it('does not treat prose about a process exit as structured exit status', () => {
     const model = new TranscriptModel()
     model.append(normalizeRecord({ type: 'response_item', payload: {

@@ -109,6 +109,7 @@ export class TranscriptModel {
   private readonly tools = new Map<string, ToolReference>()
   private readonly messages = new Set<string>()
   private readonly messagesByTool = new Map<string, MessageReference[]>()
+  private readonly sourceRecords = new Map<number, { turn: Turn; start: number; count: number; entries: Entry[] }>()
   private sentFiles = new Map<string, SentFileNotice>()
   private readonly dirty = new Set<number>()
   private resetRequested = false
@@ -285,7 +286,17 @@ export class TranscriptModel {
         turn.steps.push(step)
         this.tools.set(entry.id, { turn, step })
       } else {
+        const stepIndex = turn.steps.length
         turn.steps.push(entry)
+        if (entry.sourceRecord !== undefined) {
+          const source = this.sourceRecords.get(entry.sourceRecord)
+          if (source && source.turn === turn && source.start + source.count === stepIndex) {
+            source.count++
+            source.entries.push(entry)
+          } else {
+            this.sourceRecords.set(entry.sourceRecord, { turn, start: stepIndex, count: 1, entries: [entry] })
+          }
+        }
         if (entry.kind === 'text') turn.answer = turn.steps.length - 1
         if (entry.kind === 'shuttle-message' && entry.direction === 'sent' && entry.toolId) {
           this.messagesByTool.set(entry.toolId, [...(this.messagesByTool.get(entry.toolId) ?? []), { message: entry, turn }])
@@ -294,6 +305,33 @@ export class TranscriptModel {
       updateTimes(turn, entry.at)
       this.touch(turn)
     }
+  }
+
+  /** Replace the normalized steps produced by one native transcript record. */
+  replaceRecord(sourceRecord: number, entries: readonly Entry[]): number | undefined {
+    const source = this.sourceRecords.get(sourceRecord)
+    if (!source) return undefined
+    const start = source.entries.length ? source.turn.steps.indexOf(source.entries[0] as Step) : source.start
+    if (start < 0) return undefined
+    if (source.entries.some((entry, index) => source.turn.steps[start + index] !== entry)) return undefined
+    for (const entry of source.entries) if (entry.kind === 'shuttle-message') this.messages.delete(entry.id)
+    const replacement = entries.filter((entry): entry is Exclude<Entry, { kind: 'prompt' | 'usage' | 'tool' | 'result' }> =>
+      entry.kind !== 'prompt' && entry.kind !== 'usage' && entry.kind !== 'tool' && entry.kind !== 'result')
+      .filter(entry => entry.kind !== 'shuttle-message' || !this.messages.has(entry.id))
+    for (const entry of replacement) if (entry.kind === 'shuttle-message') this.messages.add(entry.id)
+    const end = start + source.count
+    if (source.turn.answer >= end) source.turn.answer += replacement.length - source.count
+    else if (source.turn.answer >= start) source.turn.answer = -1
+    source.turn.steps.splice(start, source.count, ...replacement)
+    const delta = replacement.length - source.count
+    for (const [key, span] of this.sourceRecords) {
+      if (key !== sourceRecord && span.turn === source.turn && span.start > start) span.start += delta
+    }
+    source.start = start
+    source.count = replacement.length
+    source.entries = [...replacement]
+    this.touch(source.turn)
+    return source.turn.index
   }
 
   /** Return the turns whose views changed since the last read. */
@@ -309,6 +347,7 @@ export class TranscriptModel {
     this.tools.clear()
     this.messages.clear()
     this.messagesByTool.clear()
+    this.sourceRecords.clear()
     this.sentFiles.clear()
     this.dirty.clear()
     this.resetRequested = true

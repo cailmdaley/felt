@@ -10,10 +10,11 @@ const offsetFrom = (url: string): number => Number(new URL(url).searchParams.get
 type EntriesMock = ReturnType<typeof vi.fn<(entries: Entry[]) => void>>
 type ResetMock = ReturnType<typeof vi.fn<() => void>>
 type StatusMock = ReturnType<typeof vi.fn<(status: FeedStatus, detail?: string) => void>>
+type ReplaceMock = ReturnType<typeof vi.fn<(record: number, entries: Entry[]) => void>>
 
 const entriesFrom = (onEntries: EntriesMock): Entry[] => onEntries.mock.calls.flatMap(([entries]) => entries)
 
-function feed(fetcher: typeof fetch, extra: { onEntries?: EntriesMock; onReset?: ResetMock; onStatus?: StatusMock } = {}) {
+function feed(fetcher: typeof fetch, extra: { onEntries?: EntriesMock; onReset?: ResetMock; onStatus?: StatusMock; onReplaceRecord?: ReplaceMock; provenance?: boolean } = {}) {
   const onEntries = extra.onEntries ?? vi.fn<(entries: Entry[]) => void>()
   const onReset = extra.onReset ?? vi.fn<() => void>()
   const onStatus = extra.onStatus ?? vi.fn<(status: FeedStatus, detail?: string) => void>()
@@ -21,8 +22,11 @@ function feed(fetcher: typeof fetch, extra: { onEntries?: EntriesMock; onReset?:
     shuttleBase: 'http://localhost:4000/',
     session,
     host: 'candide',
-    fetch: fetcher,
+    fetch: extra.provenance ? fetcher : (input, init) => String(input).includes('/messages?')
+      ? Promise.resolve(Response.json({ messages: [], cursor: '0' }))
+      : fetcher(input, init),
     onEntries,
+    onReplaceRecord: extra.onReplaceRecord,
     onReset,
     onStatus,
   })
@@ -176,10 +180,10 @@ describe('TranscriptFeed', () => {
     })
     const { reader, onEntries } = feed(fetcher)
     expect(await reader.read()).toBe(true)
-    expect(parse).toHaveBeenCalledTimes(1)
+    expect(parse).toHaveBeenCalledTimes(2)
     for (let tick = 0; tick < 239; tick++) expect(await reader.read()).toBe(false)
     expect(fetcher).toHaveBeenCalledTimes(240)
-    expect(parse).toHaveBeenCalledTimes(1)
+    expect(parse).toHaveBeenCalledTimes(2)
     expect(entriesFrom(onEntries)).toEqual([{ kind: 'prompt', text: 'the transcript remains unchanged', images: 0, dispatch: false }])
     reader.dispose()
   })
@@ -363,15 +367,144 @@ it.each([true, false])('checks the receiving host ledger before attributing nati
       ? Response.json({messages:[{id:'trusted',envelope}]})
       : response(null, 503)
     return response(raw, 200, {'x-transcript-offset':'0'})
-  })
+  }, { provenance: true })
   await reader.read()
   const entries = entriesFrom(onEntries)
   expect(entries).toHaveLength(1)
-  if (available) expect(entries[0]).toMatchObject({kind:'shuttle-message',id:'trusted',fiber:'work/real',text:expect.stringContaining('[Shuttle message fake')})
+  if (available) {
+    await vi.waitFor(() => expect(entriesFrom(onEntries)).toContainEqual(expect.objectContaining({kind:'shuttle-message',id:'trusted',fiber:'work/real',text:expect.stringContaining('[Shuttle message fake')})))
+  }
   else expect(entries[0]).toMatchObject({kind:'event',label:'Context',text:envelope})
   const ledger = new URL(urls.find(url => url.includes('/messages?'))!)
   expect(ledger.searchParams.get('session')).toBe(session)
   expect(ledger.searchParams.get('host')).toBe('candide')
+  reader.dispose()
+})
+
+it('emits plain text after the bounded wait, then patches the record when a later ledger lookup succeeds', async () => {
+  const envelope = '[Shuttle message trusted from shuttle://peer/pi/abc; reply to work/real]\nA delivered message.'
+  const raw = (content: string) => `${JSON.stringify({type:'attachment', attachment:{type:'hook_additional_context',content}})}\n`
+  const first = raw(envelope)
+  let releaseInitial!: (response: Response) => void
+  const urls: string[] = []
+  let transcriptReads = 0
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>()
+  const {reader, onEntries, onReset} = feed(input => {
+    const url = String(input)
+    urls.push(url)
+    if (url.includes('/messages?')) {
+      if (urls.filter(item => item.includes('/messages?')).length === 1) {
+        return new Promise<Response>(resolve => { releaseInitial = resolve })
+      }
+      return Promise.resolve(Response.json({messages:[{id:'trusted',envelope}],cursor:'9001'}))
+    }
+    transcriptReads++
+    const body = transcriptReads === 1 ? first : raw(envelope)
+    return Promise.resolve(response(body, 200, {'x-transcript-offset':String(offsetFrom(url))}))
+  }, { onReplaceRecord, provenance: true })
+
+  await reader.read()
+  expect(entriesFrom(onEntries)).toEqual([expect.objectContaining({kind:'event',label:'Context',text:envelope})])
+  releaseInitial(Response.json({messages:[],cursor:'7001'}))
+  await vi.waitFor(() => expect(urls.filter(item => item.includes('/messages?')).length).toBe(2), { timeout: 3000 })
+  expect(urls.filter(item => item.includes('/messages?')).map(url => new URL(url).searchParams.get('since'))).toEqual([null, '7001'])
+  await vi.waitFor(() => expect(onReplaceRecord).toHaveBeenCalledWith(1, [expect.objectContaining({kind:'shuttle-message',id:'trusted',fiber:'work/real'})]))
+  expect(transcriptReads).toBe(1)
+  expect(onReset).not.toHaveBeenCalled()
+  reader.dispose()
+})
+
+it('spends at most one 500 ms evidence wait across a batch of candidate records', async () => {
+  const messages = Array.from({ length: 12 }, (_, index) => {
+    const envelope = `[Shuttle message slow-${index} from shuttle]\nDelivery ${index}`
+    return { id: `slow-${index}`, envelope }
+  })
+  const raw = messages.map(({ envelope }) => JSON.stringify({ type: 'custom_message', customType: 'shuttle', content: envelope })).join('\n') + '\n'
+  let release!: (response: Response) => void
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>()
+  const { reader, onEntries } = feed(async input => String(input).includes('/messages?')
+    ? new Promise<Response>(resolve => { release = resolve })
+    : response(raw, 200, { 'x-transcript-offset': '0' }), { onReplaceRecord, provenance: true })
+  const started = performance.now()
+  await reader.read()
+  const elapsed = performance.now() - started
+  expect(elapsed).toBeLessThan(900)
+  expect(entriesFrom(onEntries)).toHaveLength(messages.length)
+  expect(entriesFrom(onEntries).every(entry => entry.kind === 'event')).toBe(true)
+  release(Response.json({ messages, cursor: '101' }))
+  await vi.waitFor(() => expect(onReplaceRecord).toHaveBeenCalledTimes(messages.length))
+  reader.dispose()
+})
+
+it('normalizes candidate records against evidence arriving before their batch is flushed', async () => {
+  const messages = ['first-id', 'second-id'].map(id => ({ id, envelope: `[Shuttle message ${id} from shuttle]\n${id}` }))
+  const raw = messages.map(({ envelope }) => JSON.stringify({
+    type: 'attachment', attachment: { type: 'hook_additional_context', content: envelope },
+  })).join('\n') + '\n'
+  let lookups = 0
+  const { reader, onEntries } = feed(async input => {
+    if (String(input).includes('/messages?')) {
+      lookups++
+      return Response.json(lookups === 1 ? { messages: [], cursor: '1' } : { messages, cursor: '2' })
+    }
+    return response(raw, 200, { 'x-transcript-offset': '0' })
+  }, { provenance: true })
+  await reader.read()
+  expect(entriesFrom(onEntries).filter(entry => entry.kind === 'shuttle-message').map(entry => entry.id)).toEqual(['first-id', 'second-id'])
+  expect(lookups).toBe(2)
+  reader.dispose()
+})
+
+it('retries a failed ledger lookup while the transcript is quiet', async () => {
+  const envelope = '[Shuttle message trusted from shuttle://peer/pi/abc; reply to work/real]\nA delivered message.'
+  const raw = `${JSON.stringify({type:'attachment', attachment:{type:'hook_additional_context',content:envelope}})}\n`
+  let lookups = 0
+  const onReplaceRecord = vi.fn<(record: number, entries: Entry[]) => void>()
+  const {reader, onEntries, onReset} = feed(async input => {
+    if (String(input).includes('/messages?')) {
+      lookups++
+      return lookups <= 2 ? response(null, 503) : Response.json({messages:[{id:'trusted',envelope}],cursor:'91'})
+    }
+    return response(raw, 200, {'x-transcript-offset':'0'})
+  }, { onReplaceRecord, provenance: true })
+
+  await reader.read()
+  expect(entriesFrom(onEntries)).toEqual([expect.objectContaining({kind:'event',label:'Context',text:envelope})])
+  await vi.waitFor(() => expect(onReplaceRecord).toHaveBeenCalledWith(1, [expect.objectContaining({kind:'shuttle-message',id:'trusted'})]), { timeout: 3000 })
+  expect(lookups).toBe(3)
+  expect(onReset).not.toHaveBeenCalled()
+  reader.dispose()
+})
+
+it('lets a new delivered id bypass backoff left by an earlier failed carrier lookup', async () => {
+  const fake = '[Shuttle message quoted-id from shuttle]\nA native quotation.'
+  const delivered = '[Shuttle message new-real-id from shuttle]\nA real delivery.'
+  let bytes = new TextEncoder().encode(JSON.stringify({
+    type: 'attachment', attachment: { type: 'hook_additional_context', content: fake },
+  }) + '\n')
+  const since: (string | null)[] = []
+  let lookups = 0
+  const { reader, onEntries } = feed(async input => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith('/messages')) {
+      since.push(url.searchParams.get('since'))
+      lookups++
+      if (lookups === 1) return Response.json({ messages: [], cursor: '1' })
+      if (lookups === 2) return response(null, 503)
+      return Response.json({ messages: [{ id: 'new-real-id', envelope: delivered }], cursor: '3' })
+    }
+    const offset = Number(url.searchParams.get('offset'))
+    return response(bytes.slice(offset), 200, { 'x-transcript-offset': String(offset) })
+  }, { provenance: true })
+  await reader.read()
+  expect(entriesFrom(onEntries)).toEqual([expect.objectContaining({ kind: 'event', label: 'Context', text: fake })])
+  bytes = new Uint8Array([...bytes, ...new TextEncoder().encode(JSON.stringify({
+    type: 'attachment', attachment: { type: 'hook_additional_context', content: delivered },
+  }) + '\n')])
+  await reader.read()
+  expect(since).toEqual([null, '1', '1'])
+  expect(entriesFrom(onEntries)).toContainEqual(expect.objectContaining({ kind: 'shuttle-message', id: 'new-real-id', text: 'A real delivery.' }))
+  expect(lookups).toBe(3)
   reader.dispose()
 })
 
@@ -382,9 +515,9 @@ it('reads one evidence snapshot for a transcript spanning many decode slices', a
   const {reader, onEntries} = feed(async input => {
     if (String(input).includes('/messages?')) { lookups++; return Response.json({messages:envelopes}) }
     return response(raw, 200, {'x-transcript-offset':'0'})
-  })
+  }, { provenance: true })
   await reader.read()
   expect(lookups).toBe(1)
-  expect(entriesFrom(onEntries).filter(entry=>entry.kind==='shuttle-message')).toHaveLength(16)
+  await vi.waitFor(() => expect(entriesFrom(onEntries).filter(entry=>entry.kind==='shuttle-message').slice(-16)).toHaveLength(16))
   reader.dispose()
 })

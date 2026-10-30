@@ -11,17 +11,50 @@ export interface TranscriptFeedOptions {
   host?: string
   fetch?: typeof fetch
   onEntries(entries: Entry[]): void
+  onReplaceRecord?(record: number, entries: Entry[]): void
   onReset(): void
   onStatus(status: FeedStatus, detail?: string): void
 }
 
 const DECODE_CHUNK_BYTES = 64 * 1024
 const TIME_SLICE_MS = 8
-
-type EvidenceSnapshot = { value?: Promise<MessageProvenance[]> }
+type EvidenceSnapshot = { value?: Promise<void>; deadline?: Promise<void>; deadlineAt?: number }
+type CandidateRecord = { record: number; value: unknown; entries: Entry[]; emitted: boolean }
+const PROVENANCE_WAIT_MS = 500
 
 function now(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function carrierText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return ''
+  return value.map(part => typeof part === 'string' ? part : typeof object(part)?.text === 'string' ? object(part)!.text as string : '').filter(Boolean).join('\n')
+}
+
+function candidateMessageText(record: unknown): string {
+  const value = object(record)
+  const attachment = object(value?.attachment)
+  const origin = object(attachment?.origin)
+  if (value?.type === 'attachment' && attachment?.type === 'hook_additional_context') {
+    return carrierText(attachment.content)
+  }
+  if (value?.type === 'attachment' && attachment?.type === 'queued_command'
+      && (attachment.isMeta === true || origin?.kind === 'peer')) {
+    return carrierText(attachment.prompt)
+  }
+  if (value?.type === 'user' && value.isMeta === true) {
+    const message = object(value.message)
+    return carrierText(message?.content)
+  }
+  if (value?.type === 'custom_message' && value.customType === 'shuttle') {
+    return carrierText(value.content)
+  }
+  return ''
 }
 
 /** Incrementally reads and decodes a native JSONL transcript by byte offset. */
@@ -31,6 +64,7 @@ export class TranscriptFeed {
   private readonly host?: string
   private readonly fetcher: typeof fetch
   private readonly onEntries: (entries: Entry[]) => void
+  private readonly onReplaceRecord?: (record: number, entries: Entry[]) => void
   private readonly onReset: () => void
   private readonly onStatus: (status: FeedStatus, detail?: string) => void
   private offset = 0
@@ -42,6 +76,17 @@ export class TranscriptFeed {
   private epoch = 0
   private started = false
   private disposed = false
+  private provenance = new Map<string, MessageProvenance>()
+  private provenanceCursor: string | null = null
+  private provenanceRequest: Promise<void> | null = null
+  private provenancePrefetched = false
+  private provenanceRetryTimer: ReturnType<typeof setTimeout> | null = null
+  private provenanceRetryDelay = 500
+  private provenanceCandidates = new Set<string>()
+  private provenanceGeneration = 0
+  private candidateRecords = new Map<number, CandidateRecord>()
+  private nextCandidateRecord = 0
+  private provenanceNeeded = false
 
   constructor(opts: TranscriptFeedOptions) {
     this.shuttleBase = opts.shuttleBase.replace(/\/$/, '')
@@ -49,6 +94,7 @@ export class TranscriptFeed {
     this.host = opts.host
     this.fetcher = opts.fetch ?? ((input, init) => fetch(input, init))
     this.onEntries = opts.onEntries
+    this.onReplaceRecord = opts.onReplaceRecord
     this.onReset = opts.onReset
     this.onStatus = opts.onStatus
   }
@@ -61,6 +107,10 @@ export class TranscriptFeed {
       this.started = true
       this.onStatus('loading')
     }
+    if (!this.provenancePrefetched) {
+      this.provenancePrefetched = true
+      void this.ensureProvenance(true)
+    } else if (this.provenanceNeeded) void this.ensureProvenance()
 
     const epoch = this.epoch
     let shared!: Promise<boolean>
@@ -72,7 +122,12 @@ export class TranscriptFeed {
   }
 
   /** Follow complete records from the last committed line boundary. */
-  async stream(): Promise<StreamEnd> {
+  stream(): Promise<StreamEnd> {
+    if (this.disposed || this.streamController) return Promise.resolve('stopped')
+    return this.runStream()
+  }
+
+  private async runStream(): Promise<StreamEnd> {
     if (this.disposed || this.streamController) return 'stopped'
     const controller = new AbortController()
     this.streamController = controller
@@ -153,6 +208,7 @@ export class TranscriptFeed {
               if (!this.active(epoch)) return 'stopped'
               this.offset = this.lineOffset = Number(id)
               this.onStatus('ready')
+              if (controller.signal.aborted) return 'stopped'
             }
             data = []; id = ''; event = ''
             if (controller.signal.aborted) return timedOut ? 'failed' : 'stopped'
@@ -183,6 +239,8 @@ export class TranscriptFeed {
 
   dispose(): void {
     this.stopStream()
+    if (this.provenanceRetryTimer !== null) clearTimeout(this.provenanceRetryTimer)
+    this.provenanceRetryTimer = null
     this.disposed = true
     this.epoch++
   }
@@ -197,7 +255,6 @@ export class TranscriptFeed {
       return false
     }
     if (!this.active(epoch)) return false
-
     if (response.status === 416 && !retried416) {
       this.resetBytes()
       this.onReset()
@@ -266,34 +323,83 @@ export class TranscriptFeed {
     }
   }
 
-  private async loadProvenance(): Promise<MessageProvenance[]> {
+  private async loadProvenance(): Promise<number | null> {
     try {
-      const response = await this.fetcher(this.url('messages'), { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+      const query = this.provenanceCursor ? `&since=${encodeURIComponent(this.provenanceCursor)}` : ''
+      const response = await this.fetcher(`${this.url('messages')}${query}`, { cache: 'no-store', signal: AbortSignal.timeout(10_000) })
       const payload: unknown = response.ok ? await response.json() : null
       if (payload && typeof payload === 'object' && 'messages' in payload && Array.isArray(payload.messages)) {
-        return payload.messages.filter((item): item is MessageProvenance => item && typeof item.id === 'string' && typeof item.envelope === 'string')
+        let added = 0
+        for (const item of payload.messages) {
+          if (item && typeof item.id === 'string' && typeof item.envelope === 'string' && !this.provenance.has(item.id)) {
+            this.provenance.set(item.id, item as MessageProvenance)
+            added++
+          }
+        }
+        if ('cursor' in payload && typeof payload.cursor === 'string') this.provenanceCursor = payload.cursor
+        return added
       }
     } catch { /* A missing or unreachable ledger leaves the native text intact. */ }
-    return []
+    return null
   }
 
   private async emitLines(lines: string[], epoch: number, slice = { started: now() }, evidence: EvidenceSnapshot = {}): Promise<void> {
-    let provenance: MessageProvenance[] = []
-    if (lines.some(line => line.includes('[Shuttle message '))) {
-      evidence.value ??= this.loadProvenance()
-      provenance = await evidence.value
-      if (!this.active(epoch)) return
-    }
     let batch: Entry[] = []
+    let pendingCandidates: CandidateRecord[] = []
     const flush = (): void => {
+      for (const record of pendingCandidates) {
+        const entries = normalizeRecord(record.value, [...this.provenance.values()])
+          .map(entry => ({ ...entry, sourceRecord: record.record }))
+        if (JSON.stringify(entries) !== JSON.stringify(record.entries)) {
+          const start = batch.findIndex(entry => entry.sourceRecord === record.record)
+          if (start >= 0) {
+            let end = start
+            while (end < batch.length && batch[end].sourceRecord === record.record) end++
+            batch.splice(start, end - start, ...entries)
+          }
+          record.entries = entries
+        }
+        record.emitted = true
+      }
       if (batch.length) this.onEntries(batch)
       batch = []
+      pendingCandidates = []
     }
 
     for (const line of lines) {
       if (line.trim()) {
         try {
-          batch.push(...normalizeRecord(JSON.parse(line) as unknown, provenance))
+          const value = JSON.parse(line) as unknown
+          const candidateIds = [...candidateMessageText(value).matchAll(/\[Shuttle message ([^\s\]\r\n]+)/g)].map(match => match[1])
+          let record: CandidateRecord | undefined
+          if (candidateIds.length) {
+            const unseen = candidateIds.some(id => !this.provenanceCandidates.has(id))
+            for (const id of candidateIds) {
+              if (!this.provenanceCandidates.has(id)) this.provenanceGeneration++
+              this.provenanceCandidates.add(id)
+            }
+            if (unseen) this.provenanceNeeded = candidateIds.some(id => !this.provenance.has(id))
+            if (unseen && this.provenanceRetryTimer !== null) {
+              clearTimeout(this.provenanceRetryTimer)
+              this.provenanceRetryTimer = null
+              this.provenanceRetryDelay = 500
+            }
+            evidence.value ??= this.ensureProvenance(unseen)
+            evidence.deadline ??= new Promise<void>(resolve => {
+              evidence.deadlineAt = now() + PROVENANCE_WAIT_MS
+              setTimeout(resolve, PROVENANCE_WAIT_MS)
+            })
+            record = { record: ++this.nextCandidateRecord, value, entries: [], emitted: false }
+            this.candidateRecords.set(record.record, record)
+            if (now() < (evidence.deadlineAt ?? 0)) await Promise.race([evidence.value, evidence.deadline])
+          }
+          const entries = normalizeRecord(value, [...this.provenance.values()])
+            .map(entry => record ? { ...entry, sourceRecord: record.record } : entry)
+          if (record) {
+            record.entries = entries
+            pendingCandidates.push(record)
+          }
+          batch.push(...entries)
         } catch {
           // A malformed JSONL row does not prevent later records from being read.
         }
@@ -306,6 +412,66 @@ export class TranscriptFeed {
       }
     }
     flush()
+  }
+
+  private ensureProvenance(force = false): Promise<void> {
+    if (!force && !this.provenanceNeeded) return Promise.resolve()
+    if (this.provenanceRequest) return this.provenanceRequest
+    if (this.provenanceRetryTimer !== null) return Promise.resolve()
+    const requestGeneration = this.provenanceGeneration
+    this.provenanceRequest = this.loadProvenance().then(added => {
+      this.provenanceRequest = null
+      if (added !== null) {
+        this.provenanceNeeded = false
+        this.provenanceRetryDelay = 500
+        if (this.provenanceRetryTimer !== null) {
+          clearTimeout(this.provenanceRetryTimer)
+          this.provenanceRetryTimer = null
+        }
+      } else {
+        this.provenanceNeeded = this.provenanceCandidates.size > 0
+        this.provenanceRetryDelay = Math.min(30_000, this.provenanceRetryDelay * 2)
+        this.scheduleProvenanceRetry()
+      }
+      if (added !== null && added > 0) {
+        for (const record of this.candidateRecords.values()) {
+          if (!record.emitted) continue
+          const ids = [...candidateMessageText(record.value).matchAll(/\[Shuttle message ([^\s\]\r\n]+)/g)].map(match => match[1])
+          if (!ids.some(id => this.provenance.has(id))) continue
+          const entries = normalizeRecord(record.value, [...this.provenance.values()])
+            .map(entry => ({ ...entry, sourceRecord: record.record }))
+          if (JSON.stringify(entries) !== JSON.stringify(record.entries)) {
+            record.entries = entries
+            this.onReplaceRecord?.(record.record, entries)
+          }
+        }
+      }
+      if (requestGeneration < this.provenanceGeneration
+          && [...this.provenanceCandidates].some(id => !this.provenance.has(id))) {
+        void this.ensureProvenance(true)
+      }
+    }).catch(() => {
+      this.provenanceRequest = null
+      this.provenanceNeeded = this.provenanceCandidates.size > 0
+      this.provenanceRetryDelay = Math.min(30_000, this.provenanceRetryDelay * 2)
+      this.scheduleProvenanceRetry()
+      if (requestGeneration < this.provenanceGeneration) {
+        if (this.provenanceRetryTimer !== null) {
+          clearTimeout(this.provenanceRetryTimer)
+          this.provenanceRetryTimer = null
+        }
+        void this.ensureProvenance(true)
+      }
+    })
+    return this.provenanceRequest
+  }
+
+  private scheduleProvenanceRetry(): void {
+    if (this.disposed || !this.provenanceNeeded || this.provenanceRetryTimer !== null) return
+    this.provenanceRetryTimer = setTimeout(() => {
+      this.provenanceRetryTimer = null
+      void this.ensureProvenance()
+    }, this.provenanceRetryDelay)
   }
 
   private resetBytes(): void {

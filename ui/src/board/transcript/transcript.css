@@ -523,6 +523,8 @@
 .ws-transcript-message-toggle::-webkit-details-marker { display: none; }
 .ws-transcript-message-direction { flex: 0 0 auto; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .ws-transcript-message-peer { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-soft); }
+.ws-transcript-message-claim { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.ws-transcript-message-route { flex: 0 1 auto; min-width: 0; }
 .ws-transcript-message-peer.ws-constitution-chip {
   flex: 0 1 auto;
   min-width: 0;

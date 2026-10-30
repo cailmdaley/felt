@@ -57,6 +57,10 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   direction.className = 'ws-transcript-message-direction'
   const peer = document.createElement('span')
   peer.className = 'ws-transcript-message-peer'
+  const claim = document.createElement('span')
+  claim.className = 'ws-transcript-message-claim'
+  const route = document.createElement('span')
+  route.className = 'ws-transcript-message-route'
   const preview = document.createElement('span')
   preview.className = 'ws-transcript-message-preview'
   const detail = document.createElement('div')
@@ -74,7 +78,7 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   outcome.className = 'ws-transcript-message-outcome'
   outcome.dataset.mentionIgnore = ''
   detail.append(text, source, command, outcome)
-  toggle.append(direction, peer, threadState, preview)
+  toggle.append(direction, peer, claim, route, threadState, preview)
   expander.append(toggle, detail)
   row.append(expander)
   expander.addEventListener('toggle', () => {
@@ -96,35 +100,38 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   const toggle = row.querySelector<HTMLElement>('.ws-transcript-message-toggle')!
   const preview = row.querySelector<HTMLElement>('.ws-transcript-message-preview')!
   const threadState = row.querySelector<HTMLElement>('.ws-transcript-message-thread-state')!
+  const claim = row.querySelector<HTMLElement>('.ws-transcript-message-claim')!
+  let route = row.querySelector<HTMLElement>('.ws-transcript-message-route')!
+  const linkedPeerFiber = entry.fiber && (entry.direction === 'sent' || entry.verb) ? entry.fiber : undefined
   const expanded = expander.open
   const rowClass = `ws-transcript-msg ws-transcript-shuttle-message${entry.verb ? ' ws-transcript-thread-notice' : ''}`
   if (row.className !== rowClass) row.className = rowClass
   setAttr(row, 'data-message', entry.id)
   setAttr(row, 'data-direction', entry.direction)
-  if (entry.fiber && peer.tagName !== 'A') {
+  if (linkedPeerFiber && peer.tagName !== 'A') {
     const link = document.createElement('a')
     link.className = 'ws-transcript-message-peer kbn-wikilink'
     link.dataset.transcriptMessagePeer = ''
     link.dataset.spawnChip = ''
-    link.dataset.fiber = entry.fiber
+    link.dataset.fiber = linkedPeerFiber
     link.dataset.mentionSource = entry.peer
     const label = document.createElement('span')
     label.className = 'ws-transcript-message-peer-label'
     link.append(label)
     peer.replaceWith(link)
     peer = link
-  } else if (!entry.fiber && peer.tagName === 'A') {
+  } else if (!linkedPeerFiber && peer.tagName === 'A') {
     const label = document.createElement('span')
     label.className = 'ws-transcript-message-peer ws-transcript-session-chip'
     peer.replaceWith(label)
     peer = label
   }
-  peer.classList.toggle('kbn-wikilink', !!entry.fiber)
-  peer.classList.toggle('ws-transcript-session-chip', !entry.fiber)
-  if (entry.fiber) {
+  peer.classList.toggle('kbn-wikilink', !!linkedPeerFiber)
+  peer.classList.toggle('ws-transcript-session-chip', !linkedPeerFiber)
+  if (linkedPeerFiber) {
     setAttr(peer, 'data-spawn-chip', '')
     setAttr(peer, 'data-transcript-message-peer', '')
-    setAttr(peer, 'data-fiber', entry.fiber)
+    setAttr(peer, 'data-fiber', linkedPeerFiber)
     if (!peer.classList.contains('ws-constitution-chip')) {
       let label = peer.querySelector<HTMLElement>(':scope > .ws-transcript-message-peer-label')
       if (!label) {
@@ -156,12 +163,40 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
       if (label.textContent !== entry.peer) label.textContent = entry.peer
     }
   }
-  if (entry.fiber) setAttr(peer, 'data-fiber', entry.fiber)
+  if (linkedPeerFiber) setAttr(peer, 'data-fiber', linkedPeerFiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
+  if (entry.direction === 'received' && !entry.verb && entry.fiber) {
+    if (route.tagName !== 'A') {
+      const link = document.createElement('a')
+      link.className = 'ws-transcript-message-peer ws-transcript-message-route kbn-wikilink'
+      link.dataset.spawnChip = ''
+      link.dataset.fiber = entry.fiber
+      link.dataset.mentionSource = `reply to ${entry.fiber}`
+      route.replaceWith(link)
+      route = link
+    }
+    route.classList.add('ws-transcript-message-peer', 'ws-transcript-message-route', 'kbn-wikilink')
+    route.dataset.spawnChip = ''
+    route.dataset.fiber = entry.fiber
+    route.setAttribute('aria-label', `reply to ${entry.fiber}`)
+    route.textContent = `reply to ${entry.fiber.split('/').at(-1) ?? entry.fiber}`
+    setHidden(route, false)
+  } else {
+    if (route.tagName === 'A') {
+      const label = document.createElement('span')
+      label.className = 'ws-transcript-message-route'
+      route.replaceWith(label)
+      route = label
+    }
+    setHidden(route, true)
+  }
   const directionText = entry.direction === 'received'
     ? '← From'
     : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'uncertain' ? '↯ Delivery unclear' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
   if (direction.textContent !== directionText) direction.textContent = directionText
+  const claimText = entry.claimedSender ? `claims to be ${entry.claimedSender}` : ''
+  if (claim.textContent !== claimText) claim.textContent = claimText
+  setHidden(claim, !claimText)
   const toggleText = entry.direction === 'received' && !expanded
     ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
     : ''
@@ -1160,6 +1195,7 @@ export class TranscriptBand {
       host: target.host,
       fetch: this.fetcher,
       onEntries: (entries) => this.acceptEntries(entries),
+      onReplaceRecord: (record, entries) => this.replaceFeedRecord(record, entries),
       onReset: () => this.resetFeedView(),
       onStatus: (status, detail) => this.statusChanged(status, detail),
     })
@@ -1595,6 +1631,21 @@ export class TranscriptBand {
       this.setNote(null)
       if (this.findPattern) this.scheduleFindRefresh()
     })
+  }
+
+  private replaceFeedRecord(record: number, entries: Entry[]): void {
+    if (this.disposed) return
+    const turn = this.model.replaceRecord(record, entries)
+    if (turn === undefined) return
+    this.model.placeSentFiles()
+    const changes = this.model.takeChanges()
+    this.preservePositions(() => {
+      this.paintPreview()
+      if (this.fullRendered && turn >= this.visibleStart) this.renderTurn(turn)
+    })
+    this.paintHead()
+    this.scheduleLayout()
+    if (this.findPattern && changes.turns.length) this.scheduleFindRefresh()
   }
 
   private acceptSentFiles(session: string, files: SentFile[]): void {

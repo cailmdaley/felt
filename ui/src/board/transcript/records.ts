@@ -18,7 +18,7 @@ export type UsageEntry = {
  */
 export type ResultImage = { mediaType: string; data: string } | { url: string }
 
-export type Entry =
+export type Entry = (
   | ShuttleMessage
   | UsageEntry
   | { kind: 'prompt'; text: string; images: number; dispatch: boolean; at?: number }
@@ -27,6 +27,7 @@ export type Entry =
   | { kind: 'tool'; id: string; name: string; input: unknown; at?: number }
   | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageReceipts?: ShuttleMessageReceipt[]; unknownMessageReceipts?: ShuttleMessageReceipt[]; commandOutcomes?: CommandOutcome[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
+) & { sourceRecord?: number }
 
 export type ShuttleMessageReceipt = { id: string; target?: string }
 
@@ -228,7 +229,7 @@ const PEER_CAVEAT = /\n\s*(?:This came from another Claude session|That "other C
 
 function classifiedClaudeText(raw: string, isMeta: boolean, time?: number): Entry | null {
   const text = raw
-    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, match => raw.includes('[Shuttle message ') ? match : '')
+    .replace(/<system-reminder\b[^>]*>[\s\S]*?<\/system-reminder\s*>/gi, '')
     // Claude Code heads a relayed session message with a line of its own and
     // closes it with a paragraph of advice to the model; neither is the message.
     .replace(/^\s*Another Claude session sent a message:\s*/, '')
@@ -344,6 +345,7 @@ function deliveredContext(text: string, time: number | undefined, provenance: re
     const rest = part.trim()
     // The hook's fixed introduction isn't message content.
     if (!rest || /^Messages from other sessions, supplied as peer context\.[^\n]*$/.test(rest)) return []
+    if (/^Family board \(/.test(rest)) return [event('Context', { text: rest, detail: firstLine(rest) }, time)]
     return [event('Context', { text: rest, detail: firstLine(rest) }, time)]
   })
 }
