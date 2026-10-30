@@ -14,6 +14,7 @@ import (
 func TestShuttleInstall_Armed(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "testhost")
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
@@ -38,6 +39,7 @@ func TestShuttleInstall_Armed(t *testing.T) {
 func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "testhost")
 	dir, storage := newStore(t)
 	pdir := t.TempDir()
 	seedPlainFiber(t, storage, "app", "")
@@ -158,6 +160,7 @@ func TestShuttleCreate_RefusesExistingBlock(t *testing.T) {
 func TestShuttleRepeat_Standing(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "testhost")
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "role", "")
 	pdir := t.TempDir()

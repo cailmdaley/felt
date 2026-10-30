@@ -1115,7 +1115,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
            ] = Jason.decode!(conn.resp_body)["fibers"]
   end
 
-  test "GET /api/v1/fibers/:id reports an unsynchronizable store on a miss", %{store: store} do
+  test "GET /api/v1/fibers/:id reports not-found on a non-Git store", %{store: store} do
     write_fiber!(store, "tests/present", """
     ---
     name: Present
@@ -1126,9 +1126,8 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     """)
 
     conn = get(api_conn(), "/api/v1/fibers/tests/absent")
-    assert conn.status == 503
-    assert Jason.decode!(conn.resp_body)["error"] == "felt_show_failed"
-    assert Jason.decode!(conn.resp_body)["stores"] =~ "not a git repository"
+    assert conn.status == 404
+    assert Jason.decode!(conn.resp_body)["error"] == "fiber not found on test-host: tests/absent"
   end
 
   test "GET /api/v1/fibers/composite honors ETag and changes it when its body changes", %{store: store} do

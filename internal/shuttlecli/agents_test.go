@@ -259,6 +259,7 @@ func TestShuttleAgentsInit_WritesRefusesAndForces(t *testing.T) {
 func TestShuttleInstall_AcceptsUserRegistryAgent(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	env.Set("SHUTTLE_HOST", "testhost")
 	dir, storage := newStore(t)
 	seedPlainFiber(t, storage, "task", "")
 	pdir := t.TempDir()
