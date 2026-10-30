@@ -270,10 +270,6 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  # Splice the caller's non-native frontmatter (the `shuttle:` block and any
-  # other custom keys felt does not own) into the file felt just wrote, leaving
-  # felt's native frontmatter — including the minted `id:` — byte-for-byte
-  # intact. New keys are inserted immediately before the closing `---`.
   defp atomic_write(path, payload) do
     tmp = path <> ".tmp"
 
