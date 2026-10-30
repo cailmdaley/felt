@@ -1797,6 +1797,32 @@ defmodule Shuttle.DispatcherTest do
   end
 
   @tag :tmp_dir
+  test "an unusable Rex primary refuses dispatch before uncertain liveness can be adopted", %{
+    tmp_dir: dir
+  } do
+    alias Shuttle.Test.Env
+    alias Shuttle.Terminal.RexBindings
+    Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_env("SHUTTLE_REX_BIN", Path.join(dir, "missing-rex"))
+
+    assert {:error, {:rex_server_unavailable, missing}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+    assert missing =~ "executable not found"
+
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    File.mkdir_p!(Path.dirname(RexBindings.path()))
+    File.write!(RexBindings.path(), "invalid")
+
+    assert {:error, {:rex_server_unavailable, invalid}} =
+             Dispatcher.dispatch("tests/haiku", runner: MockRunner)
+
+    assert invalid =~ "invalid_bindings"
+    refute Enum.any?(MockRunner.commands(), &match?({"tmux", ["has-session" | _]}, &1))
+  end
+
+  @tag :tmp_dir
   test "Rex dispatch and capture use the primary environment without a client wait", %{
     tmp_dir: dir
   } do
@@ -1832,6 +1858,8 @@ defmodule Shuttle.DispatcherTest do
     assert [{_, _, opts}] =
              Enum.filter(FakeRex.calls(), fn {_, argv, _} -> "session.create" in argv end)
 
+    # Preflight checks readiness once; launch reads whoami once to stamp ownership.
+    assert Enum.count(FakeRex.calls(), fn {_, argv, _} -> "whoami" in argv end) == 2
     spec = Jason.decode!(opts[:input])
     assert spec["label"] == name
     ["bash", "-l", path] = hd(spec["initial_windows"])["layout"]["block"]["options"]["command"]

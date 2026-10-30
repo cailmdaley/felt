@@ -36,6 +36,19 @@ defmodule Shuttle.Terminal do
 
   def available?, do: Enum.any?(backends(), & &1.available?())
 
+  @doc "A permanently unusable primary is a dispatch refusal, not liveness uncertainty."
+  def require_config do
+    if primary() == Shuttle.Terminal.Rex,
+      do: Shuttle.Terminal.Rex.require_config(),
+      else: :ok
+  end
+
+  def backend_health do
+    if primary() == Shuttle.Terminal.Rex,
+      do: Shuttle.Terminal.Rex.health(),
+      else: %{state: "not_selected", available: false, reason: nil}
+  end
+
   @spec status(module(), String.t(), keyword()) :: status()
   def status(runner, name, opts \\ []) do
     backends = Keyword.get_lazy(opts, :backends, &backends/0)
@@ -90,28 +103,34 @@ defmodule Shuttle.Terminal do
   @doc "Launch only when the name is positively free; keep its script in the worker's argv."
   def launch(runner, name, cwd, script_text, opts \\ []) do
     with_lock(name, fn ->
-      if status(runner, name) == :gone do
-        backend = primary()
-
-        with :ok <- backend.ensure_ready(runner) do
-          path = WorkerProcess.script_path(name)
-          File.write!(path, script_text)
-          File.chmod!(path, 0o755)
-
-          case backend.launch(runner, name, cwd, path, opts) do
-            :ok ->
-              refresh_layout(runner, backend)
-              :ok
-
-            {:error, _} = error ->
-              File.rm(path)
-              error
-          end
-        end
-      else
-        {:error, :already_running}
+      with :ok <- require_config() do
+        launch_ready(runner, name, cwd, script_text, opts)
       end
     end)
+  end
+
+  defp launch_ready(runner, name, cwd, script_text, opts) do
+    if status(runner, name) == :gone do
+      backend = primary()
+
+      with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)) do
+        path = WorkerProcess.script_path(name)
+        File.write!(path, script_text)
+        File.chmod!(path, 0o755)
+
+        case backend.launch(runner, name, cwd, path, opts) do
+          :ok ->
+            refresh_layout(runner, backend)
+            :ok
+
+          {:error, _} = error ->
+            File.rm(path)
+            error
+        end
+      end
+    else
+      {:error, :already_running}
+    end
   end
 
   @doc "Serialize a terminal mutation; a shared key also protects backend-wide indexes."

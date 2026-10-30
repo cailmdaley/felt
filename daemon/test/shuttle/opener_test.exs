@@ -249,8 +249,10 @@ defmodule Shuttle.OpenerTest do
 
   test "remote Rex is explicitly unsupported on a Rex display" do
     Env.put_app_env(:opener_version, {:ok, ~s({"terminal":"rex"})})
+
     assert {:error, "opening a worker on a remote Rex server is not supported yet"} =
              Opener.open(@name, "remote-a")
+
     refute_received {:kitty, _, _}
     assert FakeRex.calls() == []
   end

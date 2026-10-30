@@ -107,6 +107,7 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_dispatchable(fiber, force),
          {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
+         :ok <- check_terminal_config(get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
          :ok <- check_app_not_running(fiber_id, uid),
          {:ok, agent} <- resolve_agent(fiber, fiber_id),
@@ -577,7 +578,7 @@ defmodule Shuttle.Dispatcher do
 
         Logger.info("Capture session via #{agent.id} → terminal #{session}")
 
-        case Shuttle.Terminal.launch(runner, session, work_dir, run_script) do
+        case Shuttle.Terminal.launch(runner, session, work_dir, run_script, preflighted: true) do
           :ok -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
           error -> error
         end
@@ -909,6 +910,9 @@ defmodule Shuttle.Dispatcher do
   # inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
+  defp check_terminal_config("app"), do: :ok
+  defp check_terminal_config(_surface), do: Shuttle.Terminal.require_config()
+
   defp check_not_running(fiber_id, uid, runner, surface) do
     cond do
       surface == "app" and not Shuttle.Terminal.available?() -> :ok
@@ -1802,7 +1806,10 @@ defmodule Shuttle.Dispatcher do
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
   defp spawn_and_record(session, work_dir, run_script, runner, fiber_id, record_fun) do
-    case Shuttle.Terminal.launch(runner, session, work_dir, run_script, fiber: fiber_id) do
+    case Shuttle.Terminal.launch(runner, session, work_dir, run_script,
+           fiber: fiber_id,
+           preflighted: true
+         ) do
       :ok ->
         Logger.info("Worker running: #{Shuttle.Terminal.primary().id()} #{session}")
         record_fun.()

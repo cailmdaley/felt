@@ -11,8 +11,37 @@ defmodule Shuttle.Terminal.Rex do
   @impl true
   def available?, do: Rex.bin() != nil
 
+  @doc "Check configuration separately from uncertain worker liveness."
+  def require_config do
+    cond do
+      Rex.bin() == nil ->
+        unavailable("Rex executable not found; check SHUTTLE_REX_BIN")
+
+      true ->
+        case Bindings.read() do
+          {:ok, _} -> :ok
+          {:error, reason} -> unavailable("Cannot read #{Bindings.path()}: #{inspect(reason)}")
+        end
+    end
+  end
+
+  @doc "Local configuration health; this check never starts or queries the Rex server."
+  def health do
+    case require_config() do
+      :ok ->
+        %{state: "configured", available: true, reason: nil}
+
+      {:error, {:rex_server_unavailable, message}} ->
+        %{state: "unavailable", available: false, reason: message}
+    end
+  end
+
   @impl true
   def ensure_ready(runner) do
+    with :ok <- require_config(), do: ensure_server(runner)
+  end
+
+  defp ensure_server(runner) do
     case Rex.whoami(runner) do
       {:ok, _} ->
         :ok
@@ -34,11 +63,10 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp unavailable,
-    do:
-      {:error,
-       {:rex_server_unavailable,
-        "Open Rex and grant Rex Server access; the Rex server is unavailable"}}
+  defp unavailable(
+         message \\ "Open Rex and grant Rex Server access; the Rex server is unavailable"
+       ),
+       do: {:error, {:rex_server_unavailable, message}}
 
   @impl true
   def launch(runner, name, cwd, script_path, opts) do

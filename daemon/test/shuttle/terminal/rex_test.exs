@@ -15,6 +15,33 @@ defmodule Shuttle.Terminal.RexTest do
     :ok
   end
 
+  test "version exposes unusable Rex configuration without probing the server", %{tmp_dir: dir} do
+    Env.put_app_env(:terminal_backend, Rex)
+    Env.put_env("SHUTTLE_REX_BIN", Path.join(dir, "missing-rex"))
+    conn = ShuttleWeb.VersionController.show(Plug.Test.conn(:get, "/api/v1/version"), %{})
+
+    assert %{
+             "rex_backend" => %{
+               "state" => "unavailable",
+               "available" => false,
+               "reason" => reason
+             }
+           } = Jason.decode!(conn.resp_body)
+
+    assert reason =~ "executable not found"
+
+    assert {:error, {:rex_server_unavailable, _}} =
+             Shuttle.Terminal.launch(FakeRex, @name, "/tmp", "true")
+
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    File.mkdir_p!(Path.dirname(RexBindings.path()))
+    File.write!(RexBindings.path(), "invalid")
+    assert %{state: "unavailable", available: false, reason: invalid} = Rex.health()
+    assert invalid =~ "invalid_bindings"
+    assert {:error, {:rex_server_unavailable, _}} = Rex.ensure_ready(FakeRex)
+    assert FakeRex.calls() == []
+  end
+
   test "launch uses the captured specification and persists nested create IDs" do
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "/tmp/worker.sh", [])
 

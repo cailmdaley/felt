@@ -155,7 +155,8 @@ defmodule Shuttle.SessionResume do
 
       _ ->
         with :ok <- not_the_worker(session, live.()),
-             {:ok, plan} <- plan(session, opts) do
+             {:ok, plan} <- plan(session, opts),
+             :ok <- Terminal.require_config() do
           case Terminal.status(runner, plan.tmux) do
             :alive ->
               {:ok, %{tmux_session: plan.tmux, created: false}}
