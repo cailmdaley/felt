@@ -1,6 +1,6 @@
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { sessionWhen } from '../sessionHistory.js'
-import { clockTime, DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
+import { clockTime, formatSpanMinutes, instantStamp } from '../civilDay.js'
 import { fileKind } from '../attachments.js'
 import { sentFileSends, type SentFile } from '../sentFiles.js'
 import { TranscriptModel, segments, type SentFileNotice, type Step, type ToolStep, type Turn } from './model.js'
@@ -362,7 +362,7 @@ function createButton(className: string, text: string): HTMLButtonElement {
 function clock(ms: number): { text: string; title: string } {
   return {
     text: clockTime(ms),
-    title: formatInstant(ms, DATE_AND_TIME),
+    title: instantStamp(ms),
   }
 }
 

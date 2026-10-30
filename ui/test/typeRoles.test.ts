@@ -25,7 +25,8 @@ const KEYWORD = /^(inherit|unset|initial|revert)$/
 /** Family names belong to type.css alone, in any string. */
 const FAMILY_NAME = /\b(EB Garamond|Garamond|Georgia|IBM Plex|Plex Mono|SF Mono|Menlo|Monaco|Consolas|Courier|ui-monospace|ui-serif|ui-sans-serif|system-ui|-apple-system|BlinkMacSystemFont|Helvetica|Arial|sans-serif|monospace|cursive|fantasy)\b|(?<![\w-])serif\b/
 /** Selectors that draw a mark from a font rather than text. */
-const MARK = /::?(before|after|marker)|cap\b|initial|ornament|glyph|mark|chevron|close|caret|arrow|icon|bullet/
+// A mark's selector: a pseudo-element, or a class whose last word names a mark (`.ws-rail-chevron`, not `.ws-icon-label`).
+const MARK = /::?(before|after|marker|first-letter)|(?<![\w])(?:[\w-]*-)?(cap|initial|ornament|glyph|mark|chevron|close|caret|arrow|icon|bullet)(?![\w-])/
 
 type Prop = 'size' | 'family' | 'leading' | 'font' | 'track' | 'case' | 'caps' | 'feature'
 const PROPS: Record<string, Prop> = {
@@ -156,7 +157,7 @@ function judge(prop: Prop, value: string): string | undefined {
     case 'size': return SIZE.test(value) || GLYPH.test(value) ? undefined : 'raw size'
     case 'family': return FAMILY.test(value) ? undefined : 'raw family'
     case 'leading': return LEADING.test(value) || BOX.test(value) || value === 'normal' ? undefined : 'raw leading'
-    case 'track': return TRACK.test(value) || /^(0|normal)$/.test(value) ? undefined : 'raw tracking'
+    case 'track': return TRACK.test(value) || /^(0(px|em)?|normal)$/.test(value) ? undefined : 'raw tracking'
     case 'case': return value === 'none' ? undefined : 'case is the kicker role, not text-transform'
     case 'caps': return capsWhy(value)
     case 'feature': return CAPS_FEATURE.test(value) ? 'caps by feature: the kicker is font-variant-caps: all-small-caps' : undefined
@@ -176,6 +177,8 @@ const JS_VALUE = `('(?:[^'\\\\\\n]|\\\\.)*'|"(?:[^"\\\\\\n]|\\\\.)*"|\`[^\`]*\`|
 const JS_FORMS = [
   // Object keys, bare or quoted: { fontSize: '12px' }, { 'font-size': '12px' }.
   new RegExp(`(?<![\\w$.\\-'"])(['"]?)${JS_PROP}\\1\\s*:\\s*${JS_VALUE}`, 'g'),
+  // Computed keys: { ['letterSpacing']: '.1em' }.
+  new RegExp(`\\[\\s*(['"])${JS_PROP}\\1\\s*\\]\\s*:\\s*${JS_VALUE}`, 'g'),
   // Assignment, dotted or bracketed: el.style.fontSize = …, ctx.font = …, style['font-size'] = ….
   new RegExp(`(?:\\.|\\[\\s*)(['"]?)${JS_PROP}\\1\\s*\\]?\\s*=(?!=)\\s*${JS_VALUE}`, 'g'),
   // style.setProperty('font-size', …), setAttribute('font-size', …), setAttributeNS(null, 'font-size', …).
@@ -245,7 +248,9 @@ function violations(file: string, source: string, defined: Set<string>): string[
     if (!defined.has(m[1])) at(m.index, `undefined token: ${m[1]}`)
   }
 
-  for (const b of blocks(text, ctx)) {
+  const all = blocks(text, ctx)
+  const kickers = new Set(all.filter(b => /all-small-caps/.test(b.body)).map(b => b.selector))
+  for (const b of all) {
     const own = declarations(b.body, b.body.split('').map(() => 'css' as Ctx))
     const get = (prop: Prop) => own.filter(d => d.prop === prop)
     const fonts = get('font').map(d => shorthand(d.value))
@@ -257,7 +262,7 @@ function violations(file: string, source: string, defined: Set<string>): string[
     if (sizes.some(s => GLYPH.test(s)) && !MARK.test(b.selector)) at(b.offset, `glyph token on text: ${b.selector}`)
 
     // A line box from geometry is for a box: a mark, or one line that cannot wrap.
-    const nowrap = /white-space\s*:\s*(nowrap|pre)\b/.test(b.body)
+    const nowrap = /white-space\s*:\s*(nowrap|pre)(?![\w-])/.test(b.body)
     const empty = /content\s*:\s*(''|"")/.test(b.body)
     if (leadings.some(l => BOX.test(l)) && !nowrap && !empty && !MARK.test(b.selector)) {
       at(b.offset, `box line-height on wrapping text, use a leading role: ${b.selector}`)
@@ -269,6 +274,9 @@ function violations(file: string, source: string, defined: Set<string>): string[
     const tracked = get('track').some(d => TRACK.test(d.value))
     if (tracked && !caps.some(c => /all-small-caps/.test(c))) at(b.offset, `tracking without the kicker's caps: ${b.selector}`)
     if (tracked && families.some(f => /--font-mono/.test(f))) at(b.offset, `tracking on mono: ${b.selector}`)
+    if (get('track').some(d => d.value === 'var(--track-nav)') && !sizes.includes('var(--type-title)')) at(b.offset, `nav tracking off the nav size: ${b.selector}`)
+    // The cascade can split a kicker across rules: meta size on a selector some other rule here sets as a kicker.
+    if (sizes.includes('var(--type-meta)') && kickers.has(b.selector)) at(b.offset, `kicker at meta size: ${b.selector}`)
     if (caps.some(c => /all-small-caps/.test(c))) {
       if (!get('track').some(d => TRACK.test(d.value))) at(b.offset, `kicker without its tracking token: ${b.selector}`)
       if (sizes.includes('var(--type-meta)')) at(b.offset, `kicker at meta size: ${b.selector}`)
@@ -345,6 +353,13 @@ const MUST_FAIL: [string, string][] = [
   ['x.ts', "const html = '<span style=\"font-family: Menlo\">a</span>'"],
   ['x.ts', 'el.style.fontSize = getComputedStyle(other).fontSize'],
   ['x.ts', "ruler.font = getComputedStyle(message).font + ' 12px'"],
+  ['x.css', '.ac { font-size: var(--type-prose); line-height: 24px; white-space: pre-wrap; }'],
+  ['x.css', '.markdown p { font-size: var(--type-prose); line-height: 24px; }'],
+  ['x.css', '.ws-bookmark-title { font-size: var(--glyph-small); }'],
+  ['x.css', '.ws-icon-label { font-size: var(--glyph-small); }'],
+  ['x.ts', "const s = { ['letterSpacing']: '.1em' }"],
+  ['x.css', '.ad { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }\n.ad { font-size: var(--type-meta); }'],
+  ['x.css', '.ae { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-nav); }'],
 ]
 
 const MUST_PASS: [string, string][] = [
@@ -362,11 +377,14 @@ const MUST_PASS: [string, string][] = [
   ['x.css', '.ws-col-count { font: var(--type-meta)/var(--leading-ui) var(--font-mono); }'],
   ['x.css', '.ok { font-feature-settings: "onum"; }'],
   ['x.ts', "el.style.cssText = 'color: red; font-size: var(--type-note)'"],
+  ['x.css', '.ok { letter-spacing: 0px; }'],
+  ['x.css', '.ws-rail-chevron { font-size: var(--glyph-small); }'],
+  ['x.css', '.ok { font-size: var(--type-title); font-variant-caps: all-small-caps; letter-spacing: var(--track-nav); }'],
 ]
 
 it('the scan catches every form it guards, and passes the system', () => {
   const defined = new Set(['--type-row', '--type-label', '--type-note', '--type-meta', '--type-prose', '--leading-ui', '--leading-prose',
-    '--font-serif', '--font-mono', '--glyph-small', '--glyph-initial', '--track-kicker'])
+    '--font-serif', '--font-mono', '--glyph-small', '--glyph-initial', '--track-kicker', '--track-nav', '--type-title'])
   const missed = MUST_FAIL.filter(([file, src]) => violations(file, src, defined).length === 0).map(([, src]) => src)
   expect(missed, 'forms the scan let through').toEqual([])
   const flagged = MUST_PASS.flatMap(([file, src]) => violations(file, src, defined))
@@ -374,7 +392,7 @@ it('the scan catches every form it guards, and passes the system', () => {
 })
 
 it('only styles/type.css defines the type tokens', () => {
-  const define = /(?<![\w-])--(type|leading|font|glyph|rhythm|track)-[a-z-]+\s*:/
+  const define = /(?<![\w-])--(type|leading|font|glyph|rhythm|track)-[a-z-]+\s*:|setProperty\(\s*['"`]--(type|leading|font|glyph|rhythm|track)-/
   const found = files(SRC).flatMap((path) => {
     const file = relative(SRC, path)
     if (file === OWNER) return []

@@ -15,7 +15,7 @@
  * host's answers swapped in as they arrive. A host the composite reports stale
  * is not asked.
  */
-import { clockTime, DATE_AND_TIME, formatInstant, hostZone, isoDayLocal, type Zone } from './civilDay.js'
+import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
 import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE, CONVERSATION_OPENING_CHANGED, type ClaudeOpening } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
@@ -350,7 +350,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
       if (title) span.title = title
       li.append(span)
     }
-    put('kbn-ctl-session-when', sessionWhen(record.at), formatInstant(record.at, DATE_AND_TIME))
+    put('kbn-ctl-session-when', sessionWhen(record.at), instantStamp(record.at))
     put('kbn-ctl-session-agent', record.agent ?? record.harness ?? 'session')
     if (record.kind !== 'dispatch') put('kbn-ctl-session-kind', record.kind)
     if (record.host && record.host !== ctx.fiberHost) put('kbn-ctl-session-host', record.host)

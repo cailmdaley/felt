@@ -2418,7 +2418,7 @@
   }
   .kbn-viewtab {
     padding: 4px 8px;
-    font-size: var(--type-meta);
+    font-size: var(--type-note);
   }
 
   /* The folio strip loses its air and keeps its anatomy: initial, name,
@@ -2430,8 +2430,6 @@
     min-height: 34px;
     padding: 2px 4px 3px;
   }
-  .kbn-folio-name { font-size: var(--type-meta); }
-  .kbn-folio-name .kbn-cap { font-size: var(--type-note); }
 
   /* The budget, written out: the body's 2px of top padding, the view strip
      (~27), the gap under it (6), the folio strip (~41) and a little air at

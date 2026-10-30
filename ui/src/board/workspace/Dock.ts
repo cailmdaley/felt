@@ -19,7 +19,7 @@ import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptB
 import { coarsePointer, isMobileViewport } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
-import { clockTime, dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
+import { clockTime, dayClock, dueCivilDay, formatSpanMinutes, instantMs, instantStamp, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
 import { deskColumn } from '../deskColumn.js'
@@ -53,12 +53,6 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
   } : null
 }
 
-/** A calendar day in front of a clock time — `Aug 4 12:01`. Used only when the
- *  bare time would lie about which day it names. */
-function dayStamp(ms: number): string {
-  const day = new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-  return `${day} ${clockTime(ms)}`
-}
 
 function meetingStopVisibility(hasActions: boolean, collapsed: boolean, hosted: boolean): { global: boolean; pane: boolean } {
   return {
@@ -142,18 +136,18 @@ export function sessionWindow(
   const concluded = handedOff !== undefined && handedOff >= dispatched
 
   const startedToday = isoDayLocal(dispatched) === isoDayLocal(nowMs)
-  const start = startedToday ? clockTime(dispatched) : dayStamp(dispatched)
+  const start = startedToday ? clockTime(dispatched) : dayClock(dispatched)
 
   if (hasLiveWorker(card)) {
     return {
       text: `since ${start}`,
       state: 'running',
-      title: `Worker launched ${new Date(dispatched).toLocaleString()} and is still running.`,
+      title: `Worker launched ${instantStamp(dispatched)} and is still running.`,
     }
   }
   if (concluded && handedOff !== undefined) {
     const spannedMidnight = isoDayLocal(handedOff) !== isoDayLocal(dispatched)
-    const end = spannedMidnight ? dayStamp(handedOff) : clockTime(handedOff)
+    const end = spannedMidnight ? dayClock(handedOff) : clockTime(handedOff)
     // Sub-minute runs read `0m` rather than seconds: the pair of clock times
     // already tells that story, and this figure is for scale.
     const span = formatSpanMinutes(Math.max(0, Math.round((handedOff - dispatched) / 60_000)))
@@ -161,15 +155,15 @@ export function sessionWindow(
       text: `${start} → ${end} · ${span}`,
       state: 'clean',
       title:
-        `Launched ${new Date(dispatched).toLocaleString()}; ` +
-        `handed off ${new Date(handedOff).toLocaleString()}.`,
+        `Launched ${instantStamp(dispatched)}; ` +
+        `handed off ${instantStamp(handedOff)}.`,
     }
   }
   return {
     text: `${start} · no handoff`,
     state: 'unclean',
     title:
-      `Launched ${new Date(dispatched).toLocaleString()}. The worker never stamped a ` +
+      `Launched ${instantStamp(dispatched)}. The worker never stamped a ` +
       'handoff for this run — it was killed, crashed, or is still being reconciled.',
   }
 }

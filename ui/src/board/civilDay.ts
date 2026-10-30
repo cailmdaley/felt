@@ -156,6 +156,16 @@ export function clockTime(ms: number, z = hostZone()): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
 }
 
+/** A calendar day in front of a clock time, `30 Oct 03:31`: for when a bare time would not say which day it names. */
+export function dayClock(ms: number, z = hostZone()): string {
+  return `${formatInstant(ms, { day: 'numeric', month: 'short' }, z)} ${clockTime(ms, z)}`
+}
+
+/** An instant in full, `30 Oct 2026 03:31`: hover titles and receipts. */
+export function instantStamp(ms: number, z = hostZone()): string {
+  return Number.isFinite(ms) ? `${formatInstant(ms, { day: 'numeric', month: 'short', year: 'numeric' }, z)} ${clockTime(ms, z)}` : ''
+}
+
 /** Format an instant's age; optionally show seconds for live polling. Future instants read as now. */
 export function ago(ms: number, now = Date.now(), options: { seconds?: boolean } = {}): string {
   if (!Number.isFinite(ms)) return ''
@@ -367,22 +377,6 @@ export function formatCivilDay(
   return utc === undefined ? undefined : formatter('UTC', opts).format(utc + 12 * HOUR_MS)
 }
 
-/** `toLocaleString()`'s fields: the date and the time, numerically. */
-export const DATE_AND_TIME: Intl.DateTimeFormatOptions = {
-  year: 'numeric',
-  month: 'numeric',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-}
-
-/** `toLocaleTimeString()`'s fields: the time alone. */
-export const TIME_OF_DAY: Intl.DateTimeFormatOptions = {
-  hour: 'numeric',
-  minute: 'numeric',
-  second: 'numeric',
-}
 
 /** An instant said in the reader's locale, on a zone's wall clock. */
 export function formatInstant(

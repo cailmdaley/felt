@@ -101,3 +101,10 @@
   --glyph-small: 11px;
 }
 
+
+/* Code's two roles, as the element defaults: no code on the board falls back
+   to the browser's monospace. A class rule may restyle its ground and spacing;
+   its type stays these roles. */
+:where(code, kbd, samp) { font-family: var(--font-mono); font-size: var(--type-code); }
+:where(pre) { font-family: var(--font-mono); font-size: var(--type-code-block); line-height: var(--leading-prose); }
+:where(pre) :where(code, kbd, samp) { font-size: inherit; }

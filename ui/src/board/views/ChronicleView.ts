@@ -66,6 +66,7 @@ import { hasLiveWorker } from '../KanbanTypes.js'
 import { buildTimelineDays, type TimelineDay } from '../KanbanSurfaces.js'
 import {
   civilDayAt,
+  clockTime,
   civilDaySpan,
   dueCivilDay,
   dueSortMs,
@@ -79,7 +80,6 @@ import {
   railCivilDay,
   railDayReader,
   shiftCivilDay,
-  wallClock,
   type Zone,
 } from '../civilDay.js'
 import {
@@ -333,11 +333,6 @@ function railFrac(ms: number, day: string): number {
 
 const DAY_MS_CONST = 86_400_000
 
-/** `07:42` in the browser's zone — the tooltip's clock. */
-function hhmm(ms: number): string {
-  const { hour, minute } = wallClock(ms)
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
-}
 
 // ── Cycles ───────────────────────────────────────────────────────────────────
 //
@@ -3461,7 +3456,7 @@ class ChronicleView implements TemporalView {
         seg.style.width = `max(2px, calc(var(--chr-day-w) * ${f1 - f0}))`
         seg.style.height = `${h}px`
         seg.style.marginTop = `${-h / 2}px`
-        seg.title = `${hhmm(sp.startMs)}–${hhmm(sp.endMs)} · ${sp.minutes} active min`
+        seg.title = `${clockTime(sp.startMs)}–${clockTime(sp.endMs)} · ${sp.minutes} active min`
         track.append(seg)
       }
     }

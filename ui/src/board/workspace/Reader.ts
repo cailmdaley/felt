@@ -9,6 +9,7 @@ import { keyIntent, shouldForwardDocumentKey, type KeyIntent } from '../keymap.j
 import { blockingDialogOpen } from '../views/ViewRegistry.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { fileBytesUrl, showToast } from '../utils.js'
+import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
 import { channelLead, chatDocument, proseDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
@@ -712,7 +713,7 @@ export class Reader {
     const sends = doc.provenance.filter(p => p.kind === 'sent')
     receipts.append(element('summary', '', `Receipts (${sends.length})`))
     for (const p of [...sends].reverse()) {
-      if (p.kind === 'sent') receipts.append(element('div', '', `${new Date(p.time).toLocaleString()} · ${p.worker ?? ''} · ${p.session ?? ''}`))
+      if (p.kind === 'sent') receipts.append(element('div', '', `${instantStamp(p.time)} · ${p.worker ?? ''} · ${p.session ?? ''}`))
     }
     menu.append(receipts)
     if (this.currentCard && this.opts.themes) {

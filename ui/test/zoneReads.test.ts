@@ -98,7 +98,11 @@ function clockFormats(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
   const found: string[] = []
   const visit = (node: ts.Node): void => {
-    const clock = ts.isPropertyAccessExpression(node) && /^(toLocaleTimeString|getHours|getMinutes)$/.test(node.name.text)
+    // A date's locale formatters (any receiver but a number literal's), and hand-padded `hh:mm` templates.
+    const clock = ts.isPropertyAccessExpression(node) && (/^(toLocaleTimeString|toLocaleDateString|getHours|getMinutes)$/.test(node.name.text)
+      || (node.name.text === 'toLocaleString' && ts.isParenthesizedExpression(node.expression) === false && /^new Date\b|Date\b|[dD]ate$|^when$|^d$/.test(node.expression.getText(sf))))
+      || (ts.isTemplateExpression(node) && node.templateSpans.some((span, i) => i === 0 && /^:/.test(span.literal.text) && /padStart/.test(span.expression.getText(sf))
+        && i + 1 < node.templateSpans.length && /padStart/.test(node.templateSpans[i + 1].expression.getText(sf))))
     const hour = ts.isPropertyAssignment(node) && /^(hour|minute|hour12|timeStyle)$/.test(node.name.getText(sf))
     const relative = (ts.isTemplateExpression(node) && node.templateSpans.some(span => /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(span.literal.text)))
       || (ts.isStringLiteral(node) && /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(node.text))
@@ -128,9 +132,14 @@ it('sees the clock formats it exists to catch', () => {
     'const a = `${n}h ago`',
     'const a = `${n}d ago`',
     'const a = n + \'s ago\'',
+    'const t = new Date(ms).toLocaleString()',
+    'const t = when.toLocaleDateString(undefined, { month: "short" })',
+    'const t = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`',
   ]
   expect(mustFail.filter(src => clockFormats('x.ts', src).length === 0)).toEqual([])
-  expect(clockFormats('x.ts', "const word = 'a while ago'; const u = d.getUTCHours()")).toEqual([])
+  expect(clockFormats('x.ts', "const word = 'a while ago'; const u = d.getUTCHours(); const n = count.toLocaleString()")).toEqual([])
+  // A media duration (`3:07`) is not a clock time.
+  expect(clockFormats('x.ts', 'const t = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`')).toEqual([])
 })
 
 it('sees the reads it exists to catch', () => {

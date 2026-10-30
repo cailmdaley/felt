@@ -1218,7 +1218,8 @@ button.chr-name:hover {
    never scrolls sideways. The threshold is the board's one mobile breakpoint
    (`../mobile.ts`). */
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .chr-head-dow-full { display: none; }
+  /* Hidden from sight, still read: the initial beside it is aria-hidden. */
+  .chr-head-dow-full { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .chr-head-dow-initial { display: inline; }
   /* A phone gutter is a budget, and the name is what it is for: you scan the
      record by reading names, not by reading evidence about them. So the two
