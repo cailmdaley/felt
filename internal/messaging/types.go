@@ -54,7 +54,10 @@ type Request struct {
 	Wake         bool          `json:"wake"`
 	MessageID    string        `json:"message_id"`
 	ThreadSignal *ThreadSignal `json:"thread_signal,omitempty"`
-	Attachments  []Attachment  `json:"attachments,omitempty"`
+	// threadSignalVerified carries owner validation through a native send without
+	// exposing lifecycle authority in the sender-controlled request frame.
+	threadSignalVerified bool
+	Attachments          []Attachment `json:"attachments,omitempty"`
 	// NotifyWhenIdle subscribes From to one notice when the receiver next
 	// goes idle or exits; NotifyWake has that notice start a turn there.
 	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`

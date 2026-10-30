@@ -28,7 +28,7 @@ func recordEnvelope(env *sysenv.Env, session string, request Request) error {
 	if err := ensureDir(dir, 0700); err != nil {
 		return err
 	}
-	entry := DeliveredEnvelope{ID: request.MessageID, Envelope: Labeled(request), Thread: request.ThreadSignal != nil}
+	entry := DeliveredEnvelope{ID: request.MessageID, Envelope: Labeled(request), Thread: request.threadSignalVerified}
 	bytes, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -87,7 +87,7 @@ func DeliveredEnvelopes(env *sysenv.Env, session string) ([]DeliveredEnvelope, e
 				continue
 			}
 			if _, exists := byID[r.MessageID]; !exists {
-				byID[r.MessageID] = DeliveredEnvelope{ID: r.MessageID, Envelope: Labeled(r), Thread: r.ThreadSignal != nil}
+				byID[r.MessageID] = DeliveredEnvelope{ID: r.MessageID, Envelope: Labeled(r)}
 			}
 		}
 	}

@@ -250,6 +250,9 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
 		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(batch []Request) error {
 			offered = true
+			for index := range batch {
+				batch[index].threadSignalVerified = batch[index].ThreadSignal != nil
+			}
 			return emit(batch)
 		})
 		if err != nil {
@@ -310,6 +313,7 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 	return offerMailboxEachValidated(root, func(r Request) bool {
 		return fiberContextDirectEligible(root, r, generation, hook, a)
 	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(req Request) error {
+		req.threadSignalVerified = req.ThreadSignal != nil
 		req.ThreadSignal = nil
 		return deliverFiberContextItem(ctx, env, fiber, host, address, req)
 	})
