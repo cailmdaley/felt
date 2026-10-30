@@ -6,12 +6,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/atomicfile"
 	"github.com/cailmdaley/felt/internal/felt"
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
@@ -20,17 +22,27 @@ type boardCursor struct {
 	Seen []string `json:"seen"`
 }
 
+var harnessSlashCommand = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)`)
+
 // recordHumanPrompt verifies dispatch identity again under the document lock.
 func (a *app) recordHumanPrompt(input eventHookInput) {
-	if input.Prompt == "" || machinePrompt(input.Prompt) {
+	if input.Prompt == "" || machinePrompt(input.Prompt) || harnessSlashCommand.MatchString(strings.TrimSpace(input.Prompt)) {
 		return
 	}
-	path := a.env.Getenv("SHUTTLE_FIBER_PATH")
-	if path == "" {
+	if input.SessionID == "" || input.Harness == "" {
 		return
 	}
-	f, err := a.workerFiberAtPath(path, "")
-	if err != nil || shuttleRuntimeSessionID(f) != input.SessionID {
+	host, err := a.resolveOwnHost("")
+	if err != nil {
+		return
+	}
+	address := messaging.Address{Host: host, Harness: messaging.NormalizeHarness(input.Harness), ID: input.SessionID}
+	row, err := currentSessionBinding(address, a.localMessageLedger())
+	if err != nil || row == nil {
+		return
+	}
+	f, err := a.workerBindingFiber(*row)
+	if err != nil {
 		return
 	}
 	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: a.humanLabel()}, Text: input.Prompt}
@@ -45,7 +57,8 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		return
 	}
 	defer unlock()
-	if shuttleRuntimeSessionID(f) != input.SessionID {
+	current, err := currentSessionBinding(address, a.localMessageLedger())
+	if err != nil || current == nil || !sessionRecordBelongsToFiber(*current, f) {
 		return
 	}
 	block, ok, err := shuttle.BlockOf(f)

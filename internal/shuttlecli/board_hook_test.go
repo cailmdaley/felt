@@ -98,18 +98,29 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			dir, st := newStore(t)
 			seedShuttleRole(t, st, "f", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "host", "project_dir": t.TempDir(), "runtime": map[string]any{"session_uuid": "session"}, "ask": map[string]any{"text": "Which?", "at": "2026-10-28T10:00:00Z"}}, nil)
 			env.Set("SHUTTLE_STORES", dir)
-			env.Set("SHUTTLE_FIBER_PATH", st.Path("f"))
+			fiber := mustRead(t, st, "f")
+			writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "host", Harness: harness, Session: "session", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "dispatch", At: 1}})
 			daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprint(w, `{"family":null,"viewer":null,"records":[]}`)
 			}})
 			a := newApp(env)
 			input := eventHookInput{HookEventName: "UserPromptSubmit", Harness: harness, SessionID: "session", Prompt: "this one"}
+			input.Prompt = "/compact"
 			b, _ := json.Marshal(input)
 			var output bytes.Buffer
 			if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
-				t.Fatalf("hook %s %v", output.String(), err)
+				t.Fatalf("slash command hook %s %v", output.String(), err)
 			}
 			block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
+			if block.Ask == nil {
+				t.Fatal("slash command cleared ask")
+			}
+			input.Prompt = "this one"
+			b, _ = json.Marshal(input)
+			if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
+				t.Fatalf("hook %s %v", output.String(), err)
+			}
+			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
 			if block.Ask != nil {
 				t.Fatal("ask not cleared")
 			}
@@ -139,7 +150,20 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			}
 			input.SessionID = "other"
 			b, _ = json.Marshal(input)
+			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
+				t.Fatalf("unexpected binding for other session: %+v, %v", row, err)
+			}
 			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			if records = readBoardRecords(t, sink); len(records) != 2 {
+				t.Fatalf("unbound session changed board records: %+v", records)
+			}
+			writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "host", Harness: harness, Session: "other", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "resume", At: 2}})
+			input.Prompt = "continued after session succession"
+			b, _ = json.Marshal(input)
+			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			if records = readBoardRecords(t, sink); len(records) != 3 || records[2].Kind != "human" || records[2].Text != input.Prompt {
+				t.Fatalf("successor session records: %+v", records)
+			}
 			input.SessionID = "session"
 			input.Prompt = "[Shuttle message machine]"
 			b, _ = json.Marshal(input)
@@ -148,7 +172,7 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			input.Prompt = "disabled"
 			b, _ = json.Marshal(input)
 			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			if records = readBoardRecords(t, sink); len(records) != 2 {
+			if records = readBoardRecords(t, sink); len(records) != 3 {
 				t.Fatalf("unexpected records: %+v", records)
 			}
 		})
