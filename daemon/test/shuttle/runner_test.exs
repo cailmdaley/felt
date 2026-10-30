@@ -134,6 +134,47 @@ defmodule Shuttle.RunnerTest do
              )
   end
 
+  @tag :tmp_dir
+  test "EOF input uses one private file and cleans it after the command", %{tmp_dir: root} do
+    assert {"private request", 0} =
+             Shuttle.Runner.Default.cmd("cat", [],
+               input: "private request",
+               input_eof: true,
+               input_tmp_dir: root,
+               timeout_ms: 5_000
+             )
+
+    assert File.ls!(root) == []
+
+    assert {"", 0} =
+             Shuttle.Runner.Default.cmd("cat", [],
+               input_eof: true,
+               input_tmp_dir: root,
+               timeout_ms: 5_000
+             )
+
+    assert File.ls!(root) == []
+  end
+
+  @tag :tmp_dir
+  test "EOF input preserves tmux environment isolation", %{tmp_dir: root} do
+    Shuttle.Test.FakeCli.install!(%{
+      "tmux" => "#!/bin/sh\ncat; printf '|%s' \"$TMUX\"\n"
+    })
+
+    Shuttle.Test.Env.put_env("TMUX", "/operator/socket,1,0")
+
+    assert {"request|", 0} =
+             Shuttle.Runner.Default.cmd("tmux", [],
+               input: "request",
+               input_eof: true,
+               input_tmp_dir: root,
+               timeout_ms: 5_000
+             )
+
+    assert File.ls!(root) == []
+  end
+
   # The runner's wall-clock deadline is the subject: 100 ms against a 10 s
   # command, with the elapsed bound halfway between.
   @tag :timing
