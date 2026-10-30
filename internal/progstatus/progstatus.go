@@ -4,12 +4,8 @@ package progstatus
 
 import (
 	"encoding/base64"
-	"io"
-	"os"
 	"strings"
 	"unicode/utf8"
-
-	"golang.org/x/sys/unix"
 )
 
 // Report describes one terminal program status record. An empty ID addresses
@@ -21,7 +17,7 @@ type Report struct {
 // Encode returns an OSC 7501 report terminated by ESC backslash, or nil for an
 // unknown state. Invalid app and id values are omitted. Kind is emitted only
 // for a blocked state and a recognized kind. Text is single-line UTF-8, bounded
-// to 192 decoded bytes for Title and 2048 for Msg.
+// to 192 decoded bytes for Title and 128 for Msg.
 func (r Report) Encode() []byte {
 	switch r.State {
 	case "idle", "working", "done", "blocked", "error", "clear":
@@ -53,7 +49,7 @@ func (r Report) Encode() []byte {
 	}
 	if r.Msg != "" {
 		b.WriteString(":msg=")
-		b.WriteString(base64.StdEncoding.EncodeToString([]byte(singleLine(r.Msg, 2048))))
+		b.WriteString(base64.StdEncoding.EncodeToString([]byte(singleLine(r.Msg, 128))))
 	}
 	b.WriteString("\x1b\\")
 	return []byte(b.String())
@@ -113,24 +109,4 @@ func WrapTmux(seq []byte) []byte {
 		}
 	}
 	return append(b, '\x1b', '\\')
-}
-
-// Write opens path independently of the agent's descriptors and attempts one
-// nonblocking write. It returns EAGAIN for a full terminal and io.ErrShortWrite
-// for a partial report; it never retries. Raw Unix I/O avoids os.File.Write's
-// readiness polling, which can wait for space even with O_NONBLOCK.
-func Write(path string, b []byte) error {
-	fd, err := unix.Open(path, unix.O_WRONLY|unix.O_NOCTTY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
-	if err != nil {
-		return &os.PathError{Op: "open", Path: path, Err: err}
-	}
-	defer unix.Close(fd)
-	n, err := unix.Write(fd, b)
-	if err == nil && n != len(b) {
-		err = io.ErrShortWrite
-	}
-	if err != nil {
-		return &os.PathError{Op: "write", Path: path, Err: err}
-	}
-	return nil
 }

@@ -140,7 +140,7 @@ func TestEncodeTextLimits(t *testing.T) {
 	for _, field := range []struct {
 		key   string
 		limit int
-	}{{"msg", 2048}, {"title", 192}} {
+	}{{"msg", 128}, {"title", 192}} {
 		for _, runeText := range []string{"x", "é", "界", "🦉"} {
 			for _, prefix := range []string{"", "a", "ab", "abc"} {
 				input := prefix + strings.Repeat(runeText, field.limit+1)
@@ -158,7 +158,7 @@ func TestEncodeTextLimits(t *testing.T) {
 	// Sanitizing precedes truncation: each two-byte C1 character becomes one space.
 	input := strings.Repeat("\u0085", 2050)
 	pairs := reportPairs(t, (Report{State: "working", Title: input, Msg: input}).Encode())
-	for key, limit := range map[string]int{"title": 192, "msg": 2048} {
+	for key, limit := range map[string]int{"title": 192, "msg": 128} {
 		if pairs[key] != base64.StdEncoding.EncodeToString([]byte(strings.Repeat(" ", limit))) {
 			t.Errorf("%s did not truncate the sanitized text at %d bytes", key, limit)
 		}
@@ -171,11 +171,11 @@ func TestEncodeWholeSequenceLimit(t *testing.T) {
 		ID:    strings.Repeat("a", 32) + "/" + strings.Repeat("b", 32) + "/" + strings.Repeat("c", 32) + "/" + strings.Repeat("d", 29),
 		Title: strings.Repeat("t", 10000), Msg: strings.Repeat("m", 10000),
 	}).Encode()
-	if len(seq) > 4096 {
-		t.Fatalf("report has %d bytes, limit 4096", len(seq))
+	if n := len(WrapTmux(seq)); n > 768 {
+		t.Fatalf("wrapped report has %d bytes, limit 768", n)
 	}
 	pairs := reportPairs(t, seq)
-	if len(pairs) != 6 || len(pairs["title"]) != 256 || len(pairs["msg"]) != 2732 {
+	if len(pairs) != 6 || len(pairs["title"]) != 256 || len(pairs["msg"]) != 172 {
 		t.Fatalf("unexpected maximal report: %v", pairs)
 	}
 }
