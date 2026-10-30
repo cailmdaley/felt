@@ -2189,7 +2189,7 @@ defmodule Shuttle.AppWorkersTest do
         # an uncertain read; a later poll's closure reconciliation retires it.
         eventually(fn ->
           send(poller, :run_poll_cycle)
-          :sys.get_state(poller)
+          :sys.get_state(poller, 30_000)
           Poller.worker_status(poller, "tests/app") == nil
         end)
 
