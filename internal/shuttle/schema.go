@@ -20,15 +20,25 @@ var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month 
 
 // ---- Types -----------------------------------------------------------------
 
+// ThreadParent pins a thread's creation lineage independently of archive mirrors.
+// Host is a routing hint; UID is the immutable recipient identity.
+type ThreadParent struct {
+	UID  string `json:"uid" yaml:"uid"`
+	Host string `json:"host" yaml:"host"`
+	Slug string `json:"slug" yaml:"slug"`
+	Name string `json:"name" yaml:"name"`
+}
+
 // Block is the in-memory representation of a Shuttle facet. There is no
 // enabled flag and no review axis: a fiber is shuttle-managed iff it carries
 // this block, and it dispatches iff its status is "active". Lifecycle is status
 // plus tempered, uniform across kinds.
 type Block struct {
-	Kind       string `json:"kind" yaml:"kind"`
-	Host       string `json:"host,omitempty" yaml:"host,omitempty"`
-	ProjectDir string `json:"project_dir,omitempty" yaml:"project_dir,omitempty"`
-	Agent      string `json:"agent,omitempty" yaml:"agent,omitempty"`
+	ThreadParent *ThreadParent `json:"thread_parent,omitempty" yaml:"thread_parent,omitempty"`
+	Kind         string        `json:"kind" yaml:"kind"`
+	Host         string        `json:"host,omitempty" yaml:"host,omitempty"`
+	ProjectDir   string        `json:"project_dir,omitempty" yaml:"project_dir,omitempty"`
+	Agent        string        `json:"agent,omitempty" yaml:"agent,omitempty"`
 	// Surface selects how Codex executes: app is the ChatGPT-backed App Server
 	// transport, cli a tmux worker. A Codex block with no surface and no
 	// recorded session resolves to app; any other absent surface is the CLI.

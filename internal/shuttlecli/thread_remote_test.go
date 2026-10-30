@@ -160,6 +160,10 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 	create := creates.last()
 	frontmatter, _ := create["frontmatter"].(map[string]any)
 	block, _ := frontmatter["shuttle"].(map[string]any)
+	parentRef, _ := block["thread_parent"].(map[string]any)
+	if parentRef["uid"] != mustRead(t, st, "parent").UID || parentRef["host"] != "hub" || parentRef["slug"] != "parent" {
+		t.Fatalf("remote thread lost its parent identity: %#v", parentRef)
+	}
 	if create["id"] != "parent/measure" || create["origin"] != "worker" || block["host"] != "worker" {
 		t.Fatalf("remote create payload = %#v", create)
 	}

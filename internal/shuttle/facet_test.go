@@ -367,7 +367,8 @@ func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
 	t.Parallel()
 	f := shuttleFiber(t, map[string]any{
 		"kind": "oneshot", "agent": "claude-opus", "effort": "high",
-		"session_uuid": "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
+		"thread_parent": map[string]any{"uid": "parent-uid", "host": "parent-host", "slug": "hub", "name": "Hub"},
+		"session_uuid":  "keep-uuid", "dispatched_at": "2026-06-21T00:00:00Z",
 	})
 
 	// Redefine as a standing constitution with a new agent and no effort.
@@ -397,6 +398,9 @@ func TestSetConfig_PreservesRuntimeKeys(t *testing.T) {
 	}
 	if b.Effort != "" {
 		t.Fatalf("a cleared config key must be dropped, got effort=%q", b.Effort)
+	}
+	if b.ThreadParent == nil || b.ThreadParent.UID != "parent-uid" || b.ThreadParent.Host != "parent-host" {
+		t.Fatalf("thread identity clobbered by config rewrite: %+v", b.ThreadParent)
 	}
 	sh := marshalShuttle(t, f2)["shuttle"].(map[string]any)
 	if sh["session_uuid"] != "keep-uuid" || sh["dispatched_at"] != "2026-06-21T00:00:00Z" {

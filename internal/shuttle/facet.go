@@ -128,7 +128,7 @@ func SetRuntimeField(f *felt.Felt, key, value string) error {
 var configKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
 	"effort": true, "chrome": true, "surface": true, "schedule": true,
-	"role": true, "seat": true,
+	"role": true, "seat": true, "thread_parent": true,
 }
 
 // SetConfig replaces the typed configuration while preserving runtime and
@@ -148,7 +148,8 @@ func SetConfig(f *felt.Felt, block *Block) error {
 	// Questions are worker state, not configuration; preserve the live node.
 	felt.RemoveMappingKey(&encoded, "ask")
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		if configKeys[strings.TrimSpace(node.Content[i].Value)] {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if configKeys[key] && !(key == "thread_parent" && block.ThreadParent == nil) {
 			continue
 		}
 		encoded.Content = append(encoded.Content, node.Content[i], node.Content[i+1])
