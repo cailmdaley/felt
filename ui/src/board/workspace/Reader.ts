@@ -248,7 +248,7 @@ export class Reader {
     this.sidebarIndex.title = ROW_MARKS
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
-    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) })
+    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) }, opts.shuttleBase)
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
@@ -354,6 +354,7 @@ export class Reader {
     if (this.expanded) this.setExpanded(false)
     this.active = false
     this.reportChip?.view.dispose(); this.reportChip = null
+    this.threadRail.setArtifactLive(false)
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
     this.pageSheet.hide()
@@ -527,7 +528,7 @@ export class Reader {
     const chipKey = this.selected === chat?.key && report && chatFrame ? report.key : null
     if (this.reportChip?.key !== chipKey) {
       this.reportChip?.view.dispose(); this.reportChip = null
-      if (chipKey && report) this.reportChip = { key: chipKey, view: new ReportChip(this.opts.shuttleBase, report, () => this.openDocument(report.key)) }
+      if (chipKey && report) this.reportChip = { key: chipKey, view: new ReportChip(report, () => this.openDocument(report.key)) }
     }
     const head = chatFrame?.content.querySelector('.ws-chat-head')
     const refs = head?.querySelector('.ws-chat-refs')
@@ -659,6 +660,9 @@ export class Reader {
     if (!this.channel) return
     const before = [this.threadRail.present, this.threadRail.quiet, this.railShown].join()
     this.threadRail.showFiles(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
+    // The rail leads with the artifact, except while the artifact itself fills the stage.
+    const lead = channelLead(this.channel)
+    this.threadRail.showArtifact(lead && lead.key !== this.selected ? lead : null, key => this.openDocument(key))
     this.paintRail()
     if (before !== [this.threadRail.present, this.threadRail.quiet, this.railShown].join()) this.layout(false)
   }
@@ -843,6 +847,7 @@ export class Reader {
     this.railToggle.hidden = !has
     this.railToggle.setAttribute('aria-expanded', String(open))
     this.railToggle.setAttribute('aria-label', open ? 'Hide threads and sent files' : 'Show threads and sent files')
+    this.threadRail.setArtifactLive(this.railShown)
     this.railToggle.toggleAttribute('data-attention', has && (this.threadRail.needsHuman || this.fresh.size > 0))
   }
   private stagePlaces(): { page: number; sidebar: number } {
@@ -1132,6 +1137,7 @@ export class Reader {
   }
   dispose(): void {
     this.reportChip?.view.dispose()
+    this.threadRail.dispose()
     window.clearInterval(this.workerClock)
     this.cancelSidebarSlide?.()
     this.opts.themes?.unbind(this.el)

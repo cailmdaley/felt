@@ -1,34 +1,26 @@
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import type { WorkspaceDocument } from './documents.js'
-import { Thumbnail } from './Thumbnail.js'
+import { headerIcon } from './headerIcon.js'
 
-/** The report's persistent entry point, sharing the reader's document identity. */
+/** The artifact's header entry point: the word on the desktop, its icon on the phone. */
 export class ReportChip {
   readonly el = document.createElement('button')
-  private readonly thumbnail: Thumbnail
   private readonly stopTitle: () => void
-  constructor(base: string, doc: WorkspaceDocument, open: () => void) {
+  constructor(doc: WorkspaceDocument, open: () => void) {
     this.el.type = 'button'
     this.el.className = 'ws-report-chip'
     this.el.addEventListener('click', open)
-    const preview = document.createElement('span')
-    preview.className = 'ws-report-preview'; preview.inert = true
-    this.thumbnail = new Thumbnail({
-      key: doc.key, shuttleBase: base, fallback: 'Artifact', captioned: true,
-      file: { fullPath: doc.path, owner: doc.owner, basename: doc.name },
-      priority: () => 1, distance: () => 0,
-    })
-    preview.append(this.thumbnail.el)
-    const reportLabel = document.createElement('span')
-    reportLabel.className = 'ws-report-label'
-    reportLabel.textContent = 'Artifact'
-    this.el.append(preview, reportLabel)
-    const label = (): void => {
+    this.el.innerHTML = headerIcon('artifact')
+    const label = document.createElement('span')
+    label.className = 'ws-report-label'
+    label.textContent = 'Artifact'
+    this.el.append(label)
+    const name = (): void => {
       const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Artifact'
       this.el.title = title
       this.el.setAttribute('aria-label', `Read artifact: ${title}`)
     }
-    label(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) label() })
+    name(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) name() })
   }
-  dispose(): void { this.stopTitle(); this.thumbnail.dispose(); this.el.remove() }
+  dispose(): void { this.stopTitle(); this.el.remove() }
 }

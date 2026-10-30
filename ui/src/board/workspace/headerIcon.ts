@@ -1,5 +1,7 @@
 const shapes = {
   constitution: '<rect x="3" y="1.5" width="10" height="13" rx="1"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3"/>',
+  artifact: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="m4 11 3-3.5 2 2 3-3.5"/>',
+  open: '<path d="M9.5 2.5h4v4M13.5 2.5 8 8M12 9.5v4h-9.5V4H6.5"/>',
   console: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="m4 6 2.5 2L4 10m4.5 0h3"/>',
   settings: '<path d="M6.6 1.5h2.8l.5 2 1.1.6 2-.6 1.4 2.4-1.5 1.4v1.4l1.5 1.4-1.4 2.4-2-.6-1.1.6-.5 2H6.6l-.5-2-1.1-.6-2 .6-1.4-2.4 1.5-1.4V7.3L1.6 5.9 3 3.5l2 .6 1.1-.6Z"/><circle cx="8" cy="8" r="2.25"/>',
   close: '<path d="m3 8 3 3 7-7"/>',

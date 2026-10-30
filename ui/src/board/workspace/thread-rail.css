@@ -12,6 +12,32 @@
 .ws-thread-scroll[hidden] { display: none; }
 .ws-rail-files { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; padding: 10px 8px 0 10px; border-top: 1px solid var(--kbn-rule); }
 .ws-thread-scroll[hidden] + .ws-rail-files { border-top: 0; padding-top: 12px; }
+/* The artifact heads the rail; its corner toggle floats over the heading's end. Its page laid out at --ws-artifact-virtual-width and scaled to the rail, live in place. */
+.ws-rail-artifact { flex: none; display: flex; flex-direction: column; min-width: 0; padding: 12px 8px 12px 10px; border-bottom: 1px solid var(--kbn-rule); }
+.ws-rail-artifact[hidden] { display: none; }
+.ws-rail-artifact.ws-rail-artifact-folded { padding-bottom: 6px; }
+.ws-rail-artifact-head { display: flex; align-items: center; gap: 4px; min-width: 0; padding-right: 32px; }
+/* Beneath the artifact, threads give way before the sent files' heading and first rows leave view. */
+.ws-rail-artifact:not([hidden]) ~ .ws-thread-scroll { max-height: none; }
+.ws-rail-artifact:not([hidden]) ~ .ws-rail-files { min-height: 88px; }
+.ws-rail-artifact-toggle { display: flex; flex: 1 1 auto; align-items: baseline; min-width: 0; text-align: left; background: transparent; border: 0; border-radius: var(--ws-control-radius); cursor: pointer; }
+.ws-rail-artifact-toggle::before {
+  content: ''; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 8px 0 2px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .8;
+}
+.ws-rail-artifact-folded .ws-rail-artifact-toggle::before { transform: rotate(-45deg); }
+.ws-rail-artifact-toggle:hover, .ws-rail-artifact-full:hover { background: var(--ws-hover); color: var(--kbn-ink); }
+.ws-rail-artifact-full { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--kbn-ink-muted); cursor: pointer; }
+.ws-reader.ws-keyboard :is(.ws-rail-artifact-toggle, .ws-rail-artifact-full):focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
+:is(.ws-rail-artifact-toggle, .ws-rail-artifact-full):focus { outline: none; }
+.ws-rail-artifact-body { position: relative; overflow: hidden; margin-top: 6px; border: 1px solid var(--kbn-rule); border-radius: 3px; background: var(--kbn-rag, var(--kbn-paper)); }
+.ws-rail-artifact-body[hidden] { display: none; }
+.ws-rail-artifact-page {
+  position: absolute; top: 0; left: 0;
+  width: var(--ws-artifact-virtual-width, 720px); height: calc(100% / var(--ws-artifact-scale, 1));
+  transform: scale(var(--ws-artifact-scale, 1)); transform-origin: 0 0;
+}
+.ws-thread-resizing .ws-rail-artifact-body iframe { pointer-events: none; }
 .ws-rail-file-list { flex: 1 1 auto; padding: 4px 0 16px; }
 .ws-rail-file {
   display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; padding: 4px 4px 4px 8px;
@@ -25,7 +51,7 @@
 .ws-reader.ws-keyboard .ws-rail-file:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
 .ws-rail-file[aria-current='page'] { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-rail-files-empty { margin: 0; padding: 4px 8px; color: var(--kbn-ink-muted); font-size: var(--type-note); font-style: italic; }
-.ws-thread-heading { margin: 0; padding: 4px 8px; font: inherit; font-variant: small-caps; letter-spacing: .03em; color: var(--kbn-ink-muted); }
+.ws-thread-heading, .ws-rail-artifact-toggle { margin: 0; padding: 4px 8px; font: inherit; font-variant: small-caps; letter-spacing: .03em; color: var(--kbn-ink-muted); }
 .ws-thread-heading:focus { outline: none; }
 .ws-thread-handle { position: absolute; top: 0; bottom: 0; left: -4px; z-index: 3; width: 9px; cursor: col-resize; touch-action: none; }
 .ws-thread-handle::after {

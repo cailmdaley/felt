@@ -9,12 +9,15 @@ import { foldSentFiles, sentDocuments, sentFileRow } from './SentFiles.js'
 import './thread-rail.css'
 
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
-const MIN_WIDTH = 220, MAX_WIDTH = 640, STEP = 16
+const MIN_WIDTH = 220, STEP = 16
 import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
+import { ARTIFACT_RESERVE, RailArtifact } from './RailArtifact.js'
+import type { WorkspaceDocument } from './documents.js'
 
 /**
- * The reader's right-hand column: the open constitution's threads above, its
- * sent files beneath, each region scrolling on its own.
+ * The reader's right-hand column: the open constitution's artifact at its
+ * head, live and sized by the rail's width, then its threads, then its sent
+ * files, each region scrolling on its own.
  *
  * The threads region is a view of the open constitution's whole family, from the top-level
  * constitution down: inside a thread the same family stays, the open thread
@@ -44,10 +47,14 @@ export class ThreadRail {
   needsHuman = false
   /** The open conversation has sent at least one file. */
   hasFiles = false
-  /** The rail has something to draw: threads beside the open one, or sent files. */
-  get present(): boolean { return this.hasFamily || this.hasFiles }
-  /** Nothing in the rail asks for the eye: no sent files, and every other thread archived. */
-  get quiet(): boolean { return this.familyQuiet && !this.hasFiles }
+  /** The open constitution has an artifact the rail can lead with. */
+  get hasArtifact(): boolean { return this.artifact.present }
+  /** The rail has something to draw: an artifact, threads beside the open one, or sent files. */
+  get present(): boolean { return this.hasArtifact || this.hasFamily || this.hasFiles }
+  /** Nothing in the rail asks for the eye: no artifact, no sent files, and every other thread archived. */
+  get quiet(): boolean { return this.familyQuiet && !this.hasFiles && !this.hasArtifact }
+  readonly artifact: RailArtifact
+  private readonly observer: ResizeObserver | null
   /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
   /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
@@ -55,8 +62,9 @@ export class ThreadRail {
   private index: ThreadIndex | null = null
   private readonly open: (card: KanbanCard) => void
   private readonly layout: () => void
-  constructor(open: (card: KanbanCard) => void, layout: () => void) {
+  constructor(open: (card: KanbanCard) => void, layout: () => void, shuttleBase = '') {
     this.open = open; this.layout = layout
+    this.artifact = new RailArtifact(shuttleBase)
     this.el.className = 'ws-thread-rail'
     this.el.setAttribute('aria-label', 'Thread tree')
     // The rail shows and hides from the reader's corner toggle; its heading only names it.
@@ -72,7 +80,9 @@ export class ThreadRail {
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
     this.handle.addEventListener('keydown', e => this.resizeKey(e))
     this.handle.addEventListener('dblclick', () => this.setWidth(null, true))
-    this.el.append(this.handle, this.scroller, this.files)
+    this.el.append(this.handle, this.artifact.el, this.scroller, this.files)
+    this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.fit())
+    this.observer?.observe(this.el)
     try {
       const stored = Number(localStorage.getItem(WIDTH_STORAGE))
       if (Number.isFinite(stored) && stored > 0) this.width = stored
@@ -80,7 +90,7 @@ export class ThreadRail {
     this.applyWidth()
   }
   private bounds(): { min: number; max: number } {
-    return { min: MIN_WIDTH, max: Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.floor(window.innerWidth * 0.5))) }
+    return { min: MIN_WIDTH, max: Math.max(MIN_WIDTH, Math.floor(window.innerWidth * 0.5)) }
   }
   /** The viewer's width clamped to the viewport; absent, the stylesheet's default. */
   private applyWidth(): void {
@@ -189,6 +199,23 @@ export class ThreadRail {
       ;(target ?? this.filesHeading).focus({ preventScroll: true })
     }
   }
+  /** The artifact the rail leads with, or none. */
+  showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void): void {
+    this.artifact.show(doc, openFull)
+    this.applyPresence()
+    this.fit()
+  }
+  /** Load the artifact while the rail stands open beside the stage; unload it otherwise. */
+  setArtifactLive(live: boolean): void {
+    this.artifact.setLive(live && !this.el.hidden)
+    this.fit()
+  }
+  /** Size the artifact to the rail, keeping each region beneath it in view by its heading and a row or two. */
+  fit(): void {
+    if (this.el.hidden) return
+    this.artifact.resize(this.el.clientHeight, ARTIFACT_RESERVE * (Number(this.hasFamily) + Number(this.hasFiles)))
+  }
+  dispose(): void { this.observer?.disconnect(); this.artifact.dispose() }
   /** A conversation with no constitution card has no family to draw. */
   clearFamily(): void {
     this.card = null; this.scope = null; this.index = null
