@@ -335,6 +335,12 @@ Containment uses canonical slugs within each felt store; existing fiber, path, r
 An owned constitution entry with no live worker carries `pending_results` while something waits for its next worker: the number of thread results and messages in its context mailbox, plus results addressed to it still in the owner's outbox. The field is absent when nothing waits or a worker is live.
 The owner counts after each poll's delivery pass, so a count trails a new arrival by up to one poll; the composite carries each remote owner's count unchanged.
 `GET /threads/*id` carries the same count on the orchestrator (`pending_results`) and on each thread this host owns.
+Thread lifecycle state comes from each owner's document feed, including fibers
+absent from the local archive. Each node and the root carry `stale`,
+`host_unreachable` and `owner_cache_state`. An unreachable owner's archive
+fallback is stale and retains its last recorded state. A reachable owner with
+an incomplete (`cold` or `partial`) cache reports `Unknown` rather than inferring
+live state from an archive copy; `host_unreachable` stays false.
 
 The owner feed's live-worker `runtime` carries `tasks` beside its existing `phase` and session fields.
 Each task has `{id, subject, status, activeForm}`; `activeForm` is null when the harness supplies none.
