@@ -5638,8 +5638,24 @@ defmodule Shuttle.Poller do
              role: new[:role]
            ),
          :ok <- Shuttle.MigrationJournal.clear(entry) do
-      if get_in(entry, ["backend", "type"]) == "rex" do
-        Shuttle.Terminal.RexBindings.put_fiber(new.session, new.fiber_id)
+      terminal =
+        case get_in(entry, ["backend", "type"]) do
+          "rex" ->
+            new.session
+
+          "app" ->
+            record = get_in(entry, ["backend", if(forward?, do: "after", else: "before")])
+            record["terminal_tmux"] || Shuttle.CodexTerminal.tmux_name(entry["uuid"])
+
+          _ ->
+            nil
+        end
+
+      # An App Server conversation can have a held Rex TUI too. Its assignment
+      # moves without renaming or recreating that replaceable terminal.
+      with true <- is_binary(terminal),
+           {:ok, %{"bindings" => %{^terminal => _}}} <- Shuttle.Terminal.RexBindings.read(),
+           :ok <- Shuttle.Terminal.RexBindings.put_fiber(terminal, new.fiber_id) do
         Shuttle.Terminal.RexTree.refresh(state.runner)
       end
 

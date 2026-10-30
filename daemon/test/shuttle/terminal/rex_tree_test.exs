@@ -39,6 +39,17 @@ defmodule Shuttle.Terminal.RexTreeTest do
     assert [%{label: "deep/leaf"}] = RexTree.layout([%{fiber: "a/deep/leaf", session_id: "s"}])
   end
 
+  test "Codex viewers resolve the App Server thread independently of the transcript id" do
+    records = [
+      %{"fiber" => "work/source", "session" => "source-transcript", "thread_id" => "fork-thread"},
+      %{"fiber" => "work/fork", "session" => "fork-transcript", "thread_id" => "fork-thread"}
+    ]
+
+    assert RexTree.fiber_for("codex-terminal-fork-thread", records) == "work/fork"
+    assert RexTree.fiber_for("resume-fork-transcript", records) == "work/fork"
+    assert RexTree.fiber_for("codex-terminal-unrelated", records) == nil
+  end
+
   test "launch, claim and observed exit refresh only bound sessions; worker recovery labels survive" do
     FakeRex.sessions(%{
       "session:human" => %{

@@ -39,6 +39,29 @@ func TestRexListingRequiresWorkerBlockAndDoesNotReintroduceDisplayLabel(t *testi
 	}
 }
 
+func TestRexLostBindingListingUsesBlockIdentityUnderTreeDisplay(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	name := "thread-01ARZ3NDEKTSV4RRFFQ69G5FAV-shuttle"
+	path := writeRexBindings(t, env, map[string]rexBinding{})
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	stubRex(t, env, `{"sessions":[{"session_id":"session:tree","label":"└ thread"}]}`, 0)
+	env.Set("REX_TEST_BLOCKS", `{"blocks":[{"block_id":"block:worker","label":"`+name+`"},{"block_id":"block:viewer","label":"`+name+`@tmux"},{"block_id":"block:human","label":"human"}]}`)
+	r := &rexTerminal{a: newApp(env)}
+	live, err := r.LiveWorkers()
+	if err != nil || len(live) != 1 || !live[name] {
+		t.Fatalf("tree display hid live block identity: %v %v", live, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("read-only discovery wrote bindings: %v", err)
+	}
+	if err := r.Kill(name); err == nil {
+		t.Fatal("discovery became permission to destroy an unbound session")
+	}
+}
+
 func TestTerminalObservationErrorsReachEveryCLICaller(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{{"status"}, {"ps"}, {"status", "task"}, {"pause", "task"}, {"rest", "task"}, {"attach", "task"}} {

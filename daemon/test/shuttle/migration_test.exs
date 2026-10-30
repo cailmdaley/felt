@@ -378,6 +378,50 @@ defmodule Shuttle.MigrationTest do
     assert :sys.get_state(restarted).reconciliation_hold != nil
   end
 
+  test "an app-backed Codex migration reassigns its held Rex terminal viewer", %{
+    poller: p,
+    root: root
+  } do
+    alias Shuttle.{AppWorkers, Terminal, Test.FakeRex}
+    alias Shuttle.Terminal.{Rex, RexBindings}
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
+    Env.put_app_env(:migration_rex, true)
+    Env.put_app_env(:terminal_backend, Rex)
+    id = "native-session"
+    tmux = Shuttle.CodexTerminal.tmux_name(id)
+
+    :ok =
+      AppWorkers.put(%{
+        "session_uuid" => id,
+        "thread_id" => id,
+        "active" => true,
+        "fiber_id" => "source",
+        "uid" => FiberUid.for("source"),
+        "felt_store" => root,
+        "surface" => "cli",
+        "terminal_tmux" => tmux,
+        "backend_host" => "test-host",
+        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
+      })
+
+    :sys.replace_state(p, fn s ->
+      put_in(s.running[Poller.running_key(s, "source")].session, AppWorkers.ref(id))
+    end)
+
+    assert :ok = Terminal.launch(Runner, tmux, root, "sleep 30\n", fiber: "source")
+    assert {:ok, %{"bindings" => %{^tmux => %{"session_id" => sid}}}} = RexBindings.read()
+    assert FakeRex.state().sessions[sid].label == "source"
+    assert {:ok, _} = Poller.migrate(p, "source", "dest", rest: true)
+
+    assert {:ok, %{"bindings" => %{^tmux => %{"session_id" => ^sid, "fiber" => "dest"}}}} =
+             RexBindings.read()
+
+    assert FakeRex.state().sessions[sid].label == "dest"
+    assert {:ok, %{"fiber_id" => "dest", "thread_id" => ^id}} = AppWorkers.get(id)
+    assert Shuttle.CodexTerminal.tmux_name(id) == tmux
+  end
+
   test "concurrent app status writes cannot undo migration", %{poller: p, root: root} do
     alias Shuttle.AppWorkers
     id = "native-session"

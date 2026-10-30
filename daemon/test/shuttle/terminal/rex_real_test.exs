@@ -199,7 +199,9 @@ defmodule Shuttle.Terminal.RexRealTest do
                @runner,
                "probe-tree-thread",
                root,
-               "trap 'rm -f \"$0\"' EXIT\nsleep 60\n", fiber: "a/design/rex/thread")
+               "trap 'rm -f \"$0\"' EXIT\nsleep 60\n",
+               fiber: "a/design/rex/thread"
+             )
 
     assert {:ok, sessions} = Rex.sessions(@runner)
     assert Enum.map(sessions, & &1["label"]) == ["design/rex @tmux", "└ thread"]

@@ -141,11 +141,20 @@ defmodule Shuttle.OpenerTest do
 
     FakeRex.reply("tmux", {"", 0})
     assert :ok = Opener.open(@name)
-    child = "thread-01KVBR5K0FZHZQK18845TZ01Q2-shuttle"
+    child = "codex-terminal-fork-thread"
 
     Env.put_app_env(
       :opener_sessions,
-      {:ok, Jason.encode!(%{"records" => [%{"fiber" => "a/design/rex/thread", "tmux" => child}]})}
+      {:ok,
+       Jason.encode!(%{
+         "records" => [
+           %{
+             "fiber" => "a/design/rex/thread",
+             "thread_id" => "fork-thread",
+             "session" => "fork-transcript"
+           }
+         ]
+       })}
     )
 
     assert :ok = Opener.open(child, "remote-a")

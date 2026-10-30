@@ -101,6 +101,21 @@ func TestRexTerminalRealIsolatedServer(t *testing.T) {
 	if has, err := r.Has(name); !has || err != nil {
 		t.Fatalf("renamed Has %v: %v", has, err)
 	}
+	if _, err := r.command(`{"label":"└ probe"}`, "api", "call", "-s", sid, "session.set_label", "-"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if live, err := r.LiveWorkers(); !live[name] || len(live) != 1 || err != nil {
+		t.Fatalf("lost binding under tree label %v: %v", live, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("lost-binding discovery wrote the index: %v", err)
+	}
+	if err := os.WriteFile(path, before, 0600); err != nil {
+		t.Fatal(err)
+	}
 	env.Set("REX_SESSION", sid)
 	env.Set("REX_BLOCK", bid)
 	ref, err := r.a.currentTerminal()

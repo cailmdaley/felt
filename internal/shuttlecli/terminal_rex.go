@@ -250,9 +250,6 @@ func (r *rexTerminal) LiveWorkers() (map[string]bool, error) {
 				bound[name] = binding
 			}
 		}
-		if len(bound) == 0 && !isShuttleTmuxSessionName(session.Label) {
-			continue
-		}
 		blocks, err := r.blocks(session.SessionID)
 		if err != nil {
 			return live, err
@@ -265,11 +262,12 @@ func (r *rexTerminal) LiveWorkers() (map[string]bool, error) {
 			}
 		}
 		// A bound session's label is display, never a second worker identity.
-		// Lost-binding recovery needs a matching block label, like the daemon.
+		// Lost-binding discovery uses the block's recovery index independently
+		// of the session's tree display. It never grants mutation authority.
 		if len(bound) == 0 {
 			for _, block := range blocks {
-				if block.Label == session.Label {
-					live[session.Label] = true
+				if isShuttleTmuxSessionName(block.Label) {
+					live[block.Label] = true
 				}
 			}
 		}
