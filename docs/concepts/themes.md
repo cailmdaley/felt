@@ -86,13 +86,13 @@ These are the stable styling tokens:
 | `--ws-agent`, `--ws-machine`, `--ws-machine-halo` | Agent ink and halo |
 | `--ws-owed`, `--ws-fresh` | Owed/waiting text and fresh-receipt dot |
 | `--ws-verdict` | Verdict ink |
-| `--ws-serif`, `--ws-mono`, `--ws-mono-tracking` | Prose/name stack, metadata stack and tracking |
-| `--ws-heading-size`, `--ws-section-size`, `--ws-lede-size`, `--ws-prose-size` | Fiber title, section, outcome and body sizes |
-| `--ws-row-size`, `--ws-label-size`, `--ws-note-size`, `--ws-small-size`, `--ws-chrome-size` | Row titles, controls, secondary lines, metadata and the reader's base text |
+| `--font-serif`, `--font-mono`, `--ws-mono-tracking` | The serif and mono stacks, and the mono's tracking |
+| `--type-display`, `--type-title`, `--type-prose`, `--type-row`, `--type-label`, `--type-note`, `--type-meta`, `--type-code` | The type roles: fiber titles, titles and outcomes, reading text, row titles, controls, secondary lines, machine facts, code |
+| `--leading-prose`, `--leading-ui`, `--leading-tight` | Line height for reading text, a line of chrome, and titles |
 | `--ws-radius`, `--ws-control-radius`, `--ws-line-width`, `--ws-float` | Popover and menu shape, control shape, borders and elevation shadow |
 
-The default scale has seven steps: 11 px mono metadata, 14 px secondary lines, 15 px controls and labels, 16 px row titles, 18 px prose, 21 px titles and outcomes, and 34 px fiber titles. `--ws-chrome-size` follows the label step and `--ws-lede-size` the section step unless a theme sets them.
-Themes can restyle those fonts and sizes through the variables above; act zones keep Shuttle's default typography.
+The type roles are defined once, in `ui/src/styles/type.css`: 12 px mono for machine facts (ids, times, paths), 14 px secondary lines, 15 px controls and labels, 16 px row titles, 18 px prose, 21 px titles and outcomes, 34 px fiber titles, and code at 0.9 of its surrounding text. Each role names its family: mono is for what a machine wrote or a person types, and every label a person reads is serif.
+A theme restyles fonts, sizes and leading by setting these variables on `:scope`. Act zones keep Shuttle's default typography.
 
 Set related text and background tokens together and check contrast.
 Ordinary text needs at least 4.5:1 contrast; large text needs 3:1.
@@ -150,7 +150,7 @@ Set `theme: laboratory-paper`, then add this `theme.css` beside the fiber:
 [data-part='fiber-title']::before {
   content: 'FIELD NOTE / ';
   display: block;
-  font: 11px/2 var(--ws-mono);
+  font: var(--type-meta)/2 var(--font-mono);
   letter-spacing: .12em;
   color: var(--ws-ink-muted);
 }
