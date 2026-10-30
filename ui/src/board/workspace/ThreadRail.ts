@@ -277,7 +277,6 @@ export class ThreadRail {
       if (mark && ['question', 'blocked', 'discarded'].includes(mark.kind)) {
         const el = document.createElement('span'); el.className = 'ws-thread-mark'; el.dataset.kind = mark.kind
         el.title = mark.title; el.setAttribute('aria-hidden', 'true')
-        el.textContent = mark.kind === 'discarded' ? '×' : mark.kind === 'question' ? '?' : mark.kind === 'blocked' ? '!' : ''
         row.append(el); title = mark.title
       }
       const here = card.id === current.id && card.originId === current.originId

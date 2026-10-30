@@ -72,7 +72,7 @@ function sessionLabel(address: string): Pick<ShuttleMessage, 'peer' | 'peerSuffi
   const host = match[1]
   const harness = match[2]
   const session = match[3]
-  const shortSession = session ? ` · …${session.slice(-6)}` : ''
+  const shortSession = session ? ` · ${session.slice(-6)}` : ''
   return {
     peer: `${harness.charAt(0).toUpperCase()}${harness.slice(1)} · ${host}${shortSession}`,
     ...(shortSession ? { peerSuffix: shortSession } : {}),

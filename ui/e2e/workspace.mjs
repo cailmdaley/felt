@@ -124,7 +124,7 @@ test('The chat follows a live transcript by byte offset', async p => {
   assert.ok(Number(new URL(requests.at(-1).url, 'file:///').searchParams.get('offset')) > 0)
 })
 
-for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) test(`Shuttle messages are separate expandable chat rows (${device})`, async p => {
+for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone-390', { width: 390, height: 844 }], ['phone-320', { width: 320, height: 844 }]]) test(`Shuttle messages are separate expandable chat rows (${device})`, async p => {
   await p.goto(`${url}&transcript=messages`)
   await p.locator('.kbn-card').filter({ hasText: name }).click()
   await choose(p, 'Chat')
@@ -147,7 +147,45 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.equal(await rows.nth(1).locator('.ws-transcript-message-detail').isVisible(), false, 'received text starts collapsed')
     assert.ok(!(await rows.nth(0).innerText()).includes('shuttle://'), 'the compact row hides the raw session address')
     assert.ok(!(await rows.nth(1).innerText()).includes('msg-abcdef'), 'the compact row hides the message id')
-    const capture = process.env.WORKSPACE_SHOTS && (device === 'desktop' && scheme === 'light' || device === 'phone' && scheme === 'dark')
+    if (device === 'phone-320') {
+      const summary = rows.nth(0).locator('.ws-transcript-message-toggle')
+      const geometry = await summary.evaluate(el => {
+        const box = el.getBoundingClientRect()
+        const children = [...el.children].map(child => child.getBoundingClientRect())
+        const peer = el.querySelector('.ws-transcript-message-peer-label')
+        const time = el.querySelector('.ws-transcript-message-time')
+        return {
+          wrap: getComputedStyle(el).flexWrap,
+          height: box.height,
+          maxChildHeight: Math.max(...children.map(child => child.height)),
+          peerClientWidth: peer.clientWidth,
+          peerScrollWidth: peer.scrollWidth,
+          peerTextOverflow: getComputedStyle(peer).textOverflow,
+          peerRight: peer.getBoundingClientRect().right,
+          timeLeft: time.getBoundingClientRect().left,
+          timeRight: time.getBoundingClientRect().right,
+          rowRight: box.right,
+        }
+      })
+      if (process.env.WORKSPACE_SHOTS && scheme === 'light') {
+        await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+        await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-collapsed.png`) })
+      }
+      assert.equal(geometry.wrap, 'nowrap', `the message header is one flex line: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.height <= geometry.maxChildHeight + 3, `the message header occupies one line: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.peerScrollWidth > geometry.peerClientWidth, `the peer yields space and truncates: ${JSON.stringify(geometry)}`)
+      assert.equal(geometry.peerTextOverflow, 'ellipsis', 'the peer draws a single ellipsis')
+      assert.ok(geometry.timeLeft >= geometry.peerRight - 1 && geometry.timeRight <= geometry.rowRight + 1, `the time and chevron stay on the row: ${JSON.stringify(geometry)}`)
+      const sessionPeer = await rows.nth(2).locator('.ws-transcript-session-chip').evaluate(el => {
+        const label = el.querySelector('.ws-transcript-session-label')
+        const suffix = el.querySelector('.ws-transcript-session-id')
+        return { clipped: label.scrollWidth > label.clientWidth, overflow: getComputedStyle(label).textOverflow, suffix: suffix.textContent }
+      })
+      assert.ok(sessionPeer.clipped, `the long session peer gives up width: ${JSON.stringify(sessionPeer)}`)
+      assert.equal(sessionPeer.overflow, 'ellipsis')
+      assert.ok(!sessionPeer.suffix.includes('…'), `the peer carries one truncation ellipsis: ${JSON.stringify(sessionPeer)}`)
+    }
+    const capture = process.env.WORKSPACE_SHOTS && (device === 'desktop' && scheme === 'light' || device === 'phone-390' && scheme === 'dark' || device === 'phone-320' && scheme === 'light')
     if (capture) {
       await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
       await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-collapsed.png`) })
@@ -183,7 +221,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   const treatment = locator => locator.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderRadius, s.padding, s.fontSize, s.color] })
   assert.deepEqual(await treatment(sessionChip), await treatment(received.locator('.ws-transcript-message-peer.ws-constitution-chip')), 'fiber and session peers use one chip treatment')
   assert.ok(!(await sessionMessage.innerText()).includes('shuttle://'), 'the compact session row hides its address')
-  assert.equal(await sessionChip.locator('.ws-transcript-session-id').evaluate(node => node.textContent), ' · …123456', 'the short session id remains visible')
+  assert.equal(await sessionChip.locator('.ws-transcript-session-id').evaluate(node => node.textContent), ' · 123456', 'the short session id remains visible')
   const sessionChipBox = await sessionChip.boundingBox()
   assert.ok(sessionChipBox && sessionChipBox.width <= viewport.width * 0.6 + 1, 'the session chip stays within the row width')
   assert.equal(await sessionChip.locator('.ws-transcript-session-label').evaluate(node => getComputedStyle(node).textOverflow), 'ellipsis', 'the host part clips with an ellipsis')
@@ -2098,6 +2136,33 @@ test("Console in Settings opens the same remote worker as c", async p => {
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')
 })
+
+for (const width of [320, 390]) {
+  test(`Phone view bar geometry at ${width}px`, async p => {
+    const gear = p.locator('.kbn-viewtabs-settings')
+    await gear.waitFor()
+    const box = await gear.boundingBox()
+    assert.ok(box, 'Settings has visible phone geometry')
+    if (process.env.WORKSPACE_SHOTS) {
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `viewtabs-${width}.png`) })
+    }
+    const type = await p.locator('.kbn-viewtab').first().evaluate(el => {
+      const actual = getComputedStyle(el).fontSize
+      const roles = ['--type-note', '--type-title'].map(role => {
+        const probe = document.createElement('span')
+        probe.style.fontSize = `var(${role})`
+        document.body.append(probe)
+        const size = getComputedStyle(probe).fontSize
+        probe.remove()
+        return size
+      })
+      return { actual, roles }
+    })
+    assert.ok(type.roles.includes(type.actual), `view tabs use a type role: ${JSON.stringify(type)}`)
+    assert.ok(box.x >= 0 && box.x + box.width <= width, `Settings stays inside the ${width}px viewport: ${JSON.stringify(box)}`)
+  }, { width, height: 844 })
+}
 
 test('Phone overview single column, report reader and Back', async p => {
   const switcher = await p.locator('.kbn-viewtabs').boundingBox()

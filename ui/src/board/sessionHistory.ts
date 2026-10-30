@@ -251,7 +251,7 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
   const chevron = document.createElement('span')
   chevron.className = 'kbn-ctl-history-chevron'
   chevron.setAttribute('aria-hidden', 'true')
-  chevron.textContent = '▾'
+  chevron.textContent = ''
   const reading = document.createElement('span')
   reading.className = 'kbn-ctl-history-reading'
   reading.append(count, chevron)

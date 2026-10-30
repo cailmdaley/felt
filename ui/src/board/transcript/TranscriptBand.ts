@@ -960,7 +960,7 @@ export class TranscriptBand {
     title.textContent = 'Transcript'
     this.paneReading = document.createElement('span')
     this.paneReading.className = 'ws-transcript-reading'
-    const close = createButton('ws-transcript-close', '×')
+    const close = createButton('ws-transcript-close', '')
     close.setAttribute('aria-label', 'Close the transcript')
     panelHead.append(title, this.paneReading, close)
     this.scroller = document.createElement('div')

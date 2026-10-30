@@ -9,6 +9,7 @@
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
+import ts from 'typescript'
 import { expect, it } from 'vitest'
 
 const SRC = resolve('src')
@@ -24,9 +25,8 @@ const BOX = /^(\d+(\.\d+)?px|calc\(.*\)|var\(--[a-z-]+-(h|height|target)\))$/
 const KEYWORD = /^(inherit|unset|initial|revert)$/
 /** Family names belong to type.css alone, in any string. */
 const FAMILY_NAME = /\b(EB Garamond|Garamond|Georgia|IBM Plex|Plex Mono|SF Mono|Menlo|Monaco|Consolas|Courier|ui-monospace|ui-serif|ui-sans-serif|system-ui|-apple-system|BlinkMacSystemFont|Helvetica|Arial|sans-serif|monospace|cursive|fantasy)\b|(?<![\w-])serif\b/
-/** Selectors that draw a mark from a font rather than text. */
-// A mark's selector: a pseudo-element, or a class whose last word names a mark (`.ws-rail-chevron`, not `.ws-icon-label`).
-const MARK = /::?(before|after|marker|first-letter)|(?<![\w])(?:[\w-]*-)?(cap|initial|ornament|glyph|mark|chevron|close|caret|arrow|icon|bullet)(?![\w-])/
+/** Pseudo-elements that draw a mark rather than text. */
+const MARK_PSEUDO_ELEMENTS = new Set(['before', 'after', 'marker', 'first-letter'])
 
 type Prop = 'size' | 'family' | 'leading' | 'font' | 'track' | 'case' | 'caps' | 'feature'
 const PROPS: Record<string, Prop> = {
@@ -40,7 +40,6 @@ const PROPS: Record<string, Prop> = {
   'font-feature-settings': 'feature', fontFeatureSettings: 'feature',
 }
 const CSS_PROP = '(?<![\\w$-])(font-size|font-family|font-variant-caps|font-variant|font-feature-settings|font|line-height|letter-spacing|text-transform)'
-const JS_PROP = '(fontSize|fontFamily|fontVariantCaps|fontVariant|fontFeatureSettings|font|lineHeight|letterSpacing|textTransform|font-size|font-family|font-variant-caps|font-variant|font-feature-settings|line-height|letter-spacing|text-transform)'
 
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -139,7 +138,7 @@ function clean(value: string): string {
   return value.replace(/!important/, '').trim().replace(/^['"`]|['"`]$/g, '').trim()
 }
 
-interface Decl { prop: Prop; value: string; offset: number }
+interface Decl { prop: Prop; value: string; offset: number; code: boolean }
 
 /** Case variants other than the kicker's, in font-variant(-caps) or as OpenType features. */
 const OFF_CAPS = /(?<![\w-])(small-caps|all-petite-caps|petite-caps|unicase|titling-caps)\b/
@@ -173,23 +172,11 @@ function judge(prop: Prop, value: string): string | undefined {
   }
 }
 
-const JS_VALUE = `('(?:[^'\\\\\\n]|\\\\.)*'|"(?:[^"\\\\\\n]|\\\\.)*"|\`[^\`]*\`|[^,;}\\n)]+)`
-const JS_FORMS = [
-  // Object keys, bare or quoted: { fontSize: '12px' }, { 'font-size': '12px' }.
-  new RegExp(`(?<![\\w$.\\-'"])(['"]?)${JS_PROP}\\1\\s*:\\s*${JS_VALUE}`, 'g'),
-  // Computed keys: { ['letterSpacing']: '.1em' }.
-  new RegExp(`\\[\\s*(['"])${JS_PROP}\\1\\s*\\]\\s*:\\s*${JS_VALUE}`, 'g'),
-  // Assignment, dotted or bracketed: el.style.fontSize = …, ctx.font = …, style['font-size'] = ….
-  new RegExp(`(?:\\.|\\[\\s*)(['"]?)${JS_PROP}\\1\\s*\\]?\\s*=(?!=)\\s*${JS_VALUE}`, 'g'),
-  // style.setProperty('font-size', …), setAttribute('font-size', …), setAttributeNS(null, 'font-size', …).
-  new RegExp(`(?:setProperty|setAttribute|setAttributeNS)\\(\\s*(?:null\\s*,\\s*)?(['"])${JS_PROP}\\1\\s*,\\s*${JS_VALUE}`, 'g'),
-]
-
-function declarations(text: string, ctx: Ctx[]): Decl[] {
+function declarations(text: string, ctx: Ctx[], file = ''): Decl[] {
   const found: Decl[] = []
-  const push = (name: string, value: string, offset: number) => {
+  const push = (name: string, value: string, offset: number, code = false) => {
     const prop = PROPS[name]
-    if (prop) found.push({ prop, value: clean(value), offset })
+    if (prop) found.push({ prop, value: clean(value), offset, code })
   }
   // CSS: a .css file, or a template string. The value runs to `;`, `}` or the string's end, across lines.
   for (const m of text.matchAll(new RegExp(`${CSS_PROP}\\s*:\\s*([^;{}\`]*)`, 'g'))) {
@@ -205,15 +192,117 @@ function declarations(text: string, ctx: Ctx[]): Decl[] {
   for (const m of text.matchAll(/(?<![\w-])(fontSize|fontFamily|letterSpacing)=\{([^}]*)\}/g)) {
     if (ctx[m.index] === 'code') push(m[1], m[2], m.index)
   }
-  for (const re of JS_FORMS) {
-    for (const m of text.matchAll(re)) {
-      if (ctx[m.index] !== 'code' && !(ctx[m.index] === 'str' && /^['"]/.test(m[0]))) continue
-      // A TypeScript type annotation (`font: string`) is not a style.
-      if (!/^['"`]/.test(m[3]) && /^(string|number|boolean|undefined|null|[A-Z]\w*(<.*>)?|\w+\[\])\s*$/.test(m[3].trim())) continue
-      // Copying a computed font (to measure text on a canvas) reads a role; it does not set one.
-      if (m[2] === 'font' && /^\s*getComputedStyle\([^()]*\)\.font\s*(;|\n|$)/.test(text.slice(m.index + m[0].length - m[3].length))) continue
-      push(m[2], m[3], m.index)
+  if (/\.tsx?$/.test(file)) {
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+    type Scope = { parent?: Scope; variable: Scope; bindings: Map<string, ts.Expression | null> }
+    const root = {} as Scope
+    root.variable = root
+    root.bindings = new Map()
+    const scopeAt = new WeakMap<ts.Node, Scope>()
+    const add = (scope: Scope, name: string, initializer: ts.Expression | null = null) => {
+      scope.bindings.set(name, scope.bindings.has(name) ? null : initializer)
     }
+    const names = (name: ts.BindingName, out: string[] = []): string[] => {
+      if (ts.isIdentifier(name)) out.push(name.text)
+      else for (const element of name.elements) if (ts.isBindingElement(element)) names(element.name, out)
+      return out
+    }
+    const scoped = (node: ts.Node): boolean => ts.isSourceFile(node) || ts.isBlock(node) || ts.isFunctionLike(node)
+      || ts.isModuleBlock(node) || ts.isClassLike(node) || ts.isCaseBlock(node) || ts.isCatchClause(node)
+      || ts.isForStatement(node) || ts.isForInStatement(node) || ts.isForOfStatement(node)
+    const collect = (node: ts.Node, parent: Scope): void => {
+      const createsScope = scoped(node)
+      const scope = createsScope ? { parent, variable: parent.variable, bindings: new Map<string, ts.Expression | null>() } : parent
+      if (ts.isSourceFile(node) || ts.isFunctionLike(node)) scope.variable = scope
+      scopeAt.set(node, scope)
+
+      if (ts.isVariableDeclaration(node)) {
+        const list = node.parent && ts.isVariableDeclarationList(node.parent) ? node.parent : undefined
+        const isConst = !!list && (list.flags & ts.NodeFlags.Const) !== 0
+        const isVar = !!list && (list.flags & ts.NodeFlags.BlockScoped) === 0
+        const target = isVar ? scope.variable : scope
+        for (const name of names(node.name)) add(target, name, isConst && ts.isIdentifier(node.name) ? node.initializer ?? null : null)
+      } else if (ts.isParameter(node)) {
+        const literal = node.type && ts.isLiteralTypeNode(node.type) && ts.isStringLiteral(node.type.literal) ? node.type.literal : null
+        for (const name of names(node.name)) add(scope, name, ts.isIdentifier(node.name) ? literal : null)
+      } else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node)
+        || ts.isModuleDeclaration(node)) && node.name) add(parent, node.name.text)
+      else if ((ts.isFunctionExpression(node) || ts.isClassExpression(node)) && node.name) add(scope, node.name.text)
+      else if (ts.isImportClause(node) && node.name) add(scope, node.name.text)
+      else if (ts.isImportSpecifier(node)) add(scope, node.name.text)
+      else if (ts.isNamespaceImport(node)) add(scope, node.name.text)
+      else if (ts.isImportEqualsDeclaration(node)) add(scope, node.name.text)
+
+      ts.forEachChild(node, child => collect(child, scope))
+    }
+    collect(sf, root)
+
+    const unwrap = (node: ts.Expression): ts.Expression => {
+      while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)
+        || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression
+      return node
+    }
+    const staticString = (expression: ts.Expression, seen = new Set<ts.Expression>()): string | undefined => {
+      const node = unwrap(expression)
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text
+      if (ts.isIdentifier(node)) {
+        let scope = scopeAt.get(node)
+        while (scope) {
+          if (scope.bindings.has(node.text)) {
+            const initializer = scope.bindings.get(node.text)
+            if (initializer && !seen.has(initializer)) {
+              seen.add(initializer)
+              return staticString(initializer, seen)
+            }
+            return undefined
+          }
+          scope = scope.parent
+        }
+      }
+      return undefined
+    }
+    const key = (node: ts.PropertyName | ts.Expression): string | undefined => {
+      if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text
+      if (ts.isComputedPropertyName(node)) return staticString(node.expression)
+      if (ts.isElementAccessExpression(node) && node.argumentExpression) return staticString(node.argumentExpression)
+      return undefined
+    }
+    const value = (node: ts.Expression): string => staticString(node) ?? node.getText(sf)
+    const computedFontRead = (node: ts.Expression): boolean => ts.isPropertyAccessExpression(node)
+      && node.name.text === 'font' && ts.isCallExpression(node.expression)
+      && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'getComputedStyle'
+    const visit = (node: ts.Node): void => {
+      if (ts.isPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent) && ctx[node.parent.getStart(sf)] === 'code') {
+        const name = key(node.name)
+        if (name && PROPS[name]) push(name, value(node.initializer), node.name.getStart(sf), true)
+      } else if (ts.isShorthandPropertyAssignment(node) && ts.isObjectLiteralExpression(node.parent) && ctx[node.parent.getStart(sf)] === 'code') {
+        const name = node.name.text
+        if (PROPS[name]) push(name, value(node.name), node.name.getStart(sf), true)
+      } else if (ts.isJsxAttribute(node) && node.initializer && ts.isJsxExpression(node.initializer)
+        && node.initializer.expression && ctx[node.getStart(sf)] === 'code') {
+        const name = node.name.getText(sf)
+        if (PROPS[name]) push(name, value(node.initializer.expression), node.name.getStart(sf), true)
+      } else if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const left = node.left
+        const name = ts.isPropertyAccessExpression(left) ? left.name.text
+          : ts.isElementAccessExpression(left) && left.argumentExpression ? key(left) : undefined
+        if (name && PROPS[name] && ctx[left.getStart(sf)] === 'code'
+          && !(PROPS[name] === 'font' && computedFontRead(node.right))) {
+          push(name, value(node.right), left.getStart(sf), true)
+        }
+      } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+        const method = node.expression.name.text
+        const index = method === 'setAttributeNS' ? 1 : 0
+        const nameArg = node.arguments[index]
+        const valueArg = node.arguments[index + 1]
+        if (['setProperty', 'setAttribute', 'setAttributeNS'].includes(method) && nameArg && valueArg && ctx[node.getStart(sf)] === 'code') {
+          const name = staticString(nameArg)
+          if (name && PROPS[name] && !(PROPS[name] === 'font' && computedFontRead(valueArg))) push(name, value(valueArg), nameArg.getStart(sf), true)
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
   }
   return found
 }
@@ -228,13 +317,43 @@ function blocks(text: string, ctx: Ctx[]): { selector: string; body: string; off
   return found
 }
 
+/** Splits a selector list without splitting commas inside functional selectors or attributes. */
+function selectorList(selector: string): string[] {
+  const parts: string[] = []
+  let start = 0, round = 0, square = 0, quote = ''
+  for (let i = 0; i < selector.length; i++) {
+    const c = selector[i]
+    if (quote) {
+      if (c === '\\') i++
+      else if (c === quote) quote = ''
+    } else if (c === '"' || c === "'") quote = c
+    else if (c === '(') round++
+    else if (c === ')') round--
+    else if (c === '[') square++
+    else if (c === ']') square--
+    else if (c === ',' && round === 0 && square === 0) { parts.push(selector.slice(start, i).trim()); start = i + 1 }
+  }
+  parts.push(selector.slice(start).trim())
+  return parts.filter(Boolean)
+}
+
+/** A rule exempts only selectors whose actual target is a named pseudo-element. */
+function markSelector(selector: string): boolean {
+  const names = [...MARK_PSEUDO_ELEMENTS].join('|')
+  const pseudo = new RegExp(`::?(${names})\\s*$`)
+  const selectors = selectorList(selector)
+  return selectors.length > 0 && selectors.every(part => pseudo.test(part))
+}
+
 function violations(file: string, source: string, defined: Set<string>): string[] {
   const found: string[] = []
   const { text, ctx } = scan(source, file.endsWith('.css'))
   const at = (offset: number, what: string) => found.push(`${file}:${lineOf(text, offset)}  ${what}`)
 
-  for (const d of declarations(text, ctx)) {
-    const why = judge(d.prop, d.value)
+  for (const d of declarations(text, ctx, file)) {
+    let why = judge(d.prop, d.value)
+    if (d.code && ((d.prop === 'leading' && BOX.test(d.value))
+      || (d.prop === 'font' && !!shorthand(d.value).leading && BOX.test(shorthand(d.value).leading!)))) why = 'raw leading'
     if (why) at(d.offset, `${why}: ${d.value}`)
   }
 
@@ -259,12 +378,12 @@ function violations(file: string, source: string, defined: Set<string>): string[
     const caps = [...get('caps').map(d => d.value), ...fonts.flatMap(f => f.caps ? [f.caps] : [])]
 
     // A glyph token sizes a mark, never text.
-    if (sizes.some(s => GLYPH.test(s)) && !MARK.test(b.selector)) at(b.offset, `glyph token on text: ${b.selector}`)
+    if (sizes.some(s => GLYPH.test(s)) && !markSelector(b.selector)) at(b.offset, `glyph token on text: ${b.selector}`)
 
     // A line box from geometry is for a box: a mark, or one line that cannot wrap.
     const nowrap = /white-space\s*:\s*(nowrap|pre)(?![\w-])/.test(b.body)
     const empty = /content\s*:\s*(''|"")/.test(b.body)
-    if (leadings.some(l => BOX.test(l)) && !nowrap && !empty && !MARK.test(b.selector)) {
+    if (leadings.some(l => BOX.test(l)) && !nowrap && !empty && !markSelector(b.selector)) {
       at(b.offset, `box line-height on wrapping text, use a leading role: ${b.selector}`)
     }
 
@@ -312,6 +431,15 @@ const MUST_FAIL: [string, string][] = [
   ['x.ts', "el.style.fontSize = '0.9em'"],
   ['x.ts', "const s = { fontFamily: 'var(--font-main, serif)' }"],
   ['x.ts', 'const s = { lineHeight: 1.2 }'],
+  ['x.ts', "const s = { lineHeight: '24px' }"],
+  ['x.ts', "const SIZE_PX = '12px'; const s = { fontSize: SIZE_PX }"],
+  ['x.ts', "const FONT_SIZE = 'fontSize'; const s = { [FONT_SIZE]: 12 }"],
+  ['x.ts', "const FONT_SIZE = 'fontSize'; el.style[FONT_SIZE] = '12px'"],
+  ['x.ts', "const KEY = 'font-size'; el.style.setProperty(KEY, '12px')"],
+  ['x.ts', "const KEY = 'fontSize'; el.style.setProperty(KEY, '12px')"],
+  ['x.ts', "const SIZE = 'var(--type-note)'; function style(SIZE: string) { return { fontSize: SIZE } }"],
+  ['x.ts', "const KEY = 'color'; function style(KEY: 'fontSize') { return { [KEY]: '12px' } }"],
+  ['x.ts', "const KEY = 'fontSize'; function one() { return { [KEY]: '12px' } } function two() { const KEY = 'color'; return { [KEY]: 'x' } }"],
   ['x.ts', "el.style.setProperty('font-size', '13px')"],
   ['x.ts', "text.setAttribute('font-size', '11')"],
   ['x.ts', "text.setAttributeNS(null, 'font-family', 'Georgia')"],
@@ -357,6 +485,9 @@ const MUST_FAIL: [string, string][] = [
   ['x.css', '.markdown p { font-size: var(--type-prose); line-height: 24px; }'],
   ['x.css', '.ws-bookmark-title { font-size: var(--glyph-small); }'],
   ['x.css', '.ws-icon-label { font-size: var(--glyph-small); }'],
+  ['x.css', '.ws-rail-chevron { font-size: var(--glyph-small); }'],
+  ['x.css', '.ornament::before, .label { font-size: var(--glyph-small); }'],
+  ['x.css', '.kbn-cap, .kbn-cap::before { font-size: var(--glyph-small); }'],
   ['x.ts', "const s = { ['letterSpacing']: '.1em' }"],
   ['x.css', '.ad { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }\n.ad { font-size: var(--type-meta); }'],
   ['x.css', '.ae { font-size: var(--type-note); font-variant-caps: all-small-caps; letter-spacing: var(--track-nav); }'],
@@ -375,20 +506,24 @@ const MUST_PASS: [string, string][] = [
   ['x.ts', "el.style.fontSize = ''"],
   ['x.ts', 'ruler.font = getComputedStyle(message).font'],
   ['x.css', '.ws-col-count { font: var(--type-meta)/var(--leading-ui) var(--font-mono); }'],
+  ['x.ts', "const SIZE = 'var(--type-note)'; const s = { fontSize: SIZE }"],
+  ['x.ts', "const KEY = 'fontSize'; function style() { const KEY = 'color'; return { [KEY]: '12px' } }"],
+  ['x.ts', "const KEY = 'fontSize'; el.style.setProperty(KEY, 'var(--type-note)')"],
   ['x.css', '.ok { font-feature-settings: "onum"; }'],
   ['x.ts', "el.style.cssText = 'color: red; font-size: var(--type-note)'"],
   ['x.css', '.ok { letter-spacing: 0px; }'],
-  ['x.css', '.ws-rail-chevron { font-size: var(--glyph-small); }'],
+  ['x.css', '.ws-rail-chevron::before { font-size: var(--glyph-small); }'],
+  ['x.css', '.decoration::before, .decoration::after { font-size: var(--glyph-small); }'],
   ['x.css', '.ok { font-size: var(--type-title); font-variant-caps: all-small-caps; letter-spacing: var(--track-nav); }'],
 ]
 
-it('the scan catches every form it guards, and passes the system', () => {
-  const defined = new Set(['--type-row', '--type-label', '--type-note', '--type-meta', '--type-prose', '--leading-ui', '--leading-prose',
-    '--font-serif', '--font-mono', '--glyph-small', '--glyph-initial', '--track-kicker', '--track-nav', '--type-title'])
-  const missed = MUST_FAIL.filter(([file, src]) => violations(file, src, defined).length === 0).map(([, src]) => src)
-  expect(missed, 'forms the scan let through').toEqual([])
-  const flagged = MUST_PASS.flatMap(([file, src]) => violations(file, src, defined))
-  expect(flagged, 'the system, flagged').toEqual([])
+const PROBE_TOKENS = new Set(['--type-row', '--type-label', '--type-note', '--type-meta', '--type-prose', '--leading-ui', '--leading-prose',
+  '--font-serif', '--font-mono', '--glyph-small', '--glyph-initial', '--track-kicker', '--track-nav', '--type-title'])
+it.each(MUST_FAIL)('the type scan rejects off-system form #%#', (file, source) => {
+  expect(violations(file, source, PROBE_TOKENS), `${file}: ${source}`).not.toEqual([])
+})
+it.each(MUST_PASS)('the type scan accepts role form #%#', (file, source) => {
+  expect(violations(file, source, PROBE_TOKENS), `${file}: ${source}`).toEqual([])
 })
 
 it('only styles/type.css defines the type tokens', () => {

@@ -97,15 +97,50 @@ it('reads the local zone only through civilDay.ts', () => {
 function clockFormats(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
   const found: string[] = []
+  const relativeUnit = /^(s|sec|m|min|h|d|mo|w)\s+ago\b/
+  const unwrap = (node: ts.Expression): ts.Expression => {
+    while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)
+      || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression
+    return node
+  }
+  const clockPart = (expression: ts.Expression, part: 'hour' | 'minute'): boolean => {
+    const node = unwrap(expression)
+    if (ts.isIdentifier(node)) {
+      const names = part === 'hour' ? ['hour', 'hh', 'h', 'hr', 'hrs'] : ['minute', 'mm', 'm', 'min', 'mins']
+      return names.includes(node.text.toLowerCase())
+    }
+    if (ts.isCallExpression(node)) {
+      if (ts.isPropertyAccessExpression(node.expression)) {
+        const method = node.expression.name.text
+        if (method === (part === 'hour' ? 'getHours' : 'getMinutes')) return true
+        if (method === 'padStart') return clockPart(node.expression.expression, part)
+      }
+      if (ts.isIdentifier(node.expression) && node.expression.text === 'String' && node.arguments[0]) return clockPart(node.arguments[0], part)
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      const name = node.name.text.toLowerCase()
+      return part === 'hour' ? ['hour', 'hh'].includes(name) : ['minute', 'mm'].includes(name)
+    }
+    return false
+  }
+  const isoClockSlice = (node: ts.CallExpression): boolean => {
+    if (!ts.isPropertyAccessExpression(node.expression) || node.expression.name.text !== 'slice'
+      || node.arguments.length !== 2 || node.arguments[0].getText(sf) !== '11' || node.arguments[1].getText(sf) !== '16') return false
+    const iso = node.expression.expression
+    return ts.isCallExpression(iso) && ts.isPropertyAccessExpression(iso.expression) && iso.expression.name.text === 'toISOString'
+  }
   const visit = (node: ts.Node): void => {
-    // A date's locale formatters (any receiver but a number literal's), and hand-padded `hh:mm` templates.
+    // A date's locale formatters (any receiver but a number literal's).
     const clock = ts.isPropertyAccessExpression(node) && (/^(toLocaleTimeString|toLocaleDateString|getHours|getMinutes)$/.test(node.name.text)
       || (node.name.text === 'toLocaleString' && ts.isParenthesizedExpression(node.expression) === false && /^new Date\b|Date\b|[dD]ate$|^when$|^d$/.test(node.expression.getText(sf))))
-      || (ts.isTemplateExpression(node) && node.templateSpans.some((span, i) => i === 0 && /^:/.test(span.literal.text) && /padStart/.test(span.expression.getText(sf))
-        && i + 1 < node.templateSpans.length && /padStart/.test(node.templateSpans[i + 1].expression.getText(sf))))
+      || (ts.isTemplateExpression(node) && node.templateSpans.length >= 2
+        && /^:/.test(node.templateSpans[0].literal.text)
+        && clockPart(node.templateSpans[0].expression, 'hour')
+        && clockPart(node.templateSpans[1].expression, 'minute'))
+      || (ts.isCallExpression(node) && isoClockSlice(node))
     const hour = ts.isPropertyAssignment(node) && /^(hour|minute|hour12|timeStyle)$/.test(node.name.getText(sf))
-    const relative = (ts.isTemplateExpression(node) && node.templateSpans.some(span => /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(span.literal.text)))
-      || (ts.isStringLiteral(node) && /^\s*(s|m|h|d|mo|w)\s+ago\b/.test(node.text))
+    const relative = (ts.isTemplateExpression(node) && node.templateSpans.some(span => relativeUnit.test(span.literal.text.trimStart())))
+      || (ts.isStringLiteral(node) && relativeUnit.test(node.text.trimStart()))
     if (clock || hour || relative) found.push(`${file}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`)
     ts.forEachChild(node, visit)
   }
@@ -122,8 +157,7 @@ it('formats clocks and relative ages only in civilDay.ts', () => {
   expect(violations).toEqual([])
 })
 
-it('sees the clock formats it exists to catch', () => {
-  const mustFail = [
+const clockCanaries = [
     'const t = new Date(ms).toLocaleTimeString()',
     "const o = { hour: '2-digit', minute: '2-digit' }",
     "const o = { hour: 'numeric' }",
@@ -135,9 +169,21 @@ it('sees the clock formats it exists to catch', () => {
     'const t = new Date(ms).toLocaleString()',
     'const t = when.toLocaleDateString(undefined, { month: "short" })',
     'const t = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`',
+    'const t = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`',
+    'const t = `${String(hr).padStart(2, "0")}:${String(min).padStart(2, "0")}`',
+    'const t = `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}`',
+    'const t = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${zone}`',
+    'const age = `${n} min ago`',
+    'const t = `${hour}:${minute}`',
+    'const t = new Date(ms).toISOString().slice(11, 16)',
   ]
-  expect(mustFail.filter(src => clockFormats('x.ts', src).length === 0)).toEqual([])
+it.each(clockCanaries)('the scan catches this hand-written clock: %s', source => {
+  expect(clockFormats('x.ts', source)).not.toEqual([])
+})
+
+it('does not mistake plain durations or UTC forms for local clock text', () => {
   expect(clockFormats('x.ts', "const word = 'a while ago'; const u = d.getUTCHours(); const n = count.toLocaleString()")).toEqual([])
+  expect(clockFormats('x.ts', 'const duration = `${hours}:${String(minutes).padStart(2)}`')).toEqual([])
   // A media duration (`3:07`) is not a clock time.
   expect(clockFormats('x.ts', 'const t = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`')).toEqual([])
 })
