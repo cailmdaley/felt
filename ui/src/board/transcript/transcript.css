@@ -513,7 +513,7 @@
   flex: 1 1 0;
   display: flex;
   align-items: baseline;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 5px;
   width: 100%;
   min-width: 0;
@@ -523,8 +523,9 @@
 .ws-transcript-message-toggle::-webkit-details-marker { display: none; }
 .ws-transcript-message-direction { flex: 0 0 auto; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
 .ws-transcript-message-peer { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-soft); }
-.ws-transcript-message-claim { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.ws-transcript-message-route { flex: 0 1 auto; min-width: 0; }
+.ws-transcript-message-claim { flex: 0 1 12em; min-width: min(12em, 100%); max-width: 100%; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
+.ws-transcript-message-route { display: inline-flex; align-items: baseline; gap: .35em; flex: 0 1 auto; min-width: min(11em, 100%); }
+.ws-transcript-message-route-link { flex: 0 1 auto; min-width: 0; max-width: min(24em, 60vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-message-peer.ws-constitution-chip {
   flex: 0 1 auto;
   min-width: 0;
@@ -535,7 +536,8 @@
 }
 .ws-transcript-message-peer-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-session-chip {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: min(8em, 100%);
   max-width: min(24em, 60vw);
   overflow: hidden;
   white-space: nowrap;

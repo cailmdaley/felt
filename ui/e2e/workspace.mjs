@@ -150,22 +150,23 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     assert.ok(!(await rows.nth(0).innerText()).includes('shuttle://'), 'the compact row hides the raw session address')
     assert.ok(!(await rows.nth(1).innerText()).includes('msg-abcdef'), 'the compact row hides the message id')
     if (device === 'phone-320') {
-      const summary = rows.nth(0).locator('.ws-transcript-message-toggle')
+      const summary = rows.nth(1).locator('.ws-transcript-message-toggle')
       const geometry = await summary.evaluate(el => {
         const box = el.getBoundingClientRect()
-        const children = [...el.children].map(child => child.getBoundingClientRect())
-        const peer = el.querySelector('.ws-transcript-message-peer-label')
-        const time = el.querySelector('.ws-transcript-message-time')
+        const sender = el.querySelector('.ws-transcript-session-label')
+        const claim = el.querySelector('.ws-transcript-message-claim')
+        const route = el.querySelector('.ws-transcript-message-route')
         return {
           wrap: getComputedStyle(el).flexWrap,
-          height: box.height,
-          maxChildHeight: Math.max(...children.map(child => child.height)),
-          peerClientWidth: peer.clientWidth,
-          peerScrollWidth: peer.scrollWidth,
-          peerTextOverflow: getComputedStyle(peer).textOverflow,
-          peerRight: peer.getBoundingClientRect().right,
-          timeLeft: time.getBoundingClientRect().left,
-          timeRight: time.getBoundingClientRect().right,
+          sender: sender.textContent,
+          senderWidth: sender.getBoundingClientRect().width,
+          senderScrollWidth: sender.scrollWidth,
+          claimWidth: claim.getBoundingClientRect().width,
+          claimHeight: claim.getBoundingClientRect().height,
+          claimLineHeight: parseFloat(getComputedStyle(claim).lineHeight),
+          routeTop: route.getBoundingClientRect().top,
+          claimBottom: claim.getBoundingClientRect().bottom,
+          routeRight: route.getBoundingClientRect().right,
           rowRight: box.right,
         }
       })
@@ -173,11 +174,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
         await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
         await p.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, `messages-${device}-collapsed.png`) })
       }
-      assert.equal(geometry.wrap, 'nowrap', `the message header is one flex line: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.height <= geometry.maxChildHeight + 3, `the message header occupies one line: ${JSON.stringify(geometry)}`)
-      assert.ok(geometry.peerScrollWidth > geometry.peerClientWidth, `the peer yields space and truncates: ${JSON.stringify(geometry)}`)
-      assert.equal(geometry.peerTextOverflow, 'ellipsis', 'the peer draws a single ellipsis')
-      assert.ok(geometry.timeLeft >= geometry.peerRight - 1 && geometry.timeRight <= geometry.rowRight + 1, `the time and chevron stay on the row: ${JSON.stringify(geometry)}`)
+      assert.equal(geometry.wrap, 'wrap', `the message header wraps complete semantic groups: ${JSON.stringify(geometry)}`)
+      assert.equal(geometry.sender, 'shuttle', `the detected sender remains legible: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.senderWidth >= 35 && geometry.senderScrollWidth <= geometry.senderWidth + 1, `the sender chip does not collapse or clip: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.claimWidth >= 100 && geometry.claimHeight <= geometry.claimLineHeight * 2 + 2, `the claim wraps as a phrase instead of one word per line: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.routeTop >= geometry.claimBottom - 1, `the reply route gets its own line: ${JSON.stringify(geometry)}`)
+      assert.ok(geometry.routeRight <= geometry.rowRight + 1, `the route remains inside the message column: ${JSON.stringify(geometry)}`)
       const sessionPeer = await rows.nth(2).locator('.ws-transcript-session-chip').evaluate(el => {
         const label = el.querySelector('.ws-transcript-session-label')
         const suffix = el.querySelector('.ws-transcript-session-id')
@@ -216,15 +218,16 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
     .find(row => row.getAttribute('data-message') === id)
     ?.querySelector('.ws-transcript-message-preview')?.textContent === '', receivedId)
   assert.equal(await received.locator('.ws-transcript-message-preview').textContent(), '', 'expanded rows do not retain a second copy of the preview text')
-  await received.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
-  assert.equal(await received.locator('.ws-transcript-message-peer.ws-constitution-chip').getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the reply-to route remains linked to its thread')
-  assert.equal(await received.locator('.ws-transcript-message-peer.ws-transcript-session-chip .ws-transcript-session-label').textContent(), 'Shuttle', 'the From label names the detected sender')
+  const route = received.locator('.ws-transcript-message-route-link.ws-constitution-chip')
+  await route.waitFor()
+  assert.equal(await route.getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the reply-to route remains linked to its thread')
+  assert.equal(await received.locator('.ws-transcript-message-peer.ws-transcript-session-chip .ws-transcript-session-label').textContent(), 'shuttle', 'the From label names the detected sender')
   assert.equal(await received.locator('.ws-transcript-message-claim').textContent(), 'claims to be Codex · umber-workstation', 'the unverified assertion stays neutral')
-  assert.equal(await received.locator('.ws-transcript-message-route').textContent(), 'reply to validation-follow-up', 'the route is shown separately from sender identity')
+  assert.equal((await received.locator('.ws-transcript-message-route').innerText()).startsWith('reply to'), true, 'the route is shown separately from sender identity')
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()
   const treatment = locator => locator.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderRadius, s.padding, s.fontSize, s.color] })
-  assert.deepEqual(await treatment(sessionChip), await treatment(received.locator('.ws-transcript-message-peer.ws-constitution-chip')), 'fiber and session peers use one chip treatment')
+  assert.deepEqual(await treatment(sessionChip), await treatment(route), 'fiber and session peers use one chip treatment')
   assert.ok(!(await sessionMessage.innerText()).includes('shuttle://'), 'the compact session row hides its address')
   assert.equal(await sessionChip.locator('.ws-transcript-session-id').evaluate(node => node.textContent), ' · 123456', 'the short session id remains visible')
   const sessionChipBox = await sessionChip.boundingBox()
