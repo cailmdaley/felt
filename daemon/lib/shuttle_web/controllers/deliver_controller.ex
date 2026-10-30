@@ -35,7 +35,7 @@ defmodule ShuttleWeb.DeliverController do
         Map.get(params, "text"),
         Map.get(params, "origin"),
         Map.get(params, "from"),
-        Map.take(params, ["context_only", "message_id", "wake", "unless_live"])
+        Map.take(params, ["context_only", "message_id", "wake", "unless_live", "thread_signal"])
       )
 
     conn |> put_status(status) |> json(body)
@@ -70,6 +70,7 @@ defmodule ShuttleWeb.DeliverController do
             if context["context_only"] == true do
               context_reply(fiber_id, text, context["message_id"],
                 wake: context["wake"] == true,
+                thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
                 from: if(is_binary(from) and from != "", do: from)
               )

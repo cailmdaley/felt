@@ -229,6 +229,7 @@ func (a *app) rootCmd() *cobra.Command {
 		a.threadCmd(),
 		a.threadsCmd(),
 		a.contextMailboxCmd(),
+		a.threadSignalCurrentCmd(),
 		a.repeatCmd(),
 		a.shuttleDaemonCmd(),
 		a.shuttleVersionCmd(),

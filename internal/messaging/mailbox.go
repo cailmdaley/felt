@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -70,6 +72,10 @@ func HookReceiverPID() int {
 type mailboxEntry struct {
 	Request  Request `json:"request"`
 	QueuedAt int64   `json:"queued_at"`
+	// AttemptAddress pins a direct fiber-context send across a lost receipt
+	// and worker handoff. A successor must resolve the same message ID against
+	// that destination before it may redirect a conclusive rejection.
+	AttemptAddress string `json:"attempt_address,omitempty"`
 }
 
 func mailboxKey(s string) string {
@@ -226,6 +232,29 @@ func OfferMailbox(env *sysenv.Env, harness, id, host string, emit func([]Request
 }
 
 func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) error) error {
+	return offerMailboxWithAck(dir, accepts, emit, false, nil)
+}
+
+func offerMailboxValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func([]Request) error) error {
+	return offerMailboxWithAck(dir, accepts, emit, false, current)
+}
+
+// offerMailboxEach acknowledges each request as soon as its individual
+// delivery succeeds. Fiber context uses this because delivery can cross
+// conversations: a later failure must not replay earlier successes to a
+// successor under a different transport deduplication key.
+func offerMailboxEachValidated(dir string, accepts func(Request) bool, current func(context.Context, Request) (bool, error), emit func(Request) error) error {
+	return offerMailboxWithAck(dir, accepts, func(batch []Request) error {
+		for _, request := range batch {
+			if err := emit(request); err != nil {
+				return err
+			}
+		}
+		return nil
+	}, true, current)
+}
+
+func offerMailboxWithAck(dir string, accepts func(Request) bool, emit func([]Request) error, each bool, current func(context.Context, Request) (bool, error)) error {
 	lock, err := os.OpenFile(filepath.Join(dir, ".lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
@@ -271,41 +300,115 @@ func offerMailbox(dir string, accepts func(Request) bool, emit func([]Request) e
 		}
 		return items[i].entry.QueuedAt < items[j].entry.QueuedAt
 	})
-	batch := []Request{}
-	n := 0
+	candidates := []item{}
 	size := 0
 	for _, it := range items {
-		if n > 0 && size+len(it.entry.Request.Text) > 64<<10 {
+		if len(candidates) > 0 && size+len(it.entry.Request.Text) > 64<<10 {
 			break
 		}
-		batch = append(batch, it.entry.Request)
+		candidates = append(candidates, it)
 		size += len(it.entry.Request.Text)
-		n++
-		if n == 16 {
+		if len(candidates) == 16 {
 			break
 		}
+	}
+	var validationErr error
+	if current != nil {
+		validationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		type validation struct {
+			current bool
+			err     error
+		}
+		checks := make([]validation, len(candidates))
+		var wg sync.WaitGroup
+		for i, candidate := range candidates {
+			wg.Add(1)
+			go func(i int, request Request) {
+				defer wg.Done()
+				checks[i].current, checks[i].err = current(validationCtx, request)
+			}(i, candidate.entry.Request)
+		}
+		wg.Wait()
+		cancel()
+		items = []item{}
+		for i, it := range candidates {
+			isCurrent, err := checks[i].current, checks[i].err
+			if err != nil {
+				if validationErr == nil {
+					validationErr = err
+				}
+				continue
+			}
+			if !isCurrent {
+				offeredDir := filepath.Join(dir, "offered")
+				if err := ensureDir(offeredDir, 0700); err != nil {
+					return err
+				}
+				if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
+					return err
+				}
+				if err := syncDir(filepath.Join(dir, "pending")); err != nil {
+					return err
+				}
+				if err := syncDir(offeredDir); err != nil {
+					return err
+				}
+				continue
+			}
+			items = append(items, it)
+		}
+	} else {
+		items = candidates
+	}
+	batch := []Request{}
+	n := 0
+	for _, it := range items {
+		batch = append(batch, it.entry.Request)
+		n++
 	}
 	if n == 0 {
-		return nil
+		return validationErr
 	}
-	if err := ensureDir(filepath.Join(dir, "offered"), 0700); err != nil {
+	offeredDir := filepath.Join(dir, "offered")
+	if err := ensureDir(offeredDir, 0700); err != nil {
 		return err
 	}
-	if err := emit(batch); err != nil {
-		return err
+	if !each {
+		if err := emit(batch); err != nil {
+			return err
+		}
+		for _, it := range items[:n] {
+			if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
+				return err
+			}
+		}
+		if err := syncDir(filepath.Join(dir, "pending")); err != nil {
+			return err
+		}
+		if err := syncDir(offeredDir); err != nil {
+			return err
+		}
+		return validationErr
 	}
+	var deliveryErr error
 	for _, it := range items[:n] {
-		if err := os.Rename(it.path, filepath.Join(dir, "offered", filepath.Base(it.path))); err != nil {
+		if err := emit([]Request{it.entry.Request}); err != nil {
+			if deliveryErr == nil {
+				deliveryErr = err
+			}
+			continue
+		}
+		if err := os.Rename(it.path, filepath.Join(offeredDir, filepath.Base(it.path))); err != nil {
+			return err
+		}
+		if err := syncDir(filepath.Join(dir, "pending")); err != nil {
+			return err
+		}
+		if err := syncDir(offeredDir); err != nil {
 			return err
 		}
 	}
-	if err := syncDir(filepath.Join(dir, "pending")); err != nil {
-		return err
-	}
-	if err := syncDir(filepath.Join(dir, "offered")); err != nil {
-		return err
-	}
-	return nil
+	return errors.Join(validationErr, deliveryErr)
 }
 
 // mailboxSessions returns hook-registered receivers for one harness and host

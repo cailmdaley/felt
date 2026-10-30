@@ -13,11 +13,21 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
 	var from string
+	var threadSignal string
 	put := &cobra.Command{Use: "put <fiber-key> <message-id> <text>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		return messaging.QueueFiberContext(a.env, args[0], messaging.Request{MessageID: args[1], Text: args[2], From: from, Wake: wake})
+		request := messaging.Request{MessageID: args[1], Text: args[2], From: from, Wake: wake}
+		if threadSignal != "" {
+			var signal messaging.ThreadSignal
+			if err := json.Unmarshal([]byte(threadSignal), &signal); err != nil {
+				return fmt.Errorf("parsing thread signal: %w", err)
+			}
+			request.ThreadSignal = &signal
+		}
+		return messaging.QueueFiberContext(a.env, args[0], request)
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	put.Flags().StringVar(&from, "from", "shuttle", "Sender label the receiving worker sees")
+	put.Flags().StringVar(&threadSignal, "thread-signal", "", "Thread lifecycle signal JSON for delivery-time validation")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		// One JSON object, key => count. A key whose mailbox cannot be read
@@ -90,4 +100,27 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 		return messaging.DeliverFiberContext(context.Background(), a.env, args[0], host, args[1], generation)
 	}})
 	return cmd
+}
+
+func (a *app) threadSignalCurrentCmd() *cobra.Command {
+	return &cobra.Command{Use: "thread-signal-current <request-json>", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		var request messaging.ThreadSignalCheck
+		if err := json.Unmarshal([]byte(args[0]), &request); err != nil {
+			return fmt.Errorf("parsing thread signal check: %w", err)
+		}
+		payload, err := json.Marshal(request)
+		if err != nil {
+			return fmt.Errorf("encoding thread signal check: %w", err)
+		}
+		endpoint, err := a.daemonEndpoint("/api/v1/thread-signals/current")
+		if err != nil {
+			return err
+		}
+		body, err := a.postDaemon(endpoint, payload, daemonPostTimeout)
+		if err != nil {
+			return err
+		}
+		_, err = a.env.Stdout.Write(append(body, '\n'))
+		return err
+	}}
 }

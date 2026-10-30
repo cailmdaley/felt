@@ -117,6 +117,11 @@ defmodule Shuttle.Delivery do
         args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
         args = if wake, do: args ++ ["--wake"], else: args
 
+        args =
+          if opts[:thread_signal],
+            do: args ++ ["--thread-signal", Jason.encode!(opts[:thread_signal])],
+            else: args
+
         with {:ok, _} <- Shuttle.CLI.run(args) do
           flush_context(entry)
           {:ok, :queued}

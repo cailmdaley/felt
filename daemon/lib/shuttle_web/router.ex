@@ -54,6 +54,7 @@ defmodule ShuttleWeb.Router do
     # Put a message in front of a fiber's worker (owner-routed): message a live
     # session, else resume or dispatch it with the message as From User.
     post("/deliver", DeliverController, :create)
+    post("/thread-signals/current", ThreadSignalsController, :create)
     get("/peers", MessagingController, :peers)
     post("/messages", MessagingController, :create)
     post("/messages/files", MessagingController, :create_files)

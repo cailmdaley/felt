@@ -515,7 +515,13 @@ defmodule Shuttle.Threads do
            "store" => parent.felt_store,
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
            "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
-           "wake" => wake
+           "wake" => wake,
+           "signal" => %{
+             "uid" => entry.fiber["uid"] || entry.fiber["id"],
+             "verb" => verb,
+             "stamp" => stamp,
+             "owner" => own_host
+           }
          }}
       end
 
@@ -606,7 +612,8 @@ defmodule Shuttle.Threads do
            {:ok, %{fibers: [parent]}} <-
              Shuttle.FiberDocuments.get_shuttle(uid, felt_stores: stores),
            ^uid <- parent.fiber["uid"],
-           true <- acknowledged?(deliver(parent, record["text"], id, record["wake"])) do
+           {:ok, current} <- current_signal(record, id),
+           true <- not current or acknowledged?(deliver(parent, record, id)) do
         ThreadOutbox.acknowledge(id)
       end
     end
@@ -660,23 +667,143 @@ defmodule Shuttle.Threads do
 
   defp acknowledged?(_), do: false
 
-  defp deliver(parent, text, id, wake) do
+  defp deliver(parent, record, id) do
     case OriginRouter.route_host(get_in(parent.fiber, ["shuttle", "host"])) do
       :local ->
-        Delivery.context(parent, text, id, wake: wake)
+        Delivery.context(parent, record["text"], id,
+          wake: record["wake"],
+          thread_signal: record["signal"]
+        )
 
       {:remote, remote} ->
         OriginRouter.forward(remote, "/api/v1/deliver", %{
           "fiber_id" => Map.fetch!(parent.fiber, "uid"),
-          "text" => text,
+          "text" => record["text"],
           "context_only" => true,
-          "wake" => wake,
-          "message_id" => id
+          "wake" => record["wake"],
+          "message_id" => id,
+          "thread_signal" => record["signal"]
         })
 
       {:error, _} = error ->
         error
     end
+  end
+
+  defp current_signal(record, id) do
+    # Unblock notes have their own dependency semantics; they are not exits.
+    if not String.starts_with?(id, "thread-") or
+         String.match?(record["text"] || "", ~r/^thread \S+ unblocked: /) do
+      {:ok, true}
+    else
+      signal_current(
+        %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]},
+        felt_stores: Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
+      )
+    end
+  end
+
+  @doc "Validate a queued lifecycle notice against its owner's fresh document, never the poll cache."
+  def signal_current(params, opts \\ []) do
+    signal = params["signal"]
+    reference = if is_map(signal), do: signal["uid"], else: legacy_reference(params["text"])
+
+    with ref when is_binary(ref) and ref != "" <- reference,
+         {:ok, %{fibers: entries}} <- FiberDocuments.get_shuttle(ref, opts) do
+      case entries do
+        [] -> missing_signal(params)
+        [entry] -> validate_on_owner(entry, params, opts)
+        _ -> {:error, :ambiguous_thread}
+      end
+    else
+      nil -> {:error, :invalid_signal}
+      {:error, _} = error -> error
+      _ -> {:error, :invalid_signal}
+    end
+  end
+
+  defp missing_signal(params) do
+    # A newly created remote thread need not have reached this mirror yet.
+    owner = get_in(params, ["signal", "owner"])
+
+    case {owner, params["forwarded"], OriginRouter.route_host(owner)} do
+      {host, forwarded, {:remote, remote}} when is_binary(host) and forwarded != true ->
+        forward_validation(remote, params)
+
+      {_, _, :local} ->
+        {:ok, false}
+
+      {_, true, _} ->
+        {:ok, false}
+
+      {_, _, {:error, _} = error} ->
+        error
+    end
+  end
+
+  defp legacy_reference(text) when is_binary(text) do
+    case Regex.run(~r/^thread (\S+) (?:asked|closed|handed off|rested): /, text) do
+      [_, ref] -> ref
+      _ -> nil
+    end
+  end
+
+  defp legacy_reference(_), do: nil
+
+  defp validate_on_owner(entry, params, _opts) do
+    owner = get_in(entry.fiber, ["shuttle", "host"])
+
+    case OriginRouter.route_host(owner) do
+      :local ->
+        {:ok, matches_signal?(entry, params)}
+
+      {:remote, remote} ->
+        # One forwarding hop; a stale mirror must not create a routing loop.
+        if params["forwarded"] == true do
+          {:error, :owner_changed}
+        else
+          forward_validation(remote, params)
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp forward_validation(remote, params) do
+    with {:forwarded, 200, body} <-
+           OriginRouter.forward(
+             remote,
+             "/api/v1/thread-signals/current",
+             Map.put(params, "forwarded", true),
+             forward_timeout_ms: 5_000
+           ),
+         {:ok, %{"current" => current}} when is_boolean(current) <- Jason.decode(body) do
+      {:ok, current}
+    else
+      error -> {:error, {:validation_unavailable, error}}
+    end
+  end
+
+  defp matches_signal?(entry, params) do
+    fiber = entry.fiber
+    archived = fiber["status"] == "closed" and is_boolean(fiber["tempered"])
+
+    not archived and
+      Enum.any?(signals(fiber), fn {verb, stamp, _, _} ->
+        case params["signal"] do
+          %{"uid" => uid, "verb" => ^verb, "stamp" => ^stamp} ->
+            uid == (fiber["uid"] || fiber["id"])
+
+          nil ->
+            params["message_id"] ==
+              "thread-" <>
+                digest({entry.felt_store, fiber["uid"] || fiber["id"], verb, stamp})
+
+          _ ->
+            false
+        end
+      end)
   end
 
   defp after_baseline?(stamp, baseline) do
@@ -687,9 +814,12 @@ defmodule Shuttle.Threads do
   end
 
   defp signals(fiber) do
+    status = fiber["status"]
+
     ask =
       case get_in(fiber, ["shuttle", "ask"]) do
-        %{"text" => text, "at" => at} when is_binary(text) and is_binary(at) ->
+        %{"text" => text, "at" => at}
+        when is_binary(text) and is_binary(at) and status != "closed" ->
           [{"asked", at, text, true}]
 
         _ ->

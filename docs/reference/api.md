@@ -814,3 +814,13 @@ A background-interruption warning retains the time the tab went hidden even when
 Audio is sent only while hark listens, and the card says when it doesn't: "Loading models — speech isn't captured until Listening" while hark loads, "Reconnecting — audio lost since HH:MM:SS" after a drop.
 Nothing is queued for later, and an open socket more than about 2 s behind drops audio rather than queueing it.
 Browsers grant the microphone only in a secure context, so reach the board from a phone through an HTTPS front such as `tailscale serve`.
+
+### POST /api/v1/thread-signals/current
+
+Checks a queued thread lifecycle notice against the thread owner's fresh fiber.
+The request carries `message_id`, `text`, and optional `signal` with `uid`, `verb`, `stamp`, and `owner`.
+The response is `{current: true|false}`.
+A cleared or replaced ask, a rearmed close, or an archived thread returns false.
+Unreachable owners and failed reads return 503, so the mailbox retains the notice for retry.
+Existing notices without structured signal metadata are checked by their lifecycle message ID and the thread address in their text.
+Mailbox delivery validates notices before emitting them and durably acknowledges each successful direct delivery independently.

@@ -6,6 +6,16 @@ defmodule Shuttle.ThreadsTest do
   @moduletag :tmp_dir
   @endpoint ShuttleWeb.Endpoint
 
+  defmodule ScopedAPI do
+    @behaviour Plug
+    def init(owner), do: owner
+
+    def call(conn, owner) do
+      Shuttle.Env.adopt_callers([owner])
+      ShuttleWeb.Endpoint.call(conn, ShuttleWeb.Endpoint.init([]))
+    end
+  end
+
   defmodule SocketRunner do
     @behaviour Shuttle.Runner
     def cmd("bash", ["-l" | args], opts),
@@ -338,7 +348,7 @@ defmodule Shuttle.ThreadsTest do
       assert later_id
       later = %{record | "text" => "another pending context note"}
       Shuttle.ThreadOutbox.capture([{later_id, later}])
-      pending_ids = MapSet.new([id, rest_id, later_id])
+      pending_ids = MapSet.new([id, later_id])
       before_retry = length(StubPostClient.posts())
 
       # The wait is cleared and the blocker reopened before the retry.
@@ -398,7 +408,7 @@ defmodule Shuttle.ThreadsTest do
     assert Threads.pending_results(entries, "another-host") == %{}
   end
 
-  test "failed close and ask publications survive cleared stamps and publisher restart", %{
+  test "superseded close and ask publications are dropped after publisher restart", %{
     store: store
   } do
     alias Shuttle.Test.StubPostClient
@@ -437,7 +447,7 @@ defmodule Shuttle.ThreadsTest do
 
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
       Threads.deliver_results(entries, "test-host")
-      original = StubPostClient.last().body |> Jason.decode!()
+      assert StubPostClient.last() != nil
       assert {:ok, _} = CLI.run_in_store(store, clear)
 
       assert {:ok, _} =
@@ -456,8 +466,8 @@ defmodule Shuttle.ThreadsTest do
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
       task = Task.async(fn -> Threads.deliver_results(cleared, "test-host") end)
       Task.await(task, 30_000)
-      assert %{body: body} = StubPostClient.last()
-      assert Jason.decode!(body) == original
+      assert StubPostClient.last() == nil
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
       Threads.deliver_results(entries, "test-host")
       assert StubPostClient.last() == nil
@@ -508,7 +518,6 @@ defmodule Shuttle.ThreadsTest do
       Threads.deliver_results(entries, "test-host")
       Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
       assert [{message_id, record}] = Shuttle.ThreadOutbox.pending("test-host")
-      assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "--clear"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "add", "elsewhere", "Elsewhere"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "nest", "hub/child", "elsewhere"])
       assert {:ok, _} = CLI.run_felt(["-C", store, "add", "group", "Group"])
@@ -559,6 +568,7 @@ defmodule Shuttle.ThreadsTest do
           {"ask", ["Needs a decision"], true},
           {"close", ["--local"], true}
         ] do
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
       StubPostClient.set_response({:error, :unavailable})
       assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
@@ -567,8 +577,6 @@ defmodule Shuttle.ThreadsTest do
       assert record["wake"] == expected_wake
       original = StubPostClient.last().body |> Jason.decode!()
       assert original["wake"] == expected_wake
-      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--as-draft", "--local"])
-      assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "--clear"])
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
 
       Task.async(fn ->
@@ -581,6 +589,100 @@ defmodule Shuttle.ThreadsTest do
       assert original["message_id"] == id
       assert Shuttle.ThreadOutbox.pending("test-host") == []
     end
+  end
+
+  test "fresh validation rejects archived closes and stale captures and replaced asks", %{
+    store: store
+  } do
+    for {verb, args, supersede} <- [
+          {"close", ["--local"], ["reopen", "hub/child", "--local"]},
+          {"ask", ["First question"], ["ask", "hub/child", "Second question"]},
+          {"close", ["--local"], ["close", "hub/child", "--tempered=true", "--local"]}
+        ] do
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
+      assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(entries, "test-host")
+      [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
+      assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+
+      assert %{"current" => true} =
+               api_conn() |> post("/api/v1/thread-signals/current", params) |> json_response(200)
+
+      assert {:ok, true} =
+               Threads.signal_current(Map.delete(params, "signal"), felt_stores: [store])
+
+      assert {:ok, _} = CLI.run_in_store(store, supersede)
+      assert {:ok, false} = Threads.signal_current(params, felt_stores: [store])
+
+      assert %{"current" => false} =
+               api_conn() |> post("/api/v1/thread-signals/current", params) |> json_response(200)
+
+      assert {:ok, false} =
+               Threads.signal_current(Map.delete(params, "signal"), felt_stores: [store])
+
+      # An old poll snapshot must not republish after the current document changed.
+      Threads.deliver_results(entries, "test-host")
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+  end
+
+  test "validation follows the child's owner and keeps unavailable signals pending", %{
+    store: store
+  } do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "child-host", port: 43210}])
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(entries, "test-host")
+    [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+    child = Path.join(store, ".felt/hub/child/child.md")
+    File.write!(child, String.replace(File.read!(child), "host: test-host", "host: child-host"))
+    params = %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]}
+    StubPostClient.set_response({:error, :unavailable})
+    assert {:error, _} = Threads.signal_current(params, felt_stores: [store])
+    Threads.retry_results("test-host")
+    assert [{^id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
+    StubPostClient.set_response({:ok, 200, ~s({"current":false})})
+    assert {:ok, false} = Threads.signal_current(params, felt_stores: [store])
+    assert %{url: url} = StubPostClient.last()
+    assert url =~ "/api/v1/thread-signals/current"
+    Threads.retry_results("test-host")
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+  end
+
+  test "a missing mirror validates at the captured owner without a forwarding loop", %{
+    store: store
+  } do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "child-host", port: 43210}])
+    StubPostClient.set_response({:ok, 200, ~s({"current":true})})
+
+    params = %{
+      "signal" => %{
+        "uid" => "missing-child",
+        "verb" => "asked",
+        "stamp" => "2026-10-30T00:00:00Z",
+        "owner" => "child-host"
+      },
+      "message_id" => "thread-pending",
+      "text" => "thread hub/new asked: Decide"
+    }
+
+    assert {:ok, true} = Threads.signal_current(params, felt_stores: [store])
+    assert %{body: body} = StubPostClient.last()
+    assert Jason.decode!(body) == Map.put(params, "forwarded", true)
+    Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
+
+    assert {:ok, false} =
+             Threads.signal_current(Map.put(params, "forwarded", true), felt_stores: [store])
+
+    assert StubPostClient.last() == nil
   end
 
   test "results reach only the nearest orchestrator and never propagate automatically", %{
@@ -654,7 +756,7 @@ defmodule Shuttle.ThreadsTest do
     Threads.capture_results(entries, "test-host")
     hub_uid = hub.fiber["uid"]
 
-    # The tempered child's own close and its thread's both go to the hub.
+    # Archived threads publish no result; the live descendant still reports.
     assert [
              %{"parent_uid" => ^hub_uid, "text" => "thread hub/child closed: "},
              %{"parent_uid" => ^hub_uid, "text" => "thread hub/child/deep closed: "}
@@ -928,6 +1030,7 @@ defmodule Shuttle.ThreadsTest do
     assert pending(data) == []
 
     # Stamp a fresh signal before restarting. A per-boot baseline would lose it.
+    assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "A new question"])
     GenServer.stop(poller)
     assert {:ok, restarted} = start_poller!(opts)
@@ -985,6 +1088,14 @@ defmodule Shuttle.ThreadsTest do
        %{store: store, data: data} do
     alias Shuttle.Poller
     import Shuttle.Test.PollerHelpers
+
+    api =
+      start_supervised!(
+        {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false}
+      )
+
+    {:ok, {_, api_port}} = ThousandIsland.listener_info(api)
+    Env.put_env("SHUTTLE_DAEMON_URL", "http://127.0.0.1:#{api_port}")
     socket = Path.join(System.tmp_dir!(), "th-#{System.unique_integer([:positive])}.sock")
     bin = Path.join(store, "bin")
     File.mkdir_p!(bin)
@@ -1037,6 +1148,7 @@ defmodule Shuttle.ThreadsTest do
     #!/bin/bash
     export HOME='#{Shuttle.Env.home()}' SHUTTLE_DATA_DIR='#{data}' SHUTTLE_HOST=test-host
     export CLAUDE_CODE_MESSAGING_SOCKET='#{native_socket}'
+    export SHUTTLE_DAEMON_URL='#{Shuttle.Env.get("SHUTTLE_DAEMON_URL")}'
     while [ "$#" -gt 0 ]; do
       if [ "$1" = --session-id ]; then uuid="$2"; shift; fi
       shift
@@ -1186,6 +1298,7 @@ defmodule Shuttle.ThreadsTest do
       })
     )
 
+    assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/child", "--local"])
     assert {:ok, _} = CLI.run_in_store(store, ["ask", "hub/child", "Choose a kernel?"])
     send(poller, :run_poll_cycle)
 

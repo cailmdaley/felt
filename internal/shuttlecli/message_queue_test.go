@@ -254,3 +254,30 @@ func TestContextMailboxPendingCountsEachFiber(t *testing.T) {
 		t.Fatalf("pending = %v", got)
 	}
 }
+
+func TestThreadSignalCurrentPostsStructuredIdentity(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	var got messaging.ThreadSignalCheck
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/thread-signals/current": func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+				t.Error(err)
+			}
+			_, _ = w.Write([]byte(`{"current":true}`))
+		},
+	})
+	var stdout bytes.Buffer
+	env.Stdout = &stdout
+	cmd := newApp(env).threadSignalCurrentCmd()
+	cmd.SetArgs([]string{`{"signal":{"uid":"child-uid","verb":"asked","stamp":"2026-10-30T00:00:00Z","owner":"candide"},"message_id":"thread-id","text":"thread child asked: question"}`})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if got.Signal == nil || got.Signal.UID != "child-uid" || got.Signal.Verb != "asked" || got.Signal.Owner != "candide" || got.MessageID != "thread-id" || got.Text != "thread child asked: question" {
+		t.Fatalf("posted signal check = %+v", got)
+	}
+	if stdout.String() != `{"current":true}`+"\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,9 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+	}
+	if r.ThreadSignal != nil && (r.ThreadSignal.UID == "" || r.ThreadSignal.Verb == "" || r.ThreadSignal.Stamp == "" || r.ThreadSignal.Owner == "") {
+		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
 	}
 	return enqueueMailbox(root, r)
 }
@@ -233,6 +237,7 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 	if err != nil {
 		return err
 	}
+	var validationErrors []error
 	for _, entry := range entries {
 		bytes, err := readBounded(filepath.Join(dir, entry.Name()), 16384)
 		var link fiberMailboxLink
@@ -241,17 +246,30 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 		}
 		offered := false
 		root := mailboxDir(env, "fiber", link.Fiber)
-		err = offerMailbox(root, func(r Request) bool {
-			return !r.Wake && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
-		}, func(batch []Request) error {
+		err = offerMailboxValidated(root, func(r Request) bool {
+			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
+		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(batch []Request) error {
 			offered = true
 			return emit(batch)
 		})
-		if err != nil || offered {
-			return err
+		if err != nil {
+			validationErrors = append(validationErrors, err)
+		}
+		if offered {
+			return errors.Join(validationErrors...)
 		}
 	}
-	return nil
+	return errors.Join(validationErrors...)
+}
+
+func fiberContextHookEligible(root string, request Request) bool {
+	return !request.Wake && !fiberContextHasAttempt(root, request.MessageID)
+}
+
+func fiberContextHasAttempt(root, messageID string) bool {
+	path := filepath.Join(root, "pending", mailboxKey(messageID)+".json")
+	entry, err := readFiberMailboxEntry(path)
+	return err != nil || entry.AttemptAddress != ""
 }
 
 // DeliverFiberContext offers pending context to the current conversation. The
@@ -289,23 +307,138 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 			return errCode("unavailable", "%s", reason)
 		}
 	}
-	return offerMailbox(root, func(r Request) bool {
-		receiver, err := readFiberReceiver(root)
-		return err == nil && receiver.Generation == generation && (r.Wake || !hook) && fiberReceiverMatches(root, a)
-	}, func(batch []Request) error {
-		for _, req := range batch {
-			req.Address = address
-			// A successor has its own dedup fingerprint; retries to the same
-			// conversation still carry exactly the same transport message id.
-			req.MessageID += "-" + mailboxKey(address)[:16]
-			receipt, err := Send(ctx, env, host, req)
-			if err != nil {
-				return err
-			}
-			if receipt.Status != StatusContextAdded && receipt.Status != StatusAccepted {
-				return errCode("unconfirmed", "context delivery: %s", receipt.Status)
-			}
-		}
-		return nil
+	return offerMailboxEachValidated(root, func(r Request) bool {
+		return fiberContextDirectEligible(root, r, generation, hook, a)
+	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(req Request) error {
+		req.ThreadSignal = nil
+		return deliverFiberContextItem(ctx, env, fiber, host, address, req)
 	})
+}
+
+func fiberContextDirectEligible(root string, request Request, generation uint64, hook bool, address Address) bool {
+	receiver, err := readFiberReceiver(root)
+	return err == nil && receiver.Generation == generation && (request.Wake || !hook || fiberContextHasAttempt(root, request.MessageID)) && fiberReceiverMatches(root, address)
+}
+
+func deliverFiberContextItem(ctx context.Context, env *sysenv.Env, fiber, host, selectedAddress string, request Request) error {
+	return deliverFiberContextItemWith(ctx, env, fiber, host, selectedAddress, request, sendFiberContextAttempt)
+}
+
+type fiberContextSender func(context.Context, *sysenv.Env, string, Request, string) (Receipt, error)
+
+func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, host, selectedAddress string, request Request, send fiberContextSender) error {
+	root := mailboxDir(env, "fiber", fiber)
+	path := filepath.Join(root, "pending", mailboxKey(request.MessageID)+".json")
+	entry, err := readFiberMailboxEntry(path)
+	if err != nil {
+		return err
+	}
+	address := entry.AttemptAddress
+	if address == "" {
+		address = selectedAddress
+		if err := writeFiberMailboxAttempt(path, entry, address); err != nil {
+			return err
+		}
+	}
+
+	receipt, err := send(ctx, env, host, request, address)
+	if receipt.Status != StatusRejected {
+		return err
+	}
+	if err == nil {
+		err = errCode("rejected", "context delivery was rejected")
+	}
+	if address == selectedAddress {
+		if clearErr := writeFiberMailboxAttempt(path, entry, ""); clearErr != nil {
+			return clearErr
+		}
+		return err
+	}
+
+	// This attempt was conclusively rejected before delivery. Clear it and
+	// redirect to the receiver currently selected by the owning worker.
+	if err := writeFiberMailboxAttempt(path, entry, ""); err != nil {
+		return err
+	}
+	entry.AttemptAddress = selectedAddress
+	if err := writeFiberMailboxAttempt(path, entry, selectedAddress); err != nil {
+		return err
+	}
+	receipt, err = send(ctx, env, host, request, selectedAddress)
+	if receipt.Status == StatusRejected {
+		if clearErr := writeFiberMailboxAttempt(path, entry, ""); clearErr != nil {
+			return clearErr
+		}
+	}
+	return err
+}
+
+func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, request Request, address string) (Receipt, error) {
+	request.Address = address
+	// Keep one stable dedup key for retries to a destination, with an
+	// independent key when a conclusively rejected destination is replaced.
+	request.MessageID += "-" + mailboxKey(address)[:16]
+	receipt, err := Send(ctx, env, host, request)
+	if err != nil {
+		return receipt, err
+	}
+	if receipt.Status != StatusContextAdded && receipt.Status != StatusAccepted {
+		return receipt, errCode("unconfirmed", "context delivery: %s", receipt.Status)
+	}
+	return receipt, nil
+}
+
+func readFiberMailboxEntry(path string) (mailboxEntry, error) {
+	bytes, err := readBounded(path, 512<<10)
+	if err != nil {
+		return mailboxEntry{}, err
+	}
+	var entry mailboxEntry
+	if err := json.Unmarshal(bytes, &entry); err != nil {
+		return mailboxEntry{}, err
+	}
+	return entry, nil
+}
+
+func writeFiberMailboxAttempt(path string, entry mailboxEntry, address string) error {
+	entry.AttemptAddress = address
+	bytes, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(path, bytes, false)
+}
+
+func currentThreadSignal(ctx context.Context, env *sysenv.Env, request Request) (bool, error) {
+	if !strings.HasPrefix(request.MessageID, "thread-") {
+		return true, nil
+	}
+	if isUnblockedNotice(request.Text) {
+		return true, nil
+	}
+	check := ThreadSignalCheck{Signal: request.ThreadSignal, MessageID: request.MessageID, Text: request.Text}
+	bytes, err := json.Marshal(check)
+	if err != nil {
+		return false, err
+	}
+	cmd := env.CommandContext(ctx, "shuttle", "thread-signal-current", string(bytes))
+	output, err := cmd.Output()
+	if err != nil {
+		return false, fmt.Errorf("checking current thread signal %s: %w", request.MessageID, err)
+	}
+	var answer struct {
+		Current *bool `json:"current"`
+	}
+	if err := json.Unmarshal(output, &answer); err != nil {
+		return false, fmt.Errorf("decoding current thread signal %s: %w", request.MessageID, err)
+	}
+	if answer.Current == nil {
+		return false, fmt.Errorf("checking current thread signal %s: response has no current field", request.MessageID)
+	}
+	return *answer.Current, nil
+}
+
+func isUnblockedNotice(text string) bool {
+	fields := strings.SplitN(text, " ", 4)
+	return len(fields) == 4 && fields[0] == "thread" && fields[1] != "" && fields[2] == "unblocked:"
 }

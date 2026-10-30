@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
@@ -165,5 +166,197 @@ func TestPendingFiberContextCountsWhatNoWorkerHasTaken(t *testing.T) {
 	}
 	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 0 {
 		t.Fatalf("after its worker took them, pending = %d (%v), want 0", n, err)
+	}
+}
+
+func TestFiberContextHandoffKeepsPerMessageAckAfterLaterFailure(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	for _, id := range []string{"first", "second"} {
+		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := mailboxDir(env, "fiber", "fiber")
+	var firstWorker []string
+	failure := errors.New("later delivery failed")
+	err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(request Request) error {
+		firstWorker = append(firstWorker, request.MessageID)
+		if request.MessageID == "second" {
+			return failure
+		}
+		return nil
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("first worker error = %v", err)
+	}
+	if len(firstWorker) != 2 || firstWorker[0] != "first" || firstWorker[1] != "second" {
+		t.Fatalf("first worker received %v", firstWorker)
+	}
+
+	var successor []string
+	if err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(request Request) error {
+		successor = append(successor, request.MessageID)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(successor) != 1 || successor[0] != "second" {
+		t.Fatalf("successor received %v; acknowledged first message replayed", successor)
+	}
+}
+
+func TestFiberContextRestartRetriesPinnedDestinationAfterAcceptedSend(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	request := Request{MessageID: "thread-accepted", Text: "thread hub/child closed: done"}
+	if err := QueueFiberContext(env, "fiber", request); err != nil {
+		t.Fatal(err)
+	}
+	firstGeneration := transition(t, env, "execution-first", "shuttle://host/claude/first")
+	var firstID string
+	accepted := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
+		firstID = req.MessageID + "-" + mailboxKey(address)[:16]
+		return Receipt{Status: StatusContextAdded}, nil
+	}
+	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", "shuttle://host/claude/first", request, accepted); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	entry, err := readFiberMailboxEntry(path)
+	if err != nil || entry.AttemptAddress != "shuttle://host/claude/first" {
+		t.Fatalf("durable attempt = %+v, %v", entry, err)
+	}
+	if fiberContextHookEligible(mailboxDir(env, "fiber", "fiber"), request) {
+		t.Fatal("hook path bypassed a pinned direct delivery attempt")
+	}
+	successorGeneration := transition(t, env, "execution-successor", "shuttle://host/claude/successor")
+	successorTarget, err := ParseAddress("shuttle://host/claude/successor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fiberContextDirectEligible(mailboxDir(env, "fiber", "fiber"), request, successorGeneration, true, successorTarget) {
+		t.Fatalf("direct recovery was fenced by selected generation %d (first was %d)", successorGeneration, firstGeneration)
+	}
+
+	var successorAddress, successorID string
+	retry := func(_ context.Context, _ *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
+		successorAddress = address
+		successorID = req.MessageID + "-" + mailboxKey(address)[:16]
+		return Receipt{Status: StatusContextAdded}, nil
+	}
+	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", "shuttle://host/claude/successor", request, retry); err != nil {
+		t.Fatal(err)
+	}
+	if successorAddress != "shuttle://host/claude/first" || successorID != firstID {
+		t.Fatalf("restart retried %q with id %q; first attempt was %q with id %q", successorAddress, successorID, "shuttle://host/claude/first", firstID)
+	}
+}
+
+func TestFiberContextRetargetsAfterPinnedDestinationRejects(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	request := Request{MessageID: "thread-rejected", Text: "thread hub/child closed: done"}
+	if err := QueueFiberContext(env, "fiber", request); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(mailboxDir(env, "fiber", "fiber"), "pending", mailboxKey(request.MessageID)+".json")
+	entry, err := readFiberMailboxEntry(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := "shuttle://host/claude/first"
+	if err := writeFiberMailboxAttempt(path, entry, first); err != nil {
+		t.Fatal(err)
+	}
+	var addresses []string
+	sender := func(_ context.Context, _ *sysenv.Env, _ string, _ Request, address string) (Receipt, error) {
+		addresses = append(addresses, address)
+		if address == first {
+			return Receipt{Status: StatusRejected}, errCode("unavailable", "old receiver ended")
+		}
+		return Receipt{Status: StatusContextAdded}, nil
+	}
+	selected := "shuttle://host/claude/successor"
+	if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", selected, request, sender); err != nil {
+		t.Fatal(err)
+	}
+	if len(addresses) != 2 || addresses[0] != first || addresses[1] != selected {
+		t.Fatalf("delivery attempts = %v, want rejected first then current successor", addresses)
+	}
+	entry, err = readFiberMailboxEntry(path)
+	if err != nil || entry.AttemptAddress != selected {
+		t.Fatalf("successor attempt = %+v, %v", entry, err)
+	}
+}
+
+func TestThreadSignalMailboxDropsSupersededAndRetainsWhenCheckFails(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	for _, id := range []string{"thread-superseded", "thread-unavailable", "thread-healthy"} {
+		if err := QueueFiberContext(env, "fiber", Request{MessageID: id, Text: "thread hub/child asked: question"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root := mailboxDir(env, "fiber", "fiber")
+	if err := offerMailboxValidated(root, func(r Request) bool { return r.MessageID == "thread-superseded" }, func(context.Context, Request) (bool, error) {
+		return false, nil
+	}, func([]Request) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 2 {
+		t.Fatalf("pending after superseded drop = %d (%v), want 2", n, err)
+	}
+	checkFailure := errors.New("validator unavailable")
+	healthyChecked := make(chan struct{})
+	var delivered []string
+	if err := offerMailboxValidated(root, func(Request) bool { return true }, func(_ context.Context, r Request) (bool, error) {
+		if r.MessageID == "thread-unavailable" {
+			select {
+			case <-healthyChecked:
+			case <-time.After(2 * time.Second):
+				return false, errors.New("healthy notice waited behind unreachable owner")
+			}
+			return false, checkFailure
+		}
+		close(healthyChecked)
+		return true, nil
+	}, func(batch []Request) error {
+		for _, request := range batch {
+			delivered = append(delivered, request.MessageID)
+		}
+		return nil
+	}); !errors.Is(err, checkFailure) {
+		t.Fatalf("validator error = %v", err)
+	}
+	if len(delivered) != 1 || delivered[0] != "thread-healthy" {
+		t.Fatalf("healthy notice delivery = %v", delivered)
+	}
+	if n, err := PendingFiberContext(env, "fiber"); err != nil || n != 1 {
+		t.Fatalf("pending after unavailable check = %d (%v), want 1", n, err)
+	}
+}
+
+func TestCurrentThreadSignalInvokesShuttleFromEnvironmentPath(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stub := filepath.Join(bin, "shuttle")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\n[ \"$1\" = thread-signal-current ] || exit 2\nprintf '%s\\n' '{\"current\":true}'\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("PATH", bin+string(os.PathListSeparator)+env.Getenv("PATH"))
+	current, err := currentThreadSignal(context.Background(), env, Request{
+		MessageID: "thread-id",
+		Text:      "thread hub/child asked: question",
+		ThreadSignal: &ThreadSignal{
+			UID: "child-uid", Verb: "asked", Stamp: "2026-10-30T00:00:00Z", Owner: "candide",
+		},
+	})
+	if err != nil || !current {
+		t.Fatalf("current thread signal = %v, %v", current, err)
 	}
 }

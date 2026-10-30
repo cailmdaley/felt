@@ -47,17 +47,34 @@ type Directory struct {
 }
 
 type Request struct {
-	Address     string       `json:"address"`
-	Text        string       `json:"text"`
-	From        string       `json:"from,omitempty"`
-	ReplyTo     string       `json:"reply_to,omitempty"`
-	Wake        bool         `json:"wake"`
-	MessageID   string       `json:"message_id"`
-	Attachments []Attachment `json:"attachments,omitempty"`
+	Address      string        `json:"address"`
+	Text         string        `json:"text"`
+	From         string        `json:"from,omitempty"`
+	ReplyTo      string        `json:"reply_to,omitempty"`
+	Wake         bool          `json:"wake"`
+	MessageID    string        `json:"message_id"`
+	ThreadSignal *ThreadSignal `json:"thread_signal,omitempty"`
+	Attachments  []Attachment  `json:"attachments,omitempty"`
 	// NotifyWhenIdle subscribes From to one notice when the receiver next
 	// goes idle or exits; NotifyWake has that notice start a turn there.
 	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`
 	NotifyWake     bool `json:"notify_wake,omitempty"`
+}
+
+// ThreadSignal identifies the lifecycle fact represented by queued thread
+// context. The owner checks it against the child's current fiber before any
+// worker sees the notice.
+type ThreadSignal struct {
+	UID   string `json:"uid"`
+	Verb  string `json:"verb"`
+	Stamp string `json:"stamp"`
+	Owner string `json:"owner"`
+}
+
+type ThreadSignalCheck struct {
+	Signal    *ThreadSignal `json:"signal,omitempty"`
+	MessageID string        `json:"message_id"`
+	Text      string        `json:"text"`
 }
 
 type Receipt struct {
