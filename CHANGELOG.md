@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+- Claude and Pi hooks bridge terminal program status through tmux to supporting outer terminals; `SHUTTLE_PROGRAM_STATUS=off` disables it.
+
 ### Fixed
 
 - Remote recovery respects a responding daemon regardless of whether it runs under

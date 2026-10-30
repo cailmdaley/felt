@@ -54,6 +54,35 @@ the `.lock` sidecar, however many hooks see it full at the same moment — and a
 `toolInput` over 8 KiB is trimmed to its file paths plus `truncated: true` — otherwise every
 `Write` parks a whole file body in the stream.
 
+### Terminal program status
+
+`shuttle hook event` bridges OSC 7501 status to the outer terminal only when `TMUX` is set and the harness is Claude or Pi.
+Direct terminals are left to the harness's native reporter; Codex hooks do not emit because they run in the shared App Server rather than its viewer.
+Set `SHUTTLE_PROGRAM_STATUS=off` or `0` in the agent environment to disable the bridge independently of event and message recording.
+Each report uses the harness app id (`claude-code` or `pi`) and the fiber slug as its title when available.
+
+| Hook event | Status |
+| --- | --- |
+| SessionStart | `idle` |
+| UserPromptSubmit | `working` |
+| PreToolUse `AskUserQuestion` | `blocked`, kind `question` |
+| PreToolUse `ExitPlanMode` | `blocked`, kind `permission` |
+| Other PreToolUse or PostToolUse | `working`, with the tool name |
+| Notification `permission_prompt` | `blocked`, kind `permission` |
+| Notification `elicitation_dialog` | `blocked`, kind `question` |
+| Notification `idle_prompt` | no report |
+| Other Notification | `blocked`, with no kind |
+| Stop with background tasks | `working`, with the count |
+| Stop without background tasks | `done` |
+| SubagentStop | no report |
+| SessionEnd | `clear` |
+
+Worker scripts enable `allow-passthrough` per pane; tmux before 3.3 silently ignores it.
+For interactive or claimed panes, `tmux set -g allow-passthrough on` opts the server in; this permits wrapped terminal escape sequences from programs in those panes.
+Passthrough reaches the outer terminal only while the pane is visible in an attached client, and no state is replayed on attach.
+The outer terminal owns the record as tmux; working and blocked records drop when the client exits, while done survives.
+Switching sessions within a client can leave a stale record.
+
 ### Clearing sent files
 
 `shuttle sent-files clear <fiber> [--path <file>]` appends a `sent_files_cleared` event through the same locked, rotating writer as `shuttle send-file`.

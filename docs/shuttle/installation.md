@@ -707,6 +707,15 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 A fetched daemon installation writes `~/.shuttle/repo` with its release directory, which lets `shuttle-launch` locate it during remote revival.
 If you move the release manually, update that path too.
 
+## Terminal program status
+
+Inside tmux, Claude and Pi hooks can report working and blocked status to an outer terminal that supports OSC 7501.
+Set `SHUTTLE_PROGRAM_STATUS=off` (or `0`) in the agent's environment to disable these reports; direct terminals use the harness's native reporter.
+Shuttle enables tmux passthrough for worker panes on tmux 3.3 or later.
+For interactive and claimed panes, opt in with `tmux set -g allow-passthrough on`; this allows programs in those panes to send wrapped escape sequences to the outer terminal.
+Only visible panes forward reports, and attaching does not replay status.
+See [Terminal program status](../dev/event-stream.md#terminal-program-status) for event mapping and lifetime details.
+
 ## Claude Remote Control host
 
 The daemon can keep one `claude remote-control` host running so claude.ai and the mobile app can open sessions in a folder on this machine.
