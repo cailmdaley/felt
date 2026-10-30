@@ -197,7 +197,6 @@
 .ws-dock .kbn-ctl-meet-panel { position: absolute; bottom: calc(100% + var(--ws-small-gap)); left: 0; z-index: 10; display: none; box-sizing: border-box; width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 420px); overflow: auto; padding: 8px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); box-shadow: var(--ws-shadow-low); }
 .ws-dock .kbn-ctl-meet-overflow[open] > .kbn-ctl-meet-panel { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
 .ws-dock .kbn-ctl-meet-overflow[open] .kbn-ctl-meet { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
-.ws-dock .kbn-ctl-meet-panel > .kbn-detail-transcript { box-sizing: border-box; max-width: 100%; }
 .ws-dock .kbn-ctl-meet-switch { position: relative; display: inline-flex; align-items: center; gap: 7px; box-sizing: border-box; min-height: var(--ctl-h); padding: 0 8px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); white-space: nowrap; cursor: pointer; margin-right: auto; }
 .ws-dock .kbn-ctl-meet-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: inherit; }
 .ws-dock .kbn-ctl-meet-switch:has(input:disabled) { opacity: .55; cursor: default; }
