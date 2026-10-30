@@ -232,6 +232,44 @@ defmodule Shuttle.Terminal.RexRealTest do
   end
 
   @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  test "a real viewer reaches the daemon's custom tmux socket directory" do
+    tmux = Shuttle.Env.find_executable("tmux")
+
+    tmpdir =
+      Path.join(
+        "/tmp",
+        "rex-viewer-" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+      )
+
+    File.mkdir_p!(tmpdir)
+    Env.put_env("TMUX_TMPDIR", tmpdir)
+    env = [{"TMUX_TMPDIR", tmpdir}, {"TMUX", nil}, {"TMUX_PANE", nil}]
+
+    on_exit(fn ->
+      System.cmd(tmux, ["kill-server"], env: env, stderr_to_stdout: true)
+      File.rm_rf!(tmpdir)
+    end)
+
+    assert {_, 0} =
+             System.cmd(tmux, ["new-session", "-d", "-s", "probe-viewer", "/bin/sleep", "60"],
+               env: env
+             )
+
+    assert {:ok, _} =
+             Backend.viewer(@runner, "probe-custom@tmux", [tmux, "attach", "-t", "=probe-viewer"])
+
+    await(fn ->
+      System.cmd(tmux, ["list-clients", "-F", "\#{client_session}"],
+        env: env,
+        stderr_to_stdout: true
+      ) == {"probe-viewer\n", 0}
+    end)
+
+    assert {_, 0} = System.cmd(tmux, ["detach-client", "-s", "probe-viewer"], env: env)
+    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+  end
+
+  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
   test "a real tmux attach viewer closes without stopping its tmux server", %{root: root} do
     tmux = Shuttle.Env.find_executable("tmux")
     socket = Path.join(root, "tmux.sock")

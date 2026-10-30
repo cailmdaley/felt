@@ -298,13 +298,9 @@ defmodule Shuttle.MigrationTest do
     state = :sys.get_state(p)
     {:ok, plan} = Shuttle.Migration.prepare(state, "source", "dest", [])
     {:ok, entry} = Shuttle.MigrationJournal.create(plan, "test-host")
-    {:ok, %{"bindings" => bindings}} = Shuttle.Terminal.RexBindings.read()
-
-    :ok =
-      Shuttle.Terminal.RexBindings.delete(
-        FiberUid.session("source"),
-        bindings[FiberUid.session("source")]
-      )
+    # Losing the index leaves the worker's PID evidence; intentional binding
+    # removal retires both the address and its receipt.
+    File.rm!(Shuttle.Terminal.RexBindings.path())
 
     Shuttle.Test.FakeRex.sessions(%{
       sid => %{
