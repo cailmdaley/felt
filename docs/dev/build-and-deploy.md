@@ -126,18 +126,6 @@ The helper checks the exact target commit's latest push run in the `CI` workflow
 A completed run whose conclusion is not `success` refuses deployment; `--allow-failed-ci` explicitly overrides it.
 Pending runs, absent runs, and unavailable GitHub credentials print a warning and allow the deploy to continue.
 
-For notifications independent of deployments or new sessions, run `scripts/ci-notice.sh OWNER/REPO STORE DESK STATE_DIR SINCE` from the authenticated host's scheduler.
-Use a launchd job with `StartInterval` set to 600 seconds on macOS, or a cron entry every ten minutes on Linux.
-Set an explicit `PATH` containing `gh` and `shuttle`, use absolute script and directory paths, and preserve the host's GitHub authentication environment.
-`SINCE` is the poller's fixed ISO-8601 activation time, rather than a sliding lookback window.
-The script paginates every failed push run on main since that time and queues it through `shuttle message` to the desk.
-It records the run id and attempt in `STATE_DIR` after successful delivery, so repeated polls stay quiet and a failed delivery retries.
-Keep the same state directory and activation time on later runs, and run only one poller for that desk and repository.
-A crash between queueing and acknowledgement can repeat a notice.
-Launchd serializes invocations of one job; a cron wrapper must also prevent overlapping invocations, for example with `flock -n` on Linux.
-Route stdout and stderr to a private host-local log directory with restrictive permissions, then monitor that log or the scheduler's failure reporting so authentication and delivery failures remain visible.
-The host scheduler supplies each poll without a model turn, daemon subsystem, or GitHub runner credentials for the private store.
-
 To deploy a release candidate across the configured fleet, pin its tag:
 
 ```sh

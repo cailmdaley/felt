@@ -270,6 +270,10 @@ in `NOTICE` and `LICENSE-APACHE`.
 
 ## Landing changes
 
+After pushing `main`, the pusher owns CI for that exact commit until it is green.
+Capture the pushed SHA, wait for its `CI` push run to appear in `gh run list --branch main --workflow CI --commit <sha> --event push`, then run `gh run watch <run-id> --exit-status`.
+If CI is red, inspect the failing jobs and fix or revert the break before leaving; watch the resulting pushed SHA through completion too.
+
 Work lands directly on `main`: commit as each piece lands, rebase on
 `origin/main`, run the suites the change touches, and push. No PRs and no
 long-lived branches — iteration happens on `main`, one small improvement after
