@@ -661,11 +661,13 @@ describe('workspace reader integration', () => {
     expect(document.activeElement?.textContent).toBe('Sent files')
     expect(reader().querySelector<HTMLDialogElement>('.ws-page-sheet')?.open).not.toBe(true)
   })
-  it('re-reads the rail\'s default on every channel: files open it, a quiet family without them leaves it closed', async () => {
+  it('re-reads the rail\'s default on every channel: files or an artifact open it, a quiet family without them leaves it closed', async () => {
     workspace.dispose()
     const thread = (over: Partial<KanbanCard> & Pick<KanbanCard, 'id'>): KanbanCard =>
       card({ uid: over.id.replace(/\//g, '-'), name: over.id, originId: 'host-a', shuttleKind: 'oneshot', shuttleAgent: 'codex-sol', path: `${over.id}.md`, ...over })
-    const feed = [cards[0], thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }), thread({ id: 'lone', status: 'active' })]
+    const feed = [cards[0], thread({ id: 'hub', status: 'active' }), thread({ id: 'hub/kept', orchestrator: 'hub', status: 'closed', tempered: true }), thread({ id: 'lone', status: 'active' }), thread({ id: 'drawn', status: 'active' })]
+    // Only `drawn` keeps the fixture body's embedded report: an artifact the rail leads with.
+    bodyOverrides.set('host-a:hub', 'No artifact here.'); bodyOverrides.set('host-a:lone', 'No artifact here.')
     bodyCards = feed
     workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => feed, threadIndex: () => new ThreadIndex(feed), origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
     const reader = (): HTMLElement => document.querySelector<HTMLElement>('.ws-reader')!
@@ -679,6 +681,10 @@ describe('workspace reader integration', () => {
     // With neither threads nor files the rail has nothing to draw: the menu entry opens the sheet and stores no rail choice.
     workspace.open(feed[3], 'Desk'); await flush()
     expect(reader().querySelector<HTMLElement>('.ws-thread-rail')!.hidden).toBe(true)
+    workspace.open(feed[4], 'Desk'); await flush()
+    expect(reader().classList.contains('ws-with-rail')).toBe(true)
+    expect(reader().querySelector<HTMLElement>('.ws-rail-artifact')!.hidden).toBe(false)
+    workspace.open(feed[3], 'Desk'); await flush()
     const showModal = vi.fn()
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { value: showModal, configurable: true })
     try {

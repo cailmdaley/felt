@@ -1180,7 +1180,7 @@ export class Dock {
     leave.className = 'ws-header-icon ws-chat-leave'
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
-    header.append(lead, identity, refs, leave, this.head)
+    header.append(lead, identity, leave, this.head)
     let settingsInTitleRow = false
     const placeIcons = (): void => {
       const mobile = isMobileViewport()
@@ -1216,8 +1216,9 @@ export class Dock {
       }
       else if (compact) place(this.head, [status, verdict, refs, settingsItem])
       else {
-        place(this.head, [status, verdict])
-        place(header, [lead, identity, refs, settingsItem, leave, this.head])
+        // The verbs and the references share row 2's baseline; row 1 is ‹, the title, ⚙ and ×.
+        place(this.head, [status, verdict, refs])
+        place(header, [lead, identity, settingsItem, leave, this.head])
       }
       if (focused) {
         const target = focused.checkVisibility() ? focused : settingsItem

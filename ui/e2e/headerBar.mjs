@@ -114,8 +114,24 @@ export function registerHeaderBarJourneys(test) {
       }
       assert.ok(rows.leave.top < rows.title.bottom && rows.leave.bottom > rows.title.top, `× stays beside the title at ${width}`)
       assert.ok(rows.head.right - rows.leave.right < 80, `× ends the header at ${width}`)
-      if (width <= 701) assert.ok(rows.refs.top >= rows.acts.top - 1, `Constitution and Artifact follow the actions at ${width}`)
-      else assert.ok(rows.refs.top <= rows.title.top + 1 && rows.refs.bottom <= rows.acts.top + 1, `Constitution and Artifact are paired above the action row at ${width}`)
+      assert.ok(rows.refs.top >= rows.acts.top - 1 && rows.refs.bottom <= rows.acts.bottom + 1, `Constitution and Artifact share the action row at ${width}`)
+      if (width === 1440) {
+        // On the desktop they are words, closing the row on the verbs' baseline: same face, same size, same centre line.
+        assert.ok(rows.acts.right - rows.refs.right <= 2, `the references end the action row at ${width}`)
+        const faces = await header.evaluate(el => {
+          const verb = [...el.querySelectorAll('.kbn-ctl-verdict button')].find(b => b.checkVisibility())
+          const word = verb.querySelector('.ws-header-word') ?? verb
+          const read = node => { const r = node.getBoundingClientRect(), cs = getComputedStyle(node); return { centre: r.top + r.height / 2, size: cs.fontSize, family: cs.fontFamily, lineHeight: cs.lineHeight } }
+          const constitution = el.querySelector('.ws-chat-constitution')
+          return { verb: read(word), constitution: { ...read(constitution), ...(() => { const a = getComputedStyle(constitution, '::after'); return { size: a.fontSize, family: a.fontFamily } })() }, artifact: read(el.querySelector('.ws-report-chip .ws-report-label') ?? el.querySelector('.ws-chat-constitution')), icons: [...el.querySelectorAll('.ws-chat-refs svg')].filter(svg => svg.checkVisibility()).length }
+        })
+        assert.equal(faces.icons, 0, 'the desktop references carry no icons')
+        for (const ref of [faces.constitution, faces.artifact]) {
+          assert.equal(ref.size, faces.verb.size, `references and verbs share a size: ${JSON.stringify(faces)}`)
+          assert.equal(ref.family, faces.verb.family, `references and verbs share a face: ${JSON.stringify(faces)}`)
+          assert.ok(Math.abs(ref.centre - faces.verb.centre) <= 1, `references and verbs share a baseline: ${JSON.stringify(faces)}`)
+        }
+      }
       const slack = { left: rows.acts.left, right: rows.acts.right }
       const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
       const left = Math.min(...line.map(b => b.left)) - slack.left
@@ -459,7 +475,7 @@ export function registerHeaderBarJourneys(test) {
       const header = chat.locator('.ws-chat-head')
       if (device === 'desktop') await chat.locator('.ws-transcript-context:not([hidden])').waitFor()
       else assert.ok(await header.locator('.ws-transcript-meter').evaluate(el => getComputedStyle(el).display === 'none'), 'the phone omits the transcript meter from its action row')
-      await header.locator('.ws-report-chip .ws-thumbnail').waitFor()
+      await header.locator('.ws-report-chip').waitFor()
       assert.equal(title.length, 90)
       assert.equal(await header.locator('h1').getAttribute('title'), title)
       const geometry = await header.evaluate(el => {
@@ -485,7 +501,7 @@ export function registerHeaderBarJourneys(test) {
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()
-        assert.ok(target.width >= 44 && target.height >= 44, 'the thumbnail remains a 44px touch target')
+        assert.ok(target.width >= 44 && target.height >= 44, 'the artifact icon remains a 44px touch target')
       }
       assert.equal(await chat.locator('.ws-report-inset, .ws-chat-outcome, .ws-transcript-find, .ws-header-sheet').count(), 0)
       assert.equal(await header.locator('.ws-transcript-share, .ws-transcript-hit').count(), 0)
@@ -493,7 +509,8 @@ export function registerHeaderBarJourneys(test) {
         assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
         assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
       }
-      for (const label of device === 'desktop' ? ['Constitution', 'Settings', 'Temper', 'Discard'] : ['Settings']) {
+      // The desktop's Constitution is a word (checked with the action row); its icon is the phone's.
+      for (const label of device === 'desktop' ? ['Settings', 'Temper', 'Discard'] : ['Settings']) {
         const icon = header.getByRole('button', { name: label, exact: true })
         assert.equal(await icon.getAttribute('title'), label)
         assert.deepEqual(await icon.evaluate(el => {
@@ -503,7 +520,7 @@ export function registerHeaderBarJourneys(test) {
         await icon.focus(); assert.equal(await icon.evaluate(el => el === document.activeElement), true)
       }
       if (device === 'desktop') {
-        const centers = await header.locator('.ws-chat-acts .ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => { const box = svg.getBoundingClientRect(); return box.top + box.height / 2 }))
+        const centers = await header.locator('.ws-chat-acts .ws-header-icon:visible svg').evaluateAll(svgs => svgs.map(svg => svg.getBoundingClientRect()).filter(box => box.height).map(box => box.top + box.height / 2))
         assert.ok(centers.length >= 1 && Math.max(...centers) - Math.min(...centers) < 1, `lifecycle icons share one vertical center in ${device}/${scheme}: ${centers}`)
       } else {
         const centers = await header.evaluate(el => {

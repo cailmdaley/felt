@@ -46,7 +46,7 @@ export function registerLivingReportJourneys(test) {
       await selected(page).getByRole('button', { name: 'Return to Response analysis', exact: true }).click()
       await selected(page).getByRole('button', { name: 'Return to Calibrate the shear response', exact: true }).click()
       await selected(page).locator('textarea').waitFor()
-      await page.locator('.ws-report-chip .ws-thumbnail').waitFor()
+      await page.locator('.ws-report-chip').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
       await shot(page, `${device}-landing`)
       const dockBox = await page.locator('.ws-report-chip').boundingBox()
@@ -70,7 +70,7 @@ export function registerLivingReportJourneys(test) {
 
       // The persistent chip opens the report in the existing nested reader.
       await selected(page).locator('.ws-transcript-scroll').evaluate(el => { el.scrollTop = el.scrollHeight })
-      await page.locator('.ws-report-chip .ws-thumbnail').waitFor()
+      await page.locator('.ws-report-chip').waitFor()
       await report(page)
       await shot(page, `${device}-report`)
       // Local fragments stay in srcdoc, retain identity and keep the key bridge alive.

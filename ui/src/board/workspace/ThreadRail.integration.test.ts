@@ -153,7 +153,7 @@ it('resizes from its left edge, remembers the width per viewer and survives unav
     handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
     expect(rail.el.style.getPropertyValue('--ws-thread-rail-width')).toBe('220px')
     handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))
-    expect(rail.el.style.getPropertyValue('--ws-thread-rail-width')).toBe(`${Math.min(640, Math.floor(window.innerWidth * 0.5))}px`)
+    expect(rail.el.style.getPropertyValue('--ws-thread-rail-width')).toBe(`${Math.floor(window.innerWidth * 0.5)}px`)
     storage.setItem('shuttle:workspace:thread-rail-width', '400')
     expect(new ThreadRail(vi.fn(), vi.fn()).el.style.getPropertyValue('--ws-thread-rail-width')).toBe('400px')
     handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))

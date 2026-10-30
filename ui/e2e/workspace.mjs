@@ -7,6 +7,7 @@ import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, unexpected } from './layoutShift.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
+import { registerRailArtifactJourneys } from './railArtifact.mjs'
 
 const browser = await getBrowser({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   args: ['--allow-file-access-from-files', '--autoplay-policy=no-user-gesture-required'] })
@@ -3166,6 +3167,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
+registerRailArtifactJourneys(test)
 
 const runnable = tests.filter(test => !process.env.E2E_ONLY || new RegExp(process.env.E2E_ONLY).test(test.name))
 const started = performance.now()
