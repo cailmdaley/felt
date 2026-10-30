@@ -248,7 +248,7 @@ export class Reader {
     this.sidebarIndex.title = ROW_MARKS
     this.sidebar.append(this.sidebarIndex, this.sidebarPicker.el, this.sidebarHandle)
     const column = element('div', 'ws-stage-column')
-    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) }, opts.shuttleBase)
+    this.threadRail = new ThreadRail(card => this.opts.onChannel(card), () => { if (this.active) this.layout(false) }, opts.shuttleBase, (source, href) => this.opts.onNavigate?.(source, href))
     column.append(this.stage)
     const main = element('div', 'ws-stage-row')
     main.append(this.sidebar, column, this.threadRail.el)
@@ -660,9 +660,9 @@ export class Reader {
     if (!this.channel) return
     const before = [this.threadRail.present, this.threadRail.quiet, this.railShown].join()
     this.threadRail.showFiles(this.channel, this.selected ?? '', this.fresh, key => this.openDocument(key))
-    // The rail leads with the artifact, except while the artifact itself fills the stage.
-    const lead = channelLead(this.channel)
-    this.threadRail.showArtifact(lead && lead.key !== this.selected ? lead : null, key => this.openDocument(key))
+    // The rail leads with the artifact; while the artifact itself fills the stage it keeps only its heading.
+    const lead = channelLead(this.channel) ?? null
+    this.threadRail.showArtifact(lead, key => this.openDocument(key), !!lead && lead.key === this.selected)
     this.paintRail()
     if (before !== [this.threadRail.present, this.threadRail.quiet, this.railShown].join()) this.layout(false)
   }

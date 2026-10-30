@@ -26,6 +26,11 @@
   border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); opacity: .8;
 }
 .ws-rail-artifact-folded .ws-rail-artifact-toggle::before { transform: rotate(-45deg); }
+/* While the artifact fills the stage the section keeps its heading, so the rail holds its shape. */
+.ws-rail-artifact.ws-rail-artifact-staged { padding-bottom: 6px; }
+.ws-rail-artifact-staged .ws-rail-artifact-toggle { cursor: default; }
+.ws-rail-artifact-staged .ws-rail-artifact-toggle::before { visibility: hidden; }
+.ws-rail-artifact-staged .ws-rail-artifact-toggle::after { content: 'on the stage'; margin-left: 8px; font-variant: normal; font-style: italic; letter-spacing: 0; font-size: var(--type-meta); }
 .ws-rail-artifact-toggle:hover, .ws-rail-artifact-full:hover { background: var(--ws-hover); color: var(--kbn-ink); }
 .ws-rail-artifact-full { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--kbn-ink-muted); cursor: pointer; }
 .ws-reader.ws-keyboard :is(.ws-rail-artifact-toggle, .ws-rail-artifact-full):focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }

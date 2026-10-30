@@ -1,4 +1,6 @@
 import { buildFileViewer, disposeFileViewer } from '../FileViewerPanel.js'
+import { DOCUMENT_KEY_INTENTS, keyIntent } from '../keymap.js'
+import type { DocumentKey } from './DocumentBridge.js'
 import type { DocKey, WorkspaceDocument } from './documents.js'
 import { headerIcon } from './headerIcon.js'
 
@@ -55,10 +57,19 @@ export class RailArtifact {
   private expanded = true
   private openFull: ((key: DocKey) => void) | null = null
   private geometry: RailArtifactGeometry | null = null
+  /** The artifact fills the stage: the section keeps its heading and stands down its page. */
+  private onStage = false
 
   private readonly shuttleBase: string
-  constructor(shuttleBase: string) {
-    this.shuttleBase = shuttleBase
+  private readonly navigate: (source: WorkspaceDocument, href: string) => void
+  /** The rail asks to be refitted when unfolding gives the body a size again. */
+  onUnfold: () => void = () => {}
+  /**
+   * `navigate` follows the page's own links (relative and file links), as the
+   * full page does; its reader keys reach the reader through the rail.
+   */
+  constructor(shuttleBase: string, navigate: (source: WorkspaceDocument, href: string) => void = () => {}) {
+    this.shuttleBase = shuttleBase; this.navigate = navigate
     this.el.className = 'ws-rail-artifact'
     this.el.setAttribute('aria-label', 'Artifact')
     this.el.hidden = true
@@ -84,9 +95,20 @@ export class RailArtifact {
   get present(): boolean { return this.doc !== null }
   get isExpanded(): boolean { return this.expanded }
 
-  /** The document the section stands for, or none; a different one replaces the page. */
-  show(doc: WorkspaceDocument | null, openFull: (key: DocKey) => void): void {
+  /**
+   * The document the section stands for, or none; a different one replaces the
+   * page. While it fills the stage (`onStage`) the heading stays, so the rail
+   * keeps its shape, and the page is not drawn twice.
+   */
+  show(doc: WorkspaceDocument | null, openFull: (key: DocKey) => void, onStage = false): void {
     this.openFull = openFull
+    if (onStage !== this.onStage) {
+      this.onStage = onStage
+      this.el.classList.toggle('ws-rail-artifact-staged', onStage)
+      this.full.hidden = onStage
+      this.toggle.disabled = onStage
+      this.paintBody()
+    }
     if (doc?.key !== this.doc?.key || doc?.owner !== this.doc?.owner || doc?.path !== this.doc?.path) {
       this.unmount()
       this.doc = doc
@@ -128,21 +150,42 @@ export class RailArtifact {
   private setExpanded(expanded: boolean, persist: boolean): void {
     this.expanded = expanded
     this.toggle.setAttribute('aria-expanded', String(expanded))
-    this.body.hidden = !expanded
     this.el.classList.toggle('ws-rail-artifact-folded', !expanded)
-    if (expanded) this.mountIfWanted()
-    else this.unmount()
+    this.paintBody()
     if (persist) try { localStorage.setItem(OPEN_STORAGE, String(expanded)) } catch { /* Storage is optional. */ }
+  }
+
+  private paintBody(): void {
+    const open = this.expanded && !this.onStage
+    this.body.hidden = !open
+    if (open) { this.mountIfWanted(); this.onUnfold() }
+    else this.unmount()
   }
 
   private mountIfWanted(): void {
     const doc = this.doc
-    if (!doc || !this.live || !this.expanded || this.viewer) return
+    if (!doc || !this.live || !this.expanded || this.onStage || this.viewer) return
     // The full page's own viewer: the same sandbox, the same shared live watcher, and its scroll kept across rewrites.
-    const viewer = buildFileViewer(this.shuttleBase, doc.path, doc.owner, undefined, undefined, { active: true, quietLoading: true })
+    const viewer = buildFileViewer(this.shuttleBase, doc.path, doc.owner, undefined, undefined, {
+      active: true, quietLoading: true,
+      onNavigate: href => this.navigate(doc, href),
+      onDocumentKey: key => this.forwardKey(key),
+    })
     viewer.classList.add('ws-rail-artifact-page')
     this.viewer = viewer
     this.body.replaceChildren(viewer)
+  }
+
+  /** A reader key pressed inside the page bubbles out through the rail, as one pressed on the stage would. */
+  private forwardKey(data: DocumentKey): void {
+    const forwarded = new KeyboardEvent('keydown', {
+      key: data.key, altKey: data.altKey === true, ctrlKey: data.ctrlKey === true,
+      metaKey: data.metaKey === true, shiftKey: data.shiftKey === true, repeat: data.repeat === true,
+      bubbles: true, cancelable: true,
+    })
+    const intent = keyIntent(forwarded, 'reader')
+    if (!intent || !DOCUMENT_KEY_INTENTS.includes(intent)) return
+    this.el.dispatchEvent(forwarded)
   }
 
   private unmount(): void {
