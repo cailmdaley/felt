@@ -109,6 +109,18 @@ describe('TranscriptModel', () => {
     expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
   })
 
+  it.each([
+    ['accepted', 'accepted shuttle://host/codex/session (follow-up(2))'],
+    ['queued', "queued for work/child's next worker (follow-up(2))"],
+  ])('matches a %s receipt with parentheses in its message id', (_status, receipt) => {
+    const command = `shuttle message --message-id 'follow-up(2)' work/child "Ready."`
+    const messages = modelAfterCodexExec(
+      [command],
+      `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({ exit_code: 0, output: receipt })}`,
+    ).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ messageId: 'follow-up(2)', status: 'sent' }])
+  })
+
   it('keeps delivery unclear when a mixed Codex wrapper fails outside its shell call', () => {
     const command = 'shuttle message work/child "Ready."'
     const model = new TranscriptModel()

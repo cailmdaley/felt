@@ -152,13 +152,13 @@ function receiptMessages(text: string, statuses: Set<string>): ShuttleMessageRec
     }
   }
   for (const line of text.split(/\r?\n/)) {
-    const queued = /^\s*queued for (\S+)'s next worker \(([^()]*)\)\s*$/.exec(line)
+    const queued = /^\s*queued for (\S+)'s next worker \((.*)\)\s*$/.exec(line)
     if (queued && statuses.has('queued') && queued[2].trim()) {
       const id = queued[2].trim()
       receipts.set(id, { id, target: queued[1] })
       continue
     }
-    const match = /^\s*([a-z_]+)(?:\s+(\S+))?\s+\(([^()]*)\)\s*$/.exec(line)
+    const match = /^\s*([a-z_]+)(?:\s+(\S+))?\s+\((.*)\)\s*$/.exec(line)
     const status = match?.[1]?.toLowerCase()
     const id = match?.[3]?.trim()
     if (status && statuses.has(status) && id) {
