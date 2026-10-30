@@ -35,6 +35,24 @@ describe('Shuttle messages in transcripts', () => {
     expect(entries.every(entry => entry.kind === 'shuttle-message' && entry.hideTool)).toBe(true)
   })
 
+  it('reads a raw-string Codex exec input as a shell-only wrapper', () => {
+    const code = `text(await tools.exec_command({cmd: ${JSON.stringify(command)}}))`
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-string-exec-call', name: 'exec', input: code,
+    } })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: true, rawCommand: command })
+  })
+
+  it('retains a caller-supplied message id on the outgoing row', () => {
+    const custom = 'shuttle message --message-id follow-up work/child "The table is ready."'
+    const entries = normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'custom-id-call', name: 'Bash', input: { command: custom },
+    }] } })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', messageId: 'follow-up' })
+  })
+
   it('keeps stdin sends as rows when the command receives a dash positional', () => {
     const entries = normalizeRecord({ type: 'assistant', message: { content: [{
       type: 'tool_use', id: 'stdin-call', name: 'Bash', input: { command: 'printf hello | shuttle message work/child -' },
@@ -56,6 +74,16 @@ describe('Shuttle messages in transcripts', () => {
       address: 'shuttle://host-b/codex/peer-session',
       text: 'The north patch looks stable.',
     })])
+  })
+
+  it.each([
+    ['Pi', { type: 'message', message: { role: 'user', content: [{ type: 'text', text: '[Shuttle message msg-one from peer]\nFirst delivery.\n\n[Shuttle message msg-two from peer]\nSecond delivery.' }] } }],
+    ['Codex', { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '[Shuttle message msg-one from peer]\nFirst delivery.\n\n[Shuttle message msg-two from peer]\nSecond delivery.' }] } }],
+  ])('keeps every anchored delivery in a batched %s user record', (_harness, record) => {
+    expect(normalizeRecord(record)).toMatchObject([
+      { kind: 'shuttle-message', id: 'msg-one', direction: 'received', text: 'First delivery.' },
+      { kind: 'shuttle-message', id: 'msg-two', direction: 'received', text: 'Second delivery.' },
+    ])
   })
 
   it.each([
@@ -81,6 +109,60 @@ describe('Shuttle messages in transcripts', () => {
     expect(entries.map(entry => entry.kind)).toEqual(['shuttle-message', 'tool'])
     expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: false })
     expect(entries[0]).not.toHaveProperty('rawCommand')
+  })
+
+  it('keeps a Codex exec tool step when shell sends share a wrapper with another tool operation', () => {
+    const command = 'shuttle message work/child "The table is ready."'
+    const code = `await tools.exec_command({cmd: ${JSON.stringify(command)}}); await tools.apply_patch("*** Begin Patch\\n*** End Patch")`
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-mixed-exec', name: 'exec', input: { code },
+    } })
+    expect(entries.map(entry => entry.kind)).toEqual(['shuttle-message', 'tool'])
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: false })
+    expect(entries[0]).not.toHaveProperty('rawCommand')
+  })
+
+  it('does not treat tool names quoted inside a sent message as wrapper operations', () => {
+    const command = 'shuttle message work/child "Use tools.apply_patch(...) in this example."'
+    const code = `await tools.exec_command({cmd: ${JSON.stringify(command)}})`
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-send-example', name: 'exec', input: { code },
+    } })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: true, rawCommand: command })
+  })
+
+  it('keeps a Codex exec step when it has an unparsed shell command', () => {
+    const command = 'shuttle message work/child "The table is ready."'
+    const code = `await tools.exec_command({cmd: ${JSON.stringify(command)}}); await tools.exec_command({cmd: buildCommand})`
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-computed-exec', name: 'exec', input: { code },
+    } })
+    expect(entries.map(entry => entry.kind)).toEqual(['shuttle-message', 'tool'])
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: false })
+  })
+
+  const dynamicWrappers: [string, (command: string) => string][] = [
+    ['an aliased shell call', command => `const run = tools.exec_command; await tools.exec_command({cmd: ${JSON.stringify(command)}}); await run({cmd: buildCommand})`],
+    ['a concatenated command', command => `await tools.exec_command({cmd: ${JSON.stringify(command)} + ' && make test'})`],
+  ]
+  it.each(dynamicWrappers)('keeps a Codex exec step when its %s is not fully parsed', (_case, wrapper) => {
+    const command = 'shuttle message work/child "The table is ready."'
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-unparsed-operation', name: 'exec', input: { code: wrapper(command) },
+    } })
+    expect(entries.map(entry => entry.kind)).toEqual(['shuttle-message', 'tool'])
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: false })
+  })
+
+  it('keeps a Codex exec step when it calls a bracket-addressed tool', () => {
+    const command = 'shuttle message work/child "The table is ready."'
+    const code = `await tools.exec_command({cmd: ${JSON.stringify(command)}}); await tools['apply_patch'](patch)`
+    const entries = normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'codex-bracket-exec', name: 'exec', input: { code },
+    } })
+    expect(entries.map(entry => entry.kind)).toEqual(['shuttle-message', 'tool'])
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: false })
   })
 
   it('uses command-substitution heredoc text and excludes heredoc bodies from command scanning', () => {

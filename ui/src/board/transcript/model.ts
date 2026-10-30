@@ -122,59 +122,62 @@ export class TranscriptModel {
           reference.step.version++
         }
         const explicitlyIndexed = (entry.commandOutcomes?.length ?? 0) > 0 && entry.commandOutcomes!.every(outcome => outcome.index !== undefined)
-        const matchedReceipts = new Map<number, string[]>()
-        const matchedUnknowns = new Map<number, string[]>()
-        if (explicitlyIndexed) {
-          for (const outcome of entry.commandOutcomes!) {
-            if (outcome.index !== undefined && outcome.acceptedMessageIds.length) {
-              matchedReceipts.set(outcome.index, [...(matchedReceipts.get(outcome.index) ?? []), ...outcome.acceptedMessageIds])
-            }
-            if (outcome.index !== undefined && outcome.unknownMessageIds?.length) {
-              matchedUnknowns.set(outcome.index, [...(matchedUnknowns.get(outcome.index) ?? []), ...outcome.unknownMessageIds])
-            }
-          }
-        }
-        const allReceiptsMatchRows = !explicitlyIndexed && (entry.acceptedMessageIds?.length ?? 0) === messages.length && messages.length > 0
-        const allUnknownsMatchRows = !explicitlyIndexed && (entry.unknownMessageIds?.length ?? 0) === messages.length && messages.length > 0
         const indexedOutcomes = entry.commandOutcomes ?? []
+        const rowsByCommand = new Map<number, typeof messages>()
+        for (const row of messages) {
+          const commandIndex = row.message.commandIndex ?? 0
+          rowsByCommand.set(commandIndex, [...(rowsByCommand.get(commandIndex) ?? []), row])
+        }
+        const allSegmentsAreMessages = messages.length > 0 && [...rowsByCommand.values()].every(rows =>
+          rows.length === (rows[0].message.commandSegmentCount ?? 1))
+        const topLevelReceiptsTrusted = messages.every(({ message }) => !message.resultMayBeUnattributed)
+        const topLevelAccepted = topLevelReceiptsTrusted ? entry.acceptedMessageIds ?? [] : []
+        const topLevelUnknown = topLevelReceiptsTrusted ? entry.unknownMessageIds ?? [] : []
+        const allReceiptsMatchRows = !explicitlyIndexed && topLevelAccepted.length === messages.length && allSegmentsAreMessages
+        const allUnknownsMatchRows = !explicitlyIndexed && topLevelUnknown.length === messages.length && allSegmentsAreMessages
         for (const [messageIndex, reference] of messages.entries()) {
           const message = reference.message
           const commandIndex = message.commandIndex ?? 0
-          const commandRows = messages.filter(other => (other.message.commandIndex ?? 0) === commandIndex)
-          const commandReceipts = matchedReceipts.get(commandIndex) ?? []
-          const commandUnknowns = matchedUnknowns.get(commandIndex) ?? []
-          const commandOutcomeReceipts = !explicitlyIndexed && indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1
-            ? indexedOutcomes[0].acceptedMessageIds
-            : commandReceipts
-          const commandOutcomeUnknowns = !explicitlyIndexed && indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1
-            ? indexedOutcomes[0].unknownMessageIds ?? []
-            : commandUnknowns
+          const commandRows = rowsByCommand.get(commandIndex) ?? []
+          const matchingOutcomes = message.resultMayBeUnattributed ? [] : indexedOutcomes.filter(outcome => outcome.index !== undefined
+            ? outcome.index === commandIndex
+            : indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1)
+          const outcomeText = matchingOutcomes.length === 1 ? matchingOutcomes[0].output ?? entry.text : entry.text
+          const topAccepted = message.resultMayBeUnattributed && !message.messageId ? [] : entry.acceptedMessageIds ?? []
+          const topUnknown = message.resultMayBeUnattributed && !message.messageId ? [] : entry.unknownMessageIds ?? []
+          const commandReceipts = matchingOutcomes.flatMap(outcome => outcome.acceptedMessageIds)
+          const commandUnknowns = matchingOutcomes.flatMap(outcome => outcome.unknownMessageIds ?? [])
+          const explicitIdOutcomes = message.messageId ? indexedOutcomes : []
+          const acceptedIds = [...topAccepted, ...commandReceipts, ...explicitIdOutcomes.flatMap(outcome => outcome.acceptedMessageIds)]
+          const unknownIds = [...topUnknown, ...commandUnknowns, ...explicitIdOutcomes.flatMap(outcome => outcome.unknownMessageIds ?? [])]
           const commandMessageIndex = commandRows.indexOf(reference)
-          const receiptMatches = explicitlyIndexed
-            ? commandReceipts.length === commandRows.length && !!commandReceipts[commandMessageIndex]
-            : messages.length === 1 && (entry.acceptedMessageIds?.length ?? 0) > 0
-              || allReceiptsMatchRows && !!entry.acceptedMessageIds?.[messageIndex]
-              || commandOutcomeReceipts.length === commandRows.length && !!commandOutcomeReceipts[commandMessageIndex]
+          const groupReceiptsMatchRows = commandRows.length === (message.commandSegmentCount ?? 1)
+            && commandReceipts.length === commandRows.length
+          const receiptMatches = message.messageId
+            ? acceptedIds.includes(message.messageId)
+            : allReceiptsMatchRows && !!topLevelAccepted[messageIndex]
+              || groupReceiptsMatchRows && !!commandReceipts[commandMessageIndex]
           if (receiptMatches) {
             message.status = 'sent'
+            message.outcomeText = undefined
             continue
           }
 
-          const unknownReceiptMatches = explicitlyIndexed
-            ? commandUnknowns.length === commandRows.length && !!commandUnknowns[commandMessageIndex]
-            : messages.length === 1 && (entry.unknownMessageIds?.length ?? 0) > 0
-              || allUnknownsMatchRows && !!entry.unknownMessageIds?.[messageIndex]
-              || commandOutcomeUnknowns.length === commandRows.length && !!commandOutcomeUnknowns[commandMessageIndex]
+          const groupUnknownsMatchRows = commandRows.length === (message.commandSegmentCount ?? 1)
+            && commandUnknowns.length === commandRows.length
+          const unknownReceiptMatches = message.messageId
+            ? unknownIds.includes(message.messageId)
+            : allUnknownsMatchRows && !!topLevelUnknown[messageIndex]
+              || groupUnknownsMatchRows && !!commandUnknowns[commandMessageIndex]
           if (unknownReceiptMatches) {
             message.status = 'uncertain'
+            message.outcomeText = message.hideTool ? outcomeText.trim() || undefined : undefined
             continue
           }
 
-          const matchingOutcomes = explicitlyIndexed
-            ? indexedOutcomes.filter(outcome => outcome.index === commandIndex)
-            : indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1 ? indexedOutcomes : []
           const exitCode = matchingOutcomes.length === 1 ? matchingOutcomes[0].exitCode : undefined
-          const failed = exitCode !== undefined ? exitCode !== 0 : entry.isError && indexedOutcomes.length === 0
+          const failed = exitCode !== undefined ? exitCode !== 0
+            : entry.isError && indexedOutcomes.length === 0 && !message.resultMayBeUnattributed
           if (!failed) {
             message.status = 'uncertain'
           } else if ((explicitlyIndexed || (message.commandCount ?? 1) === 1)
@@ -184,6 +187,7 @@ export class TranscriptModel {
           } else {
             message.status = 'uncertain'
           }
+          message.outcomeText = message.hideTool ? outcomeText.trim() || undefined : undefined
         }
         const touched = new Set<Turn>()
         for (const message of messages) touched.add(message.turn)

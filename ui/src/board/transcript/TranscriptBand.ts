@@ -70,7 +70,10 @@ function messageRow(entry: ShuttleMessage, tag: 'div' | 'li' = 'div'): HTMLEleme
   const command = document.createElement('pre')
   command.className = 'ws-transcript-message-command'
   command.dataset.mentionIgnore = ''
-  detail.append(text, source, command)
+  const outcome = document.createElement('pre')
+  outcome.className = 'ws-transcript-message-outcome'
+  outcome.dataset.mentionIgnore = ''
+  detail.append(text, source, command, outcome)
   toggle.append(direction, peer, threadState, preview)
   expander.append(toggle, detail)
   row.append(expander)
@@ -131,7 +134,28 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
       }
       if (label.textContent !== entry.peer) label.textContent = entry.peer
     }
-  } else if (peer.textContent !== entry.peer) peer.textContent = entry.peer
+  } else {
+    let label = peer.querySelector<HTMLElement>(':scope > .ws-transcript-session-label')
+    let suffix = peer.querySelector<HTMLElement>(':scope > .ws-transcript-session-id')
+    if (!label) {
+      label = document.createElement('span')
+      label.className = 'ws-transcript-session-label'
+    }
+    if (entry.peerSuffix) {
+      if (!suffix) {
+        suffix = document.createElement('span')
+        suffix.className = 'ws-transcript-session-id'
+      }
+      if (peer.firstElementChild !== label || peer.lastElementChild !== suffix) peer.replaceChildren(label, suffix)
+      const prefix = entry.peer.slice(0, -entry.peerSuffix.length)
+      if (label.textContent !== prefix) label.textContent = prefix
+      if (suffix.textContent !== entry.peerSuffix) suffix.textContent = entry.peerSuffix
+    } else {
+      if (suffix) suffix.remove()
+      if (peer.firstElementChild !== label || peer.childElementCount !== 1) peer.replaceChildren(label)
+      if (label.textContent !== entry.peer) label.textContent = entry.peer
+    }
+  }
   if (entry.fiber) setAttr(peer, 'data-fiber', entry.fiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
   const directionText = entry.direction === 'received'
@@ -151,6 +175,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   const text = row.querySelector<HTMLElement>('.ws-transcript-message-text:not(.ws-transcript-message-source)')!
   const source = row.querySelector<HTMLElement>('.ws-transcript-message-source')!
   const command = row.querySelector<HTMLElement>('.ws-transcript-message-command')!
+  const outcome = row.querySelector<HTMLElement>('.ws-transcript-message-outcome')!
   const stateText = entry.verb ? `· ${entry.verb}` : ''
   if (threadState.textContent !== stateText) threadState.textContent = stateText
   setHidden(threadState, !entry.verb)
@@ -161,6 +186,9 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   setHidden(source, !entry.source || !!entry.text)
   if (command.textContent !== (entry.rawCommand ?? '')) command.textContent = entry.rawCommand ?? ''
   setHidden(command, !entry.rawCommand)
+  const outcomeText = entry.status === 'failed' || entry.status === 'uncertain' ? entry.outcomeText ?? '' : ''
+  if (outcome.textContent !== outcomeText) outcome.textContent = outcomeText
+  setHidden(outcome, !outcomeText)
   let stamp = toggle.querySelector<HTMLTimeElement>('.ws-transcript-message-time')
   if (entry.at === undefined) stamp?.remove()
   else {

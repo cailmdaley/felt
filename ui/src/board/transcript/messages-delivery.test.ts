@@ -58,7 +58,7 @@ describe('delivered Shuttle messages', () => {
       expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'cmbx/chair/euclid-spt-6x2pt', verb: 'closed', text: 'Covariance validated against 400 sims; report in reports/cov.html.', at: Date.parse('2026-10-22T11:05:17.443Z') }),
       expect.objectContaining({ kind: 'shuttle-message', direction: 'received', fiber: 'cmbx/chair/mask-check', verb: 'rested', text: 'Paused until the new masks land.' }),
     ])
-    expect(peer).toEqual([expect.objectContaining({ kind: 'shuttle-message', direction: 'received', peer: 'Pi · peer-host · …09500e', address: 'shuttle://peer-host/pi/ccbb4b94-acb5-4613-9bde-1c9d9609500e', text: 'thread cmbx/chair/x closed: quoted by a peer, not a delivery' })])
+    expect(peer).toEqual([expect.objectContaining({ kind: 'shuttle-message', direction: 'received', peer: 'Pi · peer-host · …09500e', peerSuffix: ' · …09500e', address: 'shuttle://peer-host/pi/ccbb4b94-acb5-4613-9bde-1c9d9609500e', text: 'thread cmbx/chair/x closed: quoted by a peer, not a delivery' })])
   })
   it('reads a CLI delivery from its plain external sender label in hook context', () => {
     const entry = normalizeRecord({ type: 'attachment', timestamp: time, attachment: {

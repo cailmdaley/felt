@@ -220,6 +220,29 @@ describe('TranscriptBand', () => {
     expect(row.querySelector('.ws-transcript-message-toggle')?.getAttribute('aria-expanded')).toBe('true')
     expect(row.querySelector<HTMLElement>('.ws-transcript-message-detail')!.hidden).toBe(false)
   })
+  it('shows a pure-send failure diagnostic in the expanded message row', async () => {
+    const session = latestId
+    const items: unknown[] = [
+      { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Send the result.' } },
+      { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { content: [{
+        type: 'tool_use', id: 'send-call', name: 'Bash', input: { command: 'shuttle message work/child "The table is ready."' },
+      }] } },
+      { type: 'user', timestamp: '2026-09-26T14:04:00.000Z', message: { content: [{
+        type: 'tool_result', tool_use_id: 'send-call', is_error: true, content: 'Error: session has ended',
+      }] } },
+    ]
+    const band = new TranscriptBand({ shuttleBase: 'http://localhost:4000', fetch: fixtureFetch({ [session]: items }), inline: true })
+    bands.push(band)
+    document.body.append(band.el)
+    band.follow(target(session))
+    await settle()
+    const row = band.el.querySelector<HTMLElement>('.ws-transcript-shuttle-message')!
+    expect(row.dataset.status).toBe('failed')
+    row.querySelector<HTMLElement>('.ws-transcript-message-toggle')!.click()
+    await settle()
+    expect(row.querySelector<HTMLElement>('.ws-transcript-message-outcome')?.textContent).toBe('Error: session has ended')
+    expect(row.querySelector<HTMLElement>('.ws-transcript-message-outcome')?.hidden).toBe(false)
+  })
   it('shows one sent image in the preview and full transcript, and opens it on its owner', async () => {
     const uid = '01KTESTFIBER000000000000001'
     const sentAt = Date.parse('2026-09-26T14:08:00Z')

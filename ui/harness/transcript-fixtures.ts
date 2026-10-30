@@ -157,7 +157,7 @@ function liveTranscript(now: number, updates: number): string {
   return records.join('')
 }
 
-/** One sent command and one peer delivery, for the chat's message-row journey. */
+/** A sent command, thread delivery and direct session message for the chat journey. */
 function messageTranscript(now: number): string {
   const toolId = 'fixture-message-send'
   return [
@@ -171,6 +171,13 @@ function messageTranscript(now: number): string {
       prompt: '[Shuttle message msg-abcdef1234567890 from shuttle://umber-workstation/codex/follow-up-session; reply to research/workspace/validation-follow-up]\nThe follow-up reviewed the north patch residual; its table is ready.',
       source_uuid: 'fixture-peer-message', delivery_id: 'fixture-peer-delivery', commandMode: 'prompt',
       origin: { kind: 'peer', from: 'uds:/fixture/peer.sock', verifiedPeerPid: 1, msg_id: 'fixture-peer-message' },
+      isMeta: true,
+    } }),
+    line({ type: 'attachment', timestamp: timestamp(now, -27_500), attachment: {
+      type: 'queued_command',
+      prompt: '[Shuttle message msg-session123456789 from shuttle://codex-host-name-that-is-long-enough-to-clip/codex/peer-session-abcdef123456]\nA separate session delivered this note.',
+      source_uuid: 'fixture-session-message', delivery_id: 'fixture-session-delivery', commandMode: 'prompt',
+      origin: { kind: 'peer', from: 'uds:/fixture/session.sock', verifiedPeerPid: 2, msg_id: 'fixture-session-message' },
       isMeta: true,
     } }),
     assistant(now, -27_000, [{ type: 'text', text: 'Both workers now have the same residual table.' }]),

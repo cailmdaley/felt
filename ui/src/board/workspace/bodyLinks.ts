@@ -73,7 +73,8 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
     if (!link.classList.contains('ws-constitution-chip')) { link.classList.add('ws-constitution-chip'); layoutChanged = true }
     if (link.classList.contains('ws-constitution-chip-missing')) { link.classList.remove('ws-constitution-chip-missing'); layoutChanged = true }
     setAttr(link, 'aria-disabled', null)
-    if (link.dataset.mentionSource === undefined) { link.dataset.mentionSource = source; layoutChanged = true }
+    if (link.hasAttribute('data-transcript-message-peer')) setData(link, 'mentionSource', row.name)
+    else if (link.dataset.mentionSource === undefined) { link.dataset.mentionSource = source; layoutChanged = true }
     setData(link, 'constitutionIdentity', row.uid ?? row.id)
     setData(link, 'constitution', row.id)
     setData(link, 'origin', row.origin)
@@ -100,7 +101,7 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       else if (identity) {
         for (const key of ['constitution', 'state', 'turn']) setData(link, key, undefined)
         for (const name of ['href', 'aria-label', 'role', 'tabindex']) setAttr(link, name, null)
-        if (link.hasAttribute('data-spawn-chip')) {
+        if (link.hasAttribute('data-spawn-chip') && !link.hasAttribute('data-transcript-message-peer')) {
           if (!link.hidden) { link.hidden = true; layoutChanged = true }
           continue
         }

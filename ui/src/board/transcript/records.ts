@@ -28,7 +28,7 @@ export type Entry =
   | { kind: 'result'; id: string; text: string; isError: boolean; images: number; pictures?: ResultImage[]; acceptedMessageIds?: string[]; unknownMessageIds?: string[]; commandOutcomes?: CommandOutcome[]; at?: number }
   | { kind: 'event'; label: string; detail?: string; text?: string; at?: number; contextReset?: boolean; context?: number }
 
-export type CommandOutcome = { index?: number; exitCode?: number; acceptedMessageIds: string[]; unknownMessageIds?: string[] }
+export type CommandOutcome = { index?: number; exitCode?: number; output?: string; acceptedMessageIds: string[]; unknownMessageIds?: string[] }
 
 type ObjectValue = Record<string, unknown>
 
@@ -156,13 +156,14 @@ function structuredCommandOutcome(value: unknown): CommandOutcome | undefined {
   return {
     ...(index === undefined ? {} : { index }),
     exitCode: result.exit_code as number,
+    output,
     acceptedMessageIds: acceptedMessageIds(output),
     unknownMessageIds: unknownMessageIds(output),
   }
 }
 
 function codexCommandOutcomes(text: string, exitCode?: unknown): CommandOutcome[] | undefined {
-  if (typeof exitCode === 'number') return [{ exitCode, acceptedMessageIds: acceptedMessageIds(text), unknownMessageIds: unknownMessageIds(text) }]
+  if (typeof exitCode === 'number') return [{ exitCode, output: text, acceptedMessageIds: acceptedMessageIds(text), unknownMessageIds: unknownMessageIds(text) }]
   // The Codex `exec` wrapper serializes each exec_command result after this header.
   const wrapperOutput = /^Script completed\r?\n[\s\S]*?\r?\nOutput:\r?\n([\s\S]*)$/i.exec(text)?.[1]?.trim()
   if (!wrapperOutput) return undefined

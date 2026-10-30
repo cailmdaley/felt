@@ -58,7 +58,9 @@ describe('TranscriptModel', () => {
       type: 'function_call_output', call_id: 'send-call', exit_code: 1, output: 'receiver unavailable',
     } }))
     const steps = model.turns.flatMap(turn => turn.steps)
-    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({
+      status: 'failed', outcomeText: 'receiver unavailable',
+    })
     expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
   })
 
@@ -74,8 +76,61 @@ describe('TranscriptModel', () => {
       output: 'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":1,"output":"Error: receiver unavailable"}',
     } }))
     const steps = model.turns.flatMap(turn => turn.steps)
-    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'failed' })
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({
+      status: 'failed', outcomeText: 'Error: receiver unavailable',
+    })
     expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
+  })
+
+  it('reads raw-string Codex exec input and matches its caller-supplied receipt id', () => {
+    const command = 'shuttle message --message-id follow-up work/child "Ready."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'exec-string-send', name: 'exec',
+      input: `text(await tools.exec_command({cmd: ${JSON.stringify(command)}}))`,
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call_output', call_id: 'exec-string-send',
+      output: 'Script completed\nWall time 0.1s\nOutput:\n{"exit_code":0,"output":"accepted shuttle://host/codex/session (follow-up)"}',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({ status: 'sent', messageId: 'follow-up' })
+    expect(steps.find(step => step.kind === 'tool')).toBeUndefined()
+  })
+
+  it('keeps delivery unclear when a mixed Codex wrapper fails outside its shell call', () => {
+    const command = 'shuttle message work/child "Ready."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'exec-send', name: 'exec',
+      input: { code: `const result = await tools.exec_command({cmd: ${JSON.stringify(command)}}); await tools.apply_patch(badPatch)` },
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call_output', call_id: 'exec-send', is_error: true, output: 'patch rejected',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({
+      status: 'uncertain', resultMayBeUnattributed: true,
+    })
+    expect(steps.find(step => step.kind === 'tool')?.kind).toBe('tool')
+  })
+
+  it('does not attribute an indexed shell failure to a later send after an unparsed call', () => {
+    const command = 'shuttle message work/child "Ready."'
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call', call_id: 'exec-indexed-send', name: 'exec',
+      input: { code: `text({i:0,result:await tools.exec_command({cmd: buildCommand})}); await tools.exec_command({cmd: ${JSON.stringify(command)}})` },
+    } }))
+    model.append(normalizeRecord({ type: 'response_item', payload: {
+      type: 'custom_tool_call_output', call_id: 'exec-indexed-send', is_error: true,
+      output: 'Script completed\nWall time 0.1s\nOutput:\n{"i":0,"result":{"exit_code":1,"output":"unrelated failure"}}',
+    } }))
+    const steps = model.turns.flatMap(turn => turn.steps)
+    expect(steps.find(step => step.kind === 'shuttle-message')).toMatchObject({
+      status: 'uncertain', resultMayBeUnattributed: true,
+    })
+    expect(steps.find(step => step.kind === 'tool')?.kind).toBe('tool')
   })
 
   it('keeps an explicit unknown Shuttle receipt unclear despite its nonzero exit status', () => {
@@ -95,6 +150,20 @@ describe('TranscriptModel', () => {
     const output = `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({ exit_code: exitCode, output: receipt })}`
     const messages = modelAfterCodexExec([command], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
     expect(messages).toMatchObject([{ status: expected }])
+  })
+
+  it('does not let an unrelated accepted receipt override an unknown custom message id', () => {
+    const model = new TranscriptModel()
+    model.append(normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'send-call', name: 'Bash',
+      input: { command: 'shuttle message --message-id intended work/child "Ready." && cat old-receipt.txt' },
+    }] } }))
+    model.append(normalizeRecord({ type: 'user', message: { content: [{
+      type: 'tool_result', tool_use_id: 'send-call', is_error: true,
+      content: 'unknown shuttle://host/codex/session (intended)\naccepted shuttle://host/codex/session (unrelated)',
+    }] } }))
+    const message = model.turns.flatMap(turn => turn.steps).find(step => step.kind === 'shuttle-message')
+    expect(message).toMatchObject({ status: 'uncertain', messageId: 'intended' })
   })
 
   it('uses explicit indices when concurrent nested commands finish out of order', () => {

@@ -11,7 +11,11 @@ export interface ShuttleMessage {
   fiber?: string
   /** The original address or target, retained for future detail views. */
   address?: string
+  /** The session-id suffix remains visible when a long host label is clipped. */
+  peerSuffix?: string
   target?: string
+  /** A caller-supplied receipt id that identifies this delivery. */
+  messageId?: string
   text: string
   source?: string
   verb?: 'closed' | 'asked' | 'handed off' | 'rested'
@@ -22,7 +26,11 @@ export interface ShuttleMessage {
   commandSegmentCount?: number
   /** Hide a tool call that contains only sends; its source is shown in the expanded row. */
   hideTool?: boolean
+  /** The Codex wrapper can report an error from a non-shell operation. */
+  resultMayBeUnattributed?: boolean
   rawCommand?: string
+  /** The result output attached to a failed or unclear pure send. */
+  outcomeText?: string
   at?: number
 }
 
@@ -56,14 +64,17 @@ function fiberCandidate(value: string): string | undefined {
   return value
 }
 
-function sessionLabel(address: string): string {
+function sessionLabel(address: string): Pick<ShuttleMessage, 'peer' | 'peerSuffix'> {
   const match = /^shuttle:\/\/([^/]+)\/([^/]+)(?:\/([^/?#]+))?/.exec(address)
-  if (!match) return 'session'
+  if (!match) return { peer: 'session' }
   const host = match[1]
   const harness = match[2]
   const session = match[3]
   const shortSession = session ? ` · …${session.slice(-6)}` : ''
-  return `${harness.charAt(0).toUpperCase()}${harness.slice(1)} · ${host}${shortSession}`
+  return {
+    peer: `${harness.charAt(0).toUpperCase()}${harness.slice(1)} · ${host}${shortSession}`,
+    ...(shortSession ? { peerSuffix: shortSession } : {}),
+  }
 }
 
 function senderLabel(sender: string): string {
@@ -71,14 +82,11 @@ function senderLabel(sender: string): string {
   return label.length <= 48 ? label : `${label.slice(0, 47)}…`
 }
 
-function peerFor(target: string): Pick<ShuttleMessage, 'peer' | 'fiber' | 'address' | 'target'> {
+function peerFor(target: string): Pick<ShuttleMessage, 'peer' | 'peerSuffix' | 'fiber' | 'address' | 'target'> {
   const fiber = fiberCandidate(target)
   if (fiber) return { peer: leaf(fiber), fiber, target }
-  return {
-    peer: target.startsWith('shuttle://') ? sessionLabel(target) : `Session · ${target.slice(-8)}`,
-    target,
-    ...(target.startsWith('shuttle://') ? { address: target } : {}),
-  }
+  if (target.startsWith('shuttle://')) return { ...sessionLabel(target), target, address: target }
+  return { peer: `Session · ${target.slice(-8)}`, target }
 }
 
 const DELIVERY = /\[Shuttle message ([^\s\]\r\n]+)([^\]\r\n]*)\]\r?\n([\s\S]*?)(?=\r?\n\[Shuttle message |\s*<\/system-reminder\s*>|$)/g
@@ -89,8 +97,7 @@ export function shuttleMessages(source: string, at?: number, anchored = false): 
   const input = anchored ? source.trimStart() : source
   const messages: ShuttleMessage[] = []
   const matches = [...input.matchAll(DELIVERY)]
-  for (const [index, match] of matches.entries()) {
-    if (anchored && index > 0) break
+  for (const match of matches) {
     const id = match[1]
     const metadata = match[2]
     const body = match[3].trim()
@@ -113,15 +120,17 @@ export function shuttleMessages(source: string, at?: number, anchored = false): 
     const sender = /(?:^|\s)from\s+([^;\]\r\n]+)/.exec(metadata)?.[1]?.trim()
     if (!sender || id.startsWith('thread-')) continue
     const address = sender.startsWith('shuttle://') ? sender : undefined
+    const session = address ? sessionLabel(address) : undefined
     const replyTo = /;\s*reply to\s+([^\]\r\n]+)/.exec(metadata)?.[1]?.trim()
     const fiber = replyTo ? fiberCandidate(replyTo) : undefined
     messages.push(withTime({
       kind: 'shuttle-message' as const,
       id,
       direction: 'received' as const,
-      peer: fiber ? leaf(fiber) : address ? sessionLabel(address) : senderLabel(sender),
+      peer: fiber ? leaf(fiber) : session?.peer ?? senderLabel(sender),
       ...(fiber ? { fiber } : {}),
       ...(address ? { address } : {}),
+      ...(session?.peerSuffix ? { peerSuffix: session.peerSuffix } : {}),
       ...(replyTo ? { target: replyTo } : {}),
       text: body,
     }, at))
@@ -132,7 +141,7 @@ export function shuttleMessages(source: string, at?: number, anchored = false): 
 type ToolCall = { id: string; name: string; input: unknown; at?: number }
 type ShellCommand = { words: string[]; chain: number }
 type ShellParse = { commands: ShellCommand[]; substitutions: Map<string, string>; heredocs: Map<string, string> }
-type ParsedSend = { target: string; text: string; source?: string }
+type ParsedSend = { target: string; text: string; source?: string; messageId?: string }
 type CommandCollection = { sends: ParsedSend[]; chains: Map<string, boolean>; segmentCount: number }
 
 const GLOBAL_VALUE_FLAGS = new Set(['-C', '--store'])
@@ -412,7 +421,7 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
-function messageCommand(words: string[], heredocs: Map<string, string>): { target: string; text: string; source?: string } | null {
+function messageCommand(words: string[], heredocs: Map<string, string>): { target: string; text: string; source?: string; messageId?: string } | null {
   let index = 0
   while (words[index] === 'env') index++
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[index] ?? '')) index++
@@ -438,6 +447,7 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
   let target: string | undefined
   const text: string[] = []
   let source: string | undefined
+  let messageId: string | undefined
   let heredocText: string | undefined
   const heredocMarkers: string[] = []
   let stdin = false
@@ -452,6 +462,7 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
       attachments = true
       source = source ?? (value ? `attachment: ${value}` : 'attachment')
     }
+    if (flag === '--message-id' && value) messageId = value
   }
   for (; index < words.length; index++) {
     const word = words[index]
@@ -480,7 +491,13 @@ function messageCommand(words: string[], heredocs: Map<string, string>): { targe
   const body = heredocText ?? text.join(' ')
   const bodySource = heredocText === undefined ? source : undefined
   if (!body && !bodySource && !attachments) return null
-  return { target, text: body, ...(bodySource ? { source: bodySource } : {}), ...(attachments && !body ? { source: bodySource ?? 'attachment' } : {}) }
+  return {
+    target,
+    text: body,
+    ...(bodySource ? { source: bodySource } : {}),
+    ...(attachments && !body ? { source: bodySource ?? 'attachment' } : {}),
+    ...(messageId ? { messageId } : {}),
+  }
 }
 
 function shellWrapper(words: string[]): string | undefined {
@@ -538,6 +555,123 @@ function toolCommands(tool: ToolCall): string[] {
   return [string(command) ?? string(input?.cmd) ?? string(tool.input)].filter((value): value is string => Boolean(value))
 }
 
+function codexWrapperIsShellOnly(input: unknown, parsedCommands: number): boolean {
+  const code = typeof input === 'string' ? input : object(input)?.code
+  if (typeof code !== 'string') return false
+
+  let index = 0
+  let calls = 0
+  let commands = 0
+  const skipSpace = (): void => {
+    while (/\s/.test(code[index] ?? '')) index++
+  }
+  const consume = (token: string): boolean => {
+    skipSpace()
+    if (!code.startsWith(token, index)) return false
+    index += token.length
+    return true
+  }
+  const consumeWord = (word: string): boolean => {
+    skipSpace()
+    if (!code.startsWith(word, index) || /[\w$]/.test(code[index + word.length] ?? '')) return false
+    index += word.length
+    return true
+  }
+  const readString = (): boolean => {
+    skipSpace()
+    const quote = code[index]
+    if (quote !== '"' && quote !== "'" && quote !== '`') return false
+    index++
+    while (index < code.length) {
+      const char = code[index++]
+      if (char === '\\') { index++; continue }
+      if (char === quote) return true
+      if (quote !== '`' && (char === '\n' || char === '\r')) return false
+      if (quote === '`' && char === '$' && code[index] === '{') return false
+    }
+    return false
+  }
+  const readKey = (): string | undefined => {
+    skipSpace()
+    if (code[index] === '"' || code[index] === "'") {
+      const start = index
+      if (!readString()) return undefined
+      const raw = code.slice(start + 1, index - 1)
+      return raw.includes('\\') ? undefined : raw
+    }
+    const match = /^[A-Za-z_$][\w$]*/.exec(code.slice(index))
+    if (!match) return undefined
+    index += match[0].length
+    return match[0]
+  }
+  const readStaticValue = (depth = 0): boolean => {
+    if (depth > 8) return false
+    skipSpace()
+    if (code[index] === '"' || code[index] === "'" || code[index] === '`') return readString()
+    if (code[index] === '[' || code[index] === '{') {
+      const close = code[index] === '[' ? ']' : '}'
+      index++
+      skipSpace()
+      if (consume(close)) return true
+      while (index < code.length) {
+        if (close === '}') {
+          const key = readKey()
+          if (key === undefined || !consume(':') || !readStaticValue(depth + 1)) return false
+        } else if (!readStaticValue(depth + 1)) return false
+        skipSpace()
+        if (consume(close)) return true
+        if (!consume(',')) return false
+        skipSpace()
+        if (consume(close)) return true
+      }
+      return false
+    }
+    const literal = /^(?:true|false|null)(?![\w$])/.exec(code.slice(index))
+    if (literal) { index += literal[0].length; return true }
+    const number = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(code.slice(index))
+    if (number) { index += number[0].length; return true }
+    return false
+  }
+  const readCommandCall = (): boolean => {
+    skipSpace()
+    let wrapped = false
+    if (code.startsWith('text', index) && !/[\w$]/.test(code[index + 4] ?? '')) {
+      index += 4
+      if (!consume('(')) return false
+      wrapped = true
+    }
+    if (!consumeWord('await') || !consumeWord('tools') || !consume('.') || !consumeWord('exec_command') || !consume('(') || !consume('{')) return false
+    let commandProperties = 0
+    while (index < code.length) {
+      skipSpace()
+      if (consume('}')) break
+      const key = readKey()
+      if (key === undefined || !consume(':')) return false
+      if (key === 'cmd') {
+        if (!readString()) return false
+        commandProperties++
+      } else if (!readStaticValue()) return false
+      skipSpace()
+      if (consume('}')) break
+      if (!consume(',')) return false
+    }
+    if (commandProperties !== 1 || !consume(')') || (wrapped && !consume(')'))) return false
+    return true
+  }
+
+  while (index < code.length) {
+    skipSpace()
+    while (consume(';')) skipSpace()
+    if (index >= code.length) break
+    if (!readCommandCall()) return false
+    calls++
+    commands++
+    skipSpace()
+    if (index < code.length && !consume(';')) return false
+  }
+  return calls > 0 && calls === parsedCommands && commands === parsedCommands
+}
+
 /** Outgoing shell calls become a separate row; pure-send tool calls fold into that row's detail. */
 export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
   if (!/^(bash|shell|exec|exec_command|terminal|command|run_terminal_cmd)$/i.test(tool.name)) return []
@@ -547,7 +681,8 @@ export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
   const parsedSends = collected.flatMap(result => result.sends)
   if (!parsedSends.length) return []
   const allChains = new Map(collected.flatMap(result => [...result.chains]))
-  const pureSend = allChains.size > 0 && [...allChains.values()].every(Boolean)
+  const shellOnlyWrapper = tool.name !== 'exec' || codexWrapperIsShellOnly(tool.input, commands.length)
+  const pureSend = allChains.size > 0 && [...allChains.values()].every(Boolean) && shellOnlyWrapper
   return parsedSends.map((parsed, index) => {
     const peer = peerFor(parsed.target)
     const commandIndex = collected.findIndex(result => result.sends.includes(parsed))
@@ -556,6 +691,7 @@ export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
       id: `sent:${tool.id}:${index}`,
       direction: 'sent' as const,
       ...peer,
+      ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
       text: parsed.text,
       ...(parsed.source ? { source: parsed.source } : {}),
       toolId: tool.id,
@@ -563,6 +699,7 @@ export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
       commandCount: commands.length,
       commandSegmentCount: collected[commandIndex]?.segmentCount ?? 1,
       hideTool: pureSend,
+      ...(tool.name === 'exec' && !shellOnlyWrapper ? { resultMayBeUnattributed: true } : {}),
       ...(pureSend ? { rawCommand: commands[commandIndex] } : {}),
       status: 'pending' as const,
     }, tool.at)
