@@ -44,8 +44,7 @@ defmodule Shuttle.Contract do
       "context-mailbox put --thread-signal and thread-signal-current (fresh lifecycle delivery)",
     24 =>
       "message-proof (one-shot sender evidence) and context-mailbox put --from-claim (neutral sender claim metadata)",
-    25 =>
-      "context-mailbox sender proof on stdin and process-checked daemon sender attribution",
+    25 => "context-mailbox sender proof on stdin and process-checked daemon sender attribution",
     26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)"
   }
 
