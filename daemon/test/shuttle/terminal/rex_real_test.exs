@@ -4,7 +4,7 @@ defmodule Shuttle.Terminal.RexRealTest do
   alias Shuttle.Terminal.RexBindings
   alias Shuttle.Terminal.Rex, as: Backend
   @moduletag :tmp_dir
-  @moduletag skip: is_nil(Shuttle.Rex.bin())
+  @moduletag skip: Shuttle.Test.IsolatedRex.skip?()
   @moduletag timeout: 60_000
   @runner Shuttle.Runner.Default
   import Shuttle.Test.IsolatedRex, only: [await: 1]
@@ -108,7 +108,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {"", 0} = Terminal.stop(@runner, name, backends: [Backend])
   end
 
-  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])
   test "the auxiliary anchor answers on the daemon's custom TMUX_TMPDIR without an explicit socket" do
     # Keep the default socket short enough for macOS's Unix-socket path limit.
     tmpdir =
@@ -139,7 +139,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     await(fn -> Rex.sessions(@runner) == {:ok, []} end)
   end
 
-  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])
   test "a Rex background anchor outlives its launcher with no Rex identity in tmux", %{root: root} do
     tmux = Shuttle.Env.find_executable("tmux")
     socket = Path.join(root, "anchor.sock")
@@ -231,7 +231,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {"", 0} = Terminal.stop(@runner, "probe-tree-thread")
   end
 
-  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])
   test "a real viewer reaches the daemon's custom tmux socket directory" do
     tmux = Shuttle.Env.find_executable("tmux")
 
@@ -269,7 +269,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     await(fn -> Rex.sessions(@runner) == {:ok, []} end)
   end
 
-  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])
   test "a real tmux attach viewer closes without stopping its tmux server", %{root: root} do
     tmux = Shuttle.Env.find_executable("tmux")
     socket = Path.join(root, "tmux.sock")
@@ -394,5 +394,34 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert :absent = Backend.probe(@runner, name)
     assert {:ok, [%{"session_id" => sid}]} = Rex.sessions(@runner)
     assert sid == b["session_id"]
+  end
+end
+
+defmodule Shuttle.Terminal.RexPrerequisitesTest do
+  use ExUnit.Case, async: true
+  @moduletag :rex_prerequisites
+  alias Shuttle.Test.{Env, IsolatedRex}
+
+  for rex_present <- [false, true], extra_present <- [false, true] do
+    test "Rex present=#{rex_present}, additional executable present=#{extra_present}" do
+      Env.put_env(
+        "SHUTTLE_REX_BIN",
+        if(unquote(rex_present), do: "/bin/sh", else: "/no-such-rex-test-binary")
+      )
+
+      extra = if unquote(extra_present), do: "/bin/sh", else: "/no-such-rex-test-extra"
+      assert IsolatedRex.skip?([extra]) == not (unquote(rex_present) and unquote(extra_present))
+      assert IsolatedRex.skip?() == not unquote(rex_present)
+    end
+  end
+
+  test "effective real-test tags never enable setup without Rex" do
+    if IsolatedRex.skip?() do
+      tests = Shuttle.Terminal.RexRealTest.__ex_unit__().tests
+      assert length(tests) >= 4
+      for test <- tests do
+        assert test.tags[:skip] == true, "#{test.name} enables setup without Rex"
+      end
+    end
   end
 end

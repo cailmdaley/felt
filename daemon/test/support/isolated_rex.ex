@@ -5,6 +5,10 @@ defmodule Shuttle.Test.IsolatedRex do
   import ExUnit.Assertions
   import ExUnit.Callbacks, only: [on_exit: 1]
 
+  def skip?(executables \\ []) do
+    is_nil(Rex.bin()) or Enum.any?(executables, &is_nil(Shuttle.Env.find_executable(&1)))
+  end
+
   def start(data_dir) do
     root = Path.join(System.tmp_dir!(), "rex-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(root)
