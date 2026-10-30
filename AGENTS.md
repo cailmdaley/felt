@@ -52,9 +52,12 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
 
 ## Critical invariants
 
+- **A host's terminal backend launches its workers.** `host.json` selects `terminal` (`tmux` by default or `rex`); Shuttle's worker name is the identity each backend renders.
+  On Rex, the daemon-written binding to session and block IDs is authoritative; labels are display and recovery indices.
+  A Rex host also observes and stops existing tmux workers when tmux is available.
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
-  Claude and Pi workers live in tmux.
-  Both Codex surfaces use the selected local App Server; `surface: cli` adds a replaceable tmux TUI attached with explicit `--remote`.
+  Claude and Pi workers use the selected terminal backend.
+  Both Codex surfaces use the selected local App Server; `surface: cli` adds a replaceable terminal TUI attached with explicit `--remote`.
   `shuttle attach <fiber>` prepares that exact thread's viewer without starting a turn.
   An idle turn, closed terminal viewer, or unreachable App Server never means the Codex conversation has died.
   Preserve its identity across daemon restarts; never substitute an embedded CLI launch or a fresh conversation for a backend failure.
@@ -233,7 +236,7 @@ CI runs `npm test`, then type-checks and builds the bundle with
 
 ### Deploying
 
-Deploying is **always safe** — tmux owns the worker process, shuttle only owns
+Deploying is **always safe** — the terminal backend owns the worker process, shuttle only owns
 the watcher, so restarting the daemon never kills running jobs. An autonomous
 worker that has built and verified a change SHOULD deploy it.
 

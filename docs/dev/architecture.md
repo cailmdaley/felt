@@ -128,7 +128,7 @@ free of shuttle and messaging packages.
 ## Execution surfaces
 
 The agent registry determines the harness, model, and reasoning effort.
-`shuttle.surface` chooses the presentation of a Codex conversation: `cli` opens a terminal TUI in tmux; `app` has no terminal viewer.
+`shuttle.surface` chooses the presentation of a Codex conversation: `cli` opens a terminal TUI in the host's selected backend; `app` has no terminal viewer.
 Both use the same local Codex App Server backend, durable conversation ownership, and native message transport.
 An existing block without a surface selects terminal presentation.
 New Codex selections in the board default to app presentation, with CLI available explicitly.
@@ -159,7 +159,7 @@ App Server transport errors preserve uncertainty instead of becoming worker-deat
 Resume targets the recorded conversation and reports failures; creating a fresh conversation is an explicit operation.
 For Codex, closing a terminal viewer does not release the task, interrupt the turn, or authorize a replacement conversation.
 `shuttle attach` prepares another viewer of the exact owned thread when needed, without starting a model turn.
-Other harnesses retain tmux/process liveness.
+Other harnesses use terminal-backend and process liveness.
 API responses distinguish presentation from conversation identity: terminal Codex has a real `tmux_session` as well as `thread_id` and `session_uuid`.
 
 Both Codex surfaces require the selected App Server's Unix control socket.
@@ -330,11 +330,11 @@ the daemon's recovery cascade bounces a stalled tunnel with `launchctl
 kickstart`, so on a Linux hub a quiet remote skips the bounce and advances to
 the cascade's ssh check.
 
-**`kitty` attach is terminal lock-in, not platform lock-in.** Attach opens the
-worker's tmux session in kitty via kitty's remote-control CLI, and kitty runs on
-Linux. What is mac-specific is only the `osascript` call that raises the kitty
-window, and that is already a no-op off macOS (`activate/1` in
-`daemon/lib/shuttle/kitty.ex`). A non-kitty user gets nothing on either OS; `shuttle attach <fiber>` always works.
+**Terminal backends and opening.** `Shuttle.Terminal` launches through the host's configured backend (`tmux` by default, `rex` when selected) and retains tmux as an observation and stop backend on Rex hosts when available.
+The worker name is Shuttle's identity; Rex's daemon-written session/block binding is authoritative, while labels are display and recovery indices.
+`Shuttle.Opener` selects Rex or Kitty for the local display: Rex opens local Rex sessions and provides viewers for local or remote tmux sessions.
+Remote Rex opening is not supported.
+The Codex App Server, Remote Control host and Hark meetings retain tmux for dead panes, options and respawn; daemon supervision loops also retain tmux.
 
 Windows is unsupported.
 

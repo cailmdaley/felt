@@ -11,6 +11,12 @@ The command builds both bundles, runs every suite even when one fails, and exits
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
+## Real Rex tests
+
+`daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.
+They run when Rex is installed and skip when it is absent.
+Point all test CLI calls at that socket, stop the isolated server in cleanup, and never create or destroy sessions on the operator's server.
+
 ## What a test is for
 
 **A test names the failure it catches.** Before writing one, say what bug

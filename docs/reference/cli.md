@@ -229,7 +229,7 @@ To adopt your current conversation, install the constitution with
 `shuttle handoff`, `shuttle close`, and `shuttle rest` accept an omitted fiber inside a worker.
 Current native session bindings and the exact tmux pane identify its destination after `migrate`, ahead of an inherited dispatch path.
 If the only available identity is `SHUTTLE_FIBER_PATH` (no native session ID or tmux pane), the environment cannot follow the move: pass the destination explicitly to `handoff`, `close`, and `rest`.
-Terminal claims identify the current tmux pane; `--tmux-session` supplies an
+Terminal claims identify the current tmux pane or Rex session and block; `--tmux-session` supplies an
 explicit existing session. App claims use `CODEX_THREAD_ID` or `--session`
 and require the daemon to verify the native conversation. The claimed host
 and surface must match the installed task. If verification fails, leave the
@@ -243,7 +243,7 @@ constitution open; activating it could launch another worker.
 | `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
 | `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
 | `shuttle status [fiber]` | One line per shuttle-managed fiber, closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so. Its `--json` adds the board's `column` (`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting`, `roles`) and the review `verdict` (`tempered`, `discarded` or null), and for a rest that waits, `blocked_on` and the `until` name it reads as. A block naming an agent the registry does not know is flagged, `!` in the table with a line naming the fix, and `agent_problem` in `--json`; the daemon maps no other name to an agent, so such a block fails every dispatch until fixed |
-| `shuttle ps` | Live tmux worker sessions only |
+| `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
 | `shuttle dispatch <fiber>` | Ask the daemon to dispatch a fiber now (`--ad-hoc`); remote owners route through this host's daemon. `--message <text>` or `--message-file <path>` adds a launch directive |
 | `shuttle sessions [fiber\|session-uuid]` | With no argument, list live native sessions across the fleet (`--host`, `--harness`, `--json`); JSON rows include `fiber` when the host's session ledger records a pairing. With a fiber or session, show the composite ledger by UID, including historical paths, lifecycle events, hosts, harnesses, staleness, transcript availability, and a canonical `address` when the row can be addressed. A session UUID or `--commit <sha>` reverse-resolves the owning fiber and its disposition; `--materialize [--dir <d>]` resolves every available transcript to an ordinary local file and writes a `manifest.json` |
@@ -252,8 +252,8 @@ constitution open; activating it could launch another worker.
 | `shuttle agents [resolve <agent>]` | List the effective agent registry (`--source builtin\|user`), or resolve one agent with its axes (`--effort`, `--chrome`) |
 | `shuttle agents init` | Seed `~/.config/shuttle/agents.json` from the built-ins (`--path`, `--force`) |
 | `shuttle agents effort <agent> <level>` | Set an agent's default effort as an `overrides` entry in the user registry (`--reset` removes it) |
-| `shuttle attach <fiber>` | Attach to a running worker's terminal; recreate a missing terminal Codex viewer of the same owned thread without starting a turn |
-| `shuttle session-name <fiber>` | Print the canonical tmux session name for a fiber |
+| `shuttle attach <fiber>` | Attach to tmux or ask the local daemon to open a Rex worker in the Rex app; recreate a missing terminal Codex viewer of the same owned thread without starting a turn. Remote Rex has no SSH TTY renderer |
+| `shuttle session-name <fiber>` | Print the canonical worker name for a fiber |
 
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.

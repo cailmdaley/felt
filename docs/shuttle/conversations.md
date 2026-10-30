@@ -8,10 +8,10 @@ A live worker's pill names its turn (**question**, **idle**, **blocked**, **work
 
 | Worker | Runs in | Open it with |
 |---|---|---|
-| Claude Code, terminal surface | tmux on the selected host | Any terminal with `shuttle attach`; Kitty from the board; Claude browser/app when Remote Control has connected. |
-| Codex, terminal surface | tmux on the selected host | Any terminal with `shuttle attach`; Kitty from the board. |
+| Claude Code, terminal surface | Selected host's tmux or Rex backend | `shuttle attach` or the board's terminal opener; Claude browser/app when Remote Control has connected. |
+| Codex, terminal surface | App Server with a tmux or Rex viewer | `shuttle attach` or the board's terminal opener. |
 | Codex, app surface | The selected host's native Codex App Server | The desktop conversation link; native remote access on another device. |
-| Pi | tmux on the selected host | Any terminal with `shuttle attach`; Kitty from the board. |
+| Pi | Selected host's tmux or Rex backend | `shuttle attach` or the board's terminal opener. |
 
 New Codex tasks default to the app surface.
 Choose `--surface cli` when installing a Codex task if you want a terminal worker instead.
@@ -26,7 +26,7 @@ Right-click the worker pill to use another available route for that conversation
 This is a preference for the browser you're using, separate from the host configuration selected in Settings.
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.
-If the link is missing on desktop, the control says **terminal** and falls back to Kitty; History explains that Remote Control is needed.
+If the link is missing on desktop, the control says **terminal** and falls back to the host's terminal opener; History explains that Remote Control is needed.
 A valid browser link without a supported desktop-app route opens in the browser and is labelled **browser**.
 
 On a phone, Shuttle uses the available conversation link because there is no local terminal to raise.
@@ -34,11 +34,17 @@ Codex app workers keep their own native opening route.
 A mobile Codex link opens ChatGPT; use **Remote**, select the host and project, then choose the conversation.
 It is not a guaranteed conversation-specific mobile deep link.
 
+## Rex
+
+On a Rex-configured host, `shuttle attach <fiber>` asks the local daemon to select the worker in the Rex app; it does not render the worker in the calling TTY.
+The board opens local Rex workers in the app and opens local or remote tmux workers in Rex viewer sessions, using SSH for remote tmux.
+Opening a worker held by a remote Rex server is not supported; use a Rex client on that host.
+[Installation](installation.md#rex-terminal-backend) covers the required app settings and privacy grant.
+
 ## Kitty
 
-Kitty is the supported terminal for the board's automatic terminal opener on macOS and Linux.
-Other terminals can still run `shuttle attach <fiber>`; Kitty is not required for that command.
-To request another board terminal integration, [open an issue](https://github.com/cailmdaley/felt/issues/new) naming your terminal and operating system.
+On tmux-configured hosts, Kitty is the board's automatic terminal opener on macOS and Linux.
+Other terminals can run `shuttle attach <fiber>` for tmux workers; Kitty is not required for that command.
 
 The opener runs on the machine whose daemon serves the board, not automatically on the machine running your browser.
 For example, open your laptop's board to have a click raise your laptop's Kitty and attach to a remote worker over SSH.

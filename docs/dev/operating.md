@@ -17,7 +17,7 @@ shuttle doctor                                   # host, listener, daemon-contra
 shuttle status                            # fibers with shuttle: blocks (closed hidden; --closed)
 shuttle status --all                      # local + every configured remote
 shuttle status --remote <name>            # single remote
-shuttle ps                                # live tmux workers only
+shuttle ps                                # live terminal workers
 shuttle install <fiber> --project-dir "$PWD" [-m <agent-id>] [--disabled]
 shuttle repeat <fiber> --schedule "0 9 * * 1-5" --tz Europe/Paris --project-dir "$PWD"
 shuttle reshape <fiber> [kind] [-s <schedule>] [-z <tz>]  # change an existing block's kind/schedule in place
@@ -48,6 +48,14 @@ For `waiting` or `error`, inspect `message`, `last_exit.screen`, and `next_attem
 Authentication errors and a folder already served by another host appear in the retained screen.
 A short failure doubles the retry delay from 2 seconds to a 300-second cap.
 Uncertain tmux visibility holds rather than launching a duplicate; the missing-socket recovery below applies to this host too.
+
+## Terminal backends
+
+`shuttle host --json` and `GET /api/v1/version` report the host's selected `terminal`, `tmux` or `rex`.
+On Rex, `shuttle attach <fiber>` opens the local Rex app rather than attaching a TTY; a remote Rex worker cannot be opened through SSH.
+The local board's Rex opener can view remote tmux workers over SSH.
+`shuttle claim` inside a Rex block sends its native session and block references; the daemon binds them to the worker name.
+See [Rex setup](../shuttle/installation.md#rex-terminal-backend) for privacy and app configuration.
 
 ## Terminal Codex workers
 

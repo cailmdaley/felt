@@ -9,7 +9,8 @@ A capture starts from the user's idea rather than an existing constitution: you 
 5. **Activate.** Run `shuttle resume <fiber-id>` only after the claim succeeds; activating sooner lets the poller launch a duplicate worker.
 6. **Work it** by the worker loop and exits in the shuttle skill.
 
-A Claude/Pi terminal claim names your `tmux_session` and, when supplied, your native `session_uuid`, and renames the terminal to the fiber's worker name.
+A Claude/Pi terminal claim names your `tmux_session` and, when supplied, your native `session_uuid`.
+Inside Rex, the claim carries the native `session:` and `block:` references in `tmux_session` and `tmux_pane`; Shuttle binds them to the fiber's worker name.
 A managed Codex claim names the exact conversation `session_uuid` and its presentation (`surface: cli` or `surface: app`); it renames no terminal.
 Use the supplied body unchanged apart from the fiber id, never another conversation's id or a new App Server.
 Exit verbs need no fiber or store — `shuttle handoff` to continue, `shuttle close` to stop — then end your turn. Never kill the shared App Server or a parent process to end the conversation.

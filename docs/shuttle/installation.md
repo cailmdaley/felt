@@ -16,8 +16,7 @@ optional; choose how to add them.
   This is what the source deploy script updates; use it when changing daemon code.
   Prebuilt releases also support multi-host fleets.
 
-The daemon needs `tmux` and both Go CLIs at runtime. Terminal workers run in tmux
-sessions; Codex app workers use a native App Server.
+The daemon needs `tmux` and both Go CLIs at runtime. Terminal workers use the host's selected backend, tmux by default or Rex on a configured host; Codex app workers use a native App Server.
 The daemon shells out to `felt` for fiber content and generic writes,
 and to `shuttle` for resolved reads and Shuttle-owned operations.
 
@@ -70,7 +69,7 @@ At runtime, whichever path you take:
 | --- | --- | --- |
 | `felt` | yes | The daemon shells out to felt for fiber content and generic writes. |
 | `shuttle` | yes | The daemon shells out to shuttle for resolved reads, Shuttle operations, and its CLI contract. |
-| `tmux` | yes | Terminal workers run in tmux sessions. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
+| `tmux` | yes | The default worker backend and auxiliary services use tmux. On a Linux host without systemd, the daemon's own keep-alive is a tmux loop too. |
 | `jq` | optional | `session.sh` uses it to pretty-print the SessionStart envelope. Without it the hook falls back to `felt hook session`. |
 
 Building from a checkout adds a toolchain, none of which the fetched daemon
@@ -176,8 +175,7 @@ curl -fsSL https://raw.githubusercontent.com/cailmdaley/felt/main/install.sh \
 of `curl` it sets the wrong process's environment, and you get both Go CLIs
 but no daemon, reported as success.
 
-A fresh Mac ships no `tmux`, and the installer says so when it finds none. Terminal
-workers need tmux:
+A fresh Mac ships no `tmux`, and the installer says so when it finds none. The default worker backend and auxiliary services need tmux:
 
 ```bash
 brew install tmux
@@ -213,8 +211,8 @@ printf '{"version":1,"felt_stores":["%s"]}\n' "$HOME/notes" \
     about any path under one of the three, but it installs anyway, so read what
     it prints.
 
-!!! warning "macOS: start your tmux server from a terminal, not the daemon"
-    Terminal workers run inside tmux, and macOS charges file access to a process
+!!! warning "macOS tmux backend: start your tmux server from a terminal, not the daemon"
+    On a tmux host, terminal workers run inside tmux, and macOS charges file access to a process
     tree's *responsible process* — for anything launchd spawns, that's the
     daemon's own executable, not the worker or its shells. If no tmux server
     is running when the daemon tries to dispatch, forking one itself would
@@ -412,8 +410,7 @@ Inspect other eligible tasks before releasing: the release applies to the entire
 Open <http://127.0.0.1:4000/> — the fiber shows up as a card, armed. The
 daemon polls every 30 seconds by default, so the card moves to in-flight on
 its own; `shuttle dispatch pipeline/first-pass` skips the wait. `shuttle ps`
-lists the live tmux session, and `shuttle attach pipeline/first-pass` drops
-you into it.
+lists the live worker, and `shuttle attach pipeline/first-pass` opens its terminal.
 
 When the worker closes, the fiber's `outcome` and `## Status` describe the result, and the card lands in Awaiting review.
 A handoff leaves the task active for another worker to continue.
@@ -706,6 +703,19 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 
 A fetched daemon installation writes `~/.shuttle/repo` with its release directory, which lets `shuttle-launch` locate it during remote revival.
 If you move the release manually, update that path too.
+
+## Rex terminal backend
+
+On a macOS host with Rex installed, add `"terminal": "rex"` to `~/.config/shuttle/host.json`, preserving its other keys.
+The default is `"tmux"`; invalid values prevent daemon startup, and a change takes effect on restart.
+Keep the Rex app installed, grant **Rex Server** Full Disk Access in macOS Privacy & Security, and enable Remote Control in the Rex app settings so Shuttle can select sessions.
+Run `shuttle doctor` to inspect Rex reachability, its app client and privacy status; Full Disk Access is a warning, not a dispatch gate.
+
+Rex holds worker sessions independently of the daemon; stopping its server ends those sessions.
+Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
+Codex App Server, Claude Remote Control and Hark meetings still use tmux for retained panes and session options.
+On macOS, their tmux anchor is launched through Rex on a Rex host and through Kitty on a tmux host.
+See [Opening conversations](conversations.md) for attach and remote limitations.
 
 ## Terminal program status
 

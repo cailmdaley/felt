@@ -17,9 +17,14 @@ Inspect eligible work before releasing: the release applies to the whole host.
 `shuttle.agent` chooses what runs, from `shuttle agents`; without one the fiber gets the registry default.
 For work that should wait, create a draft thread with `shuttle thread <parent> "<ask>" --disabled` and arm it with `shuttle resume <thread>` when ready.
 
-An `active` card can still refuse to dispatch; the daemon then shows it blocked with its reason instead of retrying every poll. On macOS the usual reason is `tmux_server_unavailable`: no tmux server is running, and the daemon won't start one itself (macOS would then charge every worker's file access to the daemon). The human restarts tmux from their terminal; re-dispatching won't help.
+An `active` card can still refuse to dispatch; the daemon shows the reason instead of retrying every poll.
+On macOS, `tmux_server_unavailable` means the terminal-owned tmux server could not be started; `rex_server_unavailable` means the Rex server could not be reached.
+Check the selected backend and its terminal app before retrying.
 
-tmux owns the workers, so restarting the daemon never ends them; it re-adopts live sessions on boot. Restart it only with bare `shuttle-launch`, never `shuttle-launch --loop` (that is the respawn loop inside the `shuttle-daemon` session). If the daemon thinks a fiber is running but no tmux session exists, `shuttle dispatch <fiber>` reconciles it.
+The terminal backend owns workers independently of the daemon, which re-adopts live sessions on boot.
+Restart only with bare `shuttle-launch`, never `shuttle-launch --loop` (the respawn loop inside the `shuttle-daemon` session).
+`shuttle dispatch <fiber>` reconciles a missing worker.
+On Rex, `shuttle attach` opens the local app and a claim carries native session and block references; remote Rex opening is unsupported.
 
 ## The columns
 

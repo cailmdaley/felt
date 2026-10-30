@@ -46,6 +46,7 @@ Run root Make targets for the daily loop; run direct Mix commands inside `daemon
 `make build` builds both CLIs, the UI, and the daemon; `make ui` builds just the board;
 `make build SKIP_UI=1` leaves the bundle to whatever put it there.
 The documentation builds from the root with `mkdocs build -f docs/mkdocs.yml`.
+`daemon/lib/shuttle/terminal/` holds the tmux and Rex backends; `terminal.ex` owns shared worker policy and `rex.ex` wraps the Rex CLI.
 
 The board harness mounts the real board against a mocked daemon.
 Run `npm run harness:board` inside `ui/` to build a self-contained bundle in

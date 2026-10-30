@@ -87,7 +87,7 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
 - **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent and chooses its execution backend.
-  Claude and Pi workers use `<leaf>-<uid>-shuttle` tmux sessions, parsed by `Shuttle.ULID.from_tmux/1`.
+  Claude and Pi workers use `<leaf>-<uid>-shuttle` worker names, parsed by `Shuttle.ULID.from_tmux/1`, on the selected terminal backend.
   Codex uses a durable `AppWorkers` record on either surface; terminal presentation opens a `codex-terminal-<thread-id>` viewer after the backend confirms the initial turn.
   Conversation identity is known before dispatch is published, without scraping a rollout or guessing which thread a terminal currently shows.
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
@@ -155,7 +155,7 @@ The Poller shows the wait with zero failed attempts and retries on the ordinary 
 An explicit request isn't queued for an unbounded future launch, and a capture must be repeated after readiness.
 The backend's endpoint-specific tmux session survives Shuttle restarts; a dead or missing owned pane, a refused socket and healthy process observations authorize native locked stale recovery, never live-server replacement.
 `GET /api/v1/version` exposes its independent `codex_backend` health.
-Terminal dispatch preflights its wrapper and tmux before creating a conversation.
+Terminal dispatch preflights its wrapper and selected terminal backend before creating a conversation.
 The backend owns the thread, configured model and effort, initial turn, and task assignment.
 A terminal viewer only renders and accepts human input for that conversation.
 Native messages address the thread through `thread/read`, `turn/steer`, `turn/start`, and `thread/inject_items` on that same server.
@@ -215,10 +215,18 @@ A custom record containing `--approve-for-me -c developer_instructions=...` must
 Use the structured `model`, `effort`, and `developer_instructions` fields instead.
 Per-worker agent `env` is also refused because tools execute in the shared server's environment; configure that environment on the server itself.
 
-## tmux server ownership (macOS)
+## Terminal backend and macOS ownership
+
+The host's `terminal` setting selects tmux (default) or Rex for launches.
+Rex uses a daemon-written binding from worker name to session and block IDs; its session labels present the fiber tree, while block and window labels retain worker names for recovery.
+Rex workers start under Rex Server; the daemon starts an absent Rex app and refuses dispatch if the server remains unavailable.
+On Rex hosts, existing tmux workers remain observable and stoppable when tmux is installed.
+Auxiliary tmux services use a Rex-launched anchor on Rex hosts and a Kitty-launched anchor on tmux hosts.
+
+### tmux server ownership (macOS)
 
 - **The daemon never roots the tmux server on macOS.** A worker's tmux session
-  (`Dispatcher.spawn_tmux/4`) needs a tmux *server* to attach to, and if none
+  needs a tmux *server* to attach to, and if none
   exists, `tmux new-session` forks one as a child of whatever invoked it. Under
   launchd that invoker is the daemon's own beam executable, and macOS TCC
   charges every file access in a process tree to the tree's *responsible
@@ -231,25 +239,9 @@ Per-worker agent `env` is also refused because tools execute in the shared serve
   restarts the way a terminal-launched one does). The plist template header
   documents the same fact for the daemon's own working directory; this is the
   same rule applied to everything the daemon spawns downstream of it.
-- **The fix is to have the user's own terminal own the fork.** The daemon
-  already remote-controls kitty (`Shuttle.Kitty`, `kitty @ launch`) to open
-  worker windows; a `--type=background` launch runs a command as kitty's
-  child with no window at all. Before a dispatch or capture that finds no
-  tmux server present, the daemon asks kitty to start one this way — an
-  anchor session (`shuttle-anchor`, deliberately not `-shuttle`-suffixed, so
-  nothing that scans session names for workers picks it up) that holds the
-  server alive with nothing running in it. The fork chain is then kitty → tmux,
-  and kitty is what TCC charges — a normal, terminal-launched process that can
-  hold its own grants.
-- **If kitty is unreachable, dispatch is refused, never silently
-  daemon-forked.** No live tmux server and no kitty remote-control socket
-  means the daemon has no way to start one without becoming its ancestor, so
-  it declines with `{:tmux_server_unavailable, message}` instead. The refusal
-  rides the same preflight-cooldown and blocked-row machinery as every other
-  dispatch refusal (`Poller.record_dispatch_failure`, the snapshot's `blocked`
-  list, the 422 shape on `/api/v1/dispatch` and `/api/v1/capture`) — a human
-  sees it on the board rather than a worker quietly inheriting a bad
-  responsible process.
+- **The terminal owns the fork.** When no tmux server exists, the daemon asks Kitty on a tmux host or Rex on a Rex host to start an anchor session.
+  The terminal's process tree owns the server and its privacy attribution.
+- **A failed launcher is refused, never silently daemon-forked.** The `tmux_server_unavailable` refusal reaches the board through the normal preflight cooldown.
 - **Attribution: how a running server is told apart from a daemon-forked
   one.** The kernel is asked, rather than the argv guessed at. `launchctl
   procinfo <pid>` names the responsible process outright but **requires root**

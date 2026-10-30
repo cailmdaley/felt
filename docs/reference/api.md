@@ -53,7 +53,7 @@ time.
 | `POST /transition` | owner-routed | The unified kanban write: move a fiber to a column, one call per drag |
 | `POST /lifecycle` | owner-routed | Invoke a named lifecycle action on a fiber — see [below](#lifecycle-actions) |
 | `POST /kill` | owner-routed | Stop a CLI worker or interrupt and release an app conversation |
-| `POST /claim` | owner-routed | Associate a tmux worker or a verified native app conversation with a fiber |
+| `POST /claim` | owner-routed | Associate a terminal worker or a verified native app conversation with a fiber |
 | `POST /migrate` | local owner | Move a live worker from one installed fiber to another on the same host, without ending its conversation |
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
@@ -72,7 +72,7 @@ time.
 | `POST /fleet/remotes` | host-addressed | Add, replace or remove one remote — shells `shuttle remotes add\|rm` |
 | `POST /tunnels` | host-addressed | `install` or `preview` a host's supervised tunnel jobs — shells `shuttle tunnels install [--dry-run]` |
 | `POST /choose-folder` | host-addressed | Open the named host's native folder picker and return the chosen path. Blocks for as long as the human takes, so the forward outlasts the dialog's own five-minute bound |
-| `POST /attach` | **not** owner-routed | Open a tmux session in kitty — a worker's, or a past session's resume — where the human is, ssh-ing out for a remote host |
+| `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH, and remote Rex opening is unsupported |
 | `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
 | `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
@@ -106,6 +106,9 @@ Requests retry the local lookup even when sharing a recent attempt.
 If the fiber remains absent after a successful pull, the response is 404 with `fiber not found on <host> after sync: <id>`.
 A failed pull with no matching fiber returns 503; read errors and timeouts are not proof of absence.
 The sync only pulls published commits; it cannot fetch an uncommitted or unpushed fiber from another host.
+
+`GET /api/v1/version` includes `terminal`, the local host's configured `tmux` or `rex` backend.
+For Rex terminal claims, `tmux_session` and `tmux_pane` carry the native `session:` and `block:` references respectively.
 
 ### Worker migration
 
