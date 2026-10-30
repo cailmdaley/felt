@@ -385,6 +385,19 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 			request.DaemonSender = false
 			return request, nil
 		}
+		if request.AttestedSender != "" {
+			if !a.isLiveDaemonChild() {
+				return request, fmt.Errorf("attested sender attribution requires a Shuttle daemon parent")
+			}
+			if _, err := messaging.ParseAddress(request.AttestedSender); err != nil {
+				return request, fmt.Errorf("attested sender: %w", err)
+			}
+			request.From = request.AttestedSender
+			request.FromClaim = ""
+			request.AttestedSender = ""
+			request.SenderProof = ""
+			return request, nil
+		}
 		sender, valid, err := messaging.VerifySenderProof(a.env, request, true)
 		if err != nil {
 			return request, err

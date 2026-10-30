@@ -1,7 +1,7 @@
 defmodule Shuttle.Messaging do
   @moduledoc "Fleet discovery and strictly host-addressed worker messaging."
 
-  alias Shuttle.Messaging.SessionFiberCache
+  alias Shuttle.Messaging.{Attestations, SessionFiberCache}
 
   require Logger
 
@@ -17,6 +17,7 @@ defmodule Shuttle.Messaging do
 
   @local_message_timeout_ms 32_000
   @remote_message_timeout_ms 42_000
+  @attestation_timeout_ms 8_000
   @local_files_timeout_ms 60_000
   @remote_files_timeout_ms 90_000
   @local_discovery_timeout_ms 10_000
@@ -511,31 +512,127 @@ defmodule Shuttle.Messaging do
         false
       end
 
-    if verified and decision == :local do
-      {:ok, request}
-    else
-      claim =
-        case request.raw["from_claim"] do
-          value when is_binary(value) and value != "" -> value
-          _ -> request.raw["from"] || ""
+    cond do
+      verified and decision == :local ->
+        {:ok, request}
+
+      verified ->
+        attest_forward(request)
+        unverified_sender(request, callback)
+
+      decision == :local ->
+        case redeem_attestation(request) do
+          {:ok, sender} ->
+            raw =
+              request.raw
+              |> Map.drop(["daemon_sender", "sender_proof"])
+              |> Map.put("from", sender)
+              |> Map.put("from_claim", "")
+              |> Map.put("attested_sender", sender)
+
+            {:ok, %{request | raw: raw}}
+
+          :error ->
+            unverified_sender(request, callback)
         end
 
-      claim = if claim in ["shuttle", "unverified"], do: "", else: claim
-
-      raw =
-        request.raw
-        |> Map.delete("daemon_sender")
-        |> Map.put("from", "unverified")
-        |> Map.put("from_claim", claim)
-        |> Map.delete("sender_proof")
-
-      raw =
-        if is_binary(callback) and callback != "",
-          do: Map.put(raw, "notify_address", callback),
-          else: raw
-
-      {:ok, %{request | raw: raw}}
+      true ->
+        unverified_sender(request, callback)
     end
+  end
+
+  # A forward cannot carry a proof the receiving host can check. The sender is
+  # forwarded as a claim, and this host keeps the evidence for the receiver to
+  # redeem through its own route here.
+  defp attest_forward(request) do
+    with {:ok, target} <- parse_address(request.address) do
+      Attestations.put(
+        request.raw["message_id"],
+        attestation(request.raw["from"], target, request)
+      )
+    end
+  end
+
+  defp redeem_attestation(request) do
+    claim = request.raw["from_claim"]
+
+    with "unverified" <- request.raw["from"],
+         true <- is_binary(claim),
+         {:ok, sender} <- parse_address(claim),
+         {:remote, remote} <- OriginRouter.route_host(sender.host),
+         {:ok, target} <- parse_address(request.address),
+         body = %{
+           "message_id" => request.raw["message_id"],
+           "from" => claim,
+           "address" => request.address,
+           "digest" => attestation(claim, target, request).digest
+         },
+         {:forwarded, 200, response} <-
+           OriginRouter.forward(remote, "/api/v1/messages/attestations", body,
+             forward_timeout_ms: @attestation_timeout_ms
+           ),
+         {:ok, %{"valid" => true}} <- Jason.decode(response) do
+      {:ok, claim}
+    else
+      _ -> :error
+    end
+  end
+
+  @doc "Redeem a forward's attestation held by this host: the receiving side's lookup."
+  def redeem_forward_attestation(%{
+        "message_id" => id,
+        "from" => from,
+        "address" => address,
+        "digest" => digest
+      })
+      when is_binary(id) and is_binary(from) and is_binary(digest) and is_binary(address) do
+    case parse_address(address) do
+      {:ok, target} ->
+        Attestations.consume(id, %{
+          from: from,
+          harness: Harnesses.normalize(target.harness),
+          native: target.native,
+          digest: digest
+        })
+
+      _ ->
+        false
+    end
+  end
+
+  def redeem_forward_attestation(_params), do: false
+
+  defp attestation(from, target, request) do
+    %{
+      from: from,
+      harness: Harnesses.normalize(target.harness),
+      native: target.native,
+      digest: Attestations.digest(request.raw["text"] || "", request.attachments)
+    }
+  end
+
+  defp unverified_sender(request, callback) do
+    claim =
+      case request.raw["from_claim"] do
+        value when is_binary(value) and value != "" -> value
+        _ -> request.raw["from"] || ""
+      end
+
+    claim = if claim in ["shuttle", "unverified"], do: "", else: claim
+
+    raw =
+      request.raw
+      |> Map.delete("daemon_sender")
+      |> Map.put("from", "unverified")
+      |> Map.put("from_claim", claim)
+      |> Map.delete("sender_proof")
+
+    raw =
+      if is_binary(callback) and callback != "",
+        do: Map.put(raw, "notify_address", callback),
+        else: raw
+
+    {:ok, %{request | raw: raw}}
   end
 
   defp validate_message(payload, mode) do

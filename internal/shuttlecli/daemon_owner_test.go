@@ -44,6 +44,15 @@ func TestIsLiveDaemonChildProbe(t *testing.T) {
 	} else if err == nil || !strings.Contains(err.Error(), "requires a Shuttle daemon parent") {
 		t.Fatalf("untrusted daemon frame error = %v", err)
 	}
+	attested := `{"address":"shuttle://host/claude/target","text":"from nibi","from":"shuttle://nibi/claude/sender","attested_sender":"shuttle://nibi/claude/sender","sender_proof":"stale","message_id":"attested-probe","wake":true}`
+	request, err = a.buildMessageRequest(strings.NewReader(attested+"\n"), nil, &messageOptions{requestJSON: true})
+	if want {
+		if err != nil || request.From != "shuttle://nibi/claude/sender" || request.FromClaim != "" || request.AttestedSender != "" || request.SenderProof != "" {
+			t.Fatalf("trusted attested frame = %+v, err %v", request, err)
+		}
+	} else if err == nil || !strings.Contains(err.Error(), "requires a Shuttle daemon parent") {
+		t.Fatalf("untrusted attested frame error = %v", err)
+	}
 	if shuttlePath := os.Getenv("FELT_DAEMON_OWNER_SHUTTLE"); shuttlePath != "" {
 		command := exec.Command(shuttlePath, "message", "--local", "--json", "--request-json")
 		command.Stdin = strings.NewReader(frame + "\n")

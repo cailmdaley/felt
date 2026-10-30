@@ -58,6 +58,7 @@ defmodule ShuttleWeb.Router do
     get("/peers", MessagingController, :peers)
     post("/messages", MessagingController, :create)
     post("/messages/files", MessagingController, :create_files)
+    post("/messages/attestations", MessagingController, :redeem_attestation)
     get("/state", StateController, :show)
     get("/state/composite", StateController, :composite)
     get("/fibers", FiberDocumentsController, :index)

@@ -195,6 +195,8 @@ defmodule Shuttle.Application do
       # Owns the ETS table for the session-to-fiber peer index; ledger appends
       # invalidate it by file token without persistent_term global GC.
       Shuttle.Messaging.SessionFiberCache,
+      # Single-use evidence of senders this host verified before forwarding.
+      Shuttle.Messaging.Attestations,
       # Owns the ETS table of large files' content digests, keyed on each
       # file version. Pure cache: a restart costs one re-read per file.
       ShuttleWeb.FileDigests,

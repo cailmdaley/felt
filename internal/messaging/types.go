@@ -67,6 +67,9 @@ type Request struct {
 	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`
 	NotifyWake     bool `json:"notify_wake,omitempty"`
 	DaemonSender   bool `json:"daemon_sender,omitempty"`
+	// AttestedSender is a sender the daemon verified through the sending host's
+	// forward attestation; the CLI accepts it only from a live daemon parent.
+	AttestedSender string `json:"attested_sender,omitempty"`
 }
 
 // ThreadSignal identifies the lifecycle fact represented by queued thread

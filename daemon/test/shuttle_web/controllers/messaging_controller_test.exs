@@ -241,6 +241,17 @@ defmodule ShuttleWeb.MessagingControllerTest do
       end
     end
 
+    # The sending host's side of a forward attestation; in tests this daemon plays both hosts.
+    def post(
+          "http://remote.test/api/v1/messages/attestations",
+          body,
+          "application/json",
+          _timeout
+        ) do
+      valid = Shuttle.Messaging.redeem_forward_attestation(Jason.decode!(body))
+      {:ok, 200, Jason.encode!(%{valid: valid})}
+    end
+
     def post("http://remote.test/api/v1/messages/files", body, "application/json", timeout) do
       request = Jason.decode!(body)
       send(Process.whereis(__MODULE__), {:forwarded_files, request, timeout})
@@ -947,6 +958,63 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     assert_receive {:forwarded, %{"address" => "shuttle://local/claude/native%2Fid"}}
     assert receipt["address"] == "shuttle://edge/claude/native%2Fid"
+  end
+
+  test "a sender verified by its own host arrives verified across hosts, once" do
+    sender = "shuttle://edge/claude/sender-session"
+
+    send_request = %{
+      "address" => "shuttle://edge/pi/p%2F1",
+      "text" => "the mask batch finished",
+      "from" => sender,
+      "sender_proof" => "verified-test-proof",
+      "wake" => false,
+      "message_id" => "attested-1"
+    }
+
+    api_conn() |> post("/api/v1/messages", Jason.encode!(send_request)) |> json_response(200)
+    assert_receive {:forwarded, %{"message_id" => "attested-1"} = forwarded}
+    assert forwarded["from"] == "unverified"
+    assert forwarded["from_claim"] == sender
+    refute Map.has_key?(forwarded, "sender_proof")
+    refute Map.has_key?(forwarded, "attested_sender")
+
+    # This daemon now receives the forward, as the target host would.
+    receive_forward = fn frame ->
+      api_conn() |> post("/api/v1/messages", Jason.encode!(frame)) |> json_response(200)
+      assert_receive {:local_message_frame, %{"message_id" => "attested-1"} = local}
+      local
+    end
+
+    tampered = receive_forward.(%{forwarded | "text" => "a different message"})
+    assert tampered["from"] == "unverified"
+    refute Map.has_key?(tampered, "attested_sender")
+
+    local = receive_forward.(forwarded)
+    assert local["from"] == sender
+    assert local["attested_sender"] == sender
+    assert local["from_claim"] == ""
+
+    replayed = receive_forward.(forwarded)
+    assert replayed["from"] == "unverified"
+    assert replayed["from_claim"] == sender
+    refute Map.has_key?(replayed, "attested_sender")
+  end
+
+  test "a forged attested sender field never reaches the CLI" do
+    request = %{
+      "address" => "shuttle://local/pi/p%2F1",
+      "text" => "hello",
+      "from" => "shuttle://edge/claude/sender-session",
+      "attested_sender" => "shuttle://edge/claude/sender-session",
+      "wake" => false,
+      "message_id" => "forged-attestation"
+    }
+
+    api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert_receive {:local_message_frame, %{"message_id" => "forged-attestation"} = local}
+    assert local["from"] == "unverified"
+    refute Map.has_key?(local, "attested_sender")
   end
 
   test "a remote receipt naming its own host for the addressed session is valid" do

@@ -18,6 +18,11 @@ defmodule ShuttleWeb.MessagingController do
     reply(conn, Messaging.send_message_with_files(params))
   end
 
+  @doc "Redeem the single-use evidence this host kept when it forwarded a verified sender."
+  def redeem_attestation(conn, params) do
+    json(conn, %{valid: Messaging.redeem_forward_attestation(params)})
+  end
+
   defp reply(conn, result) do
     case result do
       {:ok, status, receipt} -> conn |> put_status(status) |> json(receipt)
