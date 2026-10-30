@@ -21,11 +21,52 @@ type boardCursor struct {
 	Seen []string `json:"seen"`
 }
 
-var harnessSlashCommand = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_:.\-]*(?:\s|$)`)
+var bareHarnessSlashCommand = regexp.MustCompile(`^/([A-Za-z][A-Za-z0-9_-]*)(?:\s|$)`)
+var namespacedHarnessSlashCommand = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_-]*:[A-Za-z][A-Za-z0-9_-]*(?:\s|$)`)
 
-// recordHumanPrompt verifies dispatch identity again under the document lock.
+// Bare slash tokens are ambiguous with absolute paths, so only known command names pass.
+var knownHarnessSlashCommands = map[string]struct{}{
+	"add-dir": {}, "agents": {}, "bug": {}, "changelog": {}, "clear": {},
+	"clone": {}, "compact": {}, "config": {}, "context": {}, "copy": {},
+	"cost": {}, "debug": {}, "diff": {}, "doctor": {}, "exit": {},
+	"export": {}, "fork": {}, "help": {}, "hooks": {}, "hotkeys": {},
+	"import": {}, "init": {}, "login": {}, "logout": {}, "memory": {},
+	"mcp": {}, "model": {}, "name": {}, "new": {}, "permissions": {},
+	"plan": {}, "plugin": {}, "pr-comments": {}, "quit": {}, "reload": {},
+	"release-notes": {}, "resume": {}, "review": {}, "rewind": {},
+	"scoped-models": {}, "session": {}, "settings": {}, "share": {},
+	"status": {}, "thinking": {}, "todos": {}, "tree": {}, "trust": {},
+	"usage": {}, "vim": {}, "voice": {},
+}
+
+func harnessSlashCommand(prompt string) bool {
+	if namespacedHarnessSlashCommand.MatchString(prompt) {
+		return true
+	}
+	match := bareHarnessSlashCommand.FindStringSubmatch(prompt)
+	if len(match) != 2 {
+		return false
+	}
+	if strings.HasPrefix(match[1], "mcp__") && len(match[1]) > len("mcp__") {
+		return true
+	}
+	_, ok := knownHarnessSlashCommands[match[1]]
+	return ok
+}
+
+// currentPromptSession accepts the runtime session or the fiber's newest ledger binding.
+func currentPromptSession(address messaging.Address, f *felt.Felt, records []SessionProvenance) bool {
+	if sessionID := shuttleRuntimeSessionID(f); sessionID != "" && sessionID == address.ID {
+		return true
+	}
+	newest, err := newestFiberWorkerRecord(f, records)
+	return err == nil && newest != nil && newest.Host == address.Host &&
+		messaging.NormalizeHarness(newest.Harness) == address.Harness && newest.nativeSessionID() == address.ID
+}
+
+// recordHumanPrompt serializes prompt attribution with fiber lifecycle writes.
 func (a *app) recordHumanPrompt(input eventHookInput) {
-	if input.Prompt == "" || machinePrompt(input.Prompt) || harnessSlashCommand.MatchString(strings.TrimSpace(input.Prompt)) {
+	if input.Prompt == "" || machinePrompt(input.Prompt) || harnessSlashCommand(strings.TrimSpace(input.Prompt)) {
 		return
 	}
 	if input.SessionID == "" || input.Harness == "" {
@@ -36,7 +77,8 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		return
 	}
 	address := messaging.Address{Host: host, Harness: messaging.NormalizeHarness(input.Harness), ID: input.SessionID}
-	row, err := currentSessionBinding(address, a.localMessageLedger())
+	records := a.localMessageLedger()
+	row, err := currentSessionBinding(address, records)
 	if err != nil || row == nil {
 		return
 	}
@@ -44,22 +86,22 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 	if err != nil {
 		return
 	}
-	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: a.humanLabel()}, Text: input.Prompt}
-	// Only a question to clear takes the fiber lock.
-	if block, ok, err := shuttle.BlockOf(f); err != nil || !ok || block.Ask == nil {
-		a.recordBoard(r)
+	if !sessionRecordBelongsToFiber(*row, f) || !currentPromptSession(address, f, records) {
 		return
 	}
+	label := a.humanLabel()
 	st := felt.NewStorage(workerStoreRoot(f.Path))
 	f, unlock, err := lockAndReloadFiber(st, f)
 	if err != nil {
 		return
 	}
 	defer unlock()
-	current, err := currentSessionBinding(address, a.localMessageLedger())
-	if err != nil || current == nil || !sessionRecordBelongsToFiber(*current, f) {
+	currentRecords := a.localMessageLedger()
+	current, err := currentSessionBinding(address, currentRecords)
+	if err != nil || current == nil || !sessionRecordBelongsToFiber(*current, f) || !currentPromptSession(address, f, currentRecords) {
 		return
 	}
+	r := boardRecord{Kind: "human", Fiber: f.UID, By: &boardParty{Label: label}, Text: input.Prompt}
 	block, ok, err := shuttle.BlockOf(f)
 	if err == nil && ok && block.Ask != nil && a.ensureOwnedHere(f, f.ID) == nil {
 		question := block.Ask.Text

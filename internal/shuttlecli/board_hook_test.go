@@ -110,12 +110,16 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				input.Model = "gpt-6.1-sol"
 			}
 			var output bytes.Buffer
-			for _, command := range []string{"/compact", "/felt:shuttle", "/mcp__tool"} {
-				input.Prompt = command
+			runPrompt := func() {
+				t.Helper()
 				b, _ := json.Marshal(input)
 				if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
-					t.Fatalf("slash command hook %q: %s %v", command, output.String(), err)
+					t.Fatalf("hook %s %v", output.String(), err)
 				}
+			}
+			for _, command := range []string{"/compact", "/felt:shuttle", "/mcp__tool", "/plugin:cmd args"} {
+				input.Prompt = command
+				runPrompt()
 				block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
 				if block.Ask == nil {
 					t.Fatalf("slash command %q cleared ask", command)
@@ -124,63 +128,88 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 					t.Fatalf("slash command %q wrote board records: %+v", command, records)
 				}
 			}
-			if harnessSlashCommand.MatchString("/tmp/file") {
-				t.Fatal("absolute path was classified as a harness command")
-			}
-			input.Prompt = "this one"
-			b, _ := json.Marshal(input)
-			if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
-				t.Fatalf("hook %s %v", output.String(), err)
-			}
+
+			// The runtime session identity authorizes A, and a path is still human input.
+			input.Prompt = "/tmp"
+			runPrompt()
 			block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
 			if block.Ask != nil {
-				t.Fatal("ask not cleared")
+				t.Fatal("runtime session did not answer the ask")
 			}
-			data, err := os.ReadFile(sink)
-			if err != nil {
+			records := readBoardRecords(t, sink)
+			if len(records) != 1 || records[0].Kind != "answered" || records[0].Text != "Q: Which? — A: /tmp" {
+				t.Fatalf("runtime session records: %+v", records)
+			}
+
+			// Redispatch installs B as the runtime session and newest binding.
+			// A still resolves through its old session row but cannot speak for F.
+			fiber = mustRead(t, st, "f")
+			if err := shuttle.SetNodeField(fiber, "ask", map[string]any{"text": "After redispatch?", "at": "2026-10-28T10:01:00Z"}); err != nil {
 				t.Fatal(err)
 			}
-			var found bool
-			for _, line := range bytes.Split(data, []byte("\n")) {
-				var r boardRecord
-				if json.Unmarshal(line, &r) == nil && r.Type == "board" {
-					found = true
-					if r.Kind != "answered" || r.By == nil || r.By.Label != "Cail" || r.Text != "Q: Which? — A: this one" {
-						t.Fatalf("record %+v", r)
-					}
-				}
-			}
-			if !found {
-				t.Fatalf("missing record %s", data)
-			}
-			input.Prompt = "another thought"
-			b, _ = json.Marshal(input)
-			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			records := readBoardRecords(t, sink)
-			if len(records) != 2 || records[1].Kind != "human" || records[1].Text != input.Prompt {
-				t.Fatalf("human records: %+v", records)
-			}
-			input.SessionID = "other"
-			b, _ = json.Marshal(input)
-			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
-				t.Fatalf("unexpected binding for other session: %+v, %v", row, err)
-			}
-			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			if records = readBoardRecords(t, sink); len(records) != 2 {
-				t.Fatalf("unbound session changed board records: %+v", records)
-			}
-			writeMessageIdentityLedger(t, env, []SessionProvenance{{Host: "host", Harness: harness, Session: "other", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "resume", At: 2}})
-			fiber = mustRead(t, st, "f")
-			if err := shuttle.SetNodeField(fiber, "ask", map[string]any{"text": "Continue?", "at": "2026-10-28T10:01:00Z"}); err != nil {
+			if err := shuttle.SetRuntimeField(fiber, "session_uuid", "other"); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.Write(fiber); err != nil {
 				t.Fatal(err)
 			}
+			rowA := SessionProvenance{Host: "host", Harness: harness, Session: "session", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "dispatch", At: 1}
+			rowB := SessionProvenance{Host: "host", Harness: harness, Session: "other", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "dispatch", At: 2}
+			writeMessageIdentityLedger(t, env, []SessionProvenance{rowA, rowB})
+			input.SessionID = "session"
+			input.Prompt = "retired answer"
+			runPrompt()
+			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
+			if block.Ask == nil {
+				t.Fatal("retired session cleared the successor's ask")
+			}
+			if records = readBoardRecords(t, sink); len(records) != 1 {
+				t.Fatalf("retired session wrote board records: %+v", records)
+			}
+
+			// A path-like slash prefix with following prose is human input.
+			input.SessionID = "other"
+			input.Prompt = "/opt is fine"
+			runPrompt()
+			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
+			if block.Ask != nil {
+				t.Fatal("current session's path-like prompt did not answer the ask")
+			}
+			records = readBoardRecords(t, sink)
+			if len(records) != 2 || records[1].Kind != "answered" || records[1].By == nil || records[1].By.Label != "Cail" || records[1].Text != "Q: After redispatch? — A: /opt is fine" {
+				t.Fatalf("answer records: %+v", records)
+			}
+
+			input.Prompt = "<command-name>/plugin</command-name>"
+			runPrompt()
+			records = readBoardRecords(t, sink)
+			if len(records) != 3 || records[2].Kind != "human" || records[2].Text != input.Prompt {
+				t.Fatalf("human records: %+v", records)
+			}
+
+			input.SessionID = "unbound"
+			input.Prompt = "not bound"
+			if row, err := currentSessionBinding(messaging.Address{Host: "host", Harness: messaging.NormalizeHarness(harness), ID: input.SessionID}, a.localMessageLedger()); err != nil || row != nil {
+				t.Fatalf("unexpected binding for other session: %+v, %v", row, err)
+			}
+			runPrompt()
+			if records = readBoardRecords(t, sink); len(records) != 3 {
+				t.Fatalf("unbound session changed board records: %+v", records)
+			}
+
+			fiber = mustRead(t, st, "f")
+			if err := shuttle.SetNodeField(fiber, "ask", map[string]any{"text": "Continue?", "at": "2026-10-28T10:02:00Z"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Write(fiber); err != nil {
+				t.Fatal(err)
+			}
+			rowC := SessionProvenance{Host: "host", Harness: harness, Session: "resume", Fiber: fiber.ID, UID: fiber.UID, FiberPath: fiber.Path, Kind: "resume", At: 3}
+			writeMessageIdentityLedger(t, env, []SessionProvenance{rowA, rowB, rowC})
+			input.SessionID = "resume"
 			input.Prompt = "continued after session succession"
-			b, _ = json.Marshal(input)
-			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			if records = readBoardRecords(t, sink); len(records) != 3 || records[2].Kind != "answered" || records[2].Text != "Q: Continue? — A: "+input.Prompt {
+			runPrompt()
+			if records = readBoardRecords(t, sink); len(records) != 4 || records[3].Kind != "answered" || records[3].Text != "Q: Continue? — A: "+input.Prompt {
 				t.Fatalf("successor session records: %+v", records)
 			}
 			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
@@ -189,14 +218,36 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 			}
 			input.SessionID = "session"
 			input.Prompt = "[Shuttle message machine]"
-			b, _ = json.Marshal(input)
-			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
+			runPrompt()
 			env.Set("SHUTTLE_BOARD", "off")
+			input.SessionID = "resume"
 			input.Prompt = "disabled"
-			b, _ = json.Marshal(input)
-			_ = a.runEventAndMessageHook(bytes.NewReader(b), &output)
-			if records = readBoardRecords(t, sink); len(records) != 3 {
+			runPrompt()
+			if records = readBoardRecords(t, sink); len(records) != 4 {
 				t.Fatalf("unexpected records: %+v", records)
+			}
+		})
+	}
+}
+
+func TestHarnessSlashCommandShape(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prompt string
+		want   bool
+	}{
+		{name: "short path", prompt: "/tmp", want: false},
+		{name: "absolute path", prompt: "/tmp/file", want: false},
+		{name: "path and prose", prompt: "/opt is fine", want: false},
+		{name: "known built-in", prompt: "/compact", want: true},
+		{name: "built-in with arguments", prompt: "/compact focus on the code", want: true},
+		{name: "namespaced command", prompt: "/plugin:cmd args", want: true},
+		{name: "MCP command", prompt: "/mcp__tool", want: true},
+		{name: "command-name wrapper", prompt: "<command-name>/plugin</command-name>", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := harnessSlashCommand(tc.prompt); got != tc.want {
+				t.Fatalf("harnessSlashCommand(%q) = %v, want %v", tc.prompt, got, tc.want)
 			}
 		})
 	}
