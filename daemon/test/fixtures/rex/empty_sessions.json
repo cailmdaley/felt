@@ -218,7 +218,7 @@
           "label": "probe-exit_keep",
           "creator_name": "com.superlogical.terminal",
           "flavor": "com.superlogical.terminal.shell",
-          "host_id": "28c8e6dc-0a04-4a20-accf-7d6d1fb85481",
+          "host_id": "00000000-0000-4000-8000-000000000001",
           "placement": "placed",
           "window_id": "window:01a18957-08a2-7b81-8f55-c9a9168f5ed0",
           "owner": "client:01a18957-08a0-7718-a8eb-1afa14eefc1f"

@@ -45,7 +45,7 @@
       "-"
     ],
     "exit_status": 0,
-    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18956-b239-7b46-b990-f3e890d2c713\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"placement\":\"placed\",\"window_id\":\"window:01a18956-b23c-79bc-bf52-0ea1fbb79885\",\"owner\":\"client:01a18956-b239-74b7-847f-cc805f4b1b22\"}]}\n",
+    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18956-b239-7b46-b990-f3e890d2c713\",\"label\":\"probe-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"00000000-0000-4000-8000-000000000001\",\"placement\":\"placed\",\"window_id\":\"window:01a18956-b23c-79bc-bf52-0ea1fbb79885\",\"owner\":\"client:01a18956-b239-74b7-847f-cc805f4b1b22\"}]}\n",
     "stderr": "",
     "stdin": "{}"
   },
@@ -374,7 +374,7 @@
       "--json"
     ],
     "exit_status": 0,
-    "stdout": "{\n  \"principal\": {\n    \"kind\": \"peer\",\n    \"transport\": \"unix\",\n    \"display\": \"uid 592148721\",\n    \"uid\": 592148721,\n    \"gid\": 2048330233,\n    \"pid\": 15249\n  },\n  \"account\": \"<USER>\",\n  \"endpoint\": \"unix:///tmp/rexprobe.myyg/rex.sock\",\n  \"pid\": 15112,\n  \"instance_id\": \"87436c00-278f-4cd6-830c-8a31a2a402f4\",\n  \"host_id\": \"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\n  \"started_at\": \"2026-10-29T20:25:22.550905Z\",\n  \"rex_version\": \"0.0.1793131181-gdd9a20\",\n  \"exit_empty\": false,\n  \"session_count\": 0,\n  \"tailscale\": {\n    \"state\": \"disabled\",\n    \"allow_tailnet_members\": false\n  }\n}\n",
+    "stdout": "{\n  \"principal\": {\n    \"kind\": \"peer\",\n    \"transport\": \"unix\",\n    \"display\": \"uid 1000\",\n    \"uid\": 1000,\n    \"gid\": 1000,\n    \"pid\": 15249\n  },\n  \"account\": \"<USER>\",\n  \"endpoint\": \"unix:///tmp/rexprobe.myyg/rex.sock\",\n  \"pid\": 15112,\n  \"instance_id\": \"87436c00-278f-4cd6-830c-8a31a2a402f4\",\n  \"host_id\": \"00000000-0000-4000-8000-000000000001\",\n  \"started_at\": \"2026-10-29T20:25:22.550905Z\",\n  \"rex_version\": \"0.0.1793131181-gdd9a20\",\n  \"exit_empty\": false,\n  \"session_count\": 0,\n  \"tailscale\": {\n    \"state\": \"disabled\",\n    \"allow_tailnet_members\": false\n  }\n}\n",
     "stderr": ""
   },
   "server_version.json": {
@@ -405,7 +405,7 @@
       "-"
     ],
     "exit_status": 0,
-    "stdout": "{\"pid\":15112,\"instance_id\":\"87436c00-278f-4cd6-830c-8a31a2a402f4\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"started_at\":\"2026-10-29T20:25:22.550905Z\",\"exit_empty\":false,\"session_count\":0,\"tailscale\":{\"state\":\"disabled\",\"allow_tailnet_members\":false},\"api_revision\":7,\"config\":{\"generation\":1,\"hash\":\"\"}}\n",
+    "stdout": "{\"pid\":15112,\"instance_id\":\"87436c00-278f-4cd6-830c-8a31a2a402f4\",\"host_id\":\"00000000-0000-4000-8000-000000000001\",\"started_at\":\"2026-10-29T20:25:22.550905Z\",\"exit_empty\":false,\"session_count\":0,\"tailscale\":{\"state\":\"disabled\",\"allow_tailnet_members\":false},\"api_revision\":7,\"config\":{\"generation\":1,\"hash\":\"\"}}\n",
     "stderr": "",
     "stdin": "{}"
   },
@@ -1119,7 +1119,7 @@
       "-"
     ],
     "exit_status": 0,
-    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18957-08a0-7e7b-a639-109e3eece9a3\",\"label\":\"probe-exit_keep\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"28c8e6dc-0a04-4a20-accf-7d6d1fb85481\",\"placement\":\"placed\",\"window_id\":\"window:01a18957-08a2-7b81-8f55-c9a9168f5ed0\",\"owner\":\"client:01a18957-08a0-7718-a8eb-1afa14eefc1f\"}]}\n",
+    "stdout": "{\"blocks\":[{\"block_id\":\"block:01a18957-08a0-7e7b-a639-109e3eece9a3\",\"label\":\"probe-exit_keep\",\"creator_name\":\"com.superlogical.terminal\",\"flavor\":\"com.superlogical.terminal.shell\",\"host_id\":\"00000000-0000-4000-8000-000000000001\",\"placement\":\"placed\",\"window_id\":\"window:01a18957-08a2-7b81-8f55-c9a9168f5ed0\",\"owner\":\"client:01a18957-08a0-7718-a8eb-1afa14eefc1f\"}]}\n",
     "stderr": "",
     "stdin": "{}"
   },

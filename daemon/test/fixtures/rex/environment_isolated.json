@@ -1,11 +1,11 @@
 {
   "server_launch_environment": {
     "HOME": "<HOME>",
-    "PATH": "<HOME>/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/bin:<HOME>/.pi/agent/bin:<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/opt/X11/bin:/Library/Apple/usr/bin:/usr/local/munki:/opt/puppetlabs/bin:<HOME>/.bun/bin:<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:<HOME>/go/bin:<HOME>/Library/Python/3.13/bin:/opt/homebrew/opt/python/libexec/bin/:<HOME>/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:<HOME>/.cargo/bin:/usr/ucb:<HOME>/.local/bin",
+    "PATH": "<HOME>/tools/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     "SHELL": "/bin/zsh",
     "LANG": "en_US.UTF-8",
     "SSH_AUTH_SOCK": "<HOME>/.ssh/agent.sock",
-    "TMPDIR": "/var/folders/4d/5qjw96215vnfr_777knbpr9hjmpy7j/T/",
+    "TMPDIR": "/tmp/rex-fixture/",
     "SHUTTLE_HOST": "probe-isolated-sentinel"
   },
   "shell_none_bash_c": {
@@ -15,7 +15,7 @@
     "HOME": "<HOME>",
     "LANG": "en_US.UTF-8",
     "LOGNAME": "<USER>",
-    "PATH": "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS:<HOME>/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/bin:<HOME>/.pi/agent/bin:<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/opt/X11/bin:/Library/Apple/usr/bin:/usr/local/munki:/opt/puppetlabs/bin:<HOME>/.bun/bin:<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:<HOME>/go/bin:<HOME>/Library/Python/3.13/bin:/opt/homebrew/opt/python/libexec/bin/:<HOME>/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:<HOME>/.cargo/bin:/usr/ucb:<HOME>/.local/bin",
+    "PATH": "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS:<HOME>/tools/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     "PWD": "/tmp/rexprobe.myyg",
     "REX_BIN_DIR": "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
     "REX_BLOCK": "block:01a18957-5e50-7b04-91f6-9500cfc728b6",
@@ -27,18 +27,18 @@
     "TERM_PROGRAM_VERSION": "0.0.1793131181-gdd9a20",
     "TERM_PROGRAM": "rex",
     "TERM": "xterm-256color",
-    "TMPDIR": "/var/folders/4d/5qjw96215vnfr_777knbpr9hjmpy7j/T/",
+    "TMPDIR": "/tmp/rex-fixture/",
     "USER": "<USER>"
   },
   "shell_none_bash_l_c": {
     "__CF_USER_TEXT_ENCODING": "0x0:0:0",
     "_": "/usr/bin/env",
-    "CLAUDE_CODE_TMPDIR": "/var/folders/4d/5qjw96215vnfr_777knbpr9hjmpy7j/T//claude-<USER>",
+    "CLAUDE_CODE_TMPDIR": "/tmp/rex-fixture/claude-<USER>",
     "COLORTERM": "truecolor",
     "HOME": "<HOME>",
     "LANG": "en_US.UTF-8",
     "LOGNAME": "<USER>",
-    "PATH": "<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/opt/X11/bin:/Library/Apple/usr/bin:/usr/local/munki:/opt/puppetlabs/bin:<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS:<HOME>/.local/share/uv/python/cpython-3.11.16-macos-aarch64-none/bin:<HOME>/.pi/agent/bin:<HOME>/loom/bin:<HOME>/loom/skills/loom/scripts:<HOME>/loom/skills/snakemake/scripts:<HOME>/.bun/bin:<HOME>/go/bin:<HOME>/Library/Python/3.13/bin:/opt/homebrew/opt/python/libexec/bin/:<HOME>/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:<HOME>/.cargo/bin:/usr/ucb:<HOME>/.local/bin",
+    "PATH": "<HOME>/tools/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
     "PLOT_PORT": "8851",
     "PWD": "/tmp/rexprobe.myyg",
     "REX_BIN_DIR": "<HOME>/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS",
@@ -51,7 +51,7 @@
     "TERM_PROGRAM_VERSION": "0.0.1793131181-gdd9a20",
     "TERM_PROGRAM": "rex",
     "TERM": "xterm-256color",
-    "TMPDIR": "/var/folders/4d/5qjw96215vnfr_777knbpr9hjmpy7j/T/",
+    "TMPDIR": "/tmp/rex-fixture/",
     "USER": "<USER>"
   }
 }

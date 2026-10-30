@@ -12,6 +12,43 @@ defmodule Shuttle.RexTest do
     :ok
   end
 
+  test "Rex fixtures use synthetic host identity and environment paths" do
+    root = Path.expand("../fixtures/rex", __DIR__)
+
+    ids =
+      Path.wildcard(Path.join(root, "*.json"))
+      |> Enum.flat_map(fn file -> file |> File.read!() |> Jason.decode!() |> host_ids() end)
+
+    assert Enum.uniq(ids) == ["00000000-0000-4000-8000-000000000001"]
+
+    env = FakeRex.fixture("environment_isolated")
+
+    for values <- Map.values(env) do
+      assert values["TMPDIR"] == "/tmp/rex-fixture/"
+      assert values["PATH"] =~ "<HOME>/tools/bin"
+      refute values["PATH"] =~ "loom"
+      refute values["PATH"] =~ "munki"
+      refute values["PATH"] =~ "puppetlabs"
+      refute values["PATH"] =~ "/pkg/"
+    end
+  end
+
+  defp host_ids(value) when is_map(value) do
+    own = if value["host_id"], do: [value["host_id"]], else: []
+    own ++ Enum.flat_map(Map.values(value), &host_ids/1)
+  end
+
+  defp host_ids(value) when is_list(value), do: Enum.flat_map(value, &host_ids/1)
+
+  defp host_ids(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} -> host_ids(decoded)
+      {:error, _} -> []
+    end
+  end
+
+  defp host_ids(_), do: []
+
   test "binary resolution honors explicit path, PATH, then the vendor Current path", %{
     tmp_dir: dir
   } do
