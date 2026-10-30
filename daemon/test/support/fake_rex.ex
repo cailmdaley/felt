@@ -18,8 +18,13 @@ defmodule Shuttle.Test.FakeRex do
   def clear_reply(method),
     do: Agent.update(pid(), &update_in(&1.replies, fn map -> Map.delete(map, method) end))
 
-  def sessions(sessions),
-    do: Agent.update(pid(), &%{&1 | sessions: sessions, order: Enum.sort(Map.keys(sessions))})
+  def sessions(sessions) do
+    Agent.update(pid(), fn state ->
+      retained = Enum.filter(state.order, &Map.has_key?(sessions, &1))
+      added = Map.keys(sessions) -- retained
+      %{state | sessions: sessions, order: retained ++ Enum.sort(added)}
+    end)
+  end
 
   def state, do: Agent.get(pid(), & &1)
   def clients(clients), do: Agent.update(pid(), &%{&1 | clients: clients})
@@ -89,14 +94,18 @@ defmodule Shuttle.Test.FakeRex do
       reply
       |> Map.put("session_id", sid)
       |> put_in(["initial_windows", Access.at(0), "block_ids"], [bid])
+      |> put_in(["initial_windows", Access.at(0), "window_id"], window["window_id"] <> suffix)
 
     block = hd(spec["initial_windows"])["layout"]["block"]
 
+    wid = window["window_id"] <> suffix
+
     session = %{
       label: spec["label"],
+      windows: [%{"window_id" => wid, "label" => hd(spec["initial_windows"])["window_label"]}],
       window_label: hd(spec["initial_windows"])["window_label"],
       blocks: [
-        %{"block_id" => bid, "label" => block["label"], "window_id" => window["window_id"]}
+        %{"block_id" => bid, "label" => block["label"], "window_id" => wid}
       ]
     }
 
@@ -108,6 +117,49 @@ defmodule Shuttle.Test.FakeRex do
     }
 
     {reply, state}
+  end
+
+  defp run("session.new_window", spec, sid, state) do
+    n = state.creates
+    wid = "window:#{n}"
+    bid = "block:#{n}"
+    block = %{"block_id" => bid, "window_id" => wid, "label" => spec["layout"]["block"]["label"]}
+    session = state.sessions[sid]
+    windows = windows(session) ++ [%{"window_id" => wid, "label" => spec["window_label"]}]
+    session = session |> Map.put(:windows, windows) |> Map.put(:blocks, session.blocks ++ [block])
+
+    {%{"window_id" => wid, "block_ids" => [bid], "revision" => n},
+     %{state | creates: n + 1, sessions: Map.put(state.sessions, sid, session)}}
+  end
+
+  defp run("session.view", _, sid, state) do
+    case state.sessions[sid] do
+      nil -> {{"session not found", 3}, state}
+      session -> {%{"session_id" => sid, "windows" => windows(session)}, state}
+    end
+  end
+
+  defp run("session.close_window", %{"window_id" => wid}, sid, state) do
+    case state.sessions[sid] do
+      nil ->
+        {{"session not found", 3}, state}
+
+      session ->
+        session =
+          session
+          |> Map.put(:windows, Enum.reject(windows(session), &(&1["window_id"] == wid)))
+          |> Map.put(:blocks, Enum.reject(session.blocks, &(&1["window_id"] == wid)))
+
+        {%{}, put_in(state, [:sessions, sid], session)}
+    end
+  end
+
+  defp run("session.move_window", %{"window_id" => wid}, sid, state) do
+    session = state.sessions[sid]
+    windows = windows(session)
+    window = Enum.find(windows, &(&1["window_id"] == wid))
+    windows = Enum.reject(windows, &(&1["window_id"] == wid)) ++ [window]
+    {%{}, put_in(state, [:sessions, sid], Map.put(session, :windows, windows))}
   end
 
   defp run("session.list_blocks", _, sid, state) do
@@ -125,8 +177,17 @@ defmodule Shuttle.Test.FakeRex do
   defp run("session.move", %{"session_id" => sid}, sid, state),
     do: {%{}, %{state | order: List.delete(state.order, sid) ++ [sid]}}
 
-  defp run("session.set_window_label", args, sid, state),
-    do: {%{"revision" => 4}, put_in(state, [:sessions, sid, :window_label], args["label"])}
+  defp run("session.set_window_label", args, sid, state) do
+    session = state.sessions[sid]
+
+    windows =
+      Enum.map(windows(session), fn w ->
+        if w["window_id"] == args["window_id"], do: Map.put(w, "label", args["label"]), else: w
+      end)
+
+    session = session |> Map.put(:windows, windows) |> Map.put(:window_label, args["label"])
+    {%{"revision" => 4}, put_in(state, [:sessions, sid], session)}
+  end
 
   defp run("session.set_label", args, sid, state),
     do: {%{"revision" => 2}, put_in(state, [:sessions, sid, :label], args["label"])}
@@ -165,4 +226,21 @@ defmodule Shuttle.Test.FakeRex do
 
   defp run("server.apple.privacy_status", _, _, state),
     do: {%{"full_disk_access" => "granted"}, state}
+
+  defp windows(session) do
+    live = MapSet.new(session.blocks, & &1["window_id"])
+
+    case Map.get(session, :windows) do
+      nil ->
+        session.blocks
+        |> Enum.filter(&is_binary(&1["window_id"]))
+        |> Enum.uniq_by(& &1["window_id"])
+        |> Enum.map(
+          &%{"window_id" => &1["window_id"], "label" => Map.get(session, :window_label, "")}
+        )
+
+      windows ->
+        Enum.filter(windows, &MapSet.member?(live, &1["window_id"]))
+    end
+  end
 end

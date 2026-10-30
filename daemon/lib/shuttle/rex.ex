@@ -158,6 +158,20 @@ defmodule Shuttle.Rex do
       )
 
   def create(runner, spec), do: call(runner, "session.create", spec)
+
+  def windows(runner, sid) do
+    case call(runner, "session.view", %{}, session: sid) do
+      {:ok, view} -> {:ok, view["windows"] || []}
+      error -> error
+    end
+  end
+
+  def new_window(runner, sid, spec),
+    do: call(runner, "session.new_window", Map.put(spec, "focus", false), session: sid)
+
+  def close_window(runner, sid, wid),
+    do: call(runner, "session.close_window", %{"window_id" => wid}, session: sid)
+
   def destroy(runner, sid), do: call(runner, "session.destroy", %{}, session: sid)
   def privacy_status(runner), do: call(runner, "server.apple.privacy_status", %{})
 
@@ -210,12 +224,13 @@ defmodule Shuttle.Rex do
     end
   end
 
-  def select(runner, client, sid),
+  def select(runner, client, sid, wid \\ nil),
     do:
       call(runner, "client.perform", %{
         "client_id" => client,
         "action" => "session.select",
-        "args" => %{"session_id" => sid},
+        "args" =>
+          if(wid, do: %{"session_id" => sid, "window_id" => wid}, else: %{"session_id" => sid}),
         "timeout_ms" => 5_000
       })
 

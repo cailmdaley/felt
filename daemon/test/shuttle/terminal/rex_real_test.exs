@@ -93,6 +93,40 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
+  test "two real workers with no live root share one family session and stopping both removes it",
+       %{root: root} do
+    Env.put_app_env(:terminal_backend, Backend)
+
+    Shuttle.Test.RexFamilyStore.write(root, [
+      "work/design/family",
+      "work/design/family/a",
+      "work/design/family/b"
+    ])
+
+    names = ["probe-family-b", "probe-family-a"]
+    on_exit(fn -> Enum.each(names, &File.rm(WorkerProcess.script_path(&1))) end)
+
+    for {name, leaf} <- Enum.zip(names, ["b", "a"]) do
+      assert :ok =
+               Terminal.launch(@runner, name, root, "sleep 60\n",
+                 fiber: "work/design/family/" <> leaf
+               )
+    end
+
+    assert {:ok, [%{"session_id" => sid, "label" => "design/family"}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"label" => "└ a"}, %{"label" => "└ b"}]} = Rex.windows(@runner, sid)
+    assert {:ok, doc} = RexBindings.read()
+    assert doc["bindings"]["probe-family-a"]["session_id"] == sid
+    assert doc["bindings"]["probe-family-b"]["session_id"] == sid
+    assert {:ok, blocks} = Rex.blocks(@runner, sid)
+    assert Enum.sort(Enum.map(blocks, & &1["label"])) == Enum.sort(names)
+    assert {"", 0} = Terminal.stop(@runner, "probe-family-a", backends: [Backend])
+    assert :present = Backend.probe(@runner, "probe-family-b")
+    assert {:ok, [%{"label" => "└ b"}]} = Rex.windows(@runner, sid)
+    assert {"", 0} = Terminal.stop(@runner, "probe-family-b", backends: [Backend])
+    assert {:ok, []} = Rex.sessions(@runner)
+  end
+
   test "a 120-character fiber leaf launches with bounded display and block labels", %{root: root} do
     Env.put_app_env(:terminal_backend, Backend)
     fiber = "work/" <> String.duplicate("x", 120)
@@ -172,7 +206,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
-  test "display-only viewers dedupe while live and destroy their own empty sessions on exit", %{
+  test "display-only viewers dedupe while live and observation retires empty owned sessions", %{
     root: root
   } do
     label = String.duplicate("probe-viewer-", 10) <> "long-name@tmux"
@@ -196,13 +230,18 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
     assert bindings == %{}
     File.write!(gate, "exit")
-    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+
+    await(fn ->
+      Backend.sweep(@runner)
+      Rex.sessions(@runner) == {:ok, []}
+    end)
   end
 
-  test "real viewer bindings join the fiber tree and an observed exit promotes their thread", %{
+  test "real viewers and workers share a family whose label survives the root viewer's exit", %{
     root: root
   } do
     Env.put_app_env(:terminal_backend, Backend)
+    Shuttle.Test.RexFamilyStore.write(root, ["a/design/rex", "a/design/rex/thread"])
     gate = Path.join(root, "viewer-done")
     command = ["/bin/bash", "-c", "while [ ! -e '#{gate}' ]; do /bin/sleep 0.05; done"]
 
@@ -219,15 +258,18 @@ defmodule Shuttle.Terminal.RexRealTest do
              )
 
     assert {:ok, sessions} = Rex.sessions(@runner)
-    assert Enum.map(sessions, & &1["label"]) == ["design/rex @tmux", "└ thread"]
+    assert Enum.map(sessions, & &1["label"]) == ["design/rex"]
+
+    assert {:ok, [%{"label" => "rex @tmux"}, %{"label" => "└ thread"}]} =
+             Rex.windows(@runner, sid)
 
     assert {:ok, ^sid} =
              Backend.viewer(@runner, "probe-parent@tmux", command, fiber: "a/design/rex")
 
     File.write!(gate, "done")
-    await(fn -> match?({:ok, [_]}, Rex.sessions(@runner)) end)
+    await(fn -> match?({:ok, [%{"label" => "└ thread"}]}, Rex.windows(@runner, sid)) end)
     assert {:ok, _} = Terminal.list(@runner, "probe-")
-    assert {:ok, [%{"label" => "rex/thread"}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid, "label" => "design/rex"}]} = Rex.sessions(@runner)
     assert {"", 0} = Terminal.stop(@runner, "probe-tree-thread")
   end
 
@@ -266,7 +308,11 @@ defmodule Shuttle.Terminal.RexRealTest do
     end)
 
     assert {_, 0} = System.cmd(tmux, ["detach-client", "-s", "probe-viewer"], env: env)
-    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+
+    await(fn ->
+      Backend.sweep(@runner)
+      Rex.sessions(@runner) == {:ok, []}
+    end)
   end
 
   @tag skip: Shuttle.Test.IsolatedRex.skip?(["tmux"])
@@ -318,7 +364,12 @@ defmodule Shuttle.Terminal.RexRealTest do
              ])
 
     assert {_, 0} = System.cmd(tmux, ["-S", socket, "detach-client", "-s", "probe-worker"])
-    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+
+    await(fn ->
+      Backend.sweep(@runner)
+      Rex.sessions(@runner) == {:ok, []}
+    end)
+
     assert {_, 0} = System.cmd(tmux, ["-S", socket, "has-session", "-t", "=probe-worker"])
   end
 
@@ -357,7 +408,8 @@ defmodule Shuttle.Terminal.RexRealTest do
              Shuttle.Poller.claim_session(p, "claimed", sid, session_uuid: "human-native-uuid")
 
     worker = Shuttle.Poller.worker_status(p, "claimed")
-    assert {:ok, [%{"session_id" => ^sid, "label" => "claimed"}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid, "label" => ^canonical}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"label" => "claimed"}]} = Rex.windows(@runner, sid)
     assert {:ok, %{"bindings" => %{^canonical => %{"session_id" => ^sid}}}} = RexBindings.read()
 
     assert {:ok, %{session: ^canonical}} =
@@ -365,7 +417,8 @@ defmodule Shuttle.Terminal.RexRealTest do
 
     assert Shuttle.Poller.worker_status(p, "claimed").pid == worker.pid
     assert {"", 0} = Terminal.stop(@runner, canonical, backends: [Backend])
-    assert {:ok, []} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid}]} = Rex.sessions(@runner)
+    assert {:ok, []} = Rex.windows(@runner, sid)
   end
 
   test "an exited auto-closing block leaves an empty session which the backend removes", %{
@@ -419,6 +472,7 @@ defmodule Shuttle.Terminal.RexPrerequisitesTest do
     if IsolatedRex.skip?() do
       tests = Shuttle.Terminal.RexRealTest.__ex_unit__().tests
       assert length(tests) >= 4
+
       for test <- tests do
         assert test.tags[:skip] == true, "#{test.name} enables setup without Rex"
       end

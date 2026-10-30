@@ -17,7 +17,8 @@ defmodule Shuttle.Terminal.RexBindings do
 
       bindings =
         Map.reject(bindings, fn {old_name, old} ->
-          old_name != name and old["session_id"] == binding["session_id"]
+          old_name != name and old["session_id"] == binding["session_id"] and
+            old["block_id"] == binding["block_id"]
         end)
 
       viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
@@ -25,7 +26,8 @@ defmodule Shuttle.Terminal.RexBindings do
       Map.merge(doc, %{
         "server" => server,
         "bindings" => Map.put(bindings, name, binding),
-        "viewers" => viewers
+        "viewers" => viewers,
+        "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{})
       })
     end)
   end
@@ -47,7 +49,45 @@ defmodule Shuttle.Terminal.RexBindings do
   def put_viewer(key, binding, server) do
     update(fn doc ->
       viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
-      Map.merge(doc, %{"server" => server, "viewers" => Map.put(viewers, key, binding)})
+
+      Map.merge(doc, %{
+        "server" => server,
+        "bindings" => if(doc["server"] in [nil, server], do: doc["bindings"], else: %{}),
+        "families" => if(doc["server"] in [nil, server], do: doc["families"] || %{}, else: %{}),
+        "viewers" => Map.put(viewers, key, binding)
+      })
+    end)
+  end
+
+  def put_family(family, sid, server) do
+    update(fn doc ->
+      doc =
+        if doc["server"] in [nil, server],
+          do: doc,
+          else: %{"version" => 1, "bindings" => %{}, "viewers" => %{}}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "families" => Map.put(doc["families"] || %{}, family, sid)
+      })
+    end)
+  end
+
+  def delete_family(family, sid) do
+    update(fn doc ->
+      if get_in(doc, ["families", family]) == sid,
+        do: Map.put(doc, "families", Map.delete(doc["families"], family)),
+        else: doc
+    end)
+  end
+
+  def delete_viewer(key, observed), do: delete_entry("viewers", key, observed)
+
+  defp delete_entry(kind, key, observed) do
+    update(fn doc ->
+      if get_in(doc, [kind, key]) == observed,
+        do: Map.put(doc, kind, Map.delete(doc[kind], key)),
+        else: doc
     end)
   end
 
@@ -130,11 +170,18 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp valid_viewers?(_), do: false
 
+  defp valid_families?(families) when is_map(families),
+    do:
+      Enum.all?(families, fn {root, sid} -> is_binary(root) and match?("session:" <> _, sid) end)
+
+  defp valid_families?(_), do: false
+
   defp decode(json) do
     with {:ok, %{"version" => 1, "server" => server, "bindings" => bindings} = doc} <-
            Jason.decode(json),
          true <- (is_binary(server) or is_nil(server)) and is_map(bindings),
          true <- valid_viewers?(Map.get(doc, "viewers", %{})),
+         true <- valid_families?(Map.get(doc, "families", %{})),
          true <-
            Enum.all?(bindings, fn {name, binding} ->
              is_binary(name) and

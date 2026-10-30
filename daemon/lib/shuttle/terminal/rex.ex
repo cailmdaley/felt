@@ -1,10 +1,11 @@
 defmodule Shuttle.Terminal.Rex do
-  @moduledoc "Rex worker terminals addressed by daemon-owned immutable session/block bindings."
+  @moduledoc "Rex worker windows addressed by immutable session/window/block bindings."
   @behaviour Shuttle.Terminal.Backend
 
   require Logger
   alias Shuttle.{Env, Rex, WorkerProcess}
   alias Shuttle.Terminal.RexBindings, as: Bindings
+  alias Shuttle.Terminal.RexTree, as: Tree
 
   @impl true
   def id, do: "rex"
@@ -72,17 +73,14 @@ defmodule Shuttle.Terminal.Rex do
   def launch(runner, name, cwd, script_path, opts) do
     with :ok <- valid_label(name),
          {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
-         {:ok, reply} <- Rex.create(runner, create_spec(name, cwd, script_path, opts)),
-         {:ok, binding} <- created_binding(reply) do
-      binding = if opts[:fiber], do: Map.put(binding, "fiber", opts[:fiber]), else: binding
+         {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name)) do
+      spec = create_spec(name, cwd, script_path, opts)
 
-      case Bindings.put(name, binding, server) do
-        :ok ->
-          :ok
-
-        {:error, reason} ->
-          Rex.destroy(runner, binding["session_id"])
-          {:error, "Rex binding write failed: #{inspect(reason)}"}
+      case in_family(runner, family, name, spec, server, fn binding ->
+             Bindings.put(name, binding, server)
+           end) do
+        {:ok, _} -> :ok
+        error -> error
       end
     else
       {:error, message} when is_binary(message) -> {:error, message}
@@ -118,12 +116,88 @@ defmodule Shuttle.Terminal.Rex do
 
   defp created_binding(%{
          "session_id" => "session:" <> _ = sid,
-         "initial_windows" => [%{"block_ids" => ["block:" <> _ = bid]}]
-       }) do
-    {:ok, binding(sid, bid)}
-  end
+         "initial_windows" => [window]
+       }),
+       do: window_binding(sid, window)
 
   defp created_binding(_), do: {:error, :invalid_create_reply}
+
+  defp window_binding(sid, %{
+         "window_id" => "window:" <> _ = wid,
+         "block_ids" => ["block:" <> _ = bid]
+       }),
+       do: {:ok, Map.put(binding(sid, bid), "window_id", wid)}
+
+  defp window_binding(_, _), do: {:error, :invalid_window_reply}
+
+  defp family_lock(root, fun),
+    do: Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :family, root}, fun)
+
+  defp in_family(runner, family, name, spec, server, store) do
+    root = if family, do: family.family, else: name
+
+    family_lock(root, fn ->
+      with {:ok, doc} <- Bindings.read(),
+           {:ok, sessions} <- Rex.sessions(runner) do
+        sid = if doc["server"] == server, do: get_in(doc, ["families", root])
+        existing = sid && Enum.any?(sessions, &(&1["session_id"] == sid))
+        [window] = spec["initial_windows"]
+
+        entry =
+          if family, do: Map.merge(family, %{session_id: sid}), else: %{fiber: name, depth: 0}
+
+        [entry] = Tree.layout([entry])
+
+        window =
+          if family,
+            do: Map.put(window, "window_label", Tree.display_label(entry.label)),
+            else: window
+
+        result =
+          if existing do
+            with {:ok, reply} <- Rex.new_window(runner, sid, window),
+                 do: window_binding(sid, reply)
+          else
+            spec = %{
+              spec
+              | "label" =>
+                  if(family,
+                    do: Tree.display_label(Tree.session_label(root)),
+                    else: spec["label"]
+                  ),
+                "initial_windows" => [window]
+            }
+
+            with {:ok, reply} <- Rex.create(runner, spec),
+                 {:ok, b} <- created_binding(reply) do
+              case Bindings.put_family(root, b["session_id"], server) do
+                :ok ->
+                  {:ok, b}
+
+                error ->
+                  Rex.destroy(runner, b["session_id"])
+                  error
+              end
+            end
+          end
+
+        with {:ok, b} <- result do
+          b = Map.merge(b, %{"family" => root, "depth" => entry.depth})
+          b = if family, do: Map.put(b, "fiber", family.fiber), else: b
+
+          case store.(b) do
+            :ok ->
+              {:ok, b}
+
+            error ->
+              Rex.close_window(runner, b["session_id"], b["window_id"])
+              cleanup_family(runner, root, b["session_id"])
+              error
+          end
+        end
+      end
+    end)
+  end
 
   @impl true
   def probe(runner, name) do
@@ -152,6 +226,7 @@ defmodule Shuttle.Terminal.Rex do
   @impl true
   def list(runner) do
     with {:ok, doc} <- Bindings.read(),
+         :ok <- sweep(runner),
          {:ok, sessions} <- Rex.sessions(runner),
          :ok <- prune_bindings(runner, doc, Enum.map(sessions, & &1["session_id"])) do
       ids = MapSet.new(sessions, & &1["session_id"])
@@ -189,9 +264,20 @@ defmodule Shuttle.Terminal.Rex do
   def close(runner, name) do
     with {:ok, b} <- resolve(runner, name),
          false <- b["recovered"] == true do
-      case Rex.destroy(runner, b["session_id"]) do
+      close_owned(runner, name, b)
+    else
+      {:error, reason} when reason in [:server_absent, :not_found] -> :absent
+      true -> {:error, "Refusing to destroy a Rex session recovered only by block label"}
+      error -> {:error, "Rex close failed: #{inspect(error)}"}
+    end
+  end
+
+  defp close_owned(runner, name, %{"window_id" => wid, "family" => root} = b) do
+    family_lock(root, fn ->
+      case Rex.close_window(runner, b["session_id"], wid) do
         {:ok, _} ->
-          close_binding(name, b, :ok)
+          with :ok <- cleanup_family(runner, root, b["session_id"]),
+               do: close_binding(name, b, :ok)
 
         {:error, reason} when reason in [:server_absent, :not_found] ->
           close_binding(name, b, :absent)
@@ -199,10 +285,116 @@ defmodule Shuttle.Terminal.Rex do
         error ->
           {:error, "Rex close failed: #{inspect(error)}"}
       end
-    else
-      {:error, reason} when reason in [:server_absent, :not_found] -> :absent
-      true -> {:error, "Refusing to destroy a Rex session recovered only by block label"}
+    end)
+  end
+
+  defp close_owned(runner, name, %{"session_owned" => false, "window_id" => wid} = b) do
+    case Rex.close_window(runner, b["session_id"], wid) do
+      {:ok, _} -> close_binding(name, b, :ok)
+      {:error, :not_found} -> close_binding(name, b, :absent)
       error -> {:error, "Rex close failed: #{inspect(error)}"}
+    end
+  end
+
+  defp close_owned(runner, name, b) do
+    case Rex.destroy(runner, b["session_id"]) do
+      {:ok, _} ->
+        close_binding(name, b, :ok)
+
+      {:error, reason} when reason in [:server_absent, :not_found] ->
+        close_binding(name, b, :absent)
+
+      error ->
+        {:error, "Rex close failed: #{inspect(error)}"}
+    end
+  end
+
+  @doc "Retire empty daemon-created family sessions after observed worker or viewer exits."
+  def sweep(runner) do
+    with {:ok, doc} <- Bindings.read(),
+         :ok <- retire_viewers(runner, doc) do
+      Enum.reduce_while(doc["families"] || %{}, :ok, fn {root, sid}, :ok ->
+        case family_lock(root, fn -> cleanup_family(runner, root, sid) end) do
+          :ok -> {:cont, :ok}
+          error -> {:halt, error}
+        end
+      end)
+    end
+  end
+
+  defp retire_viewers(runner, doc) do
+    Enum.reduce_while(doc["viewers"] || %{}, :ok, fn {key, b}, :ok ->
+      result =
+        case Rex.blocks(runner, b["session_id"]) do
+          {:ok, blocks} ->
+            if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])) do
+              :ok
+            else
+              with :ok <- retire_viewer_session(runner, b, blocks),
+                   do: Bindings.delete_viewer(key, b)
+            end
+
+          {:error, :not_found} ->
+            Bindings.delete_viewer(key, b)
+
+          error ->
+            error
+        end
+
+      case result do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp retire_viewer_session(runner, b, []) when not is_map_key(b, "family") do
+    case Rex.windows(runner, b["session_id"]) do
+      {:ok, []} ->
+        case Rex.destroy(runner, b["session_id"]) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> error
+        end
+
+      {:ok, _} ->
+        :ok
+
+      error ->
+        error
+    end
+  end
+
+  defp retire_viewer_session(_, _, _), do: :ok
+
+  defp cleanup_family(runner, root, sid) do
+    with {:ok, doc} <- Bindings.read() do
+      if get_in(doc, ["families", root]) == sid do
+        case Rex.windows(runner, sid) do
+          {:ok, []} ->
+            case Rex.blocks(runner, sid) do
+              {:ok, []} ->
+                with {:ok, _} <- Rex.destroy(runner, sid), do: Bindings.delete_family(root, sid)
+
+              {:ok, _} ->
+                :ok
+
+              error ->
+                error
+            end
+
+          {:ok, _} ->
+            :ok
+
+          {:error, :not_found} ->
+            Bindings.delete_family(root, sid)
+
+          error ->
+            error
+        end
+      else
+        :ok
+      end
     end
   end
 
@@ -251,7 +443,7 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp write_rename(runner, from, to, source) do
-    with :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], worker_label(to)),
+    with :ok <- rename_labels(runner, source, to),
          :ok <- store(runner, to, source),
          :ok <- remove_old_binding(from, to, source) do
       :ok
@@ -260,8 +452,24 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp rename_source(runner, "session:" <> _ = sid, block_id: "block:" <> _ = bid),
-    do: live_block(runner, nil, binding(sid, bid))
+  defp rename_labels(runner, %{"family" => _} = source, to) do
+    case Rex.call(
+           runner,
+           "session.set_block_label",
+           %{"block_id" => source["block_id"], "label" => worker_label(to)},
+           session: source["session_id"]
+         ) do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
+
+  defp rename_labels(runner, source, to),
+    do: Rex.set_labels(runner, source["session_id"], source["block_id"], worker_label(to))
+
+  defp rename_source(runner, "session:" <> _ = sid, block_id: "block:" <> _ = bid) do
+    with {:ok, b} <- native_binding(runner, sid, bid), do: live_block(runner, nil, b)
+  end
 
   defp rename_source(runner, from, []), do: resolve(runner, from)
 
@@ -273,11 +481,12 @@ defmodule Shuttle.Terminal.Rex do
       live = Enum.map(sessions, & &1["session_id"])
       b = doc["bindings"][name]
 
-      # A session is one ownership unit: closing it hangs up every block.
-      # Another live worker block must not lose its binding to this claim.
+      # A captured session is one ownership unit. Family windows are separate
+      # units, so a sibling's binding cannot prevent a window-local rename.
       owned_block? =
         Enum.any?(doc["bindings"], fn {_, owned} ->
           owned["session_id"] == sid and owned["block_id"] != source["block_id"] and
+            (source["family"] == nil or owned["window_id"] == source["window_id"]) and
             Enum.any?(blocks, &(&1["block_id"] == owned["block_id"]))
         end)
 
@@ -354,15 +563,18 @@ defmodule Shuttle.Terminal.Rex do
   # session in the operator's app.
   defp reveal_with(runner, name) do
     with {:ok, b} <- resolve(runner, name) do
-      reveal_session(runner, b["session_id"])
+      with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
+        block = Enum.find(blocks, &(&1["block_id"] == b["block_id"]))
+        reveal_session(runner, b["session_id"], b["window_id"] || (block && block["window_id"]))
+      end
     else
       error -> {:error, "Cannot open Rex terminal: #{inspect(error)}"}
     end
   end
 
-  defp reveal_session(runner, sid) do
+  defp reveal_session(runner, sid, wid) do
     with {:ok, client} <- ensure_app_client(runner),
-         {:ok, _} <- Rex.select(runner, client, sid),
+         {:ok, _} <- Rex.select(runner, client, sid, wid),
          {_, 0} <- runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
       :ok
     else
@@ -378,7 +590,8 @@ defmodule Shuttle.Terminal.Rex do
     with :ok <- ensure_ready(runner),
          {:ok, argv} <- viewer_command(name, destination),
          {:ok, sid} <- viewer(runner, label, argv, opts) do
-      reveal_session(runner, sid)
+      with {:ok, doc} <- Bindings.read(),
+           do: reveal_session(runner, sid, get_in(doc, ["viewers", label, "window_id"]))
     else
       {:error, message} when is_binary(message) -> {:error, message}
       error -> {:error, "Cannot open Rex viewer: #{inspect(error)}"}
@@ -439,77 +652,41 @@ defmodule Shuttle.Terminal.Rex do
   defp viewer_locked(runner, key, label, argv, opts) do
     Shuttle.Terminal.with_lock({__MODULE__, :viewer, key}, fn ->
       with :ok <- valid_label(label),
+           :ok <- sweep(runner),
            {:ok, doc} <- Bindings.read(),
-           {:ok, sessions} <- Rex.sessions(runner),
-           {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
-           :ok <- Bindings.prune(doc, Enum.map(sessions, & &1["session_id"])) do
-        b = get_in(doc, ["viewers", key])
+           {:ok, %{"host_id" => server}} <- Rex.whoami(runner) do
+        b = if doc["server"] == server, do: get_in(doc, ["viewers", key])
 
-        # A display label is not proof of viewer ownership. Only a recorded
-        # immutable binding can authorize reuse, destruction or tree moves.
-        result =
-          if b && Enum.any?(sessions, &(&1["session_id"] == b["session_id"])) do
-            reuse_viewer(runner, label, argv, b)
-          else
-            create_viewer(runner, label, argv)
-          end
-
-        with {:ok, address} <- result do
-          sid = address["session_id"]
-
-          suffix =
-            case Regex.run(~r/@([^@]*)$/u, key),
-              do: (
-                [_, host] -> " @" <> host
-                nil -> ""
-              )
-
-          fiber = opts[:fiber] || (b && b["fiber"])
-          binding = Map.merge(address, %{"fiber" => fiber, "suffix" => suffix})
-
-          case Bindings.put_viewer(key, binding, server) do
-            :ok ->
-              {:ok, sid}
-
-            error ->
-              if b == nil or b["session_id"] != sid, do: Rex.destroy(runner, sid)
-              error
-          end
-        else
-          [] -> {:error, "Rex viewer exited before registration"}
+        case viewer_alive(runner, b) do
+          {:ok, true} -> {:ok, b["session_id"]}
+          {:ok, false} -> create_viewer(runner, key, label, argv, opts, b, server)
           error -> error
         end
       end
     end)
   end
 
-  defp reuse_viewer(runner, label, argv, b) do
+  defp viewer_alive(_, nil), do: {:ok, false}
+
+  defp viewer_alive(runner, b) do
     case Rex.blocks(runner, b["session_id"]) do
-      {:ok, []} ->
-        with {:ok, _} <- Rex.destroy(runner, b["session_id"]),
-             do: create_viewer(runner, label, argv)
-
-      {:ok, blocks} ->
-        if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])),
-          do: {:ok, b},
-          else: {:error, "Rex viewer block is gone; refusing to reuse surviving human panes"}
-
-      error ->
-        error
+      {:ok, blocks} -> {:ok, Enum.any?(blocks, &(&1["block_id"] == b["block_id"]))}
+      {:error, :not_found} -> {:ok, false}
+      error -> error
     end
   end
 
-  defp create_viewer(runner, label, argv) do
-    # Rex retains empty sessions. The viewer removes its own session after
-    # attach/ssh returns; reopening also sweeps an empty session after a crash.
-    cleanup =
-      Enum.map_join([Rex.bin() || "rex"] ++ Rex.flags(), " ", &quote_sh/1) <>
-        " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
+  defp create_viewer(runner, key, label, argv, opts, old, server) do
+    suffix =
+      case Regex.run(~r/@([^@]*)$/u, key) do
+        [_, host] -> " @" <> host
+        nil -> ""
+      end
 
     script =
       "unset TMUX TMUX_PANE\n" <>
         Rex.environment_script() <>
-        "trap #{quote_sh(cleanup)} EXIT\n" <> Enum.map_join(argv, " ", &quote_sh/1) <> "\n"
+        Enum.map_join(argv, " ", &quote_sh/1) <> "\n"
 
     spec =
       create_spec(label, Env.home(), "", [])
@@ -519,7 +696,13 @@ defmodule Shuttle.Terminal.Rex do
         script
       ])
 
-    with {:ok, reply} <- Rex.create(runner, spec), do: created_binding(reply)
+    with {:ok, family} <- Tree.resolve(opts[:fiber] || (old && old["fiber"])),
+         {:ok, b} <-
+           in_family(runner, family, key, spec, server, fn b ->
+             Bindings.put_viewer(key, Map.put(b, "suffix", suffix), server)
+           end) do
+      {:ok, b["session_id"]}
+    end
   end
 
   defp ensure_app_client(runner) do
@@ -562,7 +745,7 @@ defmodule Shuttle.Terminal.Rex do
               %{"status" => "resolved", "target" => %{"session_id" => sid, "block_id" => ^bid}}
             ]
           }} <- Rex.call(runner, "target.resolve", %{"kinds" => ["block"], "queries" => [bid]}) do
-      live_block(runner, nil, binding(sid, bid))
+      with {:ok, b} <- native_binding(runner, sid, bid), do: live_block(runner, nil, b)
     else
       {:ok, %{"results" => [%{"status" => "not_found"}]}} -> {:error, :not_found}
       {:ok, _} -> {:error, :unknown}
@@ -572,9 +755,10 @@ defmodule Shuttle.Terminal.Rex do
 
   defp resolve(runner, "session:" <> _ = sid) do
     with {:ok, doc} <- Bindings.read() do
-      case Enum.find(doc["bindings"], fn {_, b} -> b["session_id"] == sid end) do
-        {name, b} -> live_block(runner, name, b)
-        nil -> recover_block(runner, nil, sid)
+      case Enum.filter(doc["bindings"], fn {_, b} -> b["session_id"] == sid end) do
+        [{name, b}] -> live_block(runner, name, b)
+        [] -> recover_block(runner, nil, sid)
+        _ -> {:error, :unknown}
       end
     end
   end
@@ -599,6 +783,22 @@ defmodule Shuttle.Terminal.Rex do
     else
       {:error, :not_found} -> {:error, :unknown}
       error -> error
+    end
+  end
+
+  defp native_binding(runner, sid, bid) do
+    with {:ok, doc} <- Bindings.read(),
+         {:ok, blocks} <- Rex.blocks(runner, sid) do
+      known =
+        Enum.find_value(doc["bindings"], fn {_, b} ->
+          if b["session_id"] == sid and b["block_id"] == bid, do: b
+        end)
+
+      block = Enum.find(blocks, &(&1["block_id"] == bid))
+      b = known || Map.put(binding(sid, bid), "session_owned", false)
+
+      {:ok,
+       if(block && block["window_id"], do: Map.put(b, "window_id", block["window_id"]), else: b)}
     end
   end
 
@@ -644,8 +844,10 @@ defmodule Shuttle.Terminal.Rex do
         if name, do: Enum.filter(blocks, &(&1["label"] == worker_label(name))), else: blocks
 
       case matching do
-        [%{"block_id" => bid}] ->
+        [%{"block_id" => bid} = block] ->
           b = binding(sid, bid)
+          b = if block["window_id"], do: Map.put(b, "window_id", block["window_id"]), else: b
+          b = Map.put(b, "session_owned", false)
 
           if name do
             b = Map.put(b, "recovered", true)
@@ -676,21 +878,50 @@ defmodule Shuttle.Terminal.Rex do
       if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])) do
         {:ok, b}
       else
-        if blocks == [] and name != nil do
-          with {:error, :not_found} <- retire_empty(runner, b),
-               :ok <- Bindings.delete(name, b) do
-            {:error, :not_found}
-          end
-        else
-          # Only the block label can recover a worker; unrelated human panes
-          # are neither adopted nor destroyed after its address is retired.
-          with :ok <- if(name, do: Bindings.delete(name, b), else: :ok),
+        if is_binary(b["family"]) and is_binary(b["window_id"]) and name != nil do
+          with :ok <- retire_worker_window(runner, b),
+               :ok <- Bindings.delete(name, b),
                do: {:error, :not_found}
+        else
+          missing_block(runner, name, b, blocks)
         end
       end
     end
   end
 
+  defp retire_worker_window(runner, b) do
+    family_lock(b["family"], fn ->
+      result =
+        case Rex.close_window(runner, b["session_id"], b["window_id"]) do
+          {:ok, _} -> :ok
+          {:error, :not_found} -> :ok
+          error -> error
+        end
+
+      with :ok <- result, do: cleanup_family(runner, b["family"], b["session_id"])
+    end)
+  end
+
+  defp missing_block(runner, name, b, blocks) do
+    if blocks == [] and name != nil do
+      with {:error, :not_found} <- retire_empty(runner, b),
+           :ok <- Bindings.delete(name, b) do
+        {:error, :not_found}
+      end
+    else
+      # Only the block label can recover a worker; unrelated human panes
+      # are neither adopted nor destroyed after its address is retired.
+      with :ok <- if(name, do: Bindings.delete(name, b), else: :ok),
+           do: {:error, :not_found}
+    end
+  end
+
+  defp retire_empty(runner, %{"family" => root} = b) do
+    with :ok <- family_lock(root, fn -> cleanup_family(runner, root, b["session_id"]) end),
+         do: {:error, :not_found}
+  end
+
+  defp retire_empty(_runner, %{"session_owned" => false}), do: {:error, :not_found}
   defp retire_empty(_runner, %{"recovered" => true}), do: {:error, :not_found}
   defp retire_empty(runner, b), do: destroy_empty(runner, b["session_id"])
 

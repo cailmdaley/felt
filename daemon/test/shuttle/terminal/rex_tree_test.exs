@@ -10,10 +10,19 @@ defmodule Shuttle.Terminal.RexTreeTest do
     Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
     Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
     Env.put_app_env(:terminal_backend, Backend)
+
+    Shuttle.Test.RexFamilyStore.write(dir, [
+      "work/design/rex",
+      "work/design/rex/thread",
+      "work/design/rex/thread/deep",
+      "a/design/rex",
+      "a/design/rex/thread"
+    ])
+
     :ok
   end
 
-  test "nested fixture orders by path segments and counts live ancestors, not missing levels" do
+  test "nested fixture orders tabs by path and counts constitutions, not live workers" do
     entries =
       for {path, suffix} <- [
             {"work/design/rex/thread/deep/leaf", ""},
@@ -24,19 +33,27 @@ defmodule Shuttle.Terminal.RexTreeTest do
             {"work/design/rex/thread", " @remote-a"},
             {"work/design/rex/thread/deep", " @tmux"}
           ],
-          do: %{fiber: path, suffix: suffix, session_id: path <> suffix}
+          do:
+            Map.merge(
+              RexTree.family(path, [
+                %{"id" => "work/design/rex", "tags" => ["constitution"]},
+                %{"id" => "work/design/rex/thread", "shuttle" => %{}},
+                %{"id" => "work/design/rex/thread/deep", "tags" => ["constitution"]}
+              ]),
+              %{suffix: suffix, session_id: "session:family", window_id: path <> suffix}
+            )
 
     assert Enum.map(RexTree.layout(entries), &{&1.fiber, &1.label}) == [
-             {"other/alone", "other/alone"},
-             {"work/design/rex", "design/rex"},
+             {"other/alone", "alone"},
+             {"work/design/rex", "rex"},
              {"work/design/rex/thread", "└ thread"},
              {"work/design/rex/thread", "└ thread @remote-a"},
              {"work/design/rex/thread/deep", "\u2003└ deep @tmux"},
              {"work/design/rex/thread/deep/leaf", "\u2003\u2003└ leaf"},
-             {"work/design/rex-other", "design/rex-other"}
+             {"work/design/rex-other", "rex-other"}
            ]
 
-    assert [%{label: "deep/leaf"}] = RexTree.layout([%{fiber: "a/deep/leaf", session_id: "s"}])
+    assert [%{label: "leaf"}] = RexTree.layout([%{fiber: "a/deep/leaf", session_id: "s"}])
   end
 
   test "Codex viewers resolve the App Server thread independently of the transcript id" do
@@ -72,11 +89,15 @@ defmodule Shuttle.Terminal.RexTreeTest do
     parent = doc["bindings"]["parent-worker"]
     thread = doc["bindings"]["thread-worker"]
     assert {:ok, sessions} = Rex.sessions(FakeRex)
-    assert Enum.map(sessions, & &1["label"]) == ["human", "design/rex", "└ thread"]
-    assert FakeRex.state().sessions[parent["session_id"]].window_label == "parent-worker"
+    assert parent["session_id"] == thread["session_id"]
+    assert Enum.map(sessions, & &1["label"]) == ["human", "design/rex"]
+
+    assert {:ok, [%{"label" => "rex"}, %{"label" => "└ thread"}]} =
+             Rex.windows(FakeRex, parent["session_id"])
 
     assert [%{"label" => "thread-worker"}] =
              FakeRex.state().sessions[thread["session_id"]].blocks
+             |> Enum.filter(&(&1["block_id"] == thread["block_id"]))
              |> Enum.map(&Map.take(&1, ["label"]))
 
     # Recovery uses block labels even after the display has become a tree.
@@ -84,16 +105,18 @@ defmodule Shuttle.Terminal.RexTreeTest do
     assert :present = Backend.probe(FakeRex, "thread-worker")
     assert :ok = RexBindings.put_fiber("thread-worker", "work/design/rex/thread")
 
-    # Native claim makes the window/block the recovery index, then projects display.
+    # Native claims address the worker block, not an arbitrary family sibling.
     assert :ok =
-             Terminal.rename(FakeRex, parent["session_id"], "claimed-parent",
+             Terminal.rename(FakeRex, parent["block_id"], "claimed-parent",
                fiber: "work/design/rex"
              )
 
-    assert FakeRex.state().sessions[parent["session_id"]].window_label == "claimed-parent"
+    assert {:ok, [%{"label" => "rex"}, %{"label" => "└ thread"}]} =
+             Rex.windows(FakeRex, parent["session_id"])
 
     assert [%{"label" => "claimed-parent"}] =
              FakeRex.state().sessions[parent["session_id"]].blocks
+             |> Enum.filter(&(&1["block_id"] == parent["block_id"]))
              |> Enum.map(&Map.take(&1, ["label"]))
 
     before = FakeRex.calls()
@@ -105,12 +128,15 @@ defmodule Shuttle.Terminal.RexTreeTest do
 
     # A natural exit leaves an empty Rex session until the backend observes it.
     FakeRex.sessions(
-      Map.update!(FakeRex.state().sessions, parent["session_id"], &%{&1 | blocks: []})
+      Map.update!(FakeRex.state().sessions, parent["session_id"], fn s ->
+        %{s | blocks: Enum.reject(s.blocks, &(&1["block_id"] == parent["block_id"]))}
+      end)
     )
 
     assert :absent = Backend.probe(FakeRex, "claimed-parent")
     assert {:ok, sessions} = Rex.sessions(FakeRex)
-    assert Enum.map(sessions, & &1["label"]) == ["human", "rex/thread"]
+    assert Enum.map(sessions, & &1["label"]) == ["human", "design/rex"]
+    assert {:ok, [%{"label" => "└ thread"}]} = Rex.windows(FakeRex, thread["session_id"])
 
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} ->
              "session:human" in args and
@@ -205,14 +231,18 @@ defmodule Shuttle.Terminal.RexTreeTest do
 
     assert :ok = Terminal.launch(FakeRex, "parent", "/tmp", "sleep 30", fiber: "a/design/rex")
     assert {:ok, sessions} = Rex.sessions(FakeRex)
-    assert Enum.map(sessions, & &1["label"]) == [label, "design/rex", "└ thread @remote-a"]
+    assert Enum.map(sessions, & &1["label"]) == [label, "design/rex"]
+
+    assert {:ok, [%{"label" => "rex"}, %{"label" => "└ thread @remote-a"}]} =
+             Rex.windows(FakeRex, sid)
 
     assert {:ok, ^sid} =
              Backend.viewer(FakeRex, label, ["sleep", "30"], fiber: "a/design/rex/thread")
 
-    assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end) == 2
+    assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end) == 1
     assert FakeRex.state().sessions["session:human"].label == label
     assert :ok = Terminal.close(FakeRex, "parent")
-    assert FakeRex.state().sessions[sid].label == "rex/thread @remote-a"
+    assert FakeRex.state().sessions[sid].label == "design/rex"
+    assert {:ok, [%{"label" => "└ thread @remote-a"}]} = Rex.windows(FakeRex, sid)
   end
 end
