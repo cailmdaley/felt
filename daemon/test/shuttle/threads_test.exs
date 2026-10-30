@@ -112,6 +112,316 @@ defmodule Shuttle.ThreadsTest do
     {:ok, store: dir, data: data}
   end
 
+  test "created owner-only thread keeps lineage and retries close and ask to parent authority", %{
+    store: store
+  } do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+    Env.put_app_env(:remotes, [%{name: "parent-host", port: 43210}])
+    parent_path = Path.join(store, ".felt/hub/hub.md")
+
+    File.write!(
+      parent_path,
+      String.replace(File.read!(parent_path), "host: test-host", "host: parent-host")
+    )
+
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+    uid = parent.fiber["uid"]
+    File.rm!(parent_path)
+    StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/fiber/create",
+        Jason.encode!(%{
+          id: "hub/owner-only",
+          name: "Owner-only work",
+          frontmatter: %{
+            status: "active",
+            shuttle: %{
+              enabled: true,
+              kind: "oneshot",
+              host: "test-host",
+              project_dir: store,
+              thread_parent: %{
+                uid: uid,
+                host: "parent-host",
+                slug: "hub",
+                name: "Hub"
+              }
+            }
+          }
+        })
+      )
+
+    assert conn.status == 200
+
+    assert Shuttle.Dispatcher.render_prompt("hub/owner-only", felt_store: store) =~
+             "You are a thread of hub (Hub)."
+
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    child = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/owner-only"))
+    assert Threads.orchestrator(child, entries).fiber["uid"] == uid
+
+    for {verb, extra} <- [{"close", ["--local"]}, {"ask", ["Which estimator?"]}] do
+      assert {:ok, _} = CLI.run_in_store(store, ["reopen", "hub/owner-only", "--local"])
+      assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/owner-only"] ++ extra)
+      assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(latest, "test-host")
+      assert [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+      assert record["parent_uid"] == uid
+      assert record["parent_unresolved"] == true
+      assert record["anchor_uid"] == uid
+      StubPostClient.set_get_response({:error, :unavailable})
+      Threads.retry_results("test-host")
+      assert [{^id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
+      StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+      Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
+      assert %{body: body} = StubPostClient.last()
+      assert Jason.decode!(body)["fiber_id"] == uid
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+
+    refute File.exists?(parent_path)
+  end
+
+  test "an unresolved result skips an archived remote parent and persists the live ancestor", %{
+    store: store
+  } do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+
+    Env.put_app_env(:remotes, [
+      %{name: "parent-host", port: 43210},
+      %{name: "root-host", port: 43211}
+    ])
+
+    remotes = Path.join(store, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        defaults: %{discover: false},
+        remotes: [
+          %{name: "parent-host", url: "http://127.0.0.1:43210"},
+          %{name: "root-host", url: "http://127.0.0.1:43211"}
+        ]
+      })
+    )
+
+    Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+
+    parent_uid = "01JARZ3NDEKTSV4RRFFQ69G5FA"
+    root_uid = "01JARZ3NDEKTSV4RRFFQ69G5FB"
+
+    archived_parent = %{
+      "uid" => parent_uid,
+      "id" => parent_uid,
+      "slug" => "hub/parent",
+      "name" => "Parent",
+      "status" => "closed",
+      "tempered" => true,
+      "shuttle" => %{
+        "host" => "parent-host",
+        "thread_parent" => %{
+          "uid" => root_uid,
+          "host" => "root-host",
+          "slug" => "hub",
+          "name" => "Hub"
+        }
+      }
+    }
+
+    root = %{
+      "uid" => root_uid,
+      "id" => root_uid,
+      "slug" => "hub",
+      "name" => "Hub",
+      "status" => "active",
+      "shuttle" => %{"host" => "root-host"}
+    }
+
+    StubPostClient.set_get_responses([
+      {:ok, 200,
+       Jason.encode!(%{
+         fibers: [%{fiber: archived_parent, felt_store: store, path: "hub/parent.md"}]
+       })},
+      {:ok, 200,
+       Jason.encode!(%{fibers: [%{fiber: root, felt_store: store, path: "hub/hub.md"}]})}
+    ])
+
+    StubPostClient.set_response({:error, :unavailable})
+
+    record = %{
+      "owner" => "test-host",
+      "store" => store,
+      "parent_uid" => parent_uid,
+      "anchor_uid" => parent_uid,
+      "parent_host" => "parent-host",
+      "parent_slug" => "hub/parent",
+      "parent_unresolved" => true,
+      "retained_at" => DateTime.to_iso8601(DateTime.utc_now()),
+      "text" => "thread hub/parent/child closed: result",
+      "wake" => false
+    }
+
+    assert :ok = Shuttle.ThreadOutbox.capture([{"unblocked-archive", record}])
+    assert :ok = Threads.retry_results("test-host")
+    assert [{"unblocked-archive", resolved}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert resolved["parent_uid"] == root_uid
+    assert resolved["resolved_from_uid"] == parent_uid
+    refute Map.has_key?(resolved, "parent_unresolved")
+    assert StubPostClient.last().url =~ "127.0.0.1:43211/api/v1/deliver"
+    assert Jason.decode!(StubPostClient.last().body)["fiber_id"] == root_uid
+  end
+
+  test "an archived direct parent stays the durable anchor ahead of a live path ancestor", %{
+    store: store
+  } do
+    assert {:ok, _} = CLI.run_felt(["-C", store, "add", "upper", "Upper"])
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, [
+               "install",
+               "upper",
+               "--disabled",
+               "--host",
+               "test-host",
+               "--project-dir",
+               store
+             ])
+
+    assert {:ok, _} = CLI.run_felt(["-C", store, "nest", "hub", "upper"])
+
+    assert {:ok, _} =
+             CLI.run_in_store(store, ["close", "upper/hub", "--tempered=true", "--local"])
+
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "upper/hub/child", "--local"])
+    assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+    direct_parent = Enum.find(entries, &(Threads.address(&1.fiber) == "upper/hub"))
+    Threads.capture_results(entries, "test-host")
+
+    record =
+      Enum.find_value(Shuttle.ThreadOutbox.pending("test-host"), fn {_, candidate} ->
+        if candidate["text"] =~ "thread upper/hub/child closed", do: candidate
+      end)
+
+    assert record
+    assert record["anchor_uid"] == direct_parent.fiber["uid"]
+    assert record["parent_uid"] == direct_parent.fiber["uid"]
+    assert record["parent_unresolved"] == true
+
+    assert Shuttle.Dispatcher.render_prompt("upper/hub/child", felt_store: store) =~
+             "You are a thread of upper (Upper)."
+  end
+
+  test "a fresh owner feed overrides a stale local parent mirror", %{store: store} do
+    alias Shuttle.Test.StubPostClient
+    StubPostClient.start!()
+    Env.put_app_env(:write_forward_client, StubPostClient)
+
+    Env.put_app_env(:remotes, [
+      %{name: "parent-host", port: 43210},
+      %{name: "new-host", port: 43211}
+    ])
+
+    remotes = Path.join(store, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        defaults: %{discover: false},
+        remotes: [
+          %{name: "parent-host", url: "http://127.0.0.1:43210"},
+          %{name: "new-host", url: "http://127.0.0.1:43211"}
+        ]
+      })
+    )
+
+    Env.put_env("SHUTTLE_REMOTES_FILE", remotes)
+    assert {:ok, %{fibers: local}} = FiberDocuments.list(felt_stores: [store])
+    hub = Enum.find(local, &(Threads.address(&1.fiber) == "hub"))
+    uid = hub.fiber["uid"]
+    parent_path = Path.join(store, ".felt/hub/hub.md")
+
+    File.write!(
+      parent_path,
+      String.replace(File.read!(parent_path), "host: test-host", "host: parent-host")
+    )
+
+    assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+
+    assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+    Threads.capture_results(latest, "test-host")
+    assert [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert record["anchor_uid"] == uid
+    assert record["parent_unresolved"] == true
+
+    fresh =
+      Map.merge(hub, %{
+        fiber: put_in(hub.fiber, ["shuttle", "host"], "new-host"),
+        stale: false,
+        owner_feed: true
+      })
+
+    StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
+
+    StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [fresh]})})
+
+    assert :ok = Threads.retry_results("test-host", [fresh])
+    assert %{url: get_url} = StubPostClient.last_get()
+    assert get_url =~ "127.0.0.1:43211/api/v1/fibers/"
+    assert StubPostClient.last().url =~ "127.0.0.1:43211/api/v1/deliver"
+    assert Jason.decode!(StubPostClient.last().body)["fiber_id"] == uid
+    assert Shuttle.ThreadOutbox.pending("test-host") == []
+
+    refute Enum.any?(Shuttle.ThreadOutbox.pending("test-host"), fn {pending_id, _} ->
+             pending_id == id
+           end)
+  end
+
+  for verdict <- [true, false] do
+    @tag verdict: verdict
+    test "a reviewed close supplies quiet context naming verdict #{verdict}", %{
+      store: store,
+      verdict: verdict
+    } do
+      assert {:ok, _} = CLI.run_in_store(store, ["close", "hub/child", "--local"])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(entries, "test-host")
+      [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
+
+      assert {:ok, _} =
+               CLI.run_in_store(store, ["close", "hub/child", "--tempered=#{verdict}", "--local"])
+
+      assert {:ok, false} =
+               Threads.signal_current(
+                 %{"signal" => record["signal"], "message_id" => id, "text" => record["text"]},
+                 felt_stores: [store]
+               )
+
+      assert {:ok, %{fibers: latest}} = FiberDocuments.list(felt_stores: [store])
+      Threads.capture_results(latest, "test-host")
+
+      reviewed =
+        Enum.find_value(Shuttle.ThreadOutbox.pending("test-host"), fn {_, r} ->
+          if r["wake"] == false, do: r
+        end)
+
+      assert reviewed["text"] =~
+               if(verdict, do: "human verdict: tempered", else: "human verdict: discarded")
+
+      assert reviewed["signal"]["verb"] =~ "closed ("
+      Threads.deliver_results(latest, "test-host")
+      assert Shuttle.ThreadOutbox.pending("test-host") == []
+    end
+  end
+
   test "real lifecycle writes queue close, ask, handoff and rest context once without launching the parent",
        %{store: store, data: data} do
     assert {:ok, _} =
@@ -357,6 +667,9 @@ defmodule Shuttle.ThreadsTest do
 
       StubPostClient.set_response({:error, :unavailable})
       assert {:ok, _} = CLI.run_felt(["-C", store, "edit", "blocker", "-s", "closed"])
+      assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       deliver(store)
 
       assert [{id, %{"text" => "thread hub/child unblocked: The mocks land closed"} = record}] =
@@ -482,6 +795,8 @@ defmodule Shuttle.ThreadsTest do
                )
 
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       Threads.deliver_results(entries, "test-host")
       assert StubPostClient.last() != nil
       assert {:ok, _} = CLI.run_in_store(store, clear)
@@ -498,7 +813,7 @@ defmodule Shuttle.ThreadsTest do
       assert {:ok, %{fibers: cleared}} = FiberDocuments.list(felt_stores: [store])
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
       # A new publisher process has no memory of the observed close or ask.
-      StubPostClient.set_get_response({:error, :not_set})
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       Agent.update(Env.server!(StubPostClient), &Map.put(&1, :last, nil))
       task = Task.async(fn -> Threads.deliver_results(cleared, "test-host") end)
       Task.await(task, 30_000)
@@ -574,6 +889,9 @@ defmodule Shuttle.ThreadsTest do
       assert StubPostClient.last() == nil
       assert [{^message_id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
       File.write!(path, bytes)
+      assert {:ok, %{fibers: moved}} = FiberDocuments.list(felt_stores: [store])
+      moved_parent = Enum.find(moved, &(&1.fiber["uid"] == uid))
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [moved_parent]})})
       StubPostClient.set_response({:ok, 202, ~s({"queued":true,"delivery":"context"})})
       # New publisher process: no in-memory placement or publication state.
       Task.async(fn -> Threads.retry_results("test-host") end) |> Task.await(30_000)
@@ -608,6 +926,8 @@ defmodule Shuttle.ThreadsTest do
       StubPostClient.set_response({:error, :unavailable})
       assert {:ok, _} = CLI.run_in_store(store, [verb, "hub/child" | args])
       assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
+      parent = Enum.find(entries, &(Threads.address(&1.fiber) == "hub"))
+      StubPostClient.set_get_response({:ok, 200, Jason.encode!(%{fibers: [parent]})})
       Threads.deliver_results(entries, "test-host")
       assert [{id, record}] = Shuttle.ThreadOutbox.pending("test-host")
       assert record["wake"] == expected_wake
@@ -756,7 +1076,10 @@ defmodule Shuttle.ThreadsTest do
     StubPostClient.set_response({:error, :unavailable})
     assert {:error, _} = Threads.signal_current(params, felt_stores: [store])
     Threads.retry_results("test-host")
-    assert [{^id, ^record}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert [{^id, pending_record}] = Shuttle.ThreadOutbox.pending("test-host")
+    assert pending_record["parent_uid"] == record["parent_uid"]
+    assert pending_record["text"] == record["text"]
+    refute Map.has_key?(pending_record, "parent_unresolved")
     StubPostClient.set_response({:ok, 200, ~s({"current":false})})
     assert {:ok, false} = Threads.signal_current(params, felt_stores: [store])
     assert %{url: url} = StubPostClient.last()
@@ -916,11 +1239,20 @@ defmodule Shuttle.ThreadsTest do
     assert {:ok, %{fibers: entries}} = FiberDocuments.list(felt_stores: [store])
     Threads.capture_results(entries, "test-host")
     hub_uid = hub.fiber["uid"]
+    archived_uid = Enum.find(entries, &(Threads.address(&1.fiber) == "hub/child")).fiber["uid"]
 
-    # Archived threads publish no result; the live descendant still reports.
+    # Reviewed closes publish quiet verdict context; the live descendant still reports.
     assert [
-             %{"parent_uid" => ^hub_uid, "text" => "thread hub/child closed: "},
-             %{"parent_uid" => ^hub_uid, "text" => "thread hub/child/deep closed: "}
+             %{
+               "parent_uid" => ^hub_uid,
+               "text" => "thread hub/child closed (tempered):  (human verdict: tempered)"
+             },
+             %{
+               "parent_uid" => ^archived_uid,
+               "anchor_uid" => ^archived_uid,
+               "parent_unresolved" => true,
+               "text" => "thread hub/child/deep closed: "
+             }
            ] =
              Shuttle.ThreadOutbox.pending("test-host")
              |> Enum.map(&elem(&1, 1))

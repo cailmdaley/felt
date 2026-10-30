@@ -857,7 +857,8 @@ Browsers grant the microphone only in a secure context, so reach the board from 
 Checks a queued thread lifecycle notice against the thread owner's fresh fiber.
 The request carries `message_id`, `text`, and optional `signal` with `uid`, `verb`, `stamp`, and `owner`.
 The response is `{current: true|false}`.
-A cleared or replaced ask, a rearmed close, or an archived thread returns false.
+A cleared or replaced ask, a rearmed close, or an unreviewed close superseded by a human verdict returns false.
+A reviewed close has a distinct quiet notice naming the verdict.
 Unreachable owners and failed reads return 503, so the mailbox retains the notice for retry.
 Existing notices without structured signal metadata are checked by their lifecycle message ID and the thread address in their text.
 Mailbox delivery validates notices before emitting them and durably acknowledges each successful direct delivery independently.

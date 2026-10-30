@@ -256,16 +256,24 @@ Work that should wait for an orchestrator is a draft thread:
 It stays unarmed until the orchestrator runs `shuttle resume <thread>`.
 Containment relates the work; it does not gate dispatch.
 
+A thread carries its parent's immutable identity and owner hint in `shuttle.thread_parent`.
+Its owner captures results durably even when the parent has no local archive copy.
+Delivery resolves the parent's current authority by identity; an unavailable authority retains the result for retry.
+
 Thread lifecycle notices are acknowledged individually and checked against
-the owning thread's current document before delivery.
+the owning thread's current document immediately before delivery.
+A close tempered or discarded by the human supplies quiet context naming that verdict.
+It supersedes the unreviewed close notice and never wakes the orchestrator.
 A handoff remains current after its successor dispatches, until another
 handoff, close or rest replaces it.
 Unavailable owners retain their notices for retry, with a shared 30-second
 validation backoff across hook processes.
 Healthy notices can pass deferred notices, so delivery order can differ from
 queue order.
-An older owner's missing validation endpoint, or an unresolved legacy notice,
-allows delivery without validation.
+A recognizable missing validation endpoint allows delivery with a staleness caveat.
+An unresolved legacy notice allows delivery without validation.
+Acknowledgment records and offered bodies expire after 14 days.
+The originating signal timestamp prevents an expired notice from returning when replayed after its acknowledgment expires.
 
 A delivery with an unknown outcome stays pinned to its original conversation.
 When that conversation explicitly ends, a successor can receive it with a

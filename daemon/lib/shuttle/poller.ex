@@ -3261,7 +3261,7 @@ defmodule Shuttle.Poller do
   end
 
   defp deliver_thread_results(state) do
-    entries = Enum.map(state.document_cache, fn {_key, cached} -> cached.entry end)
+    {entries, _live, _reachable} = cached_thread_inputs(state)
     own_host = state.own_host_id
     # Commit observed lifecycle signals before scheduling fallible delivery.
     Shuttle.Threads.capture_results(entries, own_host)

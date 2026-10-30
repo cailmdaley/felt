@@ -1,31 +1,33 @@
 defmodule Shuttle.ThreadOutbox do
-  @moduledoc "Host-local pending thread payloads and permanent, payload-free acknowledgment IDs."
+  @moduledoc "Host-local pending thread payloads and retained, payload-free acknowledgment IDs."
+  @retention_ms 14 * 24 * 60 * 60 * 1_000
+  @prune_interval_ms 60 * 60 * 1_000
 
   @doc "Establish the first-deployment cutoff before polling; never reset or advance it."
-  def boot_baseline, do: transaction(true, fn _root, _baseline -> :ok end)
+  def boot_baseline, do: transaction(true, fn _root, _baseline, _cutoff -> :ok end)
 
-  def baseline, do: transaction(false, fn _root, baseline -> baseline end)
+  def baseline, do: transaction(false, fn _root, baseline, _cutoff -> baseline end)
 
-  # Each capture checks just its own ID. Neither the acknowledged history nor
-  # unrelated pending payloads are read or rewritten on this synchronous path.
+  # Each capture checks just its own ID. A durable cutoff makes a pruned
+  # acknowledgment unnecessary for rejecting a replay outside retention.
   def capture(records) do
-    transaction(false, fn root, _baseline ->
-      Enum.each(records, fn {id, record} -> capture_one(root, id, record) end)
+    transaction(false, fn root, _baseline, cutoff ->
+      Enum.each(records, fn {id, record} -> capture_one(root, id, record, cutoff) end)
       :ok
     end)
   end
 
   @doc "Capture records and return only the ids created by this call."
   def capture_new(records) do
-    transaction(false, fn root, _baseline ->
+    transaction(false, fn root, _baseline, cutoff ->
       Enum.flat_map(records, fn {id, record} ->
-        if capture_one(root, id, record), do: [id], else: []
+        if capture_one(root, id, record, cutoff), do: [id], else: []
       end)
     end)
   end
 
   def pending(owner) do
-    transaction(false, fn root, _baseline ->
+    transaction(false, fn root, _baseline, cutoff ->
       root
       |> Path.join("pending/*.json")
       |> Path.wildcard()
@@ -39,23 +41,57 @@ defmodule Shuttle.ThreadOutbox do
         else
           %{"id" => id, "record" => record} = path |> File.read!() |> Jason.decode!()
           true = key == key(id)
-          if record["owner"] == owner, do: [{id, record}], else: []
+
+          if retained?(record, cutoff) do
+            if record["owner"] == owner, do: [{id, record}], else: []
+          else
+            File.rm!(path)
+            []
+          end
         end
       end)
     end)
   end
 
+  @doc "Update a pending payload atomically without changing its delivery identity."
+  def update_pending(id, record) when is_map(record) do
+    transaction(false, fn root, _baseline, cutoff ->
+      path = pending_path(root, id)
+
+      cond do
+        not retained?(record, cutoff) ->
+          {:error, :expired}
+
+        File.exists?(acked_path(root, id)) ->
+          {:error, :acknowledged}
+
+        true ->
+          case File.read(path) do
+            {:ok, _} ->
+              write_atomic!(path, Jason.encode!(%{id: id, record: record}))
+              :ok
+
+            {:error, :enoent} ->
+              {:error, :not_pending}
+
+            {:error, reason} ->
+              raise File.Error, reason: reason, action: "read", path: path
+          end
+      end
+    end)
+  end
+
   def acknowledge(id) do
-    transaction(false, fn root, _baseline ->
+    transaction(false, fn root, _baseline, _cutoff ->
       acknowledge_one(root, id)
       :ok
     end)
   end
 
-  defp capture_one(root, id, record) do
+  defp capture_one(root, id, record, cutoff) do
     path = pending_path(root, id)
 
-    if File.exists?(acked_path(root, id)) or File.exists?(path) do
+    if not retained?(record, cutoff) or File.exists?(acked_path(root, id)) or File.exists?(path) do
       false
     else
       write_atomic!(path, Jason.encode!(%{id: id, record: record}))
@@ -63,8 +99,8 @@ defmodule Shuttle.ThreadOutbox do
     end
   end
 
-  # Retention rule: payloads live only until durable acknowledgment. IDs have
-  # no expiry: an unchanged lifecycle stamp can be observed again indefinitely.
+  # The cutoff in retention_cutoff prevents old lifecycle stamps from being
+  # replayed after their acknowledgment tombstones expire.
   # Publish the tombstone before deleting the payload, so interruption cannot
   # cause republication or lose an unacknowledged result.
   defp acknowledge_one(root, id) do
@@ -87,15 +123,103 @@ defmodule Shuttle.ThreadOutbox do
   defp pending_path(root, id), do: Path.join([root, "pending", key(id) <> ".json"])
   defp acked_path(root, id), do: Path.join([root, "acked", key(id)])
 
-  # Serialize host-local capture, ack and snapshot migration. Each steady-state
-  # operation touches constant-size metadata and its addressed payloads only.
+  # Serialize host-local capture, ack, pruning and snapshot migration.
   defp transaction(boot?, fun) do
     root = Path.join(Shuttle.data_dir(), "thread-outbox")
 
     :global.trans({{__MODULE__, root}, self()}, fn ->
       baseline = prepare!(root, boot?)
-      fun.(root, baseline)
+      {cutoff, prune?} = retention_cutoff(root, boot?)
+
+      if prune? do
+        persist_retention_cutoff!(root, cutoff)
+        prune_acked!(root, cutoff)
+      end
+
+      fun.(root, baseline, cutoff)
     end)
+  end
+
+  defp retention_cutoff(root, force?) do
+    path = Path.join(root, "retention_cutoff")
+    marker = Path.join(root, "last_pruned")
+    now = DateTime.utc_now()
+    candidate = DateTime.add(now, -@retention_ms, :millisecond)
+
+    current =
+      case File.read(path) do
+        {:ok, value} ->
+          {:ok, date, _} = DateTime.from_iso8601(value)
+          date
+
+        {:error, :enoent} ->
+          DateTime.add(candidate, -1, :millisecond)
+
+        {:error, reason} ->
+          raise File.Error, reason: reason, action: "read", path: path
+      end
+
+    cutoff = if DateTime.compare(current, candidate) == :gt, do: current, else: candidate
+    prune? = force? or prune_due?(marker, now)
+    {cutoff, prune?}
+  end
+
+  defp retained?(record, cutoff) do
+    if is_nil(cutoff) do
+      true
+    else
+      case get_in(record, ["signal", "stamp"]) || record["retained_at"] do
+        stamp when is_binary(stamp) ->
+          case DateTime.from_iso8601(stamp) do
+            {:ok, date, _} -> DateTime.compare(date, cutoff) != :lt
+            _ -> true
+          end
+
+        _ ->
+          true
+      end
+    end
+  end
+
+  defp prune_due?(marker, now) do
+    case File.read(marker) do
+      {:ok, value} ->
+        DateTime.to_unix(now, :millisecond) - String.to_integer(value) >= @prune_interval_ms
+
+      {:error, :enoent} ->
+        true
+
+      {:error, reason} ->
+        raise File.Error, reason: reason, action: "read", path: marker
+    end
+  end
+
+  defp persist_retention_cutoff!(root, cutoff) do
+    Path.join(root, "retention_cutoff")
+    |> write_atomic!(DateTime.to_iso8601(cutoff))
+  end
+
+  defp prune_acked!(root, cutoff) do
+    acked = Path.join(root, "acked")
+    marker = Path.join(root, "last_pruned")
+    now = System.system_time(:millisecond)
+    cutoff_seconds = DateTime.to_unix(cutoff)
+
+    Path.wildcard(Path.join(acked, "*"))
+    |> Enum.each(fn path ->
+      case File.stat(path, time: :posix) do
+        {:ok, %{mtime: mtime}} ->
+          if mtime < cutoff_seconds, do: File.rm!(path)
+
+        {:error, :enoent} ->
+          :ok
+
+        {:error, reason} ->
+          raise File.Error, reason: reason, action: "stat", path: path
+      end
+    end)
+
+    write_atomic!(marker, Integer.to_string(now))
   end
 
   defp prepare!(root, boot?) do
@@ -141,7 +265,7 @@ defmodule Shuttle.ThreadOutbox do
       Enum.each(legacy["records"], fn {id, record} ->
         if record["acked"] == true,
           do: acknowledge_one(root, id),
-          else: capture_one(root, id, migrate_recipient(record))
+          else: capture_one(root, id, migrate_recipient(record), nil)
       end)
 
       File.rm!(snapshot)

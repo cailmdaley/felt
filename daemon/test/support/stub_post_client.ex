@@ -26,7 +26,15 @@ defmodule Shuttle.Test.StubPostClient do
   def start_link(_ \\ []),
     do:
       Agent.start_link(fn ->
-        %{response: nil, get_response: {:error, :not_set}, last: nil, last_get: nil, posts: []}
+        %{
+          response: nil,
+          get_response: {:error, :not_set},
+          get_responses: [],
+          last: nil,
+          last_get: nil,
+          gets: [],
+          posts: []
+        }
       end)
 
   def set_response(response), do: Agent.update(server(), &Map.put(&1, :response, response))
@@ -34,13 +42,28 @@ defmodule Shuttle.Test.StubPostClient do
   def set_get_response(response),
     do: Agent.update(server(), &Map.put(&1, :get_response, response))
 
+  def set_get_responses(responses) when is_list(responses),
+    do: Agent.update(server(), &Map.put(&1, :get_responses, responses))
+
   def last, do: Agent.get(server(), & &1.last)
   def posts, do: Agent.get(server(), &Enum.reverse(&1.posts))
   def last_get, do: Agent.get(server(), & &1.last_get)
+  def gets, do: Agent.get(server(), &Enum.reverse(&1.gets))
 
   def get(url, _timeout_ms) do
-    Agent.update(server(), &Map.put(&1, :last_get, %{url: url}))
-    Agent.get(server(), & &1.get_response)
+    Agent.get_and_update(server(), fn state ->
+      response = List.first(state.get_responses) || state.get_response
+      responses = if state.get_responses == [], do: [], else: tl(state.get_responses)
+      get = %{url: url}
+      {response, %{state | last_get: get, gets: [get | state.gets], get_responses: responses}}
+    end)
+  end
+
+  def get_file(url, timeout_ms) do
+    case get(url, timeout_ms) do
+      {:ok, status, body} -> {:ok, status, "application/json", body}
+      error -> error
+    end
   end
 
   def post(url, body, _content_type, _timeout_ms) do

@@ -23,7 +23,7 @@ defmodule Shuttle.Contract do
   # Office writes use `shuttle role <fiber> <slug>|--clear` and
   # `shuttle seat <fiber> [--clear]`; resolved Shuttle JSON carries a role
   # string and a boolean seat.
-  @expected_level 26
+  @expected_level 27
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -45,7 +45,8 @@ defmodule Shuttle.Contract do
     24 =>
       "message-proof (one-shot sender evidence) and context-mailbox put --from-claim (neutral sender claim metadata)",
     25 => "context-mailbox sender proof on stdin and process-checked daemon sender attribution",
-    26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)"
+    26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)",
+    27 => "context-mailbox put --retained-at (bounded thread notice retention)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

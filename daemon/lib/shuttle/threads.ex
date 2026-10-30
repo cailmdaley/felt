@@ -10,10 +10,65 @@ defmodule Shuttle.Threads do
   def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
 
   def orchestrator(entry, index) when is_map(index) do
-    nearest(Path.dirname(address(entry.fiber)), &Map.get(index, {store_key(entry), &1}))
+    nearest(Path.dirname(address(entry.fiber)), fn path ->
+      Map.get(index, {store_key(entry), path}) || pinned_parent(entry, path, index)
+    end)
+  end
+
+  # A thread may be the only document in its owner's store. Its creation
+  # reference supplies lineage until the parent's owner feed is available.
+  defp pinned_parent(entry, path, index) do
+    case get_in(entry.fiber, ["shuttle", "thread_parent"]) do
+      %{"uid" => uid, "slug" => ^path, "host" => host} = ref ->
+        Enum.find_value(index, fn {_key, row} ->
+          if row.fiber["uid"] == uid, do: row
+        end) ||
+          %{
+            felt_store: entry.felt_store,
+            unresolved_parent: true,
+            fiber: %{
+              "uid" => uid,
+              "id" => uid,
+              "slug" => path,
+              "name" => ref["name"],
+              "shuttle" => %{"host" => host}
+            }
+          }
+
+      _ ->
+        nil
+    end
   end
 
   defp index(entries), do: Map.new(entries, &{{store_key(&1), address(&1.fiber)}, &1})
+
+  defp capture_parent(entry, index, own_host) do
+    case get_in(entry.fiber, ["shuttle", "thread_parent"]) do
+      %{"uid" => uid, "host" => host, "slug" => slug} = ref ->
+        %{
+          felt_store: entry.felt_store,
+          unresolved_parent: true,
+          fiber: %{
+            "uid" => uid,
+            "id" => uid,
+            "slug" => slug,
+            "name" => ref["name"],
+            "shuttle" => %{"host" => host}
+          }
+        }
+
+      _ ->
+        case orchestrator(entry, index) do
+          nil ->
+            nil
+
+          parent ->
+            if get_in(parent.fiber, ["shuttle", "host"]) == own_host,
+              do: parent,
+              else: Map.put(parent, :unresolved_parent, true)
+        end
+    end
+  end
 
   defp store_key(entry), do: Map.get(entry, :thread_store, entry.felt_store)
 
@@ -115,7 +170,9 @@ defmodule Shuttle.Threads do
               :fresh ->
                 feed.fibers
                 |> remote_entries(entries, local_store_by_uid, host)
-                |> Enum.map(&Map.merge(&1, %{stale: false, host_unreachable: false}))
+                |> Enum.map(
+                  &Map.merge(&1, %{stale: false, host_unreachable: false, owner_feed: true})
+                )
 
               {:incomplete, cache_state} ->
                 owner_rows =
@@ -283,6 +340,75 @@ defmodule Shuttle.Threads do
           _ -> nil
         end
       end)
+
+    parent =
+      case opts[:threads] do
+        {entries, _, _} ->
+          case Enum.find(
+                 entries,
+                 &(address(&1.fiber) == fiber_id and &1.felt_store == opts[:felt_store])
+               ) do
+            nil ->
+              parent
+
+            child ->
+              case get_in(child.fiber, ["shuttle", "thread_parent"]) do
+                %{"uid" => uid, "host" => host} ->
+                  case fetch_authoritative(
+                         uid,
+                         owner_feed_host(uid, entries) || host,
+                         [opts[:felt_store]],
+                         []
+                       ) do
+                    {:ok, anchor} ->
+                      case resolve_orchestrator(
+                             anchor,
+                             entries,
+                             [opts[:felt_store]],
+                             MapSet.new()
+                           ) do
+                        {:ok, resolved} -> resolved
+                        _ -> nil
+                      end
+
+                    _ ->
+                      nil
+                  end
+
+                _ ->
+                  orchestrator(child, entries) || parent
+              end
+          end
+
+        _ ->
+          with {:ok, output} <-
+                 Shuttle.CLI.run_in_store(
+                   opts[:felt_store],
+                   ["show", fiber_id, "--json"],
+                   Keyword.take(opts, [:runner])
+                 ),
+               {:ok, fiber} <- Jason.decode(output),
+               %{"uid" => uid, "host" => host} <-
+                 get_in(fiber, ["shuttle", "thread_parent"]) do
+            case fetch_authoritative(
+                   uid,
+                   host,
+                   [opts[:felt_store]],
+                   []
+                 ) do
+              {:ok, anchor} ->
+                case resolve_orchestrator(anchor, [], [opts[:felt_store]], MapSet.new()) do
+                  {:ok, resolved} -> resolved
+                  _ -> nil
+                end
+
+              _ ->
+                nil
+            end
+          else
+            _ -> parent
+          end
+      end
 
     lineage =
       case parent do
@@ -541,6 +667,185 @@ defmodule Shuttle.Threads do
     end)
   end
 
+  # The captured host is the authority entry point. It may forward to the
+  # current owner, but local mirrors never choose an identity or placement.
+  defp resolve_recipient(uid, captured_host, stores, entries) do
+    host = owner_feed_host(uid, entries) || captured_host || Shuttle.Poller.own_host_id()
+    fetch_authoritative(uid, host, stores, [])
+  end
+
+  defp owner_feed_host(uid, entries) do
+    Enum.find_value(entries, fn entry ->
+      if entry.fiber["uid"] == uid and Map.get(entry, :owner_feed) == true and
+           Map.get(entry, :stale) != true and Map.get(entry, :unknown_owner_state) != true do
+        get_in(entry.fiber, ["shuttle", "host"])
+      end
+    end)
+  end
+
+  defp fetch_authoritative(uid, host, stores, visited) do
+    cond do
+      not is_binary(host) or host == "" or host in visited ->
+        {:error, :parent_unavailable}
+
+      host == Shuttle.Poller.own_host_id() ->
+        case FiberDocuments.get_shuttle(uid, felt_stores: stores) do
+          {:ok, %{fibers: [%{fiber: %{"uid" => ^uid} = fiber} = entry]}} ->
+            current = get_in(fiber, ["shuttle", "host"])
+
+            if current == host,
+              do: {:ok, entry},
+              else: fetch_authoritative(uid, current, stores, [host | visited])
+
+          {:ok, %{fibers: []}} ->
+            {:error, :parent_missing}
+
+          {:ok, _} ->
+            {:error, :ambiguous_parent}
+
+          error ->
+            error
+        end
+
+      true ->
+        remote_recipient(uid, host, stores, visited)
+    end
+  end
+
+  defp remote_recipient(uid, host, stores, visited) do
+    with true <- is_binary(host) and host != "" and host not in visited,
+         {:remote, remote} <- OriginRouter.route_host(host),
+         {:forwarded, 200, _, body} <-
+           OriginRouter.forward_get(remote, "/api/v1/fibers/" <> URI.encode(uid), %{
+             "routed" => "1"
+           }),
+         {:ok, %{"fibers" => [%{"fiber" => %{"uid" => ^uid} = fiber} = row]}} <-
+           Jason.decode(body) do
+      entry = %{fiber: fiber, felt_store: row["felt_store"], path: row["path"]}
+      current = get_in(fiber, ["shuttle", "host"])
+
+      if current == host,
+        do: {:ok, entry},
+        else: fetch_authoritative(uid, current, stores, [host | visited])
+    else
+      error -> {:error, {:parent_unavailable, error}}
+    end
+  end
+
+  defp resolve_unresolved(record, entries, stores) do
+    uid = record["anchor_uid"] || record["parent_uid"]
+    host = owner_feed_host(uid, entries) || record["parent_host"] || Shuttle.Poller.own_host_id()
+
+    with {:ok, anchor} <- fetch_authoritative(uid, host, stores, []),
+         {:ok, parent} <- resolve_orchestrator(anchor, entries, stores, MapSet.new()) do
+      {:ok, parent}
+    end
+  end
+
+  defp resolve_orchestrator(entry, entries, stores, seen) do
+    uid = entry.fiber["uid"]
+
+    cond do
+      not is_binary(uid) or MapSet.member?(seen, uid) ->
+        {:error, :parent_cycle}
+
+      orchestrates?(entry.fiber) ->
+        {:ok, entry}
+
+      true ->
+        ref = get_in(entry.fiber, ["shuttle", "thread_parent"])
+        seen = MapSet.put(seen, uid)
+
+        case ref do
+          %{"uid" => parent_uid, "host" => host} ->
+            with {:ok, parent} <-
+                   fetch_authoritative(
+                     parent_uid,
+                     owner_feed_host(parent_uid, entries) || host,
+                     stores,
+                     []
+                   ),
+                 do: resolve_orchestrator(parent, entries, stores, seen)
+
+          _ ->
+            resolve_legacy_ancestor(entry, entries, stores, seen)
+        end
+    end
+  end
+
+  defp resolve_legacy_ancestor(entry, entries, stores, seen) do
+    entry.fiber
+    |> address()
+    |> Path.dirname()
+    |> Stream.iterate(&Path.dirname/1)
+    |> Enum.reduce_while({:error, :parent_missing}, fn
+      path, _acc when path in [".", "/"] ->
+        {:halt, {:error, :parent_missing}}
+
+      path, _acc ->
+        case fetch_address(get_in(entry.fiber, ["shuttle", "host"]), path, stores) do
+          {:ok, %{fiber: %{"shuttle" => shuttle}} = ancestor} when is_map(shuttle) ->
+            case resolve_orchestrator(ancestor, entries, stores, seen) do
+              {:ok, resolved} -> {:halt, {:ok, resolved}}
+              _ -> {:cont, {:error, :parent_missing}}
+            end
+
+          _ ->
+            {:cont, {:error, :parent_missing}}
+        end
+    end)
+  end
+
+  defp fetch_address(host, address, stores) do
+    if host == Shuttle.Poller.own_host_id() do
+      case FiberDocuments.get_shuttle(address, felt_stores: stores) do
+        {:ok, %{fibers: [%{fiber: fiber} = row]}} -> {:ok, Map.put(row, :fiber, fiber)}
+        _ -> {:error, :parent_missing}
+      end
+    else
+      with {:remote, remote} <- OriginRouter.route_host(host),
+           {:forwarded, 200, _, body} <-
+             OriginRouter.forward_get(remote, "/api/v1/fibers/" <> URI.encode(address), %{
+               "routed" => "1"
+             }),
+           {:ok, %{"fibers" => [%{"fiber" => %{"uid" => uid} = fiber} = row]}} <-
+             Jason.decode(body) do
+        entry = %{fiber: fiber, felt_store: row["felt_store"], path: row["path"]}
+        current = get_in(fiber, ["shuttle", "host"])
+
+        if current == host,
+          do: {:ok, entry},
+          else: fetch_authoritative(uid, current, stores, [host])
+      end
+    end
+  end
+
+  defp prepare_recipient(id, %{"parent_unresolved" => true} = record, entries, stores) do
+    with {:ok, parent} <- resolve_unresolved(record, entries, stores) do
+      resolved =
+        record
+        |> Map.put("parent_uid", parent.fiber["uid"])
+        |> Map.put("parent_host", get_in(parent.fiber, ["shuttle", "host"]))
+        |> Map.put("store", parent.felt_store)
+        |> Map.delete("parent_unresolved")
+        |> Map.put("resolved_from_uid", record["anchor_uid"])
+
+      with :ok <- ThreadOutbox.update_pending(id, resolved), do: {:ok, resolved, parent}
+    end
+  end
+
+  defp prepare_recipient(_id, record, entries, stores) do
+    uid = record["parent_uid"]
+
+    with uid when is_binary(uid) <- uid,
+         {:ok, parent} <- resolve_recipient(uid, record["parent_host"], stores, entries),
+         ^uid <- parent.fiber["uid"] do
+      {:ok, record, parent}
+    else
+      error -> {:error, error}
+    end
+  end
+
   @doc """
   What waits for a constitution's next worker: the `pending_results` count the
   poller stamps on its cached entry (`pending_results/2`), or 0 while a worker
@@ -718,7 +1023,7 @@ defmodule Shuttle.Threads do
   def deliver_results(entries, own_host) do
     capture_results(entries, own_host)
     capture_unblocks(entries, own_host)
-    retry_results(own_host)
+    retry_results(own_host, entries)
 
     # A parent can receive remote results while dormant. Its next live worker
     # drains the same mailbox, even when no child changes during this poll.
@@ -736,7 +1041,7 @@ defmodule Shuttle.Threads do
     records =
       for entry <- entries,
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
-          parent = orchestrator(entry, index),
+          parent = capture_parent(entry, index, own_host),
           parent != nil,
           {verb, stamp, text, wake} <- signals(entry.fiber),
           after_baseline?(stamp, baseline) do
@@ -749,6 +1054,11 @@ defmodule Shuttle.Threads do
            "owner" => own_host,
            "store" => parent.felt_store,
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
+           "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
+           "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
+           "anchor_uid" => Map.fetch!(parent.fiber, "uid"),
+           "parent_slug" => address(parent.fiber),
+           "retained_at" => stamp,
            "text" => "thread #{address(entry.fiber)} #{verb}: #{text}",
            "wake" => wake,
            "signal" => %{
@@ -782,7 +1092,7 @@ defmodule Shuttle.Threads do
           get_in(entry.fiber, ["shuttle", "host"]) == own_host,
           blocked = blocked_on(entry.fiber),
           blocked != nil and fiber_ref?(blocked),
-          parent = orchestrator(entry, index),
+          parent = capture_parent(entry, index, own_host),
           parent != nil,
           blocker = blocker(blocked, entry.felt_store, by_uid),
           is_map(blocker) and blocker["status"] == "closed",
@@ -798,6 +1108,11 @@ defmodule Shuttle.Threads do
            "owner" => own_host,
            "store" => parent.felt_store,
            "parent_uid" => Map.fetch!(parent.fiber, "uid"),
+           "parent_host" => get_in(parent.fiber, ["shuttle", "host"]),
+           "parent_unresolved" => Map.get(parent, :unresolved_parent, false),
+           "anchor_uid" => Map.fetch!(parent.fiber, "uid"),
+           "parent_slug" => address(parent.fiber),
+           "retained_at" => stamp,
            "text" => "thread #{address(entry.fiber)} unblocked: #{text}",
            "wake" => false
          }, %{"kind" => "unblocked", "fiber" => thread, "text" => text}}
@@ -838,15 +1153,13 @@ defmodule Shuttle.Threads do
   end
 
   @doc "Retry persisted publications; acknowledgment means recipient mailbox enqueue, not worker consumption."
-  def retry_results(own_host) do
+  def retry_results(own_host, entries \\ []) do
     for {id, record} <- ThreadOutbox.pending(own_host) do
       # Placement is mutable; the intended orchestrator is not. Never infer a
       # new recipient from the child's current ancestry or an old slug.
-      with uid when is_binary(uid) <- record["parent_uid"],
-           stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()]),
-           {:ok, %{fibers: [parent]}} <-
-             Shuttle.FiberDocuments.get_shuttle(uid, felt_stores: stores),
-           ^uid <- parent.fiber["uid"],
+      stores = Enum.uniq([record["store"] | Shuttle.FeltStores.configured_stores()])
+
+      with {:ok, record, parent} <- prepare_recipient(id, record, entries, stores),
            {:ok, current} <- current_signal(record, id),
            true <- not current or acknowledged?(deliver(parent, record, id)) do
         ThreadOutbox.acknowledge(id)
@@ -907,7 +1220,8 @@ defmodule Shuttle.Threads do
       :local ->
         Delivery.context(parent, record["text"], id,
           wake: record["wake"],
-          thread_signal: record["signal"]
+          thread_signal: record["signal"],
+          retained_at: record["retained_at"]
         )
 
       {:remote, remote} ->
@@ -917,7 +1231,8 @@ defmodule Shuttle.Threads do
           "context_only" => true,
           "wake" => record["wake"],
           "message_id" => id,
-          "thread_signal" => record["signal"]
+          "thread_signal" => record["signal"],
+          "retained_at" => record["retained_at"]
         })
 
       {:error, _} = error ->
@@ -1039,29 +1354,39 @@ defmodule Shuttle.Threads do
 
   defp matches_signal?(entry, params) do
     fiber = entry.fiber
-    archived = fiber["status"] == "closed" and is_boolean(fiber["tempered"])
 
-    not archived and
-      Enum.any?(signals(fiber), fn {verb, stamp, _, _} ->
-        case params["signal"] do
-          %{"uid" => uid, "verb" => ^verb, "stamp" => ^stamp} ->
-            uid == (fiber["uid"] || fiber["id"])
+    Enum.any?(signals(fiber), fn {verb, stamp, _, _} ->
+      case params["signal"] do
+        %{"uid" => uid, "verb" => ^verb, "stamp" => ^stamp} ->
+          uid == (fiber["uid"] || fiber["id"])
 
-          nil ->
-            params["message_id"] ==
-              "thread-" <>
-                digest({entry.felt_store, fiber["uid"] || fiber["id"], verb, stamp})
+        nil ->
+          params["message_id"] ==
+            "thread-" <>
+              digest({entry.felt_store, fiber["uid"] || fiber["id"], verb, stamp})
 
-          _ ->
-            false
-        end
-      end)
+        _ ->
+          false
+      end
+    end)
   end
 
   defp after_baseline?(stamp, baseline) do
     case DateTime.from_iso8601(stamp) do
       {:ok, time, _} -> DateTime.compare(time, baseline) == :gt
       _ -> false
+    end
+  end
+
+  defp close_verb(%{"tempered" => true}), do: "closed (tempered)"
+  defp close_verb(%{"tempered" => false}), do: "closed (discarded)"
+  defp close_verb(_), do: "closed"
+
+  defp close_text(fiber) do
+    case fiber["tempered"] do
+      true -> (fiber["outcome"] || "") <> " (human verdict: tempered)"
+      false -> (fiber["outcome"] || "") <> " (human verdict: discarded)"
+      _ -> fiber["outcome"] || ""
     end
   end
 
@@ -1087,8 +1412,9 @@ defmodule Shuttle.Threads do
       cond do
         fiber["status"] == "closed" && fiber["closed_at"] ->
           [
-            {"closed", fiber["closed_at"], fiber["outcome"] || "",
-             runtime["quiet_closed_at"] != fiber["closed_at"]}
+            {close_verb(fiber), fiber["closed_at"], close_text(fiber),
+             not is_boolean(fiber["tempered"]) and
+               runtime["quiet_closed_at"] != fiber["closed_at"]}
           ]
 
         fiber["status"] == "open" && fiber["horizon"] == "stashed" && handed ->

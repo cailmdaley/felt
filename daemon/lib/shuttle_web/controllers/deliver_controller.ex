@@ -47,7 +47,8 @@ defmodule ShuttleWeb.DeliverController do
           "sender_proof",
           "wake",
           "unless_live",
-          "thread_signal"
+          "thread_signal",
+          "retained_at"
         ])
       )
 
@@ -90,6 +91,7 @@ defmodule ShuttleWeb.DeliverController do
 
               context_reply(fiber_id, text, context["message_id"],
                 wake: context["wake"] == true,
+                retained_at: context["retained_at"],
                 thread_signal: context["thread_signal"],
                 unless_live: context["unless_live"] == true,
                 from: sender,
@@ -100,8 +102,7 @@ defmodule ShuttleWeb.DeliverController do
                 reply_to: context["reply_to"],
                 notify_address: context["notify_address"],
                 notify_when_idle: context["notify_when_idle"] == true,
-                notify_wake: context["notify_wake"] == true,
-                thread_signal: context["thread_signal"]
+                notify_wake: context["notify_wake"] == true
               )
             else
               {sender, claim} =

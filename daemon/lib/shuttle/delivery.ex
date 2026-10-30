@@ -151,6 +151,9 @@ defmodule Shuttle.Delivery do
             do: args ++ ["--thread-signal", Jason.encode!(opts[:thread_signal])],
             else: args
 
+        args =
+          if opts[:retained_at], do: args ++ ["--retained-at", opts[:retained_at]], else: args
+
         proof_input =
           if opts[:sender_proof],
             do: Jason.encode!(%{"sender_proof" => opts[:sender_proof]}) <> "\n",
