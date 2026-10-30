@@ -1,3 +1,4 @@
+import { clockTime } from '../civilDay.js'
 import { documentLabelMetadata, lastSent, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 
 /** Receipt-backed files, newest first. */
@@ -11,7 +12,7 @@ const FULL: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour:
 /** A narrow column's stamp: the time today, the date otherwise, the year only when it differs. */
 export function compactStamp(at: number, now = Date.now()): string {
   const when = new Date(at), today = new Date(now)
-  if (when.toDateString() === today.toDateString()) return when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (when.toDateString() === today.toDateString()) return clockTime(at)
   return when.toLocaleDateString(undefined, when.getFullYear() === today.getFullYear() ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
@@ -25,7 +26,7 @@ export function sentFileRow(channel: Channel, doc: WorkspaceDocument, selected: 
   const at = lastSent(doc)
   if (at !== undefined) {
     time.dateTime = new Date(at).toISOString()
-    time.textContent = compact ? compactStamp(at) : new Date(at).toLocaleString(undefined, FULL)
+    time.textContent = compact ? compactStamp(at) : `${new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${clockTime(at)}`
     if (compact) time.title = new Date(at).toLocaleString(undefined, FULL)
   } else time.textContent = 'Date unknown'
   row.append(label, time)

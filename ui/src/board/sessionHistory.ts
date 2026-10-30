@@ -15,7 +15,7 @@
  * host's answers swapped in as they arrive. A host the composite reports stale
  * is not asked.
  */
-import { DATE_AND_TIME, formatInstant, hostZone, isoDayLocal, type Zone } from './civilDay.js'
+import { clockTime, DATE_AND_TIME, formatInstant, hostZone, isoDayLocal, type Zone } from './civilDay.js'
 import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE, CONVERSATION_OPENING_CHANGED, type ClaudeOpening } from './conversationOpening.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
@@ -196,7 +196,7 @@ export function sessionTargets(
 
 /** `14:02` today, `Sep 26 14:02` otherwise — the strip's clock, 24-hour. */
 export function sessionWhen(ms: number, nowMs: number = Date.now(), z: Zone = hostZone()): string {
-  const time = formatInstant(ms, { hour: '2-digit', minute: '2-digit', hour12: false }, z)
+  const time = clockTime(ms, z)
   const day = isoDayLocal(ms, z)
   const today = isoDayLocal(nowMs, z)
   if (day === today) return time

@@ -1,3 +1,4 @@
+import { ago, clockTime } from '../civilDay.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { readFiber } from './fiberSource.js'
 import { inLane } from '../requestLanes.js'
@@ -96,15 +97,8 @@ function place(parent: HTMLElement, children: HTMLElement[]): void {
   const keep = new Set(children)
   for (const child of [...parent.children]) if (!keep.has(child as HTMLElement)) child.remove()
 }
-let dayMonth: Intl.DateTimeFormat | undefined
 function age(timestamp: number): string {
-  if (!timestamp) return 'Opened this session'
-  const minutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60000))
-  if (minutes < 1) return 'just now'
-  if (minutes < 60) return `${minutes}m ago`
-  if (minutes < 1440) return `${Math.floor(minutes / 60)}h ago`
-  dayMonth ??= new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' })
-  return dayMonth.format(timestamp)
+  return timestamp ? ago(timestamp) : 'Opened this session'
 }
 interface Receipt extends ShelfFile { key: DocKey; uid: string; owner: string }
 interface Folio {
@@ -793,7 +787,7 @@ export class Overview {
     const documentCount = new Set(newDocuments.map(r => r.key)).size
     const constitutionCount = new Set([...newDocuments.map(r => r.uid), ...changes.map(c => c.uid)]).size
     const reviewCount = this.opts.cards().filter(c => deskColumn(c) === 'awaitingReview').length
-    const prefix = this.previousVisit ? `Since you were here at ${new Date(this.previousVisit).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'The last 30 days'
+    const prefix = this.previousVisit ? `Since you were here at ${clockTime(this.previousVisit)}` : 'The last 30 days'
     text(this.summary, `${prefix}: ${documentCount} ${documentCount === 1 ? 'document' : 'documents'} in ${constitutionCount} ${constitutionCount === 1 ? 'constitution' : 'constitutions'}; ${reviewCount} await your review.`)
     this.startVisit()
     if (!this.status.textContent || this.status.textContent.startsWith('No ')) text(this.status, this.folios.size ? grouped.some(([, rows]) => rows.some(matches)) ? '' : 'No work matches Find.' : 'No receipts in the last 30 days. Open a fiber to keep it here this session.')

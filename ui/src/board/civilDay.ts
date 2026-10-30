@@ -150,6 +150,22 @@ export function hostZone(): Zone {
   return host.zone
 }
 
+/** Format an instant's wall clock as zero-padded 24-hour HH:MM. */
+export function clockTime(ms: number, z = hostZone()): string {
+  const d = wall(ms, z)
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
+}
+
+/** Format an instant's age; optionally show seconds for live polling. Future instants read as now. */
+export function ago(ms: number, now = Date.now(), options: { seconds?: boolean } = {}): string {
+  const elapsed = Math.max(0, now - ms)
+  if (elapsed < 60_000) return options.seconds ? `${Math.floor(elapsed / 1000)}s ago` : 'just now'
+  if (elapsed < HOUR_MS) return `${Math.floor(elapsed / 60_000)}m ago`
+  if (elapsed < 48 * HOUR_MS) return `${Math.floor(elapsed / HOUR_MS)}h ago`
+  if (elapsed < 60 * DAY_MS) return `${Math.floor(elapsed / DAY_MS)}d ago`
+  return `${Math.floor(elapsed / (30 * DAY_MS))}mo ago`
+}
+
 /** An instant's wall clock in a zone, as a Date read with its UTC getters. */
 function wall(ms: number, z: Zone): Date {
   return new Date(ms + z.offsetMs(ms))

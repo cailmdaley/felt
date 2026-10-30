@@ -1,6 +1,6 @@
 import { fileBytesUrl, renderMarkdown } from '../utils.js'
 import { sessionWhen } from '../sessionHistory.js'
-import { DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
+import { clockTime, DATE_AND_TIME, formatInstant, formatSpanMinutes } from '../civilDay.js'
 import { fileKind } from '../attachments.js'
 import { sentFileSends, type SentFile } from '../sentFiles.js'
 import { TranscriptModel, segments, type SentFileNotice, type Step, type ToolStep, type Turn } from './model.js'
@@ -198,7 +198,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
       toggle.append(stamp)
     }
     const when = clock(entry.at)
-    if (stamp.textContent !== ` · ${when.text}`) stamp.textContent = ` · ${when.text}`
+    if (stamp.textContent !== when.text) stamp.textContent = when.text
     setAttr(stamp, 'title', when.title)
   }
   setAttr(row, 'data-status', entry.status ?? '')
@@ -361,7 +361,7 @@ function createButton(className: string, text: string): HTMLButtonElement {
 
 function clock(ms: number): { text: string; title: string } {
   return {
-    text: formatInstant(ms, { hour: '2-digit', minute: '2-digit', hour12: false }),
+    text: clockTime(ms),
     title: formatInstant(ms, DATE_AND_TIME),
   }
 }
@@ -546,10 +546,7 @@ function setKicker(kicker: HTMLElement, author: string, speaker: Speaker, time?:
     stamp.className = 'ws-transcript-clock'
     stamp.textContent = when.text
     stamp.title = when.title
-    const separator = document.createElement('span')
-    separator.className = 'ws-transcript-sep'
-    separator.textContent = ' · '
-    kicker.append(separator, stamp)
+    kicker.append(stamp)
   }
 }
 

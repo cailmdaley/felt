@@ -28,7 +28,8 @@
 
 import { useEffect, useState } from 'react'
 
-import { ago, useQuietPoll } from './live'
+import { ago } from '../../board/civilDay.js'
+import { useQuietPoll } from './live'
 
 import {
   loadHostState,
@@ -48,7 +49,7 @@ function when(iso: string | undefined): string {
   if (!iso || iso === 'unknown') return 'unknown'
   const then = Date.parse(iso)
   if (Number.isNaN(then)) return iso
-  return `${iso.replace('T', ' ').replace(/\.\d+Z?$/, '')} · ${ago(then)}`
+  return `${iso.replace('T', ' ').replace(/\.\d+Z?$/, '')} · ${ago(then, Date.now(), { seconds: true })}`
 }
 
 export function HostSection({ shuttleBase, host }: HostSectionProps): JSX.Element {

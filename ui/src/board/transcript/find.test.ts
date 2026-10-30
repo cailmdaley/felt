@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import {
-  ago, containsAll, findMatches, hitLocation, markTerms, nearestMatch, projectName, queryTerms,
+  containsAll, findMatches, hitLocation, markTerms, nearestMatch, projectName, queryTerms,
   searchTranscripts, snippetPieces, snippetTerms, termPattern, unmark,
 } from './find.js'
+import { ago } from '../civilDay.js'
 import type { Turn } from './model.js'
 
 const turn = (index: number, prompt: string | null, texts: Array<[string, number?]> = []): Turn => ({

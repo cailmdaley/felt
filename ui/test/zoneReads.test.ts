@@ -93,6 +93,25 @@ it('reads the local zone only through civilDay.ts', () => {
   expect(reads, 'route these through a civilDay.ts helper that takes a Zone').toEqual([])
 })
 
+it('formats clocks and relative ages only in civilDay.ts', () => {
+  const violations = sources(SRC).flatMap((path) => {
+    const file = relative(SRC, path).split('\\').join('/')
+    if (file === OWNER) return []
+    const sf = ts.createSourceFile(file, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true)
+    const found: string[] = []
+    const visit = (node: ts.Node): void => {
+      const clock = ts.isPropertyAccessExpression(node) && node.name.text === 'toLocaleTimeString'
+      const hour = ts.isPropertyAssignment(node) && node.name.getText(sf) === 'hour' && ts.isStringLiteral(node.initializer) && node.initializer.text === '2-digit'
+      const relative = ts.isTemplateExpression(node) && node.templateSpans.some(span => /^m ago\b/.test(span.literal.text))
+      if (clock || hour || relative) found.push(`${file}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`)
+      ts.forEachChild(node, visit)
+    }
+    visit(sf)
+    return found
+  })
+  expect(violations).toEqual([])
+})
+
 it('sees the reads it exists to catch', () => {
   // The scan's own canary: each of these must be found, and comments, strings
   // and UTC getters must not be.

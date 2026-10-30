@@ -1,4 +1,5 @@
-import { ago, hitLocation, projectName, searchTranscripts, snippetPieces, type TranscriptHit } from '../transcript/find.js'
+import { ago } from '../civilDay.js'
+import { hitLocation, projectName, searchTranscripts, snippetPieces, type TranscriptHit } from '../transcript/find.js'
 import './transcriptResults.css'
 
 /** Session hits below the bar Find's constitution rows; owns its debounce and request lifetime. */

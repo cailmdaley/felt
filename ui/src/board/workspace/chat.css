@@ -148,7 +148,7 @@
 .ws-chat .ws-transcript-inline .ws-transcript-turn { gap: var(--rhythm-row); padding-block: 18px 6px; }
 .ws-chat .ws-transcript-inline .ws-transcript-turn > .ws-transcript-msg + .ws-transcript-msg { margin-top: calc(var(--rhythm-prose) - var(--rhythm-row)); }
 .ws-chat .ws-transcript-inline .ws-transcript-turn + .ws-transcript-turn { border-top: 0; }
-/* Your turns are a soft bubble at the column's right, a step lighter than the page, the time under it; the worker's are prose. */
+/* Your turns are a soft bubble at the column's right; the worker's are prose. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you {
   display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end;
   max-width: 70%; padding: 0; border: 0; border-radius: 0; background: none;
@@ -160,10 +160,10 @@
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
-  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--type-meta); color: var(--ws-ink-muted);
+  order: -1; align-self: stretch; justify-content: flex-end; margin: 0 2px 4px; font-size: var(--type-meta); color: var(--ws-ink-muted);
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
-/* The bubble already says who spoke; the line under it keeps the time. */
+/* The bubble already says who spoke; its kicker keeps the time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
 /* The session's brief is not your turn: a quiet line at the column's left, opening into plain text. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you.ws-transcript-msg-brief { align-self: stretch; align-items: flex-start; max-width: none; }

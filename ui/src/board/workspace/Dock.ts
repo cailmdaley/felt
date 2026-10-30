@@ -19,7 +19,7 @@ import { TranscriptBand, type TranscriptTarget } from '../transcript/TranscriptB
 import { coarsePointer, isMobileViewport } from '../mobile.js'
 import { humanizeCron } from '../KanbanRules.js'
 import { formatDue } from '../KanbanSurfaces.js'
-import { dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
+import { clockTime, dueCivilDay, formatSpanMinutes, instantMs, isoDayLocal } from '../civilDay.js'
 import { PastedImages, buildImageStrip, composeDirective, filesFromTransfer, pastedImageFiles, transferHasFiles, uploadPastedImages } from '../pastedImages.js'
 import { dressVerb, headerLifecycleVerbsFor, SESSION_VERBS, sessionVerbsFor } from './lifecycleVerbs.js'
 import { deskColumn } from '../deskColumn.js'
@@ -51,17 +51,6 @@ function latestTarget(card: KanbanCard): TranscriptTarget | null {
     tasks: card.workerTasks,
     at: instantMs(card.dispatchedAt),
   } : null
-}
-
-function clockTime(ms: number): string {
-  // 24-hour regardless of locale: the line is a mono strip where two times sit
-  // side by side, and `11:59 AM · 03:35 PM` is both wider and harder to subtract
-  // than `11:59 · 15:35`. The full localized stamp is on the hover.
-  return new Date(ms).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
 }
 
 /** A calendar day in front of a clock time — `Aug 4 12:01`. Used only when the

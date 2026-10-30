@@ -207,7 +207,7 @@
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-you,
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-dispatch { color: var(--ws-you); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-author-agent { color: var(--ws-machine); }
-:is(.ws-dock, .ws-transcript-pane) .ws-transcript-clock { color: var(--ws-ink-muted); font: var(--type-meta) var(--font-mono); }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-clock { margin-left: auto; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-prompt-text {
   max-height: 4.6em;
   overflow: hidden;
@@ -556,10 +556,10 @@
 }
 .ws-transcript-message-expander[open] .ws-transcript-message-preview { display: none; }
 .ws-transcript-message-thread-state { flex: 0 0 auto; color: var(--ws-ink-soft); font: var(--type-note)/var(--leading-ui) var(--font-serif); }
-.ws-transcript-message-toggle::after { flex: 0 0 auto; margin-left: auto; content: '⌄'; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
+.ws-transcript-message-toggle::after { flex: 0 0 auto; content: '⌄'; color: var(--ws-ink-faint, var(--ws-ink-muted)); }
 .ws-transcript-message-toggle[data-expanded='true']::after { content: '⌃'; }
 .ws-transcript-message-toggle:hover { color: var(--ws-ink); }
-.ws-transcript-message-time { flex: 0 0 auto; margin-left: auto; font: var(--type-meta) var(--font-mono); }
+.ws-transcript-message-time { order: 1; flex: 0 0 auto; margin-left: auto; font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
 .ws-transcript-message-detail { margin: 5px 0 1px; padding-left: 9px; border-left: 1px solid var(--ws-hairline); color: var(--ws-ink-soft); }
 .ws-transcript-message-detail[hidden], .ws-transcript-message-thread-state[hidden], .ws-transcript-message-text[hidden], .ws-transcript-message-source[hidden], .ws-transcript-message-command[hidden], .ws-transcript-message-outcome[hidden] { display: none; }
 .ws-transcript-message-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -569,17 +569,14 @@
   margin: 6px 0 0;
   overflow: auto;
   color: var(--ws-ink-muted);
-  font: var(--type-code) var(--font-mono);
+  font: var(--type-code-block)/var(--leading-ui) var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-@media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
-  .ws-transcript-message-time { display: none; }
 }
 /* A sent-file row is its time and its chips; the chips carry the only frame. */
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-msg.ws-transcript-sent-file {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   margin: 0;
   padding: 0;
@@ -589,7 +586,7 @@
   color: var(--ws-ink-muted);
   font-size: var(--type-note);
 }
-.ws-transcript-sent-file > time { flex: 0 0 auto; font: var(--type-meta) var(--font-mono); }
+.ws-transcript-sent-file > time { order: 1; flex: 0 0 auto; margin-left: auto; font: var(--type-meta)/var(--leading-ui) var(--font-mono); }
 .ws-transcript-sent-files { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .ws-transcript-sent-file-item {
   display: inline-flex;

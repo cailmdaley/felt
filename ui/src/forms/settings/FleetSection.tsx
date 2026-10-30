@@ -40,7 +40,8 @@ import { useEffect, useState } from 'react'
 
 import { FileEditor } from './FileEditor'
 import { useSettingsDraft } from './SettingsDraftContext'
-import { ago as agoMs, useQuietPoll } from './live'
+import { ago as agoMs } from '../../board/civilDay.js'
+import { useQuietPoll } from './live'
 import {
   loadFleet,
   removeRemote,
@@ -62,7 +63,7 @@ export interface FleetSectionProps {
 function ago(iso: string | null): string {
   if (!iso) return 'never'
   const then = Date.parse(iso)
-  return Number.isNaN(then) ? 'unknown' : agoMs(then)
+  return Number.isNaN(then) ? 'unknown' : agoMs(then, Date.now(), { seconds: true })
 }
 
 /** How this host reaches that one, in one line. */

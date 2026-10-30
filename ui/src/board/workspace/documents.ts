@@ -1,3 +1,4 @@
+import { ago } from '../civilDay.js'
 import { extractEmbeds, fileKind } from '../attachments.js'
 import { declaredTitle } from './DocumentTitles.js'
 
@@ -329,10 +330,7 @@ export function buildChannel(input: ChannelInput): Channel {
 
 /** The frame owns document naming and arrival metadata; renderers own content only. */
 export function documentLabelMetadata(doc: WorkspaceDocument, label: string, channelOwner: string, now = Date.now()): { title: string; summary: string } {
-  const age = (time: number): string => {
-    const minutes = Math.max(0, Math.round((now - time) / 60000))
-    return `${minutes < 60 ? `${minutes}m` : minutes < 1440 ? `${Math.floor(minutes / 60)}h` : `${Math.floor(minutes / 1440)}d`} ago`
-  }
+  const age = (time: number): string => ago(time, now)
   if (doc.kind === 'chat') return { title: '', summary: 'Conversation' }
   if (doc.kind === 'fiber') {
     const time = doc.modifiedAt ? Date.parse(doc.modifiedAt) : NaN

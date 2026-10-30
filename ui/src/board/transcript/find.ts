@@ -208,19 +208,6 @@ export function snippetTerms(snippet: string): string[] {
   return queryTerms(snippetPieces(snippet).filter((piece) => piece.hit).map((piece) => piece.text).join(' '))
 }
 
-/** `3d ago`, `5h ago`, `just now`: the age of an instant at a glance. */
-export function ago(ms: number, now: number = Date.now()): string {
-  const seconds = Math.max(0, Math.round((now - ms) / 1000))
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 48) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 60) return `${days}d ago`
-  return `${Math.round(days / 30)}mo ago`
-}
-
 /** The last path segment of a session's directory. */
 export function projectName(path: string): string {
   return path.replace(/\/+$/, '').split('/').pop() ?? ''
