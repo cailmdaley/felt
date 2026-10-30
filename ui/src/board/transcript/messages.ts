@@ -24,6 +24,8 @@ export interface ShuttleMessage {
   commandIndex?: number
   commandCount?: number
   commandSegmentCount?: number
+  /** The shell command containing this send has no runtime receipt-producing substitutions. */
+  receiptSafe?: boolean
   /** Hide a tool call that contains only sends; its source is shown in the expanded row. */
   hideTool?: boolean
   /** The Codex wrapper can report an error from a non-shell operation. */
@@ -162,7 +164,7 @@ export function shuttleMessages(source: string, at?: number, anchored = false, p
 }
 
 type ToolCall = { id: string; name: string; input: unknown; at?: number }
-type ShellCommand = { words: string[]; chain: number }
+type ShellCommand = { words: string[]; chain: number; impure: boolean }
 type ShellParse = { commands: ShellCommand[]; substitutions: Map<string, string>; heredocs: Map<string, string> }
 type ParsedSend = { target: string; text: string; source?: string; messageId?: string }
 type CommandCollection = { sends: ParsedSend[]; chains: Map<string, boolean>; segmentCount: number }
@@ -242,7 +244,7 @@ function expandCatHereDocs(source: string): { source: string; substitutions: Map
   return { source: output, substitutions }
 }
 
-function readHereDocDelimiter(line: string, start: number): { delimiter: string; stripTabs: boolean; end: number } | undefined {
+function readHereDocDelimiter(line: string, start: number): { delimiter: string; stripTabs: boolean; expand: boolean; end: number } | undefined {
   let index = start + 2
   let stripTabs = false
   if (line[index] === '-') { stripTabs = true; index++ }
@@ -253,15 +255,16 @@ function readHereDocDelimiter(line: string, start: number): { delimiter: string;
   const delimiter = line.slice(startWord, index)
   if (!delimiter) return undefined
   if (quote && line[index] === quote) index++
-  return { delimiter, stripTabs, end: index }
+  return { delimiter, stripTabs, expand: quote === '', end: index }
 }
 
 /** Replace here-document bodies with tokens before tokenizing; bodies are input, never commands. */
-function stripHereDocBodies(source: string): { source: string; bodies: Map<string, string> } {
+function stripHereDocBodies(source: string): { source: string; bodies: Map<string, string>; impure: Set<string> } {
   const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? []
   const output: string[] = []
   const bodies = new Map<string, string>()
-  const pending: Array<{ delimiter: string; stripTabs: boolean; marker: string; lines: string[] }> = []
+  const impure = new Set<string>()
+  const pending: Array<{ delimiter: string; stripTabs: boolean; expand: boolean; marker: string; lines: string[] }> = []
   let next = 0
   let quote = ''
   let escaped = false
@@ -273,7 +276,9 @@ function stripHereDocBodies(source: string): { source: string; bodies: Map<strin
       const bodyLine = line.replace(/\r?\n$/, '')
       const comparable = current.stripTabs ? bodyLine.replace(/^\t+/, '') : bodyLine
       if (comparable === current.delimiter) {
-        bodies.set(current.marker, current.lines.join('\n'))
+        const body = current.lines.join('\n')
+        bodies.set(current.marker, body)
+        if (current.expand && hasHereDocCommandSubstitution(body)) impure.add(current.marker)
         pending.shift()
       } else current.lines.push(comparable)
       if (/\r?\n$/.test(line) && pending.length === 0) output.push('\n')
@@ -297,7 +302,7 @@ function stripHereDocBodies(source: string): { source: string; bodies: Map<strin
         const heredoc = readHereDocDelimiter(line, index)
         if (heredoc) {
           const marker = `__FELT_INPUT_HEREDOC_${next++}__`
-          pending.push({ delimiter: heredoc.delimiter, stripTabs: heredoc.stripTabs, marker, lines: [] })
+          pending.push({ delimiter: heredoc.delimiter, stripTabs: heredoc.stripTabs, expand: heredoc.expand, marker, lines: [] })
           cleaned += ` ${marker} `
           index = heredoc.end - 1
           continue
@@ -307,7 +312,36 @@ function stripHereDocBodies(source: string): { source: string; bodies: Map<strin
     }
     output.push(cleaned)
   }
-  return { source: output.join(''), bodies }
+  return { source: output.join(''), bodies, impure }
+}
+
+function hasHereDocCommandSubstitution(source: string): boolean {
+  for (let index = 0; index < source.length; index++) {
+    if (source[index] === '\\') { index++; continue }
+    if (source[index] === '`' || source[index] === '$' && source[index + 1] === '(') return true
+  }
+  return false
+}
+
+function hasRuntimeSubstitution(source: string): boolean {
+  let quote = ''
+  let escaped = false
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index]
+    if (escaped) { escaped = false; continue }
+    if (quote === "'") { if (char === "'") quote = ''; continue }
+    if (quote === '"') {
+      if (char === '"') quote = ''
+      else if (char === '\\') escaped = true
+      else if (char === '`' || char === '$' && source[index + 1] === '(') return true
+      continue
+    }
+    if (char === '\\') { escaped = true; continue }
+    if (char === "'" || char === '"') { quote = char; continue }
+    if (char === '`' || char === '$' && source[index + 1] === '('
+      || (char === '<' || char === '>') && source[index + 1] === '(') return true
+  }
+  return false
 }
 
 function redirectionEnd(source: string, start: number): number {
@@ -335,6 +369,35 @@ function redirectionEnd(source: string, start: number): number {
   return index
 }
 
+function parenthesizedEnd(source: string, open: number): number {
+  let depth = 0
+  let quote = ''
+  let escaped = false
+  for (let index = open; index < source.length; index++) {
+    const char = source[index]
+    if (escaped) { escaped = false; continue }
+    if (quote === "'") { if (char === "'") quote = ''; continue }
+    if (quote === '"') {
+      if (char === '"') quote = ''
+      else if (char === '\\') escaped = true
+      continue
+    }
+    if (char === '\\') { escaped = true; continue }
+    if (char === "'" || char === '"') { quote = char; continue }
+    if (char === '(') depth++
+    else if (char === ')' && --depth === 0) return index + 1
+  }
+  return source.length
+}
+
+function backtickEnd(source: string, start: number): number {
+  for (let index = start + 1; index < source.length; index++) {
+    if (source[index] === '\\') { index++; continue }
+    if (source[index] === '`') return index + 1
+  }
+  return source.length
+}
+
 function shellSegments(source: string): ShellParse {
   const expanded = expandCatHereDocs(source)
   const heredocs = stripHereDocBodies(expanded.source)
@@ -346,11 +409,18 @@ function shellSegments(source: string): ShellParse {
   let quote = ''
   let escaped = false
   let chain = 0
+  let commandImpure = false
 
   const pushWord = () => {
     if (active) {
       let value = word
-      for (const [marker, body] of expanded.substitutions) value = value.split(marker).join(body)
+      for (const [marker, body] of expanded.substitutions) {
+        if (value.includes(marker)) commandImpure = true
+        value = value.split(marker).join(body)
+      }
+      for (const marker of heredocs.impure) {
+        if (value.includes(marker)) commandImpure = true
+      }
       words.push(value)
     }
     word = ''
@@ -358,8 +428,9 @@ function shellSegments(source: string): ShellParse {
   }
   const pushPipelineCommand = () => {
     pushWord()
-    if (words.length) commands.push({ words, chain })
+    if (words.length) commands.push({ words, chain, impure: commandImpure })
     words = []
+    commandImpure = false
   }
   const pushSequence = () => {
     const hadCommand = words.length > 0 || active
@@ -382,21 +453,45 @@ function shellSegments(source: string): ShellParse {
     }
     if (quote === '"') {
       if (char === '"') quote = ''
-      else if (char === '\\' && index + 1 < clean.length) {
+      else if ((char === '$' && clean[index + 1] === '(') || char === '`') {
+        const end = char === '`' ? backtickEnd(clean, index) : parenthesizedEnd(clean, index + 1)
+        commandImpure = true
+        word += clean.slice(index, end)
+        active = true
+        index = end - 1
+      } else if (char === '\\' && index + 1 < clean.length) {
         const next = clean[index + 1]
         if (next === '$' || next === '`' || next === '"' || next === '\\' || next === '\n') escaped = true
         else word += char
       } else word += char
       continue
     }
+    if ((char === '<' || char === '>') && clean[index + 1] === '(') {
+      const end = parenthesizedEnd(clean, index + 1)
+      commandImpure = true
+      word += clean.slice(index, end)
+      active = true
+      index = end - 1
+      continue
+    }
     if ((char === '<' || char === '>') || char === '&' && clean[index + 1] === '>') {
       if (/^\d+$/.test(word)) { word = ''; active = false }
       else pushWord()
-      index = redirectionEnd(clean, index) - 1
+      const end = redirectionEnd(clean, index)
+      if (hasRuntimeSubstitution(clean.slice(index, end))) commandImpure = true
+      index = end - 1
       continue
     }
     if (char === '\\') { escaped = true; active = true; continue }
     if (char === "'" || char === '"') { quote = char; active = true; continue }
+    if (char === '`') {
+      const end = backtickEnd(clean, index)
+      commandImpure = true
+      word += clean.slice(index, end)
+      active = true
+      index = end - 1
+      continue
+    }
     if (char === '$' && clean[index + 1] === '(') {
       // Keep command substitutions intact so their arguments cannot become shell separators.
       let depth = 1, end = index + 2, nestedQuote = ''
@@ -410,6 +505,7 @@ function shellSegments(source: string): ShellParse {
       }
       word += clean.slice(index, end)
       active = true
+      commandImpure = true
       index = end - 1
       continue
     }
@@ -555,14 +651,14 @@ function collectShell(source: string, namespace: string, depth = 0): CommandColl
     if (wrapped !== undefined) {
       const nested = collectShell(wrapped, key, depth + 1)
       segmentCount += nested.segmentCount
-      for (const [nestedKey, hasSend] of nested.chains) chains.set(nestedKey, hasSend)
+      for (const [nestedKey, hasSend] of nested.chains) chains.set(nestedKey, hasSend && !command.impure)
       sends.push(...nested.sends)
       if (!nested.chains.size) chains.set(key, false)
       continue
     }
     segmentCount++
     const send = messageCommand(command.words, parsed.heredocs)
-    chains.set(key, (chains.get(key) ?? true) && !!send)
+    chains.set(key, (chains.get(key) ?? true) && !!send && !command.impure)
     if (send) sends.push(send)
   }
   return { sends, chains, segmentCount }
@@ -709,6 +805,8 @@ export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
   return parsedSends.map((parsed, index) => {
     const peer = peerFor(parsed.target)
     const commandIndex = collected.findIndex(result => result.sends.includes(parsed))
+    const commandChains = [...(collected[commandIndex]?.chains.values() ?? [])]
+    const receiptSafe = shellOnlyWrapper && commandChains.length > 0 && commandChains.every(Boolean)
     return withTime({
       kind: 'shuttle-message' as const,
       id: `sent:${tool.id}:${index}`,
@@ -721,6 +819,7 @@ export function sentShuttleMessages(tool: ToolCall): ShuttleMessage[] {
       commandIndex,
       commandCount: commands.length,
       commandSegmentCount: collected[commandIndex]?.segmentCount ?? 1,
+      ...(receiptSafe ? { receiptSafe: true } : {}),
       hideTool: pureSend,
       ...(tool.name === 'exec' && !shellOnlyWrapper ? { resultMayBeUnattributed: true } : {}),
       ...(pureSend ? { rawCommand: commands[commandIndex] } : {}),

@@ -210,6 +210,16 @@ describe('Shuttle messages in transcripts', () => {
     expect(fromStdin[0]).toMatchObject({ kind: 'shuttle-message', text: "$(cat <<'EOF'\nA literal code example.\nEOF\n)" })
   })
 
+  it.each([
+    ['single-quoted', `shuttle message work/child '$(printf literal)'`],
+    ['escaped', 'shuttle message work/child \\$(printf literal)'],
+  ])('keeps %s command substitution text pure', (_shape, command) => {
+    const entries = normalizeRecord({ type: 'assistant', message: { content: [{
+      type: 'tool_use', id: 'literal-substitution', name: 'Bash', input: { command },
+    }] } })
+    expect(entries[0]).toMatchObject({ kind: 'shuttle-message', hideTool: true, rawCommand: command })
+  })
+
   it('does not absorb redirects or pipeline commands into the message text', () => {
     const command = 'shuttle message work/child "The table is ready." 2>&1 | tail > result.txt'
     const entries = normalizeRecord({ type: 'assistant', message: { content: [{

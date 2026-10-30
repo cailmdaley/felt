@@ -171,7 +171,7 @@ export class TranscriptModel {
           rowsByCommand.set(commandIndex, [...(rowsByCommand.get(commandIndex) ?? []), row])
         }
         const allSegmentsAreMessages = messages.length > 0 && [...rowsByCommand.values()].every(rows =>
-          rows.length === (rows[0].message.commandSegmentCount ?? 1))
+          rows.length === (rows[0].message.commandSegmentCount ?? 1) && rows.every(row => row.message.receiptSafe === true))
         const topLevelReceiptsTrusted = allSegmentsAreMessages && !explicitlyIndexed
           && messages.every(({ message }) => !message.resultMayBeUnattributed)
         const topLevelAcceptedReceipts = topLevelReceiptsTrusted ? entry.acceptedMessageReceipts ?? [] : []
@@ -182,18 +182,23 @@ export class TranscriptModel {
         const topLevelUnknownMatches = matchedReceipts(
           topLevelUnknownReceipts, messages.map(row => row.message), allSegmentsAreMessages && !explicitlyIndexed, !explicitlyIndexed,
         )
+        const repeatedMessageIds = new Set(messages.flatMap(({ message }) => message.messageId
+          && messages.some(({ message: other }) => other !== message && other.messageId === message.messageId)
+          ? [message.messageId] : []))
+        const indexedMessageIds = new Set([...repeatedMessageIds].filter(id => messages
+          .filter(({ message }) => message.messageId === id)
+          .every(({ message }) => indexedOutcomes.some(outcome => outcome.index === (message.commandIndex ?? 0)))))
         for (const reference of messages) {
           const message = reference.message
           const commandIndex = message.commandIndex ?? 0
           const commandRows = rowsByCommand.get(commandIndex) ?? []
           const commandIsPureSend = commandRows.length > 0
             && commandRows.length === (message.commandSegmentCount ?? 1)
+            && message.receiptSafe === true
           const matchingOutcomes = message.resultMayBeUnattributed ? [] : indexedOutcomes.filter(outcome => outcome.index !== undefined
             ? outcome.index === commandIndex
             : indexedOutcomes.length === 1 && (message.commandCount ?? 1) === 1)
           const outcomeText = matchingOutcomes.length === 1 ? matchingOutcomes[0].output ?? entry.text : entry.text
-          const topAccepted = topLevelReceiptsTrusted ? (entry.acceptedMessageReceipts ?? []).map(receipt => receipt.id) : []
-          const topUnknown = topLevelReceiptsTrusted ? (entry.unknownMessageReceipts ?? []).map(receipt => receipt.id) : []
           const commandAcceptedReceipts = commandIsPureSend ? matchingOutcomes.flatMap(outcome => outcome.acceptedMessageReceipts) : []
           const commandUnknownReceipts = commandIsPureSend ? matchingOutcomes.flatMap(outcome => outcome.unknownMessageReceipts) : []
           const commandAcceptedMatches = matchedReceipts(
@@ -206,21 +211,19 @@ export class TranscriptModel {
             commandRows.map(row => row.message),
             commandIsPureSend,
           )
-          const explicitIdOutcomes = message.messageId && commandIsPureSend ? matchingOutcomes : []
-          const acceptedIds = [...topAccepted, ...commandAcceptedReceipts.map(receipt => receipt.id), ...explicitIdOutcomes.flatMap(outcome => outcome.acceptedMessageReceipts.map(receipt => receipt.id))]
-          const receiptMatches = message.messageId
-            ? acceptedIds.includes(message.messageId)
-            : topLevelAcceptedMatches.has(message) || commandAcceptedMatches.has(message)
+          if (message.messageId && repeatedMessageIds.has(message.messageId) && !indexedMessageIds.has(message.messageId)) {
+            message.status = 'uncertain'
+            message.outcomeText = message.hideTool ? outcomeText.trim() || undefined : undefined
+            continue
+          }
+          const receiptMatches = topLevelAcceptedMatches.has(message) || commandAcceptedMatches.has(message)
           if (receiptMatches) {
             message.status = 'sent'
             message.outcomeText = undefined
             continue
           }
 
-          const unknownIds = [...topUnknown, ...commandUnknownReceipts.map(receipt => receipt.id), ...explicitIdOutcomes.flatMap(outcome => outcome.unknownMessageReceipts.map(receipt => receipt.id))]
-          const unknownReceiptMatches = message.messageId
-            ? unknownIds.includes(message.messageId)
-              : topLevelUnknownMatches.has(message) || commandUnknownMatches.has(message)
+          const unknownReceiptMatches = topLevelUnknownMatches.has(message) || commandUnknownMatches.has(message)
           if (unknownReceiptMatches) {
             message.status = 'uncertain'
             message.outcomeText = message.hideTool ? outcomeText.trim() || undefined : undefined
@@ -233,6 +236,7 @@ export class TranscriptModel {
           if (!failed) {
             message.status = 'uncertain'
           } else if ((explicitlyIndexed || (message.commandCount ?? 1) === 1)
+            && commandIsPureSend
             && commandRows.length === 1
             && (message.commandSegmentCount ?? 1) === 1) {
             message.status = 'failed'
