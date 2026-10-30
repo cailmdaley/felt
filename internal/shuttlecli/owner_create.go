@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
@@ -56,8 +57,14 @@ func (a *app) createRemoteFiber(owner string, f *felt.Felt, block *shuttle.Block
 	if err := json.Unmarshal(response, &created); err != nil {
 		return fmt.Errorf("parsing create response from %s: %w", owner, err)
 	}
-	if created.ID != f.ID || created.UID != f.UID {
+	if created.ID != f.ID || (f.UID != "" && created.UID != f.UID) {
 		return fmt.Errorf("owner %s created %s with uid %s; expected uid %s", owner, created.ID, created.UID, f.UID)
+	}
+	if f.UID == "" {
+		if !felt.LooksLikeUID(created.UID) || created.UID != strings.ToUpper(created.UID) {
+			return fmt.Errorf("owner %s returned no canonical intrinsic UID for %s", owner, f.ID)
+		}
+		f.UID = created.UID
 	}
 	return nil
 }

@@ -619,3 +619,78 @@ func TestShuttleRemoteDispatchReadsMessageFileFromItsWorkingDirectory(t *testing
 		})
 	}
 }
+
+func TestRemoteInstallSourceWithoutUIDUsesOwnerIdentity(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, uid string
+		wantError bool
+	}{
+		{name: "owner mints UID", uid: "01JARZ3NDEKTSV4RRFFQ69G5FA"},
+		{name: "missing owner UID", wantError: true},
+		{name: "invalid owner UID", uid: "not-a-uid", wantError: true},
+		{name: "noncanonical owner UID", uid: "01jarz3ndektsv4rrffq69g5fa", wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			path := st.Path("handwritten")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+				t.Fatal(err)
+			}
+			source := []byte("---\nname: Handwritten\nstatus: open\n---\n\nSource body.\n")
+			if err := os.WriteFile(path, source, 0644); err != nil {
+				t.Fatal(err)
+			}
+			f, err := st.Read("handwritten")
+			if err != nil || f.UID != "" {
+				t.Fatalf("source must have no UID: %+v, %v", f, err)
+			}
+			var creates requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/project-dir/resolve":
+					_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
+				case "/api/v1/lifecycle":
+					http.Error(w, `{"error":"fiber not found on worker"}`, http.StatusNotFound)
+				case "/api/v1/fiber/create":
+					creates.record(t, r)
+					_, _ = fmt.Fprintf(w, `{"id":"handwritten","uid":%q}`, tc.uid)
+				default:
+					t.Errorf("unexpected request %s", r.URL.String())
+					http.NotFound(w, r)
+				}
+			}))
+			_, _, err = executeIn(t, env, dir, "install", "handwritten", "--host", "worker", "--project-dir", "/remote/project")
+			if (err != nil) != tc.wantError {
+				t.Fatalf("install error = %v, want error %v", err, tc.wantError)
+			}
+			if got := creates.last(); got["uid"] != "" || got["id"] != "handwritten" {
+				t.Fatalf("unexpected source identity: %#v", got)
+			}
+			after, err := os.ReadFile(path)
+			if err != nil || string(after) != string(source) {
+				t.Fatalf("local source changed: %s (%v)", after, err)
+			}
+		})
+	}
+}
+
+func TestRemoteCreateRefusesChangingExistingUID(t *testing.T) {
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
+	f, err := felt.New("source", "Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := f.UID
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"id":"source","uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`))
+	}))
+	a := newApp(env)
+	err = a.createRemoteFiber("worker", f, &shuttle.Block{Kind: "oneshot", Host: "worker", ProjectDir: "/remote/project"})
+	if err == nil || f.UID != original {
+		t.Fatalf("existing source identity accepted a change: UID %s, error %v", f.UID, err)
+	}
+}
