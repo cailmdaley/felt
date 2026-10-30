@@ -481,20 +481,18 @@
   :is(.ws-dock, .ws-transcript-pane) .ws-transcript-prose { font-size: var(--type-row); }
 }
 
-/* A paste inside a prompt reads as quoted material, not as the prompt's own words. */
+/* A paste inside a prompt is distinguished by its label and muted ink. */
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-pasted {
   margin: .4em 0;
-  padding: 4px 0 4px 10px;
-  border-left: 2px solid var(--ws-hairline);
   color: var(--ws-ink-muted);
   font-size: var(--type-note);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-pasted-label {
   margin-bottom: 2px;
   color: var(--ws-ink-faint, var(--ws-ink-muted));
-  font: var(--type-meta)/var(--leading-ui) var(--font-serif);
+  font: var(--type-note)/var(--leading-ui) var(--font-serif);
   font-variant: all-small-caps;
-  letter-spacing: .04em;
+  letter-spacing: var(--track-kicker);
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }
 

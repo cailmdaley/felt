@@ -1306,7 +1306,7 @@ export class Dock {
       ruler ??= document.createElement('canvas').getContext?.('2d') ?? null
       if (!ruler) return
       const text = getComputedStyle(message), field = getComputedStyle(box)
-      ruler.font = `${text.fontStyle} ${text.fontWeight} ${text.fontSize} ${text.fontFamily}`
+      ruler.font = getComputedStyle(message).font
       const room = box.clientWidth - parseFloat(field.paddingLeft) - parseFloat(field.paddingRight)
         - foot.offsetWidth - (parseFloat(field.columnGap) || 0) - parseFloat(text.paddingLeft) - parseFloat(text.paddingRight)
       const longest = Math.max(0, ...message.value.split('\n').map(line => ruler!.measureText(line).width))
