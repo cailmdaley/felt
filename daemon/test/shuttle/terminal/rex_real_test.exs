@@ -157,7 +157,7 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
-  test "unbound viewers dedupe while live and destroy their own empty sessions on exit", %{
+  test "display-only viewers dedupe while live and destroy their own empty sessions on exit", %{
     root: root
   } do
     label = String.duplicate("probe-viewer-", 10) <> "long-name@tmux"
@@ -182,6 +182,36 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
     File.write!(gate, "exit")
     await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+  end
+
+  test "real viewer bindings join the fiber tree and an observed exit promotes their thread", %{
+    root: root
+  } do
+    Env.put_app_env(:terminal_backend, Backend)
+    gate = Path.join(root, "viewer-done")
+    command = ["/bin/bash", "-c", "while [ ! -e '#{gate}' ]; do /bin/sleep 0.05; done"]
+
+    assert {:ok, sid} =
+             Backend.viewer(@runner, "probe-parent@tmux", command, fiber: "a/design/rex")
+
+    assert :ok =
+             Terminal.launch(
+               @runner,
+               "probe-tree-thread",
+               root,
+               "trap 'rm -f \"$0\"' EXIT\nsleep 60\n", fiber: "a/design/rex/thread")
+
+    assert {:ok, sessions} = Rex.sessions(@runner)
+    assert Enum.map(sessions, & &1["label"]) == ["design/rex @tmux", "└ thread"]
+
+    assert {:ok, ^sid} =
+             Backend.viewer(@runner, "probe-parent@tmux", command, fiber: "a/design/rex")
+
+    File.write!(gate, "done")
+    await(fn -> match?({:ok, [_]}, Rex.sessions(@runner)) end)
+    assert {:ok, _} = Terminal.list(@runner, "probe-")
+    assert {:ok, [%{"label" => "rex/thread"}]} = Rex.sessions(@runner)
+    assert {"", 0} = Terminal.stop(@runner, "probe-tree-thread")
   end
 
   @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
@@ -272,7 +302,7 @@ defmodule Shuttle.Terminal.RexRealTest do
              Shuttle.Poller.claim_session(p, "claimed", sid, session_uuid: "human-native-uuid")
 
     worker = Shuttle.Poller.worker_status(p, "claimed")
-    assert {:ok, [%{"session_id" => ^sid, "label" => ^canonical}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid, "label" => "claimed"}]} = Rex.sessions(@runner)
     assert {:ok, %{"bindings" => %{^canonical => %{"session_id" => ^sid}}}} = RexBindings.read()
 
     assert {:ok, %{session: ^canonical}} =

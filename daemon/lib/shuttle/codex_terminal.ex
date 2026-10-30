@@ -108,7 +108,8 @@ defmodule Shuttle.CodexTerminal do
            (is_binary(agent.wrapper) and is_binary(cwd)) || {:error, :terminal_recipe_missing},
          :ok <- Dispatcher.preflight_terminal(agent, cwd, runner),
          :ok <- resume_exact(id, 10),
-         :ok <- Terminal.launch(runner, tmux, cwd, script(id, record, tmux)) do
+         :ok <-
+           Terminal.launch(runner, tmux, cwd, script(id, record, tmux), fiber: record["fiber_id"]) do
       AppWorkers.update(id, %{"terminal_error" => nil})
       {:ok, %{tmux_session: tmux, created: true}}
     end

@@ -15,7 +15,10 @@ defmodule Shuttle.OpenerTest do
   defmodule Client do
     def get(url, timeout) do
       send(Shuttle.Env.app(:opener_test), {:version, url, timeout})
-      Shuttle.Env.app(:opener_version, {:ok, ~s({"terminal":"tmux"})})
+
+      if String.contains?(url, "/sessions?"),
+        do: Shuttle.Env.app(:opener_sessions, {:ok, ~s({"records":[]})}),
+        else: Shuttle.Env.app(:opener_version, {:ok, ~s({"terminal":"tmux"})})
     end
   end
 
@@ -126,6 +129,32 @@ defmodule Shuttle.OpenerTest do
     refute_received {:kitty, _, _}
   end
 
+  test "local and remote viewers obtain their tree paths from their owning host's ledger" do
+    Env.delete_env("SHUTTLE_SESSIONS_FILE")
+
+    Shuttle.SessionLedger.record(
+      fiber: "a/design/rex",
+      session: "local-worker",
+      tmux: @name,
+      kind: :dispatch
+    )
+
+    FakeRex.reply("tmux", {"", 0})
+    assert :ok = Opener.open(@name)
+    child = "thread-01KVBR5K0FZHZQK18845TZ01Q2-shuttle"
+
+    Env.put_app_env(
+      :opener_sessions,
+      {:ok, Jason.encode!(%{"records" => [%{"fiber" => "a/design/rex/thread", "tmux" => child}]})}
+    )
+
+    assert :ok = Opener.open(child, "remote-a")
+    assert {:ok, sessions} = Shuttle.Rex.sessions(FakeRex)
+    assert Enum.map(sessions, & &1["label"]) == ["design/rex @tmux", "└ thread @remote-a"]
+    assert :ok = Opener.open(child, "remote-a")
+    assert [_, _] = requests("session.create")
+  end
+
   test "remote shell metacharacters stay inside the literal tmux target", %{tmp_dir: dir} do
     # Run both shell parses, as ssh does, with fixture executables only.
     tools = Path.join(dir, "tools")
@@ -159,18 +188,19 @@ defmodule Shuttle.OpenerTest do
     refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
   end
 
-  test "empty viewer sessions are destroyed and replaced, never bound" do
+  test "empty owned viewers are replaced without entering the worker bindings" do
     label = @name <> "@remote-a"
-    FakeRex.sessions(%{"session:empty" => %{label: label, blocks: []}})
+    assert {:ok, sid} = Rex.viewer(FakeRex, label, ["sleep", "30"])
+    FakeRex.sessions(Map.update!(FakeRex.state().sessions, sid, &%{&1 | blocks: []}))
     assert :ok = Opener.open(@name, "remote-a")
     assert [_] = requests("session.destroy")
-    assert [_] = requests("session.create")
-    refute Map.has_key?(FakeRex.state().sessions, "session:empty")
+    assert [_, _] = requests("session.create")
+    refute Map.has_key?(FakeRex.state().sessions, sid)
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
     assert bindings == %{}
   end
 
-  test "duplicate viewer labels and uncertain reads refuse creation and selection" do
+  test "unowned duplicate labels cannot be adopted, and uncertain reads refuse another viewer" do
     label = @name <> "@remote-a"
 
     FakeRex.sessions(%{
@@ -178,13 +208,14 @@ defmodule Shuttle.OpenerTest do
       "session:b" => %{label: label, blocks: [%{"block_id" => "block:b"}]}
     })
 
-    assert {:error, reason} = Opener.open(@name, "remote-a")
-    assert reason =~ "Ambiguous"
-    assert requests("session.create") == []
-    assert requests("client.perform") == []
+    assert :ok = Opener.open(@name, "remote-a")
+    assert [_] = requests("session.create")
+    assert [selection] = requests("client.perform")
+    refute selection["args"]["session_id"] in ["session:a", "session:b"]
+    assert requests("session.destroy") == []
     FakeRex.reply("session.list", {"timed out", :timeout})
     assert {:error, _} = Opener.open(@name, "remote-a")
-    assert requests("session.create") == []
+    assert [_] = requests("session.create")
   end
 
   test "no SSH path or unknown worker opens no viewer" do

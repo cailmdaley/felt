@@ -6,7 +6,10 @@ defmodule Shuttle.Test.FakeRex do
     do: File.read!(Path.expand("../fixtures/rex/#{name}.json", __DIR__)) |> Jason.decode!()
 
   def start_link(_opts),
-    do: Agent.start_link(fn -> %{sessions: %{}, calls: [], replies: %{}, clients: []} end)
+    do:
+      Agent.start_link(fn ->
+        %{sessions: %{}, order: [], creates: 0, calls: [], replies: %{}, clients: []}
+      end)
 
   defp pid, do: Shuttle.Env.app(:fake_rex)
   def calls, do: Agent.get(pid(), &Enum.reverse(&1.calls))
@@ -15,7 +18,9 @@ defmodule Shuttle.Test.FakeRex do
   def clear_reply(method),
     do: Agent.update(pid(), &update_in(&1.replies, fn map -> Map.delete(map, method) end))
 
-  def sessions(sessions), do: Agent.update(pid(), &%{&1 | sessions: sessions})
+  def sessions(sessions),
+    do: Agent.update(pid(), &%{&1 | sessions: sessions, order: Enum.sort(Map.keys(sessions))})
+
   def state, do: Agent.get(pid(), & &1)
   def clients(clients), do: Agent.update(pid(), &%{&1 | clients: clients})
 
@@ -66,18 +71,43 @@ defmodule Shuttle.Test.FakeRex do
   defp run("session.list", _, _, state) do
     {%{
        "sessions" =>
-         Enum.map(state.sessions, fn {sid, s} -> %{"session_id" => sid, "label" => s.label} end)
+         Enum.map(state.order, fn sid ->
+           %{"session_id" => sid, "label" => state.sessions[sid].label}
+         end)
      }, state}
   end
 
   defp run("session.create", spec, _, state) do
     reply = fixture("session_create")
-    sid = reply["session_id"]
+    suffix = if state.creates == 0, do: "", else: "-#{state.creates}"
+    sid = reply["session_id"] <> suffix
     [window] = reply["initial_windows"]
     [bid] = window["block_ids"]
+    bid = bid <> suffix
+
+    reply =
+      reply
+      |> Map.put("session_id", sid)
+      |> put_in(["initial_windows", Access.at(0), "block_ids"], [bid])
+
     block = hd(spec["initial_windows"])["layout"]["block"]
-    session = %{label: spec["label"], blocks: [%{"block_id" => bid, "label" => block["label"]}]}
-    {reply, put_in(state, [:sessions, sid], session)}
+
+    session = %{
+      label: spec["label"],
+      window_label: hd(spec["initial_windows"])["window_label"],
+      blocks: [
+        %{"block_id" => bid, "label" => block["label"], "window_id" => window["window_id"]}
+      ]
+    }
+
+    state = %{
+      state
+      | sessions: Map.put(state.sessions, sid, session),
+        order: state.order ++ [sid],
+        creates: state.creates + 1
+    }
+
+    {reply, state}
   end
 
   defp run("session.list_blocks", _, sid, state) do
@@ -88,7 +118,15 @@ defmodule Shuttle.Test.FakeRex do
   end
 
   defp run("session.destroy", _, sid, state),
-    do: {%{}, %{state | sessions: Map.delete(state.sessions, sid)}}
+    do:
+      {%{},
+       %{state | sessions: Map.delete(state.sessions, sid), order: List.delete(state.order, sid)}}
+
+  defp run("session.move", %{"session_id" => sid}, sid, state),
+    do: {%{}, %{state | order: List.delete(state.order, sid) ++ [sid]}}
+
+  defp run("session.set_window_label", args, sid, state),
+    do: {%{"revision" => 4}, put_in(state, [:sessions, sid, :window_label], args["label"])}
 
   defp run("session.set_label", args, sid, state),
     do: {%{"revision" => 2}, put_in(state, [:sessions, sid, :label], args["label"])}

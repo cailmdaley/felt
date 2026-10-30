@@ -153,6 +153,7 @@ defmodule Shuttle.Dispatcher do
             uid: uid,
             kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
+            fiber: Map.get(fiber, "id") || fiber_id,
             run_id: prompt_context_run_id(prompt_context),
             user_message: Keyword.get(opts, :user_message),
             developer_instructions: Keyword.get(opts, :developer_instructions),
@@ -1712,43 +1713,50 @@ defmodule Shuttle.Dispatcher do
             # A Pi fallback clears it and captures its new identity without
             # moving that boundary.
             result =
-              spawn_and_record(session, work_dir, run_script, runner, fn ->
-                record_dispatch_session(
-                  fiber_id,
-                  session_id,
-                  runner,
-                  Keyword.merge(opts,
-                    felt_store: felt_store,
-                    run_id: Keyword.get(opts, :run_id),
-                    tmux: session,
-                    harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
-                    uid: Keyword.get(opts, :uid),
-                    ledger_kind: :resume,
-                    dispatched_at: DateTime.to_iso8601(resumed_at)
-                  )
-                )
-
-                if fallback_signal do
-                  fallback_opts =
+              spawn_and_record(
+                session,
+                work_dir,
+                run_script,
+                runner,
+                opts[:fiber] || fiber_id,
+                fn ->
+                  record_dispatch_session(
+                    fiber_id,
+                    session_id,
+                    runner,
                     Keyword.merge(opts,
                       felt_store: felt_store,
+                      run_id: Keyword.get(opts, :run_id),
                       tmux: session,
                       harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
                       uid: Keyword.get(opts, :uid),
-                      fallback_signal: fallback_signal
+                      ledger_kind: :resume,
+                      dispatched_at: DateTime.to_iso8601(resumed_at)
                     )
-
-                  monitor_resume_fallback(
-                    fiber_id,
-                    agent.cli,
-                    work_dir,
-                    resumed_at,
-                    runner,
-                    fallback_signal,
-                    fallback_opts
                   )
+
+                  if fallback_signal do
+                    fallback_opts =
+                      Keyword.merge(opts,
+                        felt_store: felt_store,
+                        tmux: session,
+                        harness: Shuttle.SessionLedger.harness_for_cli(agent.cli),
+                        uid: Keyword.get(opts, :uid),
+                        fallback_signal: fallback_signal
+                      )
+
+                    monitor_resume_fallback(
+                      fiber_id,
+                      agent.cli,
+                      work_dir,
+                      resumed_at,
+                      runner,
+                      fallback_signal,
+                      fallback_opts
+                    )
+                  end
                 end
-              end)
+              )
 
             if fallback_signal != nil and match?({:error, _}, result),
               do: File.rm_rf(Path.dirname(fallback_signal))
@@ -1773,7 +1781,7 @@ defmodule Shuttle.Dispatcher do
 
         # Store the session UUID in the dispatch marker so "Resume previous"
         # and the autonomous continuation heuristic can recover it.
-        spawn_and_record(session, work_dir, run_script, runner, fn ->
+        spawn_and_record(session, work_dir, run_script, runner, opts[:fiber] || fiber_id, fn ->
           store_session_id(
             fiber_id,
             session_uuid,
@@ -1793,8 +1801,8 @@ defmodule Shuttle.Dispatcher do
 
   # Spawn, and on a successful spawn only, record the dispatch. A spawn failure
   # propagates unchanged — nothing is stamped for a worker that never started.
-  defp spawn_and_record(session, work_dir, run_script, runner, record_fun) do
-    case Shuttle.Terminal.launch(runner, session, work_dir, run_script) do
+  defp spawn_and_record(session, work_dir, run_script, runner, fiber_id, record_fun) do
+    case Shuttle.Terminal.launch(runner, session, work_dir, run_script, fiber: fiber_id) do
       :ok ->
         Logger.info("Worker running: #{Shuttle.Terminal.primary().id()} #{session}")
         record_fun.()

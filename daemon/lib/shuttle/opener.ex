@@ -27,9 +27,14 @@ defmodule Shuttle.Opener do
       runner = Env.app(:rex_runner, Shuttle.Runner.Default)
 
       case Terminal.locate(runner, name) do
-        Rex -> Rex.reveal(name, nil)
-        Terminal.Tmux -> Rex.reveal_tmux(name, nil, nil)
-        nil -> {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
+        Rex ->
+          Rex.reveal(name, nil)
+
+        Terminal.Tmux ->
+          Rex.reveal_tmux(name, nil, nil, fiber: Shuttle.Terminal.RexTree.fiber_for(name))
+
+        nil ->
+          {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
       end
     else
       kitty().open(name, nil)
@@ -40,7 +45,7 @@ defmodule Shuttle.Opener do
     with :ok <- remote_tmux(remote) do
       if Terminal.primary() == Rex do
         with {:ok, destination} <- Kitty.ssh_destination(host) do
-          Rex.reveal_tmux(name, host, destination)
+          Rex.reveal_tmux(name, host, destination, fiber: remote_fiber(name, remote))
         end
       else
         kitty().open(name, host)
@@ -65,6 +70,18 @@ defmodule Shuttle.Opener do
       _ ->
         {:error,
          "Cannot determine #{remote.name}'s terminal backend; its daemon could not be reached or returned an invalid version"}
+    end
+  end
+
+  defp remote_fiber(name, remote) do
+    client = Env.app(:opener_http_client, Shuttle.RemoteRegistry.Client.Default)
+
+    with {:ok, body} <- client.get(Remote.sessions_url(remote), remote.request_timeout_ms),
+         {:ok, %{"records" => records}} when is_list(records) <- Jason.decode(body) do
+      Shuttle.Terminal.RexTree.fiber_for(name, records)
+    else
+      # Missing presentation metadata does not prevent opening a known terminal.
+      _ -> nil
     end
   end
 

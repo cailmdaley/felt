@@ -334,7 +334,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     assert name == FiberUid.session("tests/rex-dispatch")
     Shuttle.Test.IsolatedRex.await(fn -> File.exists?(receipt) end)
     assert ["session:" <> _, "block:" <> _] = String.split(File.read!(receipt), "\n", trim: true)
-    assert {:ok, [%{"label" => ^name}]} = Shuttle.Rex.sessions(RealRexRunner)
+    assert {:ok, [%{"label" => "tests/rex-dispatch"}]} = Shuttle.Rex.sessions(RealRexRunner)
 
     assert {json, 0} =
              Shuttle.Runner.Default.cmd(
@@ -344,10 +344,50 @@ defmodule Shuttle.DispatchIntegrationTest do
                input_eof: true
              )
 
-    assert json =~ name
+    assert json =~ "tests/rex-dispatch"
     assert Shuttle.Terminal.status(RealRexRunner, name) == :alive
+
+    assert {:ok, %{"session_id" => human}} =
+             Shuttle.Rex.create(RealRexRunner, %{"label" => "probe-unowned"})
+
+    for fiber <- ["tests/rex-dispatch/thread", "tests/rex-dispatch/thread/deep"] do
+      write_fiber(
+        host,
+        fiber,
+        "---\nname: Tree worker\nstatus: active\nshuttle:\n  kind: oneshot\n  agent: probe-agent\n---\nA tree thread.\n"
+      )
+
+      assert {:ok, _} = Dispatcher.dispatch(fiber, runner: RealRexRunner, felt_store: host)
+    end
+
+    assert {:ok, sessions} = Shuttle.Rex.sessions(RealRexRunner)
+
+    assert Enum.map(sessions, & &1["label"]) == [
+             "probe-unowned",
+             "tests/rex-dispatch",
+             "└ thread",
+             "\u2060\u2003└ deep"
+           ]
+
+    assert {:ok, %{"bindings" => bindings}} = Shuttle.Terminal.RexBindings.read()
+
+    for {worker, b} <- bindings do
+      assert {:ok, [%{"label" => ^worker}]} = Shuttle.Rex.blocks(RealRexRunner, b["session_id"])
+    end
+
     assert {"", 0} = Shuttle.WorkerBackend.stop(RealRexRunner, name)
     assert Shuttle.Terminal.status(RealRexRunner, name) == :gone
+    assert {:ok, sessions} = Shuttle.Rex.sessions(RealRexRunner)
+    assert Enum.map(sessions, & &1["label"]) == ["probe-unowned", "rex-dispatch/thread", "└ deep"]
+
+    for fiber <- ["tests/rex-dispatch/thread", "tests/rex-dispatch/thread/deep"] do
+      assert {"", 0} = Shuttle.WorkerBackend.stop(RealRexRunner, FiberUid.session(fiber))
+    end
+
+    assert {:ok, [%{"session_id" => ^human, "label" => "probe-unowned"}]} =
+             Shuttle.Rex.sessions(RealRexRunner)
+
+    assert {:ok, _} = Shuttle.Rex.destroy(RealRexRunner, human)
     assert {:ok, []} = Shuttle.Rex.sessions(RealRexRunner)
 
     assert RealRexRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], stderr_to_stdout: true) ==

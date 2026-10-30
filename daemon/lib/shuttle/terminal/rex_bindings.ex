@@ -20,7 +20,31 @@ defmodule Shuttle.Terminal.RexBindings do
           old_name != name and old["session_id"] == binding["session_id"]
         end)
 
-      Map.merge(doc, %{"server" => server, "bindings" => Map.put(bindings, name, binding)})
+      viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
+
+      Map.merge(doc, %{
+        "server" => server,
+        "bindings" => Map.put(bindings, name, binding),
+        "viewers" => viewers
+      })
+    end)
+  end
+
+  def put_fiber(name, fiber) when is_binary(fiber) and fiber != "" do
+    update(fn doc ->
+      case doc["bindings"][name] do
+        nil -> doc
+        b -> put_in(doc, ["bindings", name], Map.put(b, "fiber", fiber))
+      end
+    end)
+  end
+
+  def put_fiber(_, _), do: :ok
+
+  def put_viewer(key, binding, server) do
+    update(fn doc ->
+      viewers = if doc["server"] in [nil, server], do: doc["viewers"] || %{}, else: %{}
+      Map.merge(doc, %{"server" => server, "viewers" => Map.put(viewers, key, binding)})
     end)
   end
 
@@ -36,10 +60,12 @@ defmodule Shuttle.Terminal.RexBindings do
 
   def prune(snapshot, live_ids) do
     update(fn doc ->
-      Enum.reduce(snapshot["bindings"], doc, fn {name, binding}, acc ->
-        if binding["session_id"] not in live_ids and acc["bindings"][name] == binding,
-          do: put_in(acc, ["bindings"], Map.delete(acc["bindings"], name)),
-          else: acc
+      Enum.reduce(["bindings", "viewers"], doc, fn kind, acc ->
+        Enum.reduce(snapshot[kind] || %{}, acc, fn {name, binding}, acc ->
+          if binding["session_id"] not in live_ids and get_in(acc, [kind, name]) == binding,
+            do: Map.put(acc, kind, Map.delete(acc[kind], name)),
+            else: acc
+        end)
       end)
     end)
   end
@@ -68,10 +94,20 @@ defmodule Shuttle.Terminal.RexBindings do
     end
   end
 
+  defp valid_viewers?(viewers) when is_map(viewers) do
+    Enum.all?(viewers, fn {key, b} ->
+      is_binary(key) and
+        match?(%{"session_id" => "session:" <> _, "block_id" => "block:" <> _}, b)
+    end)
+  end
+
+  defp valid_viewers?(_), do: false
+
   defp decode(json) do
     with {:ok, %{"version" => 1, "server" => server, "bindings" => bindings} = doc} <-
            Jason.decode(json),
          true <- (is_binary(server) or is_nil(server)) and is_map(bindings),
+         true <- valid_viewers?(Map.get(doc, "viewers", %{})),
          true <-
            Enum.all?(bindings, fn {name, binding} ->
              is_binary(name) and

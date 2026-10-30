@@ -85,6 +85,13 @@ defmodule Shuttle.SessionResume do
          %{
            session: session,
            tmux: tmux_name(session),
+           fiber:
+             case SessionLedger.latest_for_session(session,
+                    path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
+                  ) do
+               %{"fiber" => fiber} -> fiber
+               _ -> nil
+             end,
            harness: harness,
            agent: agent.id,
            cwd: cwd,
@@ -256,7 +263,7 @@ defmodule Shuttle.SessionResume do
   def running?(name, runner), do: Terminal.present?(runner, name)
 
   defp start(plan, runner) do
-    case Terminal.launch(runner, plan.tmux, plan.cwd, run_script(plan)) do
+    case Terminal.launch(runner, plan.tmux, plan.cwd, run_script(plan), fiber: plan[:fiber]) do
       :ok ->
         Logger.info("Resume of #{plan.session} (#{plan.agent}) → #{plan.tmux}")
         {:ok, %{tmux_session: plan.tmux, created: true}}

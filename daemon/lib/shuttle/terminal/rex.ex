@@ -46,6 +46,8 @@ defmodule Shuttle.Terminal.Rex do
          {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
          {:ok, reply} <- Rex.create(runner, create_spec(name, cwd, script_path, opts)),
          {:ok, binding} <- created_binding(reply) do
+      binding = if opts[:fiber], do: Map.put(binding, "fiber", opts[:fiber]), else: binding
+
       case Bindings.put(name, binding, server) do
         :ok ->
           :ok
@@ -95,10 +97,18 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def probe(runner, name) do
+    owned? = match?({:ok, %{"bindings" => %{^name => _}}}, Bindings.read())
+
     case resolve(runner, name) do
-      {:ok, _} -> :present
-      {:error, reason} when reason in [:not_found, :server_absent] -> :absent
-      {:error, _} -> :unknown
+      {:ok, _} ->
+        :present
+
+      {:error, reason} when reason in [:not_found, :server_absent] ->
+        if owned?, do: Shuttle.Terminal.RexTree.refresh(runner)
+        :absent
+
+      {:error, _} ->
+        :unknown
     end
   end
 
@@ -111,7 +121,17 @@ defmodule Shuttle.Terminal.Rex do
       bound = for {name, b} <- doc["bindings"], MapSet.member?(ids, b["session_id"]), do: name
 
       labels =
-        for %{"label" => label} <- sessions, Shuttle.Dispatcher.shuttle_session?(label), do: label
+        Enum.flat_map(sessions, fn s ->
+          case Rex.blocks(runner, s["session_id"]) do
+            {:ok, blocks} ->
+              for %{"label" => label} <- blocks,
+                  Shuttle.Dispatcher.shuttle_session?(label),
+                  do: label
+
+            _ ->
+              []
+          end
+        end)
 
       {:ok, Enum.uniq(bound ++ labels)}
     else
@@ -305,14 +325,14 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  @doc "Open or focus an unbound Rex viewer for a local or remote tmux worker."
-  def reveal_tmux(name, host, destination) do
+  @doc "Open or focus a display-only Rex viewer for a local or remote tmux worker."
+  def reveal_tmux(name, host, destination, opts \\ []) do
     runner = Env.app(:rex_runner, Shuttle.Runner.Default)
     label = name <> "@" <> (host || "tmux")
 
     with :ok <- ensure_ready(runner),
          {:ok, argv} <- viewer_command(name, destination),
-         {:ok, sid} <- viewer(runner, label, argv) do
+         {:ok, sid} <- viewer(runner, label, argv, opts) do
       reveal_session(runner, sid)
     else
       {:error, message} when is_binary(message) -> {:error, message}
@@ -335,11 +355,13 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   @doc false
-  def viewer(runner, label, argv) do
+  def viewer(runner, label, argv, opts \\ []) do
     if Regex.match?(~r/[\p{Cc}]/u, label) do
       {:error, "Rex viewer label must contain no control characters"}
     else
-      viewer_locked(runner, viewer_label(label), argv)
+      result = viewer_locked(runner, label, viewer_label(label), argv, opts)
+      if match?({:ok, _}, result), do: Shuttle.Terminal.RexTree.refresh(runner)
+      result
     end
   end
 
@@ -369,26 +391,63 @@ defmodule Shuttle.Terminal.Rex do
   defp label_hash(label),
     do: :crypto.hash(:sha256, label) |> Base.encode16(case: :lower) |> String.slice(0, 32)
 
-  defp viewer_locked(runner, label, argv) do
-    Shuttle.Terminal.with_lock({__MODULE__, :viewer, label}, fn ->
+  defp viewer_locked(runner, key, label, argv, opts) do
+    Shuttle.Terminal.with_lock({__MODULE__, :viewer, key}, fn ->
       with :ok <- valid_label(label),
-           {:ok, sessions} <- Rex.sessions(runner) do
-        case Enum.filter(sessions, &(&1["label"] == label)) do
-          [] -> create_viewer(runner, label, argv)
-          [%{"session_id" => sid}] -> reuse_viewer(runner, label, argv, sid)
-          _ -> {:error, "Ambiguous Rex viewer label #{label}; refusing to select a session"}
+           {:ok, doc} <- Bindings.read(),
+           {:ok, sessions} <- Rex.sessions(runner),
+           {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
+           :ok <- Bindings.prune(doc, Enum.map(sessions, & &1["session_id"])) do
+        b = get_in(doc, ["viewers", key])
+
+        # A display label is not proof of viewer ownership. Only a recorded
+        # immutable binding can authorize reuse, destruction or tree moves.
+        result =
+          if b && Enum.any?(sessions, &(&1["session_id"] == b["session_id"])) do
+            reuse_viewer(runner, label, argv, b)
+          else
+            create_viewer(runner, label, argv)
+          end
+
+        with {:ok, address} <- result do
+          sid = address["session_id"]
+
+          suffix =
+            case Regex.run(~r/@([^@]*)$/u, key),
+              do: (
+                [_, host] -> " @" <> host
+                nil -> ""
+              )
+
+          fiber = opts[:fiber] || (b && b["fiber"])
+          binding = Map.merge(address, %{"fiber" => fiber, "suffix" => suffix})
+
+          case Bindings.put_viewer(key, binding, server) do
+            :ok ->
+              {:ok, sid}
+
+            error ->
+              if b == nil or b["session_id"] != sid, do: Rex.destroy(runner, sid)
+              error
+          end
+        else
+          [] -> {:error, "Rex viewer exited before registration"}
+          error -> error
         end
       end
     end)
   end
 
-  defp reuse_viewer(runner, label, argv, sid) do
-    case Rex.blocks(runner, sid) do
+  defp reuse_viewer(runner, label, argv, b) do
+    case Rex.blocks(runner, b["session_id"]) do
       {:ok, []} ->
-        with {:ok, _} <- Rex.destroy(runner, sid), do: create_viewer(runner, label, argv)
+        with {:ok, _} <- Rex.destroy(runner, b["session_id"]),
+             do: create_viewer(runner, label, argv)
 
-      {:ok, [_ | _]} ->
-        {:ok, sid}
+      {:ok, blocks} ->
+        if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])),
+          do: {:ok, b},
+          else: {:error, "Rex viewer block is gone; refusing to reuse surviving human panes"}
 
       error ->
         error
@@ -423,10 +482,7 @@ defmodule Shuttle.Terminal.Rex do
         script
       ])
 
-    with {:ok, reply} <- Rex.create(runner, spec),
-         {:ok, b} <- created_binding(reply) do
-      {:ok, b["session_id"]}
-    end
+    with {:ok, reply} <- Rex.create(runner, spec), do: created_binding(reply)
   end
 
   defp ensure_app_client(runner) do
@@ -518,7 +574,31 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp recover_label(runner, name, sessions) do
-    case Enum.filter(sessions, &(&1["label"] == name)) do
+    candidates = Enum.filter(sessions, &(&1["label"] == name))
+
+    candidates =
+      if candidates == [] do
+        # A tree label isn't a recovery index. Recover through worker block
+        # labels so losing the address file doesn't duplicate live workers.
+        Enum.reduce_while(sessions, [], fn s, acc ->
+          case Rex.blocks(runner, s["session_id"]) do
+            {:ok, blocks} ->
+              if Enum.any?(blocks, &(&1["label"] == name)),
+                do: {:cont, [s | acc]},
+                else: {:cont, acc}
+
+            _ ->
+              {:halt, :unknown}
+          end
+        end)
+      else
+        candidates
+      end
+
+    case candidates do
+      :unknown ->
+        {:error, :unknown}
+
       [] ->
         {:error, :not_found}
 

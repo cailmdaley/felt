@@ -4499,7 +4499,12 @@ defmodule Shuttle.Poller do
     canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
     rename_result =
-      case rename_claim_terminal(state.runner, tmux_session, canonical, opts) do
+      case rename_claim_terminal(
+             state.runner,
+             tmux_session,
+             canonical,
+             Keyword.put(opts, :fiber, fiber_id)
+           ) do
         :ok ->
           {:ok, canonical}
 
@@ -4520,7 +4525,7 @@ defmodule Shuttle.Poller do
 
   defp rename_claim_terminal(runner, session, canonical, opts) do
     with {:ok, source} <- claim_terminal_source(runner, session, opts),
-         do: Shuttle.Terminal.rename(runner, source, canonical)
+         do: Shuttle.Terminal.rename(runner, source, canonical, fiber: opts[:fiber])
   end
 
   defp claim_terminal_source(runner, "session:" <> _ = session, opts) do
@@ -5633,6 +5638,11 @@ defmodule Shuttle.Poller do
              role: new[:role]
            ),
          :ok <- Shuttle.MigrationJournal.clear(entry) do
+      if get_in(entry, ["backend", "type"]) == "rex" do
+        Shuttle.Terminal.RexBindings.put_fiber(new.session, new.fiber_id)
+        Shuttle.Terminal.RexTree.refresh(state.runner)
+      end
+
       {:ok,
        Map.merge(new, %{context_epoch: epoch, context_harness: harness, context_address: address})}
     else

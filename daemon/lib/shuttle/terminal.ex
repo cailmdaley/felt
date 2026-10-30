@@ -100,6 +100,7 @@ defmodule Shuttle.Terminal do
 
           case backend.launch(runner, name, cwd, path, opts) do
             :ok ->
+              refresh_layout(runner, backend)
               :ok
 
             {:error, _} = error ->
@@ -122,17 +123,48 @@ defmodule Shuttle.Terminal do
     backend = Enum.find(backends, &(&1.probe(runner, name) == :present)) || hd(backends)
 
     case backend.close(runner, name) do
-      :ok -> await_gone(runner, name, stop_ladder(), opts)
-      :absent -> await_gone(runner, name, Enum.filter(stop_ladder(), &elem(&1, 0)), opts)
-      {:error, message} -> {message, 1}
+      :ok ->
+        refresh_layout(runner, backend)
+        await_gone(runner, name, stop_ladder(), opts)
+
+      :absent ->
+        refresh_layout(runner, backend)
+        await_gone(runner, name, Enum.filter(stop_ladder(), &elem(&1, 0)), opts)
+
+      {:error, message} ->
+        {message, 1}
     end
   end
 
   # A failed probe is not proof that an address cannot receive a command.
   # With no observed holder, let the primary return the primitive's evidence.
-  def close(runner, name), do: holder(runner, name).close(runner, name)
+  def close(runner, name) do
+    backend = holder(runner, name)
+    result = backend.close(runner, name)
+    if result in [:ok, :absent], do: refresh_layout(runner, backend)
+    result
+  end
+
   def paste(runner, name, text), do: holder(runner, name).paste(runner, name, text)
-  def rename(runner, from, to), do: holder(runner, from).rename(runner, from, to)
+
+  def rename(runner, from, to, opts \\ []) do
+    backend = holder(runner, from)
+
+    with :ok <- backend.rename(runner, from, to) do
+      if backend == Shuttle.Terminal.Rex do
+        with :ok <- Shuttle.Terminal.RexBindings.put_fiber(to, opts[:fiber]) do
+          refresh_layout(runner, backend)
+        end
+      else
+        :ok
+      end
+    end
+  end
+
+  defp refresh_layout(runner, Shuttle.Terminal.Rex),
+    do: Shuttle.Terminal.RexTree.refresh(runner)
+
+  defp refresh_layout(_runner, _backend), do: :ok
   def identity(runner, name), do: holder(runner, name).identity(runner, name)
   def owns_pane?(runner, name, pane), do: holder(runner, name).owns_pane?(runner, name, pane)
   def reveal(name, host \\ nil), do: holder(Shuttle.Runner.Default, name).reveal(name, host)
@@ -168,8 +200,12 @@ defmodule Shuttle.Terminal do
   defp list_all(runner) do
     Enum.reduce_while(backends(), {:ok, []}, fn backend, {:ok, names} ->
       case backend.list(runner) do
-        {:ok, listed} -> {:cont, {:ok, Enum.uniq(names ++ listed)}}
-        {:error, :unknown} = error -> {:halt, error}
+        {:ok, listed} ->
+          refresh_layout(runner, backend)
+          {:cont, {:ok, Enum.uniq(names ++ listed)}}
+
+        {:error, :unknown} = error ->
+          {:halt, error}
       end
     end)
   end

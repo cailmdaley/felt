@@ -68,7 +68,7 @@ defmodule ShuttleWeb.ClaimControllerTest do
       assert conn.status == 200, conn.resp_body
       assert %{"claimed" => true, "tmux_session" => name} = Jason.decode!(conn.resp_body)
       assert name == ctx.canonical
-      assert FakeRex.state().sessions[ctx.sid].label == name
+      assert FakeRex.state().sessions[ctx.sid].label == "claimed"
 
       assert {:ok, %{"bindings" => %{^name => %{"session_id" => sid, "block_id" => bid}}}} =
                RexBindings.read()
@@ -80,7 +80,7 @@ defmodule ShuttleWeb.ClaimControllerTest do
       retry = post(api_conn(), "/api/v1/claim", Jason.encode!(body))
       assert retry.status == 200, retry.resp_body
       assert Shuttle.Poller.worker_status(ctx.poller, "claimed").pid == before.pid
-      assert FakeRex.state().sessions[ctx.sid].label == "human display"
+      assert FakeRex.state().sessions[ctx.sid].label == "claimed"
       # The same native session with a different block is not the worker.
       session = FakeRex.state().sessions[ctx.sid]
 

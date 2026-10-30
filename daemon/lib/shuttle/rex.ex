@@ -163,7 +163,20 @@ defmodule Shuttle.Rex do
            call(runner, "session.set_block_label", %{"block_id" => bid, "label" => label},
              session: sid
            ) do
-      :ok
+      with {:ok, blocks} <- blocks(runner, sid) do
+        case Enum.find(blocks, &(&1["block_id"] == bid)) do
+          %{"window_id" => wid} when is_binary(wid) ->
+            case call(runner, "session.set_window_label", %{"window_id" => wid, "label" => label},
+                   session: sid
+                 ) do
+              {:ok, _} -> :ok
+              error -> error
+            end
+
+          _ ->
+            :ok
+        end
+      end
     end
   end
 
