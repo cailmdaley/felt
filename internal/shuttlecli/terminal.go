@@ -23,7 +23,12 @@ func (a *app) terminalBackends() ([]terminalBackend, error) {
 	}
 	primary, err := a.hostTerminal()
 	if err != nil {
-		return nil, err
+		var configErr hostConfigError
+		if errors.As(err, &configErr) && configErr.Kind == "bad_terminal" {
+			return nil, err
+		}
+		fmt.Fprintf(a.env.Stderr, "warning: cannot read terminal backend: %v; observing tmux only\n", err)
+		primary = "tmux"
 	}
 	backends := []terminalBackend{}
 	if primary == "rex" {

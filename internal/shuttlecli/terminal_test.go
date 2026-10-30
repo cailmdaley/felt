@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -118,6 +119,79 @@ func TestTerminalBackendsAndMixedHolders(t *testing.T) {
 	}
 	if err := a.killTerminalSession("missing"); err == nil {
 		t.Fatal("uncertain holder was killed")
+	}
+}
+
+func TestTerminalObservationHostConfigFallback(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, config         string
+		warning, badTerminal bool
+	}{
+		{"malformed", `{"terminal":`, true, false},
+		{"not an object", `[]`, true, false},
+		{"null document", `null`, true, false},
+		{"unreadable", "", true, false},
+		{"missing key", `{}`, false, false},
+		{"unrelated invalid setting", `{"class":42}`, false, false},
+		{"explicit tmux", `{"terminal":"tmux"}`, false, false},
+		{"unknown terminal", `{"terminal":"other"}`, false, true},
+		{"null terminal", `{"terminal":null}`, false, true},
+		{"nonstring terminal", `{"terminal":42}`, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := testEnv(t)
+			configPath := env.Getenv("SHUTTLE_HOST_CONFIG_FILE")
+			if tc.config == "" {
+				if err := os.MkdirAll(configPath, 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(configPath, []byte(tc.config), 0600); err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			const name = "task-01ARZ3NDEKTSV4RRFFQ69G5FAV-shuttle"
+			script := "#!/bin/sh\ncase \"$1\" in\nls) printf '%s\\n' '" + name + "';;\nhas-session|kill-session) exit 0;;\n*) exit 99;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(bin, "tmux"), []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("PATH", bin)
+			var stdout, stderr bytes.Buffer
+			env.Stdout, env.Stderr = &stdout, &stderr
+			a := newApp(env)
+			backends, err := a.terminalBackends()
+			if tc.badTerminal {
+				if !isHostConfigError(err, "bad_terminal") || stderr.Len() != 0 {
+					t.Fatalf("unknown terminal: %v, stderr=%q", err, stderr.String())
+				}
+				return
+			}
+			if err != nil || len(backends) != 1 || backends[0].ID() != "tmux" {
+				t.Fatalf("backends=%v error=%v", backends, err)
+			}
+			if live, err := a.terminalSessionExists(name); !live || err != nil {
+				t.Fatalf("session observation: %v %v", live, err)
+			}
+			if live, err := a.liveTerminalSessions(); !live[name] || err != nil {
+				t.Fatalf("worker listing: %v %v", live, err)
+			}
+			if err := a.killTerminalSession(name); err != nil {
+				t.Fatal(err)
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("warning leaked to stdout: %q", stdout.String())
+			}
+			if tc.warning {
+				if strings.Count(stderr.String(), "warning:") != 1 || !strings.Contains(stderr.String(), configPath) || !strings.Contains(stderr.String(), "tmux") {
+					t.Fatalf("fallback warning=%q", stderr.String())
+				}
+				if _, err := a.hostTerminal(); err == nil {
+					t.Fatal("strict host configuration reader accepted malformed input")
+				}
+			} else if stderr.Len() != 0 {
+				t.Fatalf("unexpected warning: %q", stderr.String())
+			}
+		})
 	}
 }
 
