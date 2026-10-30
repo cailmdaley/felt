@@ -1525,6 +1525,47 @@ defmodule Shuttle.ThreadsTest do
       roster = Threads.roster("hub", "/local", cold_entries, MapSet.new())
       assert roster =~ "1 unknown (owner cache cold)"
       refute roster =~ "armed"
+
+      partial_entries =
+        Threads.reconcile_owner_feeds(
+          [root, closed_mirror],
+          "test-host",
+          %{},
+          %{
+            "nibi" => %{
+              fibers: [],
+              stale: false,
+              last_error: :timeout,
+              cache: %{"state" => "partial"}
+            }
+          }
+        )
+
+      assert [%{"state" => "Unknown", "owner_cache_state" => "partial"}] =
+               Threads.tree("hub", "/local", partial_entries, MapSet.new())
+
+      stale_partial_entries =
+        Threads.reconcile_owner_feeds(
+          [root, closed_mirror],
+          "test-host",
+          %{},
+          %{
+            "nibi" => %{
+              fibers: [],
+              stale: true,
+              last_error: :timeout,
+              cache: %{"state" => "partial"}
+            }
+          }
+        )
+
+      assert [
+               %{
+                 "state" => "Armed",
+                 "stale" => true,
+                 "host_unreachable" => true
+               }
+             ] = Threads.tree("hub", "/local", stale_partial_entries, MapSet.new())
     end
 
     test "unavailable owner fallback marks every state stale and host-unreachable" do

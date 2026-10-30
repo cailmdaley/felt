@@ -151,7 +151,8 @@ defmodule Shuttle.Threads do
     stale? = Map.get(feed, :stale, Map.get(feed, "stale", true))
 
     case cache_state do
-      state when state in ["cold", "partial"] and is_nil(last_error) ->
+      state
+      when state in ["cold", "partial"] and (stale? == false or is_nil(last_error)) ->
         {:incomplete, state}
 
       state when state in [nil, "fresh"] and stale? == false ->
