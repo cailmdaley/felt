@@ -123,7 +123,11 @@ It reads `~/.config/shuttle/remotes.json`; entries with a `checkout` field are d
 Release users install packaged releases through the [installer](../shuttle/installation.md).
 
 The helper prints one warning if the target commit's latest completed main CI run failed.
-It uses the same bounded check as this repo's SessionStart hook: one GitHub request with a 900 ms process timeout, silent for green, pending, absent, or unavailable results.
+Its advisory GitHub query has a ten-second process timeout and never updates the latest-main cache.
+This repo's SessionStart hook reads `felt-ci-status.json` from Git's common directory, prints one line when that cached result is red, and starts a detached refresh for the next session.
+Worktrees share the cache; successful refreshes replace it atomically, while offline or malformed responses preserve the last known result.
+A red result checked more than a day ago shows its age; cached green, missing, or malformed results stay silent.
+The hook does no network work synchronously and requires Node; its outer harness deadline is two seconds.
 CI does not gate deployment or require waiting after a push; run targeted local tests before pushing and the full suite for broad changes.
 
 To deploy a release candidate across the configured fleet, pin its tag:

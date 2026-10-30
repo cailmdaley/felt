@@ -272,7 +272,7 @@ in `NOTICE` and `LICENSE-APACHE`.
 
 Run the targeted local tests before pushing; use the full suite for broad changes.
 CI is feedback, not a landing or deployment gate: do not wait for CI after pushing.
-The repo's SessionStart hook prints one bounded warning when the latest completed main CI run is red.
+The repo's SessionStart hook prints the cached latest completed main CI result when red and refreshes it in the background for the next session.
 
 Work lands directly on `main`: commit as each piece lands, rebase on
 `origin/main`, run the suites the change touches, and push. No PRs and no
