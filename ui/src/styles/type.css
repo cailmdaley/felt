@@ -46,8 +46,11 @@
  *            (Desk, Chronicle, Board), whose small caps then stand as tall as
  *            capitals at label size.
  *
- * Everything else is untracked (letter-spacing 0, or nothing). Mono is never
- * tracked: its advance is already even.
+ * Caps come only from font-variant-caps: all-small-caps. Other caps variants
+ * (small-caps, petite-caps, unicase) and the OpenType caps features (smcp,
+ * c2sc, pcap, unic) are never set. A tracking token sits only beside those
+ * caps; everything else is untracked (letter-spacing 0, or nothing). Mono is
+ * never tracked: its advance is already even.
  *
  * Glyph tokens size marks drawn from a font (a cross, a dropcap, a chevron),
  * never text.
