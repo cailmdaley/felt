@@ -140,7 +140,10 @@ export class Workspace {
       const host = meetingHost(meeting)
       if (host) this.open(host, this.origin, chatKey(host.originId, host.uid ?? host.id), this.overview.hasMetadata(host), false)
       else if (meeting.mirror_host ?? meeting.recorder) void this.openFiber(meeting.fiber, meeting.mirror_host ?? meeting.recorder!)
-    }, meeting => meetingHost(meeting)?.name)
+    }, meeting => {
+      const host = meetingHost(meeting)
+      return (host?.id ?? meeting.fiber)?.split('/').at(-1) ?? host?.name
+    })
     this.dock.setVerdictQueue((card, verdict) => this.queueVerdict(card, verdict))
     this.themes = new ChannelThemes(opts.shuttleBase)
     this.overview = new Overview({

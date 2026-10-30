@@ -71,6 +71,13 @@ function dayStamp(ms: number): string {
   return `${day} ${clockTime(ms)}`
 }
 
+function meetingStopVisibility(hasActions: boolean, collapsed: boolean, hosted: boolean): { global: boolean; pane: boolean } {
+  return {
+    global: hasActions && (!hosted || collapsed),
+    pane: hasActions && hosted && !collapsed,
+  }
+}
+
 /** How a meeting join ended: the error to show beside the control (null once
  *  recording began), and whether the constitution's worker received it. */
 export interface MeetingJoinResult {
@@ -809,10 +816,11 @@ export class Dock {
         this.meetingChip.setAttribute('aria-label', this.meetingChip.title)
       } else this.meetingChip.hidden = true
     }
+    const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
+    const actions = current && this.meeting?.stop ? meetingActions(current, this.meeting.stopRequested?.(current) ?? false) : null
+    const stops = meetingStopVisibility(!!actions, this.meetingPaneCollapsed, hosted)
     if (this.meetingGlobalStop) {
-      const actions = current && this.meeting?.stop ? meetingActions(current, this.meeting.stopRequested?.(current) ?? false) : null
-      const hosted = !!this.transcriptCard && meetingHostCard(current, [this.transcriptCard]) !== null
-      this.meetingGlobalStop.hidden = !actions || (hosted && !this.meetingPaneCollapsed)
+      this.meetingGlobalStop.hidden = !stops.global
       if (actions) {
         this.meetingGlobalStop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
         this.meetingGlobalStop.disabled = actions.stopDisabled
@@ -821,26 +829,23 @@ export class Dock {
     const pane = this.transcriptPane
     const card = this.transcriptCard
     if (!pane || !card) return
-    const meeting = this.meeting?.current() ?? null
-    const hosted = meetingHostCard(meeting, [card]) !== null
-    pane.hidden = !hosted || meeting === null || this.meetingPaneCollapsed
-    if (!meeting || !hosted) return
-    const actions = this.meeting?.stop ? meetingActions(meeting, this.meeting.stopRequested?.(meeting) ?? false) : null
+    pane.hidden = !hosted || current === null || this.meetingPaneCollapsed
+    if (!current || !hosted) return
     const stop = pane.querySelector<HTMLButtonElement>('.kbn-detail-transcript-stop')!
-    stop.hidden = !actions || this.meetingPaneCollapsed
+    stop.hidden = !stops.pane
     if (actions) {
       stop.textContent = actions.dismiss ? 'Dismiss' : 'Stop'
       stop.disabled = actions.stopDisabled
     }
-    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = meeting.tail.length === 0
+    pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')!.hidden = current.tail.length === 0
     for (const st of ['starting', 'loading', 'live', 'stopping', 'failed']) {
-      pane.classList.toggle(`kbn-detail-transcript-${st}`, meeting.state === st)
+      pane.classList.toggle(`kbn-detail-transcript-${st}`, current.state === st)
     }
     pane.querySelector<HTMLElement>('.kbn-detail-transcript-state')!.textContent =
-      meetingStateWord(meeting.state)
+      meetingStateWord(current.state)
     pane.querySelector<HTMLElement>('.kbn-detail-transcript-title')!.textContent =
-      meeting.title?.trim() ?? ''
-    paintTranscript(pane.querySelector<HTMLOListElement>('.kbn-detail-transcript-lines')!, meeting.tail)
+      current.title?.trim() ?? ''
+    paintTranscript(pane.querySelector<HTMLOListElement>('.kbn-detail-transcript-lines')!, current.tail)
   }
 
   /**
@@ -1481,8 +1486,7 @@ export class Dock {
       }
       if (!pane) return
       this.meetingPaneCollapsed = !pane.hidden
-      pane.hidden = !pane.hidden
-      if (this.meetingGlobalStop) this.meetingGlobalStop.hidden = !pane.hidden
+      this.syncMeeting()
       if (pane.hidden) return
       pane.querySelector<HTMLElement>('.kbn-detail-transcript-lines')?.focus({ preventScroll: true })
       pane.scrollIntoView?.({ block: 'nearest' })

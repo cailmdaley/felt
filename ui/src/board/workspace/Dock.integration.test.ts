@@ -366,6 +366,44 @@ describe('anchored pickers', () => {
     meetingDock.reset()
   })
 
+  it('keeps one Stop visible when the host chip collapses, polls, and expands the meeting pane', () => {
+    const recording = { title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [], started_at: '2026-10-29T00:00:00Z' }
+    const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn(), stop: vi.fn() }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const host = meetingDock.bandFor(task({ id: 'host/meeting', uid: 'meeting', name: 'Host meeting' }))
+    document.body.append(host.el)
+    meetingDock.syncMeeting()
+    const chip = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    const visibleStops = (): HTMLButtonElement[] => [...host.el.querySelectorAll<HTMLButtonElement>('.kbn-detail-transcript-stop')]
+      .filter(button => !button.hidden && !button.closest('[hidden]'))
+
+    expect(visibleStops()).toHaveLength(1)
+    chip.click()
+    expect(visibleStops()).toHaveLength(1)
+    meetingDock.syncMeeting()
+    expect(visibleStops()).toHaveLength(1)
+    chip.click()
+    expect(visibleStops()).toHaveLength(1)
+    meetingDock.reset()
+  })
+
+  it('does not reveal a dead Stop when the host chip collapses without a stop control', () => {
+    const recording = { title: 'Night sky', state: 'live', fiber: 'host/meeting', tail: [], started_at: '2026-10-29T00:00:00Z' }
+    const control = { canJoin: () => false, modes: () => ['call'], current: () => recording, join: vi.fn() }
+    const meetingDock = new Dock('', saved, undefined, undefined, { meeting: control as never })
+    const host = meetingDock.bandFor(task({ id: 'host/meeting', uid: 'meeting', name: 'Host meeting' }))
+    document.body.append(host.el)
+    meetingDock.syncMeeting()
+    const chip = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-chip')!
+    const paneStop = host.el.querySelector<HTMLButtonElement>('.kbn-detail-transcript-meta .kbn-detail-transcript-stop')!
+    const globalStop = host.el.querySelector<HTMLButtonElement>('.kbn-ctl-meet-stop')!
+
+    chip.click()
+    expect(paneStop.hidden).toBe(true)
+    expect(globalStop.hidden).toBe(true)
+    meetingDock.reset()
+  })
+
   it('routes the meeting armed composer button to Start meeting and preserves a visible New session action', async () => {
     const recording = null
     const join = vi.fn(async (..._args: unknown[]) => ({ error: null, delivered: true }))

@@ -189,27 +189,59 @@ export function registerHeaderBarJourneys(test) {
     await page.goto(url)
     await openRoot(page)
     const header = page.locator('.ws-selected .ws-chat-head')
-    const assertActions = async expected => {
+    const assertActions = async (expected, width = 390) => {
       assert.deepEqual(await visibleHeaderVerbs(header), expected)
       for (const selector of ['.ws-chat-standing', '.kbn-ctl-verdict', '.ws-chat-refs']) {
         const box = await header.locator(selector).boundingBox()
-        assert.ok(box && box.width > 0 && box.x >= 0 && box.x + box.width <= 390, `${selector} is visible within the phone header: ${JSON.stringify(box)}`)
+        assert.ok(box && box.width > 0 && box.x >= 0 && box.x + box.width <= width, `${selector} is visible within the phone header: ${JSON.stringify(box)}`)
         assert.ok(await header.locator(selector).evaluate(el => el.parentElement === el.closest('.ws-chat-head').querySelector('.ws-chat-acts')), `${selector} stays in the phone action row`)
       }
       const settings = header.locator('.ws-chat-settings')
       const settingsBox = await settings.boundingBox()
-      assert.ok(settingsBox && settingsBox.x >= 0 && settingsBox.x + settingsBox.width <= 390, `Settings stays available in the phone header: ${JSON.stringify(settingsBox)}`)
-      assert.ok(await settings.evaluate(el => [el.closest('.ws-chat-head'), el.closest('.ws-chat-acts')].includes(el.parentElement)), 'Settings either stays with the actions or moves to the title row')
+      assert.ok(settingsBox && settingsBox.x >= 0 && settingsBox.x + settingsBox.width <= width, `Settings stays available in the phone header: ${JSON.stringify(settingsBox)}`)
+      assert.ok(await settings.evaluate(el => [el.closest('.ws-chat-head'), el.closest('.ws-chat-acts')].includes(el.parentElement)), 'Settings stays in one of its two header rows')
       const row = await header.locator('.ws-chat-acts').boundingBox()
       const centers = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.filter(el => el.checkVisibility()).map(el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2 }))
       assert.ok(centers.length >= 3 && Math.max(...centers) - Math.min(...centers) < 1, `state verbs and references share row two: ${centers}`)
-      assert.ok(row && row.x + row.width <= 390)
+      assert.ok(row && row.x + row.width <= width)
     }
     await assertActions(['Temper', 'Discard'])
     await page.locator('.ws-rail-toggle').click()
     await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     await assertActions(['Close for review', 'Rest'])
+    const reviewInk = await header.getByRole('button', { name: 'Close for review', exact: true }).evaluate(el => {
+      const plain = document.createElement('span')
+      plain.style.color = 'var(--ws-ink)'
+      el.parentElement.append(plain)
+      const styles = getComputedStyle(el)
+      const result = {
+        pigment: styles.getPropertyValue('--verdict-pigment').trim(),
+        ink: styles.getPropertyValue('--verdict-ink').trim(),
+        color: styles.color,
+        plain: getComputedStyle(plain).color,
+      }
+      plain.remove()
+      return result
+    })
+    assert.ok(reviewInk.pigment && reviewInk.ink, `Close for review resolves both verdict colors: ${JSON.stringify(reviewInk)}`)
+    assert.notEqual(reviewInk.color, reviewInk.plain, `Close for review uses its verdict ink rather than plain text ink: ${JSON.stringify(reviewInk)}`)
+    await page.setViewportSize({ width: 320, height: 844 })
+    await page.waitForFunction(() => document.querySelector('.ws-selected .ws-chat-head')?.dataset.compact === 'true')
+    const settings = header.locator('.ws-chat-settings')
+    const settingsLayout = await header.evaluate(el => {
+      const actions = el.querySelector('.ws-chat-acts'), gear = el.querySelector('.ws-chat-settings')
+      const box = node => { const rect = node.getBoundingClientRect(); return { parent: node.parentElement?.className, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width } }
+      return { viewport: innerWidth, headerWidth: el.clientWidth, actionWidth: actions?.clientWidth, actionScrollWidth: actions?.scrollWidth, children: [...(actions?.children ?? [])].map(box), gear: gear && box(gear) }
+    })
+    assert.ok(await settings.evaluate(el => el.parentElement === el.closest('.ws-chat-head')), `Settings moves to the title row when Close for review and Rest exhaust the action row: ${JSON.stringify(settingsLayout)}`)
+    const verbCenters = await header.locator('.kbn-ctl-verdict > button:not([hidden])').evaluateAll(buttons => buttons.map(button => { const box = button.getBoundingClientRect(); return box.top + box.height / 2 }))
+    assert.ok(verbCenters.length === 2 && Math.max(...verbCenters) - Math.min(...verbCenters) < 1, `the lifecycle verbs stay on one row when Settings gives way: ${verbCenters}`)
+    if (process.env.WORKSPACE_SHOTS) {
+      await mkdir(process.env.WORKSPACE_SHOTS, { recursive: true })
+      await page.screenshot({ path: resolve(process.env.WORKSPACE_SHOTS, 'gear-moved-320-light.png') })
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
     await page.locator('.ws-rail-toggle').click()
     await page.locator('.ws-page-sheet[open] .ws-phone-threads .kbn-thread-row').filter({ hasText: 'Next validation' }).click()
     await header.getByRole('heading', { name: 'Next validation', exact: true }).waitFor()
@@ -290,6 +322,23 @@ export function registerHeaderBarJourneys(test) {
     assert.ok(await page.locator('.ws-selected .kbn-detail-transcript').isVisible())
     for (const width of [1440, 701, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+      const chipStyle = await chip.evaluate(el => {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        const style = getComputedStyle(el)
+        const fragments = [...range.getClientRects()].map(rect => ({ top: rect.top, height: rect.height, left: rect.left, right: rect.right }))
+        return {
+          lines: new Set(fragments.map(rect => Math.round(rect.top * 2) / 2)).size,
+          fragments,
+          whiteSpace: style.whiteSpace,
+          borderStyle: style.borderTopStyle,
+          borderWidth: style.borderTopWidth,
+          background: style.backgroundColor,
+        }
+      })
+      assert.equal(chipStyle.whiteSpace, 'nowrap', `the meeting chip stays on one line at ${width}`)
+      assert.ok(chipStyle.lines <= 1, `the meeting chip renders one line at ${width}: ${JSON.stringify(chipStyle)}`)
+      assert.ok((chipStyle.borderStyle !== 'none' && chipStyle.borderWidth !== '0px') || chipStyle.background !== 'rgba(0, 0, 0, 0)', `the meeting chip has a button surface at ${width}: ${JSON.stringify(chipStyle)}`)
       const actions = page.locator('.ws-selected .ws-chat-acts')
       const geometry = await actions.evaluate(el => {
         const box = el.getBoundingClientRect()
@@ -309,7 +358,7 @@ export function registerHeaderBarJourneys(test) {
     await foreignHeader.getByRole('heading', { name: 'Remote covariance review', exact: true }).waitFor()
     const foreignChip = page.locator('.ws-selected .kbn-ctl-meet-chip')
     await foreignChip.waitFor({ state: 'visible' })
-    assert.equal(await foreignChip.innerText(), 'Recording · Calibrate the shear response across independent sky patches and validate each redshift bin')
+    assert.equal(await foreignChip.innerText(), 'Recording · calibration-report')
     assert.equal(await page.locator('.ws-selected .kbn-ctl-meet-stop').innerText(), 'Stop')
     await foreignChip.click()
     await foreignHeader.getByRole('heading', { name: title, exact: true }).waitFor()

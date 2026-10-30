@@ -183,16 +183,21 @@
 /* Verbs inside the field: the default one is a plate, the others are words. */
 .ws-dock .kbn-ctl-composer .kbn-ctl-btn { min-height: var(--ctl-h); padding-inline: 10px; border-color: transparent !important; background-color: transparent; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-composer .kbn-ctl-send:not(.kbn-ctl-secondary) { border-color: var(--ws-hairline) !important; background-color: var(--ws-fill); color: var(--ws-ink); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip {
+  display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; min-height: var(--ctl-h); padding: 0 8px;
+  border: var(--ws-line-width) solid var(--ws-hairline) !important; border-radius: var(--ws-control-radius);
+  background: var(--ws-fill); color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+}
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:hover:not(:disabled) { background: var(--ws-hover); color: var(--ws-ink); }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip:disabled { cursor: default; }
+.ws-dock .kbn-ctl-composer .kbn-ctl-meet-chip[hidden] { display: none; }
 /* Meeting setup lives in a compact menu; New session and Resume stay visible. */
 .ws-dock .kbn-ctl-meet { display: contents; }
 .ws-dock .kbn-ctl-meet-overflow { position: relative; display: block; flex: none; }
 .ws-dock .kbn-ctl-meet-overflow > summary { display: grid; place-items: center; box-sizing: border-box; width: var(--ctl-h); height: var(--ctl-h); border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-title)/var(--leading-solid) var(--font-serif); cursor: pointer; list-style: none; }
 .ws-dock .kbn-ctl-meet-overflow > summary::-webkit-details-marker { display: none; }
 .ws-dock .kbn-ctl-meet-overflow > summary:hover { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet-chip { min-height: var(--ctl-h); border: 0; border-radius: var(--ws-control-radius); padding: 0 8px; background: transparent; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-tight) var(--font-serif); white-space: nowrap; cursor: pointer; }
-.ws-dock .kbn-ctl-meet-chip:hover { background: var(--ws-hover); color: var(--ws-ink); }
-.ws-dock .kbn-ctl-meet-chip:disabled { cursor: default; }
-.ws-dock .kbn-ctl-meet-chip[hidden] { display: none; }
 .ws-dock .kbn-ctl-meet-overflow > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-ink); outline-offset: 2px; }
 .ws-dock .kbn-ctl-meet-panel { position: absolute; bottom: calc(100% + var(--ws-small-gap)); left: 0; z-index: 10; display: none; box-sizing: border-box; width: min(320px, calc(100vw - 24px)); max-height: min(60vh, 420px); overflow: auto; padding: 8px; border: var(--ws-line-width) solid var(--ws-hairline); border-radius: var(--ws-control-radius); background: var(--ws-paper); box-shadow: var(--ws-shadow-low); }
 .ws-dock .kbn-ctl-meet-overflow[open] > .kbn-ctl-meet-panel { display: flex; flex-direction: column; gap: var(--ws-small-gap); }
