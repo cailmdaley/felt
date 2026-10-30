@@ -21,7 +21,7 @@ type boardCursor struct {
 	Seen []string `json:"seen"`
 }
 
-var harnessSlashCommand = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_-]*(?:\s|$)`)
+var harnessSlashCommand = regexp.MustCompile(`^/[A-Za-z][A-Za-z0-9_:.\-]*(?:\s|$)`)
 
 // recordHumanPrompt verifies dispatch identity again under the document lock.
 func (a *app) recordHumanPrompt(input eventHookInput) {

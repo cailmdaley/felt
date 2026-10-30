@@ -109,22 +109,30 @@ func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 				input.Harness = ""
 				input.Model = "gpt-6.1-sol"
 			}
-			input.Prompt = "/compact"
-			b, _ := json.Marshal(input)
 			var output bytes.Buffer
-			if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
-				t.Fatalf("slash command hook %s %v", output.String(), err)
+			for _, command := range []string{"/compact", "/felt:shuttle", "/mcp__tool"} {
+				input.Prompt = command
+				b, _ := json.Marshal(input)
+				if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
+					t.Fatalf("slash command hook %q: %s %v", command, output.String(), err)
+				}
+				block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
+				if block.Ask == nil {
+					t.Fatalf("slash command %q cleared ask", command)
+				}
+				if records := readBoardRecords(t, sink); len(records) != 0 {
+					t.Fatalf("slash command %q wrote board records: %+v", command, records)
+				}
 			}
-			block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
-			if block.Ask == nil {
-				t.Fatal("slash command cleared ask")
+			if harnessSlashCommand.MatchString("/tmp/file") {
+				t.Fatal("absolute path was classified as a harness command")
 			}
 			input.Prompt = "this one"
-			b, _ = json.Marshal(input)
+			b, _ := json.Marshal(input)
 			if err := a.runEventAndMessageHook(bytes.NewReader(b), &output); err != nil || output.Len() != 0 {
 				t.Fatalf("hook %s %v", output.String(), err)
 			}
-			block, _, _ = shuttle.BlockOf(mustRead(t, st, "f"))
+			block, _, _ := shuttle.BlockOf(mustRead(t, st, "f"))
 			if block.Ask != nil {
 				t.Fatal("ask not cleared")
 			}
