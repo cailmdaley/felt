@@ -413,7 +413,8 @@ defmodule Shuttle.MigrationTest do
     assert {:ok, %{"bindings" => %{^tmux => %{"session_id" => ^sid, "fiber" => "dest"}}}} =
              RexBindings.read()
 
-    assert FakeRex.state().sessions[sid].label == "dest"
+    assert FakeRex.state().sessions[sid].label == "source"
+    assert {:ok, [%{"label" => "dest"}]} = Shuttle.Rex.windows(FakeRex, sid)
     assert {:ok, %{"fiber_id" => "dest", "thread_id" => ^id}} = AppWorkers.get(id)
     assert Shuttle.CodexTerminal.tmux_name(id) == tmux
   end

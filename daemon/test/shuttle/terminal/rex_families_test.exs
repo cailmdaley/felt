@@ -148,5 +148,86 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.move" in args end)
   end
 
+  test "per-worker session bindings remain addressable and do not join a new family session" do
+    assert {:ok, %{"session_id" => old_sid, "initial_windows" => [window]}} =
+             Rex.create(FakeRex, Backend.create_spec("old-worker", "/tmp", "worker.sh"))
+
+    [bid] = window["block_ids"]
+
+    old = %{
+      "session_id" => old_sid,
+      "block_id" => bid,
+      "created_at" => "2026-10-29T00:00:00Z",
+      "fiber" => @root
+    }
+
+    assert :ok = RexBindings.put("old-worker", old, FakeRex.fixture("whoami")["host_id"])
+    assert :ok = launch("a", @root <> "/a")
+    assert {:ok, doc} = RexBindings.read()
+    refute doc["bindings"]["a"]["session_id"] == old_sid
+    assert doc["bindings"]["old-worker"] == old
+    assert :present = Backend.probe(FakeRex, "old-worker")
+    assert :ok = Backend.paste(FakeRex, "old-worker", "still addressed by block")
+    FakeRex.clients([%{"client_id" => "client:app", "info" => %{"kind" => "app"}}])
+    assert :ok = Backend.reveal("old-worker", nil)
+    {_, _, opts} = Enum.find(FakeRex.calls(), fn {_, args, _} -> "client.perform" in args end)
+
+    assert Jason.decode!(opts[:input])["args"] == %{
+             "session_id" => old_sid,
+             "window_id" => window["window_id"]
+           }
+
+    assert :ok = Backend.close(FakeRex, "old-worker")
+    assert :present = Backend.probe(FakeRex, "a")
+    refute Map.has_key?(FakeRex.state().sessions, old_sid)
+  end
+
+  test "last-window cleanup and a new sibling launch share the family lock" do
+    assert :ok = launch("a", @root <> "/a")
+    parent = self()
+
+    Env.put_app_env(:fake_rex_hook, fn
+      "session.view" ->
+        send(parent, {:cleanup_paused, self()})
+
+        receive do
+          :continue -> :ok
+        after
+          5_000 -> raise "cleanup barrier timed out"
+        end
+
+      _ ->
+        :ok
+    end)
+
+    closing = Task.async(fn -> Backend.close(FakeRex, "a") end)
+    assert_receive {:cleanup_paused, closer}, 2_000
+    launching = Task.async(fn -> launch("b", @root <> "/b") end)
+    assert Task.yield(launching, 100) == nil
+    send(closer, :continue)
+    assert Task.await(closing) == :ok
+    assert Task.await(launching) == :ok
+    assert {:ok, [%{"session_id" => sid}]} = Rex.sessions(FakeRex)
+    assert {:ok, %{"bindings" => %{"b" => %{"session_id" => ^sid}}}} = RexBindings.read()
+  end
+
+  test "a worker recovered by block label never closes or destroys its family session" do
+    assert :ok = launch("a", @root <> "/a")
+    assert :ok = launch("b", @root <> "/b")
+    assert {:ok, doc} = RexBindings.read()
+    a = doc["bindings"]["a"]
+    assert :ok = RexBindings.delete("a", a)
+    assert :present = Backend.probe(FakeRex, "a")
+    assert {:ok, %{"bindings" => %{"a" => %{"recovered" => true}}}} = RexBindings.read()
+    assert {:error, message} = Backend.close(FakeRex, "a")
+    assert message =~ "recovered only by block label"
+    assert :ok = Backend.close(FakeRex, "b")
+    assert :ok = Backend.sweep(FakeRex)
+    assert {:ok, [%{"session_id" => sid}]} = Rex.sessions(FakeRex)
+    assert sid == a["session_id"]
+    assert {:ok, [%{"window_id" => wid}]} = Rex.windows(FakeRex, sid)
+    assert wid == a["window_id"]
+  end
+
   defp launch(name, fiber), do: Backend.launch(FakeRex, name, "/tmp", "worker.sh", fiber: fiber)
 end

@@ -49,7 +49,8 @@ defmodule Shuttle.OpenerTest do
     FakeRex.sessions(Map.update!(FakeRex.state().sessions, sid, &%{&1 | label: "human label"}))
     assert :ok = Opener.open(@name)
     assert [select] = requests("client.perform")
-    assert select["args"] == %{"session_id" => sid}
+    [window] = FakeRex.fixture("session_create")["initial_windows"]
+    assert select["args"] == %{"session_id" => sid, "window_id" => window["window_id"]}
     assert length(requests("session.create")) == 1
     refute_received {:kitty, _, _}
     assert Enum.any?(FakeRex.calls(), &match?({"open", ["-b", "com.superlogical.rex"], _}, &1))
@@ -131,7 +132,11 @@ defmodule Shuttle.OpenerTest do
     refute_received {:kitty, _, _}
   end
 
-  test "local and remote viewers obtain their tree paths from their owning host's ledger" do
+  test "local and remote viewers obtain their tree paths from their owning host's ledger", %{
+    tmp_dir: dir
+  } do
+    Env.put_env("PATH", Shuttle.Env.get("PATH") <> ":" <> System.get_env("PATH"))
+    Shuttle.Test.RexFamilyStore.write(dir, ["a/design/rex", "a/design/rex/thread"])
     Env.delete_env("SHUTTLE_SESSIONS_FILE")
 
     Shuttle.SessionLedger.record(
@@ -161,9 +166,14 @@ defmodule Shuttle.OpenerTest do
 
     assert :ok = Opener.open(child, "remote-a")
     assert {:ok, sessions} = Shuttle.Rex.sessions(FakeRex)
-    assert Enum.map(sessions, & &1["label"]) == ["design/rex @tmux", "└ thread @remote-a"]
+    assert [%{"session_id" => sid, "label" => "design/rex"}] = sessions
+
+    assert {:ok, [%{"label" => "rex @tmux"}, %{"label" => "└ thread @remote-a"}]} =
+             Shuttle.Rex.windows(FakeRex, sid)
+
     assert :ok = Opener.open(child, "remote-a")
-    assert [_, _] = requests("session.create")
+    assert [_] = requests("session.create")
+    assert [_] = requests("session.new_window")
   end
 
   test "remote shell metacharacters stay inside the literal tmux target", %{tmp_dir: dir} do
@@ -178,7 +188,6 @@ defmodule Shuttle.OpenerTest do
     assert :ok = Opener.open(name, "remote-a")
     [spec] = requests("session.create")
     ["bash", "-c", script] = options(spec)["command"]
-    # The trap is deliberately harmless here; /bin/echo is the fake Rex CLI.
     assert {_, 0} = System.cmd("/bin/bash", ["-c", script], cd: dir, env: [{"RECEIPT", receipt}])
     assert File.read!(receipt) == "=" <> name
     refute File.exists?(sentinel)

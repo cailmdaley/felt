@@ -362,23 +362,28 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     assert {:ok, sessions} = Shuttle.Rex.sessions(RealRexRunner)
 
-    assert Enum.map(sessions, & &1["label"]) == [
-             "probe-unowned",
-             "tests/rex-dispatch",
-             "└ thread",
-             "\u2060\u2003└ deep"
-           ]
+    assert [
+             %{"session_id" => family, "label" => "tests/rex-dispatch"},
+             %{"session_id" => ^human, "label" => "probe-unowned"}
+           ] = sessions
+
+    assert {:ok, windows} = Shuttle.Rex.windows(RealRexRunner, family)
+    assert Enum.map(windows, & &1["label"]) == ["rex-dispatch", "└ thread", "\u2060\u2003└ deep"]
 
     assert {:ok, %{"bindings" => bindings}} = Shuttle.Terminal.RexBindings.read()
 
     for {worker, b} <- bindings do
-      assert {:ok, [%{"label" => ^worker}]} = Shuttle.Rex.blocks(RealRexRunner, b["session_id"])
+      assert b["session_id"] == family
+      assert {:ok, blocks} = Shuttle.Rex.blocks(RealRexRunner, b["session_id"])
+      assert Enum.any?(blocks, &(&1["block_id"] == b["block_id"] and &1["label"] == worker))
     end
 
     assert {"", 0} = Shuttle.WorkerBackend.stop(RealRexRunner, name)
     assert Shuttle.Terminal.status(RealRexRunner, name) == :gone
     assert {:ok, sessions} = Shuttle.Rex.sessions(RealRexRunner)
-    assert Enum.map(sessions, & &1["label"]) == ["probe-unowned", "rex-dispatch/thread", "└ deep"]
+    assert Enum.map(sessions, & &1["label"]) == ["tests/rex-dispatch", "probe-unowned"]
+    assert {:ok, windows} = Shuttle.Rex.windows(RealRexRunner, family)
+    assert Enum.map(windows, & &1["label"]) == ["└ thread", "\u2060\u2003└ deep"]
 
     for fiber <- ["tests/rex-dispatch/thread", "tests/rex-dispatch/thread/deep"] do
       assert {"", 0} = Shuttle.WorkerBackend.stop(RealRexRunner, FiberUid.session(fiber))

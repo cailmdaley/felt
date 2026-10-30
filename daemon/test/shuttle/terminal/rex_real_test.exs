@@ -408,7 +408,7 @@ defmodule Shuttle.Terminal.RexRealTest do
              Shuttle.Poller.claim_session(p, "claimed", sid, session_uuid: "human-native-uuid")
 
     worker = Shuttle.Poller.worker_status(p, "claimed")
-    assert {:ok, [%{"session_id" => ^sid, "label" => ^canonical}]} = Rex.sessions(@runner)
+    assert {:ok, [%{"session_id" => ^sid, "label" => "claimed"}]} = Rex.sessions(@runner)
     assert {:ok, [%{"label" => "claimed"}]} = Rex.windows(@runner, sid)
     assert {:ok, %{"bindings" => %{^canonical => %{"session_id" => ^sid}}}} = RexBindings.read()
 
