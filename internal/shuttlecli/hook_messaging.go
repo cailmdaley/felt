@@ -33,6 +33,9 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 	if harness == "" {
 		return nil
 	}
+	if input.NativePID > 0 && !messaging.HookPIDIsAncestor(input.NativePID) {
+		return nil
+	}
 	if _, ok := eventTypes[input.HookEventName]; !ok {
 		return nil
 	}

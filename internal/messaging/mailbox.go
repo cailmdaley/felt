@@ -69,6 +69,25 @@ func HookReceiverPID() int {
 	return 0
 }
 
+// HookPIDIsAncestor verifies that pid occurs in the calling hook's live
+// parent chain. Hook payloads may name a receiver, but cannot choose one.
+func HookPIDIsAncestor(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	for current, hops := os.Getpid(), 0; current > 1 && hops < 64; hops++ {
+		parent, _, ok := processParent(current)
+		if !ok || parent <= 0 || parent == current {
+			return false
+		}
+		if parent == pid {
+			return true
+		}
+		current = parent
+	}
+	return false
+}
+
 type mailboxEntry struct {
 	Request  Request `json:"request"`
 	QueuedAt int64   `json:"queued_at"`
@@ -94,9 +113,8 @@ func RegisterMailbox(env *sysenv.Env, harness, id, host, cwd string, pid int, ac
 	return registerMailboxWith(env, harness, id, host, cwd, pid, active, mailboxWrite)
 }
 
-// Each transition publishes one complete state by atomic rename. Concurrent
-// register/end hooks cannot split a transition across two independently
-// removed files; the last publication wins, regardless of completion order.
+// Each transition checks ownership and publishes under one stable per-session
+// lock. The atomic rename keeps readers from observing a partial registration.
 func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int, active bool, publish func(string, []byte, bool) error) error {
 	if harness != "claude" && harness != "codex" && harness != "pi" {
 		return errCode("invalid_request", "unsupported mailbox harness")
@@ -109,22 +127,42 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 	}
 	dir := mailboxDir(env, harness, id)
 	reg := mailboxRegistration{ID: id, Host: host, Ended: !active}
+	path := filepath.Join(dir, "receiver.json")
 	if active {
-		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
-		if !reg.live() {
-			return errCode("unavailable", "mailbox receiver process %d is not running", pid)
-		}
 		if err := ensureDir(dir, 0700); err != nil {
 			return err
 		}
 	} else if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	lock, err := os.OpenFile(filepath.Join(dir, ".registration.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if current, err := mailboxRegistrationFor(env, harness, id); err == nil && current.live() {
+		candidateStart := processStartToken(pid)
+		if current.PID != pid || current.Start != candidateStart {
+			return errCode("unavailable", "mailbox session is already registered to a live receiver process")
+		}
+	}
+	if active {
+		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
+		if !reg.live() {
+			return errCode("unavailable", "mailbox receiver process %d is not running", pid)
+		}
+	} else {
+		reg.PID, reg.Start = pid, processStartToken(pid)
+	}
 	b, err := json.Marshal(reg)
 	if err != nil {
 		return err
 	}
-	return publish(filepath.Join(dir, "receiver.json"), b, false)
+	return publish(path, b, false)
 }
 
 func MailboxAvailable(env *sysenv.Env, harness, id, host string) bool {

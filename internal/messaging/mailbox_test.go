@@ -131,9 +131,8 @@ func TestMailboxConcurrentHooksOfferOnce(t *testing.T) {
 	}
 }
 
-// Mutation: publish ended.json then remove receiver.json on end, and publish
-// receiver.json then remove ended.json on register. The barriers reproduce
-// both two-file interleavings deterministically; neither may erase all state.
+// Registration and SessionEnd serialize as one transition; readers never see
+// an intermediate state while one hook is publishing.
 func TestMailboxConcurrentRegistrationAndEndHaveOneAtomicState(t *testing.T) {
 	t.Parallel()
 	for _, firstActive := range []bool{false, true} {
@@ -164,11 +163,20 @@ func TestMailboxConcurrentRegistrationAndEndHaveOneAtomicState(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("first transition did not reach publication barrier")
 			}
-			secondErr := RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), !firstActive)
+			secondDone := make(chan error, 1)
+			go func() {
+				secondDone <- RegisterMailbox(env, "pi", "session", "host", "/project", os.Getpid(), !firstActive)
+			}()
+			select {
+			case err := <-secondDone:
+				t.Fatalf("second transition bypassed the registration lock: %v", err)
+			case <-time.After(20 * time.Millisecond):
+			}
 			release()
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
+			secondErr := <-secondDone
 			if secondErr != nil {
 				t.Fatal(secondErr)
 			}

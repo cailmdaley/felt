@@ -131,6 +131,74 @@ func TestRegisterMailboxRefusesAReceiverThatIsNotRunning(t *testing.T) {
 	}
 }
 
+func TestRegisterMailboxCannotTakeOverAnotherLiveReceiver(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	receiver := startReceiver(t)
+	if err := RegisterMailbox(env, "pi", "bob", "host", "/bob", receiver.Process.Pid, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterMailbox(env, "pi", "bob", "host", "/attacker", os.Getpid(), true); err == nil || ErrorCode(err) != "unavailable" {
+		t.Fatalf("hijack registration error = %v", err)
+	}
+	got, err := mailboxRegistrationFor(env, "pi", "bob")
+	if err != nil || got.PID != receiver.Process.Pid || got.CWD != "/bob" {
+		t.Fatalf("live registration changed: %#v, %v", got, err)
+	}
+	// The owning receiver may refresh its registration, including after a
+	// normal hook restart in the same live process.
+	if err := RegisterMailbox(env, "pi", "bob", "host", "/bob", receiver.Process.Pid, true); err != nil {
+		t.Fatalf("owner could not refresh registration: %v", err)
+	}
+	_ = receiver.Process.Kill()
+	_, _ = receiver.Process.Wait()
+	restarted := startReceiver(t)
+	if restarted.Process.Pid == receiver.Process.Pid {
+		t.Fatal("restart reused the old receiver pid")
+	}
+	if err := RegisterMailbox(env, "pi", "bob", "host", "/bob", restarted.Process.Pid, true); err != nil {
+		t.Fatalf("new receiver could not register after the old process exited: %v", err)
+	}
+}
+
+func TestConcurrentMailboxRegistrationsHaveOneLiveOwner(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	first, second := startReceiver(t), startReceiver(t)
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, receiver := range []*exec.Cmd{first, second} {
+		go func(receiver *exec.Cmd) {
+			<-start
+			errs <- RegisterMailbox(env, "pi", "racing", "host", "/project", receiver.Process.Pid, true)
+		}(receiver)
+	}
+	close(start)
+	accepted := 0
+	for range 2 {
+		if err := <-errs; err == nil {
+			accepted++
+		}
+	}
+	if accepted != 1 {
+		t.Fatalf("concurrent registrations accepted %d owners", accepted)
+	}
+	got, err := mailboxRegistrationFor(env, "pi", "racing")
+	if err != nil || !got.live() {
+		t.Fatalf("winning registration is not live: %#v, %v", got, err)
+	}
+}
+
+func TestHookPIDIsAncestorRejectsSelfAndUnrelatedPID(t *testing.T) {
+	t.Parallel()
+	if HookPIDIsAncestor(os.Getpid()) {
+		t.Fatal("hook accepted itself as its own ancestor")
+	}
+	if HookPIDIsAncestor(2147483647) {
+		t.Fatal("hook accepted an unrelated nonexistent process")
+	}
+}
+
 func TestProcessParentMatchesGetppid(t *testing.T) {
 	t.Parallel()
 	ppid, name, ok := processParent(os.Getpid())
