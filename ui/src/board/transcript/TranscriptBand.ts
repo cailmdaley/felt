@@ -166,28 +166,24 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   if (linkedPeerFiber) setAttr(peer, 'data-fiber', linkedPeerFiber)
   else if (peer.hasAttribute('data-fiber')) peer.removeAttribute('data-fiber')
   if (entry.direction === 'received' && !entry.verb && entry.fiber) {
-    if (route.tagName !== 'A') {
-      const link = document.createElement('a')
-      link.className = 'ws-transcript-message-peer ws-transcript-message-route kbn-wikilink'
+    route.classList.add('ws-transcript-message-route')
+    let link = route.querySelector<HTMLAnchorElement>(':scope > .ws-transcript-message-route-link')
+    if (!link) {
+      link = document.createElement('a')
+      link.className = 'ws-transcript-message-route-link ws-constitution-chip kbn-wikilink'
       link.dataset.spawnChip = ''
-      link.dataset.fiber = entry.fiber
-      link.dataset.mentionSource = `reply to ${entry.fiber}`
-      route.replaceWith(link)
-      route = link
+      route.replaceChildren(document.createTextNode('reply to '), link)
     }
-    route.classList.add('ws-transcript-message-peer', 'ws-transcript-message-route', 'kbn-wikilink')
-    route.dataset.spawnChip = ''
-    route.dataset.fiber = entry.fiber
-    route.setAttribute('aria-label', `reply to ${entry.fiber}`)
-    route.textContent = `reply to ${entry.fiber.split('/').at(-1) ?? entry.fiber}`
+    link.className = 'ws-transcript-message-route-link ws-constitution-chip kbn-wikilink'
+    link.dataset.spawnChip = ''
+    link.dataset.fiber = entry.fiber
+    link.dataset.mentionSource = `reply to ${entry.fiber}`
+    link.setAttribute('aria-label', `reply to ${entry.fiber}`)
+    const routeLabel = entry.fiber.split('/').at(-1) ?? entry.fiber
+    if (link.textContent !== routeLabel) link.textContent = routeLabel
     setHidden(route, false)
   } else {
-    if (route.tagName === 'A') {
-      const label = document.createElement('span')
-      label.className = 'ws-transcript-message-route'
-      route.replaceWith(label)
-      route = label
-    }
+    if (route.tagName === 'A' || route.firstChild) route.replaceChildren()
     setHidden(route, true)
   }
   const directionText = entry.direction === 'received'
