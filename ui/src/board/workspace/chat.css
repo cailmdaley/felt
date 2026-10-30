@@ -160,10 +160,10 @@
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-text.ws-transcript-unclamped { max-height: none; }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-kicker {
-  order: -1; align-self: stretch; justify-content: flex-end; margin: 0 2px 4px; font-size: var(--type-meta); color: var(--ws-ink-muted);
+  order: 2; justify-content: flex-end; margin: 4px 2px 0; font-size: var(--type-meta); color: var(--ws-ink-muted);
 }
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you .ws-transcript-prompt-images { order: 1; }
-/* The bubble already says who spoke; its kicker keeps the time. */
+/* The bubble already says who spoke; the line under it keeps the time, at the column's right edge like every chat time. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you :is(.ws-transcript-author-you, .ws-transcript-author-you + .ws-transcript-sep) { display: none; }
 /* The session's brief is not your turn: a quiet line at the column's left, opening into plain text. */
 .ws-chat .ws-transcript-inline .ws-transcript-msg-you.ws-transcript-msg-brief { align-self: stretch; align-items: flex-start; max-width: none; }

@@ -34,7 +34,9 @@ export function phoneThreads(card: KanbanCard, index: ThreadIndex, open: (card: 
     if (!members.length) continue
     const group = document.createElement('section')
     group.dataset.group = key
-    const heading = document.createElement('h3'); heading.textContent = `${label} · ${members.length}`
+    const heading = document.createElement('h3'); heading.textContent = label
+    const count = document.createElement('span'); count.className = 'ws-phone-threads-count'; count.textContent = String(members.length)
+    heading.append(' ', count)
     group.append(heading, ...members.map(row)); section.append(group)
   }
   return section
