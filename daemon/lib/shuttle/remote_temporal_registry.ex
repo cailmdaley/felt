@@ -547,7 +547,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
         state
 
       entry ->
-        entry = put_feed(entry, feed, &fold(&1, result, window, now))
+        entry = put_feed(entry, feed, &fold(&1, result, window, now, feed))
 
         if match?({:ok, {_items, _etag}}, result),
           do: persist(state.store_dir, feed, name, entry.feeds[feed])
@@ -556,11 +556,16 @@ defmodule Shuttle.RemoteTemporalRegistry do
     end
   end
 
-  defp fold(feed_state, {:ok, :not_modified}, _window, now),
+  defp fold(feed_state, {:ok, :not_modified}, _window, now, _feed),
     do: %{feed_state | last_polled_at: now, last_error: nil}
 
-  defp fold(feed_state, {:ok, {items, etag}}, window, now),
-    do: %{
+  defp fold(feed_state, {:error, reason}, _window, _now, _feed),
+    do: %{feed_state | last_error: reason}
+
+  defp fold(feed_state, {:ok, {items, etag}}, window, now, feed) do
+    items = board_received_times(items, feed_state.items, now, feed)
+
+    %{
       feed_state
       | items: items,
         etag: etag,
@@ -568,8 +573,22 @@ defmodule Shuttle.RemoteTemporalRegistry do
         last_polled_at: now,
         last_error: nil
     }
+  end
 
-  defp fold(feed_state, {:error, reason}, _window, _now), do: %{feed_state | last_error: reason}
+  defp board_received_times(items, previous_items, now, :board) do
+    received_at = DateTime.to_unix(now, :millisecond)
+    previous = Map.new(previous_items, fn item -> {item["id"], item["received_at"]} end)
+
+    Enum.map(items, fn item ->
+      case {item["id"], previous[item["id"]]} do
+        {id, at} when is_binary(id) and is_integer(at) -> Map.put(item, "received_at", at)
+        {id, _} when is_binary(id) and id != "" -> Map.put(item, "received_at", received_at)
+        _ -> Map.delete(item, "received_at")
+      end
+    end)
+  end
+
+  defp board_received_times(items, _previous_items, _now, _feed), do: items
 
   # ── Views ──
 
@@ -641,20 +660,40 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
     Enum.reduce(@feeds, entry, fn feed, acc ->
       case get_in(persisted, [feed, safe]) do
-        %{} = saved -> put_feed(acc, feed, &restore_feed(&1, saved))
+        %{} = saved -> put_feed(acc, feed, &restore_feed(&1, saved, feed))
         _ -> acc
       end
     end)
   end
 
-  defp restore_feed(feed_state, saved) do
+  defp restore_feed(feed_state, saved, feed) do
     %{
       feed_state
-      | items: list_or_empty(saved["items"]),
+      | items:
+          if(feed == :board,
+            do: restore_items(list_or_empty(saved["items"]), saved["last_polled_at"]),
+            else: list_or_empty(saved["items"])
+          ),
         window: decode_window(saved["window"]),
         etag: if(is_binary(saved["etag"]), do: saved["etag"]),
         last_polled_at: RegistryCommon.decode_dt(saved["last_polled_at"])
     }
+  end
+
+  defp restore_items(items, last_polled_at) do
+    received_at =
+      case RegistryCommon.decode_dt(last_polled_at) do
+        %DateTime{} = date -> DateTime.to_unix(date, :millisecond)
+        _ -> nil
+      end
+
+    Enum.map(items, fn
+      %{"id" => id} = item when is_binary(id) and is_integer(received_at) ->
+        Map.put_new(item, "received_at", received_at)
+
+      item ->
+        item
+    end)
   end
 
   defp list_or_empty(value) when is_list(value), do: value

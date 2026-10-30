@@ -130,7 +130,7 @@ defmodule Shuttle.BoardFamily do
           )
       end)
       |> Enum.map(&decorate(&1, by_ref, tree, roots, requested_viewer))
-      |> Enum.sort_by(&{&1["timestamp"], &1["id"]})
+      |> Enum.sort_by(&{&1["received_at"] || &1["timestamp"], &1["id"]})
 
     %{family: family(root), viewer: if(viewer, do: viewer.fiber["uid"]), records: rows}
   end

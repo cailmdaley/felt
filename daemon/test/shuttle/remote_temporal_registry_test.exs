@@ -180,7 +180,10 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     send(fetcher, :release)
 
     assert wait_until(fn ->
-             RemoteTemporalRegistry.entries_nowait(name, :board)["candide"].items == [record]
+             match?(
+               [%{"id" => "brd-test", "received_at" => at}] when is_integer(at),
+               RemoteTemporalRegistry.entries_nowait(name, :board)["candide"].items
+             )
            end)
 
     assert MockClient.calls("/api/v1/board") == 1
@@ -190,12 +193,37 @@ defmodule Shuttle.RemoteTemporalRegistryTest do
     record = %{"id" => "brd-test", "type" => "board", "timestamp" => 100}
     MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [record]})})
     {pid, name} = start_registry(dir)
-    assert %{items: [^record], stale: false} = candide(name, :board)
+
+    assert %{items: [%{"id" => "brd-test", "received_at" => received_at}], stale: false} =
+             candide(name, :board)
+
+    assert is_integer(received_at)
     assert Enum.any?(MockClient.log(), &String.ends_with?(&1, "/api/v1/board?since_ms=0"))
     GenServer.stop(pid)
     MockClient.set("/api/v1/board", {:error, :offline})
     {_pid, restored} = start_registry(dir)
-    assert %{items: [^record], last_error: :offline} = candide(restored, :board)
+
+    assert %{items: [%{"id" => "brd-test", "received_at" => ^received_at}], last_error: :offline} =
+             candide(restored, :board)
+  end
+
+  test "a board record keeps its first receive time when a later refresh changes its order", %{
+    dir: dir
+  } do
+    first = %{"id" => "first", "timestamp" => 1}
+    later = %{"id" => "later", "timestamp" => 2}
+    MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [first, later]})})
+    {_pid, name} = start_registry(dir)
+    initial = candide(name, :board).items
+    assert [%{"id" => "first", "received_at" => received_at}, %{"id" => "later"}] = initial
+
+    stop_supervised!(name)
+    MockClient.set("/api/v1/board", {:ok, Jason.encode!(%{"records" => [later, first]})})
+    {_pid, restarted} = start_registry(dir)
+    refreshed = candide(restarted, :board).items
+
+    assert [%{"id" => "later"}, %{"id" => "first", "received_at" => ^received_at}] =
+             refreshed
   end
 
   test "invalidation bypasses freshness only for the written feed", %{dir: dir} do

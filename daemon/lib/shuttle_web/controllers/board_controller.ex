@@ -33,13 +33,15 @@ defmodule ShuttleWeb.BoardController do
                 RemoteTemporalRegistry.entries_nowait(:board)
                 |> Map.values()
                 |> Enum.flat_map(& &1.items)
-
-              records =
-                (Board.all_since(since_ms) ++ remote)
                 |> Enum.filter(fn
-                  %{"timestamp" => timestamp} when is_integer(timestamp) -> timestamp >= since_ms
-                  _ -> false
+                  %{"received_at" => received_at} when is_integer(received_at) ->
+                    received_at >= since_ms
+
+                  _ ->
+                    false
                 end)
+
+              records = Board.all_since(since_ms) ++ remote
 
               json(conn, BoardFamily.compose_prepared(context, records))
           end

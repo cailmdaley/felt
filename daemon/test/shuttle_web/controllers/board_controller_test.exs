@@ -59,6 +59,21 @@ defmodule ShuttleWeb.BoardControllerTest do
     end
   end
 
+  defmodule LateRemoteClient do
+    def get(_url, _headers, _timeout) do
+      record = %{
+        "id" => "late",
+        "timestamp" => System.system_time(:millisecond) - 15 * 60_000,
+        "type" => "board",
+        "kind" => "post",
+        "fiber" => "child",
+        "text" => "arrived late"
+      }
+
+      {:ok, 200, [], Jason.encode!(%{records: [record]})}
+    end
+  end
+
   test "family endpoint composes and deduplicates a remote feed" do
     path = Path.join(System.tmp_dir!(), "board-family-api-#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)
@@ -121,6 +136,55 @@ defmodule ShuttleWeb.BoardControllerTest do
              api_conn() |> get("/api/v1/board/family?session=pi:unknown") |> json_response(200)
 
     assert 400 == get(api_conn(), "/api/v1/board/family").status
+  end
+
+  test "a late remote record is selected by local receive time" do
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "host")
+
+    entries =
+      for {id, uid} <- [{"hub", "root"}, {"hub/child", "child"}],
+          do: %{
+            felt_store: "/store",
+            fiber: %{
+              "id" => id,
+              "slug" => id,
+              "uid" => uid,
+              "name" => uid,
+              "shuttle" => %{"host" => "host"}
+            }
+          }
+
+    poller = start_supervised!({FakePoller, entries})
+    Shuttle.Test.Env.put_server(Shuttle.Poller, poller)
+    dir = Path.join(System.tmp_dir!(), "board-cache-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    registry =
+      start_supervised!(
+        {Shuttle.RemoteTemporalRegistry,
+         name: nil,
+         remotes: [%Shuttle.Remote{name: "remote", url: "http://remote"}],
+         client: LateRemoteClient,
+         store_dir: dir}
+      )
+
+    Shuttle.Test.Env.put_server(Shuttle.RemoteTemporalRegistry, registry)
+    now = System.system_time(:millisecond)
+    since = now - 5 * 60_000
+
+    api_conn() |> get("/api/v1/board/family?fiber=root&since_ms=0") |> json_response(200)
+    assert %{items: [_]} = Shuttle.RemoteTemporalRegistry.entries(registry, :board)["remote"]
+
+    result =
+      api_conn()
+      |> get("/api/v1/board/family?fiber=root&since_ms=#{since}")
+      |> json_response(200)
+
+    assert [%{"id" => "late", "timestamp" => timestamp, "received_at" => received_at}] =
+             result["records"]
+
+    assert timestamp < since
+    assert received_at >= since
   end
 
   test "local feed filters and supports conditional requests" do
