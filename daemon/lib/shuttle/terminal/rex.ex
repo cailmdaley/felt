@@ -73,7 +73,7 @@ defmodule Shuttle.Terminal.Rex do
   def launch(runner, name, cwd, script_path, opts) do
     with :ok <- valid_label(name),
          {:ok, %{"host_id" => server}} <- Rex.whoami(runner),
-         {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name)) do
+         {:ok, family} <- Tree.resolve(opts[:fiber] || Tree.fiber_for(name), opts) do
       spec = create_spec(name, cwd, script_path, opts)
 
       case in_family(runner, family, name, spec, server, fn binding ->
@@ -295,6 +295,9 @@ defmodule Shuttle.Terminal.Rex do
       error -> {:error, "Rex close failed: #{inspect(error)}"}
     end
   end
+
+  defp close_owned(_runner, _name, %{"session_owned" => false}),
+    do: {:error, "Cannot close a captured Rex worker without its window address"}
 
   defp close_owned(runner, name, b) do
     case Rex.destroy(runner, b["session_id"]) do
@@ -652,6 +655,7 @@ defmodule Shuttle.Terminal.Rex do
   defp viewer_locked(runner, key, label, argv, opts) do
     Shuttle.Terminal.with_lock({__MODULE__, :viewer, key}, fn ->
       with :ok <- valid_label(label),
+           {:ok, _} <- Rex.sessions(runner),
            :ok <- sweep(runner),
            {:ok, doc} <- Bindings.read(),
            {:ok, %{"host_id" => server}} <- Rex.whoami(runner) do
@@ -696,7 +700,7 @@ defmodule Shuttle.Terminal.Rex do
         script
       ])
 
-    with {:ok, family} <- Tree.resolve(opts[:fiber] || (old && old["fiber"])),
+    with {:ok, family} <- Tree.resolve(opts[:fiber] || (old && old["fiber"]), opts),
          {:ok, b} <-
            in_family(runner, family, key, spec, server, fn b ->
              Bindings.put_viewer(key, Map.put(b, "suffix", suffix), server)
