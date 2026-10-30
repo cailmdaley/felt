@@ -376,7 +376,11 @@ defmodule Shuttle.CodexApp.TransportTest do
         assert params["projectId"] == "existing"
         assert params["runtimeWorkspaceRoots"] == [cwd, felt]
         assert params["model"] == "configured-model"
-        assert params["config"] == %{"model_reasoning_effort" => "high"}
+        assert params["config"]["model_reasoning_effort"] == "high"
+
+        assert params["config"]["shell_environment_policy"]["set"]["SHUTTLE_SENDER_CAPABILITY"] ==
+                 String.duplicate("a", 64)
+
         assert params["approvalPolicy"] == "on-request"
         assert params["approvalsReviewer"] == "auto_review"
         assert params["sandbox"] == "workspace-write"
@@ -406,6 +410,7 @@ defmodule Shuttle.CodexApp.TransportTest do
                approval_policy: "on-request",
                approvals_reviewer: "auto_review",
                sandbox: "workspace-write",
+               sender_capability: String.duplicate("a", 64),
                developer_instructions:
                  "WAKE_MARKER\n\nFELT_MARKER\n\nAGENT_MARKER\n\nDISPATCH_MARKER"
              )
@@ -418,7 +423,11 @@ defmodule Shuttle.CodexApp.TransportTest do
   test "resume sends explicit developer instructions and omits absent overrides" do
     {path, peer} =
       initialized_peer(fn socket ->
-        for instructions <- ["PRESERVED_CONTEXT_MARKER", nil, nil] do
+        for {instructions, expected_cap} <- [
+              {"PRESERVED_CONTEXT_MARKER", String.duplicate("b", 64)},
+              {nil, nil},
+              {nil, nil}
+            ] do
           assert %{"id" => id, "method" => "thread/resume", "params" => params} =
                    recv_json(socket)
 
@@ -428,6 +437,15 @@ defmodule Shuttle.CodexApp.TransportTest do
             do: assert(params["developerInstructions"] == instructions),
             else: refute(Map.has_key?(params, "developerInstructions"))
 
+          if expected_cap do
+            assert params["config"]["shell_environment_policy"]["set"][
+                     "SHUTTLE_SENDER_CAPABILITY"
+                   ] ==
+                     expected_cap
+          else
+            refute get_in(params, ["config", "shell_environment_policy", "set"])
+          end
+
           send_result(socket, id, %{"thread" => %{"id" => "thread-1"}})
         end
       end)
@@ -436,7 +454,8 @@ defmodule Shuttle.CodexApp.TransportTest do
 
     assert {:ok, _} =
              CodexApp.resume_thread("thread-1",
-               developer_instructions: "PRESERVED_CONTEXT_MARKER"
+               developer_instructions: "PRESERVED_CONTEXT_MARKER",
+               sender_capability: String.duplicate("b", 64)
              )
 
     assert {:ok, _} = CodexApp.resume_thread("thread-1")
@@ -816,21 +835,26 @@ defmodule Shuttle.CodexApp.TransportTest do
     configure_adapter(path)
     Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(tmp_dir, "app-workers"))
 
+    capability = String.duplicate("c", 64)
+
     :ok =
-      AppWorkers.put(%{
-        "session_uuid" => thread_id,
-        "thread_id" => thread_id,
-        "fiber_id" => "tests/dead-loop",
-        "active" => true,
-        "surface" => "app",
-        "backend_host" => Shuttle.Poller.own_host_id(),
-        "backend_endpoint" => path,
-        "started_at" => DateTime.to_iso8601(DateTime.utc_now())
-      })
+      AppWorkers.put_with_sender_capability(
+        %{
+          "session_uuid" => thread_id,
+          "thread_id" => thread_id,
+          "fiber_id" => "tests/dead-loop",
+          "active" => true,
+          "surface" => "app",
+          "backend_host" => Shuttle.Poller.own_host_id(),
+          "backend_endpoint" => path,
+          "started_at" => DateTime.to_iso8601(DateTime.utc_now())
+        },
+        capability
+      )
 
     assert {:error,
             {:app_launch_failed, ^thread_id, {:peer, %{"code" => -32_600, "message" => message}}}} =
-             AppWorkers.start_turn(thread_id, "continue", [])
+             AppWorkers.start_turn(thread_id, "continue", sender_capability: capability)
 
     assert message =~ "agent loop died"
 

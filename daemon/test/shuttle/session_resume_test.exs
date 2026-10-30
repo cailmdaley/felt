@@ -370,7 +370,11 @@ defmodule Shuttle.SessionResumeTest do
 
       assert_received {:native_resume_options, @codex, native_opts}
       assert Keyword.fetch!(native_opts, :developer_instructions) == nil
-      assert native_opts == plan.backend_opts
+      assert byte_size(Keyword.fetch!(native_opts, :sender_capability)) == 64
+
+      assert Keyword.delete(native_opts, :sender_capability) ==
+               Keyword.delete(plan.backend_opts, :sender_capability)
+
       assert plan.command =~ "--remote 'unix://"
       refute plan.command =~ preset
     end

@@ -430,11 +430,36 @@ defmodule Shuttle.AppWorkersTest do
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
     assert record["backend_host"] == Poller.own_host_id()
 
+    start_opts =
+      Enum.find_value(App.calls(), fn
+        {:start, opts} -> opts
+        _ -> nil
+      end)
+
+    capability = Keyword.fetch!(start_opts, :sender_capability)
+
+    assert record["sender_capability_sha256"] ==
+             Base.encode16(:crypto.hash(:sha256, capability), case: :lower)
+
+    capability_path = Path.join(AppWorkers.root(), "app-session-1.sender-capability")
+    assert File.read!(capability_path) |> String.trim() == capability
+    assert :erlang.band(File.stat!(capability_path).mode, 0o777) == 0o600
+
+    assert {:turn, "app-session-1", _, turn_opts} =
+             Enum.find(App.calls(), &match?({:turn, _, _, _}, &1))
+
+    assert Keyword.fetch!(turn_opts, :sender_capability) == capability
+
+    assert {:error, :sender_capability_mismatch} =
+             AppWorkers.start_turn("app-session-1", "spoof",
+               sender_capability: String.duplicate("0", 64)
+             )
+
     assert [
              {:start, _},
              {:turn, "app-session-1", prompt, _},
              {:read, "app-session-1"},
-             {:resume, "app-session-1", []}
+             {:resume, "app-session-1", _}
            ] =
              App.calls()
 
@@ -602,7 +627,7 @@ defmodule Shuttle.AppWorkersTest do
              )
 
     assert tmux == "codex-terminal-" <> id
-    assert [{:start, _}, {:turn, ^id, prompt, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert [{:start, _}, {:turn, ^id, prompt, _}, {:read, ^id}, {:resume, ^id, _}] = App.calls()
     assert prompt =~ ~s(\"surface\":\"cli\")
     assert prompt =~ ~s(\"session_uuid\":\"#{id}\")
     refute prompt =~ "tmux_session"
@@ -656,7 +681,7 @@ defmodule Shuttle.AppWorkersTest do
     send(poller, :run_poll_cycle)
     eventually(fn -> Shuttle.Tmux.session_status(Runner, terminal) == :alive end, 200)
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
-    assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", []}, &1))
+    assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", _}, &1))
     refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
 
     snapshot = Poller.snapshot(poller)
@@ -824,7 +849,7 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, ref} = dispatch("tests/terminal", runner: ContextRunner, resume_mode: "previous")
     assert ref == AppWorkers.ref(id)
 
-    assert [{:resume, ^id, opts}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] =
+    assert [{:resume, ^id, opts}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] =
              App.calls()
 
     assert opts[:developer_instructions] == nil
@@ -864,7 +889,7 @@ defmodule Shuttle.AppWorkersTest do
     assert record["uid"] == uid
     assert record["felt_store"] == Runner.felt_root()
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
-    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] = App.calls()
   end
 
   test "embedded migration refuses unknown process observations without native calls" do
@@ -909,8 +934,29 @@ defmodule Shuttle.AppWorkersTest do
              dispatch("tests/terminal", runner: ReceiverHolderRunner, resume_mode: "previous")
 
     assert ref == AppWorkers.ref(id)
-    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, []}] = App.calls()
+    assert [{:resume, ^id, _}, {:turn, ^id, _, _}, {:read, ^id}, {:resume, ^id, _}] = App.calls()
+    calls = App.calls()
+
+    resume_opts =
+      Enum.find_value(calls, fn
+        {:resume, ^id, opts} -> opts
+        _ -> nil
+      end)
+
+    turn_opts =
+      Enum.find_value(calls, fn
+        {:turn, ^id, _, opts} -> opts
+        _ -> nil
+      end)
+
+    capability = Keyword.fetch!(resume_opts, :sender_capability)
+    assert Keyword.fetch!(turn_opts, :sender_capability) == capability
+
     assert {:ok, record} = AppWorkers.get(id)
+
+    assert record["sender_capability_sha256"] ==
+             Base.encode16(:crypto.hash(:sha256, capability), case: :lower)
+
     assert record["backend_host"] == Poller.own_host_id()
     assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
   end
@@ -925,7 +971,7 @@ defmodule Shuttle.AppWorkersTest do
     )
 
     assert {:ok, %{"id" => ^id}} = AppWorkers.import_embedded(id, %{}, [], ReceiverHolderRunner)
-    assert [{:resume, ^id, []}] = App.calls()
+    assert [{:resume, ^id, _}] = App.calls()
     assert {:ok, record} = AppWorkers.get(id)
     assert record["backend_host"] == Poller.own_host_id()
   end
@@ -1001,7 +1047,7 @@ defmodule Shuttle.AppWorkersTest do
              {:start, _},
              {:turn, "app-session-1", _, _},
              {:read, "app-session-1"},
-             {:resume, "app-session-1", []}
+             {:resume, "app-session-1", _}
            ] = App.calls()
   end
 
@@ -1726,7 +1772,7 @@ defmodule Shuttle.AppWorkersTest do
       |> Enum.map(fn {:ok, result} -> result end)
 
     assert Enum.all?(results, &(&1 == :ok))
-    assert Enum.count(App.calls(), &match?({:resume, ^id, []}, &1)) == 1
+    assert Enum.count(App.calls(), &match?({:resume, ^id, _}, &1)) == 1
   end
 
   test "watcher recovery rejects stale or mismatched durable ownership before native calls" do
@@ -1807,7 +1853,9 @@ defmodule Shuttle.AppWorkersTest do
                expected,
              row
 
-      assert App.calls() == [{:read, id} | if(resume, do: [{:resume, id, []}], else: [])], row
+      calls = App.calls()
+      assert Enum.take(calls, 1) == [{:read, id}], row
+      assert Enum.count(calls, &match?({:resume, ^id, _}, &1)) == if(resume, do: 1, else: 0), row
       assert {:ok, %{"active" => true}} = AppWorkers.get(id), row
     end
   end

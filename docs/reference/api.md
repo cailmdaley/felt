@@ -381,6 +381,10 @@ context-only and starts no turn. With `wake: true`, only Claude-native
 `queued`/`submitted` receipts are valid; `context_added` is never a wake result.
 Native admission alone never means a model reply.
 
+The daemon records a session sender only with a valid, one-use local sender proof bound to the delivery fields.
+Public requests without that evidence are labelled `unverified`; `from` is retained as a neutral sender claim.
+Messages produced inside the daemon are attributed to Shuttle.
+
 `notify_when_idle: true` subscribes `from`, which must be a `shuttle://`
 address, to one idle notice from the receiver; `notify_wake: true` makes that
 notice wake the subscriber. With it, `text` may be empty: the receipt is then

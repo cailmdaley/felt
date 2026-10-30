@@ -8,23 +8,40 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
 type senderProofRecord struct {
-	Sender  string `json:"sender"`
-	Address string `json:"address"`
-	Text    string `json:"text"`
-	ReplyTo string `json:"reply_to"`
-	ID      string `json:"message_id"`
-	Claim   string `json:"from_claim,omitempty"`
-	Issued  int64  `json:"issued_at"`
+	Sender         string        `json:"sender"`
+	Address        string        `json:"address"`
+	Text           string        `json:"text"`
+	ReplyTo        string        `json:"reply_to"`
+	ID             string        `json:"message_id"`
+	Claim          string        `json:"from_claim,omitempty"`
+	Wake           bool          `json:"wake"`
+	NotifyAddress  string        `json:"notify_address,omitempty"`
+	NotifyWhenIdle bool          `json:"notify_when_idle,omitempty"`
+	NotifyWake     bool          `json:"notify_wake,omitempty"`
+	ThreadSignal   *ThreadSignal `json:"thread_signal,omitempty"`
+	Attachments    []Attachment  `json:"attachments,omitempty"`
+	Issued         int64         `json:"issued_at"`
 }
 
 func proofRecord(request Request) senderProofRecord {
-	return senderProofRecord{Sender: request.From, Address: request.Address, Text: request.Text, ReplyTo: request.ReplyTo, ID: request.MessageID, Claim: request.FromClaim}
+	attachments := request.Attachments
+	if len(attachments) == 0 {
+		attachments = nil
+	}
+	return senderProofRecord{
+		Sender: request.From, Address: request.Address, Text: request.Text,
+		ReplyTo: request.ReplyTo, ID: request.MessageID, Claim: request.FromClaim,
+		Wake: request.Wake, NotifyAddress: request.NotifyAddress,
+		NotifyWhenIdle: request.NotifyWhenIdle, NotifyWake: request.NotifyWake,
+		ThreadSignal: request.ThreadSignal, Attachments: attachments,
+	}
 }
 
 // CreateSenderProof stores a one-use binding between a locally detected sender
@@ -119,7 +136,7 @@ func VerifySenderProof(env *sysenv.Env, request Request, consume bool) (string, 
 	}
 	bound := proofRecord(request)
 	bound.Issued = stored.Issued
-	if stored != bound {
+	if !reflect.DeepEqual(stored, bound) {
 		return "", false, nil
 	}
 	return stored.Sender, true, nil

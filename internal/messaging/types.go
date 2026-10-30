@@ -65,6 +65,7 @@ type Request struct {
 	// goes idle or exits; NotifyWake has that notice start a turn there.
 	NotifyWhenIdle bool `json:"notify_when_idle,omitempty"`
 	NotifyWake     bool `json:"notify_wake,omitempty"`
+	DaemonSender   bool `json:"daemon_sender,omitempty"`
 }
 
 // ThreadSignal identifies the lifecycle fact represented by queued thread

@@ -185,7 +185,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert_received {:message, request}
     assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
     assert request["text"] == "Meeting mode (call)."
-    assert request["from"] == "shuttle"
+    assert request["from"] == "unverified"
     assert request["from_claim"] == "shuttle meeting"
     assert request["wake"] == true
 
@@ -318,7 +318,7 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert Jason.decode!(last.body) == %{
              "fiber_id" => "tests/remote",
              "text" => "hello",
-             "from" => "shuttle",
+             "from" => "unverified",
              "from_claim" => ""
            }
 
@@ -335,27 +335,32 @@ defmodule ShuttleWeb.DeliverControllerTest do
     )
     |> json_response(200)
 
-    assert %{"from" => "shuttle", "from_claim" => "shuttle://sender/codex/thread"} =
+    assert %{"from" => "unverified", "from_claim" => "shuttle://sender/codex/thread"} =
              StubPostClient.last().body |> Jason.decode!()
   end
 
   # `shuttle message <fiber>`'s request: context unless a worker is live. The
   # context path reads the fiber from the configured stores.
-  defp queue_for_next_worker(fiber_id, id) do
+  defp queue_for_next_worker(fiber_id, id, extra \\ %{}) do
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
 
     api_conn()
     |> post(
       "/api/v1/deliver",
-      Jason.encode!(%{
-        "fiber_id" => fiber_id,
-        "text" => "read this when you start",
-        "from" => "shuttle://elsewhere/claude/sender",
-        "context_only" => true,
-        "unless_live" => true,
-        "wake" => true,
-        "message_id" => id
-      })
+      Jason.encode!(
+        Map.merge(
+          %{
+            "fiber_id" => fiber_id,
+            "text" => "read this when you start",
+            "from" => "shuttle://elsewhere/claude/sender",
+            "context_only" => true,
+            "unless_live" => true,
+            "wake" => true,
+            "message_id" => id
+          },
+          extra
+        )
+      )
     )
   end
 
@@ -393,6 +398,27 @@ defmodule ShuttleWeb.DeliverControllerTest do
              "tests/deliver-dormant"
              |> queue_for_next_worker("msg-dormant-1")
              |> json_response(202)
+  end
+
+  test "dormant context preserves the thread signal bound into sender evidence" do
+    put_constitution("tests/deliver-signal")
+    Env.put_app_env(:felt_runner, MockRunner)
+
+    signal = %{
+      "uid" => "child-uid",
+      "verb" => "closed",
+      "stamp" => "event-stamp",
+      "owner" => "test-host"
+    }
+
+    "tests/deliver-signal"
+    |> queue_for_next_worker("msg-signal", %{"thread_signal" => signal})
+    |> json_response(202)
+
+    assert [args] = mailbox_puts()
+    index = Enum.find_index(args, &(&1 == "--thread-signal"))
+    assert is_integer(index)
+    assert args |> Enum.at(index + 1) |> Jason.decode!() == signal
   end
 
   test "the owner feed counts what waits for a dormant fiber's next worker" do

@@ -90,7 +90,7 @@ func TestBoardMessageQueuedForWorker(t *testing.T) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != "message" || r.Fiber != messageTargetFiberUID || r.To == nil || r.To.Fiber != messageTargetFiberUID || r.By == nil || r.By.Label != "external" || r.By.Claim != "test sender" || r.Text != "hello" || !r.Wake {
+	if r.Kind != "message" || r.Fiber != messageTargetFiberUID || r.To == nil || r.To.Fiber != messageTargetFiberUID || r.By == nil || r.By.Label != "unverified" || r.By.Claim != "test sender" || r.Text != "hello" || !r.Wake {
 		t.Fatalf("record: %+v", r)
 	}
 }

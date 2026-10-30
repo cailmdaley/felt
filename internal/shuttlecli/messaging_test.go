@@ -473,10 +473,11 @@ func TestResolveMessageSenderIsReplyAddress(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "sender")
-	env.Set("CODEX_THREAD_ID", "thread/id")
-	registerSenderProcess(t, env, "codex", "thread/id", "sender", os.Getpid())
+	env.Set("CODEX_THREAD_ID", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "reply-session")
+	registerSenderProcess(t, env, "claude", "reply-session", "sender", os.Getpid())
 	a := newApp(env)
-	if got := a.detectMessageSender(); got != "shuttle://sender/codex/thread%2Fid" {
+	if got := a.detectMessageSender(); got != "shuttle://sender/claude/reply-session" {
 		t.Fatalf("sender = %q", got)
 	}
 }
@@ -485,14 +486,15 @@ func TestBuildMessageRequestKeepsExplicitFromAsClaim(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "sender")
-	env.Set("CODEX_THREAD_ID", "thread-A")
-	registerSenderProcess(t, env, "codex", "thread-A", "sender", os.Getpid())
+	env.Set("CODEX_THREAD_ID", "")
+	env.Set("CLAUDE_CODE_SESSION_ID", "claim-session")
+	registerSenderProcess(t, env, "claude", "claim-session", "sender", os.Getpid())
 	opts := messageOptions{wake: true, from: "bob"}
 	request, err := newApp(env).buildMessageRequest(strings.NewReader("hello"), []string{"shuttle://host/codex/target"}, &opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "shuttle://sender/codex/thread-A" || request.FromClaim != "bob" {
+	if request.From != "shuttle://sender/claude/claim-session" || request.FromClaim != "bob" {
 		t.Fatalf("sender attribution = %q, claim = %q", request.From, request.FromClaim)
 	}
 }
@@ -508,7 +510,7 @@ func TestRequestJSONCannotSpoofDetectedSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "shuttle" || request.FromClaim != "shuttle://host/claude/bob" {
+	if request.From != "unverified" || request.FromClaim != "shuttle://host/claude/bob" {
 		t.Fatalf("spoofed sender promoted: from=%q claim=%q", request.From, request.FromClaim)
 	}
 }

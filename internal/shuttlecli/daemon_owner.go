@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
@@ -154,6 +155,42 @@ func (a *app) daemonOwnerPath(settings hostSettings) (string, error) {
 	}
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(host+"\x00"+settings.listen.Network+"\x00"+settings.listen.Address)))
 	return filepath.Join(home, ".shuttle", "daemon-owners", key+".json"), nil
+}
+
+func (a *app) isLiveDaemonChild() bool {
+	settings, err := a.resolveHostSettings()
+	if err != nil {
+		return false
+	}
+	path, err := a.daemonOwnerPath(settings)
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var owner daemonOwner
+	if json.Unmarshal(data, &owner) != nil || owner.PID <= 0 || owner.Birth == "" {
+		return false
+	}
+	birth, err := processBirth(a.env, owner.PID)
+	if err != nil || birth != owner.Birth {
+		return false
+	}
+
+	current := os.Getpid()
+	for range 4 {
+		parent, _, ok := messaging.ProcessParent(current)
+		if !ok || parent <= 0 {
+			return false
+		}
+		if parent == owner.PID {
+			return true
+		}
+		current = parent
+	}
+	return false
 }
 
 // A manager may return from load/restart before its child begins executing.

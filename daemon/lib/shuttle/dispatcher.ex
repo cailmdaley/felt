@@ -1250,7 +1250,8 @@ defmodule Shuttle.Dispatcher do
       approvals_reviewer: codex_permissions(agent)[:approvals_reviewer],
       sandbox: codex_permissions(agent)[:sandbox],
       developer_instructions:
-        Keyword.get(opts, :developer_instructions, agent[:developer_instructions])
+        Keyword.get(opts, :developer_instructions, agent[:developer_instructions]),
+      sender_capability: Keyword.get(opts, :sender_capability)
     ]
 
   defp codex_permissions(agent) do
@@ -1271,7 +1272,28 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp create_app_worker(fiber_id, agent, work_dir, runner, context, intent, opts) do
-    opts = Keyword.put(opts, :managed_codex, true)
+    case resume_sender_capability(intent) do
+      {:ok, capability} ->
+        create_app_worker_with_capability(
+          fiber_id,
+          agent,
+          work_dir,
+          runner,
+          context,
+          intent,
+          Keyword.put(opts, :sender_capability, capability)
+        )
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp create_app_worker_with_capability(fiber_id, agent, work_dir, runner, context, intent, opts) do
+    opts =
+      opts
+      |> Keyword.put(:managed_codex, true)
+
     client = Shuttle.AppWorkers.client()
 
     start =
@@ -1284,7 +1306,13 @@ defmodule Shuttle.Dispatcher do
              ) do
         case intent do
           :fresh ->
-            client.start_thread(codex_options(agent, work_dir, context_opts))
+            client.start_thread(
+              codex_options(
+                agent,
+                work_dir,
+                Keyword.put(context_opts, :sender_capability, opts[:sender_capability])
+              )
+            )
 
           {:previous, id} ->
             resume_app_thread(
@@ -1364,7 +1392,9 @@ defmodule Shuttle.Dispatcher do
   end
 
   defp resume_app_thread(id, fiber_id, agent, work_dir, opts) do
-    with {:ok, loaded} <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
+    with {:ok, capability} <- resume_sender_capability({:previous, id}, opts),
+         opts = Keyword.put(opts, :sender_capability, capability),
+         {:ok, loaded} <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
          :ok <-
            Shuttle.AppWorkers.reserve_resume(
              id,
@@ -1400,13 +1430,40 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  defp resume_sender_capability(:fresh), do: {:ok, Shuttle.AppWorkers.new_sender_capability()}
+
+  defp resume_sender_capability({:previous, id}, opts) when is_list(opts) do
+    case Keyword.get(opts, :sender_capability) do
+      capability when is_binary(capability) and byte_size(capability) == 64 -> {:ok, capability}
+      _ -> resume_sender_capability({:previous, id})
+    end
+  end
+
+  defp resume_sender_capability({:previous, id}) when is_binary(id) do
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, _record} -> Shuttle.AppWorkers.ensure_sender_capability(id)
+      {:error, :not_found} -> {:ok, Shuttle.AppWorkers.new_sender_capability()}
+      {:error, _} = error -> error
+    end
+  end
+
   defp capture_app(yap, agent, work_dir, felt_store, opts) do
-    opts = Keyword.put(opts, :felt_store, felt_store)
+    opts =
+      opts
+      |> Keyword.put(:felt_store, felt_store)
+      |> Keyword.put_new(:sender_capability, Shuttle.AppWorkers.new_sender_capability())
+
     client = Shuttle.AppWorkers.client()
 
     with {:ok, context_opts} <- Shuttle.CodexContext.prepare(agent, work_dir, opts, :fresh),
          {:ok, %{"id" => id} = thread} <-
-           client.start_thread(codex_options(agent, work_dir, context_opts)),
+           client.start_thread(
+             codex_options(
+               agent,
+               work_dir,
+               Keyword.put(context_opts, :sender_capability, opts[:sender_capability])
+             )
+           ),
          :ok <-
            put_app_worker(
              thread,
@@ -1452,7 +1509,7 @@ defmodule Shuttle.Dispatcher do
   # `fiber_id`, `uid` and `felt_store` (nil fiber and uid for a capture).
   defp put_app_worker(%{"id" => id} = thread, agent, work_dir, fiber, opts) do
     with :ok <- Shuttle.AppWorkers.check_known_endpoint(id) do
-      Shuttle.AppWorkers.put(
+      Shuttle.AppWorkers.put_with_sender_capability(
         Map.merge(fiber, %{
           "session_uuid" => id,
           "thread_id" => id,
@@ -1468,7 +1525,8 @@ defmodule Shuttle.Dispatcher do
           "active" => true,
           "launch_state" => "starting",
           "started_at" => DateTime.to_iso8601(DateTime.utc_now())
-        })
+        }),
+        Keyword.fetch!(opts, :sender_capability)
       )
     end
   end

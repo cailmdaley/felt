@@ -250,6 +250,14 @@ defmodule Shuttle.CodexApp do
   end
 
   defp thread_options(opts) do
+    config =
+      %{}
+      |> maybe_put("model_reasoning_effort", opts[:effort])
+      |> maybe_put(
+        "shell_environment_policy",
+        sender_environment_policy(opts[:sender_capability])
+      )
+
     %{}
     |> maybe_put("cwd", opts[:cwd])
     |> maybe_put("model", opts[:model])
@@ -258,8 +266,14 @@ defmodule Shuttle.CodexApp do
     |> maybe_put("approvalsReviewer", opts[:approvals_reviewer])
     |> maybe_put("sandbox", opts[:sandbox])
     |> maybe_put("developerInstructions", opts[:developer_instructions])
-    |> maybe_put("config", if(opts[:effort], do: %{"model_reasoning_effort" => opts[:effort]}))
+    |> maybe_put("config", if(map_size(config) == 0, do: nil, else: config))
   end
+
+  defp sender_environment_policy(capability)
+       when is_binary(capability) and byte_size(capability) == 64,
+       do: %{"set" => %{"SHUTTLE_SENDER_CAPABILITY" => capability}}
+
+  defp sender_environment_policy(_), do: nil
 
   # The worker's checkout and the felt store it reports to.
   defp workspace_roots(opts) do

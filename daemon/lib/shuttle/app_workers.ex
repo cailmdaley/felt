@@ -109,8 +109,24 @@ defmodule Shuttle.AppWorkers do
   end
 
   def call(id, operation, args \\ []) do
-    with :ok <- check_endpoint(id), do: apply(client(), operation, [id | args])
+    with :ok <- check_endpoint(id),
+         {:ok, args} <- resume_options(id, operation, args),
+         do: apply(client(), operation, [id | args])
   end
+
+  defp resume_options(id, :resume_thread, [opts]) when is_list(opts) do
+    case sender_capability(id) do
+      {:ok, capability} -> {:ok, [Keyword.put(opts, :sender_capability, capability)]}
+      {:error, _} -> ensure_sender_capability(id) |> add_capability(opts)
+    end
+  end
+
+  defp resume_options(_id, _operation, args), do: {:ok, args}
+
+  defp add_capability({:ok, capability}, opts),
+    do: {:ok, [Keyword.put(opts, :sender_capability, capability)]}
+
+  defp add_capability({:error, _} = error, _opts), do: error
 
   def status(id) do
     case call(id, :status) do
@@ -146,6 +162,47 @@ defmodule Shuttle.AppWorkers do
     Shuttle.Env.app(:app_workers_dir, Path.join(Shuttle.data_dir(), "app-workers"))
   end
 
+  @doc false
+  def new_sender_capability, do: :crypto.strong_rand_bytes(32) |> Base.encode16(case: :lower)
+
+  @doc false
+  def sender_capability(id) when is_binary(id) do
+    with {:ok, record} <- get(id),
+         :ok <- check_endpoint(record, id),
+         {:ok, capability} <- File.read(capability_path(id)),
+         capability = String.trim(capability),
+         true <-
+           byte_size(capability) == 64 and
+             Base.encode16(:crypto.hash(:sha256, capability), case: :lower) ==
+               record["sender_capability_sha256"] do
+      {:ok, capability}
+    else
+      false -> {:error, :sender_capability_mismatch}
+      {:error, :enoent} -> {:error, :sender_capability_missing}
+      {:error, _} = error -> error
+      _ -> {:error, :sender_capability_unavailable}
+    end
+  end
+
+  defp capability_path(id), do: Path.join(root(), id <> ".sender-capability")
+
+  defp write_sender_capability(id, capability) when is_binary(capability) do
+    path = capability_path(id)
+    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
+
+    with :ok <- File.mkdir_p(root()),
+         :ok <- File.chmod(root(), 0o700),
+         :ok <- File.write(tmp, capability <> "\n", [:exclusive]),
+         :ok <- File.chmod(tmp, 0o600),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      error ->
+        File.rm(tmp)
+        error
+    end
+  end
+
   def get(id) when is_binary(id) do
     with :ok <- check_id(id),
          {:ok, bytes} <- File.read(record_path(id)),
@@ -161,8 +218,65 @@ defmodule Shuttle.AppWorkers do
   end
 
   def put(%{"session_uuid" => id} = record) do
-    :global.trans({{__MODULE__, id}, self()}, fn -> write_record(record) end)
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      if record["active"] == true and not is_binary(record["sender_capability_sha256"]) do
+        case sender_capability(id) do
+          {:ok, capability} ->
+            write_record(Map.put(record, "sender_capability_sha256", capability_hash(capability)))
+
+          _ ->
+            capability = new_sender_capability()
+
+            with :ok <- write_sender_capability(id, capability),
+                 do:
+                   write_record(
+                     Map.put(record, "sender_capability_sha256", capability_hash(capability))
+                   )
+        end
+      else
+        write_record(record)
+      end
+    end)
   end
+
+  def put_with_sender_capability(%{"session_uuid" => id} = record, capability)
+      when is_binary(capability) and byte_size(capability) == 64 do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      with :ok <- write_sender_capability(id, capability),
+           :ok <-
+             write_record(
+               Map.put(record, "sender_capability_sha256", capability_hash(capability))
+             ) do
+        :ok
+      end
+    end)
+  end
+
+  def ensure_sender_capability(id) when is_binary(id) do
+    :global.trans({{__MODULE__, id}, self()}, fn ->
+      with {:ok, record} <- get(id),
+           :ok <- check_endpoint(record, id) do
+        case sender_capability(id) do
+          {:ok, capability} ->
+            {:ok, capability}
+
+          _ ->
+            capability = new_sender_capability()
+
+            with :ok <- write_sender_capability(id, capability),
+                 :ok <-
+                   write_record(
+                     Map.put(record, "sender_capability_sha256", capability_hash(capability))
+                   ) do
+              {:ok, capability}
+            end
+        end
+      end
+    end)
+  end
+
+  defp capability_hash(capability),
+    do: Base.encode16(:crypto.hash(:sha256, capability), case: :lower)
 
   defp write_record(%{"session_uuid" => id} = record) do
     if Regex.match?(~r/^[A-Za-z0-9_-]+$/, id) do
@@ -221,6 +335,8 @@ defmodule Shuttle.AppWorkers do
 
   def start_turn(id, prompt, opts) do
     with :ok <- check_endpoint(id),
+         {:ok, capability} <- sender_capability(id),
+         true <- opts[:sender_capability] == capability,
          :ok <- update(id, %{"launch_state" => "starting", "pending_prompt" => prompt}) do
       result =
         with {:ok, turn} <- call(id, :start_turn, [prompt, opts]),
@@ -242,6 +358,9 @@ defmodule Shuttle.AppWorkers do
           :ok = update(id, %{"launch_state" => "blocked", "last_error" => inspect(reason)})
           {:error, {:app_launch_failed, id, reason}}
       end
+    else
+      false -> {:error, :sender_capability_mismatch}
+      {:error, _} = error -> error
     end
   end
 
@@ -257,20 +376,25 @@ defmodule Shuttle.AppWorkers do
                {:ok, origin} <- embedded_provenance(id, attributes),
                :ok <- Shuttle.WorkerProcess.check_free(runner, id),
                :ok <- Shuttle.CodexBackend.require_ready(),
+               capability = backend_opts[:sender_capability] || new_sender_capability(),
+               backend_opts = Keyword.put(backend_opts, :sender_capability, capability),
                {:ok, thread} <- load_embedded(id, backend_opts),
+               record =
+                 Map.merge(attributes, %{
+                   "session_uuid" => id,
+                   "thread_id" => id,
+                   "transcript_session_uuid" => thread["sessionId"] || id,
+                   "project_id" => thread["projectId"],
+                   "backend_host" => Shuttle.Poller.own_host_id(),
+                   "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
+                   "active" => false,
+                   "launch_state" => "idle",
+                   "resume_origin" => origin
+                 }),
+               :ok <- write_sender_capability(id, capability),
                :ok <-
                  write_record(
-                   Map.merge(attributes, %{
-                     "session_uuid" => id,
-                     "thread_id" => id,
-                     "transcript_session_uuid" => thread["sessionId"] || id,
-                     "project_id" => thread["projectId"],
-                     "backend_host" => Shuttle.Poller.own_host_id(),
-                     "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
-                     "active" => false,
-                     "launch_state" => "idle",
-                     "resume_origin" => origin
-                   })
+                   Map.put(record, "sender_capability_sha256", capability_hash(capability))
                  ) do
             {:ok, thread}
           end

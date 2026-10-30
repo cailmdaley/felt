@@ -36,6 +36,39 @@ defmodule Shuttle.ThreadsTest do
     end
   end
 
+  defp claim_test_daemon_owner!(home) do
+    {hostname, 0} = System.cmd("hostname", [])
+    hostname = String.trim(hostname)
+
+    listen_network = "tcp"
+    listen_address = "127.0.0.1:4000"
+
+    key =
+      :crypto.hash(:sha256, hostname <> <<0>> <> listen_network <> <<0>> <> listen_address)
+      |> Base.encode16(case: :lower)
+
+    path = Path.join([home, ".shuttle", "daemon-owners", key <> ".json"])
+    File.mkdir_p!(Path.dirname(path))
+    pid = System.pid()
+
+    File.write!(path, Jason.encode!(%{pid: String.to_integer(pid), birth: process_birth!(pid)}))
+  end
+
+  defp process_birth!(pid) do
+    case File.read("/proc/#{pid}/stat") do
+      {:ok, stat} ->
+        fields = stat |> String.split(")") |> List.last() |> String.split()
+        {:ok, boot} = File.read("/proc/sys/kernel/random/boot_id")
+        String.trim(boot) <> ":ticks:" <> Enum.at(fields, 19)
+
+      {:error, _} ->
+        {birth, 0} =
+          System.cmd("ps", ["-p", pid, "-o", "lstart="], env: [{"LC_ALL", "C"}, {"TZ", "UTC"}])
+
+        String.trim(birth)
+    end
+  end
+
   setup %{tmp_dir: dir} = context do
     home = Path.join(dir, "home")
     data = Path.join(dir, "data")
@@ -45,6 +78,9 @@ defmodule Shuttle.ThreadsTest do
     Env.delete_env("SHUTTLE_FIBER_PATH")
     Env.put_env("HOME", home)
     Env.put_env("SHUTTLE_DATA_DIR", data)
+    Env.delete_env("SHUTTLE_LISTEN")
+    Env.delete_env("SHUTTLE_PORT")
+    claim_test_daemon_owner!(home)
     Env.put_env("SHUTTLE_HOST", "test-host")
     Env.put_env("SHUTTLE_STORES", dir)
     unless context[:first_boot], do: Shuttle.ThreadOutbox.boot_baseline()

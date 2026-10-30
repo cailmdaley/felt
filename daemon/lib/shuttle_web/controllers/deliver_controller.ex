@@ -70,13 +70,16 @@ defmodule ShuttleWeb.DeliverController do
             {400, %{delivered: false, error: OriginRouter.unknown_origin_message(name)}}
 
           {:remote, remote} ->
-            {_sender, claimed} = unverified_sender(from, context["from_claim"])
+            {sender, claimed} =
+              if context["daemon_sender"] == true,
+                do: {"shuttle", ""},
+                else: unverified_sender(from, context["from_claim"])
 
             payload =
               %{"fiber_id" => fiber_id, "text" => text}
               |> Map.merge(context)
               |> Map.delete("sender_proof")
-              |> Map.put("from", "shuttle")
+              |> Map.put("from", sender)
               |> Map.put("from_claim", claimed)
 
             remote |> OriginRouter.forward("/api/v1/deliver", payload) |> relay()
@@ -92,12 +95,26 @@ defmodule ShuttleWeb.DeliverController do
                 from: sender,
                 from_claim: claim,
                 sender_proof: context["sender_proof"],
+                proof_wake: context["wake"] == true,
                 proof_address: context["address"],
-                reply_to: context["reply_to"]
+                reply_to: context["reply_to"],
+                notify_address: context["notify_address"],
+                notify_when_idle: context["notify_when_idle"] == true,
+                notify_wake: context["notify_wake"] == true,
+                thread_signal: context["thread_signal"]
               )
             else
-              {sender, claim} = unverified_sender(from, context["from_claim"])
-              opts = [from: sender, from_claim: claim]
+              {sender, claim} =
+                if context["daemon_sender"] == true,
+                  do: {"shuttle", ""},
+                  else: unverified_sender(from, context["from_claim"])
+
+              opts = [
+                from: sender,
+                from_claim: claim,
+                daemon_sender: context["daemon_sender"] == true
+              ]
+
               fiber_id |> Delivery.deliver(text, opts) |> reply(fiber_id)
             end
         end
@@ -115,6 +132,8 @@ defmodule ShuttleWeb.DeliverController do
       "notify_address" => context["notify_address"] || "",
       "notify_when_idle" => context["notify_when_idle"] || false,
       "notify_wake" => context["notify_wake"] || false,
+      "wake" => context["wake"] || false,
+      "thread_signal" => context["thread_signal"],
       "sender_proof" => context["sender_proof"] || ""
     }
 
@@ -138,9 +157,9 @@ defmodule ShuttleWeb.DeliverController do
   defp unverified_sender(from, claim) do
     claim = if is_binary(claim) and claim != "", do: claim, else: from
 
-    if is_binary(claim) and claim != "" and claim != "shuttle",
-      do: {"shuttle", claim},
-      else: {"shuttle", ""}
+    if is_binary(claim) and claim != "" and claim not in ["shuttle", "unverified"],
+      do: {"unverified", claim},
+      else: {"unverified", ""}
   end
 
   defp context_reply(fiber_id, text, message_id, opts)

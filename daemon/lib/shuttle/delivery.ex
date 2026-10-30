@@ -76,7 +76,12 @@ defmodule Shuttle.Delivery do
           "message_id" => message_id()
         }
 
-        case Messaging.send_message(payload) do
+        sender =
+          if Keyword.get(opts, :daemon_sender, false),
+            do: &Messaging.send_daemon_message/1,
+            else: &Messaging.send_message/1
+
+        case sender.(payload) do
           {:ok, status, receipt} -> {:message, status, receipt}
           {:error, status, error} -> {:error, status, error}
         end
@@ -116,18 +121,44 @@ defmodule Shuttle.Delivery do
         wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
         from = Keyword.get(opts, :from) || "shuttle"
         args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
+
+        args =
+          if from == "shuttle" and is_nil(opts[:sender_proof]),
+            do: args ++ ["--daemon-sender"],
+            else: args
+
         args = if opts[:from_claim], do: args ++ ["--from-claim", opts[:from_claim]], else: args
-        args = if opts[:sender_proof], do: args ++ ["--sender-proof", opts[:sender_proof]], else: args
-        args = if opts[:proof_address], do: args ++ ["--proof-address", opts[:proof_address]], else: args
+
+        args =
+          if opts[:proof_address],
+            do: args ++ ["--proof-address", opts[:proof_address]],
+            else: args
+
         args = if opts[:reply_to], do: args ++ ["--reply-to", opts[:reply_to]], else: args
+
+        args =
+          if opts[:notify_address],
+            do: args ++ ["--notify-address", opts[:notify_address]],
+            else: args
+
+        args = if opts[:notify_when_idle], do: args ++ ["--notify-when-idle"], else: args
+        args = if opts[:notify_wake], do: args ++ ["--notify-wake"], else: args
         args = if wake, do: args ++ ["--wake"], else: args
+        args = if opts[:proof_wake], do: args ++ ["--proof-wake"], else: args
 
         args =
           if opts[:thread_signal],
             do: args ++ ["--thread-signal", Jason.encode!(opts[:thread_signal])],
             else: args
 
-        with {:ok, _} <- Shuttle.CLI.run(args) do
+        proof_input =
+          if opts[:sender_proof],
+            do: Jason.encode!(%{"sender_proof" => opts[:sender_proof]}) <> "\n",
+            else: ""
+
+        args = if opts[:sender_proof], do: args ++ ["--sender-proof-stdin"], else: args
+
+        with {:ok, _} <- Shuttle.CLI.run(args, input: proof_input) do
           flush_context(entry)
           {:ok, :queued}
         end

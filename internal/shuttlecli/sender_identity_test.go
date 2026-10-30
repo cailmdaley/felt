@@ -60,7 +60,7 @@ func TestSenderIdentityUnboundOrSharedServerOnlyClaimsEnv(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if request.From != "external" || request.FromClaim != "shuttle://host/codex/bob" {
+			if request.From != "unverified" || request.FromClaim != "shuttle://host/codex/bob" {
 				t.Fatalf("unbound session promoted: %#v", request)
 			}
 		})
@@ -78,7 +78,7 @@ func TestSenderIdentityUnprovedDaemonFrameIgnoresInheritedSession(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "shuttle" || request.FromClaim != "shuttle://other/claude/alice" {
+	if request.From != "unverified" || request.FromClaim != "shuttle://other/claude/alice" {
 		t.Fatalf("daemon inherited sender: %#v", request)
 	}
 }
@@ -92,7 +92,7 @@ func TestSenderIdentityUnboundCallbackUsesHintWithoutPromotingClaim(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "external" || request.FromClaim != "shuttle://host/claude/bob" || request.NotifyAddress != "shuttle://host/codex/actual-thread" {
+	if request.From != "unverified" || request.FromClaim != "shuttle://host/claude/bob" || request.NotifyAddress != "shuttle://host/codex/actual-thread" {
 		t.Fatalf("claim changed callback or sender: %#v", request)
 	}
 }
@@ -140,7 +140,7 @@ func TestSenderIdentityMalformedHintHasNoRawHeaderFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.From != "external" || request.FromClaim != "" {
+	if request.From != "unverified" || request.FromClaim != "" {
 		t.Fatalf("malformed hint reached header: %#v", request)
 	}
 }

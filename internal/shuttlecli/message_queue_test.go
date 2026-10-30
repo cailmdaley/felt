@@ -70,7 +70,7 @@ func TestMessageToDormantFiberQueuesForNextWorker(t *testing.T) {
 	}
 	want := map[string]any{
 		"fiber_id": messageTargetFiberUID, "origin": "worker-node", "text": "read this when you start",
-		"from": "external", "from_claim": "test sender", "message_id": "msg-next-worker", "context_only": true, "unless_live": true, "wake": true,
+		"from": "unverified", "from_claim": "test sender", "message_id": "msg-next-worker", "context_only": true, "unless_live": true, "wake": true,
 	}
 	for key, value := range want {
 		if got[0][key] != value {

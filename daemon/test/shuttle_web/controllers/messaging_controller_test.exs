@@ -311,7 +311,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert match?({:ok, _, _}, result)
 
       if id in ["accepted", "queued", "submitted", "context_added"] do
-        expected_label = "shuttle"
+        expected_label = "unverified"
         assert_receive {:cleared_ask, ^store, ^expected_label}
       else
         refute_receive {:cleared_ask, _, _}
@@ -682,7 +682,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
                     %{
                       "address" => "shuttle://local/pi/p%2F1",
                       "reply_to" => "work/fiber",
-                      "from" => "shuttle",
+                      "from" => "unverified",
                       "from_claim" => "test"
                     }}
 
@@ -724,7 +724,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:local_message_frame,
                     %{
                       "reply_to" => "work/fiber",
-                      "from" => "shuttle",
+                      "from" => "unverified",
                       "from_claim" => "shuttle://peer/pi/A"
                     }}
   end
@@ -740,7 +740,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     for {proof, sender, claim} <- [
           {"verified-test-proof", request["from"], nil},
-          {"forged-proof", "shuttle", request["from"]}
+          {"forged-proof", "unverified", request["from"]}
         ] do
       payload = Map.put(request, "sender_proof", proof)
       payload = if claim, do: Map.put(payload, "from_claim", ""), else: payload
@@ -767,7 +767,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert_receive {:forwarded, frame}
 
     assert %{
-             "from" => "shuttle",
+             "from" => "unverified",
              "from_claim" => "shuttle://peer/pi/A",
              "notify_address" => "shuttle://peer/pi/A",
              "notify_when_idle" => true
@@ -794,7 +794,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
                       "notify_when_idle" => true,
                       "notify_wake" => true,
                       "notify_address" => "shuttle://peer/pi/A",
-                      "from" => "shuttle"
+                      "from" => "unverified"
                     }}
 
     for bad <- [%{"notify_when_idle" => "yes"}, %{"notify_when_idle" => false}] do
@@ -865,7 +865,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert {context, 0} = hook.("UserPromptSubmit")
 
     assert context |> Jason.decode!() |> get_in(["hookSpecificOutput", "additionalContext"]) =~
-             "[Shuttle message real-reply from shuttle; claims to be shuttle://peer/pi/sender; reply to peer/work]"
+             "[Shuttle message real-reply from unverified; claims to be shuttle://peer/pi/sender; reply to peer/work]"
 
     # A's pairing is rotated; B is a Codex CLI worker without thread_id.
     # Its native address is established by the fiber's runtime, not guessed.

@@ -376,6 +376,15 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 		if err != nil {
 			return request, err
 		}
+		if request.DaemonSender {
+			if !a.isLiveDaemonChild() {
+				return request, fmt.Errorf("daemon sender attribution requires a Shuttle daemon parent")
+			}
+			request.From = "shuttle"
+			request.FromClaim = ""
+			request.DaemonSender = false
+			return request, nil
+		}
 		sender, valid, err := messaging.VerifySenderProof(a.env, request, true)
 		if err != nil {
 			return request, err
@@ -389,7 +398,7 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 		if claim == "" {
 			claim = request.From
 		}
-		request = a.trustMessageSenderAs(request, claim, "shuttle")
+		request = a.trustMessageSenderAs(request, claim, "unverified")
 		request.SenderProof = ""
 		if request.NotifyWhenIdle && request.NotifyAddress == "" {
 			request.NotifyAddress = request.From
@@ -419,7 +428,7 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 	// Reply and idle callbacks are routing hints. A shared harness process can
 	// route to its exported session without establishing that session as sender.
 	callback := request.From
-	if callback == "external" {
+	if callback == "unverified" {
 		callback = a.messageSenderHint()
 	}
 	if request.NotifyWhenIdle {
@@ -447,6 +456,9 @@ func (a *app) trustMessageSenderAs(request messaging.Request, claim, detected st
 	claim = strings.TrimSpace(claim)
 	if claim == detected {
 		claim = ""
+	}
+	if detected == "external" {
+		detected = "unverified"
 	}
 	request.FromClaim = claim
 	request.From = detected

@@ -79,16 +79,20 @@ defmodule Shuttle.Messaging do
   def address(host, harness, native),
     do: build_address(host, %{harness: harness, native: native})
 
-  def send_message(payload) when is_map(payload), do: send_message(payload, :text)
+  def send_message(payload) when is_map(payload), do: send_message(payload, :text, :external)
 
-  def send_message_with_files(payload) when is_map(payload), do: send_message(payload, :files)
+  @doc "Send a message produced by a Shuttle daemon component."
+  def send_daemon_message(payload) when is_map(payload), do: send_message(payload, :text, :daemon)
 
-  defp send_message(payload, mode) do
+  def send_message_with_files(payload) when is_map(payload),
+    do: send_message(payload, :files, :external)
+
+  defp send_message(payload, mode, source) do
     with {:ok, request} <- validate_message(payload, mode),
          {:ok, address} <- parse_address(request.address),
          request <- normalize_message_address(request, address),
          decision <- OriginRouter.route_host(address.host),
-         {:ok, request} <- authenticate_sender(request, decision),
+         {:ok, request} <- authenticate_sender(request, decision, source),
          result <- deliver(decision, request, address) do
       result
     end
@@ -470,7 +474,18 @@ defmodule Shuttle.Messaging do
     end
   end
 
-  defp authenticate_sender(request, decision) do
+  defp authenticate_sender(request, _decision, :daemon) do
+    raw =
+      request.raw
+      |> Map.put("from", "shuttle")
+      |> Map.put("from_claim", "")
+      |> Map.put("daemon_sender", true)
+      |> Map.delete("sender_proof")
+
+    {:ok, %{request | raw: raw}}
+  end
+
+  defp authenticate_sender(request, decision, :external) do
     proof = Map.get(request.raw, "sender_proof", "")
 
     callback =
@@ -505,11 +520,12 @@ defmodule Shuttle.Messaging do
           _ -> request.raw["from"] || ""
         end
 
-      claim = if claim == "shuttle", do: "", else: claim
+      claim = if claim in ["shuttle", "unverified"], do: "", else: claim
 
       raw =
         request.raw
-        |> Map.put("from", "shuttle")
+        |> Map.delete("daemon_sender")
+        |> Map.put("from", "unverified")
         |> Map.put("from_claim", claim)
         |> Map.delete("sender_proof")
 
