@@ -37,7 +37,7 @@ defmodule Shuttle.OperatorFilesGuardTest do
   @tag skip: is_nil(System.find_executable("tmux"))
   test "a real named tmux server lives in the suite namespace" do
     server = "namespace-#{System.unique_integer([:positive])}"
-    command = fn args -> Shuttle.Env.cmd("tmux", ["-L", server | args], stderr_to_stdout: true) end
+    command = fn args -> Shuttle.Env.cmd("tmux", ["-f", "/dev/null", "-L", server | args], stderr_to_stdout: true) end
     on_exit(fn -> command.(["kill-server"]) end)
     assert {_, 0} = command.(["new-session", "-d", "-s", "sentinel", "sleep", "300"])
     assert {socket, 0} = command.(["display-message", "-p", "\#{socket_path}"])
