@@ -520,8 +520,8 @@ See [Connect your machines](../shuttle/remotes.md#verify-work-across-the-connect
 | `shuttle host check-owner` | Verify that a socket-class TCP listener belongs to this user, from `/proc/net/tcp{,6}` (a no-op for Unix listeners and off Linux) |
 | `shuttle tunnels install [name ...]` | Write (and optionally bootstrap) autossh tunnels for the named remotes, or all enabled remotes if none are given (`--unit-dir`, `--log-dir`, `--autossh-path`, `--write-only`, `--dry-run`). launchd on macOS, systemd user units on Linux |
 | `shuttle validate-identity` | Check federated fiber UID invariants across daemon feeds (`--daemon-url`, repeatable, to check other hosts) |
-| `shuttle contract` | Print the daemon-facing CLI contract version (level 22 includes family board append and `ask --clear --answered-by`; used at daemon boot to detect a stale CLI) |
-| `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--meeting`; at least one required); daemon-facing, not for manual use |
+| `shuttle contract` | Print the daemon-facing CLI contract version, used at daemon boot to detect an incompatible CLI |
+| `shuttle mark-runtime <fiber>` | Stamp `shuttle.runtime` continuation fields (`--dispatched-at`, `--session`, `--run-id`, `--handed-off-at`, `--meeting`, `--thread-exit-verb`; at least one required); daemon-facing, not for manual use |
 
 !!! note
     `shuttle remotes`, `tunnels`, `validate-identity`, `contract`, and
