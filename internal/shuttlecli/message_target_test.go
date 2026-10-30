@@ -108,6 +108,7 @@ func TestWorkerSenderAdvertisesFiberReplyTarget(t *testing.T) {
 				isolateMessageFiberStore(env, store)
 				env.Set("PI_SESSION_ID", session)
 				env.Set("AI_AGENT", "pi")
+				registerSenderProcess(t, env, "pi", session, "worker-node", os.Getpid())
 				if source == "dispatch-env" {
 					env.Set("SHUTTLE_FIBER_PATH", felt.NewStorage(store).Path("work/worker"))
 				} else {

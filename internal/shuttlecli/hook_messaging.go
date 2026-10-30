@@ -82,7 +82,7 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 				fmt.Fprintf(&context, "%s\n\n", messaging.Labeled(r))
 			}
 			if digest != "" {
-				context.WriteString("\n")
+				context.WriteString("\n[Shuttle family board digest]\n")
 				context.WriteString(digest)
 			}
 			wrote = true

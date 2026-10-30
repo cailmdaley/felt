@@ -356,8 +356,9 @@ receiver next ends a turn with nothing queued or running, or exits. A receiver
 that is idle already answers at once, giving the time its last turn ended.
 Text is optional: with text, the message is delivered and then the subscription
 is made; without it, the receipt is `subscribed`. The notice arrives as context
-from the receiver's address; `--notify-wake` has it start a turn instead. The
-sender must have a session address (`--from`, or the detected harness session).
+from Shuttle and names the receiver in its text; `--notify-wake` has it start a turn instead.
+The callback address comes from the detected harness session.
+`--from` adds a claim beside that identity and cannot set it.
 The owning host records the subscription under `$SHUTTLE_DATA_DIR/idle/` and a
 detached `shuttle idle-watch` observes it. Claude receivers subscribe through
 Claude Code's native inbox (`notify_when_idle` / `peer_idle_notice`), and a
@@ -447,10 +448,15 @@ No receipt proves that a model read, acted on, or integrated the message.
 Hook offers can repeat if the receiver crashes after writing context but before
 recording the offer; message IDs remain stable. Repeating the identical send
 with the same `--message-id` retrieves its recorded result without redelivery.
-Sender labels are self-reported, not authenticated instructions.
-Automatic `--from` detection supplies the exact sending session address.
+`--from` is a sender claim; the message header keeps it separate from the sending session detected by Shuttle.
+Shuttle resolves the caller from a live receiver registration bound to the invoking process ancestry.
+Environment session hints supply reply routing but cannot establish sender identity; ambiguous shared-server callers are external with a neutral claim.
+The CLI binds a resolved identity to the message with one-use local proof before it reaches the daemon.
+The proof store trusts the local operating-system account; it does not isolate processes with arbitrary access to that account’s files.
 A fiber worker also supplies `reply_to`, a separate fiber target shown as `reply to <fiber>` in every delivered header.
-Reply with `shuttle message <fiber> ...` to reach the fiber's current worker across handoffs; the `from` address continues to name the session that sent the message.
+At a local destination, `from` names the detected sending session.
+Across hosts, the destination attributes the relay to Shuttle and shows the original sender as a claim.
+Reply with `shuttle message <fiber> ...` to reach the fiber's current worker across handoffs.
 Nonworker messages omit `reply_to`.
 If the receiver uses another routing alias for the sender's host, resolve an explicit session reply through its own `sessions` output.
 

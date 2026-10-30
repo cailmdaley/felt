@@ -34,6 +34,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
        }), 0}
     end
 
+    def cmd("shuttle", ["message-proof" | _], opts) do
+      request = opts[:input] |> String.trim() |> Jason.decode!()
+      valid = request["sender_proof"] == "verified-test-proof"
+      {Jason.encode!(%{valid: valid, sender: if(valid, do: request["from"], else: "")}), 0}
+    end
+
     def cmd("shuttle", ["message", "--local", "--json", "--request-json"], opts) do
       request = opts[:input] |> String.trim() |> Jason.decode!()
 
@@ -305,7 +311,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
       assert match?({:ok, _, _}, result)
 
       if id in ["accepted", "queued", "submitted", "context_added"] do
-        expected_label = if id == "queued", do: "someone", else: "reviewer"
+        expected_label = "shuttle"
         assert_receive {:cleared_ask, ^store, ^expected_label}
       else
         refute_receive {:cleared_ask, _, _}
@@ -673,7 +679,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
     receipt = api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
 
     assert_receive {:forwarded,
-                    %{"address" => "shuttle://local/pi/p%2F1", "reply_to" => "work/fiber"}}
+                    %{
+                      "address" => "shuttle://local/pi/p%2F1",
+                      "reply_to" => "work/fiber",
+                      "from" => "shuttle",
+                      "from_claim" => "test"
+                    }}
 
     assert receipt["address"] == request["address"]
     assert receipt["status"] == "accepted"
@@ -711,7 +722,58 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
 
     assert_receive {:local_message_frame,
-                    %{"reply_to" => "work/fiber", "from" => "shuttle://peer/pi/A"}}
+                    %{
+                      "reply_to" => "work/fiber",
+                      "from" => "shuttle",
+                      "from_claim" => "shuttle://peer/pi/A"
+                    }}
+  end
+
+  test "only a locally verified proof preserves a sender identity", %{host: host} do
+    request = %{
+      "address" => "shuttle://#{host}/codex/native%2Fid",
+      "text" => "approved",
+      "from" => "shuttle://peer/pi/bob",
+      "reply_to" => "work/fiber",
+      "message_id" => "local-proof"
+    }
+
+    for {proof, sender, claim} <- [
+          {"verified-test-proof", request["from"], nil},
+          {"forged-proof", "shuttle", request["from"]}
+        ] do
+      payload = Map.put(request, "sender_proof", proof)
+      payload = if claim, do: Map.put(payload, "from_claim", ""), else: payload
+      assert api_conn() |> post("/api/v1/messages", Jason.encode!(payload)) |> json_response(200)
+      assert_receive {:local_message_frame, frame}
+      assert frame["from"] == sender
+      assert frame["from_claim"] == claim
+      if claim, do: refute(Map.has_key?(frame, "sender_proof"))
+    end
+  end
+
+  test "remote forwarding retains the idle callback but never a local sender proof" do
+    request = %{
+      "address" => "shuttle://edge/pi/p%2F1",
+      "text" => "hello",
+      "from" => "shuttle://peer/pi/A",
+      "sender_proof" => "verified-test-proof",
+      "notify_address" => "shuttle://peer/pi/A",
+      "notify_when_idle" => true,
+      "message_id" => "remote-proof"
+    }
+
+    assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
+    assert_receive {:forwarded, frame}
+
+    assert %{
+             "from" => "shuttle",
+             "from_claim" => "shuttle://peer/pi/A",
+             "notify_address" => "shuttle://peer/pi/A",
+             "notify_when_idle" => true
+           } = frame
+
+    refute Map.has_key?(frame, "sender_proof")
   end
 
   test "an idle subscription may omit text and reaches the owner's frame", %{host: host} do
@@ -727,7 +789,13 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     assert api_conn() |> post("/api/v1/messages", Jason.encode!(request)) |> json_response(200)
 
-    assert_receive {:local_message_frame, %{"notify_when_idle" => true, "notify_wake" => true}}
+    assert_receive {:local_message_frame,
+                    %{
+                      "notify_when_idle" => true,
+                      "notify_wake" => true,
+                      "notify_address" => "shuttle://peer/pi/A",
+                      "from" => "shuttle"
+                    }}
 
     for bad <- [%{"notify_when_idle" => "yes"}, %{"notify_when_idle" => false}] do
       assert api_conn()
@@ -757,6 +825,11 @@ defmodule ShuttleWeb.MessagingControllerTest do
     tmp_dir: root
   } do
     Shuttle.Test.Env.put_app_env(:felt_runner, Shuttle.Runner.Default)
+
+    for key <- ["CODEX_THREAD_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "PI_SESSION_ID"] do
+      Shuttle.Test.Env.put_env(key, "")
+    end
+
     Shuttle.Test.Env.put_env("SHUTTLE_HOST", host)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", root)
     path = Path.join(root, "sessions.jsonl")
@@ -792,7 +865,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert {context, 0} = hook.("UserPromptSubmit")
 
     assert context |> Jason.decode!() |> get_in(["hookSpecificOutput", "additionalContext"]) =~
-             "[Shuttle message real-reply from shuttle://peer/pi/sender; reply to peer/work]"
+             "[Shuttle message real-reply from shuttle; claims to be shuttle://peer/pi/sender; reply to peer/work]"
 
     # A's pairing is rotated; B is a Codex CLI worker without thread_id.
     # Its native address is established by the fiber's runtime, not guessed.

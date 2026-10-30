@@ -105,7 +105,11 @@ func subscribeIdle(env *sysenv.Env, a Address, req Request) *IdleSubscription {
 	if SpawnIdleWatcher == nil {
 		return unsupported("this process cannot start an idle watcher")
 	}
-	rec := IdleRecord{MessageID: req.MessageID, Address: req.Address, Subscriber: req.From, Wake: req.NotifyWake, CreatedAt: time.Now().Unix()}
+	subscriber := req.NotifyAddress
+	if subscriber == "" {
+		subscriber = req.From
+	}
+	rec := IdleRecord{MessageID: req.MessageID, Address: req.Address, Subscriber: subscriber, Wake: req.NotifyWake, CreatedAt: time.Now().Unix()}
 	switch a.Harness {
 	case "claude":
 		if !claudeNativeAvailable(env, a.ID, a.Host) {

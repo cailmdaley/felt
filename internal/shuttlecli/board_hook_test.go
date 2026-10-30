@@ -301,7 +301,7 @@ func TestBoardDigestCombinedWithMailbox(t *testing.T) {
 		t.Fatalf("%q %v", out, err)
 	}
 	text := e.HookSpecificOutput.AdditionalContext
-	if !strings.Contains(text, "mail") || !strings.Contains(text, "Family board (family)") || strings.Index(text, "mail") > strings.Index(text, "Family board") {
+	if !strings.Contains(text, "mail") || !strings.Contains(text, "\n[Shuttle family board digest]\nFamily board (family)") || strings.Index(text, "mail") > strings.Index(text, "Family board") {
 		t.Fatal(text)
 	}
 	if out = hook("UserPromptSubmit"); out != "" {

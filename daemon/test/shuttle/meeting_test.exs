@@ -472,7 +472,8 @@ defmodule Shuttle.MeetingTest do
     assert forwarded.url == "http://127.0.0.1:4001/api/v1/deliver"
     request = Jason.decode!(forwarded.body)
     assert request["fiber_id"] == "cosmo/shear-bmodes"
-    assert request["from"] == "shuttle meeting"
+    assert request["from"] == "shuttle"
+    assert request["from_claim"] in [nil, ""]
     assert request["text"] =~ "Meeting mode (call)."
     assert request["text"] =~ "~/.hark/meetings/2026-09-25_1403_shear-bmodes.txt"
     assert request["text"] =~ "joins this constitution (`cosmo/shear-bmodes`)"

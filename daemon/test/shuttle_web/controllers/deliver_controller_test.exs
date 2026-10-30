@@ -185,7 +185,8 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert_received {:message, request}
     assert request["address"] == "shuttle://#{Poller.own_host_id()}/claude/#{session_uuid}"
     assert request["text"] == "Meeting mode (call)."
-    assert request["from"] == "shuttle meeting"
+    assert request["from"] == "shuttle"
+    assert request["from_claim"] == "shuttle meeting"
     assert request["wake"] == true
 
     assert launches_before ==
@@ -313,7 +314,29 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert body == %{"delivered" => true, "delivery" => "message"}
     last = StubPostClient.last()
     assert last.url == "http://localhost:4002/api/v1/deliver"
-    assert Jason.decode!(last.body) == %{"fiber_id" => "tests/remote", "text" => "hello"}
+
+    assert Jason.decode!(last.body) == %{
+             "fiber_id" => "tests/remote",
+             "text" => "hello",
+             "from" => "shuttle",
+             "from_claim" => ""
+           }
+
+    api_conn()
+    |> post(
+      "/api/v1/deliver",
+      Jason.encode!(%{
+        "fiber_id" => "tests/remote",
+        "text" => "hello",
+        "origin" => "cineca",
+        "from" => "shuttle://sender/codex/thread",
+        "from_claim" => ""
+      })
+    )
+    |> json_response(200)
+
+    assert %{"from" => "shuttle", "from_claim" => "shuttle://sender/codex/thread"} =
+             StubPostClient.last().body |> Jason.decode!()
   end
 
   # `shuttle message <fiber>`'s request: context unless a worker is live. The

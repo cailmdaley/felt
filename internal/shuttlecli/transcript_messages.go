@@ -26,7 +26,7 @@ func (a *app) transcriptMessagesCmd() *cobra.Command {
 				}
 				watermark = time.Unix(0, nanos)
 			}
-			cursor := strconv.FormatInt(time.Now().UnixNano(), 10)
+			cursor := strconv.FormatInt(time.Now().Add(-2*time.Minute).UnixNano(), 10)
 			messages, err := messaging.DeliveredEnvelopesSince(a.env, args[0], watermark)
 			if err != nil {
 				return err

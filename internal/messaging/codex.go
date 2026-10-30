@@ -252,6 +252,9 @@ func Labeled(r Request) string {
 	if r.From != "" {
 		header += " from " + r.From
 	}
+	if r.FromClaim != "" {
+		header += "; claims to be " + r.FromClaim
+	}
 	if r.ReplyTo != "" {
 		header += "; reply to " + r.ReplyTo
 	}

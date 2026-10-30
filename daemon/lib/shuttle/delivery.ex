@@ -20,15 +20,13 @@ defmodule Shuttle.Delivery do
 
   @spec deliver(String.t(), String.t(), keyword()) :: result()
   def deliver(fiber_id, text, opts \\ []) do
-    from = Keyword.get(opts, :from, "shuttle")
-
     case Poller.live_worker(fiber_id) do
-      nil -> launch(fiber_id, text, from)
-      worker -> message(worker, text, from)
+      nil -> launch(fiber_id, text, opts)
+      worker -> message(worker, text, opts)
     end
   end
 
-  defp launch(fiber_id, text, from) do
+  defp launch(fiber_id, text, opts) do
     since = System.system_time(:millisecond)
 
     # The dispatcher reads the fiber itself, so it alone decides whether there
@@ -44,7 +42,7 @@ defmodule Shuttle.Delivery do
     # A worker that appeared between the look and the launch takes the message.
     with {:error, :already_running} <- result,
          worker when is_map(worker) <- Poller.live_worker(fiber_id) do
-      message(worker, text, from)
+      message(worker, text, opts)
     else
       _ -> {:launch, launch_mode(result, fiber_id, since), result}
     end
@@ -64,18 +62,21 @@ defmodule Shuttle.Delivery do
 
   defp launch_mode(_result, _fiber_id, _since), do: "fresh"
 
-  defp message(%{session_uuid: native, cli: cli}, text, from) do
+  defp message(%{session_uuid: native, cli: cli}, text, opts) do
     case harness(cli) do
       harness when is_binary(harness) and is_binary(native) ->
         address = Messaging.address("local", harness, native)
 
-        case Messaging.send_message(%{
-               "address" => address,
-               "text" => text,
-               "from" => from,
-               "wake" => true,
-               "message_id" => message_id()
-             }) do
+        payload = %{
+          "address" => address,
+          "text" => text,
+          "from" => Keyword.get(opts, :from, "shuttle"),
+          "from_claim" => Keyword.get(opts, :from_claim, ""),
+          "wake" => true,
+          "message_id" => message_id()
+        }
+
+        case Messaging.send_message(payload) do
           {:ok, status, receipt} -> {:message, status, receipt}
           {:error, status, error} -> {:error, status, error}
         end
@@ -115,6 +116,10 @@ defmodule Shuttle.Delivery do
         wake = Keyword.get(opts, :wake, false) and live_context_worker(entry) != nil
         from = Keyword.get(opts, :from) || "shuttle"
         args = ["context-mailbox", "put", context_key(entry), message_id, text, "--from", from]
+        args = if opts[:from_claim], do: args ++ ["--from-claim", opts[:from_claim]], else: args
+        args = if opts[:sender_proof], do: args ++ ["--sender-proof", opts[:sender_proof]], else: args
+        args = if opts[:proof_address], do: args ++ ["--proof-address", opts[:proof_address]], else: args
+        args = if opts[:reply_to], do: args ++ ["--reply-to", opts[:reply_to]], else: args
         args = if wake, do: args ++ ["--wake"], else: args
 
         args =

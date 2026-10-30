@@ -47,13 +47,16 @@ type Directory struct {
 }
 
 type Request struct {
-	Address      string        `json:"address"`
-	Text         string        `json:"text"`
-	From         string        `json:"from,omitempty"`
-	ReplyTo      string        `json:"reply_to,omitempty"`
-	Wake         bool          `json:"wake"`
-	MessageID    string        `json:"message_id"`
-	ThreadSignal *ThreadSignal `json:"thread_signal,omitempty"`
+	Address       string        `json:"address"`
+	Text          string        `json:"text"`
+	From          string        `json:"from,omitempty"`
+	FromClaim     string        `json:"from_claim,omitempty"`
+	SenderProof   string        `json:"sender_proof,omitempty"`
+	ReplyTo       string        `json:"reply_to,omitempty"`
+	NotifyAddress string        `json:"notify_address,omitempty"`
+	Wake          bool          `json:"wake"`
+	MessageID     string        `json:"message_id"`
+	ThreadSignal  *ThreadSignal `json:"thread_signal,omitempty"`
 	// threadSignalVerified carries owner validation through a native send without
 	// exposing lifecycle authority in the sender-controlled request frame.
 	threadSignalVerified bool

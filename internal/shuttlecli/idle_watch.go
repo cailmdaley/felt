@@ -49,7 +49,7 @@ func (a *app) idleWatchCmd() *cobra.Command {
 			request := messaging.Request{
 				Address:   rec.Subscriber,
 				Text:      messaging.IdleNoticeText(rec, notice),
-				From:      rec.Address,
+				From:      "shuttle",
 				Wake:      rec.Wake,
 				MessageID: messaging.IdleNoticeID(rec),
 			}

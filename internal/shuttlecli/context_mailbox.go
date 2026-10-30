@@ -13,9 +13,38 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "context-mailbox", Hidden: true, Short: "Owner-local durable fiber context"}
 	var wake bool
 	var from string
+	var fromClaim string
 	var threadSignal string
+	var senderProof string
+	var proofAddress string
+	var replyTo string
 	put := &cobra.Command{Use: "put <fiber-key> <message-id> <text>", Args: cobra.ExactArgs(3), RunE: func(cmd *cobra.Command, args []string) error {
-		request := messaging.Request{MessageID: args[1], Text: args[2], From: from, Wake: wake}
+		if err := messaging.ValidateSenderClaim(fromClaim); err != nil {
+			return err
+		}
+		detected := "shuttle"
+		claim := fromClaim
+		if claim == "" && from != "" && from != detected {
+			claim = from
+		}
+		if err := messaging.ValidateSenderClaim(claim); err != nil {
+			return err
+		}
+		request := messaging.Request{MessageID: args[1], Text: args[2], From: detected, FromClaim: claim, Wake: wake, ReplyTo: replyTo}
+		if senderProof != "" {
+			candidate := request
+			candidate.From = from
+			candidate.FromClaim = fromClaim
+			candidate.Address = proofAddress
+			candidate.SenderProof = senderProof
+			if sender, valid, err := messaging.VerifySenderProof(a.env, candidate, true); err != nil {
+				return err
+			} else if valid {
+				request.From = sender
+				request.FromClaim = fromClaim
+			}
+		}
+		request.SenderProof = ""
 		if threadSignal != "" {
 			var signal messaging.ThreadSignal
 			if err := json.Unmarshal([]byte(threadSignal), &signal); err != nil {
@@ -27,6 +56,10 @@ func (a *app) contextMailboxCmd() *cobra.Command {
 	}}
 	put.Flags().BoolVar(&wake, "wake", false, "Start a turn in the live orchestrator")
 	put.Flags().StringVar(&from, "from", "shuttle", "Sender label the receiving worker sees")
+	put.Flags().StringVar(&fromClaim, "from-claim", "", "Unverified sender claim shown beside the sender")
+	put.Flags().StringVar(&senderProof, "sender-proof", "", "One-use sender evidence from the local message CLI")
+	put.Flags().StringVar(&proofAddress, "proof-address", "", "Address bound into the sender evidence")
+	put.Flags().StringVar(&replyTo, "reply-to", "", "Fiber reply target bound into the sender evidence")
 	put.Flags().StringVar(&threadSignal, "thread-signal", "", "Thread lifecycle signal JSON for delivery-time validation")
 	cmd.AddCommand(put)
 	cmd.AddCommand(&cobra.Command{Use: "pending <fiber-key>...", Args: cobra.MinimumNArgs(1), RunE: func(cmd *cobra.Command, args []string) error {

@@ -88,6 +88,7 @@ defmodule Shuttle.Messaging do
          {:ok, address} <- parse_address(request.address),
          request <- normalize_message_address(request, address),
          decision <- OriginRouter.route_host(address.host),
+         {:ok, request} <- authenticate_sender(request, decision),
          result <- deliver(decision, request, address) do
       result
     end
@@ -469,11 +470,65 @@ defmodule Shuttle.Messaging do
     end
   end
 
+  defp authenticate_sender(request, decision) do
+    proof = Map.get(request.raw, "sender_proof", "")
+
+    callback =
+      Map.get(request.raw, "notify_address") ||
+        if Map.get(request.raw, "notify_when_idle", false), do: Map.get(request.raw, "from", "")
+
+    verified =
+      if is_binary(proof) and proof != "" do
+        proof_args =
+          if decision == :local, do: ["message-proof"], else: ["message-proof", "--consume"]
+
+        case CLI.run(proof_args, input: Jason.encode!(request.raw) <> "\n") do
+          {:ok, output} ->
+            case Jason.decode(output) do
+              {:ok, %{"valid" => true, "sender" => sender}} -> sender == request.raw["from"]
+              _ -> false
+            end
+
+          _ ->
+            false
+        end
+      else
+        false
+      end
+
+    if verified and decision == :local do
+      {:ok, request}
+    else
+      claim =
+        case request.raw["from_claim"] do
+          value when is_binary(value) and value != "" -> value
+          _ -> request.raw["from"] || ""
+        end
+
+      claim = if claim == "shuttle", do: "", else: claim
+
+      raw =
+        request.raw
+        |> Map.put("from", "shuttle")
+        |> Map.put("from_claim", claim)
+        |> Map.delete("sender_proof")
+
+      raw =
+        if is_binary(callback) and callback != "",
+          do: Map.put(raw, "notify_address", callback),
+          else: raw
+
+      {:ok, %{request | raw: raw}}
+    end
+  end
+
   defp validate_message(payload, mode) do
     address = Map.get(payload, "address")
     text = Map.get(payload, "text", "")
     from = Map.get(payload, "from", "")
+    from_claim = Map.get(payload, "from_claim", "")
     reply_to = Map.get(payload, "reply_to", "")
+    notify_address = Map.get(payload, "notify_address", "")
     # Ordinary messages are task requests. Context-only delivery is explicit
     # with `wake: false`; keeping the default here also applies to public JSON
     # callers that omit the field entirely.
@@ -481,11 +536,33 @@ defmodule Shuttle.Messaging do
     id = Map.get(payload, "message_id")
 
     with {:ok, attachments} <- validate_attachments(Map.get(payload, "attachments", []), mode) do
-      validate_message_fields(payload, address, text, from, reply_to, wake, id, attachments)
+      validate_message_fields(
+        payload,
+        address,
+        text,
+        from,
+        from_claim,
+        reply_to,
+        notify_address,
+        wake,
+        id,
+        attachments
+      )
     end
   end
 
-  defp validate_message_fields(payload, address, text, from, reply_to, wake, id, attachments) do
+  defp validate_message_fields(
+         payload,
+         address,
+         text,
+         from,
+         from_claim,
+         reply_to,
+         notify_address,
+         wake,
+         id,
+         attachments
+       ) do
     cond do
       not is_binary(address) or byte_size(address) > 8_192 ->
         {:error, 400, "address must be a bounded string"}
@@ -504,9 +581,18 @@ defmodule Shuttle.Messaging do
       not is_binary(from) or byte_size(from) > 1_024 or has_control?(from) ->
         {:error, 400, "from must be a string of at most 1024 bytes without control characters"}
 
+      not is_binary(from_claim) or byte_size(from_claim) > 1_024 or has_control?(from_claim) or
+          String.contains?(from_claim, ["[", "]", ";"]) ->
+        {:error, 400, "from_claim must be a bounded single-line label without header delimiters"}
+
       not is_binary(reply_to) or byte_size(reply_to) > 1_024 or has_control?(reply_to) ->
         {:error, 400,
          "reply_to must be a string of at most 1024 bytes without control characters"}
+
+      not is_binary(notify_address) or byte_size(notify_address) > 1_024 or
+          has_control?(notify_address) ->
+        {:error, 400,
+         "notify_address must be a string of at most 1024 bytes without control characters"}
 
       not is_boolean(wake) ->
         {:error, 400, "wake must be a boolean"}
@@ -521,7 +607,10 @@ defmodule Shuttle.Messaging do
             "address",
             "text",
             "from",
+            "from_claim",
+            "sender_proof",
             "reply_to",
+            "notify_address",
             "wake",
             "message_id",
             "notify_when_idle",
@@ -637,7 +726,8 @@ defmodule Shuttle.Messaging do
   end
 
   defp normalize_message_address(request, address) do
-    canonical = build_address(address.host, address)
+    host = if address.host == "local", do: Poller.own_host_id(), else: address.host
+    canonical = build_address(host, address)
     %{request | address: canonical, raw: Map.put(request.raw, "address", canonical)}
   end
 

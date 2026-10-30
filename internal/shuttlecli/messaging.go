@@ -226,6 +226,10 @@ exit 1 means rejected, unknown, or another command error.`,
 				if err != nil {
 					return err
 				}
+				request.Address, err = a.canonicalMessageAddress(request.Address)
+				if err != nil {
+					return err
+				}
 			}
 			id := request.MessageID
 			if !messageOpts.requestJSON {
@@ -250,6 +254,11 @@ exit 1 means rejected, unknown, or another command error.`,
 					feltErrorCode = messaging.ErrorCode(err)
 				}
 			} else {
+				proof, proofErr := messaging.CreateSenderProof(a.env, request)
+				if proofErr != nil {
+					return fmt.Errorf("creating sender evidence: %w", proofErr)
+				}
+				request.SenderProof = proof
 				receipt, err = a.postMessage(request)
 			}
 			receiptProduced = receipt.MessageID != "" && receipt.Address == request.Address && receipt.Status != "" && receipt.Transport != ""
@@ -312,7 +321,7 @@ exit 1 means rejected, unknown, or another command error.`,
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.contextOnly, "context-only", false, "deliver context without starting or steering a model turn")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyIdle, "notify-when-idle", false, "get one notice (as context) when the receiver next goes idle or exits; text is optional")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.notifyWake, "notify-wake", false, "with --notify-when-idle, have the notice start a turn here")
-	shuttleMessageCmd.Flags().StringVar(&messageOpts.from, "from", "", "label the sender (default: detected harness thread or external)")
+	shuttleMessageCmd.Flags().StringVar(&messageOpts.from, "from", "", "include a sender claim alongside the detected caller")
 	shuttleMessageCmd.Flags().StringVar(&messageOpts.id, "message-id", "", "supply an idempotency key for a safe retry")
 	shuttleMessageCmd.Flags().BoolVar(&messageOpts.local, "local", false, "send through this host's native adapter without daemon routing")
 	_ = shuttleMessageCmd.Flags().MarkHidden("local")
@@ -341,9 +350,54 @@ func messageReceiptError(id string, receipt messaging.Receipt, err error) error 
 	}
 }
 
+func (a *app) messageProofCmd() *cobra.Command {
+	consume := false
+	command := &cobra.Command{Use: "message-proof", Hidden: true, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		request, err := readMessageRequestFrame(cmd.InOrStdin())
+		if err != nil {
+			return err
+		}
+		sender, valid, err := messaging.VerifySenderProof(a.env, request, consume)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(a.env.Stdout).Encode(struct {
+			Sender string `json:"sender"`
+			Valid  bool   `json:"valid"`
+		}{sender, valid})
+	}}
+	command.Flags().BoolVar(&consume, "consume", false, "consume the proof after verification")
+	return command
+}
+
 func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOptions) (messaging.Request, error) {
 	if o.requestJSON {
-		return readMessageRequestFrame(stdin)
+		request, err := readMessageRequestFrame(stdin)
+		if err != nil {
+			return request, err
+		}
+		sender, valid, err := messaging.VerifySenderProof(a.env, request, true)
+		if err != nil {
+			return request, err
+		}
+		if valid {
+			request.From = sender
+			request.SenderProof = ""
+			return request, nil
+		}
+		claim := request.FromClaim
+		if claim == "" {
+			claim = request.From
+		}
+		request = a.trustMessageSenderAs(request, claim, "shuttle")
+		request.SenderProof = ""
+		if request.NotifyWhenIdle && request.NotifyAddress == "" {
+			request.NotifyAddress = request.From
+		}
+		if err := messaging.ValidateSenderClaim(request.FromClaim); err != nil {
+			return request, err
+		}
+		return request, nil
 	}
 	text, err := readMessageText(a.env, stdin, args, o.file)
 	if err != nil {
@@ -360,12 +414,43 @@ func (a *app) buildMessageRequest(stdin io.Reader, args []string, o *messageOpti
 			return messaging.Request{}, err
 		}
 	}
-	from := a.resolveMessageSender(o.from)
-	request := messaging.Request{Address: args[0], Text: text, From: from, ReplyTo: a.messageReplyTarget(from), Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments, NotifyWhenIdle: o.notifyIdle, NotifyWake: o.notifyWake}
+	request := messaging.Request{Address: args[0], Text: text, Wake: o.wake && !o.contextOnly, MessageID: id, Attachments: attachments, NotifyWhenIdle: o.notifyIdle, NotifyWake: o.notifyWake}
+	request = a.trustMessageSender(request, o.from)
+	// Reply and idle callbacks are routing hints. A shared harness process can
+	// route to its exported session without establishing that session as sender.
+	callback := request.From
+	if callback == "external" {
+		callback = a.messageSenderHint()
+	}
+	if request.NotifyWhenIdle {
+		request.NotifyAddress = callback
+	}
+	if err := messaging.ValidateSenderClaim(request.FromClaim); err != nil {
+		return request, err
+	}
+	request.ReplyTo = a.messageReplyTarget(callback)
 	if o.notifyIdle && text == "" && len(attachments) == 0 {
 		request.Wake = false
 	}
 	return request, nil
+}
+
+func (a *app) trustMessageSender(request messaging.Request, claim string) messaging.Request {
+	detected := a.detectMessageSender()
+	if detected == "external" && strings.TrimSpace(claim) == "" {
+		claim = a.messageSenderHint()
+	}
+	return a.trustMessageSenderAs(request, claim, detected)
+}
+
+func (a *app) trustMessageSenderAs(request messaging.Request, claim, detected string) messaging.Request {
+	claim = strings.TrimSpace(claim)
+	if claim == detected {
+		claim = ""
+	}
+	request.FromClaim = claim
+	request.From = detected
+	return request
 }
 
 func readMessageRequestFrame(reader io.Reader) (messaging.Request, error) {
@@ -445,19 +530,40 @@ func newMessageID() (string, error) {
 	return "msg-" + hex.EncodeToString(raw[:]), nil
 }
 
-func (a *app) resolveMessageSender(explicit string) string {
-	if explicit = strings.TrimSpace(explicit); explicit != "" {
-		return explicit
+func (a *app) detectMessageSender() string {
+	if host, err := a.resolveOwnHost(""); err == nil {
+		if sender := messaging.DetectProcessSender(a.env, host); sender != "" {
+			return sender
+		}
 	}
+	return "external"
+}
+
+// messageSenderHint preserves an unbound harness id as a claim, never as the
+// recorded sender. A malformed hint has no safe header representation.
+func (a *app) messageSenderHint() string {
 	if harness, value := a.harnessSessionFromEnv(); value != "" {
 		if host, err := a.resolveOwnHost(""); err == nil {
 			if address, err := messaging.FormatAddress(host, harness, value); err == nil {
 				return address
 			}
 		}
-		return harness + ":" + value
 	}
-	return "external"
+	return ""
+}
+
+func (a *app) canonicalMessageAddress(raw string) (string, error) {
+	address, err := messaging.ParseAddress(raw)
+	if err != nil {
+		return "", err
+	}
+	if address.Host == "local" {
+		address.Host, err = a.resolveOwnHost("")
+		if err != nil {
+			return "", err
+		}
+	}
+	return messaging.FormatAddress(address.Host, address.Harness, address.ID)
 }
 
 // harnessSessionEnv lists, in precedence order, the environment variables a
@@ -473,20 +579,19 @@ var harnessSessionEnv = []struct{ key, harness string }{
 	{"PI_SESSION_ID", "pi"},
 }
 
-// harnessSessionFromEnv returns the calling harness and its native session id,
-// or empty strings outside a recognised harness session.
+// harnessSessionFromEnv reads a harness session hint for routing and discovery.
+// It does not establish sender identity.
 //
 // Harnesses nest (a Pi worker launched from a Claude session inherits
 // CLAUDE_CODE_SESSION_ID), so the list order alone would attribute the Pi
 // session's message to its parent. Pi sets AI_AGENT=pi on its own process, and
 // Claude Code overwrites AI_AGENT for its children, so AI_AGENT=pi alongside
-// PI_SESSION_ID means the innermost harness is Pi.
+// PI_SESSION_ID selects Pi's hint.
 //
 // The trade-off: Codex (checked at 0.159.1) sets no AI_AGENT, so a Codex
 // session started from Pi's bash tool carries the same environment as Pi
-// started from Codex, and is attributed to its Pi parent. Pi under a Codex
-// session (a confer worker) is the common nesting, so Pi wins; --from
-// overrides either.
+// started from Codex, and selects its Pi parent's hint. Pi under a Codex
+// session (a confer worker) is the common nesting, so Pi wins.
 func (a *app) harnessSessionFromEnv() (harness, id string) {
 	if strings.TrimSpace(a.env.Getenv("AI_AGENT")) == "pi" {
 		if value := strings.TrimSpace(a.env.Getenv("PI_SESSION_ID")); value != "" {

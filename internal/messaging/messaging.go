@@ -140,10 +140,17 @@ func validateRequest(host string, r Request) error {
 	if r.NotifyWake && !r.NotifyWhenIdle {
 		return errCode("invalid_request", "notify_wake requires notify_when_idle")
 	}
+	if len(r.NotifyAddress) > 1024 || hasControl(r.NotifyAddress) {
+		return errCode("invalid_request", "notify_address is too long or contains control characters")
+	}
 	if r.NotifyWhenIdle {
-		from, err := ParseAddress(r.From)
+		notifyAddress := r.NotifyAddress
+		if notifyAddress == "" {
+			notifyAddress = r.From
+		}
+		from, err := ParseAddress(notifyAddress)
 		if err != nil {
-			return errCode("invalid_request", "notify_when_idle needs a sender address to notify; from %q is not one", r.From)
+			return errCode("invalid_request", "notify_when_idle needs a callback session address; %q is not one", notifyAddress)
 		}
 		if from == a {
 			return errCode("invalid_request", "notify_when_idle cannot target the subscribing session itself")
@@ -152,13 +159,25 @@ func validateRequest(host string, r Request) error {
 	if (r.Text == "" && len(r.Attachments) == 0 && !r.NotifyWhenIdle) || len(r.Text) > 64<<10 || strings.ContainsRune(r.Text, 0) {
 		return errCode("invalid_request", "text must be at most 65536 bytes and may be empty only with attachments")
 	}
-	if len(r.From) > 1024 || hasControl(r.From) {
-		return errCode("invalid_request", "from is too long or contains NUL")
+	if len(r.From) > 1024 || hasControl(r.From) || strings.ContainsAny(r.From, "[];") {
+		return errCode("invalid_request", "from is too long or contains header delimiters")
+	}
+	if err := ValidateSenderClaim(r.FromClaim); err != nil {
+		return err
 	}
 	if len(r.ReplyTo) > 1024 || hasControl(r.ReplyTo) {
 		return errCode("invalid_request", "reply_to is too long or contains control characters")
 	}
 	return validateAttachments(r.Attachments)
+}
+
+// ValidateSenderClaim keeps caller-supplied labels bounded and on one line of
+// the Shuttle message header.
+func ValidateSenderClaim(claim string) error {
+	if len(claim) > 1024 || hasControl(claim) || strings.ContainsAny(claim, "[];") {
+		return errCode("invalid_request", "from_claim is too long or contains header delimiters")
+	}
+	return nil
 }
 
 func hasControl(s string) bool {

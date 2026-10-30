@@ -129,7 +129,7 @@ defmodule ShuttleWeb.MeetingController do
          ) do
       {:ok, %{meeting: row, prompt: prompt}} ->
         {status, delivery} =
-          ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle meeting")
+          ShuttleWeb.DeliverController.route(fiber_id, prompt, origin, "shuttle")
 
         Meeting.log_delivery(row, status, delivery)
         body = MeetingRouter.stamp(%{meeting: row, delivery: delivery})

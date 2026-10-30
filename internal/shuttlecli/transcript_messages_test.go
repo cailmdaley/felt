@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTranscriptMessagesReadsOfflineAndRejectsInvalidSession(t *testing.T) {
@@ -33,7 +34,7 @@ func TestTranscriptMessagesCursorIsOpaqueDecimalAndValidated(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &response); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := strconv.ParseInt(response.Cursor, 10, 64); err != nil || n <= 0 || response.Messages == nil {
+	if n, err := strconv.ParseInt(response.Cursor, 10, 64); err != nil || n <= 0 || n > time.Now().Add(-119*time.Second).UnixNano() || response.Messages == nil {
 		t.Fatalf("invalid response: %s", out)
 	}
 	for _, invalid := range []string{"-1", "abc", "9223372036854775808"} {
