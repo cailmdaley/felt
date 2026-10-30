@@ -152,6 +152,25 @@ describe('TranscriptModel', () => {
     expect(messages).toMatchObject([{ status: expected }])
   })
 
+  it.each([
+    ['accepted', 0, 'sent'],
+    ['unknown', 1, 'uncertain'],
+  ] as const)('matches a custom message ID in a pretty-printed JSON %s receipt', (status, exitCode, expected) => {
+    const command = 'shuttle message --message-id follow-up work/child "Ready."'
+    const receipt = JSON.stringify({
+      message_id: 'follow-up',
+      address: 'shuttle://host/codex/session',
+      status,
+      transport: 'codex',
+    }, null, 2)
+    const output = `Script completed\nWall time 0.1s\nOutput:\n${JSON.stringify({
+      exit_code: exitCode,
+      output: `sending follow-up to shuttle://host/codex/session\n${receipt}`,
+    })}`
+    const messages = modelAfterCodexExec([command], output).turns.flatMap(turn => turn.steps).filter(step => step.kind === 'shuttle-message')
+    expect(messages).toMatchObject([{ status: expected }])
+  })
+
   it('does not let an unrelated accepted receipt override an unknown custom message id', () => {
     const model = new TranscriptModel()
     model.append(normalizeRecord({ type: 'assistant', message: { content: [{

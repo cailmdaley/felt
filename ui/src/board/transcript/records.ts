@@ -117,20 +117,52 @@ function parenthesizedReceiptId(line: string): string | undefined {
   return undefined
 }
 
+function jsonObjects(text: string): ObjectValue[] {
+  const values: ObjectValue[] = []
+  let start = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (start < 0) {
+      if (char !== '{') continue
+      start = index
+      depth = 1
+      continue
+    }
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === '{') depth++
+    else if (char === '}' && --depth === 0) {
+      try {
+        const value = object(JSON.parse(text.slice(start, index + 1)))
+        if (value) values.push(value)
+      } catch { /* Other command output can contain braces without JSON. */ }
+      start = -1
+    }
+  }
+  return values
+}
+
 function receiptMessageIds(text: string, statuses: Set<string>): string[] {
   const ids = new Set<string>()
+  for (const receipt of jsonObjects(text)) {
+    const status = string(receipt.status)?.toLowerCase()
+    const id = string(receipt.message_id)
+    if (status && statuses.has(status) && id) ids.add(id)
+  }
   for (const line of text.split(/\r?\n/)) {
     const status = /^\s*([a-z_]+)\b/i.exec(line)?.[1]?.toLowerCase()
     if (status && statuses.has(status)) {
       const id = parenthesizedReceiptId(line)
       if (id) ids.add(id)
     }
-    try {
-      const receipt = object(JSON.parse(line))
-      if (receipt && statuses.has(string(receipt.status) ?? '') && typeof receipt.message_id === 'string' && receipt.message_id.length > 0) {
-        ids.add(receipt.message_id)
-      }
-    } catch { /* Plain text receipts use the status line above. */ }
   }
   return [...ids]
 }
