@@ -351,8 +351,11 @@
 .ws-reader.ws-rail-off:has(> .ws-rail-toggle:not([hidden])):not(.ws-expand-mode) { --ws-head-end: var(--ws-toggle-room); }
 .ws-rail-toggle[hidden] { display: none; }
 .ws-rail-toggle .ws-toggle-line { stroke-linecap: round; }
-/* Something in the family waits on the human, or a sent file is unread: the same mark as the board's other unread dots. */
-.ws-rail-toggle[data-attention]::after { content: ''; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--ws-fresh); }
+/* The glyph is a bulleted list. When something in the family waits on the human, or a sent file is unread,
+   its first bullet swells into the board's unread dot, so the mark belongs to the control instead of perching on it. */
+.ws-rail-toggle :is(.ws-toggle-flag, .ws-toggle-bullet) { fill: currentColor; stroke: none; }
+.ws-rail-toggle .ws-toggle-flag { transition: r 160ms var(--ws-ease), fill 160ms var(--ws-ease); }
+.ws-rail-toggle[data-attention] .ws-toggle-flag { r: 2.5px; fill: var(--ws-fresh); }
 .ws-rail-off .ws-thread-rail { display: none; }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .ws-rail-toggle { top: calc(2px + env(safe-area-inset-top)); right: 44px; width: var(--ws-phone-target); height: var(--ws-phone-target); }

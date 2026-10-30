@@ -7,7 +7,7 @@ const css = read('reader.css').replace(/\/\*[\s\S]*?\*\//g, '')
 const tokens = `${read('tokens.css')}\n${readFileSync(new URL('../src/styles/type.css', import.meta.url), 'utf8')}`
 
 describe('workspace style contracts', () => {
-  it('scrolls the rail\'s two regions on their own: threads capped at their content, sent files taking the rest', () => {
+  it('orders the rail threads, artifact, sent files: lists scroll on their own and a drawn artifact takes the rest', () => {
     const rules = new Map<string, Map<string, string>>()
     postcss.parse(read('thread-rail.css')).walkRules(rule => {
       for (const selector of rule.selectors) {
@@ -16,10 +16,14 @@ describe('workspace style contracts', () => {
         rules.set(selector, decls)
       }
     })
-    const threads = rules.get('.ws-thread-scroll')!, files = rules.get('.ws-rail-files')!, list = rules.get('.ws-rail-file-list')!
-    for (const scroller of [threads, list]) { expect(scroller.get('overflow')).toBe('auto'); expect(scroller.get('min-height')).toBe('0') }
-    expect(threads.get('flex')).toBe('0 1 auto'); expect(threads.get('max-height')).toMatch(/%$/)
+    const threads = rules.get('.ws-thread-scroll')!, tree = rules.get('.ws-thread-tree')!, files = rules.get('.ws-rail-files')!, list = rules.get('.ws-rail-file-list')!
+    for (const scroller of [tree, list]) { expect(scroller.get('overflow')).toBe('auto'); expect(scroller.get('min-height')).toBe('0') }
+    expect(threads.get('flex')).toBe('0 1 auto'); expect(threads.get('min-height')).toBe('0'); expect(threads.get('max-height')).toMatch(/%$/)
     expect(files.get('flex')).toBe('1 1 0'); expect(files.get('min-height')).toBe('0')
+    const fill = rules.get('.ws-rail-artifact[data-fill]')!
+    expect(fill.get('flex')).toBe('1 1 0'); expect(parseFloat(fill.get('min-height')!)).toBeGreaterThan(0)
+    const filesBeside = rules.get('.ws-rail-artifact[data-fill]:not([hidden]) ~ .ws-rail-files')!
+    expect(filesBeside.get('flex')).toBe('0 1 auto'); expect(filesBeside.get('max-height')).toMatch(/%$/)
     expect(rules.get('.ws-thread-rail')!.get('flex-direction')).toBe('column')
   })
   it('keeps the ready PDF thumbnail glyph visible', () => {

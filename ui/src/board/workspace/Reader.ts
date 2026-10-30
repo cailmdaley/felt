@@ -189,7 +189,7 @@ export class Reader {
     this.sidebarToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect class="ws-toggle-column" x="1.5" y="2.5" width="4.5" height="11"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M6 2.5v11"/></svg>'
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
     this.railToggle.title = 'Threads and sent files · ⌘|'
-    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M2.5 3.5h11M5.5 8h8M5.5 12.5h8M3 8h.01M3 12.5h.01"/></svg>'
+    this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
     this.returnButton = button('ws-return', '‹', () => this.back(), 'Back one level')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')

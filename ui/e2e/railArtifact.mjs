@@ -19,7 +19,7 @@ const scale = page => section(page).evaluate(el => Number(el.dataset.scale))
 const stageBox = page => page.locator('.ws-stage-column').evaluate(el => { const r = el.getBoundingClientRect(); return [r.left, r.width].map(Math.round) })
 
 export function registerRailArtifactJourneys(test) {
-  test('Rail artifact: live at the head of the rail, scrollable in place, folded, scaled by the rail, opened full', async page => {
+  test('Rail artifact: live beneath the threads, filling the rail between them and the sent files, scrollable in place, folded, scaled by the rail, opened full', async page => {
     await page.addInitScript(() => {
       if (window !== window.top) return
       localStorage.setItem('shuttle:workspace:sidebar', 'false')
@@ -27,24 +27,26 @@ export function registerRailArtifactJourneys(test) {
     })
     await page.goto(url)
     await openRoot(page)
-    // The artifact heads the rail, above Threads and Sent files.
+    // Threads lead the rail, then the artifact, then Sent files.
     await section(page).waitFor()
     const order = await page.locator('.ws-thread-rail').evaluate(rail =>
       [...rail.children].filter(el => el.checkVisibility()).map(el => el.className.split(' ')[0]))
-    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-rail-artifact', 'ws-thread-scroll', 'ws-rail-files'])
+    assert.deepEqual(order.filter(c => c !== 'ws-thread-handle'), ['ws-thread-scroll', 'ws-rail-artifact', 'ws-rail-files'])
     const before = await stageBox(page)
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await page.waitForTimeout(200)
     assert.deepEqual(await stageBox(page), before, 'the chat column does not move when the rail artifact loads')
 
-    // The Threads heading stays in view beneath it.
+    // The artifact takes the height the threads above and the sent files below leave, and the files' heading stays in view.
     const geometry = await page.evaluate(() => {
-      const rail = document.querySelector('.ws-thread-rail').getBoundingClientRect()
-      const heading = document.querySelector('.ws-thread-scroll .ws-thread-heading').getBoundingClientRect()
-      const body = document.querySelector('.ws-rail-artifact-body').getBoundingClientRect()
-      return { rail, heading, body }
+      const box = sel => document.querySelector(sel).getBoundingClientRect()
+      return { rail: box('.ws-thread-rail'), threads: box('.ws-thread-scroll'), section: box('.ws-rail-artifact'), files: box('.ws-rail-files'), filesHeading: box('.ws-rail-files .ws-thread-heading'), body: box('.ws-rail-artifact-body') }
     })
-    assert.ok(geometry.heading.bottom <= geometry.rail.bottom, `Threads stays in view: ${JSON.stringify(geometry)}`)
+    assert.ok(Math.abs(geometry.section.top - geometry.threads.bottom) <= 1, `the artifact starts where the threads end: ${JSON.stringify(geometry)}`)
+    assert.ok(Math.abs(geometry.files.top - geometry.section.bottom) <= 1, `the sent files start where the artifact ends: ${JSON.stringify(geometry)}`)
+    assert.ok(Math.abs(geometry.files.bottom - geometry.rail.bottom) <= 1, `the regions fill the rail's height: ${JSON.stringify(geometry)}`)
+    assert.ok(geometry.filesHeading.bottom <= geometry.rail.bottom, `Sent files stays in view: ${JSON.stringify(geometry)}`)
+    assert.ok(geometry.body.height >= 0.3 * geometry.rail.height, `the artifact holds the larger share of the rail: ${JSON.stringify(geometry)}`)
     assert.ok(Math.abs(geometry.body.width - (geometry.rail.width - 18)) <= 3, `the artifact fills the rail's width: ${JSON.stringify(geometry)}`)
     const narrow = await scale(page)
     assert.ok(narrow > 0 && narrow < 1, `a default-width rail shows the page in miniature (${narrow})`)
@@ -58,6 +60,18 @@ export function registerRailArtifactJourneys(test) {
     const scrolled = () => railFrame(page).locator('body').evaluate(el => el.ownerDocument.scrollingElement.scrollTop)
     for (let i = 0; i < 20 && await scrolled() === 0; i++) await page.waitForTimeout(100)
     assert.ok(await scrolled() > 0, 'the wheel scrolls the page in place')
+
+    // On a short window the threads and files give way; the artifact never paints over the files' heading.
+    await page.setViewportSize({ width: 1440, height: 600 })
+    await page.waitForTimeout(150)
+    const short = await page.evaluate(() => {
+      const box = sel => document.querySelector(sel).getBoundingClientRect()
+      return { rail: box('.ws-thread-rail'), body: box('.ws-rail-artifact-body'), files: box('.ws-rail-files'), filesHeading: box('.ws-rail-files .ws-thread-heading') }
+    })
+    assert.ok(short.body.bottom <= short.files.top + 1, `the artifact stays above the sent files at 600px: ${JSON.stringify(short)}`)
+    assert.ok(short.filesHeading.top >= short.files.top - 1 && short.filesHeading.bottom <= short.rail.bottom, `the sent files' heading stays in view at 600px: ${JSON.stringify(short)}`)
+    assert.ok(short.body.height >= 120, `the artifact keeps a useful height at 600px: ${JSON.stringify(short)}`)
+    await page.setViewportSize({ width: 1440, height: 900 })
 
     // Folding unloads the page and remembers it; unfolding brings it back.
     const toggle = section(page).getByRole('button', { name: 'Artifact', exact: true })

@@ -11,13 +11,13 @@ import './thread-rail.css'
 const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
 const MIN_WIDTH = 220, STEP = 16
 import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
-import { ARTIFACT_RESERVE, RailArtifact } from './RailArtifact.js'
+import { RailArtifact } from './RailArtifact.js'
 import type { WorkspaceDocument } from './documents.js'
 
 /**
- * The reader's right-hand column: the open constitution's artifact at its
- * head, live and sized by the rail's width, then its threads, then its sent
- * files, each region scrolling on its own.
+ * The reader's right-hand column: the open constitution's threads first, then
+ * its artifact, live, scaled to the rail's width and filling the height the
+ * other two leave, then its sent files, each region scrolling on its own.
  *
  * The threads region is a view of the open constitution's whole family, from the top-level
  * constitution down: inside a thread the same family stays, the open thread
@@ -38,6 +38,8 @@ export class ThreadRail {
   private filesExpanded = false
   private lastFiles: { channel: Channel; selected: DocKey; fresh: ReadonlySet<DocKey>; choose: (key: DocKey) => void } | null = null
   private width: number | null = null
+  /** The reader stands the rail open beside the stage; the page loads only while the rail is also drawn. */
+  private artifactWanted = false
   private card: KanbanCard | null = null
   /** Every thread in the family besides the open one is archived. */
   private familyQuiet = false
@@ -47,7 +49,7 @@ export class ThreadRail {
   needsHuman = false
   /** The open conversation has sent at least one file. */
   hasFiles = false
-  /** The open constitution has an artifact the rail can lead with. */
+  /** The open constitution has an artifact the rail can show. */
   get hasArtifact(): boolean { return this.artifact.present }
   /** The rail has something to draw: an artifact, threads beside the open one, or sent files. */
   get present(): boolean { return this.hasArtifact || this.hasFamily || this.hasFiles }
@@ -81,7 +83,7 @@ export class ThreadRail {
     this.handle.addEventListener('pointerdown', e => this.resizeStart(e))
     this.handle.addEventListener('keydown', e => this.resizeKey(e))
     this.handle.addEventListener('dblclick', () => this.setWidth(null, true))
-    this.el.append(this.handle, this.artifact.el, this.scroller, this.files)
+    this.el.append(this.handle, this.scroller, this.artifact.el, this.files)
     this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => this.fit())
     this.observer?.observe(this.el)
     try {
@@ -200,20 +202,21 @@ export class ThreadRail {
       ;(target ?? this.filesHeading).focus({ preventScroll: true })
     }
   }
-  /** The artifact the rail leads with, or none. */
+  /** The artifact the rail shows, or none. */
   showArtifact(doc: WorkspaceDocument | null, openFull: (key: string) => void, onStage = false): void {
     this.artifact.show(doc, openFull, onStage)
     this.applyPresence()
   }
   /** Load the artifact while the rail stands open beside the stage; unload it otherwise. */
   setArtifactLive(live: boolean): void {
+    this.artifactWanted = live
     this.artifact.setLive(live && !this.el.hidden)
     this.fit()
   }
-  /** Size the artifact to the rail, keeping each region beneath it in view by its heading and a row or two. */
+  /** Scale the artifact to the rail's width; the stylesheet gives it the height. */
   fit(): void {
     if (this.el.hidden) return
-    this.artifact.resize(this.el.clientHeight, ARTIFACT_RESERVE * (Number(this.hasFamily) + Number(this.hasFiles)))
+    this.artifact.resize()
   }
   dispose(): void { this.observer?.disconnect(); this.artifact.dispose() }
   /** A conversation with no constitution card has no family to draw. */
@@ -232,6 +235,7 @@ export class ThreadRail {
   private applyPresence(): void {
     this.el.hidden = window.matchMedia(MOBILE_MEDIA).matches || !this.present
     this.scroller.hidden = !this.hasFamily
+    this.artifact.setLive(this.artifactWanted && !this.el.hidden)
     this.fit()
   }
   private paint(): void {

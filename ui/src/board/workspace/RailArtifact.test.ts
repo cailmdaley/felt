@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ARTIFACT_ASPECT, ARTIFACT_MIN_HEIGHT, ARTIFACT_RESERVE, ARTIFACT_VIRTUAL_MIN, RailArtifact, railArtifactGeometry } from './RailArtifact.js'
+import { ARTIFACT_VIRTUAL_MIN, RailArtifact, railArtifactGeometry } from './RailArtifact.js'
 import { buildChannel, channelLead } from './documents.js'
 
 const viewers: HTMLElement[] = []
@@ -17,32 +17,17 @@ vi.mock('../FileViewerPanel.js', () => ({
 
 describe('railArtifactGeometry', () => {
   it('lays a narrow rail out at the virtual minimum and scales it down', () => {
-    const g = railArtifactGeometry(360, 2000, ARTIFACT_RESERVE)
+    const g = railArtifactGeometry(360)
     expect(g.virtualWidth).toBe(ARTIFACT_VIRTUAL_MIN)
     expect(g.scale).toBeCloseTo(360 / ARTIFACT_VIRTUAL_MIN)
   })
   it('reaches 1:1 once the rail is as wide as the virtual minimum, and stays there wider', () => {
-    expect(railArtifactGeometry(ARTIFACT_VIRTUAL_MIN, 2000, 0).scale).toBe(1)
-    const wide = railArtifactGeometry(900, 2000, 0)
-    expect(wide).toMatchObject({ virtualWidth: 900, scale: 1 })
+    expect(railArtifactGeometry(ARTIFACT_VIRTUAL_MIN).scale).toBe(1)
+    expect(railArtifactGeometry(900)).toEqual({ virtualWidth: 900, scale: 1 })
   })
   it('grows the scale monotonically as the rail widens', () => {
-    const scales = [240, 320, 480, 640, 720, 960].map(w => railArtifactGeometry(w, 2000, ARTIFACT_RESERVE).scale)
+    const scales = [240, 320, 480, 640, 720, 960].map(w => railArtifactGeometry(w).scale)
     for (let i = 1; i < scales.length; i++) expect(scales[i]).toBeGreaterThanOrEqual(scales[i - 1])
-  })
-  it('follows the width as a page would while the rail has room', () => {
-    expect(railArtifactGeometry(300, 2000, ARTIFACT_RESERVE).height).toBe(Math.round(300 * ARTIFACT_ASPECT))
-  })
-  it('caps the height so the reserve stays beneath it', () => {
-    const g = railArtifactGeometry(700, 800, 2 * ARTIFACT_RESERVE)
-    expect(g.height).toBe(800 - 2 * ARTIFACT_RESERVE)
-  })
-  it('keeps a useful minimum, unless the rail itself is shorter', () => {
-    expect(railArtifactGeometry(300, 300, 2 * ARTIFACT_RESERVE).height).toBe(ARTIFACT_MIN_HEIGHT)
-    expect(railArtifactGeometry(300, 120, ARTIFACT_RESERVE).height).toBe(120)
-  })
-  it('takes the rest of the rail when nothing else stands in it', () => {
-    expect(railArtifactGeometry(300, 1000, 0).height).toBe(1000)
   })
 })
 

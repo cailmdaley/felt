@@ -16,12 +16,12 @@
 .ws-chat > .ws-dock-body { display: contents; }
 
 .ws-chat-head {
-  /* Navigation, title, settings and leave share the first row; state, verbs
-     and the paired references share the row beneath on one baseline. */
+  /* Navigation, title, the paired references, settings and leave share the
+     first row; state and verbs have the row beneath to themselves. */
   --ws-head-pad: 8px;
   flex: none; display: grid; min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  grid-template-areas: 'lead identity settings leave' 'acts acts acts acts';
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: 'lead identity refs settings leave' 'acts acts acts acts acts';
   align-items: start; gap: 2px 8px;
   padding: var(--ws-head-pad) 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
@@ -31,12 +31,12 @@
 .ws-chat-head > .ws-chat-settings { grid-area: settings; align-self: start; }
 .ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
-/* The constitution and the artifact close the action row as words, set like the verbs beside them. */
-.ws-chat-acts > .ws-chat-refs { display: flex; flex: none; align-items: center; gap: 2px; min-width: 0; margin-left: auto; }
-.ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { display: inline-flex; align-items: center; justify-content: center; gap: 0; width: auto; height: 36px; min-height: 36px; padding: 0 8px; margin: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; cursor: pointer; }
+/* The constitution and the artifact are a pair of icons, named by their titles; on the title row they sit before ⚙. */
+.ws-chat-head > .ws-chat-refs { grid-area: refs; align-self: start; margin-right: 6px; }
+.ws-chat-refs { display: flex; flex: none; align-items: center; gap: 2px; min-width: 0; }
+.ws-chat-acts > .ws-chat-refs { margin-left: auto; }
+.ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { display: inline-grid; place-items: center; width: 32px; height: 36px; padding: 0; margin: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted); cursor: pointer; }
 .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip):hover { color: var(--ws-ink); background: var(--ws-hover); }
-.ws-chat-refs > .ws-chat-constitution::after { content: 'Constitution'; }
-.ws-chat-refs svg { display: none; }
 .ws-chat-head > .ws-chat-lead { margin-left: calc(var(--ws-control-height) - 8px); }
 /* In the reader the head is the page's header line: a corner toggle floating over the stage takes its place at that end. */
 :where(.ws-chat-page) .ws-chat-head { padding-inline: max(16px, var(--ws-head-start, 0px)) max(16px, var(--ws-head-end, 0px)); }
@@ -223,9 +223,7 @@
   .ws-chat-acts .ws-transcript-meter { display: none; }
   .ws-reader .ws-chat-head .ws-chat-acts > .kbn-ctl-verdict { gap: 2px; padding-left: 4px; }
   /* A narrow card draws the pair as icons beside ⚙; their names stay in the accessible labels. */
-  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { min-width: 28px; height: 32px; min-height: 32px; padding: 2px 4px; }
-  .ws-chat-refs > .ws-chat-constitution::after, .ws-chat-refs .ws-report-label { display: none; }
-  .ws-chat-refs svg { display: block; }
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 28px; height: 32px; }
   .ws-chat-acts > .ws-chat-settings { width: 28px; height: 32px; }
   /* Words carry the compact lifecycle group; its icons return with more room. */
   .ws-reader .ws-chat-acts .ws-header-icon.ws-header-verb { gap: 0; padding-inline: 2px; }
@@ -267,9 +265,7 @@
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
   /* On the phone the pair are icons beside ⚙, named by their labels to assistive tech. */
-  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; height: 44px; min-height: 44px; padding: 0; }
-  .ws-chat-refs > .ws-chat-constitution::after, .ws-chat-refs .ws-report-label { display: none; }
-  .ws-chat-refs svg { display: block; }
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; height: 44px; }
   .ws-chat .ws-chat-head > .ws-chat-lead { align-self: center; }
   .ws-chat-standing { gap: 6px; }
   /* Phone state, settings and references share one grouped action row. */

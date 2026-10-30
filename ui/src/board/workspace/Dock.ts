@@ -1199,9 +1199,9 @@ export class Dock {
       }
       else if (compact) place(this.head, [status, verdict, refs, settingsItem])
       else {
-        // The verbs and the references share row 2's baseline; row 1 is ‹, the title, ⚙ and ×.
-        place(this.head, [status, verdict, refs])
-        place(header, [lead, identity, settingsItem, leave, this.head])
+        // Row 1 is ‹, the title, the references, ⚙ and ×; row 2 is the state and its verbs.
+        place(this.head, [status, verdict])
+        place(header, [lead, identity, refs, settingsItem, leave, this.head])
       }
       if (focused) {
         const target = focused.checkVisibility() ? focused : settingsItem

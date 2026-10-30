@@ -7,41 +7,28 @@ import { headerIcon } from './headerIcon.js'
 const OPEN_STORAGE = 'shuttle:workspace:rail-artifact-open'
 /** The narrowest width an artifact lays out at; a narrower rail shows that layout in miniature. */
 export const ARTIFACT_VIRTUAL_MIN = 720
-/** The miniature's height per unit of rail width: a page, taller than it is wide. */
-export const ARTIFACT_ASPECT = 1.4
-/** Below this the miniature stops being worth scrolling. */
-export const ARTIFACT_MIN_HEIGHT = 180
-/** What the rail keeps beneath the artifact for each region it also holds: a heading and a row or two. */
-export const ARTIFACT_RESERVE = 96
 
 export interface RailArtifactGeometry {
   /** The width the page lays out at. */
   virtualWidth: number
   /** Rail pixels per page pixel. */
   scale: number
-  /** The miniature's height in rail pixels. */
-  height: number
 }
 
 /**
- * The artifact's place at the head of the rail. The page lays out at
- * `max(width, 720)` and is scaled to the rail's width, so widening the rail
- * grows it toward 1:1. Its height follows the width as a page would, capped so
- * `reserve` pixels of the rail stay below it, and never less than a useful
- * minimum unless the rail itself is shorter. With nothing below
- * (`reserve === 0`) it takes the rest of the rail.
+ * The artifact's scale in the rail. The page lays out at `max(width, 720)` and
+ * is scaled to the rail's width, so widening the rail grows it toward 1:1. Its
+ * height is the rail's to give: the section fills what the threads above and
+ * the sent files below leave.
  */
-export function railArtifactGeometry(width: number, available: number, reserve: number): RailArtifactGeometry {
+export function railArtifactGeometry(width: number): RailArtifactGeometry {
   const w = Math.max(1, Math.floor(width))
   const virtualWidth = Math.max(w, ARTIFACT_VIRTUAL_MIN)
-  const room = Math.max(0, Math.floor(available))
-  const wanted = reserve > 0 ? Math.min(Math.round(w * ARTIFACT_ASPECT), room - reserve) : room
-  const height = Math.min(room, Math.max(ARTIFACT_MIN_HEIGHT, wanted))
-  return { virtualWidth, scale: w / virtualWidth, height }
+  return { virtualWidth, scale: w / virtualWidth }
 }
 
 /**
- * The open constitution's artifact, live, at the head of the rail: scrollable
+ * The open constitution's artifact, live, beneath the rail's threads: scrollable
  * and clickable in place, reloaded in place when the worker rewrites it, with
  * a heading that folds it and a control that opens the full page.
  */
@@ -124,22 +111,15 @@ export class RailArtifact {
     else this.unmount()
   }
 
-  /**
-   * Size the miniature to the rail: `available` is the rail's whole height,
-   * `reserve` what must stay visible beneath the section. A repeat of the same
-   * geometry writes nothing.
-   */
-  resize(available: number, reserve: number): void {
+  /** Scale the miniature to the rail's width; a repeat of the same geometry writes nothing. */
+  resize(): void {
     if (this.el.hidden || this.body.hidden) return
     const width = this.body.clientWidth
     if (!width) return
-    // The section's own chrome (padding, heading, border) comes out of the room first.
-    const chrome = this.el.offsetHeight - this.body.offsetHeight
-    const next = railArtifactGeometry(width, available - chrome, reserve)
+    const next = railArtifactGeometry(width)
     const prev = this.geometry
-    if (prev && prev.height === next.height && prev.virtualWidth === next.virtualWidth && prev.scale === next.scale) return
+    if (prev && prev.virtualWidth === next.virtualWidth && prev.scale === next.scale) return
     this.geometry = next
-    this.body.style.height = `${next.height}px`
     this.el.style.setProperty('--ws-artifact-virtual-width', `${next.virtualWidth}px`)
     this.el.style.setProperty('--ws-artifact-scale', String(next.scale))
     this.el.dataset.scale = next.scale.toFixed(3)
@@ -158,6 +138,7 @@ export class RailArtifact {
   private paintBody(): void {
     const open = this.expanded && !this.onStage
     this.body.hidden = !open
+    this.el.toggleAttribute('data-fill', open)
     if (open) { this.mountIfWanted(); this.onUnfold() }
     else this.unmount()
   }

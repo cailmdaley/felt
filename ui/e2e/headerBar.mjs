@@ -109,7 +109,7 @@ export function registerHeaderBarJourneys(test) {
         return refs?.parentElement === acts && refsBox && actsBox && refsBox.top >= actsBox.top - 1
       })
       assert.deepEqual(await visibleHeaderVerbs(header), ['Close for review', 'Rest'], `In flight draws only its verbs at ${width}`)
-      // Narrow cards reserve the title row for navigation and identity; references join the action row.
+      // Wide cards put the references on the title row before ⚙; narrow cards move them to the action row.
       const rows = await header.evaluate(el => {
         const box = sel => el.querySelector(sel)?.getBoundingClientRect() ?? null
         return { title: box('.ws-chat-title'), acts: box('.ws-chat-acts'), verbs: box('.kbn-ctl-verdict'), leave: box('.ws-chat-leave'), refs: box('.ws-chat-refs'), head: el.getBoundingClientRect() }
@@ -121,23 +121,24 @@ export function registerHeaderBarJourneys(test) {
       }
       assert.ok(rows.leave.top < rows.title.bottom && rows.leave.bottom > rows.title.top, `× stays beside the title at ${width}`)
       assert.ok(rows.head.right - rows.leave.right < 80, `× ends the header at ${width}`)
-      assert.ok(rows.refs.top >= rows.acts.top - 1 && rows.refs.bottom <= rows.acts.bottom + 1, `Constitution and Artifact share the action row at ${width}`)
+      if (width === 701) assert.ok(rows.refs.top >= rows.acts.top - 1 && rows.refs.bottom <= rows.acts.bottom + 1, `Constitution and Artifact share the action row at ${width}`)
       if (width === 1440) {
-        // On the desktop they are words, closing the row on the verbs' baseline: same face, same size, same centre line.
-        assert.ok(rows.acts.right - rows.refs.right <= 2, `the references end the action row at ${width}`)
-        const faces = await header.evaluate(el => {
-          const verb = [...el.querySelectorAll('.kbn-ctl-verdict button')].find(b => b.checkVisibility())
-          const word = verb.querySelector('.ws-header-word') ?? verb
-          const read = node => { const r = node.getBoundingClientRect(), cs = getComputedStyle(node); return { centre: r.top + r.height / 2, size: cs.fontSize, family: cs.fontFamily, lineHeight: cs.lineHeight } }
-          const constitution = el.querySelector('.ws-chat-constitution')
-          return { verb: read(word), constitution: { ...read(constitution), ...(() => { const a = getComputedStyle(constitution, '::after'); return { size: a.fontSize, family: a.fontFamily } })() }, artifact: read(el.querySelector('.ws-report-chip .ws-report-label') ?? el.querySelector('.ws-chat-constitution')), icons: [...el.querySelectorAll('.ws-chat-refs svg')].filter(svg => svg.checkVisibility()).length }
+        // On the desktop they are icons on the title row, set like ⚙ and centred with it, just before it.
+        const icons = await header.evaluate(el => {
+          const read = node => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, centre: r.top + r.height / 2, width: r.width, height: r.height } }
+          return {
+            refs: [...el.querySelectorAll('.ws-chat-refs > button')].filter(b => b.checkVisibility()).map(b => ({ ...read(b), svg: !!b.querySelector('svg')?.checkVisibility(), text: b.textContent.trim() })),
+            settings: read(el.querySelector('.ws-chat-settings')),
+          }
         })
-        assert.equal(faces.icons, 0, 'the desktop references carry no icons')
-        for (const ref of [faces.constitution, faces.artifact]) {
-          assert.equal(ref.size, faces.verb.size, `references and verbs share a size: ${JSON.stringify(faces)}`)
-          assert.equal(ref.family, faces.verb.family, `references and verbs share a face: ${JSON.stringify(faces)}`)
-          assert.ok(Math.abs(ref.centre - faces.verb.centre) <= 1, `references and verbs share a baseline: ${JSON.stringify(faces)}`)
+        assert.ok(icons.refs.length >= 1, `the references draw on the desktop: ${JSON.stringify(icons)}`)
+        for (const ref of icons.refs) {
+          assert.ok(ref.svg && ref.text === '', `references are icons without words: ${JSON.stringify(ref)}`)
+          assert.ok(Math.abs(ref.centre - icons.settings.centre) <= 1, `references share ⚙'s centre line: ${JSON.stringify(icons)}`)
+          assert.equal(ref.height, icons.settings.height, `references are ⚙'s size: ${JSON.stringify(icons)}`)
+          assert.ok(ref.right <= icons.settings.left, `references precede ⚙: ${JSON.stringify(icons)}`)
         }
+        assert.ok(rows.refs.bottom <= rows.acts.top + 1, `references sit on the title row at ${width}`)
       }
       const slack = { left: rows.acts.left, right: rows.acts.right }
       const line = await header.locator('.ws-chat-acts > :not([hidden])').evaluateAll(els => els.map(el => el.getBoundingClientRect()).filter(b => b.width))
@@ -511,7 +512,7 @@ export function registerHeaderBarJourneys(test) {
       assert.ok(reportTitle?.length)
       assert.equal(await report.getAttribute('aria-label'), `Read artifact: ${reportTitle}`)
       assert.equal(await report.locator('.ws-report-title').count(), 0)
-      assert.equal(await report.locator('.ws-report-label').innerText(), 'Artifact')
+      assert.equal(await report.innerText(), '', 'the artifact is drawn as its icon')
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()
@@ -523,8 +524,7 @@ export function registerHeaderBarJourneys(test) {
         assert.match(await header.locator('.ws-transcript-context').getAttribute('title'), /tokens of a .*window \(\d+% full\)/)
         assert.match(await header.locator('.ws-transcript-cache').getAttribute('title'), /Cache warm until/)
       }
-      // The desktop's Constitution is a word (checked with the action row); its icon is the phone's.
-      for (const label of device === 'desktop' ? ['Settings', 'Temper', 'Discard'] : ['Settings']) {
+      for (const label of device === 'desktop' ? ['Settings', 'Constitution', 'Temper', 'Discard'] : ['Settings', 'Constitution']) {
         const icon = header.getByRole('button', { name: label, exact: true })
         assert.equal(await icon.getAttribute('title'), label)
         assert.deepEqual(await icon.evaluate(el => {
