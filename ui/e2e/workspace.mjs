@@ -2247,6 +2247,8 @@ test('Phone composer keys keep focus and document identity', async p => {
 
 test('Phone page swipe follows the finger, snaps back short of the threshold and commits past it', async p => {
   await open(p); await reportReady(p)
+  await exerciseTrackSettlementWait(p)
+  await waitForTrackSettlement(p)
   const original = await selected(p).getAttribute('data-key')
   const rest = await p.locator('.ws-track').evaluate(el => new DOMMatrix(getComputedStyle(el).transform).m41)
   const cdp = await p.context().newCDPSession(p)
@@ -2280,6 +2282,45 @@ async function swipe(p, x, y, endX, endY, cancel = false) {
   await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] })
   await p.waitForTimeout(80)
   await cdp.detach()
+}
+
+async function waitForTrackSettlement(p) {
+  await poll(p, () => {
+    const track = document.querySelector('.ws-track')
+    if (!track) return false
+    const computed = new DOMMatrix(getComputedStyle(track).transform).m41
+    const target = new DOMMatrix(track.style.transform || 'none').m41
+    return Math.abs(computed - target) < 0.5
+  })
+}
+
+async function exerciseTrackSettlementWait(p) {
+  const track = p.locator('.ws-track')
+  const saved = await track.evaluate(el => ({ transform: el.style.transform, transition: el.style.transition }))
+  const transition = await track.evaluate(el => {
+    const start = new DOMMatrix(getComputedStyle(el).transform).m41
+    el.style.transition = 'transform 180ms linear'
+    void el.offsetWidth
+    el.style.transform = `translateX(${start + 80}px)`
+    const transition = el.getAnimations().find(animation => animation.transitionProperty === 'transform')
+    if (!transition) return null
+    transition.pause()
+    transition.currentTime = 0
+    const computed = new DOMMatrix(getComputedStyle(el).transform).m41
+    const target = new DOMMatrix(el.style.transform).m41
+    return { gap: Math.abs(computed - target) }
+  })
+  assert.ok(transition && transition.gap > 5, 'the guard fixture holds a real transform transition before its target')
+  await track.evaluate(el => el.getAnimations().find(animation => animation.transitionProperty === 'transform')?.play())
+  await waitForTrackSettlement(p)
+  const settled = await track.evaluate(el => Math.abs(new DOMMatrix(getComputedStyle(el).transform).m41 - new DOMMatrix(el.style.transform).m41) < 0.5)
+  assert.equal(settled, true, 'the readiness guard waits for a real track transition to settle')
+  await track.evaluate((el, saved) => {
+    el.style.transition = 'none'
+    el.style.transform = saved.transform
+    void el.offsetWidth
+    el.style.transition = saved.transition
+  }, saved)
 }
 
 test('Reader Cmd-Backslash toggles the sidebar; slash focuses the bar Find, which filters the sidebar in place, and Enter selects', async p => {
