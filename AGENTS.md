@@ -251,21 +251,19 @@ supervisor brings it back) → poll /api/v1/version until git_short_sha matches,
 booted_at advances, and ready is true → shuttle daemon release
 ```
 
-`bin/shuttle-deploy` builds source checkouts in each host's login shell across the fleet in
-`~/.config/shuttle/remotes.json`. A host marked `"build_ui": false` there is built
-with `SKIP_UI=1` and has the deploy host's `ui/dist` rsynced in before the build
-instead — for a cluster login node on a network filesystem, where `npm ci` alone
-costs minutes. It brings each harness's felt plugin up to the new build
-(Claude Code and Codex from the checkout itself, skipped when the receipt
-already passes at `HEAD` from a clean build), and a host whose `felt setup
-receipt` still fails afterwards fails, naming each unhealthy component and
-its repair.
-**Every deploy and operator restart arms the boot quarantine**
-— the cycle touches the daemon's stop marker and sends SIGTERM — so no fresh
-oneshot dispatch proceeds until `shuttle daemon release` (cron-due standing constitutions
-still fire). Only on a host that opted in does a hard-killed, previously
-released daemon back within seconds and without churn releases fresh dispatch. A daemon
-route change must ship with the matching UI; `make build` builds both.
+`bin/shuttle-deploy` resolves one commit and builds it in an immutable per-SHA
+worktree on each configured host, preserving running release files and source
+checkout edits.
+It runs `felt setup refresh --source <worktree>` for installed harnesses,
+restarts once through the existing owner (service retarget with
+`shuttle daemon install --preserve`, or tmux launcher replacement), verifies a
+fresh ready boot on the full SHA, and releases quarantine.
+Hosts marked `"build_ui": false` receive the deploy host's UI bundle before
+building with `SKIP_UI=1`; `build_wrap` runs only the build through a scheduler.
+It retains the current and previous revisions, the two newest worktrees, and
+Pi-referenced trees, and prunes the rest after verification.
+It does not migrate config or copy agent registries.
+Every failed host and step produces a nonzero final exit status; red CI is advisory.
 Fetched-release users do not need this checkout deployment helper. Details:
 [`docs/dev/build-and-deploy.md`](docs/dev/build-and-deploy.md).
 

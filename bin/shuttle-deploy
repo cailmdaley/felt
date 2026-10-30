@@ -1,245 +1,19 @@
 #!/usr/bin/env bash
-#
-# shuttle-deploy — one verb, whole fleet. Push, rebuild, cycle, verify, release.
-#
-#   bin/shuttle-deploy                        # deploy everywhere (local + all remotes)
-#   bin/shuttle-deploy --hosts local,hub-a    # a subset
-#   bin/shuttle-deploy --list                 # show the host table
-#   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
-#   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in immutable worktrees
-#   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
-#                                             # no live master — human must approve
-#
-# Per host the ritual is the one AGENTS.md documents ("Deploying is ALWAYS
-# safe"): pull → make build → migrate Shuttle config and refresh an installed
-# supervisor → bring the harness plugins up to date → cycle the daemon (kill
-# its listener — the loopback port or unix socket `shuttle host` resolves on
-# that host — then let the host's supervisor bring it back) → verify
-# git_short_sha flipped → release the boot quarantine. A host whose harness
-# plugins still disagree with its felt build fails, but only after its daemon
-# step has run. Each host builds its CLI and daemon using its login-shell
-# environment, and its UI too unless it is marked `"build_ui": false` — see the
-# bundle note below. The operator agent registry is synced too: the board reads
-# the local registry, while owner-routed mutations resolve agents on the
-# owning host.
-#
-# The fleet is NOT written here. It comes from ~/.config/shuttle/remotes.json
-# (`SHUTTLE_REMOTES_FILE` overrides) — the same file the daemon and `shuttle
-# remotes` read. Deploy uses six of its per-remote keys: `ssh` (destination,
-# defaults to the name), `checkout` (repo path on that host), `ssh_flags`
-# (extra ssh arguments), `auth` ("interactive" marks a host that needs a live
-# human credential), `enabled`, and `build_ui`. A remote without `checkout` is
-# not a deploy target and is skipped. "local" is always in the fleet; a missing
-# fleet file means local only. Portable to macOS bash 3.2 (no assoc arrays).
-#
-# `"build_wrap": "srun -p serial --cpus-per-task=8"` prefixes only the build
-# with that command and bash -lc; pull, preparation, refresh and cycle run outside it.
-# `"build_ui": false` marks a host that must not build the board bundle. On a
-# cluster login node `npm ci` against a network home filesystem costs minutes
-# and `vite build` several more, for a bundle that is identical everywhere. Such
-# a host is built with `make build SKIP_UI=1`, and this script ships the deploy
-# host's own freshly-built ui/dist to its checkout instead. The rsync happens
-# BEFORE the remote build, because the release assembled by `make daemon` copies
-# ui/dist into its priv/ — and the daemon serves the release's copy in
-# preference to the checkout's, so a bundle that lands after the build would not
-# be the one served.
-
+# Deploy a source revision: build, refresh plugins, restart once, verify, release.
+# Usage: bin/shuttle-deploy [--hosts local,hub-a] [--ref REV] [--no-push]
+#        bin/shuttle-deploy --list | --handshake | --help
+# Fleet entries come from SHUTTLE_REMOTES_FILE or ~/.config/shuttle/remotes.json.
+# Python 3 is needed only on the deploy host, for structured API responses.
 set -uo pipefail
-
-for arg in "$@"; do
-  case "$arg" in
-    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-  esac
-done
-
-supervisor_probe_cmd() {
-  cat <<'SH'
-# A live respawn loop is the selected owner even if a stale unit file exists.
-if "$HOME/.local/bin/shuttle" daemon loop-present >/dev/null 2>&1; then
-  echo tmux
-  exit 0
-fi
-for candidate in "$HOME"/Library/LaunchAgents/*.plist; do
-  [ -f "$candidate" ] || continue
-  grep -q 'io.shuttle.daemon' "$candidate" || continue
-  label=$(basename "$candidate" .plist)
-  if launchctl print "gui/$(id -u)/$label" 2>/dev/null | grep -Eq '^[[:space:]]*pid = [1-9][0-9]*$'; then echo 1; exit 0; fi
-done
-if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
-  for candidate in "$HOME"/.config/systemd/user/*.service; do
-    [ -f "$candidate" ] || continue
-    if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; } && systemctl --user is-active --quiet "$(basename "$candidate" .service)" 2>/dev/null; then echo 1; exit 0; fi
-  done
-fi
-echo 0
-SH
-}
-
-respawn_launcher_restart_cmd() {
-  local checkout="$1" owner="${2:-}" mode=""
-  [ "$owner" != tmux ] || mode="--tmux"
-  cat <<SH
-set -eu
-mkdir -p "\$HOME/.shuttle" "\$HOME/.local/bin"
-printf '%s\\n' $(shell_quote "$checkout") > "\$HOME/.shuttle/repo"
-install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") "\$HOME/.local/bin/shuttle-launch"
-PATH="\$HOME/.local/bin:\$PATH"
-export PATH
-SHUTTLE_DIR=$(shell_quote "$checkout") "\$HOME/.local/bin/shuttle-launch" $mode
-SH
-}
-
-config_migration_cmd() {
-  local reinstall="${1:-1}" release="${2:-}"
-  cat <<'SH'
-set -eu
-old="$HOME/.config/felt"
-new="$HOME/.config/shuttle"
-for name in host.json remotes.json agents.json stores.json projects.json; do
-  if [ -f "$old/$name" ] && [ ! -e "$new/$name" ] && [ ! -L "$new/$name" ]; then
-    mkdir -p "$new"
-    cp -p "$old/$name" "$new/$name"
-  fi
-done
-SH
-  if [ "$reinstall" = 1 ]; then
-    printf 'export SHUTTLE_RELEASE=%s\n' "$(shell_quote "$release")"
-    printf 'if [ "$(%s)" = 1 ]; then\n' "$(supervisor_probe_cmd)"
-    cat <<'SH'
-  PATH="$HOME/.local/bin:$PATH"
-  export PATH
-  command -v shuttle >/dev/null 2>&1 || { echo "shuttle is not on PATH; cannot refresh the installed supervisor" >&2; exit 1; }
-  migrate_legacy_supervisor_options() {
-    plist_value() {
-      plutil -extract "$2" raw -o - "$1" 2>/dev/null || true
-    }
-
-    systemd_value() {
-      awk -v key="$2" '
-        function decode(value, output, i, current, following) {
-          for (i = 1; i <= length(value); i++) {
-            current = substr(value, i, 1)
-            following = substr(value, i + 1, 1)
-            if (current == "\\" && following != "") {
-              if (following == "\\" || following == "\"") { output = output following; i++ }
-              else if (following == "n") { output = output "\\n"; i++ }
-              else if (following == "t") { output = output "\\t"; i++ }
-              else if (following == "r") { output = output "\\r"; i++ }
-              else output = output current
-            } else if (current == "%" && following == "%") {
-              output = output "%"; i++
-            } else output = output current
-          }
-          return output
-        }
-        /^Environment=/ {
-          value = substr($0, 13)
-          if (substr(value, 1, 1) == "\"") value = substr(value, 2, length(value) - 2)
-          prefix = key "="
-          if (index(value, prefix) == 1) print decode(substr(value, length(prefix) + 1))
-        }
-      ' "$1"
-    }
-
-    for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
-      [ -f "$candidate" ] || continue
-      # Re-render a daemon supervisor rendered by an older template, keeping
-      # every option it carries: the pre-split shim bakes FELT_STORES (current
-      # templates never write it); current templates mention TMUX_TMPDIR in
-      # their comments even when the value is empty and the entry is dropped,
-      # so a supervisor without the word was never offered one (install
-      # captures it from the login shell); and a current systemd unit sets
-      # KillMode=process. Tunnel supervisors carry no SHUTTLE_RELEASE.
-      grep -q 'shuttle' "$candidate" || continue
-      if ! grep -q 'FELT_STORES' "$candidate"; then
-        grep -q 'SHUTTLE_RELEASE' "$candidate" || continue
-        stale=0
-        grep -q 'TMUX_TMPDIR' "$candidate" || stale=1
-        case "$candidate" in
-          *.service)
-            grep -q '^KillMode=process' "$candidate" || stale=1
-            installed_release=$(systemd_value "$candidate" SHUTTLE_RELEASE)
-            ;;
-          *.plist) installed_release=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_RELEASE) ;;
-        esac
-        [ "$installed_release" = "$SHUTTLE_RELEASE" ] || stale=1
-        [ "$stale" = 1 ] || continue
-      fi
-
-      case "$candidate" in
-        *.plist)
-          kind=plist
-          label=$(basename "$candidate" .plist)
-          stores=$(plist_value "$candidate" EnvironmentVariables.FELT_STORES)
-          stores_file=$(plist_value "$candidate" EnvironmentVariables.FELT_STORES_FILE)
-          port=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_PORT)
-          log=$(plist_value "$candidate" StandardOutPath)
-          [ -n "$log" ] || log=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_LOG)
-          path=$(plist_value "$candidate" EnvironmentVariables.PATH)
-          ssh_auth_sock=$(plist_value "$candidate" EnvironmentVariables.SSH_AUTH_SOCK)
-          tmux_tmpdir=$(plist_value "$candidate" EnvironmentVariables.TMUX_TMPDIR)
-          codex_socket=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_CODEX_SOCKET)
-          codex_home=$(plist_value "$candidate" EnvironmentVariables.CODEX_HOME)
-          ;;
-        *)
-          kind=systemd
-          unit=$(basename "$candidate" .service)
-          if [ "$unit" = shuttle-daemon ]; then label=io.shuttle.daemon; else label="io.shuttle.$unit"; fi
-          stores=$(systemd_value "$candidate" FELT_STORES)
-          stores_file=$(systemd_value "$candidate" FELT_STORES_FILE)
-          port=$(systemd_value "$candidate" SHUTTLE_PORT)
-          log=$(awk -F= '/^StandardOutput=append:/ { sub(/^StandardOutput=append:/, ""); print; exit }' "$candidate")
-          [ -n "$log" ] || log=$(systemd_value "$candidate" SHUTTLE_LOG)
-          path=$(systemd_value "$candidate" PATH)
-          ssh_auth_sock=$(systemd_value "$candidate" SSH_AUTH_SOCK)
-          tmux_tmpdir=$(systemd_value "$candidate" TMUX_TMPDIR)
-          codex_socket=$(systemd_value "$candidate" SHUTTLE_CODEX_SOCKET)
-          codex_home=$(systemd_value "$candidate" CODEX_HOME)
-          ;;
-      esac
-
-      [ -n "$stores" ] || {
-        if [ "$kind" = plist ]; then stores=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_STORES)
-        else stores=$(systemd_value "$candidate" SHUTTLE_STORES); fi
-      }
-      [ -n "$stores_file" ] || {
-        if [ "$kind" = plist ]; then stores_file=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_STORES_FILE)
-        else stores_file=$(systemd_value "$candidate" SHUTTLE_STORES_FILE); fi
-      }
-      if [ -z "$stores_file" ] || [ "$stores_file" = "$HOME/.config/felt/stores.json" ]; then
-        stores_file="$HOME/.config/shuttle/stores.json"
-      fi
-      if [ -z "$log" ]; then
-        if [ "$kind" = plist ]; then log="$HOME/Library/Logs/shuttle.log"
-        else log="$HOME/.shuttle/shuttle.log"; fi
-      fi
-
-      set --
-      if grep -q 'TMUX_TMPDIR' "$candidate"; then set -- --tmux-tmpdir "$tmux_tmpdir"; fi
-      CODEX_HOME="$codex_home" SHUTTLE_STORES_FILE="$stores_file" shuttle daemon install \
-        --label "$label" --stores "$stores" --port "$port" --log "$log" \
-        --path "$path" --ssh-auth-sock "$ssh_auth_sock" --codex-socket "$codex_socket" "$@"
-    done
-  }
-  migrate_legacy_supervisor_options
-fi
-SH
-  fi
-}
-
-# Move the deploy host's config before reading its fleet file. The same
-# idempotent move runs on each remote after its new CLI and release are built.
-bash -lc "$(config_migration_cmd 0)" || { echo "shuttle-deploy: config migration failed on the deploy host" >&2; exit 1; }
-
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FLEET_FILE="${SHUTTLE_REMOTES_FILE:-$HOME/.config/shuttle/remotes.json}"
-AGENTS_FILE="${SHUTTLE_AGENTS_FILE:-$HOME/.config/shuttle/agents.json}"
+PUSH=1 HANDSHAKE=0 DEPLOY_REF=HEAD
+ok() { printf '  %s\n' "$*"; }
+bad() { printf '  %s: %s\n' "${HOST:-deploy}" "$*" >&2; }
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
-# The fleet file rendered as TSV: name, ssh destination, checkout, auth, flags,
-# build_ui ("1"/"0"), build_wrap. jq if it is installed, python3 otherwise — the file is read
-# on the deploy host only, so this needs no remote-side dependency. Both accept
-# either document shape the Go and Elixir readers accept: {"remotes": [...]} or a
-# bare list, and both must agree field for field: only a literal `false` turns
-# `enabled` or `build_ui` off, exactly as the Go reader's `enabledOr` does.
 read_fleet() {
   [ -f "$FLEET_FILE" ] || return 0
   if command -v jq >/dev/null 2>&1; then
@@ -270,31 +44,14 @@ PY
 }
 
 FLEET_TSV="$(read_fleet)" || exit 1
-FLEET_ORDER="local $(printf '%s\n' "$FLEET_TSV" | awk -F'\t' 'NF {print $1}' | tr '\n' ' ')"
-
-fleet_row() { printf '%s\n' "$FLEET_TSV" | awk -F'\t' -v h="$1" 'NF && $1 == h'; }
-fleet_dir() { # host → checkout dir (empty = unknown host)
-  [ "$1" = local ] && { echo "$REPO"; return; }
-  fleet_row "$1" | awk -F'\t' '{print $3}'
-}
-fleet_ssh()   { fleet_row "$1" | awk -F'\t' '{print $2}'; }   # ssh destination
-fleet_flags() { fleet_row "$1" | awk -F'\t' '{print $5}'; }   # extra ssh flags
-fleet_auth()  { fleet_row "$1" | awk -F'\t' '{print $4}'; }   # pubkey | interactive
-fleet_build_wrap() { fleet_row "$1" | awk -F'\t' '{print $7}'; }
-builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
-
-# Hosts whose ssh needs an interactive human credential (push-2FA, short-lived
-# certificates) get a handshake verb: when the preflight finds no live
-# connection, we can BOOTSTRAP one instead of failing — provided a human is
-# around to approve it. Mark such a host `"auth": "interactive"` in the fleet
-# file. A fresh master connection prompts (a push-2FA host asks "Passcode or
-# option (1-1)"); answering fires a push to the operator's device, typically
-# with a ~60s timeout. The ritual: open `ssh <host>` in a throwaway tmux
-# session, send the reply, wait for `ssh -O check` to report a live
-# ControlMaster (the ssh config's ControlMaster auto + ControlPersist keeps it
-# alive for every subsequent ssh/rsync). $SHUTTLE_HANDSHAKE_REPLY is what gets
-# typed at the prompt. Only worth firing when the human is reachable — hence
-# opt-in via --handshake, never part of an unattended run.
+FLEET_ORDER="local $(printf '%s\n' "$FLEET_TSV" | awk -F'\t' 'NF {print $1}')"
+fleet_row() { printf '%s\n' "$FLEET_TSV" | awk -F'\t' -v h="$1" '$1 == h'; }
+fleet_dir() { if [ "$1" = local ]; then printf '%s\n' "$REPO"; else fleet_row "$1" | cut -f3; fi; }
+fleet_ssh() { fleet_row "$1" | cut -f2; }
+fleet_auth() { fleet_row "$1" | cut -f4; }
+fleet_flags() { fleet_row "$1" | cut -f5; }
+fleet_build_wrap() { fleet_row "$1" | cut -f7; }
+builds_ui() { [ "$(fleet_row "$1" | cut -f6)" != 0 ]; }
 try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
   local host="$1" dest sess="shuttle-handshake-$1"
   [ "$(fleet_auth "$host")" = "interactive" ] || return 1
@@ -304,7 +61,7 @@ try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
   tmux new-session -d -s "$sess" "ssh $dest" || { bad "could not open tmux for handshake"; return 1; }
   sleep 5
   tmux send-keys -t "$sess" "${SHUTTLE_HANDSHAKE_REPLY:-1}" Enter
-  printf '  %s…%s auth prompt answered — approve the push if one was sent (times out in ~60s)\n' "$BOLD" "$RESET"
+  printf '  %s…%s auth prompt answered — approve the push if one was sent (times out in ~60s)\n' "" ""
   for _ in $(seq 1 25); do
     ssh -O check "$dest" 2>/dev/null && { ok "ControlMaster live"; tmux kill-session -t "$sess" 2>/dev/null; return 0; }
     sleep 3
@@ -314,222 +71,47 @@ try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
   return 1
 }
 
-# SSH joins its command arguments into shell text. Quote both the checkout
-# path inside the build command and that command inside the remote bash call.
-shell_quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
-}
-
-BOLD=$'\033[1m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
-ok()   { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
-bad()  { printf '  %s✗%s %s\n' "$RED" "$RESET" "$1"; }
-say()  { printf '\n%s▸ %s%s\n' "$BOLD" "$1" "$RESET"; }
-
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOSTS="$FLEET_ORDER"
-PUSH=1
-HANDSHAKE=0
-DEPLOY_REF=""
-
 while [ $# -gt 0 ]; do
   case "$1" in
-    --hosts) HOSTS="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
-    --hosts=*) HOSTS="$(echo "${1#*=}" | tr ',' ' ')"; shift ;;
+    --hosts|--ref)
+      [ $# -ge 2 ] && [ -n "$2" ] || { bad "$1 needs a value"; exit 2; }
+      if [ "$1" = --hosts ]; then HOSTS="${2//,/ }"; else DEPLOY_REF="$2"; fi; shift 2 ;;
+    --hosts=*) HOSTS="${1#*=}"; HOSTS="${HOSTS//,/ }"; shift ;;
+    --ref=*) DEPLOY_REF="${1#*=}"; shift ;;
     --no-push) PUSH=0; shift ;;
-    --ref) [ $# -ge 2 ] && [ -n "$2" ] || { echo "--ref needs a revision" >&2; exit 2; }; DEPLOY_REF="$2"; shift 2 ;;
-    --ref=*) DEPLOY_REF="${1#*=}"; [ -n "$DEPLOY_REF" ] || { echo "--ref needs a revision" >&2; exit 2; }; shift ;;
     --handshake) HANDSHAKE=1; shift ;;
     --list)
-      for h in $FLEET_ORDER; do
-        ui=build; builds_ui "$h" || ui=shipped
-        printf '%-16s %-16s %-8s %s\n' "$h" "$(fleet_ssh "$h")" "$ui" "$(fleet_dir "$h")"
-      done
-      [ -f "$FLEET_FILE" ] || printf 'no fleet file at %s — local only\n' "$FLEET_FILE"
+      for h in $FLEET_ORDER; do printf '%-16s %-16s %s\n' "$h" "$(fleet_ssh "$h")" "$(fleet_dir "$h")"; done
       exit 0 ;;
-    -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "unknown flag: $1" >&2; exit 2 ;;
+    -h|--help) sed -n '2,6p' "$0" | sed 's/^# *//'; exit 0 ;;
+    *) bad "unknown flag: $1"; exit 2 ;;
   esac
 done
-
+[ -n "$HOSTS" ] || { bad 'no hosts selected'; exit 2; }
 for h in $HOSTS; do
-  [ -n "$(fleet_dir "$h")" ] || {
-    echo "unknown host: $h (see --list; a remote needs a \"checkout\" in $FLEET_FILE)" >&2
-    exit 2
-  }
+  [ -n "$(fleet_dir "$h")" ] || { bad "unknown host: $h (see --list)"; exit 2; }
 done
-
-TARGET_COMMIT="$(git -C "$REPO" rev-parse --verify "${DEPLOY_REF:-HEAD}^{commit}")" || exit 1
+command -v python3 >/dev/null || { bad 'python3 is required on the deploy host'; exit 1; }
+TARGET_COMMIT="$(git -C "$REPO" rev-parse --verify "$DEPLOY_REF^{commit}")" || exit 1
 TARGET_SHA="${TARGET_COMMIT:0:7}"
 DEPLOY_VERSION=""
-if [ -n "$DEPLOY_REF" ] && [[ "$DEPLOY_REF" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
-  DEPLOY_VERSION="${BASH_REMATCH[1]}"
-fi
-DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
-
+if [[ "$DEPLOY_REF" =~ ^v?([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then DEPLOY_VERSION="${BASH_REMATCH[1]}"; fi
 if [ "$PUSH" = 1 ]; then
-  say "push (target $TARGET_SHA)"
-  if [ -n "$DEPLOY_REF" ]; then
-    git -C "$REPO" push origin "$DEPLOY_REF" && ok "pushed" || { bad "git push failed"; exit 1; }
-  else
-    git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
-  fi
+  if [ "$DEPLOY_REF" = HEAD ]; then git -C "$REPO" push; else git -C "$REPO" push origin "$DEPLOY_REF"; fi || exit 1
 fi
-
-# A red target gets one bounded warning; CI never gates a deployment.
 warn_target_ci() {
   "$REPO/scripts/ci-status-hook.sh" "$TARGET_COMMIT" || true
 }
 
 warn_target_ci
 
-# Remote hosts pull the upstream, so the upstream must hold the target: a
-# rejected or skipped push would otherwise deploy whatever someone else pushed.
-for h in $HOSTS; do
-  [ -n "$DEPLOY_REF" ] && break
-  [ "$h" = local ] && continue
-  git -C "$REPO" fetch -q 2>/dev/null
-  if ! git -C "$REPO" merge-base --is-ancestor HEAD '@{u}' 2>/dev/null ||
-     [ "$(git -C "$REPO" rev-parse HEAD)" != "$(git -C "$REPO" rev-parse '@{u}' 2>/dev/null)" ]; then
-    bad "HEAD $TARGET_SHA is not what its upstream holds; remotes would pull something else — push (or pull) first"
-    exit 1
-  fi
-  break
-done
 
-# Exact-ref worktrees are immutable runtime roots. Build in a new path, seed
-# only disposable caches by copying, and prune old roots only after verification.
-deploy_root_cmd() {
-  local checkout="$1"
-  cat <<SH
-set -eu
-source=$(shell_quote "$checkout")
-common=\$(git -C "\$source" rev-parse --git-common-dir)
-case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
-common=\$(cd "\$common" && pwd -P)
-main=\$(dirname "\$common")
-printf '%s.deploy\\n' "\$main"
-SH
+run_on() { # Configured SSH flags also apply to every probe and file transfer.
+  if [ "$1" = local ]; then bash -lc "$2"
+  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi
 }
-
-seed_deploy_cache_cmd() {
-  local source="$1" # The emitted snippet runs with the caller's target variable.
-  cat <<SH
-(
-  set +e
-  source=$(shell_quote "$source")
-  [ -d "\$source" ] || exit 0
-  for relative in daemon/deps daemon/_build ui/node_modules; do
-    if [ -L "\$source/\$relative" ] || [ -L "\$target/\$relative" ]; then
-      printf 'cache seeding skipped: symlinked cache root %s\\n' "\$relative" >&2
-      exit 0
-    fi
-  done
-  stage="\$target/.deploy-cache-seed.\$\$"
-  if ! mkdir -p "\$stage"; then
-    printf 'cache seeding failed; building cold\\n' >&2
-    exit 1
-  fi
-  failed=0
-  for relative in daemon/deps daemon/_build ui/node_modules; do
-    [ -d "\$source/\$relative" ] || continue
-    mkdir -p "\$stage/\$relative" || { failed=1; break; }
-    case \$(uname -s) in
-      Darwin)
-        cp -cR -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
-          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
-      *)
-        cp -R -P --reflink=auto "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null ||
-          cp -R -P "\$source/\$relative/." "\$stage/\$relative/" 2>/dev/null || failed=1 ;;
-    esac
-    [ "\$failed" = 0 ] || break
-  done
-  if [ -d "\$stage/ui/node_modules" ]; then
-    if [ -f "\$source/ui/node_modules/.npm-ci-stamp" ] &&
-       cmp -s "\$source/ui/package-lock.json" "\$target/ui/package-lock.json"; then
-      touch "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
-    else
-      rm -f "\$stage/ui/node_modules/.npm-ci-stamp" || failed=1
-    fi
-  fi
-  for relative in daemon/deps daemon/_build ui/node_modules; do
-    if [ -d "\$stage/\$relative" ] && [ -e "\$target/\$relative" ]; then failed=1; fi
-  done
-  published=
-  if [ "\$failed" = 0 ]; then
-    for relative in daemon/deps daemon/_build ui/node_modules; do
-      [ -d "\$stage/\$relative" ] || continue
-      if ! mv "\$stage/\$relative" "\$target/\$relative"; then failed=1; break; fi
-      published="\$published \$relative"
-    done
-  fi
-  if [ "\$failed" != 0 ]; then
-    for relative in \$published; do rm -rf "\$target/\$relative" 2>/dev/null || true; done
-    rm -rf "\$stage" 2>/dev/null || true
-    printf 'cache seeding failed; building cold\\n' >&2
-    exit 1
-  fi
-  rm -rf "\$stage" 2>/dev/null || true
-  printf 'seeded build caches from %s\\n' "\$source"
-) || { printf 'cache seeding failed; building cold\\n' >&2; }
-SH
-}
-
-revision_checkout_cmd() {
-  local checkout="$1" previous="${2:-}"
-  cat <<SH
-set -eu
-source=$(shell_quote "$checkout")
-commit=$(shell_quote "$TARGET_COMMIT")
-root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
-target="\$root/\$commit"
-git -C "\$source" fetch --tags origin
-git -C "\$source" cat-file -e "\$commit^{commit}"
-if [ ! -d "\$target" ]; then
-  mkdir -p "\$root"
-  git -C "\$source" worktree add --detach "\$target" "\$commit"
-  $(seed_deploy_cache_cmd "$previous")
-fi
-SH
-}
-
-prune_deploy_cmd() {
-  local checkout="$1" previous="${2:-}"
-  cat <<SH
-set -eu
-source=$(shell_quote "$checkout")
-root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
-previous=$(shell_quote "$previous")
-for candidate in "\$root"/*; do
-  [ -d "\$candidate" ] || continue
-  [ "\$candidate" = "\$root/$TARGET_COMMIT" ] && continue
-  [ "\$candidate" = "\$previous" ] && continue
-  pi list 2>/dev/null | grep -Fq "    \$candidate" && continue
-  git -C "\$source" worktree remove --force "\$candidate"
-done
-git -C "\$source" worktree prune
-SH
-}
-
-build_checkout_cmd() {
-  local checkout="$1" skip_ui="${2:-0}"
-  printf 'cd %s && ' "$(shell_quote "$checkout")"
-  if [ -n "$DEPLOY_VERSION" ]; then
-    printf 'export SHUTTLE_VERSION=%s GOFLAGS=%s && ' "$(shell_quote "$DEPLOY_VERSION")" \
-      "$(shell_quote "'-ldflags=-X=main.version=$DEPLOY_VERSION -X=main.commit=$TARGET_COMMIT'")"
-  fi
-  printf 'make build'
-  [ "$skip_ui" = 1 ] && printf ' SKIP_UI=1'
-  return 0
-}
-
-BUILD_REPO="$REPO"
-PREVIOUS_LOCAL=""
-
-# Shell snippets reach the daemon at the address `shuttle host --json`
-# resolves: its unix socket on a shared or exposed host, loopback TCP
-# otherwise. Both `felt` and `shuttle` must be on PATH; an error from the host
-# command stops the snippet rather than silently choosing another listener.
-# The prelude sets `sock`, `port`, `base`, and the daemon data directory `dd`.
+json_field() { python3 -c 'import json,sys; v=json.load(sys.stdin).get(sys.argv[1]); print("" if v is None else str(v))' "$1"; }
 listen_prelude() {
   printf '%s' 'l=; dd=; command -v felt >/dev/null 2>&1 || { echo "felt is not on PATH" >&2; exit 3; }; '
   printf '%s' 'command -v shuttle >/dev/null 2>&1 || { echo "shuttle is not on PATH" >&2; exit 3; }; '
@@ -537,481 +119,154 @@ listen_prelude() {
   printf '%s' 'dd=$(printf "%s\n" "$out" | sed -n '"'"'s/.*"data_dir": *"\([^"]*\)".*/\1/p'"'"' | head -n 1); '
   printf '%s' 'l=$(printf "%s\n" "$out" | sed -n '"'"'s/.*"listen": *"\([^"]*\)".*/\1/p'"'"' | head -n 1); '
   printf '%s' 'sock=; port=4000; '
-  printf '%s' 'case "$l" in unix://*) sock="${l#unix://}";; tcp://127.0.0.1:*) port="${l##*:}";; esac; '
+  printf '%s' 'case "$l" in unix://?*) sock="${l#unix://}";; tcp://127.0.0.1:*) port="${l##*:}";; *) echo "unsupported daemon listen address: $l" >&2; exit 3;; esac; '
   printf '%s' 'base=http://127.0.0.1:$port; [ -n "$sock" ] && base=http://localhost; '
 }
 
-# Resolve the listen address up front, with shuttle's error visible — every
-# later step discards stderr, and a resolution failure would look like a dead daemon.
-check_listen() { # $1 = "" (local) | host
-  local out
-  if [ -z "$1" ]; then out=$(bash -lc "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"' 2>&1)
-  else out=$(ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$(listen_prelude)"'echo "listen-ok ${sock:-$base}"')" 2>&1); fi
-  case "$out" in
-    *listen-ok*) return 0 ;;
-    *) bad "cannot resolve the daemon's listen address: $(printf '%s' "$out" | tail -n 3)"; return 1 ;;
-  esac
-}
-
-daemon_call() { # $1 = extra curl args, $2 = API path
+daemon_call() { # The host owns endpoint resolution and identity checks.
   listen_prelude
   printf '%s' 'shuttle host check-owner && '
-  printf '%s' "curl -s --max-time 10 $1"' ${sock:+--unix-socket "$sock"} "$base'"$2"'"'
+  printf '%s' "curl -fsS --max-time 10 $1"' ${sock:+--unix-socket "$sock"} "$base'"$2"'"'
 }
 
-# Kill whatever holds the daemon's listener; the host's supervisor restarts it.
-# The snippet runs on the target host (run_on), and touches the daemon's stop
-# marker there before the SIGTERM, so the rebuilt daemon's boot quarantine holds
-# (Shuttle.DaemonHeartbeat). The marker lives in the data directory that host's
-# `shuttle host --json` reports, else the plain $SHUTTLE_DATA_DIR expansion.
-daemon_kill() {
-  listen_prelude
-  printf '%s' 'touch "${dd:-${SHUTTLE_DATA_DIR:-$HOME/.shuttle}}/heartbeat.stopped" 2>/dev/null; '
-  printf '%s' 'if [ -n "$sock" ]; then lsof -t -- "$sock"; else lsof -ti:"$port" -sTCP:LISTEN; fi | xargs -r kill'
+version_json() { run_on "$1" "$(daemon_call '' /api/v1/version)"; }
+prepare_tree() { # Immutable roots protect running BEAMs on network filesystems.
+  cat <<SH
+set -eu
+source=$(shell_quote "$1")
+previous=$(shell_quote "${2:-}")
+common=\$(git -C "\$source" rev-parse --git-common-dir)
+case "\$common" in /*) ;; *) common="\$source/\$common" ;; esac
+root=\$(dirname "\$(cd "\$common" && pwd -P)").deploy
+target="\$root/$TARGET_COMMIT"
+git -C "\$source" fetch -q origin "$TARGET_COMMIT"
+if [ ! -d "\$target" ]; then
+  git -C "\$source" worktree add --detach "\$target" "$TARGET_COMMIT" >&2
+  # Copy only disposable caches; a missing cache means a cold build.
+  for cache in daemon/deps daemon/_build ui/node_modules; do
+    [ -d "\$previous/\$cache" ] && [ ! -L "\$previous/\$cache" ] || continue
+    mkdir -p "\$target/\$cache"
+    cp -pRP "\$previous/\$cache/." "\$target/\$cache/" || { rm -rf "\$target/\$cache"; echo "cache copy failed; building cold" >&2; }
+  done
+  if [ -f "\$target/ui/node_modules/.npm-ci-stamp" ]; then
+    if cmp -s "\$previous/ui/package-lock.json" "\$target/ui/package-lock.json"; then
+      touch "\$target/ui/node_modules/.npm-ci-stamp"
+    else
+      rm -f "\$target/ui/node_modules/.npm-ci-stamp"
+    fi
+  fi
+fi
+[ "\$(git -C "\$target" rev-parse HEAD)" = "$TARGET_COMMIT" ]
+[ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ]
+printf '%s\\n' "\$target"
+SH
 }
-
-run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CLIs are on PATH)
-  if [ -z "$1" ]; then bash -lc "$2"
-  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi 2>/dev/null
+build_cmd() {
+  printf 'cd %s && ' "$(shell_quote "$1")"
+  if [ -n "$DEPLOY_VERSION" ]; then
+    printf 'export SHUTTLE_VERSION=%s GOFLAGS=%s; ' "$(shell_quote "$DEPLOY_VERSION")" "$(shell_quote "'-ldflags=-X=main.version=$DEPLOY_VERSION -X=main.commit=$TARGET_COMMIT'")"
+  fi
+  printf 'make build'
+  builds_ui "$2" || printf ' SKIP_UI=1'
 }
-
-run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
-  if [ -z "$1" ]; then bash -lc "$2"
-  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi
+LOCAL_UI_TREE=""
+ship_ui() { # Network-home hosts receive the bundle before release assembly.
+  if [ -z "$LOCAL_UI_TREE" ]; then
+    LOCAL_UI_TREE="$(run_on local "$(prepare_tree "$REPO")")" || return 1
+    run_on local "cd $(shell_quote "$LOCAL_UI_TREE") && make ui" || return 1
+  fi
+  run_on "$1" "mkdir -p $(shell_quote "$2/ui/dist")" || return 1
+  rsync -az --delete -e "ssh $(fleet_flags "$1")" "$LOCAL_UI_TREE/ui/dist/" "$(fleet_ssh "$1"):$2/ui/dist/"
 }
-
-version_json() { # $1 = "" (local) | host
-  run_on "$1" "$(daemon_call "" /api/v1/version)"
+restart_cmd() { # Exactly one owner cycles the process; installation owns service settings.
+  cat <<SH
+set -eu
+checkout=$(shell_quote "$1")
+if shuttle daemon loop-present >/dev/null 2>&1; then
+  # The canonical launcher and repo pointer let the next login identify this loop.
+  mkdir -p "\$HOME/.local/bin" "\$HOME/.shuttle"
+  install -m 755 "\$checkout/bin/shuttle-launch" "\$HOME/.local/bin/shuttle-launch"
+  printf '%s\\n' "\$checkout" > "\$HOME/.shuttle/repo"
+  SHUTTLE_DIR="\$checkout" "\$HOME/.local/bin/shuttle-launch" --tmux
+else
+  SHUTTLE_RELEASE="\$checkout/bin/rel" shuttle daemon install --preserve
+fi
+SH
 }
-
-previous_deploy() { # Capture the live commit before retargeting the host's launcher.
-  local host="$1" checkout="$2" sha
-  sha="$(version_json "$host" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-  [ -n "$sha" ] || return 0
-  run_on "$host" "root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")")); commit=\$(git -C $(shell_quote "$checkout") rev-parse --verify $(shell_quote "$sha^{commit}")) && printf '%s/%s\\n' \"\$root\" \"\$commit\""
-}
-
-version_ready() { # JSON response -> true only for an explicit ready:true
-  printf '%s\n' "$1" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true([,}])'
-}
-
-release_quarantine() { # $1 = "" | host
-  run_on "$1" "$(daemon_call "-X POST" /api/v1/quarantine/release)" | grep -q '"ok":true'
-}
-
-wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
-  local host="$1" version="" sha="" booted="" ready="" mix_vsn="" started="" now="" elapsed="" next_notice=""
-  local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
-  local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
-
-  case "$timeout" in ''|*[!0-9]*) timeout=900 ;; esac
-  case "$interval" in ''|*[!0-9]*|0) interval=5 ;; esac
-  started="$(date +%s)"
-  next_notice=0
-
+wait_for_sha() {
+  local host="$1" previous="$2" version elapsed=0
+  local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}" interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
+  case "$timeout" in ''|*[!0-9]*) bad 'invalid ready timeout'; return 1 ;; esac
+  case "$interval" in ''|*[!0-9]*|0) bad 'invalid poll interval'; return 1 ;; esac
+  local started="$(date +%s)"
   while :; do
     version="$(version_json "$host" 2>/dev/null || true)"
-    sha="$(printf '%s\n' "$version" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    booted="$(printf '%s\n' "$version" | sed -n 's/.*"booted_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    mix_vsn="$(printf '%s\n' "$version" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
-    if version_ready "$version"; then ready=true; else ready=false; fi
-
-    # SHA and boot time prove this is the new BEAM; ready proves synchronous
-    # child init (including Poller orphan adoption) has completed.
-    if [ "$sha" = "$TARGET_SHA" ] && [ "$ready" = true ] &&
-       { [ -z "${DEPLOY_VERSION:-}" ] || [ "$mix_vsn" = "$DEPLOY_VERSION" ]; } &&
-       [ -n "$booted" ] && [ "$booted" \> "$DEPLOY_STARTED_AT" ]; then
-      return 0
-    fi
-
-    now="$(date +%s)"
-    elapsed=$((now - started))
-    if [ "$elapsed" -ge "$timeout" ]; then
-      if [ -z "$version" ]; then
-        printf '  daemon on %s did not answer /api/v1/version within %ss\n' "${host:-local}" "$timeout" >&2
-      elif [ "$ready" != true ]; then
-        printf '  daemon on %s is still booting after %ss; /api/v1/version must report ready:true\n' "${host:-local}" "$elapsed" >&2
-      elif [ -n "${DEPLOY_VERSION:-}" ] && [ "$mix_vsn" != "$DEPLOY_VERSION" ]; then
-        printf '  daemon on %s reports version %s; expected %s\n' "${host:-local}" "${mix_vsn:-missing}" "$DEPLOY_VERSION" >&2
-      else
-        printf '  daemon on %s did not prove a fresh ready boot on %s within %ss\n' "${host:-local}" "$TARGET_SHA" "$timeout" >&2
-      fi
-      return 1
-    fi
-
-    if [ "$elapsed" -ge "$next_notice" ]; then
-      if [ -z "$version" ]; then
-        printf '  waiting for daemon on %s to answer /api/v1/version (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
-      elif [ "$ready" != true ]; then
-        printf '  daemon on %s is still booting; waiting for ready:true (%ss elapsed)\n' "${host:-local}" "$elapsed" >&2
-      else
-        printf '  daemon on %s answers but its fresh boot on %s is not verified (%ss elapsed)\n' "${host:-local}" "$TARGET_SHA" "$elapsed" >&2
-      fi
-      next_notice=$((elapsed + 30))
-    fi
+    if printf '%s' "$version" | python3 -c '
+import datetime,json,sys
+try:
+    v=json.load(sys.stdin)
+    boot=datetime.datetime.fromisoformat(v["booted_at"].replace("Z","+00:00"))
+    old=datetime.datetime.fromisoformat(sys.argv[2].replace("Z","+00:00"))
+    valid=(v.get("git_sha")==sys.argv[1] and v.get("ready") is True and boot>old)
+    if sys.argv[3]: valid=valid and v.get("mix_vsn")==sys.argv[3]
+    sys.exit(0 if valid else 1)
+except (ValueError,KeyError,TypeError): sys.exit(1)
+' "$TARGET_COMMIT" "$previous" "$DEPLOY_VERSION"; then return 0; fi
+    elapsed=$(( $(date +%s) - started ))
+    [ "$elapsed" -lt "$timeout" ] || { bad "verify: no fresh ready boot on $TARGET_SHA within ${timeout}s"; return 1; }
+    [ $((elapsed % 30)) -ge "$interval" ] || ok "waiting for a fresh ready boot (${elapsed}s)"
     sleep "$interval"
   done
 }
-
-finish_verified_deploy() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
-  local host="$1" checkout="$2" harness_failed="$3" previous="${4:-}"
-  release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
-  [ "$harness_failed" = 0 ] || { bad "harness setup failed"; return 1; }
-  [ -n "$DEPLOY_REF" ] || return 0
-  run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous")" || {
-    bad "could not prune deploy worktrees on ${host:-local}"
-    return 1
-  }
-}
-
-verify_and_finish() { # $1 = host, $2 = checkout, $3 = harness failure flag, $4 = previous live tree
-  wait_for_sha "$1" || return 1
-  finish_verified_deploy "$@"
-}
-
-# A host marked `"build_ui": false` is served the deploy host's bundle, so the
-# deploy host must hold a current one before the first such remote is reached.
-# `make ui` is cheap after the first call in a deploy — npm ci is stamped on the
-# lockfile and vite rebuilds from a warm cache — and deploy_local's `make build`
-# has already done it, so the flag keeps a full-fleet run to one build.
-LOCAL_UI_BUILT=0
-ensure_local_ui() {
-  [ "$LOCAL_UI_BUILT" = 1 ] && return 0
-  bash -lc "cd $(shell_quote "$BUILD_REPO") && make ui" >/dev/null \
-    || { bad "make ui failed on the deploy host; it has no bundle to ship"; return 1; }
-  LOCAL_UI_BUILT=1
-}
-
-# Ship ui/dist into a non-building host's checkout. --delete because ui/dist is
-# wholly generated: a file left from an older bundle is never referenced by the
-# new index.html and only accumulates.
-ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
-  ensure_local_ui || return 1
-  ssh $4 "$2" "mkdir -p $(shell_quote "$3/ui")" \
-    || { bad "could not prepare $3/ui"; return 1; }
-  rsync -az --delete -e "ssh $4" "$BUILD_REPO/ui/dist/" "$2:$3/ui/dist/" \
-    || { bad "could not ship the UI bundle"; return 1; }
-  ok "shipped ui/dist (this host does not build it)"
-}
-
-# Bring felt's harness plugins up to the checkout just built. A harness counts
-# as installed when felt's plugin is enabled in it: Claude Code and Codex as
-# the enabled bundles of `felt setup receipt --json`, pi as a felt package in
-# `pi list` (the GitHub package, or a local directory whose package.json names
-# felt). A harness binary on PATH alone does not count, since setting up a
-# plugin the operator never installed, or removed, is worse than skipping it.
-# Each bundle's `inspection` says how its enablement was established:
-# "confirmed" by the harness's plugin list, "configured" by its config and
-# cache alone, or "unknown" when the list failed or the config could not be
-# read. An unknown bundle fails the host with the receipt's repair instead of
-# being set up, as does a receipt that cannot be read at all.
-# Claude Code and Codex are set up from the checkout itself (`--source`), so
-# the sealed generation carries the tree the felt binary was built from and
-# setup needs no network. They are skipped when the receipt passes and its
-# active generation was sealed at the checkout's HEAD by a clean build; a dirty
-# build ("dev (<sha>-dirty)") names no fixed tree, so it is always set up
-# again. pi has no --source and no generation. Its GitHub package follows the
-# default branch, so `felt setup pi` runs only when that clone is not at HEAD.
-# A local felt package is never re-pointed. Exact-ref deploys pin a clean
-# GitHub clone to the deployed commit; ordinary deploys follow felt setup pi.
-# The snippet runs in the host's login shell, the PATH its harnesses' hooks
-# resolve felt through, and ends with one `harness-ok` or `harness-fail` line.
-harness_setup_cmd() { # $1 = checkout dir
-  printf 'dir=%s\n' "$(shell_quote "$1")"
-  printf 'exact_ref=%s\n' "$(shell_quote "${DEPLOY_REF:-}")"
-  cat <<'SH'
-report() { printf 'harness-%s %s\n' "$1" "$2"; }
-fail() { report fail "$1"; exit 1; }
-tail_of() { printf '%s\n' "$1" | tail -n 2 | tr '\n' ' '; }
-# problems names each receipt component that is not healthy (felt, a bundle,
-# hooks, generation) with its own repair, a repair shared by several only
-# once, and falls back to the receipt's top-level repair. Components sit two
-# spaces in, their fields four (a bundle's six); a generation's per-harness
-# copies are deeper and already folded into its own repair.
-problems() (
-  felt setup receipt --json 2>/dev/null | awk '
-    function val(line) { sub(/^[^:]*: *"?/, "", line); sub(/"?,?$/, "", line); gsub(/\\"/, "\"", line); return line }
-    function add(what, why) {
-      if (why != "" && !(why in seen)) { seen[why] = 1; what = what ": " why }
-      out = out (out == "" ? "" : "; ") what
-    }
-    /^  "repair":/ { top = val($0); next }
-    /^  "[a-z_]+": [[{]$/ { sect = $0; sub(/^  "/, "", sect); sub(/".*/, "", sect); st = ""; rp = ""; next }
-    /^  []}],?$/ { if (sect != "bundles" && st != "" && st != "healthy") add(sect " " st, rp); sect = ""; next }
-    sect == "bundles" && /^      "harness":/ { h = val($0) }
-    sect == "bundles" && /^      "status":/ { st = val($0) }
-    sect == "bundles" && /^      "repair":/ { rp = val($0) }
-    sect == "bundles" && /^    },?$/ { if (st != "healthy") add(h " plugin " st, rp); st = ""; rp = "" }
-    sect != "bundles" && /^    "status":/ { st = val($0) }
-    sect != "bundles" && /^    "repair":/ { rp = val($0) }
-    END { print (out != "" ? out : top) }'
-)
-tab=$(printf '\t')
-command -v felt >/dev/null 2>&1 || fail "felt is not on PATH"
-head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || fail "cannot read HEAD in $dir"
-summary=
-
-receipt=$(felt setup receipt --json 2>/dev/null)
-healthy=$?
-# felt prints the receipt in one write, so a complete one closes its bundles
-# (null, empty, or a list whose closing bracket arrived) and ends with the
-# top-level object's unindented closing brace. Anything less is unreadable,
-# and an unreadable receipt cannot say which harnesses carry felt.
-complete=$(printf '%s\n' "$receipt" | awk '
-  /^  "bundles": (null|\[\]),?$/ { bundles = 2 }
-  /^  "bundles": \[$/ { bundles = 1; next }
-  bundles == 1 && /^  \],?$/ { bundles = 2 }
-  NF { last = $0 }
-  END { print (bundles == 2 && last == "}") ? "yes" : "no" }')
-[ "$complete" = yes ] ||
-  fail "felt setup receipt --json gave no complete receipt (exit $healthy): $(tail_of "$(felt setup receipt --json 2>&1 >/dev/null)")"
-# The receipt is indented JSON, one key per line. Only its bundles carry
-# "enabled"; each opens with its harness and holds no nested object.
-bundles=$(printf '%s\n' "$receipt" | awk '
-  function val(line) { sub(/^[^:]*: *"?/, "", line); sub(/"?,?$/, "", line); gsub(/\\"/, "\"", line); return line }
-  /"harness":/ { h = val($0); on = 0; how = ""; rep = ""; next }
-  /"inspection":/ { how = val($0) }
-  /"repair":/ { rep = val($0) }
-  /"enabled": true/ { on = 1 }
-  on && /^ *\},?$/ { print h "\t" how "\t" rep; on = 0 }')
-harnesses=
-while IFS="$tab" read -r h how reason; do
-  [ -n "$h" ] || continue
-  case "$how" in
-    confirmed|configured) harnesses="$harnesses$h " ;;
-    unknown) fail "cannot tell whether $h carries felt's plugin: ${reason:-its plugin list could not be read}" ;;
-    *) fail "the receipt gives $h no known inspection (${how:-none}); the felt on PATH may predate this checkout" ;;
-  esac
-done <<EOF
-$bundles
-EOF
-sealed=$(printf '%s\n' "$receipt" | awk '
-  /"active": \{/ { inside = 1; next }
-  inside && /"resolved_commit":/ { c = $0; sub(/.*"resolved_commit": *"/, "", c); sub(/".*/, "", c); print c; exit }
-  inside && /\}/ { exit }')
-case "$(felt --version 2>/dev/null)" in *-dirty*) dirty=1 ;; *) dirty=0 ;; esac
-if [ -n "$harnesses" ]; then
-  if [ "$healthy" = 0 ] && [ "$sealed" = "$head" ] && [ "$dirty" = 0 ]; then
-    summary="${harnesses}current"
-  else
-    for h in $harnesses; do
-      out=$(felt setup "$h" --source "$dir" 2>&1) || fail "felt setup $h failed: $(tail_of "$out")"
-    done
-    if ! felt setup receipt >/dev/null 2>&1; then
-      repair=$(problems)
-      fail "setup receipt still fails after felt setup: ${repair:-run felt setup receipt}"
-    fi
-    summary="${harnesses}set up"
-  fi
-fi
-
-# `pi list` prints each package's source, then its resolved path indented
-# below it; a source without a scheme is a local directory.
-if command -v pi >/dev/null 2>&1; then
-  listed=$(pi list 2>&1) || fail "pi list failed: $(tail_of "$listed")"
-  packages=$(printf '%s\n' "$listed" | awk '
-    /^  [^ ]/ { src = $0; sub(/^ +/, "", src); next }
-    /^    [^ ]/ {
-      p = $0; sub(/^ +/, "", p)
-      if (index(src, "git:github.com/cailmdaley/felt") == 1) print "git\t" p
-      else if (src !~ /:/) print "local\t" p
-    }')
-  checkout=$(cd "$dir" && pwd -P)
-  # A package other than the deployed checkout must also match HEAD in its
-  # files: tracked edits or deletions change what pi loads. Untracked files
-  # are ignored, since pi's own npm install leaves a package-lock.json there.
-  # edits sets `changed` to the first edited paths, and fails the host when git
-  # cannot inspect the package at all.
-  edits() {
-    local out
-    out=$(git -C "$1" status --porcelain --untracked-files=no 2>&1) ||
-      fail "cannot inspect pi's felt package $1: $(tail_of "$out")"
-    changed=$(printf '%s\n' "$out" | sed '/^$/d' | head -n 3 | tr '\n' ' ')
-  }
-  # A local package is felt when its committed package.json names felt, so an
-  # edited or deleted working copy cannot hide it; a package outside git falls
-  # back to its working package.json.
-  manifest_name() {
-    if git -C "$1" rev-parse --git-dir >/dev/null 2>&1; then
-      git -C "$1" show HEAD:package.json 2>/dev/null
-    else
-      cat "$1/package.json" 2>/dev/null
-    fi |
-      sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
-  }
-  while IFS="$tab" read -r kind path; do
-    [ -n "$path" ] || continue
-    if [ "$kind" = local ]; then
-      [ "$(manifest_name "$path")" = felt ] || continue
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      if [ "$(cd "$path" 2>/dev/null && pwd -P)" = "$checkout" ]; then
-        summary="${summary:+$summary, }pi current"
-      elif [ "$at" = "$head" ]; then
-        edits "$path"
-        [ -z "$changed" ] || fail "pi loads felt from the local package $path, at the deployed ${head:0:7} but with local edits ($changed); commit or discard them there (git -C $path status)"
-        summary="${summary:+$summary, }pi current"
-      else
-        where="no git commit"; [ -z "$at" ] || where="commit ${at:0:7}"
-        fail "pi loads felt from the local package $path at $where, not the deployed ${head:0:7}; update that checkout, or point pi at this one with pi install $dir"
-      fi
-      continue
-    fi
-    at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-    if [ "$at" = "$head" ]; then
-      state="pi current"
-    elif [ -n "$exact_ref" ]; then
-      edits "$path"
-      [ -z "$changed" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      out=$(git -C "$path" fetch origin "$head" 2>&1) &&
-        out=$(git -C "$path" checkout --detach "$head" 2>&1) ||
-        fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      [ "$at" = "$head" ] || fail "pi's felt package $path is at ${at:0:7}, not the deployed ${head:0:7}; pin its installed source to $exact_ref or install the deployed source with pi install $dir"
-      state="pi pinned"
-    else
-      out=$(felt setup pi 2>&1) || fail "felt setup pi failed: $(tail_of "$out")"
-      at=$(git -C "$path" rev-parse HEAD 2>/dev/null)
-      [ "$at" = "$head" ] || fail "pi's felt package is at ${at:0:7}, not ${head:0:7}; felt setup pi installs GitHub's default branch"
-      state="pi set up"
-    fi
-    edits "$path"
-    [ -z "$changed" ] || fail "pi's felt clone $path is at the deployed ${head:0:7} but has local edits ($changed); discard them with git -C $path checkout -- . and redeploy"
-    summary="${summary:+$summary, }$state"
-  done <<EOF
-$packages
-EOF
-fi
-
-report ok "harness plugins: ${summary:-none carry felt}"
+prune_cmd() { # Keep the current, previous and two newest roots, plus Pi sources.
+  cat <<SH
+set -eu
+current=$(shell_quote "$1")
+previous=$(shell_quote "$2")
+root=\$(dirname "\$current")
+packages=
+if command -v pi >/dev/null 2>&1; then packages=\$(pi list) || exit 1; fi
+count=0
+ls -dt "\$root"/* | while IFS= read -r tree; do
+  [ -d "\$tree" ] || continue
+  count=\$((count + 1))
+  [ "\$count" -gt 2 ] || continue
+  [ "\$tree" != "\$current" ] && [ "\$tree" != "\$previous" ] || continue
+  printf '%s\\n' "\$packages" | grep -Fq "    \$tree" && continue
+  git -C "\$current" worktree remove --force "\$tree"
+done
 SH
 }
-
-refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
-  local out line
-  if [ -z "$1" ]; then out=$(bash -lc "$(harness_setup_cmd "$2")" 2>&1)
-  else out=$(ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$(harness_setup_cmd "$2")")" 2>&1); fi
-  line=$(printf '%s\n' "$out" | sed -n 's/^harness-ok //p' | tail -n 1)
-  [ -n "$line" ] && { ok "$line"; return 0; }
-  line=$(printf '%s\n' "$out" | sed -n 's/^harness-fail //p' | tail -n 1)
-  bad "${line:-harness setup did not report: $(printf '%s' "$out" | tail -n 2)}"
-  return 1
-}
-
-deploy_local() {
-  say "local ($TARGET_SHA)"
-  bash -lc "$(build_checkout_cmd "$BUILD_REPO")" >/dev/null \
-    || { bad "make build failed"; return 1; }
-  LOCAL_UI_BUILT=1
-  run_on "" "$(config_migration_cmd 1 "$BUILD_REPO/bin/rel")" \
-    || { bad "config migration or supervisor refresh failed on the deploy host"; return 1; }
-  # A harness failure is reported now and fails the host after its daemon step.
-  local harness_failed=0
-  refresh_harnesses "" "$BUILD_REPO" || harness_failed=1
-  # Kill the listener FIRST: the daemon may be running outside launchd
-  # (a hand-started `shuttle daemon start`), where kickstart restarts nothing
-  # and the old BEAM keeps running the previous release. The booted_at check
-  # in wait_for_sha verifies that the cycle actually happened.
-  check_listen "" || return 1
-  local supervisor=""
-  supervisor="$(run_on "" "$(supervisor_probe_cmd)")" || { bad "could not inspect the local supervisor"; return 1; }
-  if [ "$supervisor" = 1 ]; then
-    run_on "" "$(daemon_kill)"; sleep 2
-    launchctl kickstart -k "gui/$(id -u)/io.shuttle.daemon" 2>/dev/null \
-      || run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO")"
-  else
-    # A listener outside the loop's tmux session would keep the port and make
-    # the new loop stand down, so stop it before the loop is replaced.
-    run_on "" "$(daemon_kill)"
-    run_on "" "$(respawn_launcher_restart_cmd "$BUILD_REPO" "$supervisor")" \
-      || { bad "could not install and restart the local respawn loop"; return 1; }
+deploy_host() {
+  local host="$1" source tree before previous old_sha cmd wrap harness_failed=0
+  if [ "$host" != local ]; then
+    run_on "$host" true || try_handshake "$host" || { bad 'ssh: unreachable; authenticate first'; return 1; }
   fi
-  verify_and_finish "" "$REPO" "$harness_failed" "$PREVIOUS_LOCAL" || {
-    bad "deployment did not complete successfully on the deploy host"
-    return 1
-  }
-  return 0
-}
-
-remote_host_cycle() { # $1 = host, $2 = deployed checkout
-  local host="$1" checkout="$2" supervisor=""
-  supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
-  run_on "$host" "$(daemon_kill)"
-  if [ "$supervisor" = 1 ]; then
-    return 0
-  fi
-  run_on "$host" "$(respawn_launcher_restart_cmd "$checkout" "$supervisor")" \
-    || { bad "could not install and restart the respawn loop on $host"; return 1; }
-}
-
-deploy_remote() {
-  local host="$1" dir="" dest="" flags="" build_cmd="" remote_root="" previous="" skip_ui=0
-  dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
-  say "$host ($dest:$dir)"
-  ssh $flags "$dest" "true" 2>/dev/null \
-    || try_handshake "$host" \
-    || { bad "ssh unreachable (expired cert / no ControlMaster? see AGENTS.md hosts section)"; return 1; }
-  if [ -n "$DEPLOY_REF" ]; then
-    previous="$(previous_deploy "$host" "$dir")"
-    run_on_visible "$host" "$(revision_checkout_cmd "$dir" "$previous")" \
-      || { bad "could not prepare the deploy revision"; return 1; }
-    remote_root="$(run_on_visible "$host" "$(deploy_root_cmd "$dir")")" \
-      || { bad "could not resolve the deploy worktree root on $host"; return 1; }
-    dir="${remote_root%/}/$TARGET_COMMIT"
-  fi
-  # The bundle goes over BEFORE the build, so the release this build assembles
-  # embeds it (see the bundle note at the top of this file).
-  if ! builds_ui "$host"; then
-    ship_ui "$host" "$dest" "$dir" "$flags" || return 1
-    skip_ui=1
-  fi
-  build_cmd="$(build_checkout_cmd "$dir" "$skip_ui")"
-  local wrap
+  before="$(version_json "$host")" || { bad 'preflight: daemon does not answer'; return 1; }
+  previous="$(printf '%s' "$before" | json_field booted_at)" || return 1
+  old_sha="$(printf '%s' "$before" | json_field git_sha)" || return 1
+  [ -n "$previous" ] && [ -n "$old_sha" ] || { bad 'preflight: daemon identity incomplete'; return 1; }
+  source="$(fleet_dir "$host")"
+  tree="$(run_on "$host" "$(prepare_tree "$source" "${source}.deploy/$old_sha")")" || { bad 'prepare: failed'; return 1; }
+  if ! builds_ui "$host"; then ship_ui "$host" "$tree" || { bad 'ship UI: failed'; return 1; }; fi
+  cmd="$(build_cmd "$tree" "$host")"
   wrap="$(fleet_build_wrap "$host")"
-  if [ -n "$wrap" ]; then
-    build_cmd="$wrap bash -lc $(shell_quote "$build_cmd")"
-  fi
-  if [ -z "$DEPLOY_REF" ]; then
-    build_cmd="cd $(shell_quote "$dir") && git pull --ff-only -q && $build_cmd"
-  fi
-  ssh $flags "$dest" "bash -lc $(shell_quote "$build_cmd")" >/dev/null \
-    || { bad "pull/build failed"; return 1; }
-  if [ -f "$AGENTS_FILE" ]; then
-    ssh $flags "$dest" "mkdir -p ~/.config/shuttle" \
-      || { bad "could not prepare remote agent registry"; return 1; }
-    rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:.config/shuttle/agents.json" \
-      || { bad "could not sync remote agent registry"; return 1; }
-  fi
-  run_on_visible "$host" "$(config_migration_cmd 1 "$dir/bin/rel")" \
-    || { bad "config migration or supervisor refresh failed on $host"; return 1; }
-  local harness_failed=0
-  refresh_harnesses "$host" "$dir" || harness_failed=1
-  # Cycle through the installed supervisor, or replace the tmux loop when no
-  # launchd/systemd unit owns this host.
-  check_listen "$host" || return 1
-  remote_host_cycle "$host" "$dir" || return 1
-  verify_and_finish "$host" "$(fleet_dir "$host")" "$harness_failed" "$previous" \
-    || { bad "deployment did not complete successfully on $host"; return 1; }
-  return 0
+  [ -z "$wrap" ] || cmd="$wrap bash -lc $(shell_quote "$cmd")"
+  run_on "$host" "$cmd" || { bad 'build: failed'; return 1; }
+  if [ "$host" = local ]; then LOCAL_UI_TREE="$tree"; fi
+  run_on "$host" "felt setup refresh --source $(shell_quote "$tree")" || harness_failed=1
+  run_on "$host" "$(restart_cmd "$tree")" || { bad 'restart: failed'; return 1; }
+  wait_for_sha "$host" "$previous" || return 1
+  # Use the CLI's HTTP result; JSON whitespace cannot turn success into failure.
+  run_on "$host" 'shuttle daemon release' || { bad 'release: failed'; return 1; }
+  run_on "$host" "$(prune_cmd "$tree" "$(dirname "$tree")/$old_sha")" || { bad 'prune: failed'; return 1; }
+  [ "$harness_failed" = 0 ] || { bad 'harness refresh: failed (daemon is deployed and released)'; return 1; }
+  ok "live on $TARGET_SHA, ready and released"
 }
-
-if [ -n "$DEPLOY_REF" ]; then
-  PREVIOUS_LOCAL="$(previous_deploy "" "$REPO")"
-  run_on_visible "" "$(revision_checkout_cmd "$REPO" "$PREVIOUS_LOCAL")" \
-    || { bad "could not prepare the deploy revision"; exit 1; }
-  BUILD_ROOT="$(bash -lc "$(deploy_root_cmd "$REPO")")" || exit 1
-  BUILD_REPO="$BUILD_ROOT/$TARGET_COMMIT"
-fi
-
 FAILED=""
-for h in $HOSTS; do
-  if [ "$h" = local ]; then deploy_local || FAILED="$FAILED $h"
-  else deploy_remote "$h" || FAILED="$FAILED $h"; fi
+for HOST in $HOSTS; do
+  printf '\n%s (%s)\n' "$HOST" "$TARGET_SHA"
+  deploy_host "$HOST" || FAILED="$FAILED $HOST"
 done
-
-echo
-if [ -z "$FAILED" ]; then
-  printf '%s✓ fleet on %s%s\n' "$GREEN$BOLD" "$TARGET_SHA" "$RESET"
-else
-  printf '%s✗ failed:%s%s\n' "$RED$BOLD" "$FAILED" "$RESET"; exit 1
-fi
+if [ -n "$FAILED" ]; then bad "failed hosts:$FAILED"; exit 1; fi
+ok "fleet on $TARGET_SHA"

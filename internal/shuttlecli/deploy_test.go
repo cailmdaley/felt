@@ -1,465 +1,160 @@
 package shuttlecli
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	wait := shellFunction(t, string(script), "wait_for_sha")
-	callsFile := filepath.Join(t.TempDir(), "version-calls")
-
-	harness := `TARGET_SHA=abc123
-DEPLOY_STARTED_AT=2026-01-01T00:00:00
-SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=2
-SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1
-CALLS_FILE='` + callsFile + `'
-version_json() {
-  calls=$(cat "$CALLS_FILE" 2>/dev/null || printf '0')
-  calls=$((calls + 1))
-  printf '%s' "$calls" > "$CALLS_FILE"
-  if [ "$calls" -eq 1 ]; then
-    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'
-  else
-    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true}'
-  fi
-}
-sleep() { :; }
-` + shellFunction(t, string(script), "version_ready") + wait + `
-wait_for_sha ""
-printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
-`
-	cmd := exec.Command("bash", "-c", harness)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("wait_for_sha failed: %v\n%s", err, out)
-	}
-	if !strings.Contains(string(out), "still booting") || !strings.Contains(string(out), "polls=2") {
-		t.Fatalf("did not wait through ready:false before success: %s", out)
-	}
-}
-
-// runDeploySupervisorMigration writes each unit into a fake home's systemd
-// user directory, runs deploy's supervisor migration against a fake shuttle,
-// and returns each `shuttle daemon install` call as SHUTTLE_STORES_FILE plus
-// its argv.
-func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map[string][]byte, loopPresent ...bool) [][]string {
-	t.Helper()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
-	migration := shellFunction(t, string(script), "config_migration_cmd")
-	home := t.TempDir()
-	unitDir := filepath.Join(home, ".config", "systemd", "user")
-	localBin := filepath.Join(home, ".local", "bin")
-	for _, dir := range []string{unitDir, localBin} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, unit := range units {
-		if err := os.WriteFile(filepath.Join(unitDir, name), unit, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	capture := filepath.Join(t.TempDir(), "install-args")
-	fakeSystemctl := filepath.Join(localBin, "systemctl")
-	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fakeShuttle := `#!/bin/sh
-if [ "$1 $2" = "daemon loop-present" ]; then [ "$SHUTTLE_TEST_LIVE_LOOP" = 1 ]; exit $?; fi
-[ "$1 $2" = "daemon install" ] || exit 2
-{
-  printf 'CALL\n'
-  printf 'STORES_FILE=%s\n' "$SHUTTLE_STORES_FILE"
-  shift 2
-  for arg do printf 'ARG=%s\n' "$arg"; done
-  printf 'CODEX_HOME=%s\n' "$CODEX_HOME"
-} >> "$SHUTTLE_CAPTURE_FILE"
-`
-	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte(fakeShuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-` + probe + migration + `
-config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
-`
-	cmd := exec.Command("/bin/bash", "-c", harness)
-	liveLoop := "0"
-	if len(loopPresent) > 0 && loopPresent[0] {
-		liveLoop = "1"
-	}
-	cmd.Env = append(os.Environ(),
-		"SHUTTLE_TEST_LIVE_LOOP="+liveLoop,
-		"HOME="+home,
-		"PATH="+localBin+":/usr/bin:/bin",
-		"SHUTTLE_RELEASE="+release.Dir,
-		"SHUTTLE_CAPTURE_FILE="+capture,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("supervisor migration: %v\n%s", err, out)
-	}
-	captured, err := os.ReadFile(capture)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		t.Fatal(err)
-	}
-	var calls [][]string
-	for _, line := range strings.Split(strings.TrimSpace(string(captured)), "\n") {
-		if line == "CALL" {
-			calls = append(calls, nil)
-			continue
-		}
-		calls[len(calls)-1] = append(calls[len(calls)-1], line)
-	}
-	return calls
-}
-
-// installFlag reads one flag's value from a captured install call.
-func installFlag(t *testing.T, call []string, name string) string {
-	t.Helper()
-	for i := 1; i+1 < len(call); i++ {
-		if call[i] == "ARG="+name {
-			return strings.TrimPrefix(call[i+1], "ARG=")
-		}
-	}
-	t.Fatalf("install call %v lacks %s", call, name)
-	return ""
-}
-
-func TestDeployMigrationSkipsServiceRefreshForLiveTmuxOwner(t *testing.T) {
-	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	// A reachable enabled systemd unit would otherwise trigger daemon install.
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": legacy}, true)
-	if len(calls) != 0 {
-		t.Fatalf("live tmux owner refreshed a competing systemd service: %v", calls)
-	}
-}
-
-func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
-	t.Parallel()
-	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"second.service": legacy})
-	if len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one", calls)
-	}
-	call := calls[0]
-	flag := func(name string) string { return installFlag(t, call, name) }
-	options := supervisorOptions{
-		OS: "Linux", Label: flag("--label"), Stores: flag("--stores"), StoresFile: strings.TrimPrefix(call[0], "STORES_FILE="),
-		Port: flag("--port"), Log: flag("--log"), Path: flag("--path"), SSHSocket: flag("--ssh-auth-sock"),
-		ShuttleBin: "/opt/shuttle",
-	}
-	if options.Label != "io.shuttle.second" || options.Stores != `/mnt/store one,/mnt/store "two" \archive %data` ||
-		options.StoresFile != "/tmp/custom config/stores.json" || options.Port != "4401" ||
-		options.Log != "/tmp/custom logs/shuttle.log" || options.Path != "/opt/custom bin:/usr/bin:/opt/felt bin" ||
-		options.SSHSocket != "/tmp/ssh agent.sock" {
-		t.Fatalf("migrated supervisor options = %+v", options)
-	}
-	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`Environment="SHUTTLE_STORES=/mnt/store one,/mnt/store \"two\" \\archive %%data"`,
-		`Environment="SHUTTLE_STORES_FILE=/tmp/custom config/stores.json"`,
-		`Environment="SHUTTLE_PORT=4401"`,
-		`Environment="PATH=/opt/custom bin:/usr/bin:/opt/felt bin"`,
-		`Environment="SSH_AUTH_SOCK=/tmp/ssh agent.sock"`,
-		`Environment="SHUTTLE_LOG=/tmp/custom logs/shuttle.log"`,
-		`StandardOutput=append:/tmp/custom logs/shuttle.log`,
+// Exercise the complete helper against a fake local/SSH host, including its exit status.
+func TestDeployRitual(t *testing.T) {
+	for _, tc := range []struct {
+		name, host, fail string
+		shipped, loop    bool
+	}{
+		{name: "local service", host: "local"},
+		{name: "remote loop", host: "remote", loop: true},
+		{name: "shipped UI", host: "remote", shipped: true},
+		{name: "scheduler", host: "scheduled"},
+		{name: "build failure", host: "remote", fail: "build"},
+		{name: "harness failure still releases", host: "local", fail: "harness"},
+		{name: "restart failure", host: "local", fail: "restart"},
+		{name: "release failure", host: "local", fail: "release"},
+		{name: "stale boot", host: "local", fail: "boot"},
+		{name: "not ready", host: "local", fail: "ready"},
+		{name: "wrong SHA", host: "local", fail: "sha"},
+		{name: "wrong release version", host: "local", fail: "version"},
+		{name: "owner refusal", host: "local", fail: "owner"},
 	} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("new supervisor render missing migrated value %q:\n%s", want, rendered)
-		}
-	}
-}
-
-func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T) {
-	t.Parallel()
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := supervisorOptions{
-		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
-		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
-		SSHSocket: "/tmp/agent.sock",
-	}
-	current, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(current, "TMUX_TMPDIR") {
-		t.Fatalf("a current unit with an empty TMUX_TMPDIR must still name it, or deploy re-renders it forever:\n%s", current)
-	}
-	if !strings.Contains(current, "\nKillMode=process\n") {
-		t.Fatalf("a current unit must set KillMode=process, or deploy re-renders it forever:\n%s", current)
-	}
-	without := func(marker string) string {
-		var lines []string
-		for _, line := range strings.Split(current, "\n") {
-			if !strings.Contains(line, marker) {
-				lines = append(lines, line)
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			bin := filepath.Join(root, "fake-bin")
+			repo := filepath.Join(root, "repo with spaces")
+			for _, d := range []string{bin, filepath.Join(repo, "bin"), filepath.Join(repo, ".git"), filepath.Join(repo, "scripts")} {
+				if err := os.MkdirAll(d, 0700); err != nil {
+					t.Fatal(err)
+				}
 			}
-		}
-		return strings.Join(lines, "\n")
-	}
-	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(without("KillMode=process")),
-	}); len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one for the unit without KillMode=process", calls)
-	}
-	older := strings.Split(without("TMUX_TMPDIR"), "\n")
-	tunnel := "[Service]\nExecStart=/usr/bin/ssh -N shuttle-remote\nEnvironment=SSH_AUTH_SOCK=/tmp/agent.sock\n"
-
-	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(current),
-		"shuttle-tunnel.service": []byte(tunnel),
-	}); len(calls) != 0 {
-		t.Fatalf("current and tunnel supervisors were re-rendered: %v", calls)
-	}
-
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(strings.Join(older, "\n")),
-		"shuttle-tunnel.service": []byte(tunnel),
-	})
-	if len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one for the pre-TMUX_TMPDIR daemon unit", calls)
-	}
-	call := calls[0]
-	for flag, want := range map[string]string{
-		"--label": defaultDaemonLabel, "--stores": "/srv/store", "--path": "/opt/bin:/usr/bin",
-		"--log": "/tmp/logs/shuttle.log", "--ssh-auth-sock": "/tmp/agent.sock", "--port": "",
-	} {
-		if got := installFlag(t, call, flag); got != want {
-			t.Errorf("%s = %q; want %q", flag, got, want)
-		}
-	}
-	if call[0] != "STORES_FILE=/tmp/cfg/stores.json" {
-		t.Errorf("stores file = %q", call[0])
-	}
-	for _, arg := range call {
-		if strings.HasPrefix(arg, "ARG=--tmux-tmpdir") {
-			t.Errorf("migration pinned %s; install must capture TMUX_TMPDIR from the login shell", arg)
-		}
-	}
-}
-
-func TestDeployConfigMigrationCopiesWithoutRemovingOrOverwriting(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	migration := shellFunction(t, string(script), "config_migration_cmd")
-	home := t.TempDir()
-	oldDir := filepath.Join(home, ".config", "felt")
-	newDir := filepath.Join(home, ".config", "shuttle")
-	if err := os.MkdirAll(oldDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(newDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for name, value := range map[string]string{
-		"host.json":   `{"source":"felt"}`,
-		"agents.json": `{"source":"felt"}`,
-	} {
-		if err := os.WriteFile(filepath.Join(oldDir, name), []byte(value), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(newDir, "agents.json"), []byte(`{"source":"shuttle"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("bash", "-c", migration+"\nconfig_migration_cmd 0 | bash")
-	cmd.Env = append(os.Environ(), "HOME="+home)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("config migration: %v\n%s", err, out)
-	}
-	for path, want := range map[string]string{
-		filepath.Join(oldDir, "host.json"):   `{"source":"felt"}`,
-		filepath.Join(oldDir, "agents.json"): `{"source":"felt"}`,
-		filepath.Join(newDir, "host.json"):   `{"source":"felt"}`,
-		filepath.Join(newDir, "agents.json"): `{"source":"shuttle"}`,
-	} {
-		got, err := os.ReadFile(path)
-		if err != nil || string(got) != want {
-			t.Errorf("%s = %q, %v; want %q", path, got, err, want)
-		}
-	}
-}
-
-// runLauncherRestart runs deploy's respawn-launcher restart against fake tmux,
-// systemctl and launchctl, so no test can reach a real supervisor. supervisor
-// names the one the fakes report installed: "", "systemd" or "launchd".
-func runLauncherRestart(t *testing.T, supervisor string, selectedOwner ...string) (home string, freshLauncher []byte, tmuxCalls string, supervisorCalls string) {
-	t.Helper()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	helper := shellFunction(t, string(script), "respawn_launcher_restart_cmd")
-	root := t.TempDir()
-	checkout := filepath.Join(root, "checkout")
-	dataDir := filepath.Join(root, "data")
-	home = filepath.Join(root, "home")
-	fakeBin := filepath.Join(root, "fakebin")
-	for _, dir := range []string{filepath.Join(checkout, "bin", "rel", "bin"), filepath.Join(checkout, "bin"), dataDir, filepath.Join(home, ".local", "bin"), fakeBin} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(checkout, "bin", "rel", "bin", "shuttled"), []byte("release"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	freshLauncher, err = os.ReadFile("../../bin/shuttle-launch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(checkout, "bin", "shuttle-launch"), freshLauncher, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "shuttle"), []byte("#!/bin/sh\ncase \"$*\" in 'daemon loop-present') [ \"$SHUTTLE_TEST_OWNER\" = live-tmux ]; exit $?;; 'host --json') printf '{\"data_dir\":\"%s\"}\\n' \"$SHUTTLE_TEST_DATA_DIR\";; *) exit 1;; esac\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	calls := filepath.Join(root, "tmux-calls")
-	marker := filepath.Join(dataDir, "heartbeat.stopped")
-	tmux := "#!/bin/sh\ncase \"$*\" in *kill-session*) [ -f \"$SHUTTLE_TEST_MARKER\" ] && echo marker-before-kill >> \"$SHUTTLE_TEST_CALLS\" ;; esac\nprintf '%s\\n' \"$*\" >> \"$SHUTTLE_TEST_CALLS\"\n"
-	if err := os.WriteFile(filepath.Join(fakeBin, "tmux"), []byte(tmux), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	supervisorLog := filepath.Join(root, "supervisor-calls")
-	fakes := map[string]string{
-		"systemctl": "#!/bin/sh\ncase \"$*\" in *show-environment*|*is-enabled*|*is-active*) [ \"$SHUTTLE_TEST_SUPERVISOR\" = systemd ]; exit $? ;; esac\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\ncase \"$*\" in *disable*) echo disabled-before-loop >> \"$SHUTTLE_TEST_CALLS\";; esac\n",
-		"launchctl": "#!/bin/sh\ncase \"$1\" in print) [ \"$SHUTTLE_TEST_SUPERVISOR\" = launchd ]; exit $? ;; esac\nprintf 'launchctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
-	}
-	for name, source := range fakes {
-		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte(source), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-` + helper + `
-respawn_launcher_restart_cmd "$CHECKOUT" "${SHUTTLE_TEST_OWNER:-}" | /bin/bash
-`
-	cmd := exec.Command("/bin/bash", "-c", harness)
-	owner := ""
-	if len(selectedOwner) > 0 {
-		owner = selectedOwner[0]
-	}
-	cmd.Env = append(os.Environ(),
-		"SHUTTLE_TEST_OWNER="+owner,
-		"HOME="+home,
-		"PATH="+fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin",
-		"CHECKOUT="+checkout,
-		"SHUTTLE_TEST_DATA_DIR="+dataDir,
-		"SHUTTLE_TEST_MARKER="+marker,
-		"SHUTTLE_TEST_CALLS="+calls,
-		"SHUTTLE_TEST_SUPERVISOR="+supervisor,
-		"SHUTTLE_TEST_SUPERVISOR_CALLS="+supervisorLog,
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("respawn launcher restart failed: %v\n%s", err, out)
-	}
-	installed, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch"))
-	if err != nil || string(installed) != string(freshLauncher) {
-		t.Fatalf("installed launcher differs from checkout: err=%v", err)
-	}
-	repo, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
-	if err != nil || strings.TrimSpace(string(repo)) != checkout {
-		t.Fatalf("deployed checkout state = %q, %v; want %q", repo, err, checkout)
-	}
-	tmuxLog, _ := os.ReadFile(calls)
-	supervisorOut, _ := os.ReadFile(supervisorLog)
-	return home, freshLauncher, string(tmuxLog), string(supervisorOut)
-}
-
-func TestDeployRestartInstallsFreshLauncherAndMarksBeforeKillingLoop(t *testing.T) {
-	t.Parallel()
-	home, _, got, supervisorCalls := runLauncherRestart(t, "")
-	if got == "" {
-		t.Fatal("tmux was not called")
-	}
-	if !strings.Contains(got, "marker-before-kill") || !strings.Contains(got, filepath.Join(home, ".local", "bin", "shuttle-launch")+"' --loop") {
-		t.Fatalf("loop restart did not mark before killing and relaunch through the installed script: %s", got)
-	}
-	if supervisorCalls != "" {
-		t.Fatalf("an unsupervised host touched a supervisor: %s", supervisorCalls)
-	}
-}
-
-func TestLauncherRestartsThroughAnInstalledSupervisor(t *testing.T) {
-	t.Parallel()
-	for supervisor, want := range map[string]string{
-		"systemd": "systemctl --user restart shuttle-daemon.service",
-		"launchd": "launchctl kickstart -k gui/",
-	} {
-		t.Run(supervisor, func(t *testing.T) {
-			t.Parallel()
-			_, _, tmuxCalls, supervisorCalls := runLauncherRestart(t, supervisor)
-			if tmuxCalls != "" {
-				t.Fatalf("a supervised host started a respawn loop: %s", tmuxCalls)
+			script, err := os.ReadFile("../../bin/shuttle-deploy")
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(supervisorCalls, want) {
-				t.Fatalf("supervisor calls = %q; want %q", supervisorCalls, want)
+			write := func(p, s string) {
+				t.Helper()
+				if err := os.WriteFile(p, []byte(s), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(filepath.Join(repo, "bin", "shuttle-deploy"), string(script))
+			write(filepath.Join(repo, "scripts", "ci-status-hook.sh"), "#!/bin/sh\necho 'CI advisory: red'\nexit 1\n")
+			realBash, err := exec.LookPath("bash")
+			if err != nil {
+				t.Fatal(err)
+			}
+			write(filepath.Join(bin, "bash"), "#!/bin/sh\n[ \"$1\" != -lc ] || shift\nexec '"+realBash+"' -c \"$@\"\n")
+			write(filepath.Join(bin, "ssh"), `#!/bin/sh
+printf 'ssh %s\n' "$*" >> "$LOG"
+for arg do cmd="$arg"; done
+exec /bin/sh -c "$cmd"
+`)
+			write(filepath.Join(bin, "git"), `#!/bin/sh
+printf 'git %s\n' "$*" >> "$LOG"
+[ "$1" != -C ] || shift 2
+case "$1" in
+ rev-parse) case "$*" in *git-common-dir*) printf '%s/.git\n' "$SOURCE";; *) echo 1111111111111111111111111111111111111111;; esac;;
+ fetch|push|status) exit 0;;
+ worktree) if [ "$2" = add ]; then mkdir -p "$4/bin" "$4/ui/dist"; printf '#!/bin/sh\necho restart-loop >> "$LOG"\n[ "$FAIL" != restart ] || exit 1\ntouch "$STATE"\n' > "$4/bin/shuttle-launch"; chmod +x "$4/bin/shuttle-launch"; fi;;
+ *) exit 2;;
+esac
+`)
+			write(filepath.Join(bin, "make"), `#!/bin/sh
+echo "make $*" >> "$LOG"
+[ "$FAIL" != build ]
+`)
+			write(filepath.Join(bin, "srun"), `#!/bin/sh
+echo scheduler >> "$LOG"
+shift
+exec "$@"
+`)
+			write(filepath.Join(bin, "rsync"), "#!/bin/sh\necho \"rsync $*\" >> \"$LOG\"\n")
+			write(filepath.Join(bin, "sleep"), "#!/bin/sh\nexit 0\n")
+			write(filepath.Join(bin, "felt"), `#!/bin/sh
+echo "felt $*" >> "$LOG"
+[ "$FAIL" != harness ]
+`)
+			write(filepath.Join(bin, "pi"), "#!/bin/sh\nexit 0\n")
+			write(filepath.Join(bin, "shuttle"), `#!/bin/sh
+echo "shuttle $*" >> "$LOG"
+case "$*" in
+ 'host --json') echo '{"data_dir":"/tmp/fake","listen":"unix:///tmp/fake.sock"}';;
+ 'host check-owner') [ "$FAIL" != owner ];;
+ 'daemon loop-present') [ "$LOOP" = true ];;
+ 'daemon install --preserve') echo restart-service >> "$LOG"; [ "$FAIL" != restart ] || exit 1; touch "$STATE";;
+ 'daemon release') [ "$FAIL" != release ] || exit 1; echo '{ "ok": true }';;
+ *) exit 2;;
+esac
+`)
+			write(filepath.Join(bin, "curl"), `#!/bin/sh
+boot=2026-01-01T00:00:00Z; ready=true; sha=1111111111111111111111111111111111111111; version=2.0.0
+if [ -f "$STATE" ]; then boot=2026-01-02T00:00:00Z; fi
+[ "$FAIL" != boot ] || boot=2026-01-01T00:00:00Z
+[ "$FAIL" != ready ] || ready=false
+[ "$FAIL" != sha ] || sha=2222222222222222222222222222222222222222
+[ "$FAIL" != version ] || version=1.0.0
+printf '{ "git_sha": "%s", "booted_at": "%s", "ready": %s, "mix_vsn": "%s" }\n' "$sha" "$boot" "$ready" "$version"
+`)
+			fleet := filepath.Join(root, "remotes.json")
+			ui := "true"
+			if tc.shipped {
+				ui = "false"
+			}
+			write(fleet, `{"remotes":[{"name":"remote","ssh":"remote","checkout":"`+repo+`","build_ui":`+ui+`,"ssh_flags":["-o","ClearAllForwardings=yes"]},{"name":"scheduled","checkout":"`+repo+`","build_wrap":"srun --serial"}]}`)
+			log := filepath.Join(root, "calls")
+			state := filepath.Join(root, "restarted")
+			cmd := exec.Command(realBash, filepath.Join(repo, "bin", "shuttle-deploy"), "--no-push", "--ref", "v2.0.0", "--hosts", tc.host)
+			loop := "false"
+			if tc.loop {
+				loop = "true"
+			}
+			cmd.Env = append(os.Environ(), "HOME="+filepath.Join(root, "home"), "PATH="+bin+":"+os.Getenv("PATH"), "SOURCE="+repo, "LOG="+log, "STATE="+state, "FAIL="+tc.fail, "LOOP="+loop, "SHUTTLE_REMOTES_FILE="+fleet, "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0")
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != (tc.fail != "") {
+				t.Fatalf("exit=%v\n%s", err, out)
+			}
+			calls, _ := os.ReadFile(log)
+			text := string(calls)
+			restarts := strings.Count(text, "restart-service\n") + strings.Count(text, "restart-loop\n")
+			wantRestarts := 1
+			if tc.fail == "build" || tc.fail == "owner" {
+				wantRestarts = 0
+			}
+			if restarts != wantRestarts {
+				t.Fatalf("restarts=%d want %d\n%s\n%s", restarts, wantRestarts, text, out)
+			}
+			if !strings.Contains(string(out), "CI advisory: red") {
+				t.Fatalf("missing advisory: %s", out)
+			}
+			if tc.fail != "" && !strings.Contains(string(out), tc.host+":") {
+				t.Fatalf("failure doesn't name host: %s", out)
+			}
+			if tc.fail == "harness" && !strings.Contains(text, "shuttle daemon release") {
+				t.Fatalf("harness failure skipped release: %s", text)
+			}
+			if tc.shipped {
+				if !strings.Contains(text, "make build SKIP_UI=1") || !strings.Contains(text, "rsync -az --delete") || strings.Index(text, "rsync -az") > strings.Index(text, "make build") {
+					t.Fatalf("bad shipped UI ordering: %s", text)
+				}
+			}
+			if tc.host == "scheduled" && !strings.Contains(text, "scheduler\n") {
+				t.Fatalf("missing scheduler: %s", text)
+			}
+			if tc.host == "remote" && !strings.Contains(text, "ssh -o ClearAllForwardings=yes") {
+				t.Fatalf("missing SSH flags: %s", text)
 			}
 		})
-	}
-}
-
-func TestShuttleDeployReportsBootingAtReadyTimeout(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	harness := `TARGET_SHA=abc123
-DEPLOY_STARTED_AT=2026-01-01T00:00:00
-SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
-SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1
-version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'; }
-sleep() { :; }
-` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + `
-wait_for_sha ""
-`
-	cmd := exec.Command("bash", "-c", harness)
-	out, err := cmd.CombinedOutput()
-	if err == nil {
-		t.Fatalf("wait_for_sha unexpectedly accepted a booting daemon: %s", out)
-	}
-	if !strings.Contains(string(out), "still booting") || !strings.Contains(string(out), "ready:true") {
-		t.Fatalf("timeout did not explain readiness requirement: %s", out)
 	}
 }
 
@@ -467,702 +162,128 @@ func shellFunction(t *testing.T, script, name string) string {
 	t.Helper()
 	start := strings.Index(script, name+"() {")
 	if start < 0 {
-		t.Fatalf("function %s not found", name)
+		t.Fatalf("missing %s", name)
 	}
-	end := strings.Index(script[start:], "\n}\n\n")
+	end := strings.Index(script[start:], "\n}\n")
 	if end < 0 {
-		if strings.HasSuffix(script[start:], "\n}") {
-			end = len(script[start:]) - 2
-		} else {
-			t.Fatalf("function %s is unterminated", name)
-		}
+		t.Fatalf("unterminated %s", name)
 	}
-	return script[start:start+end+2] + "\n"
+	return script[start:start+end+3] + "\n"
 }
 
-func TestDeploySupervisorProbeRequiresReachableManagerAndVerifiedLoop(t *testing.T) {
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
-	home := t.TempDir()
-	unitDir := filepath.Join(home, ".config", "systemd", "user")
-	launchDir := filepath.Join(home, "Library", "LaunchAgents")
-	if err := os.MkdirAll(unitDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(launchDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	unit, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(unitDir, "shuttle-daemon.service"), unit, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	plist, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.plist.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	plist = []byte(strings.ReplaceAll(string(plist), "__LABEL__", defaultDaemonLabel))
-	if err := os.WriteFile(filepath.Join(launchDir, defaultDaemonLabel+".plist"), plist, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	bin := t.TempDir()
-	write := func(name, source string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+source), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("systemctl", "exit 1\n")
-	write("launchctl", "exit 1\n")
-	write("tmux", "[ \"$1\" = list-panes ] && { echo 12345; exit 0; }; exit 1\n")
-	localBin := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(localBin, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte("#!/bin/sh\n[ \"$SHUTTLE_TEST_LOOP\" = 1 ]\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	run := func(loop string) string {
-		t.Helper()
-		cmd := exec.Command("/bin/dash", "-c", probe+"supervisor_probe_cmd | /bin/dash")
-		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":/usr/bin:/bin", "SHUTTLE_TEST_LOOP="+loop)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("probe: %v: %s", err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	if got := run("0"); got != "0" {
-		t.Fatalf("unreachable manager or unverified pane probe=%q", got)
-	}
-	if got := run("1"); got != "tmux" {
-		t.Fatalf("verified tmux loop should take precedence: %q", got)
-	}
-	write("systemctl", "case \"$*\" in *is-active*) exit 3;; *) exit 0;; esac\n")
-	write("launchctl", "echo 'pid = 0'\nexit 0\n")
-	if got := run("0"); got != "0" {
-		t.Fatalf("inactive matching systemd/launchd definitions counted as owner: %q", got)
-	}
-	write("launchctl", "echo 'pid = 12345'\nexit 0\n")
-	if got := run("0"); got != "1" {
-		t.Fatalf("loaded launchd job not recognized: %q", got)
-	}
-	write("launchctl", "exit 1\n")
-	write("systemctl", "case \"$*\" in *is-active*) exit 0;; *) exit 0;; esac\n")
-	if got := run("1"); got != "tmux" {
-		t.Fatalf("live tmux lost to enabled reachable systemd: %q", got)
-	}
-	if got := run("0"); got != "1" {
-		t.Fatalf("reachable systemd service probe=%q", got)
-	}
-}
-
-func TestDeployRevisionCheckoutPreservesSourceBranchAndEdits(t *testing.T) {
+func TestDeployCacheSeedReinstallsChangedLockfile(t *testing.T) {
 	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	source := filepath.Join(root, "source with 'quote")
-	origin := filepath.Join(root, "origin")
-	git := func(dir string, args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	for _, dir := range []string{source, origin} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	git(origin, "init", "--bare")
-	git(source, "init")
-	tracked := filepath.Join(source, "tracked")
-	if err := os.WriteFile(tracked, []byte("release\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(source, "add", "tracked")
-	git(source, "commit", "-m", "release")
-	commit := git(source, "rev-parse", "HEAD")
-	git(source, "tag", "v2.0.0-rc.1")
-	git(source, "remote", "add", "origin", origin)
-	git(source, "push", "origin", "HEAD", "--tags")
-	git(source, "switch", "-c", "active-work")
-	if err := os.WriteFile(tracked, []byte("my edits\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + "\nrevision_checkout_cmd \"$SOURCE\" | bash -eu\n"
-	run := func() ([]byte, error) {
-		cmd := exec.Command("bash", "-c", harness)
-		cmd.Env = append(os.Environ(), "SOURCE="+source, "TARGET_COMMIT="+commit)
-		return cmd.CombinedOutput()
-	}
-	if out, err := run(); err != nil {
-		t.Fatalf("first preparation: %v\n%s", err, out)
-	}
-	canonicalSource, err := filepath.EvalSymlinks(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	worktree := canonicalSource + ".deploy/" + commit
-	git(source, "config", "--local", "core.excludesfile", filepath.Join(source, ".git", "info", "exclude"))
-	if err := os.WriteFile(filepath.Join(source, ".git", "info", "exclude"), []byte("ignored-build-output\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(worktree, "ignored-build-output"), []byte("stale"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run(); err != nil {
-		t.Fatalf("repeat preparation: %v\n%s", err, out)
-	}
-	if got, err := os.ReadFile(filepath.Join(worktree, "ignored-build-output")); err != nil || string(got) != "stale" {
-		t.Fatalf("existing build cache was discarded: %q, %v", got, err)
-	}
-	if got := git(source, "branch", "--show-current"); got != "active-work" {
-		t.Fatalf("source branch changed to %q", got)
-	}
-	if got, _ := os.ReadFile(tracked); string(got) != "my edits\n" {
-		t.Fatalf("source edits lost: %q", got)
-	}
-	if got, _ := os.ReadFile(filepath.Join(worktree, "tracked")); string(got) != "release\n" {
-		t.Fatalf("worktree did not contain release: %q", got)
-	}
-}
-
-func TestDeployBuildCommandStampsBothCLIs(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	output := t.TempDir()
-	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + `
-make() {
-  [ "$*" = 'build SKIP_UI=1' ] || return 3
-  [ "$SHUTTLE_VERSION" = 2.0.0-rc.1 ] || return 4
-  go build -o "$OUTPUT/felt" ./cmd/felt && go build -o "$OUTPUT/shuttle" ./cmd/shuttle
-}
-
-eval "$(build_checkout_cmd "$SOURCE" 1)"
-`
-	cmd := exec.Command("bash", "-c", harness)
-	cmd.Env = append(os.Environ(), "SOURCE="+repo, "OUTPUT="+output, "DEPLOY_VERSION=2.0.0-rc.1", "TARGET_COMMIT=abc1234")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build command: %v\n%s", err, out)
-	}
-	for _, name := range []string{"felt", "shuttle"} {
-		out, err := exec.Command(filepath.Join(output, name), "--version").CombinedOutput()
-		if err != nil || !strings.Contains(string(out), "2.0.0-rc.1") {
-			t.Errorf("%s release version: %v\n%s", name, err, out)
-		}
-	}
-}
-
-func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
-	t.Parallel()
-	old := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "old"))
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "revision"))
-	template, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := supervisorOptions{
-		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
-		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
-		SSHSocket: "/tmp/agent.sock", TmuxTmpdir: "/tmp/tmux operator",
-		CodexSocket: "/tmp/codex.sock", CodexHome: "/tmp/codex home",
-	}
-	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(template), options, old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(rendered)})
-	if len(calls) != 1 {
-		t.Fatalf("current supervisor was not retargeted: %v", calls)
-	}
-	for name, want := range map[string]string{
-		"--stores": options.Stores, "--path": options.Path, "--log": options.Log,
-		"--ssh-auth-sock": options.SSHSocket, "--tmux-tmpdir": options.TmuxTmpdir,
-		"--codex-socket": options.CodexSocket,
-	} {
-		if got := installFlag(t, calls[0], name); got != want {
-			t.Errorf("%s = %q, want %q", name, got, want)
-		}
-	}
-	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
-		t.Fatalf("supervisor environment not retained: %v", calls[0])
-	}
-}
-
-func TestDeployRootUsesMainWorktreeFromLinkedCheckout(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	main := filepath.Join(root, "main checkout")
-	linked := filepath.Join(root, "linked checkout")
-	if err := os.MkdirAll(main, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git := func(dir string, args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git(main, "init")
-	if err := os.WriteFile(filepath.Join(main, "tracked"), []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git(main, "add", "tracked")
-	git(main, "commit", "-m", "initial")
-	git(main, "worktree", "add", "-b", "linked-lane", linked)
-	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + `deploy_root_cmd "$LINKED" | bash`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "LINKED="+linked)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("deploy root: %v\n%s", err, out)
-	}
-	want, err := filepath.EvalSymlinks(main)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want += ".deploy"
-	if got := strings.TrimSpace(string(out)); got != want {
-		t.Fatalf("deploy root = %q; want %q", got, want)
-	}
-}
-
-func TestDeployCacheSeedUsesPreviousLiveTreeAndCopies(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	previous := "1111111111111111111111111111111111111111"
-	source, target := filepath.Join(root, previous), filepath.Join(root, "target")
-	for relative, value := range map[string]string{
-		"daemon/deps/pkg/file": "known good", "daemon/_build/prod/file": "beam",
-		"ui/node_modules/.npm-ci-stamp": "stamp", "ui/package-lock.json": "same lock",
-	} {
-		path := filepath.Join(source, relative)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	decoy := filepath.Join(root, "9999999999999999999999999999999999999999", "daemon/deps/pkg/file")
-	if err := os.MkdirAll(filepath.Dir(decoy), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(decoy, []byte("mtime decoy"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, dir := range []string{filepath.Join(target, "daemon"), filepath.Join(target, "ui")} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(target, "ui/package-lock.json"), []byte("same lock"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	command := `target=$TARGET; export target
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("cache seed: %v\n%s", err, out)
-	}
-	for relative, want := range map[string]string{
-		"daemon/deps/pkg/file": "known good", "daemon/_build/prod/file": "beam", "ui/node_modules/.npm-ci-stamp": "stamp",
-	} {
-		for _, dir := range []string{source, target} {
-			got, err := os.ReadFile(filepath.Join(dir, relative))
-			if err != nil || string(got) != want {
-				t.Errorf("%s = %q, %v; want %q", filepath.Join(dir, relative), got, err, want)
+	for _, changed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "same lock", true: "changed lock"}[changed], func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			previous := filepath.Join(root, "previous")
+			gitTest := func(dir string, args ...string) string {
+				t.Helper()
+				out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+				if err != nil {
+					t.Fatalf("git %v: %v %s", args, err, out)
+				}
+				return strings.TrimSpace(string(out))
 			}
-		}
-	}
-	if err := os.WriteFile(filepath.Join(target, "daemon/deps/pkg/file"), []byte("edited target"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := os.ReadFile(filepath.Join(source, "daemon/deps/pkg/file")); err != nil || string(got) != "known good" {
-		t.Fatalf("seed changed source: %q, %v", got, err)
-	}
-}
-
-func TestDeployCacheSeedSkipsSymlinkedRoots(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	previous := "1111111111111111111111111111111111111111"
-	source, target, external := filepath.Join(root, previous), filepath.Join(root, "target"), filepath.Join(root, "external")
-	if err := os.MkdirAll(filepath.Join(source, "daemon"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(external, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(external, "payload"), []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(external, filepath.Join(source, "daemon/deps")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	command := `target=$TARGET; export target
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target)
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "symlinked cache root") {
-		t.Fatalf("symlinked cache not skipped: %v\n%s", err, out)
-	}
-	if _, err := os.Lstat(filepath.Join(target, "daemon/deps")); !os.IsNotExist(err) {
-		t.Fatalf("target received cache symlink: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(external, "payload")); err != nil || string(got) != "keep" {
-		t.Fatalf("external cache changed: %q, %v", got, err)
-	}
-}
-
-func TestDeployCacheSeedFailureFallsBackUnderErrexit(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	previous := "1111111111111111111111111111111111111111"
-	source, target := filepath.Join(root, previous, "daemon/deps"), filepath.Join(root, "target")
-	if err := os.MkdirAll(source, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "payload"), []byte("cache"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(target, "daemon"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fakeBin := filepath.Join(root, "bin")
-	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(fakeBin, "cp"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	command := `target=$TARGET; export target
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + `seed_deploy_cache_cmd "$ROOT/1111111111111111111111111111111111111111" | bash -eu; echo cold-build-continues`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "ROOT="+root, "TARGET="+target, "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "cache seeding failed; building cold") || !strings.Contains(string(out), "cold-build-continues") {
-		t.Fatalf("seed failure aborted preparation: %v\n%s", err, out)
-	}
-	if _, err := os.Stat(filepath.Join(target, "daemon/deps")); !os.IsNotExist(err) {
-		t.Fatalf("partial cache survived failure: %v", err)
-	}
-}
-
-func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	base := t.TempDir()
-	repo := filepath.Join(base, "repo with spaces")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	repo, err = filepath.EvalSymlinks(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
-		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("init")
-	if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte("0"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	git("add", "tracked")
-	git("commit", "-m", "zero")
-	commits := []string{git("rev-parse", "HEAD")}
-	for i := 1; i < 5; i++ {
-		if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte(strconv.Itoa(i)), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		git("commit", "-am", strconv.Itoa(i))
-		commits = append(commits, git("rev-parse", "HEAD"))
-	}
-	deployRoot := repo + ".deploy"
-	paths := make([]string, len(commits))
-	if err := os.WriteFile(filepath.Join(repo, ".git/info/exclude"), []byte("build-output\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for i, sha := range commits {
-		paths[i] = filepath.Join(deployRoot, sha)
-		git("worktree", "add", "--detach", paths[i], sha)
-		if err := os.WriteFile(filepath.Join(paths[i], "build-output"), []byte("generated"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(paths[1], "untracked"), []byte("dirty"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	fakeBin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$PREVIOUS" | bash -eu`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "REPO="+repo, "PREVIOUS="+paths[3], "TARGET_COMMIT="+commits[4], "PI_TREE="+paths[2], "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("prune: %v\n%s", err, out)
-	}
-	for _, path := range paths[2:] {
-		if _, err := os.Stat(path); err != nil {
-			t.Errorf("retained worktree %s missing: %v", path, err)
-		}
-	}
-	for _, path := range paths[:2] {
-		if _, err := os.Stat(path); !os.IsNotExist(err) {
-			t.Errorf("obsolete worktree remains: %s (%v)", path, err)
-		}
-		if strings.Contains(git("worktree", "list", "--porcelain"), path) {
-			t.Errorf("removed worktree still registered: %s", path)
-		}
-	}
-}
-
-func TestDeployFinishDoesNotPruneOnHarnessOrReleaseFailure(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name                     string
-		harnessFailed, releaseOK bool
-	}{
-		{name: "harness failure", harnessFailed: true, releaseOK: true},
-		{name: "release failure", harnessFailed: false, releaseOK: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			marker := filepath.Join(t.TempDir(), "prune")
-			harness := `release_quarantine() { [ "$RELEASE_OK" = 1 ]; }
-run_on_visible() { printf '%s\\n' "$2" >> "$MARKER"; }
-ok() { :; }
-bad() { :; }
-prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo "$HARNESS_FAILED"
-`
-			cmd := exec.Command("bash", "-c", harness)
-			release := "0"
-			if tc.releaseOK {
-				release = "1"
+			for _, dir := range []string{filepath.Join(source, "ui"), filepath.Join(previous, "ui", "node_modules"), filepath.Join(previous, "daemon", "_build")} {
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
 			}
-			failed := "0"
-			if tc.harnessFailed {
-				failed = "1"
+			write := func(path, body string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
-			cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "RELEASE_OK="+release, "HARNESS_FAILED="+failed, "MARKER="+marker)
-			if out, err := cmd.CombinedOutput(); err == nil {
-				t.Fatalf("failed deployment accepted: %s", out)
+			write(filepath.Join(previous, "ui", "package-lock.json"), "old")
+			lock := "old"
+			if changed {
+				lock = "new"
 			}
-			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatalf("failure pruned a worktree: %v", err)
+			write(filepath.Join(source, "ui", "package-lock.json"), lock)
+			write(filepath.Join(previous, "ui", "node_modules", ".npm-ci-stamp"), "")
+			beam := filepath.Join(previous, "daemon", "_build", "cache")
+			write(beam, "cache")
+			old := time.Unix(100000, 0)
+			if err := os.Chtimes(beam, old, old); err != nil {
+				t.Fatal(err)
 			}
-		})
-	}
-}
-
-func TestDeployPrunesAfterRelease(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	events := filepath.Join(t.TempDir(), "events")
-	harness := `release_quarantine() { printf 'release\n' >> "$EVENTS"; }
-run_on_visible() { printf '%s\n' "$2" >> "$EVENTS"; }
-ok() { :; }
-bad() { :; }
-prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo 0`
-	cmd := exec.Command("bash", "-c", harness)
-	cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "EVENTS="+events)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("successful finish: %v\\n%s", err, out)
-	}
-	got, err := os.ReadFile(events)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != "release\nprune\n" {
-		t.Fatalf("success events = %q, want release then prune", got)
-	}
-}
-
-func TestDeployRemotePullsWithBuiltOrShippedUI(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, variant := range []struct{ ui, wrap string }{{"0", ""}, {"1", ""}, {"0", "wrapper"}, {"1", "wrapper"}} {
-		buildUI, wrap := variant.ui, variant.wrap
-		t.Run("build_ui="+buildUI+"/wrap="+wrap, func(t *testing.T) {
-			dir := t.TempDir()
-			events := filepath.Join(dir, "events")
-			harness := `fleet_dir() { printf '%s' "$CHECKOUT"; }
-fleet_ssh() { printf remote; }
-fleet_flags() { :; }
-fleet_build_wrap() { printf '%s' "$BUILD_WRAP"; }
-wrapper() { printf 'wrap\n' >> "$EVENTS"; "$@"; }
-export -f wrapper
-builds_ui() { [ "$BUILD_UI" = 1 ]; }
-say() { :; }
-ok() { :; }
-bad() { echo "$1" >&2; }
-ship_ui() { printf 'ship\n' >> "$EVENTS"; }
-git() { printf 'git %s\n' "$*" >> "$EVENTS"; }
-make() { printf 'make %s\n' "$*" >> "$EVENTS"; }
-export -f git make
-ssh() { [ "$2" = true ] || bash -c "$2"; }
-run_on() { printf 1; }
-run_on_visible() { :; }
-config_migration_cmd() { :; }
-refresh_harnesses() { :; }
-check_listen() { :; }
-supervisor_probe_cmd() { :; }
-daemon_kill() { :; }
-respawn_launcher_restart_cmd() { :; }
-verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "remote_host_cycle") + shellFunction(t, string(script), "deploy_remote") + `deploy_remote remote`
-			cmd := exec.Command("bash", "-c", harness)
-			cmd.Env = append(os.Environ(), "CHECKOUT="+dir, "EVENTS="+events, "BUILD_UI="+buildUI, "BUILD_WRAP="+wrap, "DEPLOY_REF=", "DEPLOY_VERSION=", "AGENTS_FILE="+filepath.Join(dir, "absent"))
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("remote deploy: %v\n%s", err, out)
-			}
-			got, err := os.ReadFile(events)
+			gitTest(source, "init", "-b", "main")
+			gitTest(source, "config", "user.email", "test@example.invalid")
+			gitTest(source, "config", "user.name", "Test")
+			gitTest(source, "add", ".")
+			gitTest(source, "commit", "-m", "source")
+			gitTest(source, "remote", "add", "origin", source)
+			sha := gitTest(source, "rev-parse", "HEAD")
+			script, err := os.ReadFile("../../bin/shuttle-deploy")
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "git pull --ff-only -q\nmake build\nverified\n"
-			if buildUI == "0" {
-				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nverified\n"
+			harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "prepare_tree") + "\nprepare_tree \"$SOURCE\" \"$PREVIOUS\" | bash\n"
+			cmd := exec.Command("bash", "-c", harness)
+			cmd.Env = append(os.Environ(), "SOURCE="+source, "PREVIOUS="+previous, "TARGET_COMMIT="+sha)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("seed: %v %s", err, out)
 			}
-			if wrap != "" {
-				want = strings.Replace(want, "make build", "wrap\nmake build", 1)
+			tree := source + ".deploy/" + sha
+			_, err = os.Stat(filepath.Join(tree, "ui", "node_modules", ".npm-ci-stamp"))
+			if (err == nil) == changed {
+				t.Fatalf("changed=%v stamp error=%v", changed, err)
 			}
-			if string(got) != want {
-				t.Fatalf("remote events = %q; want %q", got, want)
+			info, err := os.Stat(filepath.Join(tree, "daemon", "_build", "cache"))
+			if err != nil || !info.ModTime().Equal(old) {
+				t.Fatalf("cache mtime not preserved: %v %v", info, err)
 			}
 		})
 	}
 }
 
-func TestDeployPreviousTreeUsesLiveVersion(t *testing.T) {
+func TestDeployPruneKeepsCurrentPreviousNewestAndPi(t *testing.T) {
 	t.Parallel()
+	root := t.TempDir()
+	bin := t.TempDir()
+	names := []string{"discard", "pi-root", "previous", "current", "new-one", "new-two"}
+	for i, name := range names {
+		p := filepath.Join(root, name)
+		if err := os.Mkdir(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+		stamp := time.Unix(int64(i+1)*1000, 0)
+		if err := os.Chtimes(p, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("pi", "[ \"$FAIL_PI\" != 1 ] || exit 1\nprintf '  local\\n    %s/pi-root\\n' \"$ROOT\"\n")
+	write("git", "printf '%s\\n' \"$*\" >> \"$LOG\"\n")
 	script, err := os.ReadFile("../../bin/shuttle-deploy")
 	if err != nil {
 		t.Fatal(err)
 	}
-	harness := `version_json() { printf '{"git_short_sha":"abc1234"}'; }
-deploy_root_cmd() { printf 'printf /repo.deploy'; }
-run_on() { bash -c "$2"; }
-git() { [ "$*" = '-C /repo rev-parse --verify abc1234^{commit}' ] || exit 2; printf abc123456789; }
-export -f git
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "previous_deploy") + `previous_deploy remote /repo`
-	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
-	if err != nil || strings.TrimSpace(string(out)) != "/repo.deploy/abc123456789" {
-		t.Fatalf("previous live tree = %q, %v", out, err)
-	}
-}
-
-func TestDeployFailedVersionDoesNotPrune(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	harness := `wait_for_sha() { return 1; }
-finish_verified_deploy() { echo should-not-finish; }
-` + shellFunction(t, string(script), "verify_and_finish") + `verify_and_finish remote /repo 0 /previous`
-	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
-	if err == nil || len(out) != 0 {
-		t.Fatalf("failed version check reached cleanup: %q, %v", out, err)
-	}
-}
-
-func TestDeployVisibleRunnerPreservesStderr(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("bash", "-c", shellFunction(t, string(script), "run_on_visible")+`run_on_visible '' 'echo operator-diagnostic >&2'`)
-	out, err := cmd.CombinedOutput()
-	if err != nil || !strings.Contains(string(out), "operator-diagnostic") {
-		t.Fatalf("stderr was hidden: %v\n%s", err, out)
-	}
-}
-
-func TestDeployRefRejectsWrongDaemonVersion(t *testing.T) {
-	t.Parallel()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	harness := `TARGET_SHA=abc123
-DEPLOY_VERSION=2.0.0-rc.1
-DEPLOY_STARTED_AT=2026-01-01T00:00:00
-SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
-version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"mix_vsn":"0.1.0"}'; }
-` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + "\nwait_for_sha ''\n"
-	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
-	if err == nil || !strings.Contains(string(out), "expected 2.0.0-rc.1") {
-		t.Fatalf("wrong daemon version accepted: %v\n%s", err, out)
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "prune_cmd") + "\nprune_cmd \"$ROOT/current\" \"$ROOT/previous\" | bash\n"
+	for _, fail := range []string{"0", "1"} {
+		log := filepath.Join(root, "prune-"+fail)
+		cmd := exec.Command("bash", "-c", harness)
+		cmd.Env = append(os.Environ(), "ROOT="+root, "LOG="+log, "FAIL_PI="+fail, "PATH="+bin+":"+os.Getenv("PATH"))
+		out, err := cmd.CombinedOutput()
+		if (err != nil) != (fail == "1") {
+			t.Fatalf("prune exit: %v %s", err, out)
+		}
+		calls, _ := os.ReadFile(log)
+		if fail == "1" {
+			if len(calls) > 0 {
+				t.Fatalf("pruned despite unknown Pi roots: %s", calls)
+			}
+		} else if strings.Count(string(calls), "worktree remove") != 1 || !strings.Contains(string(calls), filepath.Join(root, "discard")) {
+			t.Fatalf("unexpected removal: %s", calls)
+		}
 	}
 }

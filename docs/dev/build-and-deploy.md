@@ -130,148 +130,63 @@ A red result checked more than a day ago shows its age; cached green, missing, o
 The hook does no network work synchronously and requires Node; its outer harness deadline is two seconds.
 CI does not gate deployment or require waiting after a push; run targeted local tests before pushing and the full suite for broad changes.
 
-To deploy a release candidate across the configured fleet, pin its tag:
+Deploy the current commit or pin an explicit revision:
 
 ```sh
+bin/shuttle-deploy --hosts local,hub-a
 bin/shuttle-deploy --ref v2.0.0-rc.1 --no-push
 ```
 
-The helper resolves the tag to one commit and builds it in a detached Git worktree under `<main-worktree>.deploy/<commit>`.
-Git's common directory selects the main worktree, so linked checkouts share one deploy root.
-The regular checkout's branch and local edits stay in place; every deploy runs the build.
+The helper resolves one commit, pushes it unless `--no-push` is set, and runs the same ritual on each selected host:
 
-Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
-After the new daemon verifies a fresh ready boot, harness setup succeeds, and quarantine release succeeds, it removes other worktrees under the deploy root with `git worktree remove --force`, then runs `git worktree prune`.
-It keeps the new tree, the previous live tree, and any tree referenced by `pi list`.
-Generated files and local edits do not prevent removal of other trees.
+1. Fetch the commit into a clean, detached worktree at `<main-worktree>.deploy/<commit>`.
+2. Run `make build` in the host's login shell.
+3. Run `felt setup refresh --source <worktree>` for harnesses already carrying felt.
+4. Restart once through the existing owner.
+   A live tmux respawn loop is replaced through `shuttle-launch --tmux`.
+   An installed service is retargeted through `shuttle daemon install --preserve`, whose controlled refresh is the restart.
+5. Poll `/api/v1/version` until the full commit matches, `booted_at` advances beyond the observed pre-deploy boot, and `ready` is true.
+   Version tags must also match `mix_vsn`.
+6. Run `shuttle daemon release` and prune old deploy worktrees.
 
-A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
-These are Mix dependencies and compiled artifacts, plus npm dependencies and the `.npm-ci-stamp` that lets `make ui` skip `npm ci`.
-Symlinked cache roots disable seeding.
-Otherwise the helper stages no-dereference copies (APFS clones with `cp -c` on macOS, reflinks where supported on Linux) and publishes them only after successful copying; any seeding failure is reported and the build proceeds cold.
-Version tags stamp both CLIs and the daemon with the release version.
-If Pi loads a Felt package from another revision, the helper reports the mismatch without replacing that package choice.
-Use Pi's native package commands to select the deployed source directory, then rerun the host's deployment check.
-Use `--hosts local,hub-a` to deploy a subset.
+A worktree protects a running BEAM's release files on network filesystems and leaves the source checkout's branch and edits alone.
+New worktrees copy disposable Mix and npm caches from the previous revision when available; failed copies fall back to a cold build.
+Pruning retains the current and previous revisions, the two newest worktrees, and worktrees named by `pi list`.
+Other deploy worktrees, including their generated files, are removed.
+A failed Pi listing prevents pruning.
 
-Push the verified revision, then deploy it on each host:
+The host must already have a working daemon and an installed service or live respawn loop.
+Deployment does not migrate configuration, copy agent registries, or choose a new supervisor.
+`shuttle daemon install --preserve` reads the installed service's settings and keeps its stores, registry, endpoint, log, PATH, SSH agent, tmux directory and Codex settings while changing the release.
+Explicit install flags override saved settings.
+A missing or unreadable service definition fails instead of inventing a replacement.
+Use the [installer](../shuttle/installation.md) for initial setup and configuration changes.
 
-1. Pull the checkout and run `make build` in the host's login shell.
-2. Re-render an installed daemon supervisor that an older template wrote — a
-   pre-split one (it bakes `FELT_STORES`), one that predates `TMUX_TMPDIR`
-   (the word appears nowhere in it), or one without an open-file limit
-   (no `NumberOfFiles` or `LimitNOFILE`) — through `shuttle daemon install`, keeping
-   its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
-   `TMUX_TMPDIR` from the login shell.
-3. Run `felt setup <harness>` for each harness that carries felt's plugin, so
-   its hooks and skills match the felt just built, and check that `felt setup
-   receipt` passes (see [harness plugins](#harness-plugins)).
-4. Cycle the daemon through its supervisor or respawn loop.
-   A verified live tmux loop takes precedence over service files.
-   The helper carries that choice into the restart, disabling a reachable competing systemd unit or unloading a loaded launchd agent before recreating the loop.
-5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
-   and `ready` is `true` (up to 15 minutes by default; set
-   `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
-6. Check the changed behavior through the live API or board.
-7. Run `shuttle daemon release` to release the boot quarantine.
+Every failure names its host and step and contributes to a nonzero final exit status; other selected hosts still run.
+A harness-refresh failure is reported after the daemon has been deployed and released, so it does not leave a host serving the old build.
+Release success uses the CLI's HTTP status handling and exit code.
+The ready timeout defaults to 15 minutes; set `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` and `SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS` to override it.
+Python 3 is required on the deploy host to parse API responses; remote probes use the host's Shuttle endpoint resolution, including Unix sockets.
 
-Refreshing an answering daemon is allowed only when the target service manager reports the PID that holds its listener.
-The check needs `lsof`; an unreachable manager, missing inspection tool, stale unit file, or different owner refuses the refresh without stopping the listener.
-Installation resolves the service's endpoint from the manager's environment, the host configuration, and the rendered port, not a caller-only `SHUTTLE_LISTEN` override.
-Systemd drop-ins are refused because they can change that environment; move their settings into supported install options or `host.json` before refreshing.
-A live tmux loop must be stopped before installing a service instead.
-Refresh writes the stop marker in the service's resolved data directory and cycles only the target manager's service, never every process using the same release.
-
-`shuttle daemon start` and `install` share an atomic endpoint claim that covers the pre-listen window.
-The claim follows the foreground process across `exec` until it dies; installation hands its claim only to the target manager's verified new main process.
-The installer waits up to 30 seconds for that handoff, even if the manager's restart command returns first.
-On timeout it stops the pending service before releasing its reservation; an unconfirmed stop is reported as unresolved ownership.
-This prevents concurrent cooperating starts and start/install races from launching competing daemon processes.
-It does not serialize creation of external supervisor definitions or protect direct execution of the release launcher.
-Two supervisors created concurrently can still exist, but their CLI starts cannot own the same endpoint concurrently; remove the unwanted supervisor rather than leaving it to retry.
-
-The helper builds both CLIs, the daemon, and — on every host that is not marked
-`"build_ui": false` — the UI, on that host.
+Configured SSH flags apply to probes, builds and file transfers.
+Interactive-auth hosts can opt into `--handshake` when a human is present to approve the authentication prompt.
+A red CI result remains advisory.
 An autonomous worker should deploy a built, tested, independently reviewed change.
-Restarting briefly interrupts the API and board; existing tmux workers keep running.
-Every deploy quarantines fresh launches until `shuttle daemon release`:
-previously-running workers restore without that gate.
-the cycle touches `$SHUTTLE_DATA_DIR/heartbeat.stopped` on the target host and
-then stops the daemon with SIGTERM (whose shutdown touches the marker again), so
-the rebuilt daemon sees a graceful stop and holds. Only on a host that opts in
-(host.json `"quarantine_auto_release": true`) does a daemon killed hard, and back
-within the heartbeat window, with no churn and its previous
-incarnation already released, release itself. Restarting the tmux respawn loop
-with `bin/shuttle-launch` touches the same marker before it kills the old
-session (see
-[the boot quarantine](../shuttle/lifecycle.md#boot-quarantine)).
-
-Confirm `git_short_sha` flipped and `/api/v1/version` reports `ready: true`; if
-not, the old process may still be bound or the new daemon is still initializing.
-The listener binds before store resolution, orphan adoption, event-stream
-seeding, and Tailnet bridge reconciliation finish. While that synchronous boot
-work runs, `/api/v1/version` answers with `ready: false`; state-dependent routes
-return a fast 503. The respawn loop treats the bound listener as alive, polls
-booting daemons every five seconds, and falls through to `start --force` if the
-listener stops answering.
-
-For a manual remote build:
-
-```bash
-ssh <host> "bash -lc 'cd <checkout> && git pull --ff-only && make build'"
-```
+Restarting briefly interrupts the API and board; existing workers retain their conversations.
+The restart writes the stop marker and holds fresh launches until the verified deployment releases quarantine.
 
 ### Harness plugins
 
-`make build` installs a new `felt`, but each harness keeps running the plugin
-generation it was last set up with, and `felt setup receipt` fails once the
-two disagree. The helper therefore runs `felt setup` on every host, in its
-login shell, after the build.
+`felt setup refresh --source <checkout>` owns discovery and refresh of installed integrations.
+It refreshes enabled Claude Code and Codex plugins from that checkout, and leaves harnesses without felt alone.
+An unknown plugin inspection fails with its repair instruction.
+A healthy generation sealed at the clean checkout's commit can be reused.
+After a refresh, the runtime receipt must pass.
 
-A harness counts as installed where felt's plugin is enabled in it: Claude Code
-and Codex as the enabled bundles in `felt setup receipt --json`, and pi as a
-felt package in `pi list`, either `git:github.com/cailmdaley/felt` or a local
-directory whose committed `package.json` (its working copy, outside git) names
-felt. A harness binary on `PATH` without
-felt's plugin is left alone, so the deploy never installs a plugin the operator
-did not install or has removed. A host with no such harness reports
-`harness plugins: none carry felt`.
-
-Each receipt bundle's `inspection` says how its enablement was established:
-`confirmed` by the harness's own plugin list, `configured` by its config and
-cache alone, or `unknown` when the list failed or the config could not be read.
-The helper sets up confirmed and configured bundles. An unknown bundle fails the
-host with the receipt's repair and no setup runs. So does a receipt that is
-missing or incomplete (its bundles list unclosed, or no closing brace on the
-top-level object), rather than reading a partial answer as "no harness".
-
-Claude Code and Codex are set up with `--source <checkout>`, so the sealed
-generation holds the tree the felt binary was built from, and setup needs no
-network. They are skipped when the receipt already passes and its active
-generation was sealed at the checkout's `HEAD` by a clean build. A dirty
-checkout builds felt as `dev (<sha>-dirty)`, which does not identify a single
-tree, so a dirty host is set up again on every deploy. pi has no `--source`
-flag and no generation. For pi's GitHub package, a regular deploy runs
-`felt setup pi` only when pi's clone is not at the checkout's `HEAD`. An exact-ref
-deploy fetches and detaches a clean clone at the deployed commit when it differs;
-tracked edits or a commit that cannot be fetched fail the host. A local felt
-package is never re-pointed: it is current when
-it is the deployed checkout or sits at its `HEAD`, and otherwise the host fails
-with the package's path and commit. Any pi package other than the deployed
-checkout must also have no tracked edits or deletions (`git status
---porcelain --untracked-files=no`); a package with them fails the host with the
-edited paths, and so does one git cannot inspect. Untracked files are ignored, since pi's npm install leaves a
-`package-lock.json` in its clone.
-
-If setup fails, the host's line carries its output. If `felt setup receipt`
-still fails afterwards, the line names each component that is not healthy
-(`felt`, a harness plugin, `hooks`, `generation`) with that component's own
-repair, for example a stale `felt` shadowing the new one on `PATH`, or `hooks
-mismatch: open a Codex session and approve felt's hooks`. It falls back to the
-receipt's top-level repair when no component reports one. The host counts as failed
-only after its daemon cycle and quarantine release have run, so a harness
-problem never leaves the daemon on the old build. A pi clone that cannot fetch
-the deployed commit fails the host.
+Pi keeps its installed package source.
+A clean GitHub package is pinned to the checkout's commit; a different local package must already match it and have no tracked edits.
+The deployed checkout itself can be used as Pi's local package.
+A package that cannot be inspected fails with its path and repair rather than being replaced.
 
 ### The bundle on a host that does not build it
 
@@ -289,11 +204,11 @@ A remote can also set `"build_wrap": "srun -p serial --cpus-per-task=8 --mem=16G
 to run its build through a scheduler. The optional string is a trusted shell
 command prefix: deployment runs `<build_wrap> bash -lc '<build>'` inside the
 SSH login shell. Only the build (including its checkout directory and version
-environment) is wrapped, for both checkout and `--ref` deployments. Git pull,
+environment) is wrapped, for every deployment. Fetch,
 worktree preparation, harness refresh, and daemon cycling stay outside the
 wrapper. This composes with `build_ui: false` and `SKIP_UI=1`.
 
-`bin/shuttle-deploy --list` shows the choice per host (`build` or `shipped`).
+`bin/shuttle-deploy --list` shows configured deploy targets.
 For a `shipped` host the helper rsyncs the deploy host's own freshly-built
 `ui/dist` into that checkout and then builds it with `make build SKIP_UI=1`. The
 key is absent on every host that builds its own, and only `bin/shuttle-deploy`

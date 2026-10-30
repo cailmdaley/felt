@@ -290,3 +290,86 @@ func TestDeploySelectedTmuxDisablesCompetingSystemd(t *testing.T) {
 		})
 	}
 }
+
+// runLauncherRestart exercises the launcher itself against isolated service managers.
+func runLauncherRestart(t *testing.T, supervisor string, selectedOwner ...string) (home string, freshLauncher []byte, tmuxCalls string, supervisorCalls string) {
+	t.Helper()
+	root := t.TempDir()
+	checkout := filepath.Join(root, "checkout")
+	dataDir := filepath.Join(root, "data")
+	home = filepath.Join(root, "home")
+	fakeBin := filepath.Join(root, "fakebin")
+	for _, dir := range []string{filepath.Join(checkout, "bin", "rel", "bin"), filepath.Join(checkout, "bin"), dataDir, filepath.Join(home, ".local", "bin"), fakeBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "bin", "rel", "bin", "shuttled"), []byte("release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	freshLauncher, err := os.ReadFile("../../bin/shuttle-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "bin", "shuttle-launch"), freshLauncher, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".local", "bin", "shuttle"), []byte("#!/bin/sh\ncase \"$*\" in 'daemon loop-present') [ \"$SHUTTLE_TEST_OWNER\" != \"\" ]; exit $?;; 'host --json') printf '{\"data_dir\":\"%s\"}\\n' \"$SHUTTLE_TEST_DATA_DIR\";; *) exit 1;; esac\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	calls := filepath.Join(root, "tmux-calls")
+	marker := filepath.Join(dataDir, "heartbeat.stopped")
+	tmux := "#!/bin/sh\ncase \"$*\" in *kill-session*) [ -f \"$SHUTTLE_TEST_MARKER\" ] && echo marker-before-kill >> \"$SHUTTLE_TEST_CALLS\" ;; esac\nprintf '%s\\n' \"$*\" >> \"$SHUTTLE_TEST_CALLS\"\n"
+	if err := os.WriteFile(filepath.Join(fakeBin, "tmux"), []byte(tmux), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	supervisorLog := filepath.Join(root, "supervisor-calls")
+	fakes := map[string]string{
+		"systemctl": "#!/bin/sh\ncase \"$*\" in *show-environment*|*is-enabled*|*is-active*) [ \"$SHUTTLE_TEST_SUPERVISOR\" = systemd ]; exit $? ;; esac\nprintf 'systemctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\ncase \"$*\" in *disable*) echo disabled-before-loop >> \"$SHUTTLE_TEST_CALLS\";; esac\n",
+		"launchctl": "#!/bin/sh\ncase \"$1\" in print) [ \"$SHUTTLE_TEST_SUPERVISOR\" = launchd ]; exit $? ;; esac\nprintf 'launchctl %s\\n' \"$*\" >> \"$SHUTTLE_TEST_SUPERVISOR_CALLS\"\n",
+	}
+	for name, source := range fakes {
+		if err := os.WriteFile(filepath.Join(fakeBin, name), []byte(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "restart_cmd") + `
+restart_cmd "$CHECKOUT" | /bin/bash
+`
+
+	cmd := exec.Command("/bin/bash", "-c", harness)
+	owner := ""
+	if len(selectedOwner) > 0 {
+		owner = selectedOwner[0]
+	}
+	cmd.Env = append(os.Environ(),
+		"SHUTTLE_TEST_OWNER="+owner,
+		"HOME="+home,
+		"PATH="+fakeBin+string(os.PathListSeparator)+"/usr/bin:/bin",
+		"CHECKOUT="+checkout,
+		"SHUTTLE_TEST_DATA_DIR="+dataDir,
+		"SHUTTLE_TEST_MARKER="+marker,
+		"SHUTTLE_TEST_CALLS="+calls,
+		"SHUTTLE_TEST_SUPERVISOR="+supervisor,
+		"SHUTTLE_TEST_SUPERVISOR_CALLS="+supervisorLog,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("respawn launcher restart failed: %v\n%s", err, out)
+	}
+	installed, err := os.ReadFile(filepath.Join(home, ".local", "bin", "shuttle-launch"))
+	if err != nil || string(installed) != string(freshLauncher) {
+		t.Fatalf("canonical launcher mismatch: %v", err)
+	}
+	repo, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
+	if err != nil || strings.TrimSpace(string(repo)) != checkout {
+		t.Fatalf("repo pointer=%q, %v", repo, err)
+	}
+	tmuxLog, _ := os.ReadFile(calls)
+	supervisorOut, _ := os.ReadFile(supervisorLog)
+	return home, freshLauncher, string(tmuxLog), string(supervisorOut)
+}
