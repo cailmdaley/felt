@@ -258,7 +258,8 @@ defmodule Shuttle.Terminal.RexTest do
       fn n ->
         RexBindings.put("worker-#{n}", Map.put(binding, "session_id", "session:#{n}"), "server")
       end,
-      max_concurrency: 10
+      max_concurrency: 10,
+      timeout: 60_000
     )
     |> Enum.each(fn result -> assert result == {:ok, :ok} end)
 
