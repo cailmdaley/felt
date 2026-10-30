@@ -66,7 +66,7 @@ Plain queries search bodies by default, placing name/slug hits before metadata h
 
 ## Practice
 
-**Sync first; commit your own files.** `felt sync` before substantive work. Other sessions write to the same store, so commit only the fibers you changed, by path, then `felt sync --push`. Resolve conflicts from context; never discard another session's edits, and report a sync you couldn't complete.
+**Keep the archive together.** Before `felt sync`, commit the store's dirty fiber changes, whoever wrote them, including daemon lifecycle writes; mixed commits are fine. Then sync before substantive work and publish with `felt sync --push`. The agent running sync owns resolving conflicts from context. Never discard another session's edits, and report a sync you couldn't complete. The daemon never runs Git or commits; agents maintain the archive.
 
 **Search before you file.** When a fiber already holds the concern, extend it; a second one splits its history.
 
