@@ -132,11 +132,7 @@ defmodule Shuttle.Delivery do
       # Delivery carries the worker-owned epoch and the address it committed;
       # selecting or flushing a destination never changes authority.
       with {:ok, address, generation} <-
-             GenServer.call(
-               server,
-               {:context_receiver, Shuttle.Threads.address(entry.fiber)},
-               32_000
-             ) do
+             Poller.context_receiver(server, Shuttle.Threads.address(entry.fiber)) do
         Shuttle.CLI.run(
           ["context-mailbox", "deliver", context_key(entry), address, to_string(generation)],
           timeout_ms: 32_000

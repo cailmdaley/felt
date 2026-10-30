@@ -199,7 +199,9 @@ defmodule ShuttleWeb.DeliverControllerTest do
     assert {:ok, _session} = Poller.dispatch_fiber(fiber_id, [])
     Env.put_app_env(:felt_runner, MessageRunner)
     Env.put_app_env(:deliver_test_pid, self())
-    Poller.session_uuid(fiber_id)
+    assert %{session_uuid: uuid, cli: "claude"} = Poller.live_worker(fiber_id)
+    assert is_binary(uuid)
+    uuid
   end
 
   test "a sent message whose receipt is unconfirmed is neither delivered nor failed" do

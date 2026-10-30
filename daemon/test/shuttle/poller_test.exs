@@ -226,6 +226,38 @@ defmodule Shuttle.PollerTest do
     :ok
   end
 
+  test "published state starts cold, reports age while suspended, and fences daemon incarnations" do
+    poller_opts = [
+      runner: MockRunner,
+      own_host_id: "test-host",
+      felt_stores: [],
+      poll_interval_ms: 600_000
+    ]
+
+    {:ok, first_poller} = start_poller!(poller_opts)
+    {:ok, first} = Poller.published_state_response(first_poller)
+    assert first.generation == 1
+    assert first.etag =~ "W/\""
+    assert Poller.snapshot(first_poller).document_cache["state"] == "cold"
+
+    :sys.suspend(first_poller)
+
+    assert wait_until(fn ->
+             {:ok, response} = Poller.published_state_response(first_poller)
+             response.age_ms > first.age_ms
+           end)
+
+    {:ok, stale} = Poller.published_state_response(first_poller)
+    assert stale.age_ms >= first.age_ms
+    :sys.resume(first_poller)
+
+    :ok = GenServer.stop(first_poller, :normal, @state_timeout)
+    {:ok, second_poller} = start_poller!(poller_opts)
+    {:ok, second} = Poller.published_state_response(second_poller, first.etag)
+    assert second.etag != first.etag
+    assert second.generation == 1
+  end
+
   test "CPU memory diagnostics measure bounded task inputs without changing Poller state" do
     {:ok, poller} =
       start_poller!(
@@ -236,6 +268,7 @@ defmodule Shuttle.PollerTest do
       )
 
     await_boot_cycle!(poller)
+    await_publication!(poller)
     before = :sys.get_state(poller, @state_timeout)
 
     baseline = Poller.cpu_memory_measurements(poller)
@@ -307,7 +340,10 @@ defmodule Shuttle.PollerTest do
     assert read_bytes == read_words * word_size_bytes
     assert :sys.get_state(poller, @state_timeout) == before
 
-    :sys.replace_state(poller, &%{&1 | orphans: Enum.to_list(1..5_000)})
+    large_orphans =
+      for n <- 1..5_000, do: %{fiber_id: "orphan-#{n}", reason: "missing_tmux_session"}
+
+    :sys.replace_state(poller, &%{&1 | orphans: large_orphans})
     with_large_excluded_field = Poller.cpu_memory_measurements(poller)
 
     assert with_large_excluded_field.state.words > state_words
@@ -318,7 +354,19 @@ defmodule Shuttle.PollerTest do
     assert with_large_excluded_field.poll_read_task_environment.words ==
              baseline.poll_read_task_environment.words
 
-    large_document_cache = Map.new(1..2_000, &{&1, &1})
+    large_document_cache =
+      Map.new(1..2_000, fn n ->
+        id = "cache-#{n}"
+
+        entry = %{
+          felt_store: MockRunner.felt_root(),
+          path: "/cache/#{id}.md",
+          report_path: nil,
+          fiber: make_fiber(id)
+        }
+
+        {id, %{entry: entry, modified_at: nil}}
+      end)
 
     :sys.replace_state(poller, fn state ->
       %{state | document_cache: large_document_cache, document_fiber_index: %{}}
@@ -405,6 +453,9 @@ defmodule Shuttle.PollerTest do
       }
     end)
 
+    # Synthetic state replacement bypasses the callback publication wrapper.
+    send(poller, :publish_state)
+    :sys.get_state(poller, @state_timeout)
     assert {:ok, %{fibers: feed}} = Poller.cached_fiber_documents(poller)
 
     assert Map.new(feed, &{&1.fiber["id"], &1.orchestrator}) == %{
@@ -456,7 +507,7 @@ defmodule Shuttle.PollerTest do
     end
   end
 
-  # Drive exactly ONE poll cycle and return only once it has been applied.
+  # Drive exactly ONE poll cycle and return once its snapshot is published.
   # Every cycle a test drives goes through here. A raw `send(poller,
   # :run_poll_cycle)` is dropped while another cycle is in flight, and when it
   # lands it can leave the boot cycle unsettled — a read taken before the
@@ -493,7 +544,23 @@ defmodule Shuttle.PollerTest do
     send(poller, :run_poll_cycle)
 
     assert wait_until(fn -> :sys.get_state(poller, @state_timeout).poll_cycles > before end)
+    await_publication!(poller)
     :ok
+  end
+
+  defp await_publication!(poller) do
+    state = :sys.get_state(poller, @state_timeout)
+    target = state.published_generation + if(state.published_timer_ref, do: 1, else: 0)
+
+    assert wait_until(
+             fn ->
+               case Poller.published_state_response(poller) do
+                 {:ok, %{generation: generation}} -> generation >= target
+                 _ -> false
+               end
+             end,
+             1_000
+           )
   end
 
   # Every trace the `:dbg` relay has forwarded from `poller`, oldest first, then
@@ -1149,19 +1216,20 @@ defmodule Shuttle.PollerTest do
       %{
         state
         | document_cache_ready: false,
-          cold_feed_logged: false,
           document_cache: %{},
           document_fiber_index: %{}
       }
     end)
+
+    # Commit the test fixture through an actual Poller transition before using
+    # the mailbox-free reader.
+    GenServer.call(poller, :orchestrator_state)
 
     log =
       ExUnit.CaptureLog.capture_log(fn ->
         {:ok, _} = Poller.cached_fiber_documents(poller)
         {:ok, _} = Poller.cached_fiber_documents(poller)
         {:ok, _} = Poller.cached_fiber_documents(poller)
-        # Flush the GenServer so its logging is done before capture_log returns.
-        _ = :sys.get_state(poller, @state_timeout)
       end)
 
     occurrences =
@@ -1171,7 +1239,6 @@ defmodule Shuttle.PollerTest do
       |> Kernel.-(1)
 
     assert occurrences == 1
-    assert :sys.get_state(poller, @state_timeout).cold_feed_logged == true
   end
 
   test "owner feed stamps serve-time runtime onto an owned fiber with a live worker" do
@@ -1814,6 +1881,7 @@ defmodule Shuttle.PollerTest do
 
     MockRunner.set_show_missing(true)
     send(poller, {:fallback_started, id, worker.identity_token, opts})
+    :sys.get_state(poller, @state_timeout)
     assert {:ok, %{fibers: [%{runtime: pending}]}} = Poller.cached_fiber_documents(poller)
     assert pending.session_uuid == nil
     assert pending.identity_pending
@@ -1822,9 +1890,11 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == ""
     send(poller, {:captured_session, id, worker.identity_token, "captured", opts})
+    :sys.get_state(poller, @state_timeout)
     assert Poller.session_uuid(poller, id) == "captured"
     send(poller, {:captured_session, id, worker.identity_token, "stale", opts})
     send(poller, {:captured_session, id, make_ref(), "wrong-launch", opts})
+    :sys.get_state(poller, @state_timeout)
     assert Poller.session_uuid(poller, id) == "captured"
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "captured"
   end
@@ -2006,7 +2076,7 @@ defmodule Shuttle.PollerTest do
     assert [_, signal] = Regex.run(~r/\|\| \{ touch '([^']+)';/, script)
     assert {:ok, %{mode: mode}} = File.stat(Path.dirname(signal))
     assert Bitwise.band(mode, 0o777) == 0o700
-    assert Poller.session_uuid(poller, id) == "resume-target"
+    assert wait_until(fn -> Poller.session_uuid(poller, id) == "resume-target" end)
     File.touch!(signal)
     assert wait_until(fn -> Poller.session_uuid(poller, id) == nil end)
     assert {:ok, %{fibers: [%{runtime: pending}]}} = Poller.cached_fiber_documents(poller)
@@ -2823,6 +2893,7 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> not Process.alive?(second_task) end)
 
+    assert wait_until(fn -> Poller.snapshot(poller).poll_health.stalls >= 2 end, 1_000)
     health = Poller.snapshot(poller).poll_health
     assert health.stalls >= 2
     assert is_binary(health.last_stalled_at)
@@ -3064,7 +3135,7 @@ defmodule Shuttle.PollerTest do
     assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, force: true, ad_hoc: true)
 
     end_worker_session(poller, fiber_id)
-    _ = Poller.snapshot(poller)
+    :sys.get_state(poller, @state_timeout)
 
     doc = File.read!("#{MockRunner.felt_dir()}/#{fiber_id}/#{leaf}.md")
     assert doc =~ ~r/status:\s*closed/
@@ -3096,8 +3167,8 @@ defmodule Shuttle.PollerTest do
     end)
 
     notify_worker_exit(poller, fiber_id)
-    # Synchronous call flushes the exit message (mailbox order) before we read.
-    _ = Poller.snapshot(poller)
+    :sys.get_state(poller, @state_timeout)
+    await_publication!(poller)
   end
 
   defp loop_blocked?(poller, fiber_id) do
@@ -4472,7 +4543,12 @@ defmodule Shuttle.PollerTest do
 
     assert wait_until(fn -> :sys.get_state(poller, @state_timeout).document_cache_ready end)
 
-    assert {:ok, _output} = Poller.lifecycle_transition(poller, :accept, fiber_id)
+    :sys.suspend(poller)
+    transition = Task.async(fn -> Poller.lifecycle_transition(poller, :accept, fiber_id) end)
+    Process.sleep(20)
+    refute {"shuttle", ["-C", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
+    :sys.resume(poller)
+    assert {:ok, _output} = Task.await(transition, @state_timeout)
 
     assert {"shuttle", ["-C", store, "accept", fiber_id, "--local"]} in MockRunner.commands()
 
@@ -5727,7 +5803,12 @@ defmodule Shuttle.PollerTest do
              end)
            end)
 
-    assert Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == fiber_id))
+    assert wait_until(
+             fn ->
+               Enum.any?(Poller.snapshot(poller).eligible, &(&1.fiber_id == fiber_id))
+             end,
+             1_000
+           )
   end
 
   # A whole-loom sync can make the same constitution file readable on every
@@ -7723,7 +7804,8 @@ defmodule Shuttle.PollerTest do
   end
 
   defp notify_worker_exit(poller, fiber_id) do
-    %{pid: watcher, session: session} = Poller.worker_status(poller, fiber_id)
+    state = :sys.get_state(poller, @state_timeout)
+    %{pid: watcher, session: session} = state.running[Poller.running_key(state, fiber_id)]
     send(poller, {:worker_exited, fiber_id, watcher, session, :normal_exit})
   end
 

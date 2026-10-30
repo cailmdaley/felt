@@ -4,7 +4,8 @@ defmodule Shuttle.Poller.DocumentCache do
 
   It owns how the fiber-document feed is rebuilt each tick (`refresh/3`), how an
   entry is keyed (`cache_key/1`, uid when present else id), and whether a prior
-  entry can be reused without rebuilding (`reusable_entry?/2`, mtime-equality).
+  entry can be reused without rebuilding (`reusable_entry?/3`, mtime plus
+  resolved-agent equality).
 
   ## One walk, not N shell-outs
 
@@ -43,7 +44,7 @@ defmodule Shuttle.Poller.DocumentCache do
         modified_at = Map.get(candidate, "modified_at")
         cached = Map.get(previous, key)
 
-        if reusable_entry?(cached, modified_at) do
+        if reusable_entry?(cached, modified_at, candidate) do
           # mtime-reuse hit: the fiber body is unchanged, but adding/removing a
           # sibling artifact.html does NOT bump `modified_at`, so reconcile the
           # entry's `:report_path` against the candidate row's native field
@@ -187,12 +188,21 @@ defmodule Shuttle.Poller.DocumentCache do
     end
   end
 
-  @doc "A cached entry is reusable iff its stored mtime equals the candidate's."
+  @doc "Checks whether the stored mtime matches; cache refresh also checks resolved agent data."
   def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at)
       when is_map(entry),
       do: true
 
   def reusable_entry?(_, _), do: false
+
+  @doc "A cache hit requires matching mtimes and resolved agent records."
+  def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
+      when is_map(entry) and is_map(candidate) do
+    get_in(entry, [:fiber, "shuttle", "resolved", "agent"]) ==
+      get_in(candidate, ["shuttle", "resolved", "agent"])
+  end
+
+  def reusable_entry?(_, _, _), do: false
 
   # Build one candidate's document entry directly from its Shuttle-list row. No
   # shell-out and no stat: the row already carries the full kanban projection

@@ -5,6 +5,7 @@ defmodule Shuttle.RemoteRegistryTest do
 
   alias Shuttle.Remote
   alias Shuttle.RemoteRegistry
+  alias Shuttle.RemoteRegistry.Recovery
   alias Shuttle.Runner
 
   # ── Mock Client ──
@@ -30,6 +31,29 @@ defmodule Shuttle.RemoteRegistryTest do
     @impl true
     def get(url, _timeout_ms) do
       Agent.get(__MODULE__, &Map.get(&1, url, {:error, :not_set}))
+    end
+  end
+
+  defmodule ConditionalClient do
+    @behaviour Shuttle.RemoteRegistry.Client
+    use Agent
+
+    def start_link(_ \\ []),
+      do: Agent.start_link(fn -> %{responses: [], requests: []} end, name: __MODULE__)
+
+    def reset, do: Agent.update(__MODULE__, fn _ -> %{responses: [], requests: []} end)
+    def set(responses), do: Agent.update(__MODULE__, &%{&1 | responses: responses})
+    def requests, do: Agent.get(__MODULE__, &Enum.reverse(&1.requests))
+
+    @impl true
+    def get(_url, _timeout_ms), do: {:error, :unexpected_unconditional_get}
+
+    @impl true
+    def get(url, headers, _timeout_ms) do
+      Agent.get_and_update(__MODULE__, fn state ->
+        [response | remaining] = state.responses
+        {response, %{state | responses: remaining, requests: [{url, headers} | state.requests]}}
+      end)
     end
   end
 
@@ -250,6 +274,121 @@ defmodule Shuttle.RemoteRegistryTest do
       assert remote.request_timeout_ms == 2000
       assert remote.stale_multiplier == 4
     end
+  end
+
+  test "remote state ETags reuse a cached snapshot after a valid 304" do
+    start_supervised!(ConditionalClient)
+    etag = ~s(W/"boot-1-7")
+    body = Jason.encode!(%{"host" => "candide", "eligible" => [%{"fiber_id" => "work/a"}]})
+
+    ConditionalClient.set([
+      {:ok, 200, [{"etag", etag}], body},
+      {:ok, 304, [{"etag", etag}], ""}
+    ])
+
+    {clock, advance} = fake_clock()
+    remote = candide_remote(poll_interval_ms: 50)
+
+    registry =
+      start_supervised!(
+        {RemoteRegistry,
+         remotes: [remote], client: ConditionalClient, clock: clock, auto_poll: false}
+      )
+
+    :ok = RemoteRegistry.poll_now(registry)
+    first = RemoteRegistry.snapshot(registry, "candide")
+    assert first.snapshot["eligible"] == [%{"fiber_id" => "work/a"}]
+    assert first.stale == false
+
+    advance.(60)
+    :ok = RemoteRegistry.poll_now(registry)
+    second = RemoteRegistry.snapshot(registry, "candide")
+
+    assert second.snapshot == first.snapshot
+    assert second.stale == false
+    assert second.last_polled_at > first.last_polled_at
+    assert second.recovery.state == :healthy
+
+    assert ConditionalClient.requests() == [
+             {Remote.state_url(remote), []},
+             {Remote.state_url(remote), [{"if-none-match", etag}]}
+           ]
+  end
+
+  test "a valid 304 clears in-flight or tripped recovery state" do
+    start_supervised!(ConditionalClient)
+    etag = ~s(W/"boot-1-8")
+    body = Jason.encode!(%{"host" => "candide", "eligible" => []})
+    ConditionalClient.set([{:ok, 200, [{"etag", etag}], body}, {:ok, 304, [{"etag", etag}], ""}])
+
+    {clock, advance} = fake_clock()
+    remote = candide_remote(poll_interval_ms: 1)
+
+    registry =
+      start_supervised!(
+        {RemoteRegistry,
+         remotes: [remote],
+         client: ConditionalClient,
+         clock: clock,
+         auto_poll: false,
+         tripped_poll_floor_ms: 1}
+      )
+
+    :ok = RemoteRegistry.poll_now(registry)
+
+    :sys.replace_state(registry, fn state ->
+      entry = Map.fetch!(state.snapshots, "candide")
+
+      recovery = %Recovery{
+        state: :reviving,
+        step: :ssh_check,
+        attempt: 2,
+        trip_count: 1,
+        last_error: :connection_refused,
+        last_action: "checking remote",
+        action_due_at: DateTime.add(clock.(), 60, :second)
+      }
+
+      put_in(state.snapshots["candide"], %{entry | recovery: recovery})
+    end)
+
+    advance.(2)
+    :ok = RemoteRegistry.poll_now(registry)
+
+    recovered = RemoteRegistry.snapshot(registry, "candide")
+    assert recovered.recovery.state == :healthy
+    assert recovered.recovery.attempt == 0
+    assert recovered.recovery.last_error == nil
+    assert recovered.recovery.last_action == nil
+  end
+
+  test "a new 200 body without an ETag clears the prior validator" do
+    start_supervised!(ConditionalClient)
+    old_etag = ~s(W/"boot-1-9")
+
+    ConditionalClient.set([
+      {:ok, 200, [{"etag", old_etag}], Jason.encode!(%{"host" => "old"})},
+      {:ok, 200, [], Jason.encode!(%{"host" => "new"})}
+    ])
+
+    {clock, advance} = fake_clock()
+    remote = candide_remote(poll_interval_ms: 1)
+
+    registry =
+      start_supervised!(
+        {RemoteRegistry,
+         remotes: [remote], client: ConditionalClient, clock: clock, auto_poll: false}
+      )
+
+    :ok = RemoteRegistry.poll_now(registry)
+    assert :sys.get_state(registry).snapshots["candide"].etag == old_etag
+
+    advance.(2)
+    :ok = RemoteRegistry.poll_now(registry)
+
+    current = RemoteRegistry.snapshot(registry, "candide")
+    assert current.snapshot["host"] == "new"
+    assert :sys.get_state(registry).snapshots["candide"].etag == nil
   end
 
   describe "Remote.stale?/3" do

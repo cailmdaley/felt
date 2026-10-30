@@ -486,9 +486,12 @@ defmodule Shuttle.RemoteRegistry do
   defp should_poll?(_, _state, _now_ms), do: true
 
   defp normal_probe(%{remote: %Remote{} = remote} = entry, client, state, now) do
-    case fetch_snapshot(remote, client) do
-      {:ok, snapshot} ->
-        success_entry(entry, snapshot, now)
+    case fetch_snapshot(remote, client, entry) do
+      {:ok, snapshot, etag} ->
+        success_entry(entry, snapshot, now, etag)
+
+      {:not_modified, etag} ->
+        not_modified_entry(entry, etag, now)
 
       {:busy, reason} ->
         busy_entry(entry, reason, now)
@@ -504,9 +507,12 @@ defmodule Shuttle.RemoteRegistry do
   # a successful request ends the cascade immediately, while a failed request
   # refreshes staleness without changing the scheduled recovery action.
   defp passive_probe(%{remote: %Remote{} = remote} = entry, client, now) do
-    case fetch_snapshot(remote, client) do
-      {:ok, snapshot} ->
-        success_entry(entry, snapshot, now)
+    case fetch_snapshot(remote, client, entry) do
+      {:ok, snapshot, etag} ->
+        success_entry(entry, snapshot, now, etag)
+
+      {:not_modified, etag} ->
+        not_modified_entry(entry, etag, now)
 
       {:busy, reason} ->
         busy_entry(entry, reason, now)
@@ -603,10 +609,13 @@ defmodule Shuttle.RemoteRegistry do
         end
 
       :probe_after_bounce ->
-        case fetch_snapshot(remote, state.client) do
-          {:ok, snapshot} ->
+        case fetch_snapshot(remote, state.client, entry) do
+          {:ok, snapshot, etag} ->
             Logger.info("RemoteRegistry: #{remote.name} recovered after tunnel bounce")
-            success_entry(entry, snapshot, now)
+            success_entry(entry, snapshot, now, etag)
+
+          {:not_modified, etag} ->
+            not_modified_entry(entry, etag, now)
 
           {:busy, reason} ->
             busy_entry(entry, reason, now)
@@ -777,10 +786,13 @@ defmodule Shuttle.RemoteRegistry do
         end
 
       :probe_after_restart ->
-        case fetch_snapshot(remote, state.client) do
-          {:ok, snapshot} ->
+        case fetch_snapshot(remote, state.client, entry) do
+          {:ok, snapshot, etag} ->
             Logger.info("RemoteRegistry: #{remote.name} recovered after remote restart")
-            success_entry(entry, snapshot, now)
+            success_entry(entry, snapshot, now, etag)
+
+          {:not_modified, etag} ->
+            not_modified_entry(entry, etag, now)
 
           {:busy, reason} ->
             busy_entry(entry, reason, now)
@@ -803,10 +815,13 @@ defmodule Shuttle.RemoteRegistry do
         end
 
       :backoff_probe ->
-        case fetch_snapshot(remote, state.client) do
-          {:ok, snapshot} ->
+        case fetch_snapshot(remote, state.client, entry) do
+          {:ok, snapshot, etag} ->
             Logger.info("RemoteRegistry: #{remote.name} recovered during backoff probe")
-            success_entry(entry, snapshot, now)
+            success_entry(entry, snapshot, now, etag)
+
+          {:not_modified, etag} ->
+            not_modified_entry(entry, etag, now)
 
           {:busy, reason} ->
             busy_entry(entry, reason, now)
@@ -887,18 +902,42 @@ defmodule Shuttle.RemoteRegistry do
 
   defp recovery_action_due?(_, _now), do: false
 
-  defp fetch_snapshot(%Remote{} = remote, client) do
+  defp fetch_snapshot(%Remote{} = remote, client, entry) do
     url = Remote.state_url(remote)
+    etag = Map.get(entry, :etag)
 
-    case client.get(url, remote.request_timeout_ms) do
+    Code.ensure_loaded?(client)
+
+    response =
+      if function_exported?(client, :get, 3) do
+        headers = if is_binary(etag), do: [{"if-none-match", etag}], else: []
+        client.get(url, headers, remote.request_timeout_ms)
+      else
+        client.get(url, remote.request_timeout_ms)
+      end
+
+    case response do
       {:ok, body} ->
-        case Jason.decode(body) do
-          {:ok, snapshot} when is_map(snapshot) ->
-            {:ok, snapshot}
+        decode_snapshot(remote, body, nil)
 
-          _ ->
-            Logger.debug("RemoteRegistry: malformed JSON from #{remote.name}")
-            {:error, :malformed_json}
+      {:ok, 200, headers, body} ->
+        decode_snapshot(remote, body, header(headers, "etag"))
+
+      {:ok, 304, headers, _body}
+      when is_binary(etag) and is_map(entry) and not is_nil(entry.snapshot) ->
+        returned_etag = header(headers, "etag")
+
+        if is_nil(returned_etag) or returned_etag == etag,
+          do: {:not_modified, etag},
+          else: {:error, :validator_mismatch}
+
+      {:ok, 304, _headers, _body} ->
+        {:error, :not_modified_without_snapshot}
+
+      {:ok, status, _headers, body} when status == 503 ->
+        case busy_response(body) do
+          {:busy, reason} -> {:busy, reason}
+          :other -> {:error, {:http_status, 503}}
         end
 
       {:error, {:http_status, 503, body}} ->
@@ -909,8 +948,31 @@ defmodule Shuttle.RemoteRegistry do
 
       {:error, reason} ->
         {:error, reason}
+
+      other ->
+        {:error, {:unexpected_response, other}}
     end
   end
+
+  defp decode_snapshot(remote, body, etag) do
+    case Jason.decode(body) do
+      {:ok, snapshot} when is_map(snapshot) ->
+        {:ok, snapshot, etag}
+
+      _ ->
+        Logger.debug("RemoteRegistry: malformed JSON from #{remote.name}")
+        {:error, :malformed_json}
+    end
+  end
+
+  defp header(headers, name) when is_list(headers) do
+    Enum.find_value(headers, fn
+      {key, value} when is_binary(key) -> if String.downcase(key) == name, do: value
+      _ -> nil
+    end)
+  end
+
+  defp header(_, _), do: nil
 
   defp busy_response(body) when is_binary(body) do
     case Jason.decode(body) do
@@ -935,15 +997,30 @@ defmodule Shuttle.RemoteRegistry do
     %{entry | last_attempt_at: now, stale: true, last_error: reason, recovery: %Recovery{}}
   end
 
-  defp success_entry(%{remote: remote}, snapshot, now) do
+  defp success_entry(entry, snapshot, now, etag) do
+    remote = entry.remote
+
     %{
       snapshot: snapshot,
       last_polled_at: now,
       last_attempt_at: now,
       stale: false,
       last_error: nil,
+      etag: etag,
       remote: remote,
       recovery: %Recovery{}
+    }
+  end
+
+  defp not_modified_entry(%{snapshot: snapshot} = entry, etag, now) when not is_nil(snapshot) do
+    %{
+      entry
+      | last_polled_at: now,
+        last_attempt_at: now,
+        stale: false,
+        last_error: nil,
+        etag: etag,
+        recovery: %Recovery{}
     }
   end
 
@@ -998,6 +1075,7 @@ defmodule Shuttle.RemoteRegistry do
       last_attempt_at: now,
       stale: true,
       last_error: reason,
+      etag: Map.get(entry, :etag),
       remote: remote,
       recovery: entry.recovery
     }
@@ -1304,6 +1382,7 @@ defmodule Shuttle.RemoteRegistry do
       last_attempt_at: nil,
       stale: true,
       last_error: nil,
+      etag: nil,
       remote: remote,
       recovery: %Recovery{}
     }

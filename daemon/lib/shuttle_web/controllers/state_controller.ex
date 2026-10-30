@@ -15,15 +15,26 @@ defmodule ShuttleWeb.StateController do
   # makes them strings so the JSON encoder need not know about them.
   import ShuttleWeb.TemporalComposite, only: [format_dt: 1, render_error: 1]
 
-  # How long a state read waits on the Poller or the RemoteRegistry before
-  # answering with a degraded body. `config :shuttle, :state_call_timeout_ms`
-  # overrides it.
+  # Remote snapshots retain a bounded mailbox read for a degraded composite.
   @state_timeout_ms 1_500
 
   def show(conn, _params) do
-    case poller_state() do
-      {:ok, state} ->
-        json(conn, state)
+    Shuttle.Poller.record_state_request(Shuttle.Env.server(Shuttle.Poller))
+    validators = get_req_header(conn, "if-none-match")
+
+    case Shuttle.Poller.published_state_response(
+           Shuttle.Env.server(Shuttle.Poller),
+           validators
+         ) do
+      {:ok, response} ->
+        conn
+        |> state_headers(response)
+        |> send_resp(:ok, response.body)
+
+      {:not_modified, response} ->
+        conn
+        |> state_headers(response)
+        |> send_resp(:not_modified, "")
 
       {:error, reason} ->
         conn
@@ -32,6 +43,7 @@ defmodule ShuttleWeb.StateController do
           host: Shuttle.Poller.own_host_id(),
           error: "poller_unavailable",
           reason: render_error(reason),
+          ready: false,
           eligible: [],
           blocked: [],
           running: [],
@@ -60,15 +72,17 @@ defmodule ShuttleWeb.StateController do
     end)
   end
 
+  defp state_headers(conn, response) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> put_resp_header("etag", response.etag)
+    |> put_resp_header("cache-control", "no-cache")
+    |> put_resp_header("x-state-generation", Integer.to_string(response.generation))
+    |> put_resp_header("x-state-age-ms", Integer.to_string(response.age_ms))
+  end
+
   defp state_timeout_ms,
     do: Shuttle.Env.app(:state_call_timeout_ms, @state_timeout_ms)
-
-  defp poller_state do
-    {:ok,
-     Shuttle.Poller.orchestrator_state(Shuttle.Env.server(Shuttle.Poller), state_timeout_ms())}
-  catch
-    :exit, reason -> {:error, reason}
-  end
 
   defp local_snapshot do
     Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), state_timeout_ms())

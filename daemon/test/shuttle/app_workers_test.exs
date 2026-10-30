@@ -274,6 +274,7 @@ defmodule Shuttle.AppWorkersTest do
     Env.put_app_env(:test_codex_dependency, :ready)
     send(poller, :run_poll_cycle)
     assert_receive :thread_started
+    eventually(fn -> Poller.snapshot(poller).blocked == [] end, 250)
     assert [] = Poller.snapshot(poller).blocked
     assert [{:start, _}, {:turn, "app-session-1", _, _}] = App.calls()
   end
@@ -1882,10 +1883,15 @@ defmodule Shuttle.AppWorkersTest do
         poll_interval_ms: 60_000
       )
 
+    await_boot_cycle!(poller)
+    %{pid: watcher} = Poller.worker_status(poller, "tests/app")
+
     for {state, phase} <- [{:running, "working"}, {:running, "attention"}, {:idle, "waiting"}] do
       App.set(:state, state)
       App.set(:phase, phase)
       assert WorkerBackend.observe(session) == state
+      send(watcher, :heartbeat)
+      eventually(fn -> match?([%{phase: ^phase}], Poller.snapshot(poller).eligible) end, 250)
 
       assert [%{phase: ^phase, session_uuid: "app-session-1", state: "running"}] =
                Poller.snapshot(poller).eligible
@@ -1902,6 +1908,18 @@ defmodule Shuttle.AppWorkersTest do
     App.set(:state, :unknown)
     App.set(:phase, nil)
     assert :unknown = WorkerBackend.observe(session)
+    send(watcher, :heartbeat)
+
+    eventually(
+      fn ->
+        case Poller.snapshot(poller).eligible do
+          [entry] -> not Map.has_key?(entry, :phase)
+          _ -> false
+        end
+      end,
+      250
+    )
+
     [uncertain] = Poller.snapshot(poller).eligible
     refute Map.has_key?(uncertain, :phase)
     assert WorkerBackend.session_status(Runner, session) == :alive
@@ -2174,7 +2192,6 @@ defmodule Shuttle.AppWorkersTest do
           :sys.get_state(poller)
           Poller.worker_status(poller, "tests/app") == nil
         end)
-
 
         assert {:ok, %{"active" => false, "thread_id" => "app-session-1"}} =
                  AppWorkers.get("app-session-1")

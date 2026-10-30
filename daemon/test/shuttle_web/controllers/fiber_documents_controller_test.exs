@@ -365,12 +365,13 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     poller = warm_poller!(store)
     now = DateTime.utc_now()
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       %{
         state
         | running:
             Map.put(state.running, uid, %{
               fiber_id: "tests/live",
+              pid: self(),
               uid: uid,
               session: session,
               agent_id: "codex",
@@ -427,7 +428,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # tick is 600s away, so the injected cache survives deterministically.
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       %{
         state
         | own_host_id: "test-host",
@@ -438,6 +439,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
           running:
             Map.put(state.running, uid, %{
               fiber_id: "tests/live",
+              pid: self(),
               uid: uid,
               session: session,
               agent_id: "codex",
@@ -496,7 +498,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     # true. Post-settle, the next tick is 600s away, so cold sticks.
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       %{
         state
         | own_host_id: "test-host",
@@ -544,7 +546,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     {poller, original_state} = start_or_reuse_poller(store)
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       %{
         state
         | own_host_id: "test-host",
@@ -608,7 +610,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     {poller, original_state} = start_or_reuse_poller(store)
     wait_until(fn -> :sys.get_state(poller).document_cache_ready end)
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       %{
         state
         | own_host_id: "test-host",
@@ -626,7 +628,7 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
 
     changed = put_in(base.fiber["name"], "After")
 
-    :sys.replace_state(poller, fn state ->
+    replace_and_publish!(poller, fn state ->
       cache = %{uid => %{modified_at: "m2", entry: changed}}
 
       %{
@@ -1769,6 +1771,15 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
       assert StubGetFileClient.last() == nil,
              "an unconfigured host: pin should never attempt a forward"
     end
+  end
+
+  # Inject a projection fixture, then drive the same callback as the bounded
+  # publication timer. A system-state replacement alone does not publish it.
+  defp replace_and_publish!(poller, transform) do
+    state = :sys.replace_state(poller, transform)
+    send(poller, :publish_state)
+    :sys.get_state(poller, :infinity)
+    state
   end
 
   # Start this test's Poller (registered as its `Shuttle.Poller`, so the

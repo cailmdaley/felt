@@ -21,6 +21,7 @@ defmodule ShuttleWeb.VersionController do
       Shuttle.BuildStamp.stamp()
       |> Map.put(:ready, readiness.ready)
       |> Map.put(:boot_duration_ms, readiness.duration_ms)
+      |> Map.put(:poller_publication, Shuttle.Poller.published_state_metrics())
       |> Map.merge(health)
       |> Map.put(:host, Shuttle.Poller.daemon_host_id())
       |> Map.put(:listen, Shuttle.listen())

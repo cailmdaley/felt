@@ -30,6 +30,21 @@ is not enough.
 
 `GET /api/v1/debug/profile?seconds=N` is host-scoped and peer-gated; it blocks for 1–300 seconds (default 30), returns OS CPU, VM microstates, process reductions and layered file/port-call attribution, and rejects concurrent profiles with 409. Add `&mode=cpu` for a bounded 1–10 second window (default 10) with selected function counters and route, peer, status, and duration HTTP counts. Function rows include uninstrumented callees and exclude separately instrumented callees; they do not cover total VM CPU. Its `forwarded_for_untrusted` value is an untrusted proxy assertion. Profiler work contributes to the measurement window, so exclude that window from steady-rate comparisons.
 
+`GET /api/v1/state` serves the Poller's latest published snapshot without waiting
+for its mailbox. It returns a generation ETag; a matching `If-None-Match`
+returns 304 with no body. `X-State-Age-Ms` reports how old the published view
+was when served, including when the Poller is busy. State changes are
+coalesced for up to one second while the Poller is available; successful
+lifecycle and worker actions publish before answering. External AppWorkers
+presentation fields are observed on the existing five-second watcher cadence,
+then published within the one-second coalescing window. A missing publication
+during startup or Poller restart returns 503 with `ready: false`. The
+`/api/v1/version` response includes cumulative `poller_publication` counters
+(`publish_count`, `encode_us`, `total_publish_us`, and `state_request_count`),
+plus the latest generation, incarnation and age, for measuring publication rate
+and cost between reads. The timing counters measure elapsed wall time, not CPU
+time.
+
 ## Write plane
 
 | Route | Routing | Purpose |

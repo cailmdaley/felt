@@ -73,6 +73,8 @@ defmodule Shuttle.Poller do
   # `config :shuttle, :dispatch_call_timeout_ms` overrides it.
   @dispatch_call_timeout_ms 30_000
   @orchestrator_state_call_timeout_ms 30_000
+  @published_state_key :shuttle_poller_published_state
+  @published_state_debounce_ms 1_000
 
   # Resume-loop circuit breaker. A still-active oneshot whose worker exits is
   # re-dispatched on the next poll (resuming the prior transcript on a dirty
@@ -244,7 +246,6 @@ defmodule Shuttle.Poller do
       # One-shot guard so the "served from a cold cache" log fires once per cold
       # PERIOD, not once per request (a remote viewer polls every 5s). Reset to
       # false when the first poll flips `document_cache_ready` true.
-      cold_feed_logged: false,
       # %{runtime_key => %{reason: term, attempted_at: DateTime.t, attempts:
       # pos_integer, fiber_id: slug, uid: String.t() | nil}} — fibers the
       # dispatcher rejected with an error other than :already_running. Keyed by
@@ -255,6 +256,7 @@ defmodule Shuttle.Poller do
       # scroll unread in the daemon log. Entries clear on successful dispatch or
       # when the fiber's eligibility changes (frontmatter edit, pause, close).
       dispatch_failures: %{},
+      worker_observation_seq: 0,
       # %{runtime_key => %{count: pos_integer, opened_at: DateTime.t | nil,
       # fiber_id: slug, uid: String.t | nil}} — the resume-loop circuit breaker's
       # per-fiber state. `count` is consecutive rapid worker exits (lived <
@@ -339,7 +341,16 @@ defmodule Shuttle.Poller do
       # replaces this map; successful hot rows never widen the hot set.
       last_full_listings: %{},
       # Per-store full-scan cadence.
-      discovery: %{}
+      discovery: %{},
+      published_table: nil,
+      published_generation: 0,
+      published_signature: nil,
+      published_reader_signature: nil,
+      published_incarnation: nil,
+      published_timer_ref: nil,
+      published_count: 0,
+      published_encode_us: 0,
+      published_publish_us: 0
     ]
   end
 
@@ -360,12 +371,12 @@ defmodule Shuttle.Poller do
 
   @spec snapshot(GenServer.server()) :: map()
   def snapshot(server) do
-    GenServer.call(server, :snapshot)
+    published_lookup(server, :snapshot, %{})
   end
 
   @spec snapshot(GenServer.server(), non_neg_integer()) :: map()
   def snapshot(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
-    GenServer.call(server, :snapshot, timeout_ms)
+    snapshot(server)
   end
 
   @doc false
@@ -381,7 +392,31 @@ defmodule Shuttle.Poller do
 
   @spec cached_fiber_documents(GenServer.server(), keyword()) :: {:ok, map()} | {:error, term()}
   def cached_fiber_documents(server, opts) do
-    GenServer.call(server, {:cached_fiber_documents, opts}, @orchestrator_state_call_timeout_ms)
+    case published_lookup(server, :feed_inputs, nil) do
+      nil ->
+        {:error, :cold}
+
+      %{
+        entries: base_entries,
+        cache: cache,
+        felt_stores: default_stores,
+        running: running,
+        task_reads: tasks,
+        pending_results: pending
+      } ->
+        entries =
+          base_entries
+          |> stamp_runtime(running, tasks)
+          |> stamp_pending_results(%State{pending_results: pending, running: running})
+
+        log_cold_feed_once(server, cache)
+        envelope = Shuttle.FiberDocuments.envelope(default_stores, entries, cache)
+
+        case Keyword.get(opts, :felt_stores) do
+          nil -> {:ok, envelope}
+          stores -> {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache)}
+        end
+    end
   end
 
   @doc """
@@ -396,7 +431,7 @@ defmodule Shuttle.Poller do
   """
   @spec parked_index(GenServer.server()) :: map()
   def parked_index(server \\ Shuttle.Env.server(__MODULE__)) do
-    GenServer.call(server, :parked_index, @orchestrator_state_call_timeout_ms)
+    published_lookup(server, :parked_index, %{})
   catch
     :exit, _ -> %{}
   end
@@ -408,7 +443,19 @@ defmodule Shuttle.Poller do
   `{:error, :cold}` before the first poll has warmed the cache.
   """
   def thread_inputs(server \\ Shuttle.Env.server(__MODULE__)) do
-    GenServer.call(server, :thread_inputs, @orchestrator_state_call_timeout_ms)
+    case published_lookup(server, :thread_inputs, :unavailable) do
+      :unavailable ->
+        {:error, :unavailable}
+
+      {:error, :cold} = result ->
+        result
+
+      %{entries: entries, local_live: local_live, own_host_id: own_host_id, fleet: fleet} ->
+        {live, reachable} =
+          Shuttle.Threads.with_fleet(local_live, own_host_id, fleet, DateTime.utc_now())
+
+        {:ok, {entries, live, reachable}}
+    end
   end
 
   @doc """
@@ -420,9 +467,7 @@ defmodule Shuttle.Poller do
   """
   @spec fiber_stores(GenServer.server()) :: %{String.t() => String.t()}
   def fiber_stores(server \\ Shuttle.Env.server(__MODULE__)) do
-    GenServer.call(server, :fiber_stores, @orchestrator_state_call_timeout_ms)
-  catch
-    :exit, _ -> %{}
+    published_lookup(server, :fiber_stores, %{})
   end
 
   @doc """
@@ -459,7 +504,10 @@ defmodule Shuttle.Poller do
 
   @spec worker_status(GenServer.server(), String.t()) :: map() | nil
   def worker_status(server, fiber_id) do
-    GenServer.call(server, {:worker_status, fiber_id})
+    case published_worker_view(server, fiber_id) do
+      %{worker: worker} -> worker
+      _ -> nil
+    end
   end
 
   @doc """
@@ -481,9 +529,10 @@ defmodule Shuttle.Poller do
 
   @spec session_uuid(GenServer.server(), String.t()) :: String.t() | nil
   def session_uuid(server, fiber_id) when is_binary(fiber_id) do
-    GenServer.call(server, {:session_uuid, fiber_id})
-  catch
-    :exit, _ -> nil
+    case published_worker_view(server, fiber_id) do
+      %{worker: worker, fiber: fiber} -> worker_session_uuid(worker, fiber)
+      _ -> worker_session_uuid(nil, published_lookup(server, {:fiber_view, fiber_id}, nil))
+    end
   end
 
   @doc """
@@ -497,7 +546,17 @@ defmodule Shuttle.Poller do
 
   @spec live_worker(GenServer.server(), String.t()) :: map() | nil
   def live_worker(server, fiber_id) when is_binary(fiber_id) do
-    GenServer.call(server, {:live_worker, fiber_id})
+    case published_worker_view(server, fiber_id) do
+      nil ->
+        nil
+
+      %{worker: worker, fiber: fiber} ->
+        %{
+          session: worker.session,
+          session_uuid: worker_session_uuid(worker, fiber),
+          cli: worker_cli(worker, fiber)
+        }
+    end
   end
 
   @spec dispatch_fiber(String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
@@ -633,7 +692,84 @@ defmodule Shuttle.Poller do
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()
   def orchestrator_state(server, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
-    GenServer.call(server, :orchestrator_state, timeout_ms)
+    published_lookup(server, :state_map, %{})
+  end
+
+  @doc false
+  def published_state_response(server \\ Shuttle.Env.server(__MODULE__), if_none_match \\ nil) do
+    case published_lookup(server, :state_response, nil) do
+      nil ->
+        {:error, :unavailable}
+
+      response ->
+        age_ms = max(System.monotonic_time(:millisecond) - response.published_at_ms, 0)
+
+        if validator_matches?(if_none_match, response.etag) do
+          {:not_modified, Map.put(response, :age_ms, age_ms)}
+        else
+          {:ok, Map.put(response, :age_ms, age_ms)}
+        end
+    end
+  end
+
+  defp validator_matches?(validators, etag) do
+    validators
+    |> List.wrap()
+    |> Enum.flat_map(&String.split(&1, ","))
+    |> Enum.any?(fn validator ->
+      validator = String.trim(validator)
+      validator == "*" or weak_etag(validator) == weak_etag(etag)
+    end)
+  end
+
+  defp weak_etag("W/" <> etag), do: etag
+  defp weak_etag(etag), do: etag
+
+  @doc false
+  def published_state_metrics(server \\ Shuttle.Env.server(__MODULE__)) do
+    metrics =
+      published_lookup(server, :metrics, %{
+        publish_count: 0,
+        encode_us: 0,
+        total_publish_us: 0,
+        last_encode_us: 0,
+        generation: 0,
+        incarnation: nil,
+        age_ms: nil
+      })
+
+    requests = published_lookup(server, :state_request_count, nil)
+    request_count = if requests, do: :atomics.get(requests, 1), else: 0
+
+    metrics
+    |> Map.put(:state_request_count, request_count)
+    |> maybe_put_publication_age()
+  end
+
+  @doc false
+  def record_state_request(server \\ Shuttle.Env.server(__MODULE__)) do
+    case published_lookup(server, :state_request_count, nil) do
+      nil -> :ok
+      requests -> :atomics.add(requests, 1, 1)
+    end
+
+    :ok
+  end
+
+  defp maybe_put_publication_age(%{published_at_monotonic_ms: at} = metrics)
+       when is_integer(at) do
+    Map.put(metrics, :age_ms, max(System.monotonic_time(:millisecond) - at, 0))
+  end
+
+  defp maybe_put_publication_age(metrics), do: metrics
+
+  @doc false
+  def context_receiver(server \\ Shuttle.Env.server(__MODULE__), fiber_id)
+      when is_binary(fiber_id) do
+    case published_worker_view(server, fiber_id) do
+      %{receiver: receiver} -> receiver
+      _ -> {:error, :no_worker}
+    end
   end
 
   @doc """
@@ -802,6 +938,7 @@ defmodule Shuttle.Poller do
     state = write_daemon_heartbeat(%{state | daemon_boots: boots})
 
     state = schedule_tick(state, 0)
+    state = initialize_publication(state)
     {:ok, state}
   end
 
@@ -932,7 +1069,404 @@ defmodule Shuttle.Poller do
   end
 
   @impl true
-  def handle_info({:dispatched_identity, fiber_id, token, uuid}, state) do
+  def handle_call(request, from, state) do
+    transition_call(request, from, state)
+    |> publish_after_transition(request)
+  end
+
+  @impl true
+  def handle_info(message, state) do
+    transition_info(message, state)
+    |> publish_after_transition(message)
+  end
+
+  defp initialize_publication(%State{} = state) do
+    table = :ets.new(:shuttle_poller_publication, [:set, :protected, read_concurrency: true])
+    requests = :atomics.new(1, signed: false)
+    cold_feed_logged = :atomics.new(1, signed: false)
+    :ets.insert(table, [{:state_request_count, requests}, {:cold_feed_logged, cold_feed_logged}])
+    incarnation = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+    :persistent_term.put({@published_state_key, state.self_ref}, table)
+    :persistent_term.put({@published_state_key, self()}, table)
+
+    state =
+      publish_projection(%{state | published_table: table, published_incarnation: incarnation})
+
+    %{state | published_signature: publication_signature(state)}
+  end
+
+  defp published_lookup(server, key, default) do
+    ref = server_ref(server)
+
+    try do
+      table = :persistent_term.get({@published_state_key, ref})
+
+      case :ets.lookup(table, key) do
+        [{^key, value}] -> value
+        _ -> default
+      end
+    rescue
+      ArgumentError -> default
+    catch
+      :error, :badarg -> default
+    end
+  end
+
+  defp server_ref(server) when is_pid(server), do: server
+  defp server_ref(server) when is_atom(server), do: Process.whereis(server) || server
+  defp server_ref(server), do: GenServer.whereis(server) || server
+
+  defp publish_after_transition({:noreply, state}, message),
+    do: {:noreply, schedule_or_publish(state, message)}
+
+  defp publish_after_transition({:reply, reply, state}, message),
+    do: {:reply, reply, schedule_or_publish(state, message)}
+
+  defp publish_after_transition({:stop, reason, state}, _message),
+    do: {:stop, reason, state}
+
+  defp publish_after_transition({:stop, reason, reply, state}, _message),
+    do: {:stop, reason, reply, state}
+
+  defp schedule_or_publish(%State{published_table: nil} = state, _message), do: state
+
+  defp schedule_or_publish(%State{} = state, message) do
+    signature = publication_signature(state)
+    reader_signature = reader_projection_signature(state)
+
+    state =
+      if reader_signature === state.published_reader_signature do
+        state
+      else
+        state = publish_reader_projections(state)
+        %{state | published_reader_signature: reader_signature}
+      end
+
+    if signature === state.published_signature do
+      state
+    else
+      if immediate_publication?(message) do
+        if state.published_timer_ref, do: Process.cancel_timer(state.published_timer_ref)
+        publish_projection(%{state | published_timer_ref: nil})
+      else
+        if is_nil(state.published_timer_ref) do
+          ref = Process.send_after(self(), :publish_state, @published_state_debounce_ms)
+          %{state | published_timer_ref: ref}
+        else
+          state
+        end
+      end
+    end
+  end
+
+  defp immediate_publication?(message) do
+    case message do
+      {:refresh_document, _} -> true
+      {:lifecycle_transition, _, _, _} -> true
+      {:dispatch, _, _} -> true
+      {:claim_session, _, _, _} -> true
+      {:migrate, _, _, _} -> true
+      {:kill_session, _} -> true
+      {:capture, _, _} -> true
+      :release_boot_quarantine -> true
+      {:dispatched_identity, _, _, _} -> true
+      {:captured_session, _, _, _, _} -> true
+      {:fallback_started, _, _, _} -> true
+      {:identity_capture_failed, _, _, _} -> true
+      {:retry_identity, _, _} -> true
+      _ -> false
+    end
+  end
+
+  defp publication_signature(state) do
+    Map.take(state, [
+      :running,
+      :standing_roles,
+      :orphans,
+      :fiber_store_cache,
+      :document_cache,
+      :document_fiber_index,
+      :document_cache_stats,
+      :document_cache_ready,
+      :document_cache_partial,
+      :document_cache_refreshed_at,
+      :document_cache_last_refresh_ms,
+      :task_reads,
+      :dispatch_failures,
+      :worker_observation_seq,
+      :resume_loop,
+      :boot_quarantine,
+      :contract_check,
+      :parked_launches,
+      :own_host_id,
+      :felt_stores,
+      :max_concurrent_workers,
+      :reconciliation_hold,
+      :poll_check_in_progress,
+      :poll_stalls,
+      :last_poll_stalled_at,
+      :stall_timeout_ms,
+      :full_scan_budget_ms,
+      :discovery
+    ])
+  end
+
+  defp publish_projection(%State{} = state) do
+    table = state.published_table
+    generation = state.published_generation + 1
+    started = System.monotonic_time(:microsecond)
+    snapshot = add_poll_health(Snapshot.build_snapshot(state), state)
+    state_map = Map.put(snapshot, :running_detail, full_state_running_detail(state))
+    encode_started = System.monotonic_time(:microsecond)
+    state_body = Jason.encode!(state_map)
+    encoded_us = System.monotonic_time(:microsecond) - encode_started
+    state = publish_reader_projections(state)
+    published_at_ms = System.monotonic_time(:millisecond)
+    etag = ~s(W/"#{state.published_incarnation}-#{generation}")
+    publish_us = System.monotonic_time(:microsecond) - started
+
+    metrics = %{
+      incarnation: state.published_incarnation,
+      generation: generation,
+      publish_count: state.published_count + 1,
+      encode_us: state.published_encode_us + encoded_us,
+      last_encode_us: encoded_us,
+      publish_us: publish_us,
+      total_publish_us: state.published_publish_us + publish_us,
+      published_at_monotonic_ms: published_at_ms
+    }
+
+    response = %{
+      body: state_body,
+      etag: etag,
+      generation: generation,
+      published_at_ms: published_at_ms
+    }
+
+    :ets.insert(table, [
+      {:snapshot, snapshot},
+      {:state_map, state_map},
+      {:state_body, state_body},
+      {:state_response, response},
+      {:metrics, metrics}
+    ])
+
+    %{
+      state
+      | published_generation: generation,
+        published_count: metrics.publish_count,
+        published_encode_us: metrics.encode_us,
+        published_publish_us: metrics.total_publish_us,
+        published_signature: publication_signature(state),
+        published_reader_signature: reader_projection_signature(state)
+    }
+  end
+
+  defp full_state_running_detail(state) do
+    Enum.map(state.running, fn {runtime_key, meta} ->
+      %{
+        runtime_key: runtime_key,
+        fiber_id: fiber_address(meta),
+        pid: inspect(meta.pid),
+        session: meta.session,
+        agent_id: meta.agent_id,
+        started_at: DateTime.to_unix(meta.started_at, :millisecond),
+        last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond)
+      }
+    end)
+  end
+
+  defp publish_reader_projections(state) do
+    table = state.published_table
+
+    {base_entries, state} =
+      if state.document_cache_ready, do: owner_feed_base(state), else: {[], state}
+
+    cache_meta = document_cache_meta(state)
+
+    previous_ready = published_lookup(self(), :feed_ready, nil)
+
+    if state.document_cache_ready or previous_ready == true do
+      case published_lookup(self(), :cold_feed_logged, nil) do
+        nil -> :ok
+        logged -> :atomics.put(logged, 1, 0)
+      end
+    end
+
+    feed_inputs = %{
+      entries: base_entries,
+      cache: cache_meta,
+      felt_stores: state.felt_stores,
+      running: state.running,
+      task_reads: state.task_reads,
+      pending_results: state.pending_results
+    }
+
+    worker_entries =
+      Enum.map(state.running, fn {runtime_key, worker} ->
+        uid = metadata_uid(worker)
+        fiber_id = fiber_address(worker)
+        fiber_document = cached_fiber(state, fiber_id) || cached_fiber(state, uid) || %{}
+        fiber = Map.take(fiber_document, ["shuttle"])
+
+        receiver =
+          case {worker[:context_epoch], worker[:context_address]} do
+            {epoch, address} when is_integer(epoch) and is_binary(address) ->
+              {:ok, address, epoch}
+
+            _ ->
+              {:error, :authority_unknown}
+          end
+
+        projection = %{worker: worker, fiber: fiber, receiver: receiver}
+        canonical_aliases = [fiber_id, uid, fiber_document["id"]]
+        fallback_aliases = [fiber_document["slug"]]
+        {runtime_key, projection, canonical_aliases, fallback_aliases}
+      end)
+
+    # A runtime key always wins when one worker's slug happens to equal another
+    # worker's key. Fiber identifiers then win over slug fallbacks.
+    worker_views =
+      Map.new(worker_entries, fn {runtime_key, projection, _, _} -> {runtime_key, projection} end)
+
+    worker_views =
+      Enum.reduce(worker_entries, worker_views, fn {_key, projection, canonical_aliases, _},
+                                                   views ->
+        Enum.reduce(canonical_aliases, views, fn alias_id, aliases ->
+          if is_binary(alias_id) and alias_id != "" do
+            Map.put_new(aliases, alias_id, projection)
+          else
+            aliases
+          end
+        end)
+      end)
+
+    worker_views =
+      Enum.reduce(worker_entries, worker_views, fn {_key, projection, _, fallback_aliases},
+                                                   views ->
+        Enum.reduce(fallback_aliases, views, fn alias_id, aliases ->
+          if is_binary(alias_id) and alias_id != "" do
+            Map.put_new(aliases, alias_id, projection)
+          else
+            aliases
+          end
+        end)
+      end)
+
+    fiber_view_objects =
+      Enum.map(state.document_fiber_index, fn {fiber_id, fiber} ->
+        {{:fiber_view, fiber_id}, Map.take(fiber, ["shuttle"])}
+      end)
+
+    old_fiber_keys =
+      Enum.map(:ets.match_object(table, {{:fiber_view, :_}, :_}), &elem(&1, 0))
+
+    new_fiber_keys = MapSet.new(Enum.map(fiber_view_objects, &elem(&1, 0)))
+
+    :ets.insert(
+      table,
+      [
+        {:feed_inputs, feed_inputs},
+        {:feed_ready, state.document_cache_ready},
+        {:thread_inputs, published_thread_inputs(state)},
+        {:fiber_stores, published_fiber_stores(state)},
+        {:parked_index, Snapshot.parked_index(state.parked_launches)},
+        {:worker_views, worker_views}
+      ] ++ fiber_view_objects
+    )
+
+    Enum.each(old_fiber_keys, fn key ->
+      if not MapSet.member?(new_fiber_keys, key), do: :ets.delete(table, key)
+    end)
+
+    state
+  end
+
+  defp published_fiber_stores(state) do
+    for {_key, %{entry: %{fiber: %{"uid" => uid}, felt_store: store}}} <- state.document_cache,
+        is_binary(uid),
+        into: %{},
+        do: {uid, store}
+  end
+
+  defp published_thread_inputs(%State{document_cache_ready: false}), do: {:error, :cold}
+
+  defp published_thread_inputs(state) do
+    entries =
+      Enum.map(state.document_cache, fn {_key, cached} ->
+        pending_entry(cached.entry, state.pending_results)
+      end)
+
+    %{
+      entries: entries,
+      local_live: MapSet.new(Map.keys(state.running)),
+      own_host_id: state.own_host_id,
+      fleet: state.fleet
+    }
+  end
+
+  defp log_cold_feed_once(server, %{state: "cold"}) do
+    case published_lookup(server, :cold_feed_logged, nil) do
+      nil ->
+        :ok
+
+      logged ->
+        if :atomics.compare_exchange(logged, 1, 0, 1) == :ok do
+          Logger.info("owner feed served from COLD document cache (poll not yet warmed)")
+        end
+    end
+  end
+
+  defp log_cold_feed_once(_server, _cache), do: :ok
+
+  defp published_worker_view(server, fiber_id) do
+    server
+    |> published_lookup(:worker_views, %{})
+    |> Map.get(fiber_id)
+  end
+
+  defp reader_projection_signature(state) do
+    Map.take(state, [
+      :running,
+      :document_cache,
+      :document_fiber_index,
+      :document_cache_ready,
+      :document_cache_partial,
+      :document_cache_refreshed_at,
+      :document_cache_last_refresh_ms,
+      :document_cache_stats,
+      :task_reads,
+      :pending_results,
+      :fleet,
+      :parked_launches,
+      :felt_stores,
+      :own_host_id
+    ])
+  end
+
+  defp transition_info({:deliver_thread_results, entries, own_host, callers}, state) do
+    poller = self()
+
+    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
+      Shuttle.Env.adopt_callers(callers)
+      Shuttle.Threads.deliver_results(entries, own_host)
+      send(poller, {:pending_results, Shuttle.Threads.pending_results(entries, own_host)})
+    end)
+
+    {:noreply, state}
+  end
+
+  defp transition_info(:publish_state, state) do
+    state = %{state | published_timer_ref: nil}
+
+    if publication_signature(state) === state.published_signature do
+      {:noreply, state}
+    else
+      {:noreply, publish_projection(state)}
+    end
+  end
+
+  defp transition_info({:dispatched_identity, fiber_id, token, uuid}, state) do
     case running_worker(state, fiber_id) do
       %{identity_token: ^token} when not is_nil(token) ->
         key = running_key(state, fiber_id)
@@ -944,7 +1478,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:fallback_started, fiber_id, token, opts}, state) do
+  defp transition_info({:fallback_started, fiber_id, token, opts}, state) do
     worker = running_worker(state, fiber_id)
     store = Keyword.get(opts, :felt_store)
 
@@ -957,7 +1491,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:identity_capture_failed, fiber_id, token, reason}, state) do
+  defp transition_info({:identity_capture_failed, fiber_id, token, reason}, state) do
     case running_worker(state, fiber_id) do
       %{identity_token: ^token, session_uuid: nil} when not is_nil(token) ->
         key = running_key(state, fiber_id)
@@ -978,7 +1512,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:retry_identity, fiber_id, token}, state) do
+  defp transition_info({:retry_identity, fiber_id, token}, state) do
     case running_worker(state, fiber_id) do
       %{identity_token: ^token, session_uuid: nil} when not is_nil(token) ->
         case fetch_fiber_full(fiber_id, state) do
@@ -995,7 +1529,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:captured_session, fiber_id, token, uuid, opts}, state) do
+  defp transition_info({:captured_session, fiber_id, token, uuid, opts}, state) do
     worker = running_worker(state, fiber_id)
     store = Keyword.get(opts, :felt_store)
 
@@ -1040,8 +1574,8 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
-      when is_reference(tick_token) do
+  defp transition_info({:tick, tick_token}, %{tick_token: tick_token} = state)
+       when is_reference(tick_token) do
     state = %{
       state
       | tick_timer_ref: nil,
@@ -1052,18 +1586,19 @@ defmodule Shuttle.Poller do
     {:noreply, state}
   end
 
-  def handle_info({:tick, _}, state), do: {:noreply, state}
+  defp transition_info({:tick, _}, state), do: {:noreply, state}
 
   # The daemon's own liveness tick. Deliberately its own timer rather than a
   # rider on the poll cycle: a poll can stall for minutes behind a wedged felt
   # read (the read runs in a Task, so this GenServer stays responsive), and what
   # the next boot needs to know is that THIS process was alive and serving, which
   # is exactly what handling this message proves.
-  def handle_info(:write_daemon_heartbeat, state) do
+  defp transition_info(:write_daemon_heartbeat, state) do
     {:noreply, write_daemon_heartbeat(state)}
   end
 
-  def handle_info(:run_poll_cycle, %{reconciliation_hold: hold} = state) when not is_nil(hold) do
+  defp transition_info(:run_poll_cycle, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold) do
     # A reconciliation hold is stronger than boot quarantine. No discovery,
     # adoption, cron, was-running exemption or force launch runs through it.
     state = recover_migrations(state)
@@ -1078,9 +1613,10 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info(:run_poll_cycle, %{poll_check_in_progress: true} = state), do: {:noreply, state}
+  defp transition_info(:run_poll_cycle, %{poll_check_in_progress: true} = state),
+    do: {:noreply, state}
 
-  def handle_info(:run_poll_cycle, state) do
+  defp transition_info(:run_poll_cycle, state) do
     parent = self()
     poll_token = make_ref()
     state = %{state | stall_timeout_ms: state.stall_timeout_base_ms}
@@ -1116,10 +1652,10 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info(
-        {:poll_plan, poll_token, result},
-        %{poll_check_in_progress: true, poll_token: poll_token} = state
-      ) do
+  defp transition_info(
+         {:poll_plan, poll_token, result},
+         %{poll_check_in_progress: true, poll_token: poll_token} = state
+       ) do
     case result do
       {:ok, %{stores: stores, discovery_plan: discovery_plan}} ->
         if stores != state.felt_stores do
@@ -1185,10 +1721,10 @@ defmodule Shuttle.Poller do
   # :dispatch, a claim, a :worker_exited) is already reflected
   # and is simply respected by the re-validating apply, never clobbered by a
   # stale snapshot.
-  def handle_info(
-        {:poll_world, poll_token, result},
-        %{poll_check_in_progress: true, poll_token: poll_token} = state
-      ) do
+  defp transition_info(
+         {:poll_world, poll_token, result},
+         %{poll_check_in_progress: true, poll_token: poll_token} = state
+       ) do
     applied =
       case result do
         {:ok, world} ->
@@ -1214,14 +1750,14 @@ defmodule Shuttle.Poller do
   # A slow read no longer owns the poller's clock forever. Reap its supervised,
   # unlinked task first, then advance with a fresh cycle token. The phase
   # reference keeps an already-queued timeout from an earlier phase inert.
-  def handle_info(
-        {:poll_stalled, poll_token, phase_ref},
-        %{
-          poll_check_in_progress: true,
-          poll_token: poll_token,
-          poll_stall_phase_ref: phase_ref
-        } = state
-      ) do
+  defp transition_info(
+         {:poll_stalled, poll_token, phase_ref},
+         %{
+           poll_check_in_progress: true,
+           poll_token: poll_token,
+           poll_stall_phase_ref: phase_ref
+         } = state
+       ) do
     Logger.error("Poll cycle stalled after #{state.stall_timeout_ms}ms; advancing poller")
 
     state =
@@ -1241,22 +1777,22 @@ defmodule Shuttle.Poller do
   # Replies from an abandoned cycle (including a timer or task message racing
   # the next cycle) are inert. Matching the token is the single-flight fence;
   # without it, a late world could overwrite current state and re-arm the tick.
-  def handle_info({:poll_plan, _poll_token, _result}, state), do: {:noreply, state}
-  def handle_info({:poll_world, _poll_token, _result}, state), do: {:noreply, state}
-  def handle_info({:poll_stalled, _poll_token, _phase_ref}, state), do: {:noreply, state}
-  def handle_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
+  defp transition_info({:poll_plan, _poll_token, _result}, state), do: {:noreply, state}
+  defp transition_info({:poll_world, _poll_token, _result}, state), do: {:noreply, state}
+  defp transition_info({:poll_stalled, _poll_token, _phase_ref}, state), do: {:noreply, state}
+  defp transition_info({:poll_stalled, _poll_token}, state), do: {:noreply, state}
 
-  def handle_info({:worker_exited, _, _, _, _}, %{reconciliation_hold: hold} = state)
-      when not is_nil(hold), do: {:noreply, state}
+  defp transition_info({:worker_exited, _, _, _, _}, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold), do: {:noreply, state}
 
-  def handle_info({:worker_exited, fiber_id, watcher, session, _reason}, state) do
+  defp transition_info({:worker_exited, fiber_id, watcher, session, _reason}, state) do
     case running_worker(state, fiber_id) do
       %{pid: ^watcher, session: ^session} -> {:noreply, handle_worker_exit(state, fiber_id)}
       _ -> {:noreply, state}
     end
   end
 
-  def handle_info({:app_worker_missing, fiber_id, session}, state) do
+  defp transition_info({:app_worker_missing, fiber_id, session}, state) do
     case running_key(state, fiber_id) do
       nil ->
         {:noreply, state}
@@ -1276,23 +1812,32 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_info({:pending_results, counts}, state) when is_map(counts),
+  defp transition_info({:app_worker_observed, fiber_id, session}, state) do
+    case running_worker(state, fiber_id) do
+      %{session: ^session} ->
+        {:noreply, %{state | worker_observation_seq: state.worker_observation_seq + 1}}
+
+      _ ->
+        {:noreply, state}
+    end
+  end
+
+  defp transition_info({:pending_results, counts}, state) when is_map(counts),
     do: {:noreply, %{state | pending_results: counts}}
 
-  def handle_info({:fleet, fleet}, state) when is_map(fleet),
+  defp transition_info({:fleet, fleet}, state) when is_map(fleet),
     do: {:noreply, %{state | fleet: fleet}}
 
-  def handle_info(msg, state) do
+  defp transition_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")
     {:noreply, state}
   end
 
-  @impl true
-  def handle_call(:snapshot, _from, state) do
+  defp transition_call(:snapshot, _from, state) do
     {:reply, add_poll_health(Snapshot.build_snapshot(state), state), state}
   end
 
-  def handle_call(:cpu_memory_measurements, _from, %State{} = state) do
+  defp transition_call(:cpu_memory_measurements, _from, %State{} = state) do
     measurement_started_at = System.monotonic_time(:microsecond)
     word_size_bytes = :erlang.system_info(:wordsize)
     state_words = :erts_debug.flat_size(state)
@@ -1342,13 +1887,13 @@ defmodule Shuttle.Poller do
     {:reply, measurements, state}
   end
 
-  def handle_call(:thread_inputs, _from, %State{document_cache_ready: false} = state),
+  defp transition_call(:thread_inputs, _from, %State{document_cache_ready: false} = state),
     do: {:reply, {:error, :cold}, state}
 
-  def handle_call(:thread_inputs, _from, state),
+  defp transition_call(:thread_inputs, _from, state),
     do: {:reply, {:ok, cached_thread_inputs(state)}, state}
 
-  def handle_call(:fiber_stores, _from, state) do
+  defp transition_call(:fiber_stores, _from, state) do
     stores =
       for {_key, %{entry: %{fiber: %{"uid" => uid}, felt_store: store}}} <- state.document_cache,
           is_binary(uid),
@@ -1358,11 +1903,11 @@ defmodule Shuttle.Poller do
     {:reply, stores, state}
   end
 
-  def handle_call(:parked_index, _from, state) do
+  defp transition_call(:parked_index, _from, state) do
     {:reply, Snapshot.parked_index(state.parked_launches), state}
   end
 
-  def handle_call({:cached_fiber_documents, opts}, _from, state) do
+  defp transition_call({:cached_fiber_documents, opts}, _from, state) do
     # Serve-from-cache-ALWAYS: this reply is a pure read of GenServer state, so
     # it never blocks on the filesystem. A cold cache (before the first poll
     # warms it) returns an empty feed with `cache.state == "cold"` rather than an
@@ -1389,15 +1934,6 @@ defmodule Shuttle.Poller do
          |> stamp_runtime(state.running, state.task_reads)
          |> stamp_pending_results(state), state}
       else
-        # Log once per cold period, not once per (5s-cadence) request.
-        state =
-          if state.cold_feed_logged do
-            state
-          else
-            Logger.info("owner feed served from COLD document cache (poll not yet warmed)")
-            %{state | cold_feed_logged: true}
-          end
-
         {[], state}
       end
 
@@ -1406,7 +1942,7 @@ defmodule Shuttle.Poller do
     {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
   end
 
-  def handle_call({:refresh_document, fiber_id}, _from, state) do
+  defp transition_call({:refresh_document, fiber_id}, _from, state) do
     # A cold cache means no poll has populated it yet; the first poll will read
     # disk fresh, so there is nothing to patch. Once warm, re-read this one fiber.
     if state.document_cache_ready do
@@ -1416,7 +1952,7 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_call({:session_uuid, fiber_id}, _from, state) do
+  defp transition_call({:session_uuid, fiber_id}, _from, state) do
     worker = running_worker(state, fiber_id)
     {:reply, worker_session_uuid(worker, cached_fiber(state, fiber_id)), state}
   end
@@ -1424,7 +1960,7 @@ defmodule Shuttle.Poller do
   # The address and epoch the receiver record committed. Delivery uses that
   # address rather than re-resolving one from the registry, so a registry
   # entry vanishing under a live worker cannot make its own epoch superseded.
-  def handle_call({:context_receiver, fiber_id}, _from, state) do
+  defp transition_call({:context_receiver, fiber_id}, _from, state) do
     reply =
       case running_worker(state, fiber_id) do
         nil ->
@@ -1441,7 +1977,7 @@ defmodule Shuttle.Poller do
     {:reply, reply, state}
   end
 
-  def handle_call({:live_worker, fiber_id}, _from, state) do
+  defp transition_call({:live_worker, fiber_id}, _from, state) do
     reply =
       case running_worker(state, fiber_id) do
         nil ->
@@ -1466,16 +2002,16 @@ defmodule Shuttle.Poller do
     {:reply, reply, state}
   end
 
-  def handle_call({:worker_status, fiber_id}, _from, state) do
+  defp transition_call({:worker_status, fiber_id}, _from, state) do
     # `running_worker` resolves a uid or slug input through `running_key`'s scan.
     {:reply, running_worker(state, fiber_id), state}
   end
 
-  def handle_call({:migrate, _, _, _}, _from, %{reconciliation_hold: hold} = state)
-      when not is_nil(hold),
-      do: {:reply, {:error, :reconciliation_required}, state}
+  defp transition_call({:migrate, _, _, _}, _from, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold),
+       do: {:reply, {:error, :reconciliation_required}, state}
 
-  def handle_call({:migrate, from_id, to_id, opts}, _from, state) do
+  defp transition_call({:migrate, from_id, to_id, opts}, _from, state) do
     case Shuttle.Migration.prepare(state, from_id, to_id, opts) do
       {:retry, reply} ->
         {:reply, {:ok, reply}, state}
@@ -1498,11 +2034,11 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_call({:claim_session, _, _, _}, _from, %{reconciliation_hold: hold} = state)
-      when not is_nil(hold),
-      do: {:reply, {:error, :reconciliation_required}, state}
+  defp transition_call({:claim_session, _, _, _}, _from, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold),
+       do: {:reply, {:error, :reconciliation_required}, state}
 
-  def handle_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
+  defp transition_call({:claim_session, fiber_id, tmux_session, opts}, _from, state) do
     {runtime_key, slug} = resolve_identity(state, fiber_id)
     uid = resolved_uid(state, slug, runtime_key)
 
@@ -1526,16 +2062,16 @@ defmodule Shuttle.Poller do
     {:reply, reply, state}
   end
 
-  def handle_call({:kill_session, fiber_id}, _from, state) do
+  defp transition_call({:kill_session, fiber_id}, _from, state) do
     {reply, state} = stop_tracked_worker(state, fiber_id)
     {:reply, reply, state}
   end
 
-  def handle_call({:capture, _, _}, _from, %{reconciliation_hold: hold} = state)
-      when not is_nil(hold),
-      do: {:reply, {:error, :reconciliation_required}, state}
+  defp transition_call({:capture, _, _}, _from, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold),
+       do: {:reply, {:error, :reconciliation_required}, state}
 
-  def handle_call({:capture, yap, opts}, _from, state) do
+  defp transition_call({:capture, yap, opts}, _from, state) do
     felt_store = Keyword.get(opts, :felt_store) || List.first(state.felt_stores)
 
     # Guard rather than fetch!: a malformed call (or no configured store) must
@@ -1567,22 +2103,22 @@ defmodule Shuttle.Poller do
     end
   end
 
-  def handle_call({:dispatch, _, _}, _from, %{reconciliation_hold: hold} = state)
-      when not is_nil(hold),
-      do: {:reply, {:error, :reconciliation_required}, state}
+  defp transition_call({:dispatch, _, _}, _from, %{reconciliation_hold: hold} = state)
+       when not is_nil(hold),
+       do: {:reply, {:error, :reconciliation_required}, state}
 
-  def handle_call({:dispatch, fiber_id, opts}, _from, state) do
+  defp transition_call({:dispatch, fiber_id, opts}, _from, state) do
     case fetch_request_fiber(fiber_id, state) do
       {:ok, _} -> dispatch_request(state, fiber_id, opts)
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
-  def handle_call({:sync_missing_stores, stores}, _from, state) do
+  defp transition_call({:sync_missing_stores, stores}, _from, state) do
     {:reply, Shuttle.StoreSync.sync(stores), state}
   end
 
-  def handle_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
+  defp transition_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
     {_runtime_key, slug} = resolve_identity(state, fiber_id)
 
     result =
@@ -1617,15 +2153,15 @@ defmodule Shuttle.Poller do
     {:reply, result, state}
   end
 
-  def handle_call(:orchestrator_state, _from, state) do
+  defp transition_call(:orchestrator_state, _from, state) do
     {:reply, add_poll_health(Snapshot.build_full_state(state), state), state}
   end
 
-  def handle_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
+  defp transition_call(:release_boot_quarantine, _from, %{boot_quarantine: false} = state) do
     {:reply, :ok, state}
   end
 
-  def handle_call(:release_boot_quarantine, _from, state) do
+  defp transition_call(:release_boot_quarantine, _from, state) do
     Logger.info("boot quarantine released; fresh dispatch resumes on the next tick")
     state = record_daemon_heartbeat(%{state | boot_quarantine: false, parked_launches: %{}})
 
@@ -1905,9 +2441,6 @@ defmodule Shuttle.Poller do
         document_cache_last_refresh_ms: document_cache_refresh_ms,
         document_cache_partial: not listings_ok?,
         task_reads: Map.get(world, :task_reads, state.task_reads),
-        # Ready is (re)established this tick: re-arm the cold-serve log guard so a
-        # future cold period (only reachable in tests) logs once again.
-        cold_feed_logged: false,
         standing_roles: standing_roles,
         dispatch_failures: evict_stale_by_candidates(state.dispatch_failures, candidates),
         resume_loop: evict_stale_by_candidates(state.resume_loop, candidates)
@@ -2629,27 +3162,59 @@ defmodule Shuttle.Poller do
   defp refresh_worker_document(state, fiber_id) do
     case fetch_fiber_full(fiber_id, state) do
       {:ok, fiber} ->
-        cache =
-          Map.new(state.document_cache, fn {key, cached} ->
+        {cache, found?} =
+          Enum.reduce(state.document_cache, {%{}, false}, fn {key, cached}, {cache, found?} ->
             previous = cached.entry.fiber
 
             if fiber_id in [previous["id"], previous["uid"], previous["slug"]] do
               case Shuttle.FiberDocuments.entries_for_fiber(cached.entry.felt_store, fiber) do
                 [entry | _] ->
-                  {key, %{cached | entry: entry, modified_at: entry.fiber["modified_at"]}}
+                  {Map.put(cache, key, %{
+                     cached
+                     | entry: entry,
+                       modified_at: entry.fiber["modified_at"]
+                   }), true}
 
                 [] ->
-                  {key, cached}
+                  {Map.put(cache, key, cached), found?}
               end
             else
-              {key, cached}
+              {Map.put(cache, key, cached), found?}
             end
           end)
+
+        cache =
+          if found? do
+            cache
+          else
+            store = owning_store(fiber_id, state)
+
+            case Shuttle.FiberDocuments.entries_for_fiber(store, fiber) do
+              [entry | _] ->
+                key = Shuttle.Poller.DocumentCache.cache_key(entry.fiber)
+                Map.put(cache, key, %{modified_at: entry.fiber["modified_at"], entry: entry})
+
+              [] ->
+                cache
+            end
+          end
 
         install_document_cache(state, cache)
 
       {:error, _} ->
         state
+    end
+  end
+
+  defp consume_dispatched_identity(state, fiber_id, identity_token) do
+    receive do
+      {:dispatched_identity, ^fiber_id, ^identity_token, uuid} ->
+        {:noreply, state} =
+          transition_info({:dispatched_identity, fiber_id, identity_token, uuid}, state)
+
+        state
+    after
+      0 -> state
     end
   end
 
@@ -2683,15 +3248,7 @@ defmodule Shuttle.Poller do
     # Commit observed lifecycle signals before scheduling fallible delivery.
     Shuttle.Threads.capture_results(entries, own_host)
     callers = Shuttle.Env.callers()
-    poller = self()
-
-    Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-      Shuttle.Env.adopt_callers(callers)
-      Shuttle.Threads.deliver_results(entries, own_host)
-      # Counted after delivery, so what a live worker just took is not.
-      send(poller, {:pending_results, Shuttle.Threads.pending_results(entries, own_host)})
-    end)
-
+    send(self(), {:deliver_thread_results, entries, own_host, callers})
     state
   end
 
@@ -3674,7 +4231,12 @@ defmodule Shuttle.Poller do
 
         case register_running(state, fiber_id, runtime_key, running_meta) do
           {:ok, state} ->
-            {refresh_worker_document(state, fiber_id), {:ok, session}}
+            state =
+              state
+              |> refresh_worker_document(fiber_id)
+              |> consume_dispatched_identity(fiber_id, identity_token)
+
+            {state, {:ok, session}}
 
           {:error, reason} ->
             # Watcher start failed: the worker may be alive in tmux. Record the
@@ -4924,6 +5486,7 @@ defmodule Shuttle.Poller do
       fiber_id: fiber_id,
       session: session,
       agent_id: agent_id,
+      context_harness: worker_cli(nil, fiber),
       # Keep the office snapshot with the worker across identity retries and
       # session succession; document edits do not change this run's provenance.
       role: get_in(fiber, ["shuttle", "role"]),

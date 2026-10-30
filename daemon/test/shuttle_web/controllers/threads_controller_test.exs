@@ -48,15 +48,35 @@ defmodule ShuttleWeb.ThreadsControllerTest do
   defp warm!(entries, running) do
     cache = Map.new(entries, &{&1.fiber["uid"], %{modified_at: nil, entry: &1}})
 
-    :sys.replace_state(quiet_poller!(), fn state ->
+    poller = quiet_poller!()
+
+    :sys.replace_state(poller, fn state ->
       %{
         state
         | document_cache_ready: true,
           document_cache: cache,
           document_fiber_index: Shuttle.Poller.DocumentCache.index(cache),
-          running: Map.new(running, &{&1, %{}})
+          running:
+            Map.new(running, fn id ->
+              now = DateTime.utc_now()
+
+              {id,
+               %{
+                 pid: nil,
+                 session: "thread-test",
+                 agent_id: nil,
+                 started_at: now,
+                 last_activity_at: now
+               }}
+            end)
       }
     end)
+
+    # `:sys.replace_state/2` changes the GenServer fixture without running the
+    # normal transition wrapper, so use an actual callback as a publication
+    # barrier before exercising the mailbox-free controller reader.
+    GenServer.call(poller, :orchestrator_state)
+    poller
   end
 
   test "a constitution's threads, by address or uid, live from the poller's workers" do
@@ -93,7 +113,9 @@ defmodule ShuttleWeb.ThreadsControllerTest do
     assert %{"error" => "poller_unavailable"} =
              get(api_conn(), "/api/v1/threads/hub") |> json_response(503)
 
-    :sys.replace_state(quiet_poller!(), &%{&1 | document_cache_ready: false})
+    poller = quiet_poller!()
+    :sys.replace_state(poller, &%{&1 | document_cache_ready: false})
+    GenServer.call(poller, :orchestrator_state)
 
     assert %{"error" => "cold"} = get(api_conn(), "/api/v1/threads/hub") |> json_response(503)
   end

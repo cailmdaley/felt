@@ -75,7 +75,8 @@ defmodule Shuttle.WorkerWatcher do
       heartbeat_interval_ms: heartbeat_interval,
       max_consecutive_failures: max_consecutive_failures,
       consecutive_failures: 0,
-      heartbeat_timer_ref: nil
+      heartbeat_timer_ref: nil,
+      app_projection: app_worker_projection(Shuttle.AppWorkers.id(session))
     }
 
     # On init, check if the session exists. `:gone` (confirmed absent) is the
@@ -100,13 +101,14 @@ defmodule Shuttle.WorkerWatcher do
        state
        | fiber_id: fiber_id,
          session: session,
-         consecutive_failures: 0
+         consecutive_failures: 0,
+         app_projection: app_worker_projection(Shuttle.AppWorkers.id(session))
      }}
   end
 
   @impl true
   def handle_info(:heartbeat, state) do
-    observe_app(state)
+    state = observe_app(state)
 
     case check_session(state) do
       :alive ->
@@ -152,17 +154,51 @@ defmodule Shuttle.WorkerWatcher do
   # ── Internal ──
 
   defp observe_app(state) do
+    id = Shuttle.AppWorkers.id(state.session)
+
     case Shuttle.WorkerBackend.observe(state.session) do
       :missing ->
-        try do
-          send(state.poller, {:app_worker_missing, state.fiber_id, state.session})
-        rescue
-          ArgumentError -> :ok
-        end
+        notify_poller_message(state, {:app_worker_missing, state.fiber_id, state.session})
 
       _ ->
         :ok
     end
+
+    projection = app_worker_projection(id)
+
+    if state.app_projection != projection and projection != nil do
+      notify_poller_message(state, {:app_worker_observed, state.fiber_id, state.session})
+    end
+
+    %{state | app_projection: projection}
+  end
+
+  defp app_worker_projection(id) when is_binary(id) do
+    case Shuttle.AppWorkers.get(id) do
+      {:ok, record} ->
+        Map.take(record, [
+          "launch_state",
+          "remote_phase",
+          "phase_changed_at",
+          "surface",
+          "terminal_tmux",
+          "transcript_session_uuid",
+          "project_id",
+          "terminal_error",
+          "backend_error"
+        ])
+
+      _ ->
+        nil
+    end
+  end
+
+  defp app_worker_projection(_), do: nil
+
+  defp notify_poller_message(state, message) do
+    send(state.poller, message)
+  rescue
+    ArgumentError -> :ok
   end
 
   defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.session)

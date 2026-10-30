@@ -52,6 +52,7 @@ defmodule ShuttleWeb.ThreadsController do
     case Shuttle.Poller.thread_inputs() do
       {:ok, _} = ok -> ok
       {:error, :cold} -> {:error, "cold"}
+      {:error, :unavailable} -> {:error, "poller_unavailable"}
     end
   catch
     :exit, _ -> {:error, "poller_unavailable"}

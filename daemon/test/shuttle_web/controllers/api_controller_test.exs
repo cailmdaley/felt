@@ -107,6 +107,14 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["dispatched"] == true
     assert body["fiber_id"] == "tests/api-dispatch"
     assert body["tmux_session"] == FiberUid.session("tests/api-dispatch")
+
+    assert %{session: session} =
+             Poller.live_worker(Shuttle.Env.server(Poller), "tests/api-dispatch")
+
+    assert session == body["tmux_session"]
+
+    state = get(api_conn(), "/api/v1/state") |> Map.fetch!(:resp_body) |> Jason.decode!()
+    assert Enum.any?(state["eligible"], &(&1["fiber_id"] == "tests/api-dispatch"))
   end
 
   test "dispatch returns 409 for already running fiber" do
@@ -840,6 +848,7 @@ defmodule ShuttleWeb.APIControllerTest do
 
     conn = get(api_conn(), "/api/v1/state")
     assert conn.status == 200
+    assert Plug.Conn.get_resp_header(conn, "content-type") == ["application/json; charset=utf-8"]
     body = Jason.decode!(conn.resp_body)
     assert body["host"] != nil
     assert is_list(body["eligible"])
@@ -850,6 +859,23 @@ defmodule ShuttleWeb.APIControllerTest do
     # build" out of the one fetch it already makes, instead of a `/version`
     # round trip per host — so it is part of this body's shape, not an extra.
     assert body["build"] == Jason.decode!(Jason.encode!(Shuttle.BuildStamp.stamp()))
+    [etag] = Plug.Conn.get_resp_header(conn, "etag")
+    [generation] = Plug.Conn.get_resp_header(conn, "x-state-generation")
+
+    unchanged =
+      get(api_conn() |> Plug.Conn.put_req_header("if-none-match", etag), "/api/v1/state")
+
+    assert unchanged.status == 304
+    assert unchanged.resp_body == ""
+    assert Plug.Conn.get_resp_header(unchanged, "x-state-generation") == [generation]
+
+    later_match =
+      get(
+        api_conn() |> Plug.Conn.put_req_header("if-none-match", ~s(W/"older", #{etag})),
+        "/api/v1/state"
+      )
+
+    assert later_match.status == 304
 
     # Slice 7: no separate `:runtime` index. Liveness rides the `eligible` rows
     # — each carries the intrinsic uid, the live tmux session, and run state, so
@@ -869,19 +895,53 @@ defmodule ShuttleWeb.APIControllerTest do
            ] = body["eligible"]
   end
 
-  test "state degrades to JSON when the poller is unavailable" do
-    shrink_state_timeout()
-    :sys.suspend(Shuttle.Env.server(Shuttle.Poller))
+  test "state and delivery reads use the publication while the poller is suspended" do
+    poller = Shuttle.Env.server(Shuttle.Poller)
+    fiber_id = "tests/suspended-state-read"
+    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id))
+    MockRunner.set_shuttle(fiber_id, oneshot_shuttle())
+    assert {:ok, _session} = Poller.dispatch_fiber(poller, fiber_id, [])
+    :sys.suspend(poller)
 
     try do
-      conn = get(api_conn(), "/api/v1/state")
-      assert conn.status == 503
-      body = Jason.decode!(conn.resp_body)
-      assert body["error"] == "poller_unavailable"
-      assert is_binary(body["host"])
-      assert is_list(body["running_detail"])
+      assert [%{fiber_id: ^fiber_id}] = Poller.snapshot(poller).eligible
+      assert %{session: session} = Poller.live_worker(poller, fiber_id)
+      assert String.ends_with?(session, "-shuttle")
+      worker = Poller.worker_status(poller, fiber_id)
+      assert worker
+
+      assert Poller.session_uuid(poller, fiber_id) ==
+               Poller.session_uuid(poller, Poller.metadata_uid(worker))
+
+      assert {:ok, address, epoch} = Poller.context_receiver(poller, fiber_id)
+      assert address =~ "shuttle://"
+      assert is_integer(epoch)
+      assert {:ok, _} = Poller.cached_fiber_documents(poller)
+      assert {:ok, {_, _, _}} = Poller.thread_inputs(poller)
+      assert is_map(Poller.fiber_stores(poller))
+      assert is_map(Poller.parked_index(poller))
+      assert is_map(Poller.orchestrator_state(poller, 0))
+
+      assert {:command_error, 1, _} =
+               Shuttle.Delivery.flush_context(%{
+                 fiber: %{"id" => fiber_id, "uid" => Poller.metadata_uid(worker)},
+                 felt_store: MockRunner.felt_root()
+               })
+
+      {:ok, latest} = Poller.published_state_response(poller)
+
+      conn =
+        get(
+          api_conn() |> Plug.Conn.put_req_header("if-none-match", latest.etag),
+          "/api/v1/state"
+        )
+
+      assert conn.status == 304
+      assert conn.resp_body == ""
+      [age] = Plug.Conn.get_resp_header(conn, "x-state-age-ms")
+      assert String.to_integer(age) >= 0
     after
-      :sys.resume(Shuttle.Env.server(Shuttle.Poller))
+      :sys.resume(poller)
     end
   end
 
@@ -980,15 +1040,15 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["remotes"] == %{}
   end
 
-  test "composite degrades local snapshot when the poller is unavailable" do
-    shrink_state_timeout()
+  test "composite serves the last local snapshot while the poller is suspended" do
     :sys.suspend(Shuttle.Env.server(Shuttle.Poller))
 
     try do
       conn = get(api_conn(), "/api/v1/state/composite")
       assert conn.status == 200
       body = Jason.decode!(conn.resp_body)
-      assert body["local"]["error"] == "poller_unavailable"
+      assert is_binary(body["local"]["host"])
+      refute Map.has_key?(body["local"], "error")
       assert body["remotes"] == %{}
     after
       :sys.resume(Shuttle.Env.server(Shuttle.Poller))
@@ -1014,6 +1074,11 @@ defmodule ShuttleWeb.APIControllerTest do
     assert body["mix_vsn"] == Shuttle.version()
     assert is_boolean(body["tailnet_dial"]["configured"])
     assert is_list(body["tailnet_dial"]["bridges"])
+    assert is_integer(body["poller_publication"]["publish_count"])
+    assert is_integer(body["poller_publication"]["state_request_count"])
+    assert is_integer(body["poller_publication"]["generation"])
+    assert is_integer(body["poller_publication"]["encode_us"])
+    assert is_integer(body["poller_publication"]["total_publish_us"])
 
     if body["git_sha"] != "unknown" do
       assert String.length(body["git_short_sha"]) == 7
