@@ -87,6 +87,58 @@ defmodule Shuttle.Rex do
     end
   end
 
+  @doc "Fork a detached auxiliary command under Rex Server's privacy attribution."
+  def run_background(argv, runner) do
+    with :ok <- Shuttle.Terminal.Rex.ensure_ready(runner),
+         executable when is_binary(executable) <- bin() do
+      # Rex keeps empty sessions. Only this newly created session is removed;
+      # a matching display label is never permission to reuse or destroy one.
+      cleanup =
+        Enum.map_join([executable] ++ flags(), " ", &quote_sh/1) <>
+          " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
+
+      exports =
+        Enum.map_join(~w(PATH SSH_AUTH_SOCK), "", fn key ->
+          case Env.get(key) do
+            nil -> "unset #{key}\n"
+            value -> "export #{key}=#{quote_sh(value)}\n"
+          end
+        end)
+
+      command = [
+        "/usr/bin/env",
+        "-u",
+        "REX_SESSION",
+        "-u",
+        "REX_BLOCK",
+        "-u",
+        "REX_CLIENT" | argv
+      ]
+
+      script =
+        "unset TMUX TMUX_PANE\n" <>
+          exports <>
+          "trap #{quote_sh(cleanup)} EXIT\n" <> Enum.map_join(command, " ", &quote_sh/1) <> "\n"
+
+      spec =
+        Shuttle.Terminal.Rex.create_spec("shuttle-tmux-anchor@rex", Env.home(), "")
+        |> put_in(["initial_windows", Access.at(0), "layout", "block", "options", "command"], [
+          "/bin/bash",
+          "-c",
+          script
+        ])
+
+      case create(runner, spec) do
+        {:ok, %{"session_id" => "session:" <> _}} -> :ok
+        error -> {:error, "Rex background launch failed: #{inspect(error)}"}
+      end
+    else
+      error -> {:error, "Rex background launch unavailable: #{inspect(error)}"}
+    end
+  end
+
+  defp quote_sh(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
+
   def whoami(runner), do: json_command(runner, ["whoami", "--json"])
 
   def sessions(runner),

@@ -93,6 +93,39 @@ defmodule Shuttle.Terminal.RexRealTest do
     assert bindings == %{}
   end
 
+  @tag skip: is_nil(Shuttle.Env.find_executable("tmux"))
+  test "a Rex background anchor outlives its launcher with no Rex identity in tmux", %{root: root} do
+    tmux = Shuttle.Env.find_executable("tmux")
+    socket = Path.join(root, "anchor.sock")
+    receipt = Path.join(root, "anchor-env")
+
+    argv = [
+      tmux,
+      "-S",
+      socket,
+      "new-session",
+      "-d",
+      "-s",
+      "probe-anchor",
+      "--",
+      "/bin/sh",
+      "-c",
+      "printf '%s\\n' \"${REX_SESSION-unset}\" \"${REX_BLOCK-unset}\" \"${REX_CLIENT-unset}\" > '#{receipt}'; exec sleep 60"
+    ]
+
+    on_exit(fn -> System.cmd(tmux, ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+    assert :ok = Rex.run_background(argv, @runner)
+    await(fn -> File.exists?(receipt) end)
+    assert File.read!(receipt) == "unset\nunset\nunset\n"
+    await(fn -> Rex.sessions(@runner) == {:ok, []} end)
+
+    assert {"probe-anchor\n", 0} =
+             System.cmd(tmux, ["-S", socket, "ls", "-F", "\#{session_name}"])
+
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert bindings == %{}
+  end
+
   test "unbound viewers dedupe while live and destroy their own empty sessions on exit", %{
     root: root
   } do

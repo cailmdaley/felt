@@ -17,11 +17,10 @@ defmodule Shuttle.TmuxServer do
   The fix is not to route dispatch through something else — `tmux new-session`'s
   exit status is the dispatch's ground truth and must stay so. The fix is to
   make sure a tmux server ALREADY EXISTS, forked by an app the human can grant,
-  before the daemon ever runs `new-session`. The daemon already remote-controls
-  kitty (`Shuttle.Kitty`), so it asks kitty to fork the server: `kitty @ launch
-  --type=background` runs a command as a child of kitty, with no window, and TCC
-  then charges kitty — an app the human grants once (files, microphone, system
-  audio).
+  before the daemon ever runs `new-session`. On tmux-primary hosts kitty forks
+  it through a background command. On Rex-primary hosts Rex Server forks it
+  through a short-lived block. The server retains that app's resource coalition
+  after the launcher exits; the human grants that app access once.
 
   "Charges kitty" holds only for a kitty that is its own responsible app. TCC
   follows the launchd resource coalition, and a kitty started by another app's
@@ -36,9 +35,9 @@ defmodule Shuttle.TmuxServer do
 
     * a server is present (or its presence can't be determined) → `:ok`,
       dispatch proceeds untouched
-    * no server, a self-rooted kitty reachable or startable → it forks an
+    * no server, the selected app reachable or startable → it forks an
       anchor session, we wait for the socket, disarm `exit-empty`, then `:ok`
-    * no server, no such kitty → dispatch is **REFUSED** with an
+    * no server, no such app → dispatch is **REFUSED** with an
       operator-facing message. The daemon never quietly starts the server
       itself; a silent success here is exactly the state that poisons a whole
       day of workers with permission prompts.
@@ -55,7 +54,7 @@ defmodule Shuttle.TmuxServer do
   requires root) prints the process's resource coalition, whose `name` is the
   launchd label or app bundle that rooted the tree — exactly the attribution TCC
   charges file access to. A coalition of `io.shuttle.daemon` is a daemon-born
-  server, kitty's is the intended one, and any other app's is reported as a
+  server; kitty's or Rex Server's is intended. Any other app's is reported as a
   warning by `shuttle doctor`. See `internal/shuttlecli/tmux_origin.go`; nothing
   in this module needs to stamp or read a marker.
   """
@@ -64,14 +63,14 @@ defmodule Shuttle.TmuxServer do
 
   @type presence :: :present | :absent | :unknown
 
-  # The session kitty starts to hold a fresh server alive. It deliberately does
+  # The session the terminal app starts to hold a fresh server alive. It does
   # NOT end in `-shuttle`, so every "is this a worker?" predicate in the system
   # (`Shuttle.Dispatcher.shuttle_session?/1`, the poller's
   # `list_shuttle_sessions/1`, Go's `isShuttleTmuxSessionName`) ignores it.
   @anchor "shuttle-anchor"
 
-  # Poll budget for the server appearing after kitty forks it. Generous enough
-  # for a cold `kitty @ launch` round trip, short enough that a dispatch tick
+  # Poll budget for the server appearing after the app forks it. Generous enough
+  # for the background launch round trip, short enough that a dispatch tick
   # never stalls on it.
   @await_budget_ms 3_000
   @await_interval_ms 100
@@ -80,8 +79,8 @@ defmodule Shuttle.TmuxServer do
   Ensures this host has a tmux server the daemon did not fork.
 
   `:ok` on every non-darwin host, and on darwin whenever a server is present or
-  its presence is uncertain. Otherwise asks kitty to fork one; a kitty failure
-  or a server that never appears is `{:error, {:tmux_server_unavailable,
+  its presence is uncertain. Otherwise asks the selected app to fork one.
+  A launcher failure or a server that never appears is `{:error, {:tmux_server_unavailable,
   message}}`, and the message is rendered verbatim on every failure surface.
   """
   @spec ensure_available(module()) :: :ok | {:error, {:tmux_server_unavailable, String.t()}}
@@ -112,14 +111,16 @@ defmodule Shuttle.TmuxServer do
   end
 
   defp start_server(runner) do
-    with :ok <- start_via_kitty(runner),
+    launcher = launcher()
+
+    with :ok <- start_via_app(runner, launcher),
          :ok <- await_server(runner, @await_budget_ms) do
       disarm_exit_empty(runner)
-      Logger.info("Started a tmux server via kitty (anchor session #{@anchor})")
+      Logger.info("Started a tmux server via #{launcher} (anchor session #{@anchor})")
       :ok
     else
       {:error, reason} -> refuse(reason)
-      :timeout -> refuse("kitty accepted the command but no tmux server appeared")
+      :timeout -> refuse("#{launcher} accepted the command but no tmux server appeared")
     end
   end
 
@@ -144,29 +145,41 @@ defmodule Shuttle.TmuxServer do
     end
   end
 
-  # Asks kitty to fork a tmux server holding an anchor session.
+  defp launcher do
+    if Shuttle.Terminal.primary() == Shuttle.Terminal.Rex, do: :rex, else: :kitty
+  end
+
+  defp start_via_app(runner, :rex) do
+    case Shuttle.Env.find_executable("tmux") do
+      nil ->
+        {:error, "tmux executable not found for the Rex anchor"}
+
+      executable ->
+        Shuttle.Env.app(:rex_impl, Shuttle.Rex).run_background(anchor_command(executable), runner)
+    end
+  end
+
+  defp start_via_app(runner, :kitty),
+    do: kitty_impl().run_background(anchor_command("tmux"), runner)
+
+  # Asks the terminal app to fork a tmux server holding an anchor session.
   #
   # `tmux start-server` alone is useless here: it exits 0 and the server
   # immediately dies to `exit-empty` (verified). The server needs one session to
   # hold it up, and the anchor's payload is an effectively-infinite sleep rather
   # than a shell, so nothing is attached to it and nothing can wander off.
-  @spec start_via_kitty(module()) :: :ok | {:error, String.t()}
-  defp start_via_kitty(runner) do
-    kitty_impl().run_background(
-      [
-        "tmux",
-        "new-session",
-        "-d",
-        "-s",
-        @anchor,
-        "--",
-        "sh",
-        "-c",
-        "exec sleep 2147483647"
-      ],
-      runner
-    )
-  end
+  defp anchor_command(executable),
+    do: [
+      executable,
+      "new-session",
+      "-d",
+      "-s",
+      @anchor,
+      "--",
+      "sh",
+      "-c",
+      "exec sleep 2147483647"
+    ]
 
   # Polls `presence/1` until a server answers, or `budget_ms` elapses.
   @spec await_server(module(), non_neg_integer()) :: :ok | :timeout
@@ -217,7 +230,19 @@ defmodule Shuttle.TmuxServer do
   is a stream of "erlexec" permission prompts, which names nothing they own.
   """
   @spec refusal_message(String.t()) :: String.t()
-  def refusal_message(kitty_error) do
+  def refusal_message(error) do
+    refusal_message(error, launcher())
+  end
+
+  defp refusal_message(error, :rex) do
+    "No tmux server is running on this machine, and Shuttle could not ask Rex to start one " <>
+      "(#{error}). On macOS the daemon must never start the tmux server itself: macOS privacy " <>
+      "would charge its processes to the daemon binary and raise erlexec access prompts. " <>
+      "Open Rex, grant Rex Server Full Disk Access (and microphone access for meetings), " <>
+      "then retry. The auxiliary tmux server must be rooted by Rex Server."
+  end
+
+  defp refusal_message(kitty_error, :kitty) do
     "No tmux server is running on this machine, and Shuttle could not ask kitty to start one " <>
       "(#{kitty_error}). On macOS the daemon must never start the tmux server itself: every " <>
       "process under it — the worker, its shells, its tools — would be charged to the daemon's " <>

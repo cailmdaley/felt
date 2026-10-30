@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,6 +11,100 @@ import (
 	"testing"
 	"time"
 )
+
+func TestDoctorRexReceipt(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, whoami, privacy, clients string
+		want                           receiptStatus
+		reachable, app, warning        bool
+	}{
+		{"granted", `{"rex_version":"test-version"}`, `{"services":[{"service":"full_disk_access","status":"granted"},{"service":"microphone","status":"not_determined"}]}`, `{"clients":[{"info":{"kind":"cli"}},{"info":{"kind":"app"}}]}`, receiptHealthy, true, true, false},
+		{"denied is advisory", `{"rex_version":"test-version"}`, `{"services":[{"service":"full_disk_access","status":"denied"}]}`, `{"clients":[]}`, receiptHealthy, true, false, true},
+		{"not determined is advisory", `{"rex_version":"test-version"}`, `{"services":[{"service":"full_disk_access","status":"not_determined"}]}`, `{"clients":[]}`, receiptHealthy, true, false, true},
+		{"absent", "ABSENT", `{}`, `{}`, receiptMissing, false, false, false},
+		{"transport error", "FAIL", `{}`, `{}`, receiptPartial, false, false, false},
+		{"malformed whoami", `{}`, `{}`, `{}`, receiptPartial, false, false, false},
+		{"malformed privacy", `{"rex_version":"test-version"}`, `{}`, `{"clients":[]}`, receiptPartial, true, false, true},
+		{"empty privacy", `{"rex_version":"test-version"}`, `{"services":[]}`, `{"clients":[]}`, receiptPartial, true, false, true},
+		{"malformed clients", `{"rex_version":"test-version"}`, `{"services":[{"service":"full_disk_access","status":"granted"}]}`, `{}`, receiptPartial, true, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(t.TempDir(), "rex")
+			log := filepath.Join(t.TempDir(), "calls")
+			// Reject any invocation that could autostart or select another endpoint.
+			script := "#!/bin/sh\n[ \"$1 $2 $3 $4 $5\" = '--autostart=false --timeout 5s -S unix:///doctor-test.sock' ] || exit 9\nshift 5\nprintf '%s\\n' \"$*\" >> " + shellQuote(log) + "\ncase \"$*\" in\n" +
+				"'whoami --json') reply=" + shellQuote(tc.whoami) + ";;\n" +
+				"'api call server.apple.privacy_status -') [ \"$(/bin/cat)\" = '{}' ] || exit 8; reply=" + shellQuote(tc.privacy) + ";;\n" +
+				"'client ls --json') reply=" + shellQuote(tc.clients) + ";;\n*) exit 7;;\nesac\n" +
+				"[ \"$reply\" != ABSENT ] || { echo 'server is not running' >&2; exit 4; }\n[ \"$reply\" != FAIL ] || exit 1\nprintf '%s\\n' \"$reply\"\n"
+			if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			env.Set("SHUTTLE_REX_BIN", bin)
+			env.Set("SHUTTLE_REX_SERVER", "unix:///doctor-test.sock")
+			a := newApp(env)
+			rec := a.collectRexReceipt()
+			if rec == nil || rec.Status != tc.want || rec.Reachable != tc.reachable || rec.AppClient != tc.app || (rec.Warning != "") != tc.warning {
+				t.Fatalf("Rex receipt = %+v", rec)
+			}
+			if tc.reachable && rec.Version != "test-version" {
+				t.Fatalf("missing version: %+v", rec)
+			}
+			if tc.want != receiptHealthy && rec.Repair == "" {
+				t.Fatal("failed receipt needs a repair")
+			}
+			if tc.name == "granted" && rec.Privacy["microphone"] != "not_determined" {
+				t.Fatalf("privacy services = %v", rec.Privacy)
+			}
+			var stdout bytes.Buffer
+			env.Stdout = &stdout
+			a.printRexReceipt(rec)
+			if !strings.Contains(stdout.String(), "Rex:") || (strings.Contains(stdout.String(), "warning:")) != tc.warning {
+				t.Fatalf("Rex text = %s", &stdout)
+			}
+			data, err := json.Marshal(DoctorReceipt{Rex: rec})
+			if err != nil || !strings.Contains(string(data), `"rex":{"status":`) {
+				t.Fatalf("Rex JSON: %s (%v)", data, err)
+			}
+			calls, err := os.ReadFile(log)
+			if err != nil || !strings.HasPrefix(string(calls), "whoami --json\n") {
+				t.Fatalf("read-only commands: %s (%v)", calls, err)
+			}
+		})
+	}
+}
+
+func TestDoctorOmitsRexOnTmuxHosts(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	env.Set("SHUTTLE_REX_BIN", "/must-not-run/rex")
+	if got := newApp(env).collectRexReceipt(); got != nil {
+		t.Fatalf("tmux host probed Rex: %+v", got)
+	}
+	data, err := json.Marshal(DoctorReceipt{})
+	if err != nil || strings.Contains(string(data), `"rex"`) {
+		t.Fatalf("tmux receipt includes Rex: %s (%v)", data, err)
+	}
+}
+
+func TestDoctorRexMissingBinary(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	if err := os.WriteFile(env.Getenv("SHUTTLE_HOST_CONFIG_FILE"), []byte(`{"terminal":"rex"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env.Set("SHUTTLE_REX_BIN", "/does-not-exist/rex")
+	rec := newApp(env).collectRexReceipt()
+	if rec == nil || rec.Status != receiptMissing || rec.Repair == "" || rec.Reachable {
+		t.Fatalf("missing Rex binary = %+v", rec)
+	}
+}
 
 func TestShuttleBinaryReceiptReportsShadowingAndHookResolution(t *testing.T) {
 	t.Parallel()

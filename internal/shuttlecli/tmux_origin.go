@@ -19,8 +19,8 @@ import (
 //     access data from other apps" prompts that approving does not fix. A
 //     receipt mismatch: the daemon refuses to fork the server
 //     (Shuttle.TmuxServer), so only a server it should not have made gets here.
-//   - kitty itself (`application.net.kovidgoyal.kitty.<n>.<n>`): the intended
-//     root, the app the human grants once.
+//   - kitty itself (`application.net.kovidgoyal.kitty.<n>.<n>`) or Rex Server
+//     (`com.superlogical.rex.server.<hash>`): intended roots, granted by the human.
 //   - any other app: a kitty started by another app's child process sits in
 //     that app's coalition — the Quick Access panel toggled by an Alfred or
 //     skhd hotkey is charged to the launcher — and so does a server forked
@@ -36,6 +36,7 @@ import (
 const (
 	tmuxOriginDaemonBorn = "daemon_born"
 	tmuxOriginKittyBorn  = "kitty_born"
+	tmuxOriginRexBorn    = "rex_born"
 	tmuxOriginAppBorn    = "app_born"
 	tmuxOriginUnknown    = "unknown"
 	tmuxOriginAbsent     = "absent"
@@ -133,6 +134,8 @@ func classifyCoalition(name string) string {
 		return tmuxOriginDaemonBorn
 	case strings.HasPrefix(name, "application.") && coalitionRoot(name) == kittyBundleID:
 		return tmuxOriginKittyBorn
+	case strings.HasPrefix(name, "com.superlogical.rex.server."):
+		return tmuxOriginRexBorn
 	default:
 		return tmuxOriginAppBorn
 	}
@@ -163,7 +166,7 @@ func (a *app) probeTmuxOrigin() tmuxOriginReport {
 const tmuxOriginRepair = "tmux server is charged to the Shuttle daemon (launchd coalition " + daemonLaunchdLabel + ") — macOS charges every worker's file access to the daemon binary; restart your tmux server from a terminal (kill it once no workers are live, then tmux new-session -d -s shuttle-anchor from a kitty window)"
 
 // tmuxOriginWarning is the advisory for a server rooted by an app other than
-// kitty or the daemon; "" for every other origin.
+// kitty, Rex Server or the daemon; "" for every other origin.
 func tmuxOriginWarning(report tmuxOriginReport) string {
 	if report.Origin != tmuxOriginAppBorn {
 		return ""

@@ -3,6 +3,11 @@ defmodule Shuttle.TmuxServerTest do
 
   alias Shuttle.TmuxServer
 
+  setup do
+    Shuttle.Test.Env.put_app_env(:terminal_backend, Shuttle.Terminal.Tmux)
+    :ok
+  end
+
   # ── presence/1 ──
 
   # A runner that answers per tmux subcommand and remembers every call, so both
@@ -22,8 +27,15 @@ defmodule Shuttle.TmuxServerTest do
     @impl true
     def cmd(command, args, _opts) do
       Agent.get_and_update(__MODULE__, fn state ->
-        {Map.get(state.replies, List.first(args), {"", 0}),
-         %{state | calls: state.calls ++ [{command, args}]}}
+        key = List.first(args)
+
+        {reply, replies} =
+          case Map.get(state.replies, key, {"", 0}) do
+            [reply | rest] -> {reply, Map.put(state.replies, key, rest)}
+            reply -> {reply, state.replies}
+          end
+
+        {reply, %{state | replies: replies, calls: state.calls ++ [{command, args}]}}
       end)
     end
 
@@ -110,9 +122,14 @@ defmodule Shuttle.TmuxServerTest do
   # The kitty seam receives the dispatch's runner, so the coalition reads and
   # the LaunchServices start run through the same injectable shell as tmux.
   defmodule RunnerEchoKitty do
-    def run_background(_argv, runner) do
+    def run_background(argv, runner) do
+      send(self(), {:kitty_argv, argv})
       send(self(), {:kitty_runner, runner})
-      {:error, "no running kitty is its own responsible app"}
+
+      Shuttle.Env.app(
+        :kitty_launch_result,
+        {:error, "no running kitty is its own responsible app"}
+      )
     end
   end
 
@@ -122,12 +139,122 @@ defmodule Shuttle.TmuxServerTest do
       Shuttle.Test.Env.put_app_env(:kitty_impl, RunnerEchoKitty)
     end
 
+    test "tmux-primary startup keeps the kitty anchor command unchanged" do
+      Shuttle.Test.Env.put_app_env(:kitty_launch_result, :ok)
+
+      start_supervised!(
+        {StubRunner, %{"ls" => [{"no server running", 1}, {"shuttle-anchor", 0}]}}
+      )
+
+      assert :ok = TmuxServer.ensure_available(StubRunner)
+
+      assert_received {:kitty_argv,
+                       [
+                         "tmux",
+                         "new-session",
+                         "-d",
+                         "-s",
+                         "shuttle-anchor",
+                         "--",
+                         "sh",
+                         "-c",
+                         "exec sleep 2147483647"
+                       ]}
+
+      assert {"tmux", ["set-option", "-s", "exit-empty", "off"]} in StubRunner.calls()
+    end
+
     test "forks through kitty with the dispatch's runner, and refuses when kitty cannot" do
       start_supervised!({StubRunner, {"no server running on /tmp/tmux-501/default", 1}})
 
       assert {:error, {:tmux_server_unavailable, msg}} = TmuxServer.ensure_available(StubRunner)
       assert_received {:kitty_runner, StubRunner}
       assert msg =~ "no running kitty is its own responsible app"
+    end
+  end
+
+  defmodule RunnerEchoRex do
+    def run_background(argv, runner) do
+      send(self(), {:rex_launcher, argv, runner})
+      Shuttle.Env.app(:rex_launch_result, :ok)
+    end
+  end
+
+  describe "Rex-primary anchor" do
+    @describetag :tmp_dir
+    setup %{tmp_dir: dir} do
+      Shuttle.Test.Env.put_app_env(:os_type, {:unix, :darwin})
+      Shuttle.Test.Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+      Shuttle.Test.Env.put_app_env(:rex_impl, RunnerEchoRex)
+      Shuttle.Test.Env.put_app_env(:kitty_impl, RunnerEchoKitty)
+      tmux = Path.join(dir, "tmux")
+      File.write!(tmux, "#!/bin/sh\nexit 0\n")
+      File.chmod!(tmux, 0o700)
+      Shuttle.Test.Env.put_env("PATH", dir)
+      {:ok, tmux: tmux}
+    end
+
+    test "launches through Rex with an absolute tmux path and hardens the resulting server", %{
+      tmux: tmux
+    } do
+      start_supervised!(
+        {StubRunner, %{"ls" => [{"no server running", 1}, {"shuttle-anchor", 0}]}}
+      )
+
+      assert :ok = TmuxServer.ensure_available(StubRunner)
+
+      assert_received {:rex_launcher,
+                       [
+                         ^tmux,
+                         "new-session",
+                         "-d",
+                         "-s",
+                         "shuttle-anchor",
+                         "--",
+                         "sh",
+                         "-c",
+                         "exec sleep 2147483647"
+                       ], StubRunner}
+
+      refute_received {:kitty_runner, _}
+      assert {"tmux", ["set-option", "-s", "exit-empty", "off"]} in StubRunner.calls()
+    end
+
+    test "refuses a failed Rex launch without falling back to kitty or daemon-born tmux" do
+      start_supervised!({StubRunner, {"no server running", 1}})
+      Shuttle.Test.Env.put_app_env(:rex_launch_result, {:error, "server unreachable"})
+      assert {:error, {:tmux_server_unavailable, msg}} = TmuxServer.ensure_available(StubRunner)
+      assert msg =~ "Rex"
+      assert msg =~ "server unreachable"
+      assert msg =~ "Full Disk Access"
+      refute msg =~ "kitty"
+      refute_received {:kitty_runner, _}
+      assert [{"tmux", ["ls", "-F", _]}] = StubRunner.calls()
+    end
+
+    test "refuses before launch if the daemon cannot resolve tmux", %{tmux: tmux} do
+      File.rm!(tmux)
+      Shuttle.Env.invalidate_executable("tmux")
+      start_supervised!({StubRunner, {"no server running", 1}})
+      assert {:error, {:tmux_server_unavailable, msg}} = TmuxServer.ensure_available(StubRunner)
+      assert msg =~ "tmux executable not found"
+      refute_received {:rex_launcher, _, _}
+      refute_received {:kitty_runner, _}
+    end
+
+    test "refuses when Rex accepts but no tmux server appears" do
+      start_supervised!({StubRunner, {"no server running", 1}})
+      assert {:error, {:tmux_server_unavailable, msg}} = TmuxServer.ensure_available(StubRunner)
+      assert msg =~ "rex accepted the command but no tmux server appeared"
+      refute_received {:kitty_runner, _}
+      refute Enum.any?(StubRunner.calls(), fn {_, args} -> List.first(args) == "set-option" end)
+    end
+
+    test "a present auxiliary server is hardened without launching Rex" do
+      start_supervised!({StubRunner, {"shuttle-anchor", 0}})
+      assert :ok = TmuxServer.ensure_available(StubRunner)
+      refute_received {:rex_launcher, _, _}
+      refute_received {:kitty_runner, _}
     end
   end
 

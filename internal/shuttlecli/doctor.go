@@ -30,6 +30,7 @@ type DoctorReceipt struct {
 	Host          ReceiptHost          `json:"host"`
 	ShuttleBinary ReceiptShuttleBinary `json:"shuttle_binary"`
 	TmuxServer    *ReceiptTmuxServer   `json:"tmux_server,omitempty"`
+	Rex           *ReceiptRex          `json:"rex,omitempty"`
 }
 
 type ReceiptDaemon struct {
@@ -77,6 +78,17 @@ type ReceiptTmuxServer struct {
 	RootedBy  string        `json:"rooted_by,omitempty"`
 }
 
+type ReceiptRex struct {
+	Status          receiptStatus     `json:"status"`
+	Repair          string            `json:"repair,omitempty"`
+	Warning         string            `json:"warning,omitempty"`
+	Reachable       bool              `json:"reachable"`
+	Version         string            `json:"version,omitempty"`
+	Privacy         map[string]string `json:"privacy"`
+	ResponsiblePath string            `json:"responsible_path,omitempty"`
+	AppClient       bool              `json:"app_client"`
+}
+
 func (a *app) doctorCmd() *cobra.Command {
 	doctorCmd := &cobra.Command{
 		Use:   "doctor",
@@ -96,6 +108,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				a.printTailnetDialReceipt(receipt.Daemon.TailnetDial)
 				a.printDiscoveryReceipt(receipt.Daemon.Discovery)
 				a.printTmuxServerReceipt(receipt.TmuxServer)
+				a.printRexReceipt(receipt.Rex)
 				if receipt.Repair != "" {
 					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
 				}
@@ -135,9 +148,13 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 	receipt.Daemon = a.collectDaemonReceipt()
 	receipt.Host = a.collectHostReceiptWhenReady(receipt.Daemon)
 	receipt.TmuxServer = a.collectTmuxServerReceipt()
+	receipt.Rex = a.collectRexReceipt()
 	statuses := []receiptStatus{receipt.Daemon.Status, receipt.Host.Status}
 	if receipt.TmuxServer != nil {
 		statuses = append(statuses, receipt.TmuxServer.Status)
+	}
+	if receipt.Rex != nil {
+		statuses = append(statuses, receipt.Rex.Status)
 	}
 	receipt.Status, receipt.Repair = combineDoctorReceiptStatus(statuses...)
 	if receipt.Daemon.Status != receiptHealthy && receipt.Daemon.Status == receipt.Status && receipt.Daemon.Repair != "" {
@@ -146,6 +163,9 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 	foldDoctorRepair(&receipt, receipt.Host.Status, receipt.Host.Repair)
 	if receipt.TmuxServer != nil {
 		foldDoctorRepair(&receipt, receipt.TmuxServer.Status, receipt.TmuxServer.Repair)
+	}
+	if receipt.Rex != nil {
+		foldDoctorRepair(&receipt, receipt.Rex.Status, receipt.Rex.Repair)
 	}
 	return receipt
 }
@@ -389,7 +409,7 @@ func (a *app) collectTmuxServerReceipt() *ReceiptTmuxServer {
 
 // printTmuxServerReceipt names the app the running tmux server is charged to,
 // then the remedy when that app is the daemon or the advisory when it is
-// neither the daemon nor kitty.
+// neither the daemon nor an intended terminal app.
 func (a *app) printTmuxServerReceipt(rec *ReceiptTmuxServer) {
 	if rec == nil {
 		return

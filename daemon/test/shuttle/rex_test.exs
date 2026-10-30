@@ -111,6 +111,31 @@ defmodule Shuttle.RexTest do
              Rex.call(Shuttle.Runner.Default, "ignored", %{"message" => "a'b\nsecond"})
   end
 
+  test "background launch is unbound, non-autostarting and cleans only its own session" do
+    assert :ok = Rex.run_background(["/absolute tools/tmux", "new-session", "a'b"], FakeRex)
+    {_, _, opts} = Enum.find(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+    spec = Jason.decode!(opts[:input])
+    assert spec["label"] == "shuttle-tmux-anchor@rex"
+    options = hd(spec["initial_windows"])["layout"]["block"]["options"]
+    assert options["exit"] == %{"on_completion" => true, "quick_exit_threshold_ms" => 0}
+    assert ["/bin/bash", "-c", script] = options["command"]
+    assert script =~ "unset TMUX TMUX_PANE"
+    assert script =~ "'-u' 'REX_SESSION' '-u' 'REX_BLOCK' '-u' 'REX_CLIENT'"
+    assert script =~ "'/absolute tools/tmux' 'new-session' 'a'\\''b'"
+    assert script =~ "trap "
+    assert script =~ "--autostart=false"
+    assert script =~ "unix:///scope.sock"
+    assert script =~ "$REX_SESSION"
+    refute File.exists?(Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "terminals/rex.json"))
+  end
+
+  test "background launch propagates create failure without launching another backend" do
+    FakeRex.reply("session.create", {"maximum sessions reached", 1})
+    assert {:error, message} = Rex.run_background(["/absolute/tmux"], FakeRex)
+    assert message =~ "maximum sessions reached"
+    refute Enum.any?(FakeRex.calls(), fn {bin, _, _} -> bin in ["tmux", "kitty"] end)
+  end
+
   defp seed do
     [%{"session_id" => sid, "label" => label}] = FakeRex.fixture("session_list")["sessions"]
     FakeRex.sessions(%{sid => %{label: label, blocks: FakeRex.fixture("list_blocks")["blocks"]}})
