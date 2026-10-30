@@ -302,7 +302,6 @@ defmodule Shuttle.Terminal.Rex do
   defp pid_path(block),
     do: Path.join([Shuttle.data_dir(), "terminals", "rex-pids", block <> ".pid"])
 
-  @impl true
   def reveal(name, _host), do: reveal_with(Env.app(:rex_runner, Shuttle.Runner.Default), name)
 
   # The runner-taking form keeps app activation testable without selecting a
@@ -461,17 +460,9 @@ defmodule Shuttle.Terminal.Rex do
       Enum.map_join([Rex.bin() || "rex"] ++ Rex.flags(), " ", &quote_sh/1) <>
         " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
 
-    exports =
-      Enum.map_join(~w(PATH SSH_AUTH_SOCK), "", fn key ->
-        case Env.get(key) do
-          nil -> "unset #{key}\n"
-          value -> "export #{key}=#{quote_sh(value)}\n"
-        end
-      end)
-
     script =
       "unset TMUX TMUX_PANE\n" <>
-        exports <>
+        Rex.environment_script() <>
         "trap #{quote_sh(cleanup)} EXIT\n" <> Enum.map_join(argv, " ", &quote_sh/1) <> "\n"
 
     spec =
@@ -498,17 +489,8 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  @env ~w(SHUTTLE_HOST SHUTTLE_DATA_DIR SHUTTLE_LISTEN SHUTTLE_CODEX_SOCKET SHUTTLE_AGENTS_FILE SHUTTLE_HOST_CONFIG_FILE SHUTTLE_REX_BIN SHUTTLE_REX_SERVER PATH SSH_AUTH_SOCK)
   @impl true
   def script(_name) do
-    exports =
-      Enum.map_join(@env, "", fn key ->
-        case Env.get(key) do
-          nil -> "unset #{key}\n"
-          value -> "export #{key}=#{quote_sh(value)}\n"
-        end
-      end)
-
     executable = quote_sh(Rex.bin() || "rex")
     flags = Enum.map_join(Rex.flags(), " ", &quote_sh/1)
 
@@ -519,8 +501,8 @@ defmodule Shuttle.Terminal.Rex do
         "( sleep 2; #{executable} #{flags} send-key -s \"$REX_SESSION\" -b \"$REX_BLOCK\" enter ) &\n",
       env:
         "unset TMUX TMUX_PANE\n" <>
-          exports <>
-          "( umask 077; mkdir -p #{quote_sh(Path.dirname(pid_path("block")))}; printf '%s\\n' \"$$\" \"$REX_SESSION\" \"$REX_BLOCK\" > #{quote_sh(Path.dirname(pid_path("block")))}/\"$REX_BLOCK.pid\" )\n"
+          Rex.environment_script() <>
+          "( umask 077 && mkdir -p #{quote_sh(Path.dirname(pid_path("block")))} && printf '%s\\n' \"$$\" \"$REX_SESSION\" \"$REX_BLOCK\" > #{quote_sh(Path.dirname(pid_path("block")))}/\"$REX_BLOCK.pid\" ) || true\n"
     }
   end
 

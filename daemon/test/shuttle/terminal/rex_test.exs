@@ -235,15 +235,24 @@ defmodule Shuttle.Terminal.RexTest do
     Env.put_env("PATH", "/daemon/tools:/bin")
     Env.put_env("SSH_AUTH_SOCK", "/daemon/agent.sock")
     Env.put_env("SECRET_TOKEN", "never-export")
+    Env.put_env("TMUX_TMPDIR", "/daemon/tmux")
     snippets = Rex.script(@name)
     assert snippets.wait_for_viewer == ""
     assert snippets.env =~ "unset TMUX TMUX_PANE"
     assert snippets.env =~ "export SHUTTLE_HOST='host'\\''quoted'"
     assert snippets.env =~ "export PATH='/daemon/tools:/bin'"
     assert snippets.env =~ "export SSH_AUTH_SOCK='/daemon/agent.sock'"
+    assert snippets.env =~ "export TMUX_TMPDIR='/daemon/tmux'"
     refute snippets.env =~ "SECRET_TOKEN"
     assert snippets.submit_key =~ ~s(send-key -s "$REX_SESSION" -b "$REX_BLOCK" enter)
     refute snippets.submit_key =~ "tmux"
+  end
+
+  test "a failed PID receipt does not abort the worker under set -e", %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "terminals"), "not a directory")
+    script = "set -e\n" <> Rex.script(@name).env <> "printf worker-starts"
+    assert {output, 0} = System.cmd("/bin/bash", ["-c", script], stderr_to_stdout: true)
+    assert output =~ "worker-starts"
   end
 
   test "binding index serializes distinct worker writes and conditional prune preserves newer values" do

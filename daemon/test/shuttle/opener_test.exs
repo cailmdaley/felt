@@ -39,6 +39,7 @@ defmodule Shuttle.OpenerTest do
     File.chmod!(Path.join(tools, "tmux"), 0o755)
     Env.put_env("PATH", tools)
     Env.put_env("SSH_AUTH_SOCK", "/tmp/daemon's ssh.sock")
+    Env.put_env("TMUX_TMPDIR", "/tmp/daemon's tmux")
     %{tmux: Path.join(tools, "tmux")}
   end
 
@@ -65,6 +66,7 @@ defmodule Shuttle.OpenerTest do
     assert ["bash", "-c", script] = options["command"]
     assert script =~ "'#{tmux}' 'attach' '-t' '=#{@name}'"
     assert script =~ "export PATH="
+    assert script =~ "export TMUX_TMPDIR='/tmp/daemon'\\''s tmux'"
     assert length(requests("client.perform")) == 2
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
     assert bindings == %{}

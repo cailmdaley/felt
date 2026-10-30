@@ -97,14 +97,6 @@ defmodule Shuttle.Rex do
         Enum.map_join([executable] ++ flags(), " ", &quote_sh/1) <>
           " api call -s \"$REX_SESSION\" session.destroy - <<< '{}' >/dev/null 2>&1"
 
-      exports =
-        Enum.map_join(~w(PATH SSH_AUTH_SOCK TMUX_TMPDIR), "", fn key ->
-          case Env.get(key) do
-            nil -> "unset #{key}\n"
-            value -> "export #{key}=#{quote_sh(value)}\n"
-          end
-        end)
-
       command = [
         "/usr/bin/env",
         "-u",
@@ -117,7 +109,7 @@ defmodule Shuttle.Rex do
 
       script =
         "unset TMUX TMUX_PANE\n" <>
-          exports <>
+          environment_script() <>
           "trap #{quote_sh(cleanup)} EXIT\n" <> Enum.map_join(command, " ", &quote_sh/1) <> "\n"
 
       spec =
@@ -135,6 +127,18 @@ defmodule Shuttle.Rex do
     else
       error -> {:error, "Rex background launch unavailable: #{inspect(error)}"}
     end
+  end
+
+  @environment ~w(SHUTTLE_HOST SHUTTLE_DATA_DIR SHUTTLE_LISTEN SHUTTLE_CODEX_SOCKET SHUTTLE_AGENTS_FILE SHUTTLE_HOST_CONFIG_FILE SHUTTLE_REX_BIN SHUTTLE_REX_SERVER PATH SSH_AUTH_SOCK TMUX_TMPDIR)
+
+  @doc "Export the daemon's worker and transport environment into a Rex block."
+  def environment_script do
+    Enum.map_join(@environment, "", fn key ->
+      case Env.get(key) do
+        nil -> "unset #{key}\n"
+        value -> "export #{key}=#{quote_sh(value)}\n"
+      end
+    end)
   end
 
   defp quote_sh(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
