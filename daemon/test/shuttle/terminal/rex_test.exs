@@ -72,10 +72,26 @@ defmodule Shuttle.Terminal.RexTest do
     assert Rex.probe(FakeRex, @name) == :present
   end
 
-  test "rejects long and control-containing names before a create" do
-    assert {:error, _} = Rex.launch(FakeRex, String.duplicate("a", 128), "/tmp", "x", [])
+  test "rejects control-containing names before a create" do
     assert {:error, _} = Rex.launch(FakeRex, "bad\nlabel", "/tmp", "x", [])
     assert FakeRex.calls() == []
+  end
+
+  test "a 120-character fiber leaf launches with a unique bounded recovery index" do
+    name =
+      Shuttle.Dispatcher.session_name(String.duplicate("x", 120), "01KVBR5K0FZHZQK18845TZ01Q2")
+
+    assert :ok = Rex.launch(FakeRex, name, "/tmp", "worker.sh", [])
+    [{_, _, opts}] = Enum.filter(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+    spec = Jason.decode!(opts[:input])
+    label = spec["label"]
+    assert String.length(label) == 127
+    assert hd(spec["initial_windows"])["layout"]["block"]["label"] == label
+    refute Rex.worker_label(name <> "other") == label
+    assert {:ok, %{"bindings" => %{^name => binding}}} = RexBindings.read()
+    assert :ok = RexBindings.delete(name, binding)
+    assert :present = Rex.probe(FakeRex, name)
+    assert {:ok, %{"bindings" => %{^name => %{"recovered" => true}}}} = RexBindings.read()
   end
 
   test "bound address survives label drift and takes precedence over duplicate labels" do
@@ -152,12 +168,12 @@ defmodule Shuttle.Terminal.RexTest do
   end
 
   test "missing worker block destroys an empty owned session but preserves other panes" do
-    seed()
+    own_seed()
     assert :present = Rex.probe(FakeRex, @name)
     FakeRex.sessions(%{sid() => %{label: @name, blocks: []}})
     assert :absent = Rex.probe(FakeRex, @name)
     assert FakeRex.state().sessions == %{}
-    seed()
+    own_seed()
     assert :present = Rex.probe(FakeRex, @name)
 
     FakeRex.sessions(%{
@@ -169,7 +185,7 @@ defmodule Shuttle.Terminal.RexTest do
   end
 
   test "close destroys the session and binding; paste errors never submit" do
-    seed()
+    own_seed()
     assert :present = Rex.probe(FakeRex, @name)
     FakeRex.reply("block.event", {"timeout", 1})
     assert {:error, _} = Rex.paste(FakeRex, @name, "message")
@@ -338,15 +354,22 @@ defmodule Shuttle.Terminal.RexTest do
       sid() => %{label: @name, blocks: [%{"block_id" => "block:human", "label" => "human"}]}
     })
 
-    assert :unknown = Rex.probe(FakeRex, @name)
+    assert :absent = Rex.probe(FakeRex, @name)
     assert {:error, _} = Rex.paste(FakeRex, @name, "not for the human")
   end
 
-  test "lost-binding recovery destroys an empty worker-labelled session before relaunch" do
+  test "lost-binding recovery never destroys a session based on a label" do
     FakeRex.sessions(%{sid() => %{label: @name, blocks: []}})
     assert :absent = Rex.probe(FakeRex, @name)
-    assert FakeRex.state().sessions == %{}
+    assert Map.has_key?(FakeRex.state().sessions, sid())
+    seed()
+    assert :present = Rex.probe(FakeRex, @name)
+    assert {:error, message} = Rex.close(FakeRex, @name)
+    assert message =~ "recovered only by block label"
+    FakeRex.sessions(%{sid() => %{label: @name, blocks: []}})
     assert :absent = Rex.probe(FakeRex, @name)
+    assert Map.has_key?(FakeRex.state().sessions, sid())
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.destroy" in args end)
   end
 
   test "rename holds launch's destination-name lock across its check and mutation" do
@@ -379,6 +402,16 @@ defmodule Shuttle.Terminal.RexTest do
     send(renamer, :continue)
     assert Task.await(rename) == :ok
     assert Task.await(launch) == {:error, :already_running}
+  end
+
+  defp own_seed do
+    seed()
+
+    RexBindings.put(
+      @name,
+      %{"session_id" => sid(), "block_id" => bid(), "created_at" => "2026-10-29T00:00:00Z"},
+      FakeRex.fixture("whoami")["host_id"]
+    )
   end
 
   defp seed, do: FakeRex.sessions(%{sid() => %{label: @name, blocks: blocks()}})

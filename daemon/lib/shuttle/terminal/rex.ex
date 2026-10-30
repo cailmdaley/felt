@@ -91,15 +91,17 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   def create_spec(name, cwd, script_path, opts \\ []) do
+    label = worker_label(name)
+
     %{
-      "label" => name,
+      "label" => label,
       "initial_windows" => [
         %{
-          "window_label" => name,
+          "window_label" => label,
           "layout" => %{
             "block" => %{
               "flavor" => "com.superlogical.terminal.shell",
-              "label" => name,
+              "label" => label,
               "options" => %{
                 "shell" => "none",
                 "command" => ["bash", "-l", script_path],
@@ -170,7 +172,8 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def close(runner, name) do
-    with {:ok, b} <- resolve(runner, name) do
+    with {:ok, b} <- resolve(runner, name),
+         false <- b["recovered"] == true do
       case Rex.destroy(runner, b["session_id"]) do
         {:ok, _} ->
           close_binding(name, b, :ok)
@@ -183,6 +186,7 @@ defmodule Shuttle.Terminal.Rex do
       end
     else
       {:error, reason} when reason in [:server_absent, :not_found] -> :absent
+      true -> {:error, "Refusing to destroy a Rex session recovered only by block label"}
       error -> {:error, "Rex close failed: #{inspect(error)}"}
     end
   end
@@ -232,7 +236,7 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp write_rename(runner, from, to, source) do
-    with :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], to),
+    with :ok <- Rex.set_labels(runner, source["session_id"], source["block_id"], worker_label(to)),
          :ok <- store(runner, to, source),
          :ok <- remove_old_binding(from, to, source) do
       :ok
@@ -266,7 +270,7 @@ defmodule Shuttle.Terminal.Rex do
         owned_block? or
           (b != nil and b["session_id"] in live and
              (b["session_id"] != sid or b["block_id"] != source["block_id"])) or
-          Enum.any?(sessions, &(&1["label"] == name and &1["session_id"] != sid))
+          Enum.any?(sessions, &(&1["label"] == worker_label(name) and &1["session_id"] != sid))
 
       if conflict,
         do: {:error, :rename_failed},
@@ -585,26 +589,19 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp recover_label(runner, name, sessions) do
-    candidates = Enum.filter(sessions, &(&1["label"] == name))
-
+    # Session labels are display only; only the worker block is a recovery index.
     candidates =
-      if candidates == [] do
-        # A tree label isn't a recovery index. Recover through worker block
-        # labels so losing the address file doesn't duplicate live workers.
-        Enum.reduce_while(sessions, [], fn s, acc ->
-          case Rex.blocks(runner, s["session_id"]) do
-            {:ok, blocks} ->
-              if Enum.any?(blocks, &(&1["label"] == name)),
-                do: {:cont, [s | acc]},
-                else: {:cont, acc}
+      Enum.reduce_while(sessions, [], fn s, acc ->
+        case Rex.blocks(runner, s["session_id"]) do
+          {:ok, blocks} ->
+            if Enum.any?(blocks, &(&1["label"] == worker_label(name))),
+              do: {:cont, [s | acc]},
+              else: {:cont, acc}
 
-            _ ->
-              {:halt, :unknown}
-          end
-        end)
-      else
-        candidates
-      end
+          _ ->
+            {:halt, :unknown}
+        end
+      end)
 
     case candidates do
       :unknown ->
@@ -629,22 +626,21 @@ defmodule Shuttle.Terminal.Rex do
     with {:ok, blocks} <- Rex.blocks(runner, sid) do
       # Native claims may select a sole human pane. Name recovery requires
       # the worker block's label, never an unrelated remaining pane.
-      matching = if name, do: Enum.filter(blocks, &(&1["label"] == name)), else: blocks
+      matching =
+        if name, do: Enum.filter(blocks, &(&1["label"] == worker_label(name))), else: blocks
 
       case matching do
         [%{"block_id" => bid}] ->
           b = binding(sid, bid)
 
           if name do
+            b = Map.put(b, "recovered", true)
             with :ok <- store(runner, name, b), do: {:ok, b}
           else
             {:ok, b}
           end
 
-        [] when blocks == [] and name != nil ->
-          destroy_empty(runner, sid)
-
-        [] when blocks == [] ->
+        [] when name != nil or blocks == [] ->
           {:error, :not_found}
 
         _ ->
@@ -667,7 +663,7 @@ defmodule Shuttle.Terminal.Rex do
         {:ok, b}
       else
         if blocks == [] and name != nil do
-          with {:error, :not_found} <- destroy_empty(runner, b["session_id"]),
+          with {:error, :not_found} <- retire_empty(runner, b),
                :ok <- Bindings.delete(name, b) do
             {:error, :not_found}
           end
@@ -679,6 +675,9 @@ defmodule Shuttle.Terminal.Rex do
       end
     end
   end
+
+  defp retire_empty(_runner, %{"recovered" => true}), do: {:error, :not_found}
+  defp retire_empty(runner, b), do: destroy_empty(runner, b["session_id"])
 
   defp store(runner, name, b) do
     with {:ok, %{"host_id" => server}} <- Rex.whoami(runner), do: Bindings.put(name, b, server)
@@ -693,11 +692,16 @@ defmodule Shuttle.Terminal.Rex do
 
   defp quote_sh(text), do: "'" <> String.replace(text, "'", "'\\''") <> "'"
 
+  @doc "A bounded block recovery index, distinct from the full durable worker name."
+  def worker_label(name) do
+    if String.length(name) < 128,
+      do: name,
+      else: String.slice(name, 0, 94) <> "~" <> label_hash(name)
+  end
+
   defp valid_label(name) do
-    if String.length(name) >= 128 or Regex.match?(~r/[\p{Cc}]/u, name),
-      do:
-        {:error,
-         "Rex worker label must be shorter than 128 characters and contain no control characters"},
+    if Regex.match?(~r/[\p{Cc}]/u, name),
+      do: {:error, "Rex worker label must contain no control characters"},
       else: :ok
   end
 

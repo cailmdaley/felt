@@ -289,7 +289,7 @@ defmodule Shuttle.Migration do
 
   defp verify_rex_label_transition(runner, name, sid) do
     with {:ok, sessions} <- Shuttle.Rex.sessions(runner) do
-      case Enum.filter(sessions, &(&1["label"] == name)) do
+      case Enum.filter(sessions, &(&1["label"] == Shuttle.Terminal.Rex.worker_label(name))) do
         [%{"session_id" => ^sid}] -> :ok
         _ -> {:error, :backend_unobservable}
       end
