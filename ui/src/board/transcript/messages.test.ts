@@ -72,7 +72,7 @@ describe('Shuttle messages in transcripts', () => {
     const record = { type: 'attachment', timestamp: time, attachment: { type: 'queued_command', commandMode: 'prompt', isMeta: true,
       origin: { kind: 'peer' }, prompt: envelope } }
     expect(normalizeRecord(record, [provenance(envelope)])).toEqual([expect.objectContaining({
-      kind: 'shuttle-message', id: 'msg-1234', direction: 'received', peer: 'Codex · host-b · …ession',
+      kind: 'shuttle-message', id: 'msg-1234', direction: 'received', peer: 'Codex · host-b · ession',
       fiber: 'research/workspace/validation-follow-up',
       target: 'research/workspace/validation-follow-up',
       address: 'shuttle://host-b/codex/peer-session',
