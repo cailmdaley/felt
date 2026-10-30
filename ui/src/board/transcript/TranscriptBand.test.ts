@@ -164,12 +164,21 @@ describe('TranscriptBand', () => {
   })
   it('keeps thread deliveries visible between messages in preview and full transcript, outside folded tools', async () => {
     const delivered = `[Shuttle message thread-${'a'.repeat(64)}]\nthread work/child closed: A measured result`
+    const id = /^\[Shuttle message ([^\s\]]+)/.exec(delivered)![1]
     const items = [
       ...records('Keep going', 'I am coordinating.'),
-      { type: 'user', message: { content: delivered } },
+      { type: 'attachment', attachment: { type: 'hook_additional_context', content: delivered } },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'I will integrate it.' }] } },
     ]
-    const band = makeBand(fixtureFetch({ [latestId]: items }))
+    const transcriptFetch = fixtureFetch({ [latestId]: items })
+    const fetcher = vi.fn<typeof fetch>(async input => {
+      const url = new URL(String(input))
+      if (url.pathname.endsWith('/transcript/messages')) {
+        return new Response(JSON.stringify({ messages: [{ id, envelope: delivered, thread: true }] }))
+      }
+      return transcriptFetch(input)
+    })
+    const band = makeBand(fetcher)
     band.follow(target(latestId))
     await settle()
     const preview = band.el.querySelector('.ws-transcript-exchange')!
@@ -202,7 +211,7 @@ describe('TranscriptBand', () => {
     const items: unknown[] = [
       { type: 'user', timestamp: '2026-09-26T14:02:00.000Z', message: { content: 'Send the result.' } },
       { type: 'assistant', timestamp: '2026-09-26T14:03:00.000Z', message: { content: [{
-        type: 'tool_use', id: 'send-call', name: 'Bash', input: { command: 'shuttle message work/child "The table is ready."' },
+        type: 'tool_use', id: 'send-call', name: 'Bash', input: { command: 'shuttle message --message-id msg-42 work/child "The table is ready."' },
       }] } },
     ]
     const fetcher = fixtureFetch({ [session]: items })
