@@ -39,7 +39,7 @@ describe('fictional workspace transcripts', () => {
       .trim()
       .split('\n')
       .map(value => JSON.parse(value) as unknown)
-    expect(added.flatMap(normalizeRecord)).toEqual([
+    expect(added.flatMap(record => normalizeRecord(record))).toEqual([
       { kind: 'tool', id: 'fixture-live-1', name: 'Bash', input: { command: 'python validate.py --batch 1' }, at: NOW },
       { kind: 'result', id: 'fixture-live-1', text: 'batch 1: 12 bins, max deviation 0.1%', isError: false, images: 0, at: NOW + 200 },
       {
@@ -71,6 +71,6 @@ describe('fictional workspace transcripts', () => {
     const records = text.trim().split('\n').map(value => JSON.parse(value) as unknown)
     expect(bytes.byteLength).toBeGreaterThan(1_000_000)
     expect(records).toHaveLength(12_000)
-    expect(records.flatMap(normalizeRecord).filter(entry => entry.kind === 'prompt')).toHaveLength(3000)
+    expect(records.flatMap(record => normalizeRecord(record)).filter(entry => entry.kind === 'prompt')).toHaveLength(3000)
   })
 })

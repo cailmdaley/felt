@@ -9,7 +9,7 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
 
 describe('images a tool returned', () => {
   it('keeps each harness\'s image payload on its result, undecoded', () => {
-    const results = lines.flatMap(normalizeRecord).filter(entry => entry.kind === 'result')
+    const results = lines.flatMap(record => normalizeRecord(record)).filter(entry => entry.kind === 'result')
     expect(results.map(entry => entry.kind === 'result' && entry.pictures)).toEqual([
       [{ mediaType: 'image/png', data: PNG }],
       [{ mediaType: 'image/jpeg', data: PNG }],

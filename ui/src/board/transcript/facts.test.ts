@@ -12,7 +12,7 @@ const codex = records(codexSource)
 const pi = records(piSource)
 const modelFor = (...raw: unknown[]): TranscriptModel => {
   const model = new TranscriptModel()
-  model.append(raw.flatMap(normalizeRecord))
+  model.append(raw.flatMap(record => normalizeRecord(record)))
   return model
 }
 const usage = (at: number, cache: { read: number; write: number; hourWrite: number }): Entry => ({ kind: 'usage', at, cache })

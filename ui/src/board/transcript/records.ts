@@ -570,8 +570,7 @@ function codexRecord(record: ObjectValue): Entry[] {
 }
 
 /** Normalize one native JSONL record by its record shape. Unknown and malformed records are ignored. */
-export function normalizeRecord(raw: unknown, verified: readonly MessageProvenance[] | number = []): Entry[] {
-  const provenance = Array.isArray(verified) ? verified : []
+export function normalizeRecord(raw: unknown, provenance: readonly MessageProvenance[] = []): Entry[] {
   try {
     const record = object(raw)
     if (!record || record.isSidechain === true) return []

@@ -152,7 +152,7 @@ function liveTranscript(now: number, updates: number): string {
           `Batch ${update} covers twelve more fixture bins; the largest deviation is 0.${update}%, inside the stated tolerance, so the measured values stand.`,
       }]),
     )
-    if (update === 3) records.push(user(now, 16_500, '[Shuttle message thread-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc]\nthread research/workspace/mask-validation asked: Compare the next batch against the same mask.'))
+    if (update === 3) records.push(line({type: 'attachment', timestamp: timestamp(now, 16_500), attachment: {type: 'hook_additional_context', content: LIVE_THREAD_ENVELOPE}}))
   }
   return records.join('')
 }
@@ -209,8 +209,12 @@ export function workspaceTranscriptBytes(
   return encoder.encode(source + headFacts(now, scenario))
 }
 
+const LIVE_THREAD_ENVELOPE = '[Shuttle message thread-cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc]\nthread research/workspace/mask-validation asked: Compare the next batch against the same mask.'
+
 /** Host-owned envelope fixtures, separate from the transcript's quoted body headers. */
-export function workspaceMessageProvenance(now: number): Array<{id: string; envelope: string}> {
+export function workspaceMessageProvenance(now: number, scenario: string | null): Array<{id: string; envelope: string; thread?: boolean}> {
+  if (scenario === 'live') return [{id: /^\[Shuttle message ([^\]]+)/.exec(LIVE_THREAD_ENVELOPE)![1], envelope: LIVE_THREAD_ENVELOPE, thread: true}]
+  if (scenario !== 'messages') return []
   return messageTranscript(now).trim().split('\n').flatMap(line => {
     const record = JSON.parse(line)
     const envelope = record.attachment?.prompt

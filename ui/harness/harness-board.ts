@@ -1668,7 +1668,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     })
   }
   if (url.includes('/api/v1/transcript/messages')) {
-    return json({ messages: transcriptScenario === 'messages' ? workspaceMessageProvenance(now) : [] })
+    return json({ messages: workspaceMessageProvenance(now, transcriptScenario) })
   }
   if (url.includes('/api/v1/transcript/raw')) {
     const query = new URL(url, 'http://harness').searchParams
