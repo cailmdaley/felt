@@ -106,6 +106,7 @@ func TestProgramStatusGatesAndTarget(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			env, home := isolateEvents(t)
 			env.Set("TMUX", tc.tmux)
+			env.Set("TMUX_PANE", "%1")
 			env.Set("SHUTTLE_PROGRAM_STATUS", tc.off)
 			env.Set("SHUTTLE_FIBER_PATH", "/fibers/project/fiber.md")
 			a := newApp(env)
@@ -150,6 +151,20 @@ func TestProgramStatusGatesAndTarget(t *testing.T) {
 	}
 }
 
+func TestProgramStatusRequiresTmuxPane(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ tmux, pane string }{{"socket", ""}, {"", "%1"}, {"", ""}} {
+		env, _ := isolateEvents(t)
+		env.Set("TMUX", tc.tmux)
+		env.Set("TMUX_PANE", tc.pane)
+		a := newApp(env)
+		a.eventReceiverPID = func() int { t.Fatal("incomplete tmux context resolved receiver"); return 0 }
+		a.programStatusTTY = func(int) string { t.Fatal("incomplete tmux context probed tty"); return "" }
+		a.programStatusWrite = func(string, []byte) error { t.Fatal("incomplete tmux context wrote status"); return nil }
+		a.reportProgramStatus(eventHookInput{Harness: "claude", HookEventName: "SessionStart"})
+	}
+}
+
 func TestProgramStatusDefaultWriterRefusesIsolatedEnv(t *testing.T) {
 	t.Parallel()
 	a := testApp(t)
@@ -162,6 +177,7 @@ func TestProgramStatusDefaultWriterRefusesIsolatedEnv(t *testing.T) {
 		t.Fatal("isolated default writer accepted a write")
 	}
 	a.env.Set("TMUX", "socket")
+	a.env.Set("TMUX_PANE", "%1")
 	a.programStatusTTY = func(int) string { return path }
 	a.eventReceiverPID = func() int { return 123 }
 	a.reportProgramStatus(eventHookInput{Harness: "claude", HookEventName: "SessionStart"})
@@ -175,6 +191,7 @@ func TestProgramStatusHookBeforeEventAndMessagesOff(t *testing.T) {
 	t.Parallel()
 	env, path := eventStream(t)
 	env.Set("TMUX", "socket")
+	env.Set("TMUX_PANE", "%1")
 	env.Set("SHUTTLE_MESSAGES", "off")
 	env.Set("SHUTTLE_FIBER_PATH", "/fibers/project/fiber.md")
 	a := newApp(env)
@@ -216,6 +233,7 @@ func TestProgramStatusHookBeforeEventAndMessagesOff(t *testing.T) {
 func TestProgramStatusAndBoardDigestWithMessagesOff(t *testing.T) {
 	env := messageHookEnv(t, "host")
 	env.Set("TMUX", "socket")
+	env.Set("TMUX_PANE", "%1")
 	env.Set("SHUTTLE_MESSAGES", "off")
 	const now = 1793300000000
 	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +273,7 @@ func TestProgramStatusIndependentOfEvents(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		env, path := eventStream(t)
 		env.Set("TMUX", "socket")
+		env.Set("TMUX_PANE", "%1")
 		env.Set("SHUTTLE_MESSAGES", "off")
 		if enabled {
 			env.Set("SHUTTLE_PROGRAM_STATUS", "off")
@@ -318,6 +337,7 @@ func TestProgramStatusMalformedHookSilent(t *testing.T) {
 	for _, payload := range []string{`not JSON`, `{"hook_event_name":"Stop"`, `{"hook_event_name":"Stop","harness":"claude","native_pid":"bad"}`} {
 		env, path := eventStream(t)
 		env.Set("TMUX", "socket")
+		env.Set("TMUX_PANE", "%1")
 		a := newApp(env)
 		a.programStatusTTY = func(int) string { t.Fatal("malformed input probed tty"); return "" }
 		a.programStatusWrite = func(string, []byte) error { t.Fatal("malformed input wrote status"); return nil }

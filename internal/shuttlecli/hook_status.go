@@ -72,7 +72,7 @@ func (a *app) reportProgramStatus(input eventHookInput) {
 	if off := a.env.Getenv("SHUTTLE_PROGRAM_STATUS"); off == "off" || off == "0" {
 		return
 	}
-	if a.env.Getenv("TMUX") == "" {
+	if a.env.Getenv("TMUX") == "" || a.env.Getenv("TMUX_PANE") == "" {
 		return
 	}
 	harness := input.Harness
