@@ -24,6 +24,11 @@ defmodule ShuttleWeb.BoardControllerTest do
       {:ok, entries}
     end
 
+    def terminate(_reason, _entries) do
+      :persistent_term.erase({:shuttle_poller_published_state, self()})
+      :ok
+    end
+
     def handle_call(:thread_inputs, _from, entries),
       do: {:reply, {:ok, {entries, MapSet.new(), nil}}, entries}
   end

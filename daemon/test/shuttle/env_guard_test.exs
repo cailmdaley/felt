@@ -28,6 +28,8 @@ defmodule Shuttle.EnvGuardTest do
 
   # Async test files that write `:persistent_term`, with the reason it is safe.
   @term_write_allowlist %{
+    "test/shuttle_web/controllers/board_controller_test.exs" =>
+      "keys are this test fake Poller process pid and are erased on termination",
     "test/shuttle/session_link_test.exs" => "keys are this test's own session uuids",
     "test/shuttle/felt_stores_test.exs" => "the key is this test's Shuttle.Env.scope_key slot",
     "test/shuttle/env_isolation_test.exs" => "the key is this test's Shuttle.Env.scope_key slot"

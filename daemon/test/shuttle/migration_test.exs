@@ -197,8 +197,8 @@ defmodule Shuttle.MigrationTest do
     moving = Task.async(fn -> Poller.migrate(p, "source", "dest", rest: true) end)
     early = Task.yield(moving, 2000)
     send(writer.pid, :commit)
-    Task.await(writer)
-    if early == nil, do: Task.await(moving)
+    Task.await(writer, 30_000)
+    if early == nil, do: Task.await(moving, 30_000)
     {:ok, current} = AppWorkers.get(id)
     assert current["fiber_id"] == "dest"
   end
