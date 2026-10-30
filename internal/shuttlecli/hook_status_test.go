@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -208,6 +210,43 @@ func TestProgramStatusHookBeforeEventAndMessagesOff(t *testing.T) {
 	}
 	if _, exists := lines[0]["message"]; exists {
 		t.Fatalf("notification message leaked into wire format: %+v", lines[0])
+	}
+}
+
+func TestProgramStatusAndBoardDigestWithMessagesOff(t *testing.T) {
+	env := messageHookEnv(t, "host")
+	env.Set("TMUX", "socket")
+	env.Set("SHUTTLE_MESSAGES", "off")
+	const now = 1793300000000
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"family":  map[string]any{"label": "family"},
+			"records": []map[string]any{{"id": "one", "timestamp": now, "kind": "post", "member": "child", "text": "family update"}},
+		})
+	}})
+	a := newApp(env)
+	a.eventNow = func() time.Time { return time.UnixMilli(now) }
+	a.eventReceiverPID = func() int { return 123 }
+	a.programStatusTTY = func(int) string { return "/dev/test-tty" }
+	writes := 0
+	a.programStatusWrite = func(_ string, b []byte) error {
+		writes++
+		if !bytes.Contains(b, []byte("state=working:app=claude-code")) {
+			t.Errorf("unexpected terminal status: %q", b)
+		}
+		return nil
+	}
+	var stdout bytes.Buffer
+	payload := `{"hook_event_name":"UserPromptSubmit","harness":"claude","session_id":"session"}`
+	if err := a.runEventAndMessageHook(strings.NewReader(payload), &stdout); err != nil {
+		t.Fatal(err)
+	}
+	var envelope sessionEnvelope
+	if err := json.Unmarshal(stdout.Bytes(), &envelope); err != nil {
+		t.Fatalf("board context missing: %q, %v", stdout.String(), err)
+	}
+	if writes != 1 || !strings.Contains(envelope.HookSpecificOutput.AdditionalContext, "family update") {
+		t.Fatalf("writes=%d context=%q; status and board must both survive disabled messaging", writes, stdout.String())
 	}
 }
 

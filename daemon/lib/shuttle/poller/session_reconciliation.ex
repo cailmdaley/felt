@@ -273,8 +273,8 @@ defmodule Shuttle.Poller.SessionReconciliation do
   end
 
   # The App Server owns the conversation across daemon restarts, but a terminal
-  # viewer belongs to its terminal backend and may have died with its server. Check every poll:
-  # the backend can still be starting during boot adoption. Recreate only the
+  # viewer belongs to its terminal backend and may have died with its server.
+  # Check every poll: the backend can still be starting during boot adoption. Recreate only the
   # viewer for CLI-surface records; prepare verifies the exact stored thread and
   # starts its TUI without creating a model turn. App-surface records need none.
   defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id} = record, runner)

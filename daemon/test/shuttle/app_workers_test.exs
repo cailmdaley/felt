@@ -192,6 +192,11 @@ defmodule Shuttle.AppWorkersTest do
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
   end
 
+  defmodule RexRunner do
+    def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
+    def cmd(command, args, opts), do: Runner.cmd(command, args, opts)
+  end
+
   defmodule MissingTmuxRunner do
     def cmd("tmux", _args, _opts), do: {"tmux unavailable", :timeout}
     def cmd(cmd, args, opts), do: Runner.cmd(cmd, args, opts)
@@ -645,6 +650,52 @@ defmodule Shuttle.AppWorkersTest do
 
     assert %{session: "codex-app:" <> ^id, context_address: "shuttle://test-host/codex/" <> ^id} =
              Poller.worker_status(poller, "tests/terminal")
+  end
+
+  @tag :tmp_dir
+  test "restart restores a Rex viewer without replacing the App Server conversation", %{
+    tmp_dir: dir
+  } do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
+    Env.put_app_env(:fake_rex, start_supervised!({Shuttle.Test.FakeRex, []}))
+    Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal", runner: RexRunner)
+    terminal = WorkerBackend.tmux(ref)
+    assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
+    Shuttle.Test.FakeRex.sessions(%{})
+    assert Shuttle.Terminal.status(RexRunner, terminal) == :gone
+    calls_before_restart = App.calls()
+    App.set(:read_result, {:error, :backend_not_ready})
+
+    {:ok, poller} =
+      start_poller!(
+        runner: RexRunner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    assert %{session: ^ref} = Poller.worker_status(poller, "tests/terminal")
+
+    eventually(
+      fn ->
+        {:ok, record} = AppWorkers.get("app-session-1")
+        record["terminal_error"] != nil
+      end,
+      200
+    )
+
+    assert Shuttle.Terminal.status(RexRunner, terminal) == :gone
+    App.set(:read_result, {:ok, %{"id" => "app-session-1", "status" => %{"type" => "idle"}}})
+    send(poller, :run_poll_cycle)
+    eventually(fn -> Shuttle.Terminal.status(RexRunner, terminal) == :alive end, 200)
+    assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
+    restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
+    assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", []}, &1))
+    refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
+    refute Enum.any?(Runner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
 
   test "restart adopts terminal backend identity even with no terminal" do
