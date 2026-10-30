@@ -12,6 +12,7 @@ import (
 func TestThreadInheritanceAndOverrides(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
+	ownHost(t, env, "testhost")
 	dir, st := newStore(t)
 	seedPlainFiber(t, st, "hub", "")
 	pdir := t.TempDir()
@@ -90,6 +91,7 @@ func TestThreadSurfaceInheritanceAndOverride(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			env := testEnv(t)
+			ownHost(t, env, "testhost")
 			dir, st := newStore(t)
 			seedPlainFiber(t, st, "hub", "")
 			f := mustRead(t, st, "hub")

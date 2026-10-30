@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -127,7 +128,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			// --disabled WITH a project_dir): arming later refuses a block
 			// without one.
 			if !installDisabled || cmd.Flags().Changed("project-dir") {
-				projectDir, perr := a.resolveProjectDirFlag(installProjectDir)
+				projectDir, perr := a.resolveThreadProjectDir(cmd, args, host, installProjectDir)
 				if perr != nil {
 					return perr
 				}
@@ -160,6 +161,32 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 
 			if err := shuttle.SetConfig(f, block); err != nil {
 				return fmt.Errorf("attaching shuttle block: %w", err)
+			}
+			owner := ""
+			if !installDisabled {
+				owner, err = a.routeOwnerForCommand(cmd, args, block.Host)
+				if err != nil {
+					return err
+				}
+			}
+			if owner != "" && !installDisabled {
+				output, err := a.postOwnerLifecycle("install", owner, f, map[string]any{
+					"model": block.Agent, "surface": block.Surface, "project_dir": block.ProjectDir,
+				})
+				if err != nil {
+					var status daemonStatusError
+					if errors.As(err, &status) && status.status == 404 {
+						if createErr := a.createRemoteFiber(owner, f, block); createErr == nil {
+							fmt.Fprintf(a.env.Stdout, "installed %s as oneshot constitution (armed) on %s\n", args[0], owner)
+							return nil
+						} else {
+							return remoteRouteError(cmd, args, owner, createErr)
+						}
+					}
+					return remoteRouteError(cmd, args, owner, err)
+				}
+				a.printDaemonBody([]byte(output))
+				return nil
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
@@ -249,11 +276,11 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			if hasBlock {
 				return a.refuseExistingBlock(args[0], f, existing)
 			}
-			projectDir, err := a.resolveProjectDirFlag(repeatProjectDir)
+			host, err := a.resolveOwnHost(repeatHost)
 			if err != nil {
 				return err
 			}
-			host, err := a.resolveOwnHost(repeatHost)
+			projectDir, err := a.resolveThreadProjectDir(cmd, args, host, repeatProjectDir)
 			if err != nil {
 				return err
 			}
@@ -296,6 +323,30 @@ set-model / set-agent for the agent, uninstall to start over.`,
 
 			if err := shuttle.SetConfig(f, block); err != nil {
 				return fmt.Errorf("attaching shuttle block: %w", err)
+			}
+			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
+			if err != nil {
+				return err
+			}
+			if owner != "" {
+				output, err := a.postOwnerLifecycle("repeat", owner, f, map[string]any{
+					"schedule": repeatSchedule, "tz": repeatTZ, "model": block.Agent,
+					"surface": block.Surface, "project_dir": block.ProjectDir,
+				})
+				if err != nil {
+					var status daemonStatusError
+					if errors.As(err, &status) && status.status == 404 {
+						if createErr := a.createRemoteFiber(owner, f, block); createErr == nil {
+							fmt.Fprintf(a.env.Stdout, "installed %s as standing constitution on %s\n", args[0], owner)
+							return nil
+						} else {
+							return remoteRouteError(cmd, args, owner, createErr)
+						}
+					}
+					return remoteRouteError(cmd, args, owner, err)
+				}
+				a.printDaemonBody([]byte(output))
+				return nil
 			}
 			if err := st.Write(f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)

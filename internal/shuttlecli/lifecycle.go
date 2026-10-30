@@ -86,6 +86,9 @@ func (a *app) resolveOwnedShuttleFiber(query, missingBlockHint string) (*felt.Fe
 // acquisition. On any error the lock (if acquired) is released before
 // returning, so a failed reload never leaks a held lock.
 func lockAndReloadFiber(st *felt.Storage, f *felt.Felt) (*felt.Felt, func() error, error) {
+	if st == nil {
+		return f, func() error { return nil }, nil
+	}
 	unlock, err := st.LockFiber(f.ID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("locking fiber %s: %w", f.ID, err)
@@ -432,6 +435,18 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				}
 				output, err := a.postOwnerLifecycle("resume", owner, f, nil)
 				if err != nil {
+					var missing daemonStatusError
+					if st != nil && errors.As(err, &missing) && missing.status == 404 {
+						f.Status = felt.StatusActive
+						if setErr := shuttle.SetConfig(f, block); setErr == nil {
+							createErr := a.createRemoteFiber(owner, f, block)
+							if createErr == nil {
+								fmt.Fprintf(a.env.Stdout, "created %s on %s from its local draft and armed it\n", f.ID, owner)
+								return nil
+							}
+							return remoteRouteError(cmd, args, owner, createErr)
+						}
+					}
 					return remoteRouteError(cmd, args, owner, err)
 				}
 				a.printDaemonBody([]byte(output))
@@ -563,7 +578,7 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there.
 func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
-	f, _, _, err := a.shuttleResolveFiberRef(query, true)
+	f, storage, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
@@ -585,6 +600,22 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 			}
 		}
 		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, payload)
+		if err != nil && storage != nil && verb == "resume" {
+			var missing daemonStatusError
+			if errors.As(err, &missing) && missing.status == 404 {
+				if block, ok, blockErr := shuttle.BlockOf(f); blockErr == nil && ok {
+					f.Status = felt.StatusActive
+					if setErr := shuttle.SetConfig(f, block); setErr == nil {
+						createErr := a.createRemoteFiber(owner, f, block)
+						if createErr == nil {
+							fmt.Fprintf(a.env.Stdout, "created %s on %s from its local draft and armed it\n", f.ID, owner)
+							return true, nil
+						}
+						return true, remoteRouteError(cmd, []string{query}, owner, createErr)
+					}
+				}
+			}
+		}
 		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
 			fmt.Fprintf(a.env.Stdout, "  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
 		}

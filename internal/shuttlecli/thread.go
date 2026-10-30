@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,9 +36,9 @@ its owning daemon. The source is armed for a fresh worker. If migration fails,
 the child stays created but disabled. --take cannot be combined with --disabled
 or a host different from the caller's.
 
---json prints an object with the new id and uid. Creation writes locally; publish the
-fiber with felt sync --push so its owner can dispatch it. Remote path validation
-uses a daemon when reachable; without --take creation can work offline.`,
+--json prints an object with the new id and uid. An armed thread for a remote
+host is created by that host's daemon. A remote draft made with --disabled stays
+local until you move it to its owner.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if take && disabled {
@@ -59,9 +60,19 @@ uses a daemon when reachable; without --take creation can work offline.`,
 			if err != nil {
 				return err
 			}
-			parent, unlock, err := lockAndReloadFiber(st, parent)
-			if err != nil {
-				return err
+			remoteParent := st == nil
+			var unlock func() error
+			if !remoteParent {
+				parent, unlock, err = lockAndReloadFiber(st, parent)
+				if err != nil {
+					return err
+				}
+			} else {
+				root, rootErr := felt.ProjectRoot(a.env, a.dir)
+				if rootErr != nil {
+					return rootErr
+				}
+				st = felt.NewStorage(root)
 			}
 			defer func() {
 				if unlock != nil {
@@ -152,18 +163,29 @@ uses a daemon when reachable; without --take creation can work offline.`,
 			if err != nil {
 				return err
 			}
-			childUnlock, err := st.LockFiber(child.ID)
-			if err != nil {
-				return err
+			owner := ""
+			if !disabled {
+				owner, err = a.routeOwnerForCommand(cmd, args, block.Host)
+				if err != nil {
+					return err
+				}
+			}
+			var childUnlock func() error
+			if owner == "" {
+				childUnlock, err = st.LockFiber(child.ID)
+				if err != nil {
+					return err
+				}
+				if err := st.CheckAvailableID(child.ID); err != nil {
+					childUnlock()
+					return err
+				}
 			}
 			defer func() {
 				if childUnlock != nil {
 					childUnlock()
 				}
 			}()
-			if err := st.CheckAvailableID(child.ID); err != nil {
-				return err
-			}
 			child.Body = ask + "\n\n## Desired State\n\n## Status\n"
 			child.AddTag("constitution")
 			child.Status = felt.StatusActive
@@ -173,9 +195,29 @@ uses a daemon when reachable; without --take creation can work offline.`,
 			if err := shuttle.SetConfig(child, block); err != nil {
 				return err
 			}
-			child.Touch(child.CreatedAt)
-			if err := st.Write(child); err != nil {
-				return err
+			if owner != "" {
+				response, err := a.postOwnerFiberCreate(owner, map[string]any{
+					"id": child.ID, "name": child.Name, "body": child.Body,
+					"frontmatter": map[string]any{
+						"status": string(child.Status), "tags": child.Tags,
+						"shuttle": block,
+					},
+				})
+				if err != nil {
+					return remoteRouteError(cmd, args, owner, err)
+				}
+				var created struct {
+					UID string `json:"uid"`
+				}
+				_ = json.Unmarshal(response, &created)
+				if created.UID != "" {
+					child.UID = created.UID
+				}
+			} else {
+				child.Touch(child.CreatedAt)
+				if err := st.Write(child); err != nil {
+					return err
+				}
 			}
 			if take {
 				child.Path = st.Path(child.ID)

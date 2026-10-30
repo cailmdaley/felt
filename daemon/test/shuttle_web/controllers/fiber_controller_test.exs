@@ -111,6 +111,40 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert length(String.split(File.read!(path), "due:")) == 2
   end
 
+  test "POST /api/v1/fiber/create preserves source identity and document metadata", %{tmp: tmp} do
+    uid = "01JARZ3NDEKTSV4RRFFQ69G5FA"
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/fiber/create",
+        Jason.encode!(%{
+          id: "tests/transferred",
+          uid: uid,
+          name: "Transferred fiber",
+          body: "the source body",
+          frontmatter: %{
+            "status" => "active",
+            "description" => "A source description",
+            "created-at" => "2026-10-29T12:00:00Z",
+            "updated-at" => "2026-10-30T12:00:00Z",
+            "shuttle" => %{kind: "oneshot", project_dir: tmp}
+          }
+        })
+      )
+
+    assert conn.status == 200
+
+    assert %{"id" => "tests/transferred", "uid" => ^uid, "path" => path} =
+             Jason.decode!(conn.resp_body)
+
+    assert {:ok, parsed} = path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
+    assert parsed["id"] == uid
+    assert parsed["description"] == "A source description"
+    assert to_string(parsed["created-at"]) =~ "2026-10-29T12:00:00Z"
+    assert to_string(parsed["updated-at"]) =~ "2026-10-30T12:00:00Z"
+  end
+
   test "POST /api/v1/fiber/create writes under shuttle.project_dir when it differs from daemon root",
        %{
          tmp: tmp

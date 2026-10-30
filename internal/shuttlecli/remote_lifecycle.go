@@ -229,6 +229,22 @@ func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields 
 	return string(response), nil
 }
 
+// postOwnerFiberCreate sends a complete fiber document through the local
+// daemon's owner-routed create endpoint. The destination daemon owns placement
+// and validates any armed project_dir against its own filesystem.
+func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte, error) {
+	payload["origin"] = owner
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encoding fiber create request: %w", err)
+	}
+	endpoint, err := a.daemonEndpoint("/api/v1/fiber/create")
+	if err != nil {
+		return nil, err
+	}
+	return a.postRouted(owner, endpoint, body)
+}
+
 func (a *app) postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([]byte, error) {
 	payload := map[string]any{"fiber_id": fiber.ID, "origin": owner}
 	for key, value := range fields {

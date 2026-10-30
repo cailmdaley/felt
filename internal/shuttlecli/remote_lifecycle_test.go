@@ -3,18 +3,75 @@ package shuttlecli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cailmdaley/felt/internal/felt"
 	"github.com/cailmdaley/felt/internal/shuttle"
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/spf13/cobra"
 )
+
+func TestRemoteInstallAndRepeatTransferMissingSourceWithIdentityAndMetadata(t *testing.T) {
+	t.Parallel()
+	for _, verb := range []string{"install", "repeat"} {
+		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			f, err := felt.New(verb+"-source", "Source")
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.Body = "source body\n\n## Desired State\n"
+			f.Description = "source description"
+			due := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
+			f.Due = &due
+			uid := f.UID
+			if err := st.Write(f); err != nil {
+				t.Fatal(err)
+			}
+			var create requestBodies
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/project-dir/resolve":
+					_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
+				case "/api/v1/lifecycle":
+					http.Error(w, `{"error":"fiber not found on worker"}`, http.StatusNotFound)
+				case "/api/v1/fiber/create":
+					create.record(t, r)
+					got := create.last()
+					_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q}`, got["id"], got["uid"])
+				default:
+					t.Errorf("unexpected request %s", r.URL.String())
+					http.NotFound(w, r)
+				}
+			}))
+			args := []string{verb, f.ID, "--host", "worker", "--project-dir", "/remote/project"}
+			if verb == "repeat" {
+				args = append(args, "--schedule", "0 9 * * *")
+			}
+			if _, _, err := executeIn(t, env, dir, args...); err != nil {
+				t.Fatal(err)
+			}
+			payload := create.last()
+			frontmatter, _ := payload["frontmatter"].(map[string]any)
+			stored, _ := st.Read(f.ID)
+			if payload["id"] != f.ID || payload["uid"] != uid || payload["body"] != stored.Body || frontmatter["description"] != "source description" || frontmatter["due"] != "2026-11-30" {
+				t.Fatalf("incomplete source transfer: %#v", payload)
+			}
+			if _, err := st.Read(f.ID); err != nil {
+				t.Fatalf("lost local source after failed owner lookup: %v", err)
+			}
+		})
+	}
+}
 
 func TestDirectOwnerCommandUsesShuttleAndOmitsLocalStore(t *testing.T) {
 	t.Parallel()

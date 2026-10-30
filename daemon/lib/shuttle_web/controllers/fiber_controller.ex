@@ -53,13 +53,16 @@ defmodule ShuttleWeb.FiberController do
     with {:ok, fiber_id} <- required_string(params, "id"),
          {:ok, name} <- required_string(params, "name"),
          {:ok, body} <- optional_string(params, "body", ""),
+         {:ok, uid} <- optional_string(params, "uid", ""),
          {:ok, frontmatter} <- normalize_frontmatter(params, name),
          {:ok, frontmatter} <- normalize_shuttle_host(frontmatter),
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
-         {:ok, path} <- felt_add(fiber_id, name, body, frontmatter),
-         :ok <- inject_non_native_frontmatter(path, frontmatter) do
-      json(conn, %{id: fiber_id, path: path})
+         {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
+         :ok <- inject_non_native_frontmatter(path, frontmatter),
+         :ok <- inject_transferred_metadata(path, uid, frontmatter) do
+      uid = if uid == "", do: generated_uid, else: uid
+      json(conn, %{id: fiber_id, path: path, uid: uid})
     else
       {:error, reason} ->
         conn
@@ -150,7 +153,10 @@ defmodule ShuttleWeb.FiberController do
 
     with :ok <- ensure_felt_repo(root),
          {:ok, _output} <- Shuttle.Felt.run(args) do
-      felt_path(root, fiber_id)
+      case felt_metadata(root, fiber_id) do
+        {:ok, path, uid} -> {:ok, path, uid}
+        error -> error
+      end
     else
       {:error, reason} -> {:error, reason}
       {:command_error, _status, output} -> {:error, "felt add failed: #{String.trim(output)}"}
@@ -172,12 +178,16 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  defp felt_path(root, fiber_id) do
+  defp felt_metadata(root, fiber_id) do
     case Shuttle.Felt.run(["-C", root, "show", fiber_id, "-j"]) do
       {:ok, output} ->
         case Jason.decode(output) do
-          {:ok, %{"path" => path}} when is_binary(path) and path != "" -> {:ok, path}
-          _ -> {:error, "felt show returned no path for #{fiber_id}"}
+          {:ok, %{"path" => path, "uid" => uid}}
+          when is_binary(path) and path != "" and is_binary(uid) and uid != "" ->
+            {:ok, path, uid}
+
+          _ ->
+            {:error, "felt show returned no path or uid for #{fiber_id}"}
         end
 
       {:command_error, _status, _output} ->
@@ -185,6 +195,32 @@ defmodule ShuttleWeb.FiberController do
 
       {:error, reason} ->
         {:error, "felt show failed: #{reason}"}
+    end
+  end
+
+  defp inject_transferred_metadata(path, uid, frontmatter) do
+    operations =
+      [
+        {"id", uid},
+        {"description", Map.get(frontmatter, "description")},
+        {"created-at", Map.get(frontmatter, "created-at")},
+        {"updated-at", Map.get(frontmatter, "updated-at")},
+        {"closed-at", Map.get(frontmatter, "closed-at")}
+      ]
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+      |> Enum.map(fn {key, value} -> {:put, key, value} end)
+
+    if operations == [] do
+      :ok
+    else
+      with {:ok, content} <- File.read(path),
+           ["", frontmatter, body] <- String.split(content, "---\n", parts: 3) do
+        updated = ["---\n", FrontmatterEdit.apply(frontmatter, operations), "---\n", body]
+        atomic_write(path, updated)
+      else
+        {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
+        _ -> {:error, "created fiber has unexpected frontmatter layout"}
+      end
     end
   end
 
