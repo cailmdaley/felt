@@ -140,7 +140,9 @@ defmodule ShuttleWeb.FiberControllerTest do
 
     assert {:ok, parsed} = path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
     assert parsed["id"] == uid
+    assert parsed["status"] == "active"
     assert parsed["description"] == "A source description"
+    assert parsed["shuttle"]["host"] == "test-host"
     assert to_string(parsed["created-at"]) =~ "2026-10-29T12:00:00Z"
     assert to_string(parsed["updated-at"]) =~ "2026-10-30T12:00:00Z"
   end

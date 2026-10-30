@@ -59,8 +59,7 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
-         :ok <- inject_non_native_frontmatter(path, frontmatter),
-         :ok <- inject_transferred_metadata(path, uid, frontmatter) do
+         :ok <- inject_create_frontmatter(path, frontmatter, uid) do
       uid = if uid == "", do: generated_uid, else: uid
       json(conn, %{id: fiber_id, path: path, uid: uid})
     else
@@ -198,7 +197,9 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  defp inject_transferred_metadata(path, uid, frontmatter) do
+  defp inject_create_frontmatter(path, frontmatter, uid) do
+    extra = Map.drop(frontmatter, @felt_native_keys)
+
     operations =
       [
         {"id", uid},
@@ -210,17 +211,20 @@ defmodule ShuttleWeb.FiberController do
       |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
       |> Enum.map(fn {key, value} -> {:put, key, value} end)
 
-    if operations == [] do
-      :ok
+    with {:ok, content} <- File.read(path),
+         ["", raw_frontmatter, body] <- String.split(content, "---\n", parts: 3) do
+      frontmatter =
+        if extra == %{},
+          do: raw_frontmatter,
+          else: raw_frontmatter <> FrontmatterEdit.render(extra)
+
+      frontmatter =
+        if operations == [], do: frontmatter, else: FrontmatterEdit.apply(frontmatter, operations)
+
+      atomic_write(path, ["---\n", frontmatter, "---\n", body])
     else
-      with {:ok, content} <- File.read(path),
-           ["", frontmatter, body] <- String.split(content, "---\n", parts: 3) do
-        updated = ["---\n", FrontmatterEdit.apply(frontmatter, operations), "---\n", body]
-        atomic_write(path, updated)
-      else
-        {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
-        _ -> {:error, "created fiber has unexpected frontmatter layout"}
-      end
+      {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
+      _ -> {:error, "created fiber has unexpected frontmatter layout"}
     end
   end
 
@@ -271,31 +275,6 @@ defmodule ShuttleWeb.FiberController do
   # other custom keys felt does not own) into the file felt just wrote, leaving
   # felt's native frontmatter — including the minted `id:` — byte-for-byte
   # intact. New keys are inserted immediately before the closing `---`.
-  defp inject_non_native_frontmatter(path, frontmatter) do
-    extra = Map.drop(frontmatter, @felt_native_keys)
-
-    if extra == %{} do
-      :ok
-    else
-      case File.read(path) do
-        {:ok, content} -> splice(path, content, extra)
-        {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
-      end
-    end
-  end
-
-  defp splice(path, content, extra) do
-    case String.split(content, "---\n", parts: 3) do
-      ["", frontmatter, rest] ->
-        rendered = FrontmatterEdit.render(extra)
-        payload = ["---\n", frontmatter, rendered, "---\n", rest]
-        atomic_write(path, payload)
-
-      _ ->
-        {:error, "created fiber has unexpected frontmatter layout"}
-    end
-  end
-
   defp atomic_write(path, payload) do
     tmp = path <> ".tmp"
 

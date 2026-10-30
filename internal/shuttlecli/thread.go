@@ -207,12 +207,16 @@ local until you move it to its owner.`,
 					return remoteRouteError(cmd, args, owner, err)
 				}
 				var created struct {
+					ID  string `json:"id"`
 					UID string `json:"uid"`
 				}
-				_ = json.Unmarshal(response, &created)
-				if created.UID != "" {
-					child.UID = created.UID
+				if err := json.Unmarshal(response, &created); err != nil {
+					return fmt.Errorf("owner %s may have created thread %s, but its response identity could not be read; inspect it before retrying: %w", owner, child.ID, err)
 				}
+				if created.ID != child.ID || !felt.LooksLikeUID(created.UID) || created.UID != strings.ToUpper(created.UID) {
+					return fmt.Errorf("owner %s may have created thread %s, but returned an invalid identity; inspect it before retrying", owner, child.ID)
+				}
+				child.UID = created.UID
 			} else {
 				child.Touch(child.CreatedAt)
 				if err := st.Write(child); err != nil {

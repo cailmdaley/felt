@@ -19,7 +19,7 @@ func TestThreadRemoteDirectoryValidation(t *testing.T) {
 			var bodies requestBodies
 			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/api/v1/fiber/create" {
-					_, _ = w.Write([]byte(`{"id":"parent/ask","uid":"01JREMOTEUID0000000000000000"}`))
+					_, _ = w.Write([]byte(`{"id":"parent/ask","uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`))
 					return
 				}
 				if r.URL.Path != "/api/v1/project-dir/resolve" {
@@ -95,6 +95,31 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	}
 }
 
+func TestRemoteThreadInvalidCreateIdentityIsReportedAsUncertain(t *testing.T) {
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "parent", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "hub", "project_dir": t.TempDir(), "agent": "claude-opus"}, nil)
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/project-dir/resolve":
+			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
+		case "/api/v1/fiber/create":
+			_, _ = w.Write([]byte(`{"id":"parent/measure","uid":"not-a-ulid"}`))
+		default:
+			t.Errorf("unexpected request %s", r.URL.String())
+			http.NotFound(w, r)
+		}
+	}))
+	_, _, err := executeIn(t, env, dir, "thread", "parent", "Measure", "--host", "worker", "--project-dir", "/remote/project")
+	if err == nil || !strings.Contains(err.Error(), "may have created thread parent/measure") {
+		t.Fatalf("create response error = %v", err)
+	}
+	if _, err := st.Read("parent/measure"); err == nil {
+		t.Fatal("uncertain remote create left a local copy")
+	}
+}
+
 func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T) {
 	t.Parallel()
 	env := remoteLifecycleEnv(t)
@@ -108,14 +133,14 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/fiber/create":
 			creates.record(t, r)
 			created := creates.last()
-			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":"01JREMOTEUID0000000000000000"}`, created["id"])
+			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`, created["id"])
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/composite":
-			_, _ = w.Write([]byte(`{"fibers":[{"path":"parent/measure/measure.md","origin":"worker","fiber":{"id":"01JREMOTEUID0000000000000000","slug":"parent/measure","name":"Measure","status":"open","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
+			_, _ = w.Write([]byte(`{"fibers":[{"path":"parent/measure/measure.md","origin":"worker","fiber":{"id":"01JARZ3NDEKTSV4RRFFQ69G5FA","slug":"parent/measure","name":"Measure","status":"open","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/fibers/parent/measure":
 			if r.URL.Query().Get("origin") != "worker" {
 				t.Errorf("owner read query = %s", r.URL.RawQuery)
 			}
-			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01JREMOTEUID0000000000000000","slug":"parent/measure","name":"Measure","status":"open","body":"Measure\n\n## Desired State\n\n## Status","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
+			_, _ = w.Write([]byte(`{"fibers":[{"fiber":{"id":"01JARZ3NDEKTSV4RRFFQ69G5FA","slug":"parent/measure","name":"Measure","status":"open","body":"Measure\n\n## Desired State\n\n## Status","shuttle":{"kind":"oneshot","host":"worker","agent":"claude-opus","project_dir":"/remote/project"}}}]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/lifecycle":
 			lifecycle.record(t, r)
 			_, _ = w.Write([]byte("owner resumed\n"))
