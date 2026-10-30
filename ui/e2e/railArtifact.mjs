@@ -88,20 +88,17 @@ export function registerRailArtifactJourneys(test) {
     await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
 
-    // The page's own relative links open their documents in the reader, as on the full page.
-    await railFrame(page).locator('body').evaluate(el => el.ownerDocument.scrollingElement.scrollTo(0, 0))
-    await railFrame(page).getByRole('link', { name: 'Read the independent validation →', exact: true }).click()
-    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/validation.html'))
-    await page.locator('.ws-selected .ws-document-back, .ws-selected .ws-chat-back').first().waitFor({ state: 'attached' })
-    await page.goBack().catch(() => {})
-    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.startsWith('chat:'), null, { timeout: 5000 }).catch(() => {})
-    if (!await page.locator('.ws-page.ws-selected[data-key^="chat:"]').count()) await page.keyboard.press('Escape')
-    await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
-
     // Open full goes to the full page, where the rail stops repeating it.
     await section(page).getByRole('button', { name: 'Open the full artifact', exact: true }).click()
     await page.locator('.ws-page.ws-selected').frameLocator('iframe').getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     assert.equal(await section(page).isVisible(), true, 'the section keeps its heading while the artifact fills the stage')
     assert.equal(await section(page).locator('iframe').count(), 0, 'the rail does not draw the staged artifact twice')
+
+    // Back on the chat, the page's own relative links open their documents in the reader, as on the full page.
+    await page.locator('.ws-page.ws-selected').getByRole('button', { name: 'Back one level', exact: true }).click()
+    await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
+    await railFrame(page).locator('body').evaluate(el => el.ownerDocument.scrollingElement.scrollTo(0, 0))
+    await railFrame(page).getByRole('link', { name: 'Read the independent validation →', exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('.ws-page.ws-selected')?.getAttribute('data-key')?.endsWith('/validation.html'))
   }, { width: 1440, height: 900 })
 }
