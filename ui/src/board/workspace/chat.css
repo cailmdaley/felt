@@ -123,7 +123,7 @@
 /* The report reference stays legible beside the constitution brief. */
 .ws-report-chip { display: grid; flex: none; padding: 0; margin: 0; border-radius: 5px; }
 .ws-report-preview { display: block; position: relative; overflow: hidden; align-self: stretch; min-height: 84px; aspect-ratio: 3 / 2; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
-.ws-chat-refs .ws-report-preview { width: 18px; height: 14px; min-height: 14px; aspect-ratio: auto; border-radius: 2px; }
+.ws-chat-refs .ws-report-preview { align-self: center; width: 18px; height: 14px; min-height: 14px; aspect-ratio: auto; border-radius: 2px; }
 .ws-chat-refs .ws-report-label { padding: 0; font: inherit; color: inherit; }
 .ws-report-preview > .ws-thumbnail { width: 100%; height: 100%; }
 .ws-report-label { display: block; padding: 2px 4px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-solid) var(--font-serif); text-align: center; }

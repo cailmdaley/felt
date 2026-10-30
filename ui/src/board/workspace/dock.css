@@ -263,12 +263,13 @@
 .ws-dock .kbn-detail-save-status { flex: 1; color: var(--ws-ink-muted); font: var(--type-meta) var(--font-mono); }
 .ws-dock .kbn-detail-save-status-saving { font-style: italic; }
 .ws-dock .kbn-detail-transcript { padding: 8px 0; border-block: var(--ws-line-width) solid var(--ws-hairline); }
-.ws-dock .kbn-detail-transcript-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; color: var(--ws-ink-muted); font: var(--type-meta) var(--font-mono); }
+/* The meeting's line is one voice: its state, its name and Stop, all set as labels. */
+.ws-dock .kbn-detail-transcript-meta { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-dock .kbn-detail-transcript-dot { width: var(--ws-dot-size); height: var(--ws-dot-size); flex: none; border-radius: 50%; background: var(--ws-ink-muted); }
 .ws-dock .kbn-detail-transcript-live .kbn-detail-transcript-dot { background: var(--ws-ink); }
 .ws-dock .kbn-detail-transcript-failed .kbn-detail-transcript-dot { background: var(--ws-red); }
 .ws-dock .kbn-detail-transcript-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--ws-stop); font: var(--type-meta) var(--font-serif); cursor: pointer; }
+.ws-dock button.kbn-detail-transcript-stop:not(.kbn-card-worker) { margin-left: auto; flex: none; padding: 2px 6px; border: 0; background: transparent; color: var(--ws-stop); font: inherit; cursor: pointer; }
 .ws-dock .kbn-detail-transcript-stop:disabled { opacity: .55; cursor: default; }
 .ws-dock .kbn-detail-transcript-lines { margin: 0; padding: 0; list-style: none; max-height: 9em; overflow-y: auto; overscroll-behavior: contain; font: var(--type-prose)/var(--leading-ui) var(--font-serif); overflow-wrap: anywhere; }
 .ws-dock .kbn-meeting-speaker { margin-right: 5px; color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-ui) var(--font-serif); }
