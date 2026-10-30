@@ -243,7 +243,7 @@ defmodule Shuttle.FrontmatterEdit do
           indentation =
             lines
             |> tl()
-            |> Enum.reject(&blank?/1)
+            |> Enum.reject(&(blank?(&1) or comment?(&1)))
             |> Enum.map(&indent_of/1)
             |> Enum.filter(&(&1 > 0))
             |> Enum.min(fn -> 2 end)
@@ -278,6 +278,13 @@ defmodule Shuttle.FrontmatterEdit do
   end
 
   defp reject_child_span(lines, child) do
+    direct_indent =
+      lines
+      |> Enum.reject(&(blank?(&1) or comment?(&1)))
+      |> Enum.map(&indent_of/1)
+      |> Enum.filter(&(&1 > 0))
+      |> Enum.min(fn -> 0 end)
+
     {kept, _} =
       Enum.reduce(lines, {[], :scanning}, fn line, {kept, state} ->
         case state do
@@ -288,11 +295,11 @@ defmodule Shuttle.FrontmatterEdit do
             if blank?(line) or indent_of(line) > child_indent do
               {kept, {:dropping, child_indent}}
             else
-              step(line, child, kept)
+              step(line, child, direct_indent, kept)
             end
 
           :scanning ->
-            step(line, child, kept)
+            step(line, child, direct_indent, kept)
         end
       end)
 
@@ -301,8 +308,8 @@ defmodule Shuttle.FrontmatterEdit do
 
   # One line of the scan: if it's the child header, start dropping its span;
   # otherwise keep it.
-  defp step(line, child, kept) do
-    if match_child_header?(line, child) do
+  defp step(line, child, direct_indent, kept) do
+    if indent_of(line) == direct_indent and match_child_header?(line, child) do
       {kept, {:dropping, indent_of(line)}}
     else
       {[line | kept], :scanning}
@@ -321,6 +328,7 @@ defmodule Shuttle.FrontmatterEdit do
   end
 
   defp blank?(line), do: String.trim(line) == ""
+  defp comment?(line), do: String.starts_with?(String.trim_leading(line), "#")
 
   # ── rendering ────────────────────────────────────────────────────────────────
 

@@ -80,6 +80,47 @@ defmodule Shuttle.FrontmatterEditTest do
       assert out =~ ~s(    expr: "0 8 * * *")
     end
 
+    test "nested runtime edits preserve same-named keys deeper in unknown configuration" do
+      for indent <- [2, 4], operation <- [:put, :delete] do
+        pad = String.duplicate(" ", indent)
+
+        fm =
+          "shuttle:\n#{pad}custom:\n#{pad}#{pad}runtime:\n#{pad}#{pad}#{pad}keep: yes\n#{pad}runtime: {handed_off_at: old}\n"
+
+        op =
+          if operation == :put,
+            do: {:put_nested, "shuttle", "runtime", %{"thread_exit_verb" => "closed"}},
+            else: {:delete_nested, "shuttle", "runtime"}
+
+        out = FrontmatterEdit.apply(fm, [op])
+        assert {:ok, parsed} = YamlElixir.read_from_string(out)
+        assert parsed["shuttle"]["custom"]["runtime"]["keep"] == "yes"
+        assert out =~ "#{pad}#{pad}#{pad}keep: yes"
+      end
+    end
+
+    test "comments do not determine nested mapping indentation" do
+      fm = "shuttle:\n # operator note\n  kind: standing\n  runtime: {handed_off_at: old}\n"
+
+      for op <- [
+            {:put_nested, "shuttle", "runtime", %{"thread_exit_verb" => "closed"}},
+            {:delete_nested, "shuttle", "runtime"}
+          ] do
+        out = FrontmatterEdit.apply(fm, [op])
+        assert {:ok, parsed} = YamlElixir.read_from_string(out)
+        assert parsed["shuttle"]["kind"] == "standing"
+        assert out =~ " # operator note"
+
+        case op do
+          {:put_nested, _, _, _} ->
+            assert parsed["shuttle"]["runtime"] == %{"thread_exit_verb" => "closed"}
+
+          _ ->
+            refute Map.has_key?(parsed["shuttle"], "runtime")
+        end
+      end
+    end
+
     test "nested runtime maps can be updated without dropping unknown fields or inline maps" do
       for indent <- [2, 4] do
         pad = String.duplicate(" ", indent)

@@ -1427,3 +1427,27 @@ func TestShuttleRetiredAgent_AcceptRefuses(t *testing.T) {
 		t.Fatal("refused accept must not arm the fiber")
 	}
 }
+
+func TestResumeLegacyRestSuppressesHandoffNotice(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	dir, storage := newStore(t)
+	seedShuttleRole(t, storage, "f", felt.StatusOpen, map[string]any{
+		"kind": "oneshot", "agent": "claude-opus", "project_dir": t.TempDir(),
+		"runtime": map[string]any{"handed_off_at": "2026-10-29T00:00:00Z"},
+	}, nil)
+	f := mustRead(t, storage, "f")
+	if err := f.SetExtraField("horizon", "stashed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.Write(f); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := runIn(t, env, dir, "resume", "f", "--local"); err != nil {
+		t.Fatalf("resume: %v\n%s", err, out)
+	}
+	got := mustRead(t, storage, "f")
+	if got.Status != felt.StatusActive || shuttleRuntimeMap(t, got)["thread_exit_verb"] != "rearmed" {
+		t.Fatalf("legacy rest can become a handoff: status=%s runtime=%v", got.Status, shuttleRuntimeMap(t, got))
+	}
+}
