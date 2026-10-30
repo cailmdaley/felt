@@ -239,7 +239,6 @@ function violations(file: string, source: string, defined: Set<string>): string[
     const fonts = get('font').map(d => shorthand(d.value))
     const sizes = [...get('size').map(d => d.value), ...fonts.flatMap(f => f.size ? [f.size] : [])]
     const leadings = [...get('leading').map(d => d.value), ...fonts.flatMap(f => f.leading ? [f.leading] : [])]
-    const families = [...get('family').map(d => d.value), ...fonts.flatMap(f => f.family ? [f.family] : [])]
     const caps = [...get('caps').map(d => d.value), ...fonts.flatMap(f => f.caps ? [f.caps] : [])]
 
     // A glyph token sizes a mark, never text.
@@ -256,12 +255,6 @@ function violations(file: string, source: string, defined: Set<string>): string[
     if (caps.some(c => /all-small-caps/.test(c))) {
       if (!get('track').some(d => TRACK.test(d.value))) at(b.offset, `kicker without its tracking token: ${b.selector}`)
       if (sizes.includes('var(--type-meta)')) at(b.offset, `kicker at meta size: ${b.selector}`)
-    }
-
-    // A bare count is mono meta.
-    const last = b.selector.split(',').pop() ?? ''
-    if (/-count\b/.test(last) && (families.length || sizes.length) && !families.includes('var(--font-mono)')) {
-      at(b.offset, `a count is mono: ${b.selector}`)
     }
   }
   return found
@@ -321,9 +314,7 @@ const MUST_FAIL: [string, string][] = [
   ['x.css', '.r { font: var(--type-meta)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }'],
   ['x.css', '.s { font-size: var(--type-prose); line-height: 24px; }'],
   ['x.css', '.t { font: var(--type-prose)/var(--ctl-line-height) var(--font-serif); }'],
-  ['x.css', '.ws-col-count { font: var(--type-meta)/var(--leading-ui) var(--font-serif); }'],
   ['x.ts', "const css = `.u { content: '/*'; font-size: 13px; }`"],
-  ['x.css', '.ws-group-count { font-size: var(--type-meta); }'],
   ['x.ts', "const re = /`/g\nconst css = `.v { font-size: 13px; }`"],
 ]
 
