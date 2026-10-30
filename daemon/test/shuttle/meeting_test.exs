@@ -1867,6 +1867,16 @@ defmodule Shuttle.MeetingTest do
     {output, status} =
       tmux_cmd.(["display-message", "-p", "-t", "=" <> session <> ":", format])
 
+    # A closed PTY can precede SIGCHLD delivery; libutempter can lose that
+    # signal entirely. Wake only this isolated server's reaper while the
+    # retained pane has incomplete exit evidence (tmux/tmux#4559).
+    if status == 0 and String.starts_with?(output, "1||") do
+      {server, 0} = tmux_cmd.(["display-message", "-p", "\#{pid}"])
+      {pid, ""} = Integer.parse(String.trim(server))
+      assert pid > 1
+      assert {_, 0} = Shuttle.Env.cmd("kill", ["-s", "CHLD", to_string(pid)])
+    end
+
     case Meeting.parse_tmux_result(output, status) do
       {:ok, %{state: {:dead, _}}} ->
         {output, status}

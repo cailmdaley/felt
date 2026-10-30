@@ -1,4 +1,4 @@
-package sysenv
+package sysenv_test
 
 import (
 	"bytes"
@@ -8,21 +8,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func writeExecutable(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sysenvtest.LinkScript(t, path, body)
 	return path
 }
 
 func TestIsolatedEnvReadsOnlyItsOwnState(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	env := New(dir, []string{"HOME=/fake/home", "ONLY_HERE=1", "malformed", "=nokey"})
+	env := sysenv.New(dir, []string{"HOME=/fake/home", "ONLY_HERE=1", "malformed", "=nokey"})
 
 	if got := env.Getenv("ONLY_HERE"); got != "1" {
 		t.Fatalf("Getenv = %q", got)
@@ -51,7 +52,7 @@ func TestIsolatedEnvReadsOnlyItsOwnState(t *testing.T) {
 
 func TestCloneIsIndependent(t *testing.T) {
 	t.Parallel()
-	base := New("/a", []string{"K=base"})
+	base := sysenv.New("/a", []string{"K=base"})
 	clone := base.Clone()
 	clone.Set("K", "clone")
 	clone.Chdir("/b")
@@ -74,26 +75,25 @@ func TestLiveEnvRefusesWrites(t *testing.T) {
 			t.Fatal("Set on the live env did not panic")
 		}
 	}()
-	OS().Set("SYSENV_NEVER", "1")
+	sysenv.OS().Set("SYSENV_NEVER", "1")
 }
 
 func TestLookPathSearchesTheInjectedPath(t *testing.T) {
 	t.Parallel()
 	bin := t.TempDir()
 	tool := writeExecutable(t, bin, "sysenv-fake-tool", "#!/bin/sh\necho hi\n")
-	writeExecutable(t, bin, "not-executable", "")
-	if err := os.Chmod(filepath.Join(bin, "not-executable"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "not-executable"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	env := New(t.TempDir(), []string{"PATH=" + bin})
+	env := sysenv.New(t.TempDir(), []string{"PATH=" + bin})
 	if got, err := env.LookPath("sysenv-fake-tool"); err != nil || got != tool {
 		t.Fatalf("LookPath = %q, %v", got, err)
 	}
 	if _, err := env.LookPath("not-executable"); !errors.Is(err, exec.ErrNotFound) {
 		t.Fatalf("a non-executable file was found: %v", err)
 	}
-	if _, err := OS().LookPath("sysenv-fake-tool"); err == nil {
+	if _, err := sysenv.OS().LookPath("sysenv-fake-tool"); err == nil {
 		t.Fatal("the process PATH saw the injected tool")
 	}
 	if got, err := env.LookPath(tool); err != nil || got != tool {
@@ -109,7 +109,7 @@ func TestCommandRunsInsideTheEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := New(work, []string{"PATH=" + bin + ":/usr/bin:/bin", "MARK=isolated"})
+	env := sysenv.New(work, []string{"PATH=" + bin + ":/usr/bin:/bin", "MARK=isolated"})
 
 	var out bytes.Buffer
 	cmd := env.Command("sysenv-print")
@@ -137,7 +137,7 @@ func TestRelativeLookupsUseTheInjectedDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join("bin", "sysenv-relative-tool")); err == nil {
 		t.Fatal("the process working directory already holds the tool")
 	}
-	env := New(work, []string{"PATH=bin"})
+	env := sysenv.New(work, []string{"PATH=bin"})
 
 	if got, err := env.LookPath("./bin/sysenv-relative-tool"); err != nil || got != "./bin/sysenv-relative-tool" {
 		t.Fatalf("LookPath(./bin/...) = %q, %v", got, err)
@@ -163,7 +163,7 @@ func TestRelativeLookupsUseTheInjectedDirectory(t *testing.T) {
 	if got := env.Resolve("/abs/x"); got != "/abs/x" {
 		t.Fatalf("Resolve(absolute) = %q", got)
 	}
-	if got := OS().Resolve("bin/x"); got != "bin/x" {
+	if got := sysenv.OS().Resolve("bin/x"); got != "bin/x" {
 		t.Fatalf("live Resolve = %q, want the path unchanged", got)
 	}
 }

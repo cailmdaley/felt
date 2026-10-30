@@ -730,6 +730,8 @@ defmodule Shuttle.RemoteRegistryTest do
 
   describe "recovery cascade" do
     test "bounces the tunnel after the failure threshold and returns healthy on the next good probe" do
+      {clock, advance} = fake_clock()
+
       MockClient.set(
         "http://localhost:4001/api/v1/state",
         {:error, :econnrefused}
@@ -749,12 +751,13 @@ defmodule Shuttle.RemoteRegistryTest do
           bounce_wait_ms: 1,
           restart_wait_ms: 1,
           backoff_schedule_ms: [5],
-          user_uid: "501"
+          user_uid: "501",
+          clock: clock
         )
 
       Enum.each(1..3, fn _ ->
         :ok = RemoteRegistry.poll_now(:reg_recovery_happy)
-        Process.sleep(2)
+        advance.(2)
       end)
 
       degraded = RemoteRegistry.snapshot(:reg_recovery_happy, "candide")
@@ -767,7 +770,7 @@ defmodule Shuttle.RemoteRegistryTest do
       )
 
       :ok = RemoteRegistry.poll_now(:reg_recovery_happy)
-      Process.sleep(2)
+      advance.(2)
       :ok = RemoteRegistry.poll_now(:reg_recovery_happy)
 
       healed = RemoteRegistry.snapshot(:reg_recovery_happy, "candide")

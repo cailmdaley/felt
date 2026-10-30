@@ -6,6 +6,7 @@
 #   bin/shuttle-deploy --hosts local,hub-a    # a subset
 #   bin/shuttle-deploy --list                 # show the host table
 #   bin/shuttle-deploy --no-push              # skip the git push (already pushed)
+#   bin/shuttle-deploy --allow-failed-ci      # explicitly deploy a red CI revision
 #   bin/shuttle-deploy --ref v2.0.0-rc.1      # build an exact revision in immutable worktrees
 #   bin/shuttle-deploy --handshake            # bootstrap interactive ssh auth when
 #                                             # no live master — human must approve
@@ -330,12 +331,14 @@ HOSTS="$FLEET_ORDER"
 PUSH=1
 HANDSHAKE=0
 DEPLOY_REF=""
+ALLOW_FAILED_CI=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --hosts) HOSTS="$(echo "$2" | tr ',' ' ')"; shift 2 ;;
     --hosts=*) HOSTS="$(echo "${1#*=}" | tr ',' ' ')"; shift ;;
     --no-push) PUSH=0; shift ;;
+    --allow-failed-ci) ALLOW_FAILED_CI=1; shift ;;
     --ref) [ $# -ge 2 ] && [ -n "$2" ] || { echo "--ref needs a revision" >&2; exit 2; }; DEPLOY_REF="$2"; shift 2 ;;
     --ref=*) DEPLOY_REF="${1#*=}"; [ -n "$DEPLOY_REF" ] || { echo "--ref needs a revision" >&2; exit 2; }; shift ;;
     --handshake) HANDSHAKE=1; shift ;;
@@ -374,6 +377,45 @@ if [ "$PUSH" = 1 ]; then
     git -C "$REPO" push && ok "pushed" || { bad "git push failed"; exit 1; }
   fi
 fi
+
+# Check the exact revision, including pinned releases, before any host builds.
+# Pending and unavailable results stay visible without preventing a deploy.
+check_target_ci() {
+  local run status conclusion url
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "shuttle-deploy: warning: gh unavailable; CI for $TARGET_COMMIT is unknown" >&2
+    return 0
+  fi
+  if ! run=$(cd "$REPO" && gh run list \
+    --workflow CI --commit "$TARGET_COMMIT" --event push --limit 1 \
+    --json status,conclusion,url \
+    --jq '.[0] | select(. != null) | [.status, .conclusion, .url] | @tsv'); then
+    echo "shuttle-deploy: warning: could not read CI for $TARGET_COMMIT; status unknown" >&2
+    return 0
+  fi
+  if [ -z "$run" ]; then
+    echo "shuttle-deploy: warning: no CI run yet for $TARGET_COMMIT" >&2
+    return 0
+  fi
+  status=$(printf '%s\n' "$run" | cut -f1)
+  conclusion=$(printf '%s\n' "$run" | cut -f2)
+  url=$(printf '%s\n' "$run" | cut -f3)
+  if [ "$status" != completed ]; then
+    echo "shuttle-deploy: warning: CI for $TARGET_COMMIT is $status: $url" >&2
+    return 0
+  fi
+  if [ "$conclusion" != success ]; then
+    if [ "$ALLOW_FAILED_CI" = 1 ]; then
+      echo "shuttle-deploy: warning: overriding CI $conclusion for $TARGET_COMMIT: $url" >&2
+      return 0
+    fi
+    echo "shuttle-deploy: refusing CI $conclusion for $TARGET_COMMIT: $url (override: --allow-failed-ci)" >&2
+    return 1
+  fi
+  ok "CI passed for $TARGET_SHA: $url"
+}
+
+check_target_ci || exit 1
 
 # Remote hosts pull the upstream, so the upstream must hold the target: a
 # rejected or skipped push would otherwise deploy whatever someone else pushed.
