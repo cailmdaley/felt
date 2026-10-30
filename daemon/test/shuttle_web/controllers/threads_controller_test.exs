@@ -109,6 +109,22 @@ defmodule ShuttleWeb.ThreadsControllerTest do
              get(api_conn(), "/api/v1/threads/nowhere") |> json_response(404)
   end
 
+  test "a stale local mirror marks its root unavailable even while resting" do
+    warm!(
+      [
+        entry("hub", %{
+          "status" => "open",
+          "horizon" => "stashed",
+          "shuttle" => %{"host" => "nibi"}
+        })
+      ],
+      []
+    )
+
+    assert %{"fiber_id" => "hub", "stale" => true, "host_unreachable" => true} =
+             get(api_conn(), "/api/v1/threads/hub") |> json_response(200)
+  end
+
   test "503 before the first poll warms the cache, and with no Poller" do
     assert %{"error" => "poller_unavailable"} =
              get(api_conn(), "/api/v1/threads/hub") |> json_response(503)

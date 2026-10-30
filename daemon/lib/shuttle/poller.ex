@@ -438,8 +438,9 @@ defmodule Shuttle.Poller do
 
   @doc """
   The inputs of `Shuttle.Threads.tree/5`: `{:ok, {entries, live, reachable}}`,
-  the cached constitutions, the running workers' runtime keys across the fleet
-  and the hosts those cover (`Shuttle.Threads.with_fleet/4`), or
+  owner-authoritative constitutions reconciled from the local cache and cached
+  owner feeds, the running workers' runtime keys across the fleet and the hosts
+  those cover (`Shuttle.Threads.with_fleet/4`), or
   `{:error, :cold}` before the first poll has warmed the cache.
   """
   def thread_inputs(server \\ Shuttle.Env.server(__MODULE__)) do
@@ -451,11 +452,31 @@ defmodule Shuttle.Poller do
         result
 
       %{entries: entries, local_live: local_live, own_host_id: own_host_id, fleet: fleet} ->
+        entries =
+          Shuttle.Threads.reconcile_owner_feeds(
+            entries,
+            own_host_id,
+            fiber_stores(server),
+            thread_owner_feeds()
+          )
+
         {live, reachable} =
           Shuttle.Threads.with_fleet(local_live, own_host_id, fleet, DateTime.utc_now())
 
         {:ok, {entries, live, reachable}}
     end
+  end
+
+  defp thread_owner_feeds do
+    Shuttle.RemoteFiberRegistry.feeds()
+    |> Map.new(fn {host, feed} ->
+      cache = Map.get(feed, :cache, Map.get(feed, "cache"))
+      cache_state = Map.get(cache || %{}, :state, Map.get(cache || %{}, "state"))
+      fresh_cache? = cache_state in [nil, "fresh"]
+      {host, if(fresh_cache?, do: feed, else: %{feed | stale: true})}
+    end)
+  catch
+    :exit, _ -> %{}
   end
 
   @doc """

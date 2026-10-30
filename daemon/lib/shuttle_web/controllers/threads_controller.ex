@@ -3,9 +3,10 @@ defmodule ShuttleWeb.ThreadsController do
   Agent-API endpoint: GET /api/v1/threads/*id
 
   A constitution's threads to every depth, as `Shuttle.Threads.tree/5` builds
-  them from this daemon's cached constitutions, local and synced, with the
-  workers running on this host and on every remote it polls fresh as the live
-  ones. `id` is a uid or a fiber address;
+  them from this daemon's local constitutions and the cached owner feeds, with
+  the workers running on this host and on every remote it polls fresh as the
+  live ones. A stale owner feed falls back to the local copy and marks the root
+  and each row stale and host-unreachable. `id` is a uid or a fiber address;
   `shuttle threads` renders the response.
 
   `pending_results` counts what waits for the orchestrator's own next worker
@@ -36,6 +37,9 @@ defmodule ShuttleWeb.ThreadsController do
         uid: fiber["uid"],
         name: fiber["name"],
         felt_store: store,
+        stale: Map.get(entry, :stale, false),
+        host_unreachable: Map.get(entry, :host_unreachable, false),
+        owner_cache_state: Map.get(entry, :owner_cache_state),
         pending_results: Threads.waiting(entry, live?),
         threads: Threads.tree(Threads.address(fiber), store, entries, live, reachable)
       })

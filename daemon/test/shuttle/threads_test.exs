@@ -1433,6 +1433,215 @@ defmodule Shuttle.ThreadsTest do
   end
 
   describe "orchestrator roster" do
+    test "a fresh owner feed replaces mirror state and excludes fibers absent at the owner" do
+      root =
+        thread("hub", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}, "/local")
+
+      closed_mirror =
+        thread(
+          "hub/closed",
+          %{"status" => "active", "shuttle" => %{"host" => "nibi"}},
+          "/local"
+        )
+
+      rested_mirror =
+        thread(
+          "hub/rested",
+          %{"status" => "active", "shuttle" => %{"host" => "nibi"}},
+          "/local"
+        )
+
+      closed_owner = %{
+        "felt_store" => "/nibi/store",
+        "path" => "hub/closed.md",
+        "fiber" => %{
+          "id" => "hub/closed",
+          "slug" => "hub/closed",
+          "uid" => "u-hub/closed",
+          "name" => "Closed",
+          "status" => "closed",
+          "tempered" => true,
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      rested_owner = %{
+        "felt_store" => "/nibi/store",
+        "path" => "hub/rested.md",
+        "fiber" => %{
+          "id" => "hub/rested",
+          "slug" => "hub/rested",
+          "uid" => "u-hub/rested",
+          "name" => "Rested",
+          "status" => "open",
+          "horizon" => "stashed",
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      entries =
+        Threads.reconcile_owner_feeds(
+          [root, closed_mirror, rested_mirror],
+          "test-host",
+          %{"u-hub/closed" => "/local", "u-hub/rested" => "/local"},
+          %{"nibi" => %{fibers: [closed_owner, rested_owner], stale: false}}
+        )
+
+      assert [
+               %{"id" => "hub/closed", "state" => "Archived", "stale" => false},
+               %{"id" => "hub/rested", "state" => "Resting", "stale" => false}
+             ] = Threads.tree("hub", "/local", entries, MapSet.new())
+
+      absent_entries =
+        Threads.reconcile_owner_feeds(
+          [root, closed_mirror],
+          "test-host",
+          %{},
+          %{"nibi" => %{fibers: [], stale: false}}
+        )
+
+      assert [] = Threads.tree("hub", "/local", absent_entries, MapSet.new())
+
+      cold_entries =
+        Threads.reconcile_owner_feeds(
+          [root, closed_mirror],
+          "test-host",
+          %{},
+          %{"nibi" => %{fibers: [], stale: false, cache: %{"state" => "cold"}}}
+        )
+
+      assert [
+               %{
+                 "id" => "hub/closed",
+                 "state" => "Unknown",
+                 "column" => "unknown",
+                 "stale" => true,
+                 "host_unreachable" => false,
+                 "owner_cache_state" => "cold"
+               }
+             ] =
+               Threads.tree("hub", "/local", cold_entries, MapSet.new())
+    end
+
+    test "unavailable owner fallback marks every state stale and host-unreachable" do
+      root =
+        thread("hub", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}, "/local")
+
+      rested =
+        thread(
+          "hub/rested",
+          %{
+            "status" => "open",
+            "horizon" => "stashed",
+            "shuttle" => %{"host" => "nibi"}
+          },
+          "/local"
+        )
+
+      entries = Threads.reconcile_owner_feeds([root, rested], "test-host", %{}, %{})
+
+      assert [
+               %{
+                 "id" => "hub/rested",
+                 "state" => "Resting",
+                 "stale" => true,
+                 "host_unreachable" => true
+               }
+             ] = Threads.tree("hub", "/local", entries, MapSet.new(), MapSet.new(["test-host"]))
+    end
+
+    test "remote-only children inherit a known local ancestor store identity" do
+      root =
+        thread("hub", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}, "/local")
+
+      child = %{
+        "felt_store" => "/nibi/store-with-no-shared-fiber",
+        "path" => "hub/new.md",
+        "fiber" => %{
+          "id" => "hub/new",
+          "slug" => "hub/new",
+          "uid" => "u-new",
+          "name" => "New",
+          "status" => "active",
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      entries =
+        Threads.reconcile_owner_feeds([root], "test-host", %{}, %{
+          "nibi" => %{fibers: [child], stale: false}
+        })
+
+      assert [%{"id" => "hub/new", "state" => "Armed", "stale" => false}] =
+               Threads.tree("hub", "/local", entries, MapSet.new())
+    end
+
+    test "an owner-only root stays queryable with its remote-only descendants" do
+      root = %{
+        "felt_store" => "/nibi/new-store",
+        "path" => "new-root.md",
+        "fiber" => %{
+          "id" => "new-root",
+          "slug" => "new-root",
+          "uid" => "u-new-root",
+          "name" => "New root",
+          "status" => "open",
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      child = %{
+        "felt_store" => "/nibi/new-store",
+        "path" => "new-root/child.md",
+        "fiber" => %{
+          "id" => "new-root/child",
+          "slug" => "new-root/child",
+          "uid" => "u-new-child",
+          "name" => "Child",
+          "status" => "active",
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      entries =
+        Threads.reconcile_owner_feeds([], "test-host", %{}, %{
+          "nibi" => %{fibers: [root, child], stale: false}
+        })
+
+      assert [%{"id" => "new-root/child", "state" => "Armed"}] =
+               Threads.tree("new-root", "/nibi/new-store", entries, MapSet.new())
+    end
+
+    test "an owner-only root joins a uniquely identified local child store" do
+      root = %{
+        "felt_store" => "/nibi/new-store",
+        "path" => "new-root.md",
+        "fiber" => %{
+          "id" => "new-root",
+          "slug" => "new-root",
+          "uid" => "u-new-root",
+          "name" => "New root",
+          "status" => "open",
+          "shuttle" => %{"host" => "nibi"}
+        }
+      }
+
+      local_child =
+        thread(
+          "new-root/local-child",
+          %{"status" => "active", "shuttle" => %{"host" => "test-host"}},
+          "/local-child-store"
+        )
+
+      entries =
+        Threads.reconcile_owner_feeds([local_child], "test-host", %{}, %{
+          "nibi" => %{fibers: [root], stale: false}
+        })
+
+      assert [%{"id" => "new-root/local-child", "state" => "Armed"}] =
+               Threads.tree("new-root", "/local-child-store", entries, MapSet.new())
+    end
+
     test "the fleet view adds fresh remotes' workers and names the hosts it covers" do
       remote = fn name ->
         %Shuttle.Remote{

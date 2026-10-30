@@ -14,6 +14,7 @@ defmodule Shuttle.NoStoreSyncTest do
 
         checks = [
           {~r/(?:System|:os)\.cmd\(\s*"git"|\.cmd\(\s*"git"/, "git command"},
+          {~r/Shuttle\.Runner\.run\(\s*"git"|Runner\.run\(\s*"git"/, "runner git command"},
           {~r/Shuttle\.Felt\.run\(\s*\[.*?"sync"/s, "felt sync command"},
           {~r/defmodule\s+Shuttle\.StoreSync\b/, "StoreSync module"}
         ]

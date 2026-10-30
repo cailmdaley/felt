@@ -10,10 +10,12 @@ defmodule Shuttle.Threads do
   def orchestrator(entry, entries) when is_list(entries), do: orchestrator(entry, index(entries))
 
   def orchestrator(entry, index) when is_map(index) do
-    nearest(Path.dirname(address(entry.fiber)), &Map.get(index, {entry.felt_store, &1}))
+    nearest(Path.dirname(address(entry.fiber)), &Map.get(index, {store_key(entry), &1}))
   end
 
-  defp index(entries), do: Map.new(entries, &{{&1.felt_store, address(&1.fiber)}, &1})
+  defp index(entries), do: Map.new(entries, &{{store_key(&1), address(&1.fiber)}, &1})
+
+  defp store_key(entry), do: Map.get(entry, :thread_store, entry.felt_store)
 
   @doc "Stamp each constitution with its orchestrator's wire id, or null."
   def put_orchestrators(entries), do: stamp(entries, & &1.felt_store)
@@ -89,6 +91,173 @@ defmodule Shuttle.Threads do
         not (fiber["status"] == "closed" and is_boolean(fiber["tempered"]))
 
   def address(fiber), do: fiber["slug"] || fiber["id"]
+
+  @doc "Reconcile thread rows with cached owner feeds without doing network I/O."
+  def reconcile_owner_feeds(entries, own_host_id, local_store_by_uid, feeds)
+      when is_list(entries) and is_map(local_store_by_uid) and is_map(feeds) do
+    {local_entries, remote_mirrors} =
+      Enum.split_with(entries, fn entry ->
+        host = get_in(entry.fiber, ["shuttle", "host"])
+        host in [nil, "", own_host_id]
+      end)
+
+    mirrored_by_host = Enum.group_by(remote_mirrors, &get_in(&1.fiber, ["shuttle", "host"]))
+
+    hosts = Map.keys(mirrored_by_host) ++ Map.keys(feeds)
+
+    owner_entries =
+      hosts
+      |> Enum.uniq()
+      |> Enum.flat_map(fn host ->
+        case Map.get(feeds, host) do
+          feed when is_map(feed) ->
+            case owner_feed_state(feed) do
+              :fresh ->
+                feed.fibers
+                |> remote_entries(entries, local_store_by_uid, host)
+                |> Enum.map(&Map.merge(&1, %{stale: false, host_unreachable: false}))
+
+              {:incomplete, cache_state} ->
+                owner_rows =
+                  feed.fibers
+                  |> remote_entries(entries, local_store_by_uid, host)
+                  |> Enum.map(&unknown_owner_row(&1, cache_state))
+
+                owner_ids = MapSet.new(owner_rows, &entry_identity/1)
+
+                missing_mirrors =
+                  (mirrored_by_host[host] || [])
+                  |> Enum.reject(&MapSet.member?(owner_ids, entry_identity(&1)))
+                  |> Enum.map(&unknown_owner_row(&1, cache_state))
+
+                owner_rows ++ missing_mirrors
+
+              :unavailable ->
+                stale_mirrors(mirrored_by_host, host)
+            end
+
+          _unavailable ->
+            stale_mirrors(mirrored_by_host, host)
+        end
+      end)
+
+    local_entries ++ owner_entries
+  end
+
+  defp owner_feed_state(%{stale: false} = feed) do
+    cache = Map.get(feed, :cache, Map.get(feed, "cache")) || %{}
+    cache_state = Map.get(cache, :state, Map.get(cache, "state"))
+
+    case cache_state do
+      state when state in [nil, "fresh"] -> :fresh
+      state when state in ["cold", "partial"] -> {:incomplete, state}
+      _ -> :unavailable
+    end
+  end
+
+  defp owner_feed_state(_), do: :unavailable
+
+  defp unknown_owner_row(entry, cache_state) do
+    Map.merge(entry, %{
+      stale: true,
+      host_unreachable: false,
+      unknown_owner_state: true,
+      owner_cache_state: cache_state
+    })
+  end
+
+  defp entry_identity(entry), do: entry.fiber["uid"] || address(entry.fiber)
+
+  defp stale_mirrors(mirrored_by_host, host) do
+    Enum.map(mirrored_by_host[host] || [], &Map.merge(&1, %{stale: true, host_unreachable: true}))
+  end
+
+  defp remote_entries(rows, local_entries, local_store_by_uid, host) when is_list(rows) do
+    Enum.flat_map(rows, fn row ->
+      fiber = field(row, :fiber)
+
+      if is_map(fiber) and get_in(fiber, ["shuttle", "host"]) == host do
+        owner_store = field(row, :felt_store)
+        store = local_store_for(fiber, owner_store, local_entries, local_store_by_uid)
+        local? = is_binary(store)
+
+        [
+          Map.merge(
+            %{
+              fiber: fiber,
+              felt_store: if(local?, do: store, else: owner_store),
+              path: field(row, :path),
+              pending_results: field(row, :pending_results) || 0
+            },
+            if(local?, do: %{}, else: %{thread_store: remote_store_key(host, owner_store)})
+          )
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  defp remote_store_key(host, owner_store), do: {:remote_owner, host, owner_store}
+
+  defp local_store_for(fiber, owner_store, local_entries, local_store_by_uid) do
+    case Map.get(local_store_by_uid, fiber["uid"]) do
+      store when is_binary(store) -> store
+      _ -> store_from_ancestor(fiber, owner_store, local_entries)
+    end
+  end
+
+  defp store_from_ancestor(fiber, owner_store, local_entries) do
+    local_entries
+    |> Enum.filter(fn entry ->
+      entry.felt_store == owner_store and ancestor?(address(entry.fiber), address(fiber))
+    end)
+    |> Enum.max_by(&path_depth(address(&1.fiber)), fn -> nil end)
+    |> case do
+      nil ->
+        local_entries
+        |> Enum.filter(&ancestor?(address(&1.fiber), address(fiber)))
+        |> Enum.group_by(& &1.felt_store)
+        |> choose_nearest_store()
+        |> case do
+          nil ->
+            local_entries
+            |> Enum.filter(&ancestor?(address(fiber), address(&1.fiber)))
+            |> Enum.group_by(& &1.felt_store)
+            |> choose_nearest_store()
+
+          store ->
+            store
+        end
+
+      entry ->
+        entry.felt_store
+    end
+  end
+
+  defp choose_nearest_store(by_store) do
+    candidates =
+      Enum.flat_map(by_store, fn {store, rows} ->
+        depth = rows |> Enum.map(&path_depth(address(&1.fiber))) |> Enum.max(fn -> 0 end)
+        [{store, depth}]
+      end)
+
+    case Enum.max_by(candidates, &elem(&1, 1), fn -> nil end) do
+      {store, depth} when depth > 0 ->
+        if Enum.count(candidates, &(elem(&1, 1) == depth)) == 1, do: store
+
+      _ ->
+        nil
+    end
+  end
+
+  defp ancestor?(ancestor, child) when is_binary(ancestor) and is_binary(child) do
+    String.starts_with?(child, ancestor <> "/")
+  end
+
+  defp ancestor?(_, _), do: false
+  defp path_depth(path) when is_binary(path), do: length(String.split(path, "/", trim: true))
+  defp path_depth(_), do: 0
 
   @doc "The current containment relation in fresh, resumed and standing dispatch prompts."
   def prompt(fiber_id, opts) do
@@ -255,13 +424,14 @@ defmodule Shuttle.Threads do
   `host_unreachable`, full `outcome`, what it rests until (`blocked_on` as
   stored and the `until` name it reads as, both nil when it waits for nothing),
   `pending_results` (`waiting/2`) and its own `threads`. `entries` are the
-  poller's cached constitutions; `live` holds the running workers' runtime keys
+  reconciled local and owner-feed constitutions; `live` holds the running workers' runtime keys
   (uid, else id) across the fleet; `reachable` is the set of hosts whose
   workers `live` covers (`with_fleet/4`), or nil when the fleet is unknown. An
   Armed thread on a host outside `reachable` is `host_unreachable`.
   """
   def tree(fiber_id, felt_store, entries, live, reachable \\ nil) do
     index = index(entries)
+    store = tree_store(fiber_id, felt_store, entries)
 
     children =
       entries
@@ -269,11 +439,18 @@ defmodule Shuttle.Threads do
       |> Enum.group_by(fn entry ->
         case orchestrator(entry, index) do
           nil -> nil
-          parent -> {parent.felt_store, address(parent.fiber)}
+          parent -> {store_key(parent), address(parent.fiber)}
         end
       end)
 
-    grow(children, {felt_store, fiber_id}, {live, reachable, by_uid(entries)})
+    grow(children, {store, fiber_id}, {live, reachable, by_uid(entries)})
+  end
+
+  defp tree_store(fiber_id, felt_store, entries) do
+    case Enum.find(entries, &(address(&1.fiber) == fiber_id and &1.felt_store == felt_store)) do
+      nil -> felt_store
+      root -> store_key(root)
+    end
   end
 
   defp grow(children, key, {live, reachable, by_uid} = seen) do
@@ -283,7 +460,12 @@ defmodule Shuttle.Threads do
     |> Enum.map(fn %{fiber: fiber} = entry ->
       live? = live?(fiber, live)
       host = get_in(fiber, ["shuttle", "host"])
-      state = thread_state(fiber, live?)
+
+      state =
+        if Map.get(entry, :unknown_owner_state), do: "Unknown", else: thread_state(fiber, live?)
+
+      column = if Map.get(entry, :unknown_owner_state), do: "unknown", else: column(fiber, live?)
+
       blocked = blocked_on(fiber)
 
       %{
@@ -291,17 +473,25 @@ defmodule Shuttle.Threads do
         "uid" => fiber["uid"],
         "name" => fiber["name"],
         "host" => host,
-        "column" => column(fiber, live?),
+        "column" => column,
         "state" => state,
+        "stale" => Map.get(entry, :stale, false),
+        "owner_cache_state" => Map.get(entry, :owner_cache_state),
         "host_unreachable" =>
-          state == "Armed" and is_binary(host) and reachable != nil and
-            not MapSet.member?(reachable, host),
+          case Map.fetch(entry, :host_unreachable) do
+            {:ok, unavailable?} ->
+              unavailable?
+
+            :error ->
+              state == "Armed" and is_binary(host) and reachable != nil and
+                not MapSet.member?(reachable, host)
+          end,
         "outcome" => fiber["outcome"],
         "ask" => get_in(fiber, ["shuttle", "ask", "text"]),
         "blocked_on" => blocked,
         "until" => blocked && blocker_name(blocked, entry.felt_store, by_uid),
         "pending_results" => waiting(entry, live?),
-        "threads" => grow(children, {entry.felt_store, address(fiber)}, seen)
+        "threads" => grow(children, {store_key(entry), address(fiber)}, seen)
       }
     end)
   end
