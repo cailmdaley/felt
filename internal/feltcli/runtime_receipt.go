@@ -176,6 +176,9 @@ func (a *app) collectRuntimeReceipt() RuntimeReceipt {
 	if r.Felt.Status != receiptHealthy && r.Felt.Status == r.Status && r.Felt.Repair != "" {
 		r.Repair = r.Felt.Repair
 	}
+	if r.Hooks.Status != receiptHealthy && r.Hooks.Status == r.Status && r.Hooks.Repair != "" {
+		r.Repair = r.Hooks.Repair
+	}
 	if r.Generation.Status != receiptHealthy && r.Generation.Status == r.Status {
 		r.Repair = r.Generation.Repair
 	}
@@ -500,8 +503,10 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 		if !hookFilesCompatible(root) {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
 		}
-		if b.Harness == "codex" && strings.Contains(b.Evidence, "plugin list") && !a.codexHooksTrusted() {
-			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: "open a Codex session and approve felt's hooks, then rerun the receipt"}
+		if b.Harness == "codex" {
+			if err := a.codexHookTrust(false); err != nil {
+				return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("%v; run `felt setup codex --trust-hooks`, then rerun the receipt", err)}
+			}
 		}
 	}
 	return ReceiptComponent{Status: receiptHealthy}
@@ -572,32 +577,6 @@ func hookValueContains(value any, suffix string) bool {
 		}
 	}
 	return false
-}
-
-func (a *app) codexHooksTrusted() bool {
-	cfg, err := a.readCodexConfig()
-	if err != nil {
-		return false
-	}
-	state, _ := cfg["hooks"].(map[string]interface{})
-	state, _ = state["state"].(map[string]interface{})
-	seen := map[string]bool{}
-	for key, value := range state {
-		if !strings.HasPrefix(key, codexPluginRef+":hooks/hooks.json:") {
-			continue
-		}
-		if entry, ok := value.(map[string]interface{}); ok {
-			if hash, _ := entry["trusted_hash"].(string); hash != "" {
-				if strings.Contains(key, ":session_start:") {
-					seen["session_start"] = true
-				}
-				if strings.Contains(key, ":pre_tool_use:") {
-					seen["pre_tool_use"] = true
-				}
-			}
-		}
-	}
-	return seen["session_start"] && seen["pre_tool_use"]
 }
 
 // collectGenerationReceipt compares the marker in the active promoted

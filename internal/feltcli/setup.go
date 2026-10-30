@@ -113,15 +113,23 @@ hooks as the Claude Code plugin. Re-running updates it.
 
 The source is chosen as for felt setup claude; felt validates it, promotes it
 to a local generation, and registers that with codex plugin marketplace add
-and codex plugin add. Codex asks you to trust the plugin's hooks in your next
-interactive session; until you accept, the skills load but the hooks stay
-dormant. --uninstall removes the plugin and its marketplace.`,
+and codex plugin add. Felt records trust for its own plugin hooks using Codex's
+App Server hashes and config API; other hooks' trust is untouched.
+--trust-hooks repairs trust without reinstalling the plugin.
+--uninstall removes the plugin and its marketplace.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			source, _ := cmd.Flags().GetString("source")
 			uninstall, _ := cmd.Flags().GetBool("uninstall")
 
 			if uninstall {
 				return a.uninstallCodexPlugin()
+			}
+			trustOnly, _ := cmd.Flags().GetBool("trust-hooks")
+			if trustOnly {
+				if _, err := a.env.LookPath("codex"); err != nil {
+					return nil
+				}
+				return a.withPluginPromotionLock(func() error { return a.codexHookTrust(true) })
 			}
 
 			marketplaceSource, err := a.resolveSetupSource(source)
@@ -145,6 +153,9 @@ dormant. --uninstall removes the plugin and its marketplace.`,
 	}
 	command.Flags().Bool("uninstall", false, "Remove felt plugin and marketplace from Codex")
 	command.Flags().String("source", "", "Path to felt repo checkout or plugin directory")
+	command.Flags().Bool("trust-hooks", false, "Trust felt's installed Codex plugin hooks without reinstalling")
+	command.MarkFlagsMutuallyExclusive("trust-hooks", "uninstall")
+	command.MarkFlagsMutuallyExclusive("trust-hooks", "source")
 	return command
 }
 
@@ -884,9 +895,7 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 	}
 
 	fmt.Fprintln(a.env.Stdout)
-	fmt.Fprintln(a.env.Stdout, "Restart Codex for changes to take effect. Your next interactive Codex")
-	fmt.Fprintln(a.env.Stdout, "session will ask you to review and trust felt's hooks — until you accept,")
-	fmt.Fprintln(a.env.Stdout, "the skills load but the hooks stay dormant.")
+	a.refreshCodexHookTrust()
 	return nil
 }
 

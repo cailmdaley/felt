@@ -222,6 +222,7 @@ func (a *app) restoreCodexInstallation(state codexInstallationState) error {
 		if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 			return fmt.Errorf("restoring Codex plugin: %w", err)
 		}
+		a.refreshCodexHookTrust()
 	} else {
 		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
 	}

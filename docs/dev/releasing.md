@@ -59,7 +59,8 @@ Resumes retain these files; delete a session's claims only to deliberately re-en
 [Codex supports these hooks and `additionalContext`](https://developers.openai.com/codex/hooks/).
 Its rollout `event_msg/token_count` records provide `info.last_token_usage.total_tokens` and `info.model_context_window`; cumulative billing totals are never used.
 The transcript format isn't a stable Codex hook API, so unsupported formats fail open rather than estimating context.
-Codex users must trust plugin hooks in their interactive session.
+`felt setup codex` records trust for felt's own plugin hooks through Codex's App Server API and verifies the shared server when present.
+Other hooks' trust is untouched; `felt setup codex --trust-hooks` repairs trust without reinstalling, and `felt setup receipt` detects untrusted or modified hooks.
 
 Refresh a source build on the current machine with `felt setup claude --source <clean-main-checkout>` and `felt setup codex --source <clean-main-checkout>` for installed harnesses, then check `felt setup receipt --json`.
 These commands promote `~/.felt/plugin-runtime/current` transactionally; they don't restart or deploy the daemon.

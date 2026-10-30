@@ -23,9 +23,10 @@ func testEnv(t *testing.T) (*sysenv.Env, *sysenvtest.Streams) {
 		t.Fatal(err)
 	}
 	return sysenvtest.FromProcess(t, map[string]string{
-		"HOME":            home,
-		"XDG_CACHE_HOME":  filepath.Join(dir, "cache"),
-		"XDG_CONFIG_HOME": filepath.Join(dir, "config"),
+		"HOME":                 home,
+		"SHUTTLE_CODEX_SOCKET": filepath.Join(testScratch, "no-codex.sock"),
+		"XDG_CACHE_HOME":       filepath.Join(dir, "cache"),
+		"XDG_CONFIG_HOME":      filepath.Join(dir, "config"),
 	})
 }
 

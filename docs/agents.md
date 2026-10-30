@@ -59,14 +59,18 @@ All three commands are idempotent, so re-running is safe. All take `--uninstall`
 remove what they installed. `felt uninstall` clears the harnesses at once, and
 serves as the general inverse.
 
-!!! note "Codex asks you to trust the hooks"
+!!! note "Felt records trust for its own Codex hooks"
 
-    Codex reviews a plugin's hooks before it will run them. Your next
-    interactive Codex session shows a review screen for felt's; accept it once
-    and the setting persists. Until you do, the skills load but the hooks stay
-    dormant — no `SessionStart` fiber context, and nothing recorded for
-    shuttle's activity stream. A headless `codex exec` session can't show the
-    prompt, so trust felt's hooks from an interactive session first.
+    `felt setup codex` records trust for exactly `felt@cailmdaley-felt`'s plugin hooks after installing or refreshing them.
+    It uses Codex's own hook hashes and App Server config API, leaving other plugins, user hooks, and project hooks untouched.
+    When Shuttle's shared App Server is running, setup writes through it and verifies its hooks without restarting it.
+    Otherwise, setup uses a temporary stdio App Server.
+    Codex hashes the plugin's contents, including its generation marker, so a changed payload needs fresh trust.
+    An identical reinstall preserves trust.
+
+    A failed trust step prints a warning; `felt setup receipt` reports the hooks as unhealthy and names the repair.
+    Run `felt setup codex --trust-hooks` to repair trust without reinstalling, then rerun the receipt.
+    Until trust succeeds, Codex can skip the hooks or ask for interactive review.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see

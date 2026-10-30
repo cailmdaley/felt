@@ -255,34 +255,6 @@ func TestHookFilesCompatibleRequiresBothRuntimeBoundaries(t *testing.T) {
 	}
 }
 
-func TestCodexHooksTrustedRequiresBothActiveBoundaryEntries(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	a := testApp(t, env)
-	configDir := filepath.Join(homeOf(t, env), ".codex")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := `[hooks.state."felt@cailmdaley-felt:hooks/hooks.json:session_start:0:0"]
-trusted_hash = "sha256:one"
-
-[hooks.state."felt@cailmdaley-felt:hooks/hooks.json:pre_tool_use:0:0"]
-trusted_hash = "sha256:two"
-`
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if !a.codexHooksTrusted() {
-		t.Fatal("trusted active hook entries were not recognized")
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config[:len(config)-len("\n[hooks.state.\"felt@cailmdaley-felt:hooks/hooks.json:pre_tool_use:0:0\"]\ntrusted_hash = \"sha256:two\"\n")]), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if a.codexHooksTrusted() {
-		t.Fatal("one missing trust entry was reported fully trusted")
-	}
-}
-
 func TestCollectGenerationReceiptRejectsPendingPromotion(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
