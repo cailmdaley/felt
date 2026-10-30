@@ -78,6 +78,16 @@ time.
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
+### Fiber creation
+
+`POST /fiber/create` takes `{id, name, body?, frontmatter?, origin?, uid?}`.
+The owning daemon creates the exact store-relative `id`, without requiring its parent document to exist.
+It validates an armed constitution's `project_dir` on that host and stamps its `shuttle.host`.
+The response is `{id, path, uid}`; `path` is the owner's Markdown filename, and `uid` is the intrinsic fiber identity.
+A supplied `uid` preserves an existing document's identity during transfer.
+Transferred native metadata and custom frontmatter are written with the Shuttle block before that constitution becomes eligible for dispatch.
+An unavailable owner fails the request, and a duplicate document is refused rather than overwritten.
+
 ### Lifecycle actions
 
 `POST /lifecycle` takes `{fiber, action, origin?}` plus the action's own
