@@ -162,7 +162,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
     ? '← From'
     : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'uncertain' ? '↯ Delivery unclear' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
   if (direction.textContent !== directionText) direction.textContent = directionText
-  const toggleText = entry.direction === 'received'
+  const toggleText = entry.direction === 'received' && !expanded
     ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
     : ''
   if (preview.textContent !== toggleText) preview.textContent = toggleText
@@ -171,7 +171,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   setAttr(toggle, 'aria-label', entry.verb ? `${action} · ${entry.verb}` : action)
   setAttr(toggle, 'aria-expanded', String(expanded))
   setAttr(toggle, 'data-expanded', String(expanded))
-  setHidden(preview, expanded)
+  setHidden(preview, expanded || !toggleText)
   const text = row.querySelector<HTMLElement>('.ws-transcript-message-text:not(.ws-transcript-message-source)')!
   const source = row.querySelector<HTMLElement>('.ws-transcript-message-source')!
   const command = row.querySelector<HTMLElement>('.ws-transcript-message-command')!

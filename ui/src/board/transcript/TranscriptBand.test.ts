@@ -182,10 +182,16 @@ describe('TranscriptBand', () => {
     expect(notice.querySelector('.ws-transcript-message-toggle')?.textContent).toContain('· closed')
     expect(notice.querySelector('.ws-transcript-message-toggle')?.getAttribute('aria-label')).toContain('· closed')
     expect(notice.querySelector('.ws-transcript-message-detail .ws-transcript-message-thread-state')).toBeNull()
-    notice.querySelector<HTMLElement>('.ws-transcript-message-toggle')!.click()
+    const toggle = notice.querySelector<HTMLElement>('.ws-transcript-message-toggle')!
+    const messagePreview = notice.querySelector<HTMLElement>('.ws-transcript-message-preview')!
+    toggle.click()
     await settle()
-    expect(notice.querySelector<HTMLElement>('.ws-transcript-message-preview')?.hidden).toBe(true)
+    expect(messagePreview.hidden).toBe(true)
+    expect(messagePreview.textContent).toBe('')
     expect(notice.querySelector('.ws-transcript-message-detail')?.textContent).toContain('A measured result')
+    toggle.click()
+    await settle()
+    expect(messagePreview.textContent).toBe('A measured result')
     band.el.querySelector<HTMLButtonElement>('.ws-transcript-open-full')!.click()
     expect(band.el.querySelectorAll('.ws-transcript-turn')).toHaveLength(1)
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')

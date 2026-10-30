@@ -166,6 +166,12 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await received.locator('.ws-transcript-message-direction').click()
   assert.match(await received.locator('.ws-transcript-message-text:not(.ws-transcript-message-source)').innerText(), /follow-up reviewed the north patch residual/)
   assert.equal(await received.locator('.ws-transcript-message-preview').isVisible(), false, 'expanding replaces the preview with the full message')
+  const receivedId = await received.getAttribute('data-message')
+  assert.ok(receivedId)
+  await poll(p, id => [...document.querySelectorAll('.ws-transcript-shuttle-message')]
+    .find(row => row.getAttribute('data-message') === id)
+    ?.querySelector('.ws-transcript-message-preview')?.textContent === '', receivedId)
+  assert.equal(await received.locator('.ws-transcript-message-preview').textContent(), '', 'expanded rows do not retain a second copy of the preview text')
   await received.locator('.ws-transcript-message-peer.ws-constitution-chip').waitFor()
   assert.equal(await received.locator('.ws-transcript-message-peer.ws-constitution-chip').getAttribute('data-fiber'), 'research/workspace/validation-follow-up', 'the sender resolves to its thread chip')
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
