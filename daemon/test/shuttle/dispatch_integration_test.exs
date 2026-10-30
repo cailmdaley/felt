@@ -998,7 +998,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     script = read_run_script()
     assert script =~ "--resume '#{session}'"
     refute script =~ "Mode: resume"
-    refute script =~ " || "
+    refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end
 
   test "resume previous dispatch reaches each harness-specific resume command", %{host: host} do

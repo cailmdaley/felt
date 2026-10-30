@@ -797,7 +797,7 @@ defmodule Shuttle.DispatcherTest do
     assert script =~ "--session '#{session}'"
     refute script =~ "Mode: resume"
     refute script =~ "<<<"
-    refute script =~ " || "
+    refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end
 
   test "dirty restoration continues a turn with its resume prompt" do
@@ -830,7 +830,7 @@ defmodule Shuttle.DispatcherTest do
     script = File.read!(List.last(args))
     assert script =~ "Mode: resume"
     assert script =~ "--resume '#{session}'"
-    refute script =~ " || "
+    refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end
 
   test "stale restoration authorization cannot fall through to a fresh dispatch" do
