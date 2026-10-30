@@ -663,6 +663,7 @@ defmodule Shuttle.AppWorkersTest do
     Env.put_app_env(:terminal_backend, Shuttle.Terminal.Rex)
     terminal_fiber("tests/terminal")
     assert {:ok, ref} = dispatch("tests/terminal", runner: RexRunner)
+    assert {:ok, capability} = AppWorkers.sender_capability("app-session-1")
     terminal = WorkerBackend.tmux(ref)
     assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
     Shuttle.Test.FakeRex.sessions(%{})
@@ -694,7 +695,10 @@ defmodule Shuttle.AppWorkersTest do
     eventually(fn -> Shuttle.Terminal.status(RexRunner, terminal) == :alive end, 200)
     assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
-    assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", []}, &1))
+    assert {:resume, "app-session-1", [sender_capability: ^capability]} =
+             Enum.find(restored_calls, &match?({:resume, "app-session-1", _}, &1))
+
+    assert {:ok, ^capability} = AppWorkers.sender_capability("app-session-1")
     refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
     refute Enum.any?(Runner.commands(), &match?({"tmux", ["new-session" | _]}, &1))
   end
