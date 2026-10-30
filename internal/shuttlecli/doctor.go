@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cailmdaley/felt/internal/messaging"
 	"github.com/spf13/cobra"
 )
 
@@ -23,14 +24,16 @@ const (
 )
 
 type DoctorReceipt struct {
-	Schema        int                  `json:"schema"`
-	Status        receiptStatus        `json:"status"`
-	Repair        string               `json:"repair,omitempty"`
-	Daemon        ReceiptDaemon        `json:"daemon"`
-	Host          ReceiptHost          `json:"host"`
-	ShuttleBinary ReceiptShuttleBinary `json:"shuttle_binary"`
-	TmuxServer    *ReceiptTmuxServer   `json:"tmux_server,omitempty"`
-	Rex           *ReceiptRex          `json:"rex,omitempty"`
+	Schema              int                        `json:"schema"`
+	Status              receiptStatus              `json:"status"`
+	Repair              string                     `json:"repair,omitempty"`
+	Daemon              ReceiptDaemon              `json:"daemon"`
+	Host                ReceiptHost                `json:"host"`
+	ShuttleBinary       ReceiptShuttleBinary       `json:"shuttle_binary"`
+	TmuxServer          *ReceiptTmuxServer         `json:"tmux_server,omitempty"`
+	PendingContext      []messaging.PendingContext `json:"pending_context,omitempty"`
+	PendingContextError string                     `json:"pending_context_error,omitempty"`
+	Rex                 *ReceiptRex                `json:"rex,omitempty"`
 }
 
 type ReceiptDaemon struct {
@@ -109,6 +112,7 @@ func (a *app) doctorCmd() *cobra.Command {
 				a.printDiscoveryReceipt(receipt.Daemon.Discovery)
 				a.printTmuxServerReceipt(receipt.TmuxServer)
 				a.printRexReceipt(receipt.Rex)
+				a.printPendingContextReceipt(receipt)
 				if receipt.Repair != "" {
 					fmt.Fprintf(a.env.Stdout, "repair: %s\n", receipt.Repair)
 				}
@@ -149,6 +153,11 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 	receipt.Host = a.collectHostReceiptWhenReady(receipt.Daemon)
 	receipt.TmuxServer = a.collectTmuxServerReceipt()
 	receipt.Rex = a.collectRexReceipt()
+	pending, err := messaging.OverdueFiberContext(a.env, time.Now(), 10*time.Minute)
+	receipt.PendingContext = pending
+	if err != nil {
+		receipt.PendingContextError = err.Error()
+	}
 	statuses := []receiptStatus{receipt.Daemon.Status, receipt.Host.Status}
 	if receipt.TmuxServer != nil {
 		statuses = append(statuses, receipt.TmuxServer.Status)
@@ -168,6 +177,22 @@ func (a *app) collectDoctorReceipt() DoctorReceipt {
 		foldDoctorRepair(&receipt, receipt.Rex.Status, receipt.Rex.Repair)
 	}
 	return receipt
+}
+
+func (a *app) printPendingContextReceipt(receipt DoctorReceipt) {
+	if receipt.PendingContextError != "" {
+		fmt.Fprintf(a.env.Stdout, "warning: cannot inspect pending fiber context: %s\n", receipt.PendingContextError)
+	}
+	for _, pending := range receipt.PendingContext {
+		fmt.Fprintf(a.env.Stdout, "warning: fiber context %s pending for %d minutes (mailbox %s", pending.MessageID, pending.AgeSeconds/60, pending.Mailbox)
+		if pending.AttemptAddress != "" {
+			fmt.Fprintf(a.env.Stdout, ", pinned to %s", pending.AttemptAddress)
+		}
+		if pending.PossibleRepeat {
+			fmt.Fprint(a.env.Stdout, ", possible repeat")
+		}
+		fmt.Fprintln(a.env.Stdout, ")")
+	}
 }
 
 func combineDoctorReceiptStatus(statuses ...receiptStatus) (receiptStatus, string) {

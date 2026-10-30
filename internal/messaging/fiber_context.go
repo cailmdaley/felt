@@ -248,7 +248,7 @@ func offerLinkedFiberContext(env *sysenv.Env, harness, id, host string, emit fun
 		root := mailboxDir(env, "fiber", link.Fiber)
 		err = offerMailboxValidated(root, func(r Request) bool {
 			return fiberContextHookEligible(root, r) && fiberReceiverMatches(root, Address{Host: host, Harness: harness, ID: id}) && MailboxAvailable(env, harness, id, host)
-		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(batch []Request) error {
+		}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, func(batch []Request) error {
 			offered = true
 			for index := range batch {
 				batch[index].threadSignalVerified = batch[index].ThreadSignal != nil
@@ -312,7 +312,7 @@ func DeliverFiberContext(ctx context.Context, env *sysenv.Env, fiber, host, addr
 	}
 	return offerMailboxEachValidated(root, func(r Request) bool {
 		return fiberContextDirectEligible(root, r, generation, hook, a)
-	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignal(ctx, env, r) }, func(req Request) error {
+	}, func(ctx context.Context, r Request) (bool, error) { return currentThreadSignalWithBackoff(ctx, env, r) }, func(req Request) error {
 		req.threadSignalVerified = req.ThreadSignal != nil
 		req.ThreadSignal = nil
 		return deliverFiberContextItem(ctx, env, fiber, host, address, req)
@@ -345,8 +345,12 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		}
 	}
 
+	if entry.PossibleRepeat {
+		request.Text = possibleRepeatContext(request.Text)
+	}
 	receipt, err := send(ctx, env, host, request, address)
-	if receipt.Status != StatusRejected {
+	unknownEnded := receipt.Status == StatusUnknown && address != selectedAddress && fiberContextSessionEnded(env, host, address)
+	if receipt.Status != StatusRejected && !unknownEnded {
 		return err
 	}
 	if err == nil {
@@ -359,10 +363,11 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 		return err
 	}
 
-	// This attempt was conclusively rejected before delivery. Clear it and
-	// redirect to the receiver currently selected by the owning worker.
-	if err := writeFiberMailboxAttempt(path, entry, ""); err != nil {
-		return err
+	// An ended receiver cannot finish an unknown attempt. Its successor gets
+	// a durable warning because the previous receiver may have taken it.
+	if unknownEnded && !entry.PossibleRepeat {
+		entry.PossibleRepeat = true
+		request.Text = possibleRepeatContext(request.Text)
 	}
 	entry.AttemptAddress = selectedAddress
 	if err := writeFiberMailboxAttempt(path, entry, selectedAddress); err != nil {
@@ -377,10 +382,19 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	return err
 }
 
+func possibleRepeatContext(text string) string {
+	return "Possible repeat: delivery to a previous worker had an unknown outcome before its session ended.\n\n" + text
+}
+
+func fiberContextSessionEnded(env *sysenv.Env, host, address string) bool {
+	a, err := ParseAddress(address)
+	return err == nil && a.Host == host && strings.HasPrefix(mailboxUnavailable(env, a.Harness, a.ID, host), "session has ended;")
+}
+
 func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, request Request, address string) (Receipt, error) {
 	request.Address = address
 	// Keep one stable dedup key for retries to a destination, with an
-	// independent key when a conclusively rejected destination is replaced.
+	// independent key when a rejected or authoritatively ended destination is replaced.
 	request.MessageID += "-" + mailboxKey(address)[:16]
 	receipt, err := Send(ctx, env, host, request)
 	if err != nil {

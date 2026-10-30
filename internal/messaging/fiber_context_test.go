@@ -3,8 +3,10 @@ package messaging
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -358,5 +360,60 @@ func TestCurrentThreadSignalInvokesShuttleFromEnvironmentPath(t *testing.T) {
 	})
 	if err != nil || !current {
 		t.Fatalf("current thread signal = %v, %v", current, err)
+	}
+}
+
+func TestFiberContextUnknownRolloverRequiresEndedEvidence(t *testing.T) {
+	for _, ended := range []bool{false, true} {
+		t.Run(fmt.Sprint(ended), func(t *testing.T) {
+			env := testEnv(t)
+			request := Request{MessageID: "unknown-result", Text: "thread child closed: done"}
+			if err := QueueFiberContext(env, "fiber", request); err != nil {
+				t.Fatal(err)
+			}
+			first, next := "shuttle://host/claude/A", "shuttle://host/claude/B"
+			calls := map[string]int{}
+			sender := func(ctx context.Context, env *sysenv.Env, _ string, req Request, address string) (Receipt, error) {
+				req.Address = address
+				req.MessageID += "-" + mailboxKey(address)[:16]
+				return withDedup(ctx, env, req, func(context.Context) dedupSendResult {
+					calls[address]++
+					if address == first {
+						return dedupSendResult{Receipt: Receipt{Status: StatusUnknown}, Err: errCode("ambiguous_delivery", "lost reply")}
+					}
+					if !strings.Contains(req.Text, "Possible repeat:") {
+						t.Errorf("successor notice lacks repeat warning: %q", req.Text)
+					}
+					return dedupSendResult{Receipt: Receipt{Status: StatusContextAdded}}
+				})
+			}
+			if err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", first, request, sender); err == nil {
+				t.Fatal("unknown outcome acknowledged")
+			}
+			if ended {
+				if err := RegisterMailbox(env, "claude", "A", "host", "/project", os.Getpid(), true); err != nil {
+					t.Fatal(err)
+				}
+				if err := RegisterMailbox(env, "claude", "A", "host", "/project", os.Getpid(), false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i := 0; i < 2; i++ {
+				err := deliverFiberContextItemWith(context.Background(), env, "fiber", "host", next, request, sender)
+				if ended && err != nil {
+					t.Fatal(err)
+				}
+				if !ended && err == nil {
+					t.Fatal("unreachable receiver treated as ended")
+				}
+			}
+			wantNext := 0
+			if ended {
+				wantNext = 1
+			}
+			if calls[first] != 1 || calls[next] != wantNext {
+				t.Fatalf("transport calls = %v", calls)
+			}
+		})
 	}
 }

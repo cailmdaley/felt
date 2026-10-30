@@ -265,7 +265,7 @@ configured stores; they refuse guessed paths and duplicate matches.
 
 | Command | Purpose |
 |---|---|
-| `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration |
+| `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration; warn about local fiber context pending for at least ten minutes |
 | `shuttle daemon start [--force]` | Start the local Mix release in the foreground; atomically claims its endpoint and refuses an answering daemon or live start/install claim even with `--force` |
 | `shuttle daemon stop` | Stop the local daemon and mark the shutdown as intentional |
 | `shuttle daemon status` | Print daemon state; exits 2 when the daemon is down |
