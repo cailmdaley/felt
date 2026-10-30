@@ -62,15 +62,16 @@ serves as the general inverse.
 !!! note "Felt records trust for its own Codex hooks"
 
     `felt setup codex` records trust for exactly `felt@cailmdaley-felt`'s plugin hooks after installing or refreshing them.
-    It uses Codex's own hook hashes and App Server config API, leaving other plugins, user hooks, and project hooks untouched.
-    When Shuttle's shared App Server is running, setup writes through it and verifies its hooks without restarting it.
-    Otherwise, setup uses a temporary stdio App Server.
+    It uses Codex's own hook hashes and App Server config API, which need Codex 0.166.0 or newer, and leaves other plugins, user hooks, and project hooks untouched.
+    Trust is recorded only for the bytes of the promoted generation: felt first checks that Codex's plugin cache carries the promoted generation's sealed marker and payload digest, and that every felt hook Codex lists loads from that cache.
+    Shuttle's shared App Server is found through `SHUTTLE_CODEX_SOCKET`, else the endpoint the running local daemon reports, else the default path.
+    When it answers, setup writes through it and verifies its hooks without restarting it; otherwise a temporary stdio App Server writes and verifies, and the shared server is reported as not inspected.
     Codex hashes the plugin's contents, including its generation marker, so a changed payload needs fresh trust.
     An identical reinstall preserves trust.
 
-    A failed trust step prints a warning; `felt setup receipt` reports the hooks as unhealthy and names the repair.
-    Run `felt setup codex --trust-hooks` to repair trust without reinstalling, then rerun the receipt.
-    Until trust succeeds, Codex can skip the hooks or ask for interactive review.
+    A failed trust step prints a warning and `felt setup receipt` reports the hooks as unhealthy with the repair:
+    `felt setup codex --trust-hooks` when trust is missing or stale, `felt setup codex` when the cached plugin is not the promoted generation.
+    An older Codex without the trust API, or a shared App Server that did not answer, is a note on a healthy receipt; Codex then asks to review felt's hooks interactively.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
