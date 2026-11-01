@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
 import { card } from './testFixtures.js'
-import { THREAD_LABEL, ThreadIndex, threadState, type ThreadState } from './threads.js'
+import { ThreadIndex, threadState } from './threads.js'
 import { constitutionMentions } from './workspace/bodyLinks.js'
 import { ThreadRail } from './workspace/ThreadRail.js'
 import { deskColumn } from './deskColumn.js'
@@ -53,12 +53,11 @@ describe('every thread surface names a thread the way the Desk files it', () => 
     try {
       const index = new ThreadIndex([hub, ...expected.map(([c]) => c)])
       const rail = new ThreadRail(vi.fn(), vi.fn()); rail.show(hub, index)
-      // The rail names a state by its group's heading; the Desk's tree by the line's state, which its mark draws.
-      const labels = (root: ParentNode, scope: string) => Object.fromEntries([...root.querySelectorAll<HTMLElement>(`${scope} .kbn-thread-row`)]
-        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.closest('details')?.querySelector('.ws-thread-group-label')?.textContent ?? THREAD_LABEL[row.dataset.threadState as ThreadState]]))
+      const labels = Object.fromEntries([...rail.el.querySelectorAll<HTMLElement>('.kbn-thread-row')]
+        .filter(row => row.querySelector('.kbn-thread-name')!.textContent !== hub.name)
+        .map(row => [row.querySelector('.kbn-thread-name')!.textContent, row.querySelector('.ws-tree-state')!.textContent]))
       const want = Object.fromEntries(expected.map(([c, , label]) => [c.name, label]))
-      // The rail has no Roles group: a seat rests with Resting.
-      expect(labels(rail.el, '.ws-thread-group')).toEqual({ ...want, [spawned.name]: 'Armed', [seat.name]: 'Resting' })
+      expect(labels).toEqual({ ...want, [spawned.name]: 'Armed', [seat.name]: 'Resting' })
     } finally { vi.unstubAllGlobals() }
   })
 })

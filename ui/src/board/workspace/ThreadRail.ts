@@ -1,8 +1,7 @@
 import { MOBILE_MEDIA } from '../mobile.js'
 import { type KanbanCard } from '../KanbanTypes.js'
 import { threadItem } from '../ThreadPeek.js'
-import { deskColumn } from '../deskColumn.js'
-import { threadKey, threadState, type ThreadIndex, type ThreadState } from '../threads.js'
+import { threadState, type ThreadIndex } from '../threads.js'
 import { turnOf } from '../turn.js'
 import { documentLabelMetadata, lastSent, type Channel, type DocKey } from './documents.js'
 import { foldSentFiles, sentDocuments, sentFileRow } from './SentFiles.js'
@@ -12,7 +11,7 @@ const WIDTH_STORAGE = 'shuttle:workspace:thread-rail-width'
 const MIN_WIDTH = 220
 /** A sized region keeps at least its heading and a row; a drawn artifact keeps at least this much between them. */
 const MIN_REGION = 72, MIN_ARTIFACT = 200
-import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
+import { renderThreadTree } from './ThreadTree.js'
 import { RailArtifact } from './RailArtifact.js'
 import { HANDLE_STEP, RailFold, RailSplit, dragHandle } from './RailRegions.js'
 import type { WorkspaceDocument } from './documents.js'
@@ -26,7 +25,7 @@ import type { WorkspaceDocument } from './documents.js'
  *
  * The threads region is a view of the open constitution's whole family, from the top-level
  * constitution down: inside a thread the same family stays, the open thread
- * marked in place and its ancestry's groups opened, so siblings and cousins
+ * marked in place and its archived ancestry opened, so siblings and cousins
  * stay one click away. Navigation never changes containment.
  */
 export class ThreadRail {
@@ -67,7 +66,7 @@ export class ThreadRail {
   private readonly observer: ResizeObserver | null
   /** The constitution whose subtree the rail draws: the family's head. */
   private scope: KanbanCard | null = null
-  /** The thread last revealed, so a repaint does not reopen a group the reader folded. */
+  /** The thread last revealed, so a repaint does not reopen a fold the reader closed. */
   private revealed = ''
   private index: ThreadIndex | null = null
   private readonly open: (card: KanbanCard) => void
@@ -156,7 +155,7 @@ export class ThreadRail {
       this.tree.replaceChildren(); this.signature = ''
       return
     }
-    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...[scope, ...descendants].map(c => [c.id, c.orchestrator, c.name, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
+    const signature = JSON.stringify([card.id, card.originId, scope.id, ...ancestors.map(c => [c.id, c.name]), ...[scope, ...descendants].map(c => [c.id, c.orchestrator, c.name, c.createdAt, c.status, c.tempered, c.runtimePhase, c.workerState, c.ask, c.outcome, c.originStale, c.launchError, c.effectiveHorizon, c.tags, c.shuttleBlockedOn])])
     if (signature === this.signature) return
     this.signature = signature
     this.paint()
@@ -251,81 +250,21 @@ export class ThreadRail {
     const focus = active instanceof HTMLElement && this.tree.contains(active) ? active.dataset.threadFocus : undefined
     const open = new Map([...this.tree.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]')].map(el => [el.dataset.threadDetails!, el.open]))
     const index = this.index!
-    const focusOf = (kind: string, card: KanbanCard): string => JSON.stringify([kind, card.originId, card.feltStore, card.id])
-    // A row whose parent stands in the same group sits indented beneath it.
-    const depthIn = (card: KanbanCard, members: ReadonlySet<string>, memo: Map<string, number>): number => {
-      const key = threadKey(card), known = memo.get(key)
-      if (known !== undefined) return known
-      // Walk up only to the nearest ancestor already measured, so a deep chain costs its length once.
-      const chain: KanbanCard[] = []
-      let p = index.parentOf(card), base = 0
-      for (; p && p.id !== scope.id; p = index.parentOf(p)) {
-        const seen = memo.get(threadKey(p))
-        if (seen !== undefined) { base = seen + (members.has(threadKey(p)) ? 1 : 0); break }
-        chain.push(p)
-      }
-      for (let i = chain.length - 1; i >= 0; i--) {
-        memo.set(threadKey(chain[i]), base)
-        if (members.has(threadKey(chain[i]))) base++
-      }
-      memo.set(key, base)
-      return base
-    }
-    // A mark appears only where a group needs a sub-state: whose turn a waiting thread is, a live worker under a working one, or a discarded one among the archived.
-    const markOf = (card: KanbanCard, state: ThreadState): { kind: string; title: string } | null => {
-      if (state === 'waiting') { const turn = turnOf(card); return { kind: turn.turn, title: turn.word } }
-      if (state === 'archived' && deskColumn(card) === 'composted') return { kind: 'discarded', title: 'Discarded' }
-      return null
-    }
-    const rowFor = (card: KanbanCard, group: string, label: string, members: ReadonlySet<string>, memo: Map<string, number>): HTMLElement => {
-      const item = threadItem(card, index, this.open, focusOf(group, card))
-      const row = item.querySelector<HTMLElement>('.kbn-thread-row')!, state = index.state(card)
-      const depth = depthIn(card, members, memo)
-      if (depth) { item.dataset.depth = String(depth); item.style.setProperty('--ws-thread-depth', String(depth)) }
-      const mark = markOf(card, state)
-      let title = label
-      if (mark && ['question', 'blocked', 'discarded'].includes(mark.kind)) {
-        const el = document.createElement('span'); el.className = 'ws-thread-mark'; el.dataset.kind = mark.kind
-        el.title = mark.title; el.setAttribute('aria-hidden', 'true')
-        row.append(el); title = mark.title
-      }
-      const here = card.id === current.id && card.originId === current.originId
-      row.classList.toggle('ws-thread-current', here)
-      if (here) row.setAttribute('aria-current', 'page')
-      const pin = item.querySelector<HTMLButtonElement>('.kbn-thread-pin')!
-      pin.hidden = !here && pin.getAttribute('aria-pressed') !== 'true'
-      pin.tabIndex = pin.hidden ? -1 : 0
-      row.setAttribute('aria-label', `${card.name}, ${title.toLowerCase()}`)
-      return item
-    }
-    const rootIsOpen = current.id === scope.id && current.originId === scope.originId
-    const rootRow = rootIsOpen ? null : rowFor(scope, 'root', 'Root constitution', new Set(), new Map())
-    rootRow?.classList.add('ws-thread-root')
-    this.tree.replaceChildren(...(rootRow ? [rootRow] : []))
-    const subtree = index.subtree(scope)
-    // Arriving at a thread opens the groups holding it and its ancestry, once; the reader may fold them after.
-    const visit = JSON.stringify([current.id, current.originId, scope.id])
+    const visit = JSON.stringify([current.id, current.originId, current.feltStore, scope.id])
     const arriving = visit !== this.revealed
     this.revealed = visit
-    const lineage = new Set<string>([threadKey(current)])
-    for (let p = index.parentOf(current); p; p = index.parentOf(p)) lineage.add(threadKey(p))
-    let currentRow: HTMLElement | null = null
-    for (const [key, label] of THREAD_GROUPS) {
-      const members = subtree.filter(c => threadGroup(c) === key)
-      if (!members.length) continue
-      const group = document.createElement('details'); group.className = 'ws-thread-group'; group.dataset.threadDetails = key
-      group.open = (arriving && members.some(c => lineage.has(threadKey(c)))) || (open.get(key) ?? key !== 'archived')
-      const summary = document.createElement('summary'); summary.dataset.threadFocus = focusOf(`group:${key}`, scope)
-      const name = document.createElement('span'); name.className = 'ws-thread-group-label'; name.textContent = label
-      const count = document.createElement('span'); count.className = 'ws-thread-group-count'; count.textContent = String(members.length)
-      summary.append(name, count); summary.setAttribute('aria-label', `${label}, ${members.length}`)
-      const keys = new Set(members.map(threadKey)), memo = new Map<string, number>()
-      group.append(summary, ...members.map(card => rowFor(card, key, label, keys, memo)))
-      currentRow ??= group.querySelector<HTMLElement>('.ws-thread-current')
-      this.tree.append(group)
-    }
+    const rows = renderThreadTree(index, scope, current, (card, focus) => {
+      const item = threadItem(card, index, this.open, focus)
+      const pin = item.querySelector<HTMLButtonElement>('.kbn-thread-pin')!
+      const here = card.id === current.id && card.originId === current.originId && card.feltStore === current.feltStore
+      pin.hidden = !here && pin.getAttribute('aria-pressed') !== 'true'
+      pin.tabIndex = pin.hidden ? -1 : 0
+      return item
+    }, open, arriving)
+    this.tree.replaceChildren(...rows)
+    const currentRow = this.tree.querySelector<HTMLElement>('.ws-thread-current')
     this.layout()
-    if (arriving && currentRow && typeof currentRow.scrollIntoView === 'function') currentRow.scrollIntoView({ block: 'nearest' })
+    if (arriving && currentRow && (this.tree.scrollTop > 0 || currentRow !== this.tree.firstElementChild?.querySelector('.kbn-thread-row')) && typeof currentRow.scrollIntoView === 'function') currentRow.scrollIntoView({ block: 'nearest' })
     if (focus) {
       const target = [...this.tree.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
       if (target) target.focus({ preventScroll: true })

@@ -106,7 +106,7 @@ async function captureCurrentMeetingStates(page) {
       await page.locator('.ws-rail-toggle').click()
       await rail.waitFor({ state: 'visible' })
     }
-    await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').filter({ hasText: 'Response analysis' }).click()
+    await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').filter({ hasText: 'Response analysis' }).click()
     const header = page.locator('.ws-selected .ws-chat-head')
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 390]) {
@@ -180,7 +180,7 @@ export function registerHeaderBarJourneys(test) {
       ]
       for (const [name, verbs] of visits) {
         if (name === 'Accepted pilot') await page.locator('.ws-thread-rail summary').filter({ hasText: 'Archived' }).click()
-        await page.locator('.ws-thread-rail .kbn-thread-row').filter({ hasText: name }).click()
+        await page.locator('.ws-thread-rail .kbn-thread-row').filter({ has: page.getByText(name, { exact: true }) }).click()
         await header.getByRole('heading', { name, exact: true }).waitFor()
         assert.deepEqual(await visibleHeaderVerbs(header), verbs, `${name} draws only its state actions`)
         await assertLifecycleInk(header, scheme)
@@ -241,7 +241,7 @@ export function registerHeaderBarJourneys(test) {
     // The family's active thread exercises Close as well as the verdicts.
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.getByRole('button', { name: 'Show threads and sent files', exact: true }).click()
-    await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
+    await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
     await header.getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
     for (const width of [1440, 701]) {
       await page.setViewportSize({ width, height: 900 })
@@ -586,8 +586,28 @@ export function registerHeaderBarJourneys(test) {
     await page.keyboard.press('Space')
     await page.waitForFunction(() => document.querySelector('.ws-selected .ws-transcript-scroll').scrollTop > 0)
   }, { width: 1440, height: 900 })
+  test('The phone family tree keeps an archive fold and focus across a live feed repaint', async page => {
+    await page.goto(url)
+    await openRoot(page)
+    await page.locator('.ws-rail-toggle').click()
+    const sheet = page.locator('.ws-page-sheet[open]'), fold = sheet.locator('.ws-tree-archived').first()
+    await fold.locator('summary').click()
+    await fold.locator('summary').focus()
+    await page.evaluate(async () => {
+      const fixture = window.__harness.MOCK_FEED.fibers.find(row => row.fiber.name === 'Accepted pilot')
+      fixture.fiber.name = 'Accepted pilot updated'
+      await window.__harness.modal.fetchAndRender()
+    })
+    await sheet.getByText('Accepted pilot updated', { exact: true }).waitFor()
+    assert.equal(await fold.evaluate(el => el.open), true)
+    assert.equal(await fold.locator('summary').evaluate(el => el === document.activeElement), true)
+    await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
+    await sheet.waitFor({ state: 'hidden' })
+    await page.locator('.ws-rail-toggle').click()
+    assert.equal(await page.locator('.ws-page-sheet[open] .ws-tree-archived').first().evaluate(el => el.open), true)
+  }, { width: 390, height: 844 }, 'false', 'reduce', true)
   for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-    for (const scheme of ['light', 'dark']) test(`The rail omits its open root and keeps it as the thread anchor (${device}, ${scheme})`, async page => {
+    for (const scheme of ['light', 'dark']) test(`The family tree keeps its root and marks the open thread (${device}, ${scheme})`, async page => {
       await page.addInitScript(scheme => {
         if (window !== window.top) return
         localStorage.setItem('shuttle.appearance', JSON.stringify({ mode: scheme, dark: 'night-chart' }))
@@ -599,7 +619,7 @@ export function registerHeaderBarJourneys(test) {
       const header = page.locator('.ws-selected .ws-chat-head')
       const family = page.locator(device === 'phone' ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
       const show = async () => { if (device === 'phone') await page.locator('.ws-rail-toggle').click() }
-      const rootAnchor = () => family.locator(device === 'phone' ? '.ws-phone-threads-root' : '.ws-thread-root')
+      const rootAnchor = () => family.locator('.kbn-thread-row').first()
       for (const name of ['Response analysis', 'Choose the response cut']) {
         await show()
         await family.locator('.kbn-thread-row').filter({ hasText: name }).click()
@@ -615,7 +635,8 @@ export function registerHeaderBarJourneys(test) {
         await rootAnchor().click()
         await header.getByRole('heading', { name: title, exact: true }).waitFor()
         await show()
-        assert.equal(await rootAnchor().count(), 0)
+        assert.equal(await rootAnchor().count(), 1)
+        assert.equal(await rootAnchor().getAttribute('aria-current'), 'page')
         if (device === 'phone') await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
       }
     }, viewport)

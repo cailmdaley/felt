@@ -1,43 +1,41 @@
 import type { KanbanCard } from '../KanbanTypes.js'
 import { threadRow } from '../ThreadPeek.js'
-import type { ThreadIndex } from '../threads.js'
-import { THREAD_GROUPS, threadGroup } from './threadGroups.js'
+import { threadKey, type ThreadIndex } from '../threads.js'
+import { renderThreadTree } from './ThreadTree.js'
 
-const identity = (card: KanbanCard): string => JSON.stringify([card.originId, card.uid ?? card.id])
+/** The phone's family tree, retaining disclosures across sheet openings and repaints. */
+export class PhoneThreads {
+  private section: HTMLElement | null = null
+  private readonly openFolds = new Map<string, boolean>()
+  private revealed = ''
+  private signature = ''
 
-/**
- * The phone's thread list for the open constitution: its family from the
- * root down, the threads waiting on an answer first, the open one marked.
- * Empty (null) when the constitution has no family.
- */
-export function phoneThreads(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLElement | null {
-  let root = index.card(card)
-  for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) root = parent
-  const family = index.subtree(root)
-  if (!family.length) return null
-  const current = identity(index.card(card))
-  const section = document.createElement('section')
-  section.className = 'ws-phone-threads'
-  section.setAttribute('aria-label', 'Threads')
-  const row = (thread: KanbanCard): HTMLElement => {
-    const button = threadRow(thread, index, open)
-    if (identity(thread) === current) button.setAttribute('aria-current', 'page')
-    return button
+  render(card: KanbanCard, index: ThreadIndex, open: (card: KanbanCard) => void): HTMLElement | null {
+    for (const fold of this.section?.querySelectorAll<HTMLDetailsElement>('details[data-thread-details]') ?? []) {
+      this.openFolds.set(fold.dataset.threadDetails!, fold.open)
+    }
+    card = index.card(card)
+    let root = card
+    for (let parent = index.parentOf(root); parent; parent = index.parentOf(parent)) root = parent
+    if (!index.children(root).length) { this.section = null; this.signature = ''; return null }
+    const visit = JSON.stringify([threadKey(root), threadKey(card)])
+    const signature = JSON.stringify([visit, root, ...index.subtree(root)])
+    if (signature === this.signature && this.section) return this.section
+    this.signature = signature
+    const arriving = visit !== this.revealed
+    this.revealed = visit
+    const section = document.createElement('section')
+    section.className = 'ws-phone-threads'
+    section.setAttribute('aria-label', 'Threads')
+    section.append(...renderThreadTree(index, root, card, (thread, focus) => {
+      const row = threadRow(thread, index, open)
+      row.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.threadFocus = JSON.stringify([focus, 'dot'])
+      return row
+    }, this.openFolds, arriving))
+    this.section = section
+    if (arriving && threadKey(card) !== threadKey(root)) requestAnimationFrame(() => {
+      if (section.isConnected) section.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })
+    })
+    return section
   }
-  if (identity(root) !== current) {
-    const rootRow = row(root)
-    rootRow.classList.add('ws-phone-threads-root')
-    section.append(rootRow)
-  }
-  for (const [key, label] of THREAD_GROUPS) {
-    const members = family.filter(thread => threadGroup(thread) === key)
-    if (!members.length) continue
-    const group = document.createElement('section')
-    group.dataset.group = key
-    const heading = document.createElement('h3'); heading.textContent = label
-    const count = document.createElement('span'); count.className = 'ws-phone-threads-count'; count.textContent = String(members.length)
-    heading.append(' ', count)
-    group.append(heading, ...members.map(row)); section.append(group)
-  }
-  return section
 }

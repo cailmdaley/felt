@@ -1,4 +1,4 @@
-/* The rail: threads, then the artifact, then sent files. State headings frame single-line constitution rows. */
+/* The rail: threads, then the artifact, then sent files. The family tree holds single-line constitution rows. */
 .ws-thread-rail {
   position: relative; display: flex; flex-direction: column; min-width: 0;
   flex: 0 0 min(var(--ws-thread-rail-width, clamp(240px, 25vw, 340px)), 60vw);
@@ -91,33 +91,7 @@
 .ws-reader.ws-keyboard .ws-thread-handle:focus-visible::after { background: var(--ws-focus); }
 .ws-thread-resizing, .ws-thread-resizing * { cursor: col-resize; user-select: none; }
 .ws-thread-splitting, .ws-thread-splitting * { cursor: row-resize; user-select: none; }
-.ws-thread-group { --tone: var(--kbn-ink-muted); margin: 0; }
-.ws-thread-group[data-thread-details='waiting'] { --tone: var(--kbn-owed-bright); }
-.ws-thread-group[data-thread-details='working'] { --tone: var(--ws-state-working); }
-.ws-thread-group > summary {
-  display: flex; align-items: baseline; gap: 8px; list-style: none; cursor: pointer;
-  margin-top: 14px; padding: 5px 8px 6px;
-  font-size: var(--type-note); font-variant: all-small-caps; letter-spacing: var(--track-kicker); font-weight: 400; color: var(--tone);
-  border-bottom: 1px solid color-mix(in srgb, var(--tone) 35%, transparent);
-}
-.ws-thread-group:first-child > summary { margin-top: 6px; }
-.ws-thread-group > summary::-webkit-details-marker { display: none; }
-.ws-thread-group > summary::before {
-  content: ''; flex: none; align-self: center; width: 6px; height: 6px; margin: 0 6px 0 2px;
-  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); opacity: .8;
-}
-.ws-thread-group[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
-.ws-thread-group-count { font: var(--type-meta)/var(--leading-tight) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; font-variant-numeric: tabular-nums; color: var(--tone); }
-.ws-thread-group > summary:hover { background: var(--ws-hover); }
-.ws-reader.ws-keyboard .ws-thread-group > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); outline-offset: -1px; }
-.ws-thread-group > summary:focus { outline: none; }
-.ws-thread-tree .kbn-thread-row { padding: 4px 26px 4px 4px; font-size: var(--type-row); }
-.ws-thread-tree .kbn-thread-item[data-depth] .kbn-thread-row { padding-left: calc(4px + var(--ws-thread-depth) * var(--ws-thread-indent)); }
-.ws-thread-tree .ws-thread-mark { flex: none; width: 12px; text-align: center; color: var(--kbn-ink-muted); }
-.ws-thread-tree .ws-thread-mark::before { font-size: var(--glyph-small); }
-.ws-thread-tree .ws-thread-mark[data-kind='question']::before { content: '?'; }
-.ws-thread-tree .ws-thread-mark[data-kind='blocked']::before { content: '!'; }
-.ws-thread-tree .ws-thread-mark[data-kind='discarded']::before { content: '×'; }
+.ws-thread-tree .kbn-thread-row { padding: 4px 26px 4px calc(4px + var(--ws-thread-depth, 0) * var(--ws-thread-indent)); font-size: var(--type-row); }
 .ws-thread-tree .kbn-thread-row:hover, .ws-thread-tree .kbn-thread-row:focus-visible { background: var(--ws-hover); }
 .ws-thread-tree .kbn-thread-row.ws-thread-current { background: var(--kbn-paper); box-shadow: inset 0 0 0 1px var(--kbn-rule); }
 .ws-thread-tree .kbn-thread-item > .kbn-thread-pin { right: 4px; }

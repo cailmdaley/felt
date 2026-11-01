@@ -13,13 +13,10 @@
 .ws-page-sheet-head { margin: 0 0 12px; flex: none; }
 .ws-page-sheet h2 { font: var(--type-title)/var(--leading-tight) var(--font-serif); margin: 0; }
 .ws-page-sheet-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding-bottom: 24px; }
-.ws-phone-threads h3, .ws-sent-files h3 { margin: 20px 0 8px; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
-.ws-phone-threads-count { font: var(--type-meta)/var(--leading-ui) var(--font-mono); font-variant-caps: normal; letter-spacing: 0; }
-.ws-reader .ws-phone-threads .kbn-thread-row { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; min-height: var(--ws-phone-target); padding: 8px; border-top: 1px solid var(--ws-hairline-soft); text-align: left; }
+.ws-sent-files h3 { margin: 20px 0 8px; color: var(--ws-ink-muted); font: var(--type-note)/var(--leading-ui) var(--font-serif); font-variant-caps: all-small-caps; letter-spacing: var(--track-kicker); }
+.ws-reader .ws-phone-threads .kbn-thread-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; min-height: var(--ws-phone-target); padding: 8px 4px 8px calc(4px + var(--ws-thread-depth, 0) * 12px); border-top: 1px solid var(--ws-hairline-soft); text-align: left; }
 .ws-reader .ws-phone-threads .kbn-thread-row[aria-current='page'] { background: var(--ws-fill); box-shadow: inset 2px 0 var(--ws-ink); }
 .ws-phone-threads .kbn-thread-name { font: var(--type-label)/var(--leading-tight) var(--font-serif); color: var(--ws-ink); }
-.ws-phone-threads .kbn-thread-row small { font: var(--type-meta)/var(--leading-tight) var(--font-mono); color: var(--ws-ink-muted); }
-.ws-phone-threads .kbn-thread-outcome { font: var(--type-meta)/var(--leading-ui) var(--font-serif); color: var(--ws-ink-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ws-reader .ws-sent-file { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 12px; width: 100%; min-height: 52px; padding: 12px 4px; text-align: left; border-top: 1px solid var(--ws-hairline-soft); }
 .ws-sent-file > span:first-child { overflow-wrap: anywhere; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .ws-sent-file time { color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-mono); }

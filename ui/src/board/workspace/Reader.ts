@@ -27,7 +27,7 @@ import { installPageSwipe, PhoneTopbar, SWIPE, swipeFollow, swipeOutcome, swipeS
 import { PageSheet } from './PageSheet.js'
 import { SettingsMenu } from './SettingsMenu.js'
 import { ReportChip } from './ReportChip.js'
-import { phoneThreads } from './PhoneThreads.js'
+import { PhoneThreads } from './PhoneThreads.js'
 import { anchorPopover, type Release } from './anchoredPopover.js'
 
 export interface ReaderOptions {
@@ -131,6 +131,7 @@ export class Reader {
   private swiping = false
   private swipeWatchdog: ReturnType<typeof setTimeout> | null = null
   private readonly pageSheet: PageSheet
+  private readonly phoneThreads = new PhoneThreads()
   private readonly settingsMenu: SettingsMenu
   private readonly announcement = element('div', 'ws-sr-only')
   private readonly observer: ResizeObserver | null
@@ -410,7 +411,7 @@ export class Reader {
     this.closeMenu()
     const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
     this.el.append(this.pageSheet.el)
-    this.pageSheet.show(this.railToggle, !card ? null : phoneThreads(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
+    this.pageSheet.show(this.railToggle, !card ? null : this.phoneThreads.render(card, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
   }
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {
@@ -647,8 +648,14 @@ export class Reader {
   }
   /** The rail's threads region: the open card's family, or none. */
   private feedFamily(): void {
-    if (this.currentCard) this.threadRail.show(this.currentCard, this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards()))
-    else this.threadRail.clearFamily()
+    if (this.currentCard) {
+      const index = this.opts.threadIndex?.() ?? new ThreadIndex(this.opts.cards())
+      this.threadRail.show(this.currentCard, index)
+      if (this.pageSheet.isOpen) this.pageSheet.updateThreads(this.phoneThreads.render(this.currentCard, index, thread => this.pageSheet.close(() => this.opts.onChannel(thread))))
+    } else {
+      this.threadRail.clearFamily()
+      if (this.pageSheet.isOpen) this.pageSheet.updateThreads(null)
+    }
   }
   /** The rail's files region; a change in what the rail holds can change whether it stands open. */
   private feedFiles(): void {

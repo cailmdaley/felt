@@ -42,9 +42,10 @@ export function registerLivingReportJourneys(test) {
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-      // The family card opens its waiting thread; ancestry opens the report's owning constitution.
-      await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
-      await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+      // The family tree keeps the report's owning constitution at its root.
+      if (phone) await page.locator('.ws-rail-toggle').click()
+      const family = page.locator(phone ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
+      await family.locator('.kbn-thread-row').first().click()
       await selected(page).locator('textarea').waitFor()
       await page.locator('.ws-report-chip').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
@@ -122,7 +123,7 @@ export function registerLivingReportJourneys(test) {
         await page.locator('.ws-rail-toggle').click()
         await page.locator('.ws-page-sheet[open]').waitFor()
         assert.ok(await page.locator('.ws-page-sheet .ws-sent-file').count() > 0)
-        assert.ok(await page.locator('.ws-page-sheet [data-group="archived"]').count() > 0)
+        assert.ok(await page.locator('.ws-page-sheet .ws-tree-archived').count() > 0)
         await shot(page, 'phone-sheet')
         await page.getByRole('button', { name: 'Close threads and files', exact: true }).click()
         await page.locator('.ws-page-sheet[open]').waitFor({ state: 'hidden' })
@@ -156,16 +157,16 @@ export function registerLivingReportJourneys(test) {
       // A thread's back returns to the chat from which it was opened.
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
-        await page.locator('.ws-page-sheet [data-group="working"] .kbn-thread-row').first().click()
-      } else await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
+        await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
+      } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
       await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
       await selected(page).locator('.ws-chat-origin').click()
       await selected(page).getByRole('heading', { name: 'Calibrate the shear response', exact: true }).waitFor()
       // Further ancestors stay reachable from settings without adding a header row.
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
-        await page.locator('.ws-page-sheet [data-group="working"] .kbn-thread-row').first().click()
-      } else await page.locator('.ws-thread-rail [data-thread-details="working"] .kbn-thread-row').first().click()
+        await page.locator('.ws-page-sheet .kbn-thread-row[data-thread-state="working"]').first().click()
+      } else await page.locator('.ws-thread-rail .kbn-thread-row[data-thread-state="working"]').first().click()
       await selected(page).getByRole('heading', { name: 'Response analysis', exact: true }).waitFor()
       await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
       await page.locator('.ws-settings-menu:not([hidden]) .ws-settings-ancestry .ws-ancestry-link').click()

@@ -52,12 +52,25 @@ export class PageSheet {
   show(opener: HTMLElement, threads: HTMLElement | null = null): void {
     if (this.isOpen || this.pendingBack || !this.model) return
     this.opener = opener
-    this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
-    this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
-    this.el.setAttribute('aria-label', this.heading.textContent)
+    this.updateThreads(threads)
     this.el.querySelector('button')?.setAttribute('aria-label', 'Close threads and files')
     window.history.pushState({ ...window.history.state, [HISTORY_KEY]: this.token }, '')
     this.open()
+  }
+  /** Refresh the family without losing a disclosure's focus or the sheet's scroll position. */
+  updateThreads(threads: HTMLElement | null): void {
+    if (this.threads.firstElementChild === threads && this.threads.hidden === !threads) return
+    const active = document.activeElement
+    const focus = active instanceof HTMLElement && this.threads.contains(active) ? active.dataset.threadFocus : undefined
+    const scroll = this.body.scrollTop
+    this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
+    this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
+    this.el.setAttribute('aria-label', this.heading.textContent)
+    this.body.scrollTop = scroll
+    if (focus) {
+      const target = [...this.threads.querySelectorAll<HTMLElement>('[data-thread-focus]')].find(el => el.dataset.threadFocus === focus)
+      ;(target ?? this.el.querySelector<HTMLElement>('button'))?.focus({ preventScroll: true })
+    }
   }
   private render(): void {
     if (!this.model) return
@@ -110,7 +123,7 @@ export class PageSheet {
     event.stopPropagation()
     if (event.key === 'Escape') { event.preventDefault(); this.close() }
     if (event.key === 'Tab') {
-      const buttons = [...this.el.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], [tabindex="0"]')].filter(button => button.checkVisibility() && !button.matches(':disabled'))
+      const buttons = [...this.el.querySelectorAll<HTMLElement>('button, input, select, textarea, a[href], summary, [tabindex="0"]')].filter(button => button.checkVisibility() && !button.matches(':disabled'))
       const first = buttons[0], last = buttons.at(-1)
       if (event.shiftKey && (document.activeElement === first || !this.el.contains(document.activeElement))) { event.preventDefault(); last?.focus() }
       else if (!event.shiftKey && (document.activeElement === last || !this.el.contains(document.activeElement))) { event.preventDefault(); first?.focus() }
