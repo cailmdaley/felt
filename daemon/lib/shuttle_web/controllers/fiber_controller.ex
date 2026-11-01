@@ -61,6 +61,10 @@ defmodule ShuttleWeb.FiberController do
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
          :ok <- inject_create_frontmatter(path, frontmatter, uid) do
       uid = if uid == "", do: generated_uid, else: uid
+      # Announce the new document to the Poller: an armed constitution
+      # dispatches on the next tick, and the owner's feed lists it now, even
+      # on a store whose discovery stays hot between full scans.
+      Shuttle.Poller.refresh_document(fiber_id)
       json(conn, %{id: fiber_id, path: path, uid: uid})
     else
       {:error, reason} ->

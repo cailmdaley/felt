@@ -122,6 +122,7 @@ defmodule Shuttle.Poller do
     :full_scan_min_interval_ms,
     :last_known_listings,
     :last_full_listings,
+    :announced_ids,
     :runner,
     :document_cache,
     :running,
@@ -341,6 +342,12 @@ defmodule Shuttle.Poller do
       # The immutable id source for hot scans: only a successful full listing
       # replaces this map; successful hot rows never widen the hot set.
       last_full_listings: %{},
+      # %{store => %{id => announced_at_ms}} — fibers this daemon wrote or
+      # re-read (`refresh_document/2`) that a hot scan must list although its
+      # full-listing baseline predates them: a constitution created through
+      # `POST /fiber/create` dispatches on the next tick, not the next full
+      # scan. A full scan that started after an id's announcement retires it.
+      announced_ids: %{},
       # Per-store full-scan cadence.
       discovery: %{},
       published_table: nil,
@@ -2434,6 +2441,7 @@ defmodule Shuttle.Poller do
           state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores),
         last_full_listings:
           state.last_full_listings |> Map.merge(full_listings) |> Map.take(felt_stores),
+        announced_ids: retire_announced_ids(state.announced_ids, full_listings, discovery),
         discovery: discovery
     }
 
@@ -2806,11 +2814,47 @@ defmodule Shuttle.Poller do
   end
 
   defp hot_ids_for_store(store, _previous, state) do
+    announced = state.announced_ids |> Map.get(store, %{}) |> Map.keys()
+
     state.last_full_listings
     |> Map.get(store, [])
     |> Enum.map(&Map.get(&1, "id"))
+    |> Enum.concat(announced)
     |> Enum.filter(&is_binary/1)
     |> Enum.uniq()
+  end
+
+  defp announce_id(%State{} = state, store, id) when is_binary(store) and is_binary(id) do
+    if store in state.felt_stores do
+      now = System.system_time(:millisecond)
+      ids = state.announced_ids |> Map.get(store, %{}) |> Map.put(id, now)
+      %{state | announced_ids: Map.put(state.announced_ids, store, ids)}
+    else
+      state
+    end
+  end
+
+  defp announce_id(state, _store, _id), do: state
+
+  # A full listing that began at or after an announcement saw the document on
+  # disk, so its baseline now carries the id (or its absence is real).
+  defp retire_announced_ids(announced, full_listings, discovery) do
+    announced
+    |> Map.new(fn {store, ids} ->
+      case {Map.has_key?(full_listings, store), Map.get(discovery, store, %{})} do
+        {true, %{last_full_completed_at: done, last_full_duration_ms: duration}}
+        when is_integer(done) and is_integer(duration) ->
+          started = done - duration
+          {store, Map.filter(ids, fn {_id, at} -> at > started end)}
+
+        {true, _info} ->
+          {store, %{}}
+
+        {false, _info} ->
+          {store, ids}
+      end
+    end)
+    |> Map.reject(fn {_store, ids} -> ids == %{} end)
   end
 
   defp merge_hot_rows(previous, listed, foreign_ids) do
@@ -3287,7 +3331,10 @@ defmodule Shuttle.Poller do
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)
         cached = %{modified_at: Map.get(fiber, "modified_at"), entry: entry}
-        install_document_cache(state, Map.put(without_fiber, key, cached))
+
+        state
+        |> announce_id(Map.get(entry, :felt_store), Map.get(fiber, "slug"))
+        |> install_document_cache(Map.put(without_fiber, key, cached))
 
       {:ok, %{fibers: []}} ->
         # Fiber no longer resolves (uninstalled / deleted): drop it from the feed.
