@@ -136,6 +136,10 @@ func shellQuote(value string) string {
 // accepted the request, so it must never be reported as a safe-to-repeat
 // failure.
 func remoteRouteError(cmd *cobra.Command, args []string, owner string, err error) error {
+	var moved movedDraftError
+	if errors.As(err, &moved) {
+		return err
+	}
 	command := directOwnerCommand(cmd, args)
 	if detail, ok := ownerForwardFailure(err, owner); ok {
 		return fmt.Errorf("owning host %q is unreachable (forward failed: %s); the action may have been applied. Check the fiber on %q before retrying. Run `%s` there if needed", owner, detail, owner, command)

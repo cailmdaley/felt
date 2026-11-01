@@ -442,12 +442,10 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 					if st != nil && errors.As(err, &missing) && missing.status == 404 {
 						f.Status = felt.StatusActive
 						if setErr := shuttle.SetConfig(f, block); setErr == nil {
-							createErr := a.createRemoteFiber(owner, f, block)
-							if createErr == nil {
-								fmt.Fprintf(a.env.Stdout, "created %s on %s from its local draft and armed it\n", f.ID, owner)
-								return nil
+							if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
+								return remoteRouteError(cmd, args, owner, createErr)
 							}
-							return remoteRouteError(cmd, args, owner, createErr)
+							return nil
 						}
 					}
 					return remoteRouteError(cmd, args, owner, err)
@@ -614,12 +612,10 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 				if block, ok, blockErr := shuttle.BlockOf(f); blockErr == nil && ok {
 					f.Status = felt.StatusActive
 					if setErr := shuttle.SetConfig(f, block); setErr == nil {
-						createErr := a.createRemoteFiber(owner, f, block)
-						if createErr == nil {
-							fmt.Fprintf(a.env.Stdout, "created %s on %s from its local draft and armed it\n", f.ID, owner)
-							return true, nil
+						if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
+							return true, remoteRouteError(cmd, []string{query}, owner, createErr)
 						}
-						return true, remoteRouteError(cmd, []string{query}, owner, createErr)
+						return true, nil
 					}
 				}
 			}

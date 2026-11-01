@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/cailmdaley/felt/internal/felt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,7 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	dir, st := newStore(t)
 	seedShuttleRole(t, st, "parent", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "hub", "project_dir": t.TempDir(), "agent": "claude-opus"}, nil)
 	var create requestBodies
+	ownerPath := filepath.Join(t.TempDir(), "owner.md")
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/project-dir/resolve":
@@ -71,7 +73,7 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 		case "/api/v1/fiber/create":
 			create.record(t, r)
 			payload := create.last()
-			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q}`, payload["id"], payload["uid"])
+			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"path":%q}`, payload["id"], payload["uid"], ownerPath)
 		default:
 			t.Errorf("unexpected request %s", r.URL.String())
 			http.NotFound(w, r)
@@ -90,8 +92,8 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	if got := create.last(); got["origin"] != "worker" || got["id"] != "parent/measure" {
 		t.Fatalf("owner create payload = %#v", got)
 	}
-	if got := mustRead(t, st, "parent/measure"); got.Status != felt.StatusOpen {
-		t.Fatalf("local draft was armed as a mirror: %s", got.Status)
+	if _, err := st.Read("parent/measure"); err == nil {
+		t.Fatal("local draft remains after transfer")
 	}
 }
 
