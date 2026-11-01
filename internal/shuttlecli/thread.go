@@ -37,8 +37,9 @@ the child stays created but disabled. --take cannot be combined with --disabled
 or a host different from the caller's.
 
 --json prints an object with the new id and uid. An armed thread for a remote
-host is created by that host's daemon. A remote draft made with --disabled stays
-local until you move it to its owner.`,
+host is created by that host's daemon, which dispatches it on its next poll. A
+remote draft made with --disabled stays in this store while you write it;
+` + "`shuttle resume`" + ` moves it to its owner, which creates and arms it.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if take && disabled {
