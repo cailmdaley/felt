@@ -130,25 +130,6 @@ defmodule Shuttle.Application do
 
   @impl true
   def start(_type, _args) do
-    case Supervisor.start_link(bootstrap_specs(),
-           strategy: :one_for_one,
-           name: Shuttle.Supervisor
-         ) do
-      {:ok, pid} ->
-        try do
-          start_runtime(pid)
-        catch
-          kind, reason ->
-            Supervisor.stop(pid)
-            :erlang.raise(kind, reason, __STACKTRACE__)
-        end
-
-      other ->
-        other
-    end
-  end
-
-  defp start_runtime(pid) do
     # A release bakes its compile-time config (config/prod.exs) into
     # releases/*/sys.config, EVALUATED on the build machine — so anything
     # decided there travels with the artifact to every host it lands on.
@@ -175,45 +156,29 @@ defmodule Shuttle.Application do
 
     Shuttle.Readiness.begin_boot()
 
-    # The host identity, resolved after filesystem services and before runtime children:
+    # The host identity, resolved exactly once and before any child starts:
     # every caller — the endpoint's first requests, the Poller, the owned-feed
     # filter — reads this frozen value and none shells felt for it. A daemon
     # felt cannot name does not boot.
     Shuttle.Poller.freeze_daemon_host_id!()
     :persistent_term.put({Shuttle.Terminal, :primary}, Shuttle.Host.terminal())
 
-    Enum.reduce_while(runtime_specs(), {:ok, pid}, fn spec, started ->
-      case Supervisor.start_child(pid, spec) do
-        {:ok, _child} -> {:cont, started}
-        {:ok, _child, _info} -> {:cont, started}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, ^pid} ->
+    case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
+      {:ok, pid} ->
         duration_ms = Shuttle.Readiness.mark_ready()
         Logger.info("Shuttle ready after #{duration_ms}ms")
         {:ok, pid}
 
-      error ->
-        Supervisor.stop(pid)
-        error
+      other ->
+        other
     end
   end
 
   @doc false
-  def child_specs, do: bootstrap_specs() ++ runtime_specs()
-
-  defp bootstrap_specs do
-    Enum.map(
-      [{Task.Supervisor, name: Shuttle.TaskSupervisor}, Shuttle.FileAccess],
-      &Supervisor.child_spec(&1, [])
-    )
-  end
-
-  defp runtime_specs do
+  def child_specs do
     core = [
       {Registry, keys: :duplicate, name: ShuttleWeb.TranscriptStreams},
+      {Task.Supervisor, name: Shuttle.TaskSupervisor},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Shares one felt read among concurrent board requests for the same
       # fiber, and among concurrent misses for a store's listing.
