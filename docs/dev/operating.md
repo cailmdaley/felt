@@ -293,6 +293,36 @@ Repeatedly increasing `stalls` means the daemon is alive but an input remains
 wedged; inspect `~/.config/shuttle/stores.json` and remote tunnel health rather
 than restarting the daemon to clear the symptom.
 
+## Bounded filesystem and HTTP work
+
+`GET /api/v1/version` includes `filesystem`: lease capacity, occupied and quarantined slots, availability, and blocked protected-folder prefixes.
+Daemon filesystem reads, mutations, discovery and file transfers use `Shuttle.FileAccess`.
+The default is two leases and a 1.5-second operation deadline, with no waiting queue.
+A saturated pool returns `busy`; an expired operation returns `timeout`.
+Neither means that a file is absent.
+Readers retain their lease until their raw descriptor closes, including during network backpressure.
+
+On macOS, denied or timed-out Documents/Desktop/Downloads access blocks the protected prefix and its discovered symlink aliases.
+Subsequent probes fail without re-entering the filesystem.
+Grant the launcher Files & Folders access or Full Disk Access, then restart the daemon to retry.
+A successful in-flight open/read can also clear its block; metadata success cannot.
+The Elixir `Shuttle.FileAccess.reset/0` API clears blocks without reclaiming occupied leases: native work can outlive its caller.
+An unexpected worker death quarantines its credit, and a lost lease journal fails closed, until VM restart.
+
+The Poller publishes `poll_health.store_inventory` and `filesystem_error`.
+Unavailable cold inventory refuses dispatch, claims, migration and lifecycle writes instead of treating an unreadable registry as empty.
+Project-directory filesystem failures defer dispatch rather than arm a fresh document.
+
+HTTP/1 requests have an end-to-end fuse from parsed headers through response completion, including body reads, dependency calls and sends.
+Ordinary reads allow 35 seconds; version health allows eight.
+Mutations allow the configured Poller write budget plus forwarding transit margin and five seconds.
+Chooser, search, fleet controls, uploads and file/transcript routes retain their longer bounded contracts.
+HTTP/2 is disabled because a fuse owns an HTTP/1 connection.
+Socket sends are bounded independently, and owner relays admit four callers per URL with a five-second cooldown after transport failure.
+A timeout can close the socket without rendering JSON; dependency-call failures before response headers return 503.
+Neither a disconnected request nor a filesystem timeout rolls back a mutation that is already executing.
+Inspect the owner before retrying a write.
+
 ## A worker tmux cannot see
 
 tmux reaches its server through a socket file, `/tmp/tmux-<uid>/default`

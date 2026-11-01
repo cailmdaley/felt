@@ -177,7 +177,7 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),
-    do: GenServer.call(server, :refresh_now, RegistryCommon.read_timeout_ms())
+    do: GenServer.call(server, :refresh_now, RegistryCommon.control_timeout_ms())
 
   @doc """
   Synchronously refreshes one remote's owner feed.
@@ -214,7 +214,12 @@ defmodule Shuttle.RemoteFiberRegistry do
 
   @spec refresh(GenServer.server(), String.t()) :: :ok | {:error, term()}
   def refresh(server, name) when is_binary(name) do
-    RegistryCommon.read(server, {:refresh, name}, {:error, :not_running})
+    RegistryCommon.read(
+      server,
+      {:refresh, name},
+      {:error, :not_running},
+      RegistryCommon.control_timeout_ms()
+    )
   end
 
   # ── Server ──

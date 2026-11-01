@@ -21,6 +21,9 @@ defmodule ShuttleWeb.RequestDeadline do
 
   @doc "Overall request budget in milliseconds, including body reads and sends."
   def budget_ms("POST", "/api/v1/choose-folder"), do: 335_000
+  def budget_ms("GET", "/api/v1/transcripts/search"), do: 125_000
+  def budget_ms("GET", "/api/v1/version"), do: 8_000
+  def budget_ms("GET", path) when path in ["/api/v1/agents", "/api/v1/fleet/remotes"], do: 20_000
 
   def budget_ms(method, path)
       when method in ["GET", "HEAD"] and
@@ -38,8 +41,10 @@ defmodule ShuttleWeb.RequestDeadline do
   def budget_ms("POST", path) when path in ["/api/v1/attachments", "/api/v1/messages/files"],
     do: 300_000
 
-  def budget_ms(method, _path) when method in ["GET", "HEAD", "OPTIONS"], do: 8_000
-  def budget_ms(_method, _path), do: 35_000
+  # The outer fuse leaves room for the owner's buffered read budget and for
+  # the configured Poller write budget plus its forwarding transit margin.
+  def budget_ms(method, _path) when method in ["GET", "HEAD", "OPTIONS"], do: 35_000
+  def budget_ms(_method, _path), do: Shuttle.OriginRouter.default_forward_timeout_ms() + 5_000
 
   @impl true
   def init(opts) do

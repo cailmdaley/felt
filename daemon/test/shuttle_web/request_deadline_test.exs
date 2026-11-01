@@ -254,7 +254,7 @@ defmodule ShuttleWeb.RequestDeadlineTest do
     assert RequestDeadline.budget_ms("GET", "/api/v1/transcript") == 305_000
     assert RequestDeadline.budget_ms("POST", "/api/v1/fleet/remotes") == 95_000
     assert RequestDeadline.budget_ms("POST", "/api/v1/tunnels") == 95_000
-    assert RequestDeadline.budget_ms("POST", "/api/v1/dispatch") == 35_000
+    assert RequestDeadline.budget_ms("POST", "/api/v1/dispatch") == 45_000
     assert RequestDeadline.budget_ms("POST", "/api/v1/choose-folder") == 335_000
 
     for path <- Map.keys(ShuttleWeb.LargeBodyParser.limits()) do
@@ -262,6 +262,8 @@ defmodule ShuttleWeb.RequestDeadlineTest do
       assert RequestDeadline.budget_ms("POST", path) > ShuttleWeb.LargeBodyParser.read_timeout()
     end
 
-    assert RequestDeadline.budget_ms("GET", "/api/v1/attachments") == 8_000
+    assert RequestDeadline.budget_ms("GET", "/api/v1/attachments") == 35_000
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 60_000)
+    assert RequestDeadline.budget_ms("POST", "/api/v1/dispatch") == 75_000
   end
 end

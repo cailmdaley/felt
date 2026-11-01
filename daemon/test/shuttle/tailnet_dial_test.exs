@@ -58,6 +58,9 @@ defmodule Shuttle.TailnetDialTest do
             {:error, _} -> conn
           end
 
+        "/blocked-response" ->
+          Plug.Conn.send_resp(conn, 200, :binary.copy(<<0>>, 32 * 1024 * 1024))
+
         "/in-flight" ->
           send(parent, {:inflight_request, self()})
 
@@ -694,6 +697,68 @@ defmodule Shuttle.TailnetDialTest do
     :gen_tcp.close(client)
   end
 
+  test "a LocalAPI peer that stops reading cannot pin a TLS send", %{base: base} do
+    previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous) end)
+    {tls_port, _peer} = start_silent_tls_peer(base)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, 443)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    {:ok, client} =
+      :gen_tcp.connect(
+        {:local, path},
+        0,
+        [:binary, active: false, send_timeout: 3_000, send_timeout_close: true],
+        5_000
+      )
+
+    on_exit(fn -> :gen_tcp.close(client) end)
+    assert_receive {:localapi_relay_pid, localapi_pid}, 5_000
+    on_exit(fn -> if Process.alive?(localapi_pid), do: Process.exit(localapi_pid, :kill) end)
+    assert_receive {:silent_tls_handshake, _peer_pid}, 5_000
+    send(localapi_pid, :hold)
+    assert_receive {:localapi_relay_held, ^localapi_pid}, 5_000
+    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+    on_exit(fn -> if Process.alive?(relay_pid), do: Process.exit(relay_pid, :kill) end)
+    monitor = Process.monitor(relay_pid)
+    writer = Task.async(fn -> :gen_tcp.send(client, :binary.copy(<<0>>, 32 * 1024 * 1024)) end)
+    assert_receive {:DOWN, ^monitor, :process, ^relay_pid, :normal}, 3_000
+    assert {:tailnet_dial, :relay, :timeout} = TailnetDial.last_error(remote.name)
+    assert {:ok, result} = Task.yield(writer, 3_000)
+    assert result == :ok or match?({:error, _reason}, result)
+  end
+
+  test "a Unix client that stops reading cannot pin a response send", %{
+    base: base,
+    tls_port: tls_port
+  } do
+    previous = Application.get_env(:shuttle, :tailnet_dial_test_cacerts)
+    Application.put_env(:shuttle, :tailnet_dial_test_cacerts, test_cacerts())
+    on_exit(fn -> restore_cacerts(previous) end)
+    localapi = start_localapi(base, mode: :relay, tls_port: tls_port, parent: self())
+    remote = start_bridge(base, localapi, @host, tls_port)
+    path = TailnetDial.socket_path(remote.name, Path.join(base, "data"))
+    baseline = Task.Supervisor.children(Shuttle.TaskSupervisor)
+
+    {:ok, client} =
+      :gen_tcp.connect({:local, path}, 0, [:binary, active: false, recbuf: 4_096], 5_000)
+
+    on_exit(fn -> :gen_tcp.close(client) end)
+    assert_receive {:localapi_relay_pid, localapi_pid}, 5_000
+    on_exit(fn -> if Process.alive?(localapi_pid), do: Process.exit(localapi_pid, :kill) end)
+    assert [relay_pid] = Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+    on_exit(fn -> if Process.alive?(relay_pid), do: Process.exit(relay_pid, :kill) end)
+    monitor = Process.monitor(relay_pid)
+    :ok = :gen_tcp.send(client, "GET /blocked-response HTTP/1.1\r\nHost: #{@host}\r\n\r\n")
+    assert_receive {:https_request, [@host]}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^relay_pid, :normal}, 3_000
+    assert {:tailnet_dial, :relay, :timeout} = TailnetDial.last_error(remote.name)
+    assert eventually(fn -> Task.Supervisor.children(Shuttle.TaskSupervisor) == baseline end)
+  end
+
   test "an absent LocalAPI socket closes its client and records the dial failure", %{base: base} do
     localapi = Path.join(base, "absent.sock")
     remote = start_bridge(base, localapi, @host, 443)
@@ -1298,7 +1363,10 @@ defmodule Shuttle.TailnetDialTest do
 
   # Relays started since `baseline`. Relays left by earlier tests may be
   # reaped mid-test, so a test compares only what it added.
-  defp new_relays(baseline), do: Task.Supervisor.children(Shuttle.TaskSupervisor) -- baseline
+  defp new_relays(baseline) do
+    transports = for {_token, lease} <- :sys.get_state(Shuttle.RelayGate).leases, do: lease.worker
+    Task.Supervisor.children(Shuttle.TaskSupervisor) -- (baseline ++ transports)
+  end
 
   # A ceiling of ~30 s, reached only when the condition never holds: a passing
   # test returns as soon as it does, however loaded the machine.

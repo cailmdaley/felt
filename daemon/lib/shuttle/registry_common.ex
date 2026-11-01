@@ -14,13 +14,16 @@ defmodule Shuttle.RegistryCommon do
 
   require Logger
 
-  # Read timeout for the synchronous snapshot/feed calls. Generous because a
-  # cold first walk on the owning daemon can take seconds.
-  @registry_read_timeout_ms 30_000
+  # Leave room for a temporal feed's five-second fetch within the HTTP fuse.
+  @registry_read_timeout_ms 6_000
+  @registry_control_timeout_ms 30_000
 
   @doc "Default timeout (ms) for the registries' synchronous read calls."
   @spec read_timeout_ms() :: pos_integer()
   def read_timeout_ms, do: @registry_read_timeout_ms
+
+  @doc "Timeout for explicit registry refresh operations."
+  def control_timeout_ms, do: @registry_control_timeout_ms
 
   @doc """
   Coerce the configured `:remotes` entries into `%Shuttle.Remote{}` structs,

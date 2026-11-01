@@ -227,7 +227,7 @@ defmodule Shuttle.RemoteTemporalRegistry do
 
   @spec refresh_now(GenServer.server()) :: :ok
   def refresh_now(server),
-    do: GenServer.call(server, :refresh_now, RegistryCommon.read_timeout_ms())
+    do: GenServer.call(server, :refresh_now, RegistryCommon.control_timeout_ms())
 
   @doc """
   The activity window a fetch made at `now` asks for: `to_ms` is `now` ceiled

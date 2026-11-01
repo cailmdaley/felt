@@ -1563,10 +1563,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   def post(url, body, content_type, timeout_ms)
       when is_binary(url) and is_binary(body) and is_binary(content_type) and
              is_integer(timeout_ms) do
-    case request(:post, url, [], {content_type, body}, timeout_ms) do
-      {:ok, status, _headers, resp_body} -> {:ok, status, resp_body}
-      {:error, _reason} = error -> error
-    end
+    post_once(url, body, content_type, timeout_ms)
   end
 
   @doc "A non-replayable POST without redirects or connection reuse."
@@ -1732,6 +1729,12 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
   # every multibyte char (— × é …) and corrupting images and PDFs.
   defp request(method, url, req_headers, payload, timeout_ms) do
+    Shuttle.RelayClient.transport(timeout_ms, fn ->
+      buffered_request(method, url, req_headers, payload, timeout_ms)
+    end)
+  end
+
+  defp buffered_request(method, url, req_headers, payload, timeout_ms) do
     with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       headers =
         Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
@@ -1745,11 +1748,10 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
             {String.to_charlist(request_url), headers, String.to_charlist(type), body}
         end
 
-      case :httpc.request(
+      case Shuttle.RelayClient.request(
              method,
              request,
              http_opts(request_url, timeout_ms, private_dial?),
-             [body_format: :binary],
              profile
            ) do
         {:ok, {{_, status, _}, resp_headers, body}} ->
@@ -1775,22 +1777,9 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # `prepare/1` keeps the same direct, proxy, and private Tailnet routes as the
   # buffered client; Mint adds neither redirect handling nor status retries.
   defp request_once(url, body, content_type, timeout_ms) do
-    task =
-      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
-        request_once_inner(url, body, content_type, timeout_ms)
-      end)
-
-    case Task.yield(task, timeout_ms) do
-      {:ok, result} ->
-        result
-
-      {:exit, reason} ->
-        {:error, {:exit, reason}}
-
-      nil ->
-        Task.shutdown(task, :brutal_kill)
-        {:error, :timeout}
-    end
+    Shuttle.RelayClient.transport(timeout_ms, fn ->
+      request_once_inner(url, body, content_type, timeout_ms)
+    end)
   end
 
   defp request_once_inner(url, body, content_type, timeout_ms) do
@@ -1835,7 +1824,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
           hostname: uri.host,
           protocols: [:http1],
           mode: :passive,
-          transport_opts: [timeout: timeout_ms, send_timeout: timeout_ms]
+          transport_opts: [timeout: timeout_ms, send_timeout: min(timeout_ms, 1_000)]
         )
 
       _ ->
@@ -1849,8 +1838,8 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
 
     transport_opts =
       if scheme == :https,
-        do: Keyword.merge(tls_opts(), timeout: timeout_ms, send_timeout: timeout_ms),
-        else: [timeout: timeout_ms, send_timeout: timeout_ms]
+        do: Keyword.merge(tls_opts(), timeout: timeout_ms, send_timeout: min(timeout_ms, 1_000)),
+        else: [timeout: timeout_ms, send_timeout: min(timeout_ms, 1_000)]
 
     opts = [
       hostname: uri.host,
@@ -2163,13 +2152,22 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # one another process may already be mid-request on. Returns the profile's
   # pid, which is what `apply_proxy/4` pins its memo to.
   defp ensure_profile(profile) do
-    case :inets.start(:httpc, profile: profile) do
-      {:ok, pid} -> pid
-      {:error, {:already_started, pid}} -> pid
-      # An httpc that will not start a profile is not something a poll tick can
-      # fix; the request that follows fails and reports itself.
-      _ -> nil
+    pid =
+      case :inets.start(:httpc, profile: profile) do
+        {:ok, pid} -> pid
+        {:error, {:already_started, pid}} -> pid
+        _ -> nil
+      end
+
+    if pid do
+      :ok =
+        :httpc.set_options(
+          [socket_opts: [send_timeout: 1_000, send_timeout_close: true]],
+          profile
+        )
     end
+
+    pid
   end
 
   defp remotes_file_snapshot do

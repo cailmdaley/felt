@@ -10,6 +10,12 @@ defmodule Shuttle.Test.ForwardStub do
 
   alias Shuttle.Test.{Env, StubGetFileClient}
 
+  def start_gate! do
+    unless is_pid(Shuttle.Env.server(Shuttle.RelayGate)) do
+      Env.start_scoped!({Shuttle.RelayGate, name: nil, cooldown_ms: 0})
+    end
+  end
+
   def stub_forward(remote_name, remote_url, response, client \\ StubGetFileClient) do
     client.start!()
     client.set_response(response)
