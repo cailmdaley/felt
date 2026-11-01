@@ -213,7 +213,6 @@ defmodule Shuttle.Application do
 
   defp runtime_specs do
     core = [
-      ShuttleWeb.RequestDeadline,
       {Registry, keys: :duplicate, name: ShuttleWeb.TranscriptStreams},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},
       # Shares one felt read among concurrent board requests for the same
@@ -366,26 +365,6 @@ defmodule Shuttle.Application do
 
     existing = Shuttle.Env.app(ShuttleWeb.Endpoint, [])
     http = Keyword.get(existing, :http, [])
-    island = Keyword.get(http, :thousand_island_options, [])
-    transport = Keyword.get(island, :transport_options, [])
-
-    # A peer that stops reading must not pin a socket owner during a long transfer.
-    transport =
-      Keyword.merge(transport,
-        send_timeout: min(Keyword.get(transport, :send_timeout, 5_000), 5_000),
-        send_timeout_close: true
-      )
-
-    # The request fuse closes the HTTP/1 socket owner; HTTP/2 streams have a
-    # separate connection owner and are not served by this listener.
-    http =
-      http
-      |> Keyword.put(
-        :http_2_options,
-        Keyword.put(Keyword.get(http, :http_2_options, []), :enabled, false)
-      )
-      |> Keyword.put(:thousand_island_options, Keyword.put(island, :transport_options, transport))
-
     server? = Keyword.get(existing, :server, true)
 
     %{class: class, listen: listen} = Shuttle.Host.resolve!(Keyword.get(http, :port, 4000))

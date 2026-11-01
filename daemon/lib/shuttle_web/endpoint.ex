@@ -67,5 +67,5 @@ defmodule ShuttleWeb.Endpoint do
   )
 
   plug(Plug.Head)
-  plug(ShuttleWeb.RouterBoundary)
+  plug(ShuttleWeb.Router)
 end
