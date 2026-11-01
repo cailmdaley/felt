@@ -46,7 +46,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
         if reusable_entry?(cached, modified_at, candidate) do
           # mtime-reuse hit: the fiber body is unchanged, but adding/removing a
-          # sibling artifact.html does NOT bump `modified_at`, so reconcile the
+          # sibling tapestry.html does NOT bump `modified_at`, so reconcile the
           # entry's `:report_path` against the candidate row's native field
           # before reusing (put when the field is present, drop when absent).
           reused = reconcile_report_path(cached, candidate)

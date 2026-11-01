@@ -7,7 +7,7 @@ describes it.
 ```
 .felt/bao-analysis/mock-validation/
 ├── mock-validation.md
-├── artifact.html
+├── tapestry.html
 ├── residuals.png
 ├── chains.pdf
 └── interview.m4a
@@ -52,13 +52,11 @@ A `:title:` option supplies the document's label.
     directive as ordinary body text. A plain markdown viewer or an Obsidian
     vault shows it as a literal block.
 
-## The `artifact.html` convention
+## The `tapestry.html` convention
 
-felt recognizes `artifact.html` as a fiber's companion page, with `report.html`
-as a compatibility name for existing fibers. If both files exist, readers
-select `artifact.html`.
+felt recognizes `tapestry.html` as a fiber's companion page, with `artifact.html` and `report.html` as fallback names, in that order.
 
-Use `artifact.html` as the living, visual index to a fiber's sub-fibers, sent
+Use `tapestry.html` as the living, visual index to a fiber's sub-fibers, sent
 files, and findings. It can combine figures, analysis prose, and links when
 that helps a reader catch up. felt detects the file during
 its directory walk and surfaces the absolute path as `report_path` in JSON
@@ -71,11 +69,11 @@ felt show mock-validation -j | jq -r .report_path
 felt implies nothing further. It does not open the file, render it, or require
 it. Most fibers need no companion page.
 
-To make the artifact the first document selected when the channel opens, declare
+To make the tapestry the first document selected when the channel opens, declare
 it at the top of the body:
 
 ```markdown
-:::{embed} artifact.html
+:::{embed} tapestry.html
 :::
 
 The jackknife covariance is the default. …
@@ -85,16 +83,16 @@ HTML supports sections, tables, inlined plots, and collapsible depth in one
 self-contained file. Keep it self-contained — base64 the images — so the page
 renders wherever the fiber is opened, including on a different machine.
 
-Shuttle workers rewrite the artifact as the work changes. Its findings can use
+Shuttle workers rewrite the tapestry as the work changes. Its findings can use
 the concise report register: group by meaning, rewrite instead of appending,
-and inline every image. See [Optional: artifact.html](../shuttle/constitutions.md#optional-artifacthtml).
+and inline every image. See [Optional: tapestry.html](../shuttle/constitutions.md#optional-tapestryhtml).
 
-Existing `report.html` files and explicit `:::{embed} report.html`
-declarations continue to work. New companion pages use `artifact.html`.
+Existing `artifact.html` and `report.html` files and explicit embed
+declarations continue to work. New companion pages use `tapestry.html`.
 
 ## References between pages
 
-An artifact can refer to a file already in its constitution's pages, whether the file was embedded or sent.
+A tapestry can refer to a file already in its constitution's pages, whether the file was embedded or sent.
 In HTML, use a relative link such as `<a href="./take.mp3">Listen to the take</a>` or name the file in `<code>take.mp3</code>`.
 In markdown, use `[Listen to the take](./take.mp3)` or a code span such as `take.mp3`.
 Plain text panes also recognize filenames in backticks.
@@ -105,7 +103,7 @@ A bare filename in code, or in a link's text, must be unique across the constitu
 Ambiguous filenames stay unlinked, and external URLs keep their own navigation.
 
 Audio references also have an inline ▸ button.
-It plays the channel's audio-page element without leaving the artifact, changes to ❙❙ while playing, and shows progress as a hairline.
+It plays the channel's audio-page element without leaving the tapestry, changes to ❙❙ while playing, and shows progress as a hairline.
 Press it again to pause.
 Only one recording plays at a time; changing pages or leaving the reader pauses inline playback.
 
@@ -119,7 +117,7 @@ receipt ribbon and folios; the reader groups repeated sends under each
 document's Receipts menu. See [the Board guide](../shuttle/board.md#board-what-the-work-produced).
 
 The two channels overlap — the file a worker sends can also be the fiber's
-`artifact.html` companion. What differs is durability.
+`tapestry.html` companion. What differs is durability.
 
 | | Companion | Send |
 |---|---|---|

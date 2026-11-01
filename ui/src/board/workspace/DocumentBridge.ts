@@ -36,7 +36,7 @@ export function documentMessage(data: unknown): data is DocumentMessage {
   const p = data.payload
   switch (data.type) {
     case 'ready': return fields(p, ['media']) && (p.media === undefined || typeof p.media === 'boolean')
-    case 'media': case 'references:scan': return fields(p, [])
+    case 'media': case 'references:scan': case 'pdf:scan': return fields(p, [])
     case 'pause': return fields(p, []) || fields(p, ['candidate']) && shortString(p.candidate)
     case 'active': return fields(p, ['active']) && typeof p.active === 'boolean'
     case 'key': return fields(p, KEY_FIELDS) && shortString(p.key, 64) && p.key.length > 0
@@ -59,12 +59,83 @@ export function documentMessage(data: unknown): data is DocumentMessage {
     case 'references:playback': return fields(p, ['states']) && boundedArray(p.states, item =>
       fields(item, ['candidate', 'playing', 'progress']) && shortString(item.candidate) && typeof item.playing === 'boolean'
       && typeof item.progress === 'number' && Number.isFinite(item.progress) && item.progress >= 0 && item.progress <= 1)
+    case 'pdf:layout': return fields(p, ['items']) && Array.isArray(p.items) && p.items.length <= 32 && boundedArray(p.items, item =>
+      fields(item, ['id', 'src', 'x', 'y', 'width', 'height']) && shortString(item.id, 64) && shortString(item.src, 4096)
+      && coordinate(item.x) && coordinate(item.y) && travel(item.width) && travel(item.height)
+      && (item.width as number) > 0 && (item.height as number) > 0)
     default: return false
   }
 }
 
 /** This function is serialized, so every dependency arrives as an argument. */
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime): void {
+function installEmbeddedPdfEmbeds(send: (type: string, payload?: Record<string, unknown>) => void): void {
+  const known = new WeakMap<HTMLIFrameElement, { id: string; placeholder: HTMLElement; src: string }>()
+  const embeds = new Map<string, { placeholder: HTMLElement; src: string }>()
+  let nextId = 0
+  let frame = 0
+  const scan = (): void => {
+    frame = 0
+    const items: { id: string; src: string; x: number; y: number; width: number; height: number }[] = []
+    for (const candidate of document.querySelectorAll<HTMLIFrameElement>('iframe[src]')) {
+      const src = candidate.getAttribute('src') ?? ''
+      if (!/\.pdf(?:[?#]|$)/i.test(src)) continue
+      let item = known.get(candidate)
+      if (!item) {
+        const box = candidate.getBoundingClientRect()
+        const placeholder = document.createElement('div')
+        placeholder.className = candidate.className
+        placeholder.setAttribute('role', 'region')
+        placeholder.setAttribute('aria-label', candidate.title || 'Embedded PDF')
+        placeholder.dataset.shuttlePdfEmbed = 'true'
+        placeholder.style.cssText = candidate.getAttribute('style') ?? ''
+        if (!placeholder.style.width && candidate.getAttribute('width')) placeholder.style.width = `${candidate.getAttribute('width')}px`
+        if (!placeholder.style.height && candidate.getAttribute('height')) placeholder.style.height = `${candidate.getAttribute('height')}px`
+        if (!placeholder.style.width) placeholder.style.width = `${Math.max(1, box.width)}px`
+        if (!placeholder.style.height) placeholder.style.height = `${Math.max(1, box.height)}px`
+        candidate.replaceWith(placeholder)
+        item = { id: `pdf-${++nextId}`, placeholder, src }
+        known.set(candidate, item)
+        embeds.set(item.id, item)
+      }
+    }
+    for (const [id, item] of embeds) {
+      if (!item.placeholder.isConnected) { embeds.delete(id); continue }
+      const box = item.placeholder.getBoundingClientRect()
+      items.push({ id, src: item.src, x: box.left, y: box.top, width: box.width, height: box.height })
+      if (items.length >= 32) break
+    }
+    send('pdf:layout', { items })
+  }
+  let stopped = false
+  let observer: MutationObserver
+  const schedule = (): void => {
+    const hasPdfFrame = [...document.querySelectorAll<HTMLIFrameElement>('iframe[src]')].some(candidate => /\.pdf(?:[?#]|$)/i.test(candidate.getAttribute('src') ?? ''))
+    if (stopped || (!embeds.size && !hasPdfFrame)) return
+    if (!frame) frame = requestAnimationFrame(scan)
+  }
+  observer = new MutationObserver(schedule)
+  observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src', 'style', 'class', 'width', 'height', 'hidden'] })
+  document.addEventListener('scroll', schedule, true)
+  document.addEventListener('load', schedule, true)
+  window.addEventListener('resize', schedule)
+  const rescan = (): void => scan()
+  window.addEventListener('shuttle-pdf-scan', rescan)
+  void document.fonts?.ready.then(schedule, () => {})
+  document.fonts?.addEventListener('loadingdone', schedule)
+  window.addEventListener('load', schedule, { once: true })
+  window.addEventListener('pagehide', () => {
+    stopped = true
+    cancelAnimationFrame(frame)
+    observer.disconnect()
+    document.removeEventListener('scroll', schedule, true)
+    document.removeEventListener('load', schedule, true)
+    window.removeEventListener('resize', schedule)
+    window.removeEventListener('shuttle-pdf-scan', rescan)
+    document.fonts?.removeEventListener('loadingdone', schedule)
+  }, { once: true })
+}
+
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -113,6 +184,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     }
     parent.postMessage({ protocol, version, type, payload }, '*')
   }
+  embeddedPdfs(send)
   const style = document.createElement('style'); style.textContent = css
   ;(document.head ?? document.documentElement).append(style)
   const disposeMentions = reportMentions(mentions, mentionCss, limits, () => active)
@@ -160,6 +232,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
       active = payload.active
       if (!active) { pause(); position() }
     } else if (data.type === 'references:scan') links?.scan()
+    else if (data.type === 'pdf:scan') window.dispatchEvent(new Event('shuttle-pdf-scan'))
     else if (data.type === 'references:resolved' && Array.isArray(payload.targets)) {
       links?.resolve(payload.targets.filter((target: ReferenceTarget) => target && typeof target.candidate === 'string' && typeof target.title === 'string' && typeof target.audio === 'boolean'))
     } else if (data.type === 'references:playback' && Array.isArray(payload.states)) {
@@ -289,7 +362,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length

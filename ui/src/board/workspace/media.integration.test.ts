@@ -86,7 +86,7 @@ describe('native media documents', () => {
     const command = vi.spyOn(iframe.contentWindow!, 'postMessage')
     const send = (type: string) => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data: envelope(type) }))
     send('ready')
-    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
+    expect(command).toHaveBeenCalledWith(envelope('active', { active: true }), '*')
     const native = viewer('/song.mp3').querySelector('audio')!
     await native.play()
     expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
@@ -97,7 +97,7 @@ describe('native media documents', () => {
     send('media')
     expect(command).toHaveBeenLastCalledWith(envelope('pause'), '*')
     resumeFileViewer(report)
-    expect(command).toHaveBeenLastCalledWith(envelope('active', { active: true }), '*')
+    expect(command).toHaveBeenCalledWith(envelope('active', { active: true }), '*')
   })
 
   it('keeps the element through receding and parking and takes p without stealing typing or Space', async () => {

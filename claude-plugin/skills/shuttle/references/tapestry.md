@@ -1,16 +1,6 @@
-# Writing artifact.html
+# Writing tapestry.html
 
-The artifact is the constitution's one living, visual index to its sub-fibers, sent files and findings.
-Keep it current so the human can open it at any point and catch up on the work.
-The constitution's chat header carries a thumbnail and title for `artifact.html`; clicking the artifact chip opens the page full-size.
-Use the page's space for maps, comparisons, figures or a two-dimensional arrangement when that helps the reader understand the work.
-Link each finding to its evidence and each sub-fiber or sent file to the reason it matters.
-The artifact is a **current-state document, rewritten whole each session**.
-
-Not every constitution needs one.
-Write it when the work needs a surface the human can return to beyond the chat.
-It can be a visual index, an interactive explanation or a report; let the content determine its shape.
-The report guidance below applies when the artifact presents findings.
+The tapestry is the constitution's one living page: the main visual surface for telling the human anything beyond chat. It's what they open when they come back after hours away, and it should catch them up. Its form follows the work. A visual index to sub-fibers and findings, a report, the slides of a talk being built, several PDFs embedded side by side for a paper review: whatever the human most needs to *see*. The constitution's chat header shows its thumbnail; clicking opens it full-size.
 
 ## Who reads it
 
@@ -24,11 +14,11 @@ Neither wants the trench narrative. What you tried Tuesday and abandoned Wednesd
 **Name state as you use it.** "Run 04 (the apodized-mask one)" costs six words and saves a round trip. Never assume continuity of context across the gap.
 
 `outcome:` is the kanban headline and `## Status` is the next worker's handoff — mechanics, blockers, where you stopped.
-The artifact helps the human understand the work through meaning, evidence and visual structure.
+The tapestry helps the human understand the work through meaning, evidence and visual structure.
 
 ## Rewrite, don't append
 
-**Each session rewrites the whole artifact** against current understanding, with everything superseded removed.
+**Each session rewrites the whole tapestry** against current understanding, with everything superseded removed.
 
 **Zero session numbering.** No "session 3", no "this dispatch", no "updated 2026-06-14", no per-section date stamps. One as-of stamp at the top of the document is the only time marker the report carries. Time-anchored phrasing anywhere else is the smell that says history is sedimenting where a correction belongs.
 
@@ -51,7 +41,7 @@ The second is shorter, tells the reader what to do, and stays true next month. T
 
 ## Shape
 
-**Before `shuttle ask`, rewrite `artifact.html` to lead with the question.**
+**Before `shuttle ask`, rewrite `tapestry.html` to lead with the question.**
 Nothing goes above this opening, including a title, as-of stamp, status panel or executive summary:
 
 1. **Short background** — pitched at what the human knows since their last engagement, only enough to frame the question.
@@ -95,7 +85,7 @@ Each surviving item **names what would resolve it**: the run, the check, the per
 <img src="data:image/png;base64,iVBORw0KGgoAAA…" alt="…">
 ```
 
-Never `<img src="recovery.png">`. **Why:** a report travels alone. It gets sent as a single file, opened straight off disk, and read from a checkout on another machine — and most fiber stores gitignore binaries as policy (the loom does), so the sibling PNG never even syncs. In all three cases a relative `src` renders broken, and those are the cases where the human actually reads it. The same rule covers every other asset: styles stay inline, fonts fall back to system stacks, no external fetches.
+Never `<img src="recovery.png">`. **Why:** a report travels alone. It gets sent as a single file, opened straight off disk, and read from a checkout on another machine — and most fiber stores gitignore binaries as policy (the loom does), so the sibling PNG never even syncs. In all three cases a relative `src` renders broken, and those are the cases where the human actually reads it. Sibling PDFs and embedded reports are exceptions and must travel with the tapestry. The same rule covers every other asset: styles stay inline, fonts fall back to system stacks, no external fetches.
 
 Inline at write time — read the PNG, base64 it, write the tag. If a plot is too heavy to inline comfortably, shrink the plot, not the rule.
 
@@ -104,14 +94,14 @@ Inline at write time — read the PNG, base64 it, write the tag. If a plot is to
 ## Mechanics
 
 You may give the report's channel a bundled theme with `theme: blueprint` (or `portolan`, `laboratory-paper`, `night-chart`) in the fiber's frontmatter.
-A sibling `theme.css` layers scoped variables, fonts and flourishes over that base; it styles Shuttle's reader and overview folio, while `artifact.html` keeps its own CSS.
+A sibling `theme.css` layers scoped variables, fonts and flourishes over that base; it styles Shuttle's reader and overview folio, while `tapestry.html` keeps its own CSS.
 The [constitution theme contract](https://cailmdaley.github.io/felt/concepts/themes/) documents the `--ws-*` tokens, stable parts and pigment meanings.
 
-Start from [artifact-template.html](../assets/artifact-template.html), a palette and primitives kit, not a framework or a content model to fill in.
+Start from [tapestry-template.html](../assets/tapestry-template.html), a palette and primitives kit, not a framework or a content model to fill in.
 Plain HTML is right too.
 It follows the viewer's light or dark appearance automatically.
-A sibling `artifact.html` appears as a chip in the constitution's chat header without a directive.
-An explicit `:::{embed} artifact.html` in the fiber body also declares it there. Existing `:::{embed} report.html` declarations continue to resolve.
+A sibling `tapestry.html` appears as a chip in the constitution's chat header without a directive.
+An explicit `:::{embed} tapestry.html` in the fiber body also declares it there. Existing `:::{embed} report.html` declarations continue to resolve.
 
 Reference a sibling page with `href="./name.mp3"` or its unique basename in `<code>`; the reader makes it a page link with inline play for audio ([companion references](https://cailmdaley.github.io/felt/concepts/companions/#references-between-pages)).
 
@@ -127,6 +117,13 @@ Replace sample claims and data; keep figures self-contained.
   <img src="data:image/png;base64,REPLACE_WITH_PLOT_BYTES" alt="Residuals with their uncertainty bands">
   <figcaption>All five residuals lie within one standard deviation of zero.</figcaption>
 </figure>
+```
+
+### Embedded PDF
+
+```html
+<figure><iframe src="./paper.pdf" title="Draft v3" style="width:100%;height:80vh"></iframe>
+  <figcaption>Section 4's covariance argument is where the referee will push.</figcaption></figure>
 ```
 
 ### Table
@@ -152,7 +149,7 @@ Replace sample claims and data; keep figures self-contained.
 
 ```html
 <p><a href="./validation.html">Read the validation and its plots →</a></p>
-<p><a href="./checks/artifact.html">Read the checks thread's report →</a></p>
+<p><a href="./checks/tapestry.html">Read the checks thread's report →</a></p>
 ```
 
 Relative file links open in place, one level deeper in the reader.
@@ -165,16 +162,16 @@ Each nested report is itself self-contained; links express structure without bun
 
 ```html
 <figure class="report-embed">
-  <iframe src="./checks/artifact.html" title="Independent checks report"
+  <iframe src="./checks/tapestry.html" title="Independent checks report"
     loading="lazy" sandbox="allow-scripts"></iframe>
   <figcaption>The independent checks pass in every patch.
-    <a href="./checks/artifact.html">Read the full checks report →</a>
+    <a href="./checks/tapestry.html">Read the full checks report →</a>
   </figcaption>
 </figure>
 ```
 
 A live report embed is the deliberate exception to the no-fetch rule: it reads another report from the fiber tree.
-Use a relative path from this report to that fiber's `artifact.html` (for a sibling fiber, `../checks/artifact.html`).
+Use a relative path from this report to that fiber's `tapestry.html` (for a sibling fiber, `../checks/tapestry.html`).
 The embed needs that companion to travel with it; for a portable single-file export, replace it with an inlined figure and retain the link to depth.
 
 The test before handoff: **give the report to someone who has never seen this fiber and ask what they'd do next.** If they have to reconstruct the present by diffing paragraphs, rewrite it.

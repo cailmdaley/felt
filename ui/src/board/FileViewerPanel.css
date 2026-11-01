@@ -34,6 +34,12 @@
   background: var(--kbn-rag);
 }
 
+/* Embedded PDF bytes are rendered by the trusted reader with PDF.js. The
+   source HTML stays in its opaque sandbox; this layer only covers its measured
+   PDF placeholders and clips to the same document viewport. */
+.kbn-fileview-embedded-pdfs { position: absolute; inset: 0; overflow: clip; pointer-events: none; }
+.kbn-fileview-embedded-pdf { position: absolute; overflow: hidden; pointer-events: auto; background: var(--ws-paper); }
+
 .kbn-fileview-pdf-stage {
   position: relative;
   display: flex;

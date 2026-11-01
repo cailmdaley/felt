@@ -1413,7 +1413,7 @@ type directoryEntriesCache struct {
 }
 
 func companionName(entries []os.DirEntry) string {
-	for _, name := range []string{"artifact.html", "report.html"} {
+	for _, name := range []string{"tapestry.html", "artifact.html", "report.html"} {
 		for _, entry := range entries {
 			if !entry.IsDir() && entry.Name() == name {
 				return name
@@ -1486,7 +1486,7 @@ func (s *Storage) fiberFileWithReport(id, filePath string, entryPoint bool, cach
 		return fiberFile{}, false
 	}
 	reportName := ""
-	for _, name := range []string{"artifact.html", "report.html"} {
+	for _, name := range []string{"tapestry.html", "artifact.html", "report.html"} {
 		if _, err := os.Lstat(filepath.Join(reportDir, name)); err == nil && cache.hasEntry(reportDir, name) {
 			reportName = name
 			break

@@ -247,6 +247,68 @@ describe('workspace file viewer hooks', () => {
     expect(viewer.querySelector('.pdfViewer')).toBeNull()
   })
 
+  it('loads embedded PDFs only from the owning file-assets namespace', async () => {
+    const fetcher = vi.fn(async (url: string) => responseWithBlob(url.includes('large.pdf') ? `%PDF-1.7 ${'x'.repeat(2 * 1024 * 1024)}` : '%PDF-1.7 valid bytes'))
+    vi.stubGlobal('fetch', fetcher)
+    const onWeight = vi.fn()
+    const viewer = buildFileViewer('', '/dir/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    watch.content!('<iframe src="./paper.pdf"></iframe>')
+    const frame = viewer.querySelector('iframe')!
+    const layout = (...sources: string[]) => window.dispatchEvent(new MessageEvent('message', {
+      source: frame.contentWindow,
+      data: envelope('pdf:layout', { items: sources.map((src, index) => ({ id: `pdf-${index + 1}`, src, x: 8, y: 12 + index * 410, width: 320, height: 400 })) }),
+    }))
+    layout('./paper.pdf')
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledWith('/api/v1/file?path=%2Fdir%2Fpaper.pdf&origin=host-a', expect.objectContaining({ cache: 'no-cache' })))
+    await vi.waitFor(() => expect(pdfRenderer.mount, viewer.querySelector('.kbn-fileview-embedded-pdf')?.textContent).toHaveBeenCalledOnce())
+    layout('./paper.pdf', './large.pdf')
+    await vi.waitFor(() => expect(onWeight).toHaveBeenLastCalledWith(4))
+    layout('./paper.pdf', './large.pdf', 'https://attacker.test/paper.pdf')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    layout('./large.pdf')
+    await vi.waitFor(() => expect(onWeight).toHaveBeenLastCalledWith(3))
+    disposeFileViewer(viewer)
+  })
+
+  it('reloads an embedded PDF when refreshed HTML keeps the same PDF path', async () => {
+    let requests = 0
+    const fetcher = vi.fn(async (_url: string) => {
+      requests++
+      return responseWithBlob(requests === 1 ? `%PDF-1.7 ${'x'.repeat(2 * 1024 * 1024)}` : '%PDF-1.7 revised bytes')
+    })
+    vi.stubGlobal('fetch', fetcher)
+    const onWeight = vi.fn()
+    const viewer = buildFileViewer('', '/dir/report.html', 'host-a', undefined, undefined, { onWeight })
+    document.body.append(viewer)
+    const html = '<iframe src="./paper.pdf"></iframe>'
+    watch.content!(html)
+    const layout = (frame: HTMLIFrameElement): void => {
+      window.dispatchEvent(new MessageEvent('message', {
+        source: frame.contentWindow,
+        data: envelope('pdf:layout', { items: [{ id: 'pdf-1', src: './paper.pdf', x: 8, y: 12, width: 320, height: 400 }] }),
+      }))
+    }
+    let frame = viewer.querySelector('iframe')!
+    ready(frame)
+    layout(frame)
+    await vi.waitFor(() => expect(pdfRenderer.mount).toHaveBeenCalledOnce())
+    expect(onWeight).toHaveBeenLastCalledWith(3)
+
+    watch.content!('<h1>Revised report</h1>' + html)
+    frame = viewer.querySelectorAll('iframe')[1]
+    ready(frame)
+    expect(onWeight).toHaveBeenLastCalledWith(1)
+    layout(frame)
+    await vi.waitFor(() => expect(pdfRenderer.mount).toHaveBeenCalledTimes(2))
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(fetcher.mock.calls[0][0]).toBe(fetcher.mock.calls[1][0])
+    expect(new TextDecoder().decode(pdfRenderer.mount.mock.calls[1][1])).toContain('revised bytes')
+    expect(onWeight).toHaveBeenLastCalledWith(2)
+    disposeFileViewer(viewer)
+  })
+
   it('does not create a PDF viewer when its request settles after disposal', async () => {
     let settle!: (response: Response) => void
     const fetcher = vi.fn((_src: string) => new Promise<Response>(resolve => { settle = resolve }))

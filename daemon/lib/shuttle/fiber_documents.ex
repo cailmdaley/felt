@@ -550,7 +550,7 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  # Resolve the fiber's companion. artifact.html takes precedence over report.html.
+  # Resolve the fiber's companion. tapestry.html takes precedence over artifact.html and report.html.
   #
   #   * `:field` — the felt-list path. felt's native `report_path` field is the
   #     authoritative signal: a non-empty string means a report exists; ABSENT
@@ -573,7 +573,7 @@ defmodule Shuttle.FiberDocuments do
   defp companion_name(fiber, dir, :stat) do
     case Map.get(fiber, "report_path") do
       value when is_binary(value) and value != "" -> Path.basename(value)
-      _ -> Enum.find(["artifact.html", "report.html"], &File.exists?(Path.join(dir, &1)))
+      _ -> Enum.find(["tapestry.html", "artifact.html", "report.html"], &File.exists?(Path.join(dir, &1)))
     end
   end
 

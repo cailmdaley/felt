@@ -70,7 +70,7 @@ export interface FileViewerOptions {
 /**
  * Render a deliverable into a fresh element by extension — the shared dispatch
  * a reader mounts for each open file. The iframe variant carries a loading veil
- * (a remote `artifact.html` can be multi-MB over a slow tunnel; a blank frame
+ * (a remote `tapestry.html` can be multi-MB over a slow tunnel; a blank frame
  * reads as broken) that lifts on `load` and flips to an error note on `error`.
  *
  * `onFrameLoad` fires after each HTML document update — the reader uses it
@@ -141,7 +141,7 @@ export function buildFileViewer(
   }
 
   if (kind === 'html') {
-    return buildHtmlViewer(src, fullPath, onFrameLoad, options)
+    return buildHtmlViewer(shuttleBase, src, fullPath, originId, onFrameLoad, options)
   }
 
   // PDF.js renders within the board's stage so the first page can fit even in
@@ -440,8 +440,10 @@ export function loadFileViewerOnce(viewer: HTMLElement | null): void {
 }
 
 function buildHtmlViewer(
+  shuttleBase: string,
   src: string,
   fullPath: string,
+  originId: string,
   onFrameLoad?: (iframe: HTMLIFrameElement, refreshed: boolean) => void,
   options: FileViewerOptions = {},
 ): HTMLElement {
@@ -451,6 +453,20 @@ function buildHtmlViewer(
   embeddedMediaViewers.set(wrap, embedded)
   embeddedPlayers.add(embedded)
   const veil = loadingVeil(fullPath, options)
+  const pdfLayer = document.createElement('div')
+  pdfLayer.className = 'kbn-fileview-embedded-pdfs'
+  pdfLayer.setAttribute('aria-label', 'Embedded PDFs')
+  type EmbeddedPdf = { element: HTMLElement; controller: AbortController; dispose?: () => void; src: string }
+  const pdfs = new Map<string, EmbeddedPdf>()
+  const pdfWeights = new Map<string, number>()
+  let htmlWeight = 1
+  let publishedWeight = 0
+  const publishWeight = (): void => {
+    const weight = htmlWeight + [...pdfWeights.values()].reduce((sum, item) => sum + item, 0)
+    if (weight === publishedWeight) return
+    publishedWeight = weight
+    options.onWeight?.(weight)
+  }
   let disposed = false
   let failed = false
   let hasContent = false
@@ -459,6 +475,7 @@ function buildHtmlViewer(
   let stagingFrame: HTMLIFrameElement | null = null
   let stagingBridge: FrameBridge | null = null
   const byteWeights = new WeakMap<HTMLIFrameElement, number>()
+  const frameWeights = new WeakMap<HTMLIFrameElement, number>()
   const createFrame = (ready: (frame: HTMLIFrameElement, bridge: FrameBridge) => void): HTMLIFrameElement => {
     const frame = document.createElement('iframe')
     frame.className = 'kbn-fileview-frame'
@@ -472,11 +489,61 @@ function buildHtmlViewer(
       const weight = Math.max(charged, byteWeights.get(frame) ?? 1, media ? 2 : 1)
       if (weight <= charged) return
       charged = weight
-      options.onWeight?.(weight)
+      frameWeights.set(frame, charged)
+      if (frame === iframe) { htmlWeight = weight; publishWeight() }
     }
     const bridge = connectDocumentFrame(frame, message => {
       if (disposed) return
-      if (message.type === 'ready') {
+      if (message.type === 'pdf:layout' && frame === iframe) {
+        const entries = message.payload.items as { id: string; src: string; x: number; y: number; width: number; height: number }[]
+        const live = new Set(entries.map(item => item.id))
+        for (const [id, pdf] of pdfs) if (!live.has(id)) {
+          pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove(); pdfs.delete(id)
+          pdfWeights.delete(id)
+        }
+        publishWeight()
+        const frameBox = frame.getBoundingClientRect(), layerBox = pdfLayer.getBoundingClientRect()
+        const scaleX = frameBox.width / Math.max(1, frame.clientWidth), scaleY = frameBox.height / Math.max(1, frame.clientHeight)
+        for (const entry of entries) {
+          let pdf = pdfs.get(entry.id)
+          const bytesUrl = embeddedPdfBytesUrl(shuttleBase, src, originId, entry.src)
+          if (!bytesUrl) continue
+          if (pdf && pdf.src !== bytesUrl) {
+            pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove(); pdfs.delete(entry.id); pdf = undefined
+            pdfWeights.delete(entry.id)
+            publishWeight()
+          }
+          if (!pdf) {
+            const pdfId = entry.id
+            const element = document.createElement('div')
+            element.className = 'kbn-fileview-embedded-pdf'
+            const controller = new AbortController()
+            pdf = { element, controller, src: bytesUrl }
+            pdfs.set(entry.id, pdf)
+            pdfLayer.append(element)
+            void fetch(bytesUrl, { cache: 'no-cache', signal: controller.signal }).then(async response => {
+              if (!response.ok) throw new Error(response.status === 404 ? '404 Not Found' : `${response.status} ${response.statusText}`)
+              const bytes = await response.arrayBuffer()
+              if (controller.signal.aborted || disposed) return
+              if (bytes.byteLength < 5 || String.fromCharCode(...new Uint8Array(bytes, 0, 5)) !== '%PDF-') throw new Error('response is not a PDF')
+              pdfWeights.set(pdfId, bytes.byteLength > 2 * 1024 * 1024 ? 2 : 1)
+              publishWeight()
+              const { mountPdfViewer } = await import('./pdfViewer')
+              if (controller.signal.aborted || disposed) return
+              const mounted = mountPdfViewer(element, bytes, () => {}, error => {
+                if (!controller.signal.aborted) element.textContent = `Could not render embedded PDF: ${error}`
+              })
+              pdf!.dispose = mounted.dispose
+              await mounted.ready
+            }).catch(error => {
+              if (!controller.signal.aborted && !disposed) element.textContent = `Could not load embedded PDF: ${error instanceof Error ? error.message : 'request failed'}`
+            })
+          }
+          const left = frameBox.left - layerBox.left + entry.x * scaleX + pdfLayer.scrollLeft
+          const top = frameBox.top - layerBox.top + entry.y * scaleY + pdfLayer.scrollTop
+          Object.assign(pdf.element.style, { left: `${left}px`, top: `${top}px`, width: `${entry.width * scaleX}px`, height: `${entry.height * scaleY}px` })
+        }
+      } else if (message.type === 'ready') {
         if (announced) return
         announced = true
         charge(message.payload.media === true)
@@ -510,13 +577,14 @@ function buildHtmlViewer(
     initialLoadHandled = true
     embedded.bridge = bridge
     bridge.command('active', { active: embedded.active })
+    bridge.command('pdf:scan')
     failed = false
     veil.remove()
     onFrameLoad?.(frame, false)
     options.onState?.({ status: 'ready' })
   })
   let currentBridge = frameBridge(iframe)!
-  wrap.append(iframe, veil)
+  wrap.append(iframe, pdfLayer, veil)
 
   const stop = watchLiveFile(
     src,
@@ -544,12 +612,18 @@ function buildHtmlViewer(
         const position = initialLoadHandled ? currentBridge.position : undefined
         currentBridge.command('pause')
         currentBridge.dispose()
+        for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.(); pdf.element.remove() }
+        pdfs.clear()
+        pdfWeights.clear()
         currentBridge = bridge
         embedded.bridge = bridge
         bridge.command('active', { active: embedded.active })
         if (position) bridge.command('restore', position)
         iframe.replaceWith(frame)
         iframe = frame
+        htmlWeight = frameWeights.get(frame) ?? byteWeights.get(frame) ?? 1
+        publishWeight()
+        bridge.command('pdf:scan')
         stagingFrame = null
         stagingBridge = null
         frame.style.cssText = ''
@@ -590,10 +664,25 @@ function buildHtmlViewer(
     stagingFrame?.remove()
     currentBridge.command('pause')
     currentBridge.dispose()
+    for (const pdf of pdfs.values()) { pdf.controller.abort(); pdf.dispose?.() }
+    pdfs.clear()
     embeddedPlayers.delete(embedded)
     embeddedMediaViewers.delete(wrap)
   })
   return wrap
+}
+
+/** Only fetch PDFs inside the current host's file-assets namespace. */
+function embeddedPdfBytesUrl(base: string, htmlSrc: string, owner: string, raw: string): string | undefined {
+  try {
+    const assetBase = new URL(htmlAssetUrl(htmlSrc), document.baseURI)
+    const target = new URL(raw, assetBase)
+    const prefix = `/api/v1/file-assets/${encodeURIComponent(owner)}/`
+    if (target.origin !== assetBase.origin || !target.pathname.startsWith(prefix) || !/\.pdf$/i.test(target.pathname)) return undefined
+    const relative = target.pathname.slice(prefix.length).split('/').map(decodeURIComponent).join('/')
+    if (!relative || relative.split('/').some(part => part === '.' || part === '..')) return undefined
+    return fileBytesUrl(base, `/${relative}`, owner)
+  } catch { return undefined }
 }
 
 /** A path-shaped owner route lets the browser resolve CSS, scripts and sibling images. */

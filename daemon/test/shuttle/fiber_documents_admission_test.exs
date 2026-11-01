@@ -58,21 +58,21 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
   end
 
   describe "companion resolution" do
-    test "prefers artifact.html while retaining the report_path wire field" do
+    test "prefers tapestry.html while retaining the report_path wire field" do
       dir = Path.join(System.tmp_dir!(), "felt-companion-#{System.unique_integer([:positive])}")
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf!(dir) end)
       File.write!(Path.join(dir, "task.md"), "---\nname: Task\n---\n")
       File.write!(Path.join(dir, "report.html"), "legacy")
-      File.write!(Path.join(dir, "artifact.html"), "current")
+      File.write!(Path.join(dir, "tapestry.html"), "current")
 
       assert [%{report_path: path}] = FiberDocuments.entries_for_fiber("/tmp/store", %{
                "id" => "task",
                "path" => Path.join(dir, "task.md"),
-               "report_path" => Path.join(dir, "artifact.html")
+               "report_path" => Path.join(dir, "tapestry.html")
              })
 
-      assert path == Path.join(dir, "artifact.html")
+      assert path == Path.join(dir, "tapestry.html")
     end
 
     test "falls back to an existing report.html companion" do

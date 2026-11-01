@@ -112,7 +112,7 @@ export interface CompositeEntry {
    * image in the body resolves against before the `/file` route reads it.
    * Present for every fiber a current-build daemon serves. */
   dir?: string;
-  /** Absolute path to the sibling `artifact.html` or legacy `report.html`,
+  /** Absolute path to the sibling `tapestry.html` or legacy `report.html`,
    * when the owning daemon resolved one. */
   reportPath?: string;
   /**

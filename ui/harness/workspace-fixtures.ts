@@ -297,6 +297,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   const readme = `${project}/deliverables/readme.txt`
   const code = `${project}/deliverables/response.py`
   const pdf = `${project}/deliverables/response.pdf`
+  const embeddedPdf = `${project}/.felt/research/workspace/calibration-report/embedded.pdf`
   const image = `${project}/deliverables/figure.png`
   const liveImage = `${project}/deliverables/live-arrival.png`
   const mp3 = `${project}/deliverables/tone.mp3`
@@ -312,6 +313,8 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   const pageGestures = `<div id="gesture-deck" style="touch-action:pan-y;height:120px;background:#eee8dc">Deck</div><div id="gesture-carousel" style="height:120px;background:#e4ece4">Carousel</div><script>document.getElementById('gesture-carousel').addEventListener('touchmove',e=>e.preventDefault(),{passive:false})</script>`
   const longReport = Array.from({ length: 80 }, (_, index) => (index === 40 ? pageGestures : '') + reportLine(index)).join('\n')
   const reportHTML = `<!doctype html><html><head><meta charset="utf-8"><title>Calibration report</title><style>body{font:16px/1.5 sans-serif;margin:32px}h1{color:#514637}@layer report{.authored-media{max-width:42%;height:123px}}@media (prefers-color-scheme: dark){body{background:#16181d;color:#e6e0d4}h1{color:#e8cf9a}a{color:#a9c7ff}}</style></head><body><h1 id="report-sentinel">Calibration report</h1><p>The response is stable across five independent sky patches. No correction is needed at the measured precision.</p><p><a href="./validation.html">Read the independent validation →</a> · <a href="./response.svg">Open the response plot →</a> · <a href="./analysis/report.html">Read the analysis thread →</a> · <a href="/api/v1/file?path=%2Fremote%2Freport.html&amp;origin=basalt-login-02#remote-section">Cross-host report →</a></p><p id="report-identity"></p><p><a href="#conclusions">Jump to conclusions</a> · <a href="./validation.html#validation-conclusions">Validation conclusions</a></p><p>Read <code>brief.md</code> and <a href="../../../../deliverables/brief.md">the field note</a>; listen to <code>tone.mp3</code> or <code>tone.wav</code>.</p><p>Embedded screenshot, 3000 × 600 pixels:</p><img id="oversized-report-image" src="${OVERSIZED_IMAGE}" width="3000" height="600" alt="Wide screenshot gradient">${wideTable}${longReport}<h2 id="conclusions">Conclusions</h2><div style="height:100vh"></div><script>document.getElementById('report-identity').textContent='instance:'+crypto.randomUUID()</script></body></html>`
+  const embeddedReport = `${fiberDir}/paper-review.html`
+  const embeddedReportHTML = '<!doctype html><html><head><title>Paper review</title></head><body><h1>Paper review</h1><img id="late-layout" src="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'1\' height=\'1\'/%3E" alt="Late report figure"><figure><iframe src="./embedded.pdf" title="Embedded paper preview" style="width:100%;height:520px"></iframe><figcaption>Embedded PDF preview for the reader\'s PDF.js path.</figcaption></figure></body></html>'
   const file = (owner: string, path: string, mime: string, body: Blob | string): WorkspaceFileFixture => ({
     owner,
     path,
@@ -338,6 +341,8 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
     `),
     file(WORKSPACE_HOST, `${project}/.felt/research/workspace/mask-validation/theme.css`, 'text/css', '{ ] broken css'),
     file(WORKSPACE_HOST, report, 'text/html', reportHTML),
+    file(WORKSPACE_HOST, embeddedReport, 'text/html', embeddedReportHTML),
+    file(WORKSPACE_HOST, embeddedPdf, 'application/pdf', blobFor(pdfData, 'application/pdf')),
     file(WORKSPACE_REMOTE, '/remote/report.html', 'text/html', '<!doctype html><html><head><title>Remote check</title></head><body><h1>Remote check</h1><div style="height:100vh"></div><h2 id="remote-section">Remote section</h2><div style="height:100vh"></div></body></html>'),
     file(WORKSPACE_HOST, `${fiberDir}/validation.html`, 'text/html', '<!doctype html><html><head><title>Independent validation</title><style>body{font:20px/1.6 Georgia;margin:48px;color:#30291f}img{max-width:100%}</style></head><body><h1>Independent patches agree</h1><p>Every response ratio lies within 0.3% of unity. The north and south patches agree within the stated uncertainty.</p><a href="./response.svg">Open the response plot →</a><div style="height:100vh"></div><h2 id="validation-conclusions">Validation conclusions</h2><div style="height:100vh"></div></body></html>'),
     file(WORKSPACE_HOST, `${fiberDir}/response.svg`, 'image/svg+xml', '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><rect width="800" height="500" fill="#fbf6e9"/><text x="80" y="60" font-size="28" fill="#30291f">Response ratios agree with unity</text><path d="M80 100V420H740M80 250H740" fill="none" stroke="#a39478"/><path d="M140 248L270 252L400 249L530 247L660 251" fill="none" stroke="#3f8278" stroke-width="4"/><g fill="#3f8278"><circle cx="140" cy="248" r="7"/><circle cx="270" cy="252" r="7"/><circle cx="400" cy="249" r="7"/><circle cx="530" cy="247" r="7"/><circle cx="660" cy="251" r="7"/></g><text x="300" y="470" font-size="20" fill="#30291f">Independent sky patch</text></svg>'),
@@ -372,6 +377,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
   receipt(report, WORKSPACE_UID, -8 * minute, WORKSPACE_HOST, 'workspace-send-older')
   receipt(report, WORKSPACE_UID, -3 * minute, WORKSPACE_HOST, 'workspace-send-middle')
   receipt(report, WORKSPACE_UID, -1 * minute, WORKSPACE_HOST, 'workspace-send-latest')
+  receipt(embeddedReport, WORKSPACE_UID, -30 * minute, WORKSPACE_HOST, 'workspace-paper-review')
   for (const path of [notes, readme, code, pdf, image, mp3, wav, mp4, webm, other, missing]) {
     receipt(path, WORKSPACE_UID, -2 * minute, WORKSPACE_HOST, 'workspace-delivery')
   }

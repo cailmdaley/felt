@@ -82,19 +82,19 @@ describe('buildChannel', () => {
     expect(channel.documents[1].path).toBe('/store/project/task/task.md')
   })
 
-  it('prefers artifact.html over the legacy report.html companion', () => {
+  it('prefers tapestry.html over the legacy report.html companion', () => {
     const channel = buildChannel({ ...base, body: 'plain', embeds: [
       { path: '/store/project/task/report.html' },
-      { path: '/store/project/task/artifact.html' },
+      { path: '/store/project/task/tapestry.html' },
     ] })
-    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/artifact.html')
+    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/tapestry.html')
   })
 
-  it('selects artifact.html when report.html is explicitly embedded and artifact is not', () => {
+  it('selects tapestry.html when report.html is explicitly embedded and artifact is not', () => {
     const channel = buildChannel({ ...base, body: 'plain', embeds: [
       { path: '/store/project/task/report.html' },
-    ], sent: [{ path: '/store/project/task/artifact.html', time: 100 }] })
-    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/artifact.html')
+    ], sent: [{ path: '/store/project/task/tapestry.html', time: 100 }] })
+    expect(defaultSelection(channel)).toBe('host-a:/store/project/task/tapestry.html')
   })
 
   it('ends a run in the chat when the fiber has a conversation, files to its left, and opens on it', () => {
@@ -267,12 +267,13 @@ describe('selection and labels', () => {
 
 
 it('chooses the own companion ahead of newer nested receipts, then the newest receipt', () => {
-  const files = ['/fiber/checks/artifact.html', '/fiber/report.html', '/fiber/artifact.html', '/other.txt']
+  const files = ['/fiber/checks/tapestry.html', '/fiber/report.html', '/fiber/tapestry.html', '/other.txt', '/fiber/artifact.html']
   const choose = (values: string[]) => leadReceipt(values, '/fiber', x => x)
-  expect(choose(files)).toBe('/fiber/artifact.html')
-  expect(choose(files.filter(x => x !== '/fiber/artifact.html'))).toBe('/fiber/report.html')
+  expect(choose(files)).toBe('/fiber/tapestry.html')
+  expect(choose(files.filter(x => x !== '/fiber/tapestry.html'))).toBe('/fiber/artifact.html')
+  expect(choose(files.filter(x => x !== '/fiber/tapestry.html' && x !== '/fiber/artifact.html'))).toBe('/fiber/report.html')
   expect(choose([files[0], files[3]])).toBe(files[0])
-  const channel = buildChannel({ ...base, body: '', sent: [{ path: 'checks/artifact.html', time: 3 }, { path: 'artifact.html', time: 1 }] })
-  expect(channelLead(channel)?.path).toBe('/store/project/task/artifact.html')
+  const channel = buildChannel({ ...base, body: '', sent: [{ path: 'checks/tapestry.html', time: 3 }, { path: 'tapestry.html', time: 1 }] })
+  expect(channelLead(channel)?.path).toBe('/store/project/task/tapestry.html')
   expect(defaultSelection(channel)).toBe(channelLead(channel)?.key)
 })

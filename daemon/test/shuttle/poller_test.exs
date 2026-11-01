@@ -1135,7 +1135,7 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
-  test "mtime-reuse hit reconciles the companion path when artifact.html is added/removed" do
+  test "mtime-reuse hit reconciles the companion path when tapestry.html is added/removed" do
     uid = "01JZ0000000000000000000RPT"
 
     fiber =
@@ -1165,7 +1165,7 @@ defmodule Shuttle.PollerTest do
     assert [entry] = body.fibers
     refute Map.has_key?(entry, :report_path)
 
-    # An artifact.html appears — but adding it does NOT bump the fiber's mtime, so
+    # An tapestry.html appears — but adding it does NOT bump the fiber's mtime, so
     # the next poll is a mtime-REUSE hit. The reconcile must still surface it from
     # the candidate row's native report_path field.
     current = MockRunner.fiber("tests/report-toggle")
@@ -1175,7 +1175,7 @@ defmodule Shuttle.PollerTest do
       Map.put(
         current,
         "report_path",
-        "#{MockRunner.felt_dir()}/tests/report-toggle/artifact.html"
+        "#{MockRunner.felt_dir()}/tests/report-toggle/tapestry.html"
       )
     )
 
@@ -1185,7 +1185,7 @@ defmodule Shuttle.PollerTest do
       assert {:ok, body} = Poller.cached_fiber_documents(poller)
       assert [entry] = body.fibers
       assert Map.has_key?(entry, :report_path)
-      assert String.ends_with?(entry.report_path, "artifact.html")
+      assert String.ends_with?(entry.report_path, "tapestry.html")
     end)
 
     # The artifact is removed (field drops) — again without an mtime bump. The

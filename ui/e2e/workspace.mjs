@@ -2121,6 +2121,83 @@ test('PDF.js paints fixture; owner route; Overview draws PDFs as faces', async p
   assert.equal(await p.locator('.ws-overview .kbn-thumbnail-pdf iframe').count(), 0, 'PDF thumbnails draw a face, not the native viewer')
 })
 
+test('A PDF iframe in a report is rendered by the trusted reader inside the opaque document', async p => {
+  await open(p); await choose(p, 'paper-review.html')
+  const frame = selected(p).locator('iframe.kbn-fileview-frame')
+  const inner = await frame.contentFrame()
+  const placeholder = inner.locator('[data-shuttle-pdf-embed]')
+  await placeholder.waitFor()
+  const overlay = selected(p).locator('.kbn-fileview-embedded-pdf')
+  const canvas = overlay.locator('.pdfViewer .page[data-page-number="1"] canvas').first()
+  await canvas.waitFor()
+  await p.waitForFunction(() => {
+    const canvas = document.querySelector('.ws-page.ws-selected .kbn-fileview-embedded-pdf .pdfViewer canvas')
+    if (!canvas?.width || !canvas.height) return false
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data
+    let ink = false
+    let paper = false
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] === 0) continue
+      ink ||= pixels[i] < 200 && pixels[i + 1] < 200 && pixels[i + 2] < 200
+      paper ||= pixels[i] > 240 && pixels[i + 1] > 240 && pixels[i + 2] > 240
+      if (ink && paper) return true
+    }
+    return false
+  })
+  const beforeShift = await placeholder.boundingBox()
+  await inner.locator('#late-layout').evaluate(img => new Promise(resolve => {
+    img.onload = resolve
+    img.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22900%22 height=%22220%22/%3E'
+  }))
+  let alignedAfterShift = false
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const [frameBox, child, parent] = await Promise.all([
+      frame.boundingBox(),
+      placeholder.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }),
+      overlay.boundingBox(),
+    ])
+    if (frameBox && child && parent) {
+      const clientHeight = await frame.evaluate(el => el.clientHeight)
+      const expectedY = frameBox.y + child.y * frameBox.height / clientHeight
+      if (Math.abs(parent.y - expectedY) < 3) { alignedAfterShift = true; break }
+    }
+    await p.waitForTimeout(50)
+  }
+  assert.ok(alignedAfterShift, 'the PDF overlay catches up after the late image shifts its placeholder')
+  const afterShift = await placeholder.boundingBox()
+  assert.ok(beforeShift && afterShift && afterShift.y > beforeShift.y + 100, 'a late image load moves the PDF and triggers a geometry rescan')
+  await inner.locator('#late-layout').evaluate(img => { img.style.height = '420px' })
+  let alignedAfterStyle = false
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const [frameBox, child, parent] = await Promise.all([
+      frame.boundingBox(), placeholder.evaluate(el => el.getBoundingClientRect().y), overlay.boundingBox(),
+    ])
+    if (frameBox && child !== null && parent) {
+      const clientHeight = await frame.evaluate(el => el.clientHeight)
+      if (Math.abs(parent.y - (frameBox.y + child * frameBox.height / clientHeight)) < 3) { alignedAfterStyle = true; break }
+    }
+    await p.waitForTimeout(50)
+  }
+  const afterStyle = await placeholder.boundingBox()
+  assert.ok(alignedAfterStyle && afterShift && afterStyle && afterStyle.y > afterShift.y + 100,
+    'a preceding element height change triggers another PDF geometry rescan')
+  await p.screenshot({ path: '/tmp/felt-embedded-pdf.png' })
+  assert.equal(await inner.locator('iframe[src$=".pdf"]').count(), 0, 'the opaque report never delegates the PDF to the native browser plugin')
+  assert.equal(await frame.getAttribute('sandbox'), 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms')
+  assert.ok((await records(p)).some(r => r.url.includes('embedded.pdf')), 'the PDF bytes use the normal owner-routed file endpoint')
+  const [frameBox, wrapBox, childBox, overlayBox] = await Promise.all([
+    frame.boundingBox(),
+    selected(p).locator('.kbn-fileview-frame-wrap').boundingBox(),
+    placeholder.evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }),
+    overlay.boundingBox(),
+  ])
+  assert.ok(frameBox && wrapBox && overlayBox)
+  const scaleX = frameBox.width / await frame.evaluate(el => el.clientWidth)
+  const scaleY = frameBox.height / await frame.evaluate(el => el.clientHeight)
+  assert.ok(Math.abs(overlayBox.x - (frameBox.x + childBox.x * scaleX)) < 3, 'the PDF canvas aligns with its HTML placeholder')
+  assert.ok(Math.abs(overlayBox.y - (frameBox.y + childBox.y * scaleY)) < 3, 'the PDF canvas follows the report layout')
+})
+
 test('Remote worker conversation records attach handler without launching a terminal', async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')

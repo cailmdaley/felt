@@ -881,20 +881,24 @@ export class Workspace {
       // The body (or its failure) shows as soon as it lands; the run's order waits for the receipts.
       if (!wasLoaded && this.current === state && this.isActive && !this.disposed) this.show(state, false)
       await receiptRead
-      const artifactPath = state.card.fiberDir && `${state.card.fiberDir}/artifact.html`
       if (this.disposed) return
-      const reportPath = state.card.fiberDir && `${state.card.fiberDir}/report.html`
-      const companionPath = artifactPath ?? reportPath
-      if (companionPath && !state.channel.documents.some(d => d.path === companionPath)) {
-        void head(fileBytesUrl(this.opts.shuttleBase, companionPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true }).then(async artifact => {
-          const legacy = !artifact?.exists && reportPath
-            ? await head(fileBytesUrl(this.opts.shuttleBase, reportPath, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true })
-            : null
-          const path = artifact?.exists ? companionPath : legacy?.exists ? reportPath : undefined
-          if (!path || this.disposed || state.links.some(link => link.path === path)) return
-          state.links.push({ path }); this.rebuild(state)
-          if (this.current === state && this.isActive) this.show(state, false)
-        })
+      const fiberDir = state.card.fiberDir
+      if (fiberDir) {
+        void (async () => {
+          for (const name of ['tapestry.html', 'artifact.html', 'report.html']) {
+            const path = `${fiberDir}/${name}`
+            if (state.channel.documents.some(d => d.path === path)) return
+            const result = await head(fileBytesUrl(this.opts.shuttleBase, path, state.card.originId), RESOURCE_PRIORITY.neighbour, { fresh: true })
+            if (this.disposed) return
+            if (result?.exists) {
+              if (!state.links.some(link => link.path === path)) {
+                state.links.push({ path }); this.rebuild(state)
+                if (this.current === state && this.isActive) this.show(state, false)
+              }
+              return
+            }
+          }
+        })()
       }
       state.runFinal = true
       this.rebuild(state)

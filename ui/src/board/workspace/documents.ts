@@ -78,7 +78,7 @@ export function normalizeAbsolutePath(path: string, base = '/'): string {
 /** Choose the fiber's own companion before the newest receipt. Candidates are newest first. */
 export function leadReceipt<T>(receipts: readonly T[], fiberDir: string | undefined, path: (receipt: T) => string, own: (receipt: T) => boolean = () => true): T | undefined {
   if (fiberDir !== undefined) {
-    for (const name of ['artifact.html', 'report.html']) {
+    for (const name of ['tapestry.html', 'artifact.html', 'report.html']) {
       const target = normalizeAbsolutePath(name, fiberDir)
       const match = receipts.find(receipt => own(receipt) && normalizeAbsolutePath(path(receipt), fiberDir) === target)
       if (match) return match
@@ -170,7 +170,7 @@ export function isDeclared(document: WorkspaceDocument): boolean {
 }
 
 function isReport(document: WorkspaceDocument): boolean {
-  return ['artifact.html', 'report.html'].includes(document.name.toLowerCase())
+  return ['tapestry.html', 'artifact.html', 'report.html'].includes(document.name.toLowerCase())
 }
 
 /** True when the document runs left of the fiber page: the body declares it. */

@@ -73,14 +73,14 @@ without opening anything.
 When the work is blocked, lead the outcome with `Blocked: …` so the card reads
 as "answer me," not "review me."
 
-### Optional: `artifact.html`
+### Optional: `tapestry.html`
 
-Use `artifact.html` as the fiber's living, visual index to sub-fibers, sent
+Use `tapestry.html` as the fiber's living, visual index to sub-fibers, sent
 files, and findings. The worker rewrites it as the work changes and can embed
 it in the body:
 
 ```markdown
-:::{embed} artifact.html
+:::{embed} tapestry.html
 :::
 ```
 
