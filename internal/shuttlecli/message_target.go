@@ -115,6 +115,9 @@ func (a *app) resolveMessageTargetOnce(target string) (string, error) {
 			return "", err
 		}
 	}
+	if fiberLookup.candidateCount() == 0 && !fiberLookup.refused() {
+		fiberLookup.Fibers = a.ownerFeedFibers(target)
+	}
 	sessionCandidates = uniqueMessageCandidates(sessionCandidates)
 	if len(unmappedLedger) > 0 {
 		return "", fmt.Errorf("message target %q is ambiguous or has an unmapped Codex transcript candidate; use a peer address or explicit shuttle:// address: %s", target, messageTargetLabels(sessionCandidates, fiberLookup, unmappedLedger))
@@ -477,4 +480,29 @@ func shuttleRuntimeSessionID(f *felt.Felt) string {
 	runtime, _ := block["runtime"].(map[string]any)
 	sessionID, _ := runtime["session_uuid"].(string)
 	return strings.TrimSpace(sessionID)
+}
+
+// ownerFeedFibers finds a constitution its owner reports by exact path or UID
+// when this host's stores do not hold it: a thread created on another host is
+// addressable before Git carries its document here. Feed errors mean no match.
+func (a *app) ownerFeedFibers(target string) []*felt.Felt {
+	feed, err := a.fetchStatusFeed()
+	if err != nil || feed == nil {
+		return nil
+	}
+	var fibers []*felt.Felt
+	for _, entry := range feed.Fibers {
+		if entry.Fiber["slug"] != target && entry.Fiber["uid"] != target && entry.Fiber["id"] != target {
+			continue
+		}
+		f, err := statusDocument(entry.Fiber)
+		if err != nil {
+			continue
+		}
+		if block, ok, err := shuttle.BlockOf(f); err != nil || !ok || block.Host != entry.Origin {
+			continue
+		}
+		fibers = append(fibers, f)
+	}
+	return fibers
 }
