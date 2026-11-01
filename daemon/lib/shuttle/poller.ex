@@ -1972,12 +1972,13 @@ defmodule Shuttle.Poller do
   end
 
   defp transition_call({:refresh_document, fiber_id}, _from, state) do
-    # A cold cache means no poll has populated it yet; the first poll will read
-    # disk fresh, so there is nothing to patch. Once warm, re-read this one fiber.
+    # A cold cache means no poll has populated it yet, so there is nothing to
+    # patch; the document is still announced, because a boot-seeded store's
+    # first polls are hot. Once warm, re-read this one fiber.
     if state.document_cache_ready do
       {:reply, :ok, refresh_document_entry(state, fiber_id)}
     else
-      {:reply, :ok, state}
+      {:reply, :ok, announce_document(state, fiber_id)}
     end
   end
 
@@ -2441,7 +2442,10 @@ defmodule Shuttle.Poller do
           state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores),
         last_full_listings:
           state.last_full_listings |> Map.merge(full_listings) |> Map.take(felt_stores),
-        announced_ids: retire_announced_ids(state.announced_ids, full_listings, discovery),
+        announced_ids:
+          state.announced_ids
+          |> retire_announced_ids(full_listings, discovery)
+          |> Map.take(felt_stores),
         discovery: discovery
     }
 
@@ -2835,6 +2839,16 @@ defmodule Shuttle.Poller do
   end
 
   defp announce_id(state, _store, _id), do: state
+
+  defp announce_document(%State{} = state, fiber_id) do
+    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: state.felt_stores) do
+      {:ok, %{fibers: [entry | _]}} ->
+        announce_id(state, Map.get(entry, :felt_store), get_in(entry, [:fiber, "slug"]))
+
+      _ ->
+        state
+    end
+  end
 
   # A full listing that began at or after an announcement saw the document on
   # disk, so its baseline now carries the id (or its absence is real).

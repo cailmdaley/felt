@@ -301,6 +301,7 @@ defmodule Shuttle.PollerTest do
            ]
 
     assert read_input_keys == [
+             :announced_ids,
              :discovery,
              :document_cache,
              :felt_stores,
