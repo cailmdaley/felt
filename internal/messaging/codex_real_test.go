@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +30,13 @@ func TestCodexRealTerminalAppServer(t *testing.T) {
 	}
 	if testing.Short() {
 		t.Skip("real Codex terminal integration")
+	}
+	versionOutput, err := exec.Command(codex, "--version").Output()
+	if err != nil {
+		t.Fatalf("read Codex version: %v", err)
+	}
+	if !codexVersionAtLeast(string(versionOutput), 0, 162, 1) {
+		t.Skipf("real Codex terminal integration requires codex 0.162.1 or newer; found %q", strings.TrimSpace(string(versionOutput)))
 	}
 	root, err := os.MkdirTemp("/tmp", "felt-cx-real-")
 	if err != nil {
@@ -290,4 +299,49 @@ trust_level="trusted"
 		t.Fatalf("developer context was checked in only %d worker model requests", developerRequests.Load())
 	}
 	t.Logf("real Codex App Server + terminal TUI: idle start, active steer, context, dedup, same-thread resume; %d local fixture calls, no external inference", calls.Load())
+}
+
+var codexVersionPattern = regexp.MustCompile(`(?:^|[^0-9])([0-9]+)\.([0-9]+)\.([0-9]+)(?:[^0-9]|$)`)
+
+func codexVersionAtLeast(output string, major, minor, patch int) bool {
+	match := codexVersionPattern.FindStringSubmatch(output)
+	if match == nil {
+		return false
+	}
+	version := [3]int{}
+	for i := range version {
+		value, err := strconv.Atoi(match[i+1])
+		if err != nil {
+			return false
+		}
+		version[i] = value
+	}
+	minimum := [3]int{major, minor, patch}
+	for i := range version {
+		if version[i] != minimum[i] {
+			return version[i] > minimum[i]
+		}
+	}
+	return true
+}
+
+func TestCodexVersionAtLeast(t *testing.T) {
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{"codex-cli 0.162.1", true},
+		{"codex-cli 0.162.2", true},
+		{"codex-cli 0.163.0", true},
+		{"codex-cli 0.162.0", false},
+		{"codex-cli 0.159.1", false},
+		{"codex-cli unknown", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			if got := codexVersionAtLeast(tt.version, 0, 162, 1); got != tt.want {
+				t.Fatalf("codexVersionAtLeast(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
 }
