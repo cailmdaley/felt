@@ -39,6 +39,9 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 	// Setup may run from a project; trust must not depend on it.
 	env.Chdir(repoRoot(t))
 	a := testApp(t, env)
+	if version, old := a.codexVersionTooOld(); old {
+		t.Skipf("Codex %s exposes definition-only hook hashes; plugin-content trust requires Codex %s or newer", version, codexHookTrustMinimum)
+	}
 	source := repoRoot(t)
 	// Promote a private sealed generation where setup puts it.
 	candidate := filepath.Join(root, ".felt", pluginRuntimeDirName, pluginCurrentName)

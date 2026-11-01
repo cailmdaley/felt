@@ -463,7 +463,9 @@ func TestCodexHookTrustUnsupportedCodexIsAdvisory(t *testing.T) {
 			env, streams := testEnv(t)
 			hooks := []codexTrustHook{feltHook("session_start", "modified")}
 			if shape == "hash" {
-				hooks[0].CurrentHash = "sha256:old"
+				// Codex versions before the plugin-content trust protocol return
+				// one valid digest for the hook definition only.
+				hooks[0].CurrentHash = "sha256:" + strings.Repeat("a", 64)
 			}
 			f := fakeCodexTrust(t, env, hooks)
 			if shape == "old-version" {
