@@ -22,29 +22,24 @@ function fixture() {
   return { root, transcript, env, input, write, run, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
-test("Claude pipe: below, once soft, resumed once hard, new session", () => {
+const codexRow = (tokens, window = 200_000) => JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: tokens }, model_context_window: window } } }) + "\n";
+
+test("Claude sessions are never nudged, at any size or override", () => {
   const f = fixture();
   try {
-    f.write(249_999); assert.equal(f.run(), "");
-    f.write(250_000);
-    const soft = JSON.parse(f.run()).hookSpecificOutput;
-    assert.equal(soft.hookEventName, "PostToolUse");
-    assert.match(soft.additionalContext, /250,000 tokens \(window unknown\)/);
-    assert.equal(f.run(), "");
-    assert.equal(f.run({ ...f.input, hook_event_name: "UserPromptSubmit" }), "");
-    f.write(350_000);
-    assert.match(JSON.parse(f.run()).hookSpecificOutput.additionalContext, /^HARD CONTEXT LIMIT:/);
-    assert.equal(f.run(), "");
-    assert.ok(JSON.parse(f.run({ ...f.input, session_id: "fresh" })).hookSpecificOutput.additionalContext);
+    for (const tokens of [250_000, 400_000, 2_000_000]) {
+      f.write(tokens);
+      assert.equal(f.run(), "");
+      assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_TOKENS: "1000" }), "");
+    }
   } finally { f.cleanup(); }
 });
 
-test("Claude explicit window uses percent and sums cached/output tokens", () => {
+test("Claude usage sums cached/output tokens and reads the [1m] window", () => {
   const f = fixture();
   try {
     f.write(150_000);
-    assert.equal(f.run(), "");
-    assert.match(JSON.parse(f.run({ ...f.input, context_window: 200_000 })).hookSpecificOutput.additionalContext, /75.0% of the window/);
+    assert.equal(transcriptUsage(f.transcript).tokens, 150_000);
     f.write(150_000, { model: "claude-test[1m]" });
     assert.equal(transcriptUsage(f.transcript).contextWindow, 1_000_000);
   } finally { f.cleanup(); }
@@ -53,11 +48,11 @@ test("Claude explicit window uses percent and sums cached/output tokens", () => 
 test("bounded tail skips old records, malformed lines, incomplete final write", () => {
   const f = fixture();
   try {
-    f.write(800_000);
+    fs.writeFileSync(f.transcript, codexRow(190_000));
     fs.appendFileSync(f.transcript, JSON.stringify({ type: "user", padding: "x".repeat(TAIL_BYTES * 4) }) + "\n");
     assert.equal(f.run(), "", "no whole-history fallback");
-    fs.appendFileSync(f.transcript, "bad json\n" + JSON.stringify({ type: "assistant", message: { role: "assistant", usage: { input_tokens: 600_000 } } }) + "\n{\"partial\":");
-    assert.match(JSON.parse(f.run()).hookSpecificOutput.additionalContext, /600,000 tokens/);
+    fs.appendFileSync(f.transcript, "bad json\n" + codexRow(160_000) + "{\"partial\":");
+    assert.match(JSON.parse(f.run()).hookSpecificOutput.additionalContext, /160,000 tokens/);
   } finally { f.cleanup(); }
 });
 
@@ -73,10 +68,10 @@ test("Codex uses last request usage/window, never cumulative or cached twice", (
   } finally { f.cleanup(); }
 });
 
-test("concurrent Claude hooks claim each level only once", async () => {
+test("concurrent hooks claim each level only once", async () => {
   const f = fixture();
   try {
-    f.write(250_000);
+    fs.writeFileSync(f.transcript, codexRow(160_000));
     const outputs = await Promise.all(Array.from({ length: 6 }, () => new Promise((resolve, reject) => {
       const child = spawn(hook, { env: f.env }); let output = "";
       child.stdout.on("data", (data) => output += data);
@@ -91,7 +86,7 @@ test("bad input, missing runtime/file, invalid env, unwritable state fail open",
   const f = fixture();
   try {
     assert.equal(f.run(), "");
-    f.write(800_000);
+    fs.writeFileSync(f.transcript, codexRow(190_000));
     assert.equal(f.run({}, {}), "");
     assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_PCT: "bad" }), "");
     assert.equal(f.run(f.input, { SHUTTLE_HANDOFF_STATE_DIR: f.transcript }), "");

@@ -19,7 +19,7 @@ shared plugin for both.
   SessionStart (active and recently touched fibers) and PreToolUse
   (`internal/feltcli/hook.go`), and Shuttle hooks for event and commit records.
   **Updating the binaries updates binary-owned hook behavior**; refresh the plugin when its skills or adapter scripts change.
-- Handoff nudges run in felt's Pi extension and the shared Claude Code/Codex `PostToolUse` and `UserPromptSubmit` hooks, independent of a store or running daemon.
+- Handoff nudges run in felt's Pi extension and the shared Claude Code/Codex `PostToolUse` and `UserPromptSubmit` hooks (which stay silent for Claude Code sessions), independent of a store or running daemon.
   Refresh the package/plugin after changing this integration, not just the binaries.
 - **Binaries and plugin update in lockstep.** `felt update` replaces both Go
   CLIs as a pair, then refreshes each installed integration; the Homebrew
@@ -27,19 +27,21 @@ shared plugin for both.
 
 ## Context handoff nudges
 
-The Claude Code hook's first nudge fires at `min(window × 75%, 250000)` context tokens; the firmer nudge fires at `min(window × 88%, 350000)`.
-Pi and Codex retain `min(window × 75%, 500000)` and `min(window × 88%, 750000)`.
+Claude Code sessions are never nudged; they decide their own handoff.
+Pi and Codex get a first nudge at `min(window × 75%, 500000)` context tokens and a firmer one at `min(window × 88%, 750000)`.
 Each level fires once per session, even after resuming or compacting.
 If a turn crosses both thresholds, Pi sends the first nudge and escalates on the next turn if work continues.
 The integration advises a durable handoff; it neither terminates the session nor changes interactive Pi's compaction settings.
 Confer can still veto automatic compaction for its workers, but felt owns their nudges.
 
-| Environment variable | Claude Code default | Pi / Codex default |
-|---|---:|---:|
-| `SHUTTLE_HANDOFF_PCT` | 75 | 75 |
-| `SHUTTLE_HANDOFF_TOKENS` | 250000 | 500000 |
-| `SHUTTLE_HANDOFF_HARD_PCT` | 88 | 88 |
-| `SHUTTLE_HANDOFF_HARD_TOKENS` | 350000 | 750000 |
+The thresholds can be overridden in the environment:
+
+| Environment variable | Default |
+|---|---:|
+| `SHUTTLE_HANDOFF_PCT` | 75 |
+| `SHUTTLE_HANDOFF_TOKENS` | 500000 |
+| `SHUTTLE_HANDOFF_HARD_PCT` | 88 |
+| `SHUTTLE_HANDOFF_HARD_TOKENS` | 750000 |
 
 Percentages must be positive and at most 100; token limits must be positive.
 Hard settings must be at least their corresponding first-nudge settings.

@@ -87,44 +87,26 @@ func TestHandoffHookMatchesNode(t *testing.T) {
 	}
 }
 
-func TestClaudeHandoffDefaultsAndOverrides(t *testing.T) {
-	for _, tc := range []struct {
-		tokens    int
-		overrides map[string]string
-		want      string
-	}{
-		{249999, nil, ""}, {250000, nil, "Context is at 250,000"},
-		{350000, nil, "HARD CONTEXT LIMIT"},
-		{250000, map[string]string{"SHUTTLE_HANDOFF_TOKENS": "300000"}, ""},
-		{150000, map[string]string{"SHUTTLE_HANDOFF_CONTEXT_WINDOW": "200000"}, "Context is at 150,000"},
-		{500000, map[string]string{"SHUTTLE_HANDOFF_PCT": "101"}, ""},
-	} {
+func TestClaudeSessionsAreNeverNudged(t *testing.T) {
+	for _, tokens := range []int{250000, 400000, 2000000} {
 		env, _ := envWithHome(t)
 		clearHandoffEnv(env)
 		env.Set("SHUTTLE_HANDOFF_STATE_DIR", t.TempDir())
-		for key, value := range tc.overrides {
-			env.Set(key, value)
-		}
+		env.Set("SHUTTLE_HANDOFF_TOKENS", "1000")
 		tr := filepath.Join(t.TempDir(), "tr")
-		row, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "usage": map[string]any{"input_tokens": tc.tokens}}})
+		row, _ := json.Marshal(map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "usage": map[string]any{"input_tokens": tokens}}})
 		if err := os.WriteFile(tr, row, 0600); err != nil {
 			t.Fatal(err)
 		}
 		input, _ := json.Marshal(map[string]any{"session_id": "test", "transcript_path": tr, "hook_event_name": "UserPromptSubmit"})
-		var got bytes.Buffer
-		a := newApp(env)
-		if err := a.runHandoffHook(bytes.NewReader(input), &got); err != nil {
-			t.Fatal(err)
-		}
-		// At the hard boundary, soft is claimed first and hard follows next check.
-		if tc.want == "HARD CONTEXT LIMIT" {
-			got.Reset()
-			if err := a.runHandoffHook(bytes.NewReader(input), &got); err != nil {
+		for i := 0; i < 2; i++ {
+			var got bytes.Buffer
+			if err := newApp(env).runHandoffHook(bytes.NewReader(input), &got); err != nil {
 				t.Fatal(err)
 			}
-		}
-		if (tc.want == "" && got.Len() != 0) || (tc.want != "" && !strings.Contains(got.String(), tc.want)) {
-			t.Fatalf("tokens %d: %s", tc.tokens, got.String())
+			if got.Len() != 0 {
+				t.Fatalf("tokens %d: Claude session nudged: %s", tokens, got.String())
+			}
 		}
 	}
 }

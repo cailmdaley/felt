@@ -49,10 +49,11 @@ func (a *app) runHandoffHook(in io.Reader, out io.Writer) error {
 	if err != nil || usage == nil {
 		return err
 	}
-	values := []float64{75, 500000, 88, 750000}
+	// Claude sessions decide their own handoff; only Codex transcripts are nudged.
 	if usage.Harness == "claude" {
-		values[1], values[3] = 250000, 350000
+		return nil
 	}
+	values := []float64{75, 500000, 88, 750000}
 	for i, key := range []string{"SHUTTLE_HANDOFF_PCT", "SHUTTLE_HANDOFF_TOKENS", "SHUTTLE_HANDOFF_HARD_PCT", "SHUTTLE_HANDOFF_HARD_TOKENS"} {
 		if raw, ok := a.env.LookupEnv(key); ok {
 			v, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)

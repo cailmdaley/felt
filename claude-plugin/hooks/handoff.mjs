@@ -47,13 +47,9 @@ export function transcriptUsage(file, input = {}, env = process.env) {
 export function runHandoffHook(input, env = process.env) {
   if (!["PostToolUse", "UserPromptSubmit"].includes(input.hook_event_name) || !input.session_id || !input.transcript_path) return;
   const usage = transcriptUsage(input.transcript_path, input, env);
-  if (!usage) return;
-  // Pi imports the shared library directly and retains its own defaults.
-  const thresholds = handoffThresholds(usage.harness === "claude" ? {
-    ...env,
-    SHUTTLE_HANDOFF_TOKENS: env.SHUTTLE_HANDOFF_TOKENS ?? "250000",
-    SHUTTLE_HANDOFF_HARD_TOKENS: env.SHUTTLE_HANDOFF_HARD_TOKENS ?? "350000",
-  } : env);
+  // Claude sessions decide their own handoff; only Codex transcripts are nudged.
+  if (!usage || usage.harness === "claude") return;
+  const thresholds = handoffThresholds(env);
   const root = env.SHUTTLE_HANDOFF_STATE_DIR || path.join(os.homedir(), ".shuttle", "handoff");
   const key = createHash("sha256").update(`${usage.harness}:${input.session_id}`).digest("hex");
   const directory = path.join(root, key);
