@@ -559,6 +559,53 @@ func TestResolveMessageTargetFiberWithoutRuntimeSessionIsClear(t *testing.T) {
 	}
 }
 
+// A thread created on its owner reaches this host's stores only through Git;
+// until then the owner feed is what makes it addressable by path or UID.
+func TestResolveMessageTargetFiberKnownOnlyToItsOwner(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	isolateMessageFiberStore(env, "")
+	peers, err := json.Marshal(messaging.Directory{Sessions: []messaging.Session{}, Gaps: []messaging.Gap{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := json.Marshal(sessionLedgerResponse{
+		Records: []SessionProvenance{{
+			Session: messageTargetSession,
+			UID:     messageTargetFiberUID,
+			Host:    "worker-node",
+			Harness: "claude-code",
+			Fiber:   "hub/remote-thread",
+			Kind:    "dispatch",
+		}},
+		Origins: map[string]any{"worker-node": map[string]any{"stale": false, "last_error": nil}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := `{"fibers":[{"origin":"worker-node","fiber":{"id":"` + messageTargetFiberUID + `","uid":"` + messageTargetFiberUID +
+		`","slug":"hub/remote-thread","name":"remote thread","status":"active","shuttle":{"kind":"oneshot","host":"worker-node","agent":"claude-opus","runtime":{"session_uuid":"` +
+		messageTargetSession + `"}}},"runtime":{"tmux_session":"remote-thread-shuttle"}}],"origins":{"worker-node":{"stale":false}}}`
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/peers":            jsonBody(string(peers)),
+		sessionsCompositePath:      jsonBody(string(ledger)),
+		"/api/v1/fibers/composite": jsonBody(feed),
+	})
+
+	for _, target := range []string{"hub/remote-thread", messageTargetFiberUID} {
+		got, err := newApp(env).resolveMessageTarget(target)
+		if err != nil {
+			t.Fatalf("%s: %v", target, err)
+		}
+		if want := "shuttle://worker-node/claude/" + messageTargetSession; got != want {
+			t.Fatalf("%s resolved to %q, want %q", target, got, want)
+		}
+	}
+	if _, err := newApp(env).resolveMessageTarget("remote-thread"); err == nil {
+		t.Fatal("a bare slug must not resolve through the owner feed")
+	}
+}
+
 func TestResolveMessageTargetNotFound(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

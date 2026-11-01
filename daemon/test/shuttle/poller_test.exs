@@ -301,6 +301,7 @@ defmodule Shuttle.PollerTest do
            ]
 
     assert read_input_keys == [
+             :announced_ids,
              :discovery,
              :document_cache,
              :felt_stores,
@@ -7414,6 +7415,58 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(following, fn {cmd, args} ->
              cmd == "shuttle" and "ls" in args and "--ids-from" not in args
            end)
+  end
+
+  @tag :adaptive_discovery
+  test "a document the daemon announces joins the hot set before the next full scan" do
+    known = "tests/discovery-known"
+    created = "tests/discovery-created"
+    MockRunner.set_fiber(known, make_fiber(known, %{"status" => "open"}))
+    MockRunner.set_shuttle(known, "enabled: true\nhost: another-host\nkind: oneshot\n", "open")
+    MockRunner.set_ls_delay(15)
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_discovery_announced,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        full_scan_budget_ms: 1,
+        full_scan_min_interval_ms: 60_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    sync_poll_cycle!(poller)
+    store = MockRunner.felt_root()
+
+    listed? = fn id ->
+      :sys.get_state(poller, @state_timeout).last_known_listings[store]
+      |> Enum.any?(&(Map.get(&1, "id") == id))
+    end
+
+    # Written after the full listing (a `POST /fiber/create`): a hot tick
+    # alone never finds it.
+    MockRunner.set_fiber(created, make_fiber(created, %{"status" => "active"}))
+    MockRunner.set_shuttle(created, "enabled: true\nhost: another-host\nkind: oneshot\n", "active")
+    sync_poll_cycle!(poller)
+    assert Poller.snapshot(poller).poll_health.discovery[store].mode == :hot
+    refute listed?.(created)
+
+    assert :ok = Poller.refresh_document(poller, created)
+    sync_poll_cycle!(poller)
+    assert listed?.(created)
+    assert Map.has_key?(:sys.get_state(poller, @state_timeout).announced_ids[store], created)
+
+    # A full scan that starts after the announcement carries the id itself.
+    :sys.replace_state(poller, fn state ->
+      info = Map.fetch!(state.discovery, store)
+      %{state | discovery: Map.put(state.discovery, store, %{info | next_full_due_at: 0})}
+    end)
+
+    sync_poll_cycle!(poller)
+    assert listed?.(created)
+    assert :sys.get_state(poller, @state_timeout).announced_ids == %{}
   end
 
   @tag :adaptive_discovery

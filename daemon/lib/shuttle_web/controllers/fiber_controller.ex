@@ -26,10 +26,11 @@ defmodule ShuttleWeb.FiberController do
 
   alias Shuttle.{FeltStores, FrontmatterEdit, OriginRouter}
 
-  # These native keys are initialized through felt add. Transfer identity and
-  # source timestamps are restored with the custom fields in the final patch;
-  # they are excluded from the generic splice to avoid duplicate YAML keys.
-  @felt_native_keys ~w(id name status tags outcome due created-at)
+  # These native keys are initialized through felt add or restored by the
+  # final patch (transfer identity, description and source timestamps). The
+  # generic splice of custom fields excludes them all: felt refuses a document
+  # whose frontmatter repeats a key.
+  @felt_native_keys ~w(id name status tags outcome due description created-at updated-at closed-at)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
@@ -60,6 +61,10 @@ defmodule ShuttleWeb.FiberController do
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
          :ok <- inject_create_frontmatter(path, frontmatter, uid) do
       uid = if uid == "", do: generated_uid, else: uid
+      # Announce the new document to the Poller: an armed constitution
+      # dispatches on the next tick, and the owner's feed lists it now, even
+      # on a store whose discovery stays hot between full scans.
+      Shuttle.Poller.refresh_document(fiber_id)
       json(conn, %{id: fiber_id, path: path, uid: uid})
     else
       {:error, reason} ->

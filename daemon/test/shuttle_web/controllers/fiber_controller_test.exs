@@ -145,6 +145,22 @@ defmodule ShuttleWeb.FiberControllerTest do
     assert parsed["shuttle"]["host"] == "test-host"
     assert to_string(parsed["created-at"]) =~ "2026-10-29T12:00:00Z"
     assert to_string(parsed["updated-at"]) =~ "2026-10-30T12:00:00Z"
+
+    # YAML parsers here keep the last duplicate; felt refuses the document.
+    keys =
+      path
+      |> File.read!()
+      |> frontmatter()
+      |> String.split("\n")
+      |> Enum.flat_map(fn line ->
+        case Regex.run(~r/^([A-Za-z_-]+):/, line) do
+          [_, key] -> [key]
+          _ -> []
+        end
+      end)
+
+    assert keys == Enum.uniq(keys), "duplicate frontmatter keys: #{inspect(keys)}"
+    assert {_json, 0} = System.cmd("felt", ["-C", tmp, "show", "tests/transferred", "-j"])
   end
 
   test "POST /api/v1/fiber/create writes under shuttle.project_dir when it differs from daemon root",
