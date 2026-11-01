@@ -242,7 +242,7 @@ defmodule ShuttleWeb.FiberControllerTest do
 
     assert conn.status == 200
     assert %{"uid" => uid, "path" => path} = Jason.decode!(conn.resp_body)
-    assert String.starts_with?(path, Path.join(owner, ".felt") <> "/")
+    assert String.starts_with?(path, Shuttle.FeltStores.store_felt_realpath(owner) <> "/")
     assert_receive {:announcement, {:refresh_created_document, ^owner, ^uid}}
   end
 

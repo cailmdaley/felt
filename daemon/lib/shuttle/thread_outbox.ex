@@ -30,22 +30,24 @@ defmodule Shuttle.ThreadOutbox do
     transaction(false, fn root, _baseline, cutoff ->
       root
       |> Path.join("pending/*.json")
-      |> Path.wildcard()
+      |> Shuttle.FileAccess.wildcard()
       |> Enum.flat_map(fn path ->
         key = Path.basename(path, ".json")
 
-        if File.exists?(Path.join([root, "acked", key])) do
+        if Shuttle.FileAccess.exists?(Path.join([root, "acked", key])) do
           # Crash after durable ack but before payload removal.
-          File.rm!(path)
+          Shuttle.FileAccess.rm!(path)
           []
         else
-          %{"id" => id, "record" => record} = path |> File.read!() |> Jason.decode!()
+          %{"id" => id, "record" => record} =
+            path |> Shuttle.FileAccess.read!() |> Jason.decode!()
+
           true = key == key(id)
 
           if retained?(record, cutoff) do
             if record["owner"] == owner, do: [{id, record}], else: []
           else
-            File.rm!(path)
+            Shuttle.FileAccess.rm!(path)
             []
           end
         end
@@ -62,11 +64,11 @@ defmodule Shuttle.ThreadOutbox do
         not retained?(record, cutoff) ->
           {:error, :expired}
 
-        File.exists?(acked_path(root, id)) ->
+        Shuttle.FileAccess.exists?(acked_path(root, id)) ->
           {:error, :acknowledged}
 
         true ->
-          case File.read(path) do
+          case Shuttle.FileAccess.read(path) do
             {:ok, _} ->
               write_atomic!(path, Jason.encode!(%{id: id, record: record}))
               :ok
@@ -91,7 +93,8 @@ defmodule Shuttle.ThreadOutbox do
   defp capture_one(root, id, record, cutoff) do
     path = pending_path(root, id)
 
-    if not retained?(record, cutoff) or File.exists?(acked_path(root, id)) or File.exists?(path) do
+    if not retained?(record, cutoff) or Shuttle.FileAccess.exists?(acked_path(root, id)) or
+         Shuttle.FileAccess.exists?(path) do
       false
     else
       write_atomic!(path, Jason.encode!(%{id: id, record: record}))
@@ -105,9 +108,9 @@ defmodule Shuttle.ThreadOutbox do
   # cause republication or lose an unacknowledged result.
   defp acknowledge_one(root, id) do
     path = acked_path(root, id)
-    unless File.exists?(path), do: write_atomic!(path, id)
+    unless Shuttle.FileAccess.exists?(path), do: write_atomic!(path, id)
 
-    case File.rm(pending_path(root, id)) do
+    case Shuttle.FileAccess.rm(pending_path(root, id)) do
       :ok ->
         :ok
 
@@ -147,7 +150,7 @@ defmodule Shuttle.ThreadOutbox do
     candidate = DateTime.add(now, -@retention_ms, :millisecond)
 
     current =
-      case File.read(path) do
+      case Shuttle.FileAccess.read(path) do
         {:ok, value} ->
           {:ok, date, _} = DateTime.from_iso8601(value)
           date
@@ -182,7 +185,7 @@ defmodule Shuttle.ThreadOutbox do
   end
 
   defp prune_due?(marker, now) do
-    case File.read(marker) do
+    case Shuttle.FileAccess.read(marker) do
       {:ok, value} ->
         DateTime.to_unix(now, :millisecond) - String.to_integer(value) >= @prune_interval_ms
 
@@ -205,11 +208,11 @@ defmodule Shuttle.ThreadOutbox do
     now = System.system_time(:millisecond)
     cutoff_seconds = DateTime.to_unix(cutoff)
 
-    Path.wildcard(Path.join(acked, "*"))
+    Shuttle.FileAccess.wildcard(Path.join(acked, "*"))
     |> Enum.each(fn path ->
-      case File.stat(path, time: :posix) do
+      case Shuttle.FileAccess.stat(path, time: :posix) do
         {:ok, %{mtime: mtime}} ->
-          if mtime < cutoff_seconds, do: File.rm!(path)
+          if mtime < cutoff_seconds, do: Shuttle.FileAccess.rm!(path)
 
         {:error, :enoent} ->
           :ok
@@ -228,15 +231,16 @@ defmodule Shuttle.ThreadOutbox do
     path = Path.join(root, "baseline")
 
     baseline =
-      case File.read(path) do
+      case Shuttle.FileAccess.read(path) do
         {:ok, value} ->
           valid_baseline!(value)
 
         {:error, :enoent} ->
           # A missing cutoff in an established store is corruption, not first
           # deployment. Never recover by resetting it and dropping pending work.
-          if File.exists?(Path.join(root, "version")) or payloads?(root) or not boot?,
-            do: raise("missing thread outbox baseline: #{path}")
+          if Shuttle.FileAccess.exists?(Path.join(root, "version")) or payloads?(root) or
+               not boot?,
+             do: raise("missing thread outbox baseline: #{path}")
 
           value =
             valid_baseline!(
@@ -250,10 +254,10 @@ defmodule Shuttle.ThreadOutbox do
           raise File.Error, reason: reason, action: "read", path: path
       end
 
-    File.mkdir_p!(Path.join(root, "pending"))
-    File.mkdir_p!(Path.join(root, "acked"))
+    Shuttle.FileAccess.mkdir_p!(Path.join(root, "pending"))
+    Shuttle.FileAccess.mkdir_p!(Path.join(root, "acked"))
 
-    unless File.exists?(Path.join(root, "version")),
+    unless Shuttle.FileAccess.exists?(Path.join(root, "version")),
       do: write_atomic!(Path.join(root, "version"), "4")
 
     if legacy do
@@ -268,7 +272,7 @@ defmodule Shuttle.ThreadOutbox do
           else: capture_one(root, id, migrate_recipient(record), nil)
       end)
 
-      File.rm!(snapshot)
+      Shuttle.FileAccess.rm!(snapshot)
     end
 
     baseline
@@ -276,7 +280,7 @@ defmodule Shuttle.ThreadOutbox do
 
   defp payloads?(root) do
     Enum.any?(["pending", "acked"], fn dir ->
-      case File.ls(Path.join(root, dir)) do
+      case Shuttle.FileAccess.ls(Path.join(root, dir)) do
         {:ok, []} -> false
         {:ok, _} -> true
         {:error, :enoent} -> false
@@ -291,7 +295,7 @@ defmodule Shuttle.ThreadOutbox do
   end
 
   defp read_snapshot!(path) do
-    case File.read(path) do
+    case Shuttle.FileAccess.read(path) do
       {:ok, bytes} ->
         state = Jason.decode!(bytes)
 
@@ -322,14 +326,14 @@ defmodule Shuttle.ThreadOutbox do
   end
 
   defp write_atomic!(path, bytes) do
-    File.mkdir_p!(Path.dirname(path))
+    Shuttle.FileAccess.mkdir_p!(Path.dirname(path))
     tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
     try do
-      File.write!(tmp, bytes, [:binary, :sync])
-      File.rename!(tmp, path)
+      Shuttle.FileAccess.write!(tmp, bytes, [:binary, :sync])
+      Shuttle.FileAccess.rename!(tmp, path)
     after
-      File.rm(tmp)
+      Shuttle.FileAccess.rm(tmp)
     end
   end
 end

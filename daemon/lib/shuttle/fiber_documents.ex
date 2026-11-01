@@ -388,7 +388,8 @@ defmodule Shuttle.FiberDocuments do
         end
 
       {_output, status} ->
-        {:error, %{felt_store: store, status: status, error: failure_diagnostic(cli, args, store)}}
+        {:error,
+         %{felt_store: store, status: status, error: failure_diagnostic(cli, args, store)}}
     end
   end
 
@@ -572,8 +573,14 @@ defmodule Shuttle.FiberDocuments do
 
   defp companion_name(fiber, dir, :stat) do
     case Map.get(fiber, "report_path") do
-      value when is_binary(value) and value != "" -> Path.basename(value)
-      _ -> Enum.find(["tapestry.html", "artifact.html", "report.html"], &File.exists?(Path.join(dir, &1)))
+      value when is_binary(value) and value != "" ->
+        Path.basename(value)
+
+      _ ->
+        Enum.find(
+          ["tapestry.html", "artifact.html", "report.html"],
+          &Shuttle.FileAccess.exists?(Path.join(dir, &1))
+        )
     end
   end
 

@@ -142,7 +142,7 @@ defmodule Shuttle.ConfigFiles do
     path = path(id)
 
     base =
-      case File.stat(path, time: :posix) do
+      case Shuttle.FileAccess.stat(path, time: :posix) do
         {:ok, %File.Stat{size: size, mtime: mtime}} ->
           %{id: id, path: path, exists: true, size: size, updated_at: mtime}
 
@@ -208,7 +208,7 @@ defmodule Shuttle.ConfigFiles do
   """
   @spec digest(id()) :: String.t() | nil
   def digest(id) do
-    case File.read(path(id)) do
+    case Shuttle.FileAccess.read(path(id)) do
       {:ok, content} -> hash(content)
       _ -> nil
     end
@@ -247,7 +247,7 @@ defmodule Shuttle.ConfigFiles do
   def read(id) do
     path = path(id)
 
-    case File.read(path) do
+    case Shuttle.FileAccess.read(path) do
       {:ok, text} -> {:ok, content_row(id, text)}
       {:error, :enoent} -> {:ok, content_row(id, nil)}
       {:error, reason} -> {:error, "#{path}: #{:file.format_error(reason)}"}
@@ -404,7 +404,7 @@ defmodule Shuttle.ConfigFiles do
             {:unavailable, "could not run shuttle to validate: #{reason}"}
         end
       after
-        File.rm(tmp)
+        Shuttle.FileAccess.rm(tmp)
       end
     end
   end
@@ -417,10 +417,10 @@ defmodule Shuttle.ConfigFiles do
     dir = Path.join(System.tmp_dir!(), "shuttle-config-check")
     path = Path.join(dir, "#{System.unique_integer([:positive])}.json")
 
-    with :ok <- File.mkdir_p(dir),
-         :ok <- File.chmod(dir, 0o700),
-         :ok <- File.write(path, text),
-         :ok <- File.chmod(path, 0o600) do
+    with :ok <- Shuttle.FileAccess.mkdir_p(dir),
+         :ok <- Shuttle.FileAccess.chmod(dir, 0o700),
+         :ok <- Shuttle.FileAccess.write(path, text),
+         :ok <- Shuttle.FileAccess.chmod(path, 0o600) do
       {:ok, path}
     else
       {:error, reason} ->
@@ -464,16 +464,16 @@ defmodule Shuttle.ConfigFiles do
     path = path(id)
     tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, text),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.FileAccess.mkdir_p(Path.dirname(path)),
+         :ok <- Shuttle.FileAccess.write(tmp, text),
+         :ok <- Shuttle.FileAccess.rename(tmp, path) do
       Logger.info("ConfigFiles: wrote #{path} (#{byte_size(text)} bytes)")
       # The digest is of the bytes just written, not of a fresh read — the
       # same hole `read/1` closes, at the other end (see `content_row/2`).
       {:ok, content_row(id, text)}
     else
       {:error, reason} ->
-        File.rm(tmp)
+        Shuttle.FileAccess.rm(tmp)
         {:error, "#{path}: #{:file.format_error(reason)}"}
     end
   end
@@ -481,7 +481,7 @@ defmodule Shuttle.ConfigFiles do
   defp remove(id) do
     path = path(id)
 
-    case File.rm(path) do
+    case Shuttle.FileAccess.rm(path) do
       :ok ->
         Logger.info("ConfigFiles: removed #{path}")
         {:ok, content_row(id, nil)}

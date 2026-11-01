@@ -346,7 +346,7 @@ defmodule Shuttle.Host do
   # read a different class out of the same bytes. Invalid UTF-8 anywhere in
   # the file is malformed, not just inside the values read here.
   defp read_document(path) do
-    case File.read(path) do
+    case Shuttle.FileAccess.read(path) do
       {:ok, content} ->
         with true <-
                String.valid?(content) || {:error, :malformed, "parsing #{path}: invalid UTF-8"},
@@ -611,9 +611,9 @@ defmodule Shuttle.Host do
   """
   @spec restrict_bound_socket!(String.t()) :: :ok
   def restrict_bound_socket!(path) do
-    case File.lstat(path) do
+    case Shuttle.FileAccess.lstat(path) do
       {:ok, %File.Stat{type: :other}} ->
-        File.chmod!(path, 0o600)
+        Shuttle.FileAccess.chmod!(path, 0o600)
 
       {:ok, %File.Stat{type: type}} ->
         raise ArgumentError, "#{path} is a #{type}, not the bound socket"
@@ -648,9 +648,9 @@ defmodule Shuttle.Host do
   defp walk!(current, [name | rest], euid, links) do
     candidate = Path.join(current, name)
 
-    case File.lstat(candidate) do
+    case Shuttle.FileAccess.lstat(candidate) do
       {:ok, %File.Stat{type: :symlink, uid: uid}} when uid in [euid, 0] ->
-        target = File.read_link!(candidate)
+        target = Shuttle.FileAccess.read_link!(candidate)
 
         case Path.split(target) do
           ["/" | parts] ->
@@ -684,11 +684,11 @@ defmodule Shuttle.Host do
   end
 
   defp create_ancestor!(dir, euid) do
-    case File.mkdir(dir) do
+    case Shuttle.FileAccess.mkdir(dir) do
       :ok ->
-        case File.lstat(dir) do
+        case Shuttle.FileAccess.lstat(dir) do
           {:ok, %File.Stat{type: :directory, uid: ^euid, mode: mode}} ->
-            File.chmod!(dir, Bitwise.band(mode, 0o7755))
+            Shuttle.FileAccess.chmod!(dir, Bitwise.band(mode, 0o7755))
 
           _ ->
             raise ArgumentError, "refusing to listen under #{dir}: it changed while being created"
@@ -718,7 +718,7 @@ defmodule Shuttle.Host do
   """
   @spec ancestor_problem(String.t(), non_neg_integer()) :: String.t() | nil
   def ancestor_problem(dir, euid) do
-    case File.lstat(dir) do
+    case Shuttle.FileAccess.lstat(dir) do
       {:ok, %File.Stat{} = stat} -> dir_stat_problem(stat, euid)
       {:error, reason} -> :file.format_error(reason) |> to_string()
     end
@@ -766,7 +766,7 @@ defmodule Shuttle.Host do
         "#{path} is not under #{top}"
 
       true ->
-        case File.stat(top) do
+        case Shuttle.FileAccess.stat(top) do
           {:ok, stat} ->
             case dir_stat_problem(stat, euid) do
               nil -> walk_socket_path(top, Path.split(relative), euid)
@@ -787,7 +787,7 @@ defmodule Shuttle.Host do
   defp walk_socket_path(dir, [name | rest], euid) do
     path = Path.join(dir, name)
 
-    case {File.lstat(path), rest} do
+    case {Shuttle.FileAccess.lstat(path), rest} do
       {{:ok, %File.Stat{type: :symlink}}, _} ->
         "#{path} is a symlink"
 
@@ -831,13 +831,16 @@ defmodule Shuttle.Host do
   end
 
   defp ensure_socket_dir!(dir, euid) do
-    case File.lstat(dir) do
+    case Shuttle.FileAccess.lstat(dir) do
       {:error, :enoent} ->
-        case File.mkdir(dir) do
+        case Shuttle.FileAccess.mkdir(dir) do
           :ok ->
-            case File.lstat(dir) do
-              {:ok, %File.Stat{type: :directory, uid: ^euid}} -> File.chmod!(dir, 0o700)
-              _ -> raise_socket_dir(dir, "it changed while being created")
+            case Shuttle.FileAccess.lstat(dir) do
+              {:ok, %File.Stat{type: :directory, uid: ^euid}} ->
+                Shuttle.FileAccess.chmod!(dir, 0o700)
+
+              _ ->
+                raise_socket_dir(dir, "it changed while being created")
             end
 
           {:error, :eexist} ->
@@ -855,7 +858,7 @@ defmodule Shuttle.Host do
   end
 
   defp check_socket_dir!(dir, euid) do
-    case File.lstat(dir) do
+    case Shuttle.FileAccess.lstat(dir) do
       {:ok, %File.Stat{type: :directory, mode: mode, uid: uid}} ->
         perms = Bitwise.band(mode, 0o7777)
 
@@ -888,7 +891,7 @@ defmodule Shuttle.Host do
   defp format_mode(perms), do: "0" <> String.pad_leading(Integer.to_string(perms, 8), 3, "0")
 
   defp clear_stale_socket!(path) do
-    case File.lstat(path) do
+    case Shuttle.FileAccess.lstat(path) do
       {:error, :enoent} ->
         :ok
 
@@ -899,7 +902,7 @@ defmodule Shuttle.Host do
             raise ArgumentError, "another daemon is listening on unix://#{path}"
 
           {:error, :econnrefused} ->
-            File.rm!(path)
+            Shuttle.FileAccess.rm!(path)
             :ok
 
           {:error, reason} ->

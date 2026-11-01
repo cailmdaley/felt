@@ -72,12 +72,16 @@ defmodule ShuttleWeb.FileDigests do
   end
 
   defp hash(path) do
-    case File.open(path, [:read, :binary, :raw]) do
+    Shuttle.FileAccess.task(path, fn -> raw_hash(path) end)
+  end
+
+  defp raw_hash(path) do
+    case :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
       {:ok, file} ->
         try do
           hash_chunks(file, :crypto.hash_init(:sha256))
         after
-          File.close(file)
+          :file.close(file)
         end
 
       {:error, _reason} ->

@@ -57,7 +57,7 @@ defmodule Shuttle.MigrationJournal do
   def reverse(entry) do
     # Backend verification can persist a terminal mismatch after the caller
     # captured this entry. Compensation must not overwrite that evidence.
-    with {:ok, bytes} <- File.read(path(entry)),
+    with {:ok, bytes} <- Shuttle.FileAccess.read(path(entry)),
          {:ok, current} <- Jason.decode(bytes),
          :ok <- validate(current),
          true <- current["id"] == entry["id"] and current["host"] == entry["host"],
@@ -71,13 +71,13 @@ defmodule Shuttle.MigrationJournal do
   end
 
   def pending(host \\ Shuttle.Poller.own_host_id()) do
-    with :ok <- File.mkdir_p(root(host)),
-         {:ok, names} <- File.ls(root()),
-         {:ok, owned} <- File.ls(root(host)) do
+    with :ok <- Shuttle.FileAccess.mkdir_p(root(host)),
+         {:ok, names} <- Shuttle.FileAccess.ls(root()),
+         {:ok, owned} <- Shuttle.FileAccess.ls(root(host)) do
       Enum.each(names, fn name ->
         path = Path.join(root(), name)
 
-        if File.dir?(path) and path != root(host),
+        if Shuttle.FileAccess.dir?(path) and path != root(host),
           do: Logger.info("Ignoring foreign migration journal namespace #{path}")
       end)
 
@@ -91,7 +91,7 @@ defmodule Shuttle.MigrationJournal do
       paths
       |> Enum.sort()
       |> Enum.reduce_while({:ok, []}, fn path, {:ok, entries} ->
-        with {:ok, bytes} <- File.read(path),
+        with {:ok, bytes} <- Shuttle.FileAccess.read(path),
              {:ok, %{"host" => owner} = entry} <- Jason.decode(bytes),
              true <- is_binary(owner) and owner != "" do
           if owner == host do
@@ -118,13 +118,13 @@ defmodule Shuttle.MigrationJournal do
     if previous == path(entry) do
       :ok
     else
-      case File.read(path(entry)) do
+      case Shuttle.FileAccess.read(path(entry)) do
         {:error, :enoent} ->
-          with :ok <- put(entry), do: File.rm(previous)
+          with :ok <- put(entry), do: Shuttle.FileAccess.rm(previous)
 
         {:ok, bytes} ->
           if Jason.decode(bytes) == {:ok, entry},
-            do: File.rm(previous),
+            do: Shuttle.FileAccess.rm(previous),
             else: {:error, :journal_namespace_conflict}
 
         error ->
@@ -300,27 +300,31 @@ defmodule Shuttle.MigrationJournal do
   def unresolvable(entry, reason),
     do: put(Map.merge(entry, %{"resolution" => "unresolvable", "reason" => to_string(reason)}))
 
-  def clear(entry), do: File.rm(path(entry))
+  def clear(entry), do: Shuttle.FileAccess.rm(path(entry))
 
   defp path(entry), do: Path.join(root(entry["host"]), entry["id"] <> ".json")
 
   defp put(entry) do
+    Shuttle.FileAccess.task(path(entry), fn -> raw_put(entry) end)
+  end
+
+  defp raw_put(entry) do
     path = path(entry)
     tmp = path <> "." <> Base.encode16(:crypto.strong_rand_bytes(8)) <> ".tmp"
 
-    with :ok <- File.mkdir_p(root(entry["host"])),
-         :ok <- File.chmod(root(), 0o700),
-         :ok <- File.chmod(root(entry["host"]), 0o700),
-         {:ok, file} <- File.open(tmp, [:write, :binary, :exclusive]) do
+    with :ok <- Shuttle.FileAccess.mkdir_p(root(entry["host"])),
+         :ok <- Shuttle.FileAccess.chmod(root(), 0o700),
+         :ok <- Shuttle.FileAccess.chmod(root(entry["host"]), 0o700),
+         {:ok, file} <- :file.open(String.to_charlist(tmp), [:write, :raw, :binary, :exclusive]) do
       result =
-        with :ok <- File.chmod(tmp, 0o600),
-             :ok <- IO.binwrite(file, Jason.encode!(entry)),
+        with :ok <- Shuttle.FileAccess.chmod(tmp, 0o600),
+             :ok <- :file.write(file, Jason.encode!(entry)),
              :ok <- :file.sync(file),
              do: :ok
 
-      File.close(file)
-      result = if result == :ok, do: File.rename(tmp, path), else: result
-      if result != :ok, do: File.rm(tmp)
+      :file.close(file)
+      result = if result == :ok, do: Shuttle.FileAccess.rename(tmp, path), else: result
+      if result != :ok, do: Shuttle.FileAccess.rm(tmp)
       result
     end
   end

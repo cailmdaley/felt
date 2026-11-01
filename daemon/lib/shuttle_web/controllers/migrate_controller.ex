@@ -25,9 +25,15 @@ defmodule ShuttleWeb.MigrateController do
             end
 
           status =
-            if code in ["rollback_failed", "reconciliation_required", "recovery_failed"],
-              do: 503,
-              else: 422
+            if code in [
+                 "rollback_failed",
+                 "reconciliation_required",
+                 "recovery_failed",
+                 "filesystem_unavailable",
+                 "store_inventory_unavailable"
+               ],
+               do: 503,
+               else: 422
 
           conn
           |> put_status(status)

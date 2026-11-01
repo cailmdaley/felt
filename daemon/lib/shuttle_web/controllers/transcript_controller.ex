@@ -76,7 +76,8 @@ defmodule ShuttleWeb.TranscriptController do
           end
 
         {:remote, %Remote{} = remote} ->
-          query = Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
+          query =
+            Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
 
           case OriginRouter.forward_get(remote, "/api/v1/transcript/messages", query) do
             {:forwarded, status, content_type, body} ->
@@ -115,7 +116,7 @@ defmodule ShuttleWeb.TranscriptController do
 
   defp local_stream(conn, session, offset) do
     with path when is_binary(path) <- Transcript.path(session),
-         {:ok, %{size: size} = stat} <- File.stat(path) do
+         {:ok, %{size: size} = stat} <- Shuttle.FileAccess.stat(path) do
       if offset > size do
         conn
         |> put_resp_content_type("application/json")
@@ -173,7 +174,7 @@ defmodule ShuttleWeb.TranscriptController do
   defp local_bytes(conn, session, offset) when is_integer(offset) do
     case Transcript.path(session) do
       path when is_binary(path) ->
-        case File.stat(path) do
+        case Shuttle.FileAccess.stat(path) do
           {:ok, %File.Stat{size: size}} when offset <= size ->
             conn
             |> put_resp_content_type("application/x-ndjson", nil)
@@ -229,7 +230,9 @@ defmodule ShuttleWeb.TranscriptController do
 
   # Bandit raises on a zero-length sendfile, which a poll at EOF asks for.
   defp send_slice(conn, _path, _offset, 0), do: send_resp(conn, 200, "")
-  defp send_slice(conn, path, offset, length), do: send_file(conn, 200, path, offset, length)
+
+  defp send_slice(conn, path, offset, length),
+    do: ShuttleWeb.BoundedFileSender.send_file(conn, 200, path, offset, length)
 
   defp remote_bytes(conn, session, %Remote{} = remote, offset) do
     query = %{"session" => session, "host" => "local"}

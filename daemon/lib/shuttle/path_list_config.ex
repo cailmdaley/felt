@@ -73,7 +73,7 @@ defmodule Shuttle.PathListConfig do
   def read_registered(spec) do
     key = spec.json_key
 
-    case File.read(config_path(spec)) do
+    case Shuttle.FileAccess.read(config_path(spec)) do
       {:ok, content} ->
         case Jason.decode(content) do
           {:ok, %{^key => paths}} when is_list(paths) -> {:ok, normalize(paths)}
@@ -101,14 +101,14 @@ defmodule Shuttle.PathListConfig do
     try do
       case normalized do
         [] ->
-          case File.rm(path) do
+          case Shuttle.FileAccess.rm(path) do
             :ok -> {:ok, normalized}
             {:error, :enoent} -> {:ok, normalized}
             {:error, reason} -> {:error, {:file_error, reason}}
           end
 
         _ ->
-          File.mkdir_p!(Path.dirname(path))
+          Shuttle.FileAccess.mkdir_p!(Path.dirname(path))
           # Unique per write, not `<path>.tmp`. A fixed staging name is atomic
           # against a reader and actively unsafe against a second writer: two
           # concurrent saves share the file, and the first to rename publishes
@@ -116,8 +116,8 @@ defmodule Shuttle.PathListConfig do
           # owner-routed, so two hubs really can save the same host's file at
           # once.
           tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
-          File.write!(tmp, encode(spec, normalized))
-          File.rename!(tmp, path)
+          Shuttle.FileAccess.write!(tmp, encode(spec, normalized))
+          Shuttle.FileAccess.rename!(tmp, path)
           {:ok, normalized}
       end
     rescue

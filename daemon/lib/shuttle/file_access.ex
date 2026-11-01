@@ -42,6 +42,13 @@ defmodule Shuttle.FileAccess do
   clear a protected-folder block.
   """
   use Supervisor
+  require Record
+
+  Record.defrecordp(
+    :file_info_record,
+    :file_info,
+    Record.extract(:file_info, from_lib: "kernel/include/file.hrl")
+  )
 
   def start_link(opts \\ []) do
     opts = Keyword.merge(Shuttle.Env.app(__MODULE__, []), opts)
@@ -87,6 +94,15 @@ defmodule Shuttle.FileAccess do
       error ->
         error
     end
+  end
+
+  def cwd! do
+    run("/", fn _ ->
+      case :prim_file.get_cwd() do
+        {:ok, path} -> to_string(path)
+        {:error, reason} -> raise File.Error, reason: reason, action: "get working directory"
+      end
+    end)
   end
 
   def protected_roots do
@@ -196,6 +212,141 @@ defmodule Shuttle.FileAccess do
       {:error, reason} -> raise File.Error, reason: reason, action: "read file", path: path
     end
   end
+
+  @doc "Write and close a raw file within one native-I/O lease."
+  def write(path, bytes, modes \\ []) do
+    run(
+      path,
+      fn resolved ->
+        with {:ok, fd} <- :file.open(native(resolved), [:write, :binary, :raw] ++ modes) do
+          try do
+            :file.write(fd, bytes)
+          after
+            :file.close(fd)
+          end
+        end
+      end,
+      follow_final: :exclusive not in modes
+    )
+  end
+
+  @doc "Open, use and close a raw descriptor in its leased worker."
+  def open(path, modes, fun) when is_function(fun, 1) do
+    run(
+      path,
+      fn resolved ->
+        with {:ok, fd} <- :file.open(native(resolved), [:raw | modes]) do
+          try do
+            {:ok, fun.(fd)}
+          after
+            :file.close(fd)
+          end
+        end
+      end,
+      follow_final: :exclusive not in modes
+    )
+  end
+
+  def touch(path) do
+    run(path, fn resolved ->
+      now = :calendar.local_time()
+
+      case :prim_file.write_file_info(native(resolved), file_info_record(atime: now, mtime: now)) do
+        {:error, :enoent} -> write(resolved, "")
+        result -> result
+      end
+    end)
+  end
+
+  def rm_rf(path) do
+    run(path, fn resolved -> remove_tree(resolved, []) end, follow_final: false)
+  end
+
+  defp remove_tree(path, removed) do
+    case lstat(path) do
+      {:error, :enoent} ->
+        {:ok, removed}
+
+      {:ok, %File.Stat{type: :directory}} ->
+        with {:ok, names} <- ls(path),
+             {:ok, removed} <-
+               Enum.reduce_while(names, {:ok, removed}, fn name, {:ok, acc} ->
+                 case remove_tree(Path.join(path, name), acc) do
+                   {:ok, acc} -> {:cont, {:ok, acc}}
+                   error -> {:halt, error}
+                 end
+               end),
+             :ok <- rmdir(path),
+             do: {:ok, [path | removed]}
+
+      {:ok, _} ->
+        with :ok <- rm(path), do: {:ok, [path | removed]}
+
+      {:error, reason} ->
+        {:error, reason, path}
+    end
+  end
+
+  def write!(path, bytes, modes \\ []), do: bang(write(path, bytes, modes), "write file", path)
+  def read_link!(path), do: bang(read_link(path), "read link", path)
+
+  def mkdir(path), do: run(path, &:prim_file.make_dir(native(&1)))
+
+  def mkdir_p(path) do
+    run(path, fn resolved -> raw_mkdir_p(resolved) end)
+  end
+
+  def mkdir_p!(path), do: bang(mkdir_p(path), "make directory", path)
+
+  defp raw_mkdir_p(path) do
+    case :prim_file.make_dir(native(path)) do
+      :ok ->
+        :ok
+
+      {:error, :eexist} ->
+        case :file.read_file_info(native(path), [:raw]) do
+          {:ok, record} ->
+            if File.Stat.from_record(record).type == :directory, do: :ok, else: {:error, :eexist}
+
+          error ->
+            error
+        end
+
+      {:error, :enoent} ->
+        with :ok <- raw_mkdir_p(Path.dirname(path)), do: raw_mkdir_p(path)
+
+      error ->
+        error
+    end
+  end
+
+  def chmod(path, mode),
+    do: run(path, &:prim_file.write_file_info(native(&1), file_info_record(mode: mode)))
+
+  def chmod!(path, mode), do: bang(chmod(path, mode), "change mode", path)
+  def rm(path), do: run(path, &:prim_file.delete(native(&1)), follow_final: false)
+  def rm!(path), do: bang(rm(path), "remove file", path)
+  def rmdir(path), do: run(path, &:prim_file.del_dir(native(&1)))
+
+  def rename(source, destination) do
+    run(
+      source,
+      fn resolved ->
+        run(destination, fn target -> :prim_file.rename(native(resolved), native(target)) end,
+          follow_final: false
+        )
+      end,
+      follow_final: false
+    )
+  end
+
+  def rename!(source, destination), do: bang(rename(source, destination), "rename file", source)
+
+  defp bang(:ok, _action, _path), do: :ok
+  defp bang({:ok, value}, _action, _path), do: value
+
+  defp bang({:error, reason}, action, path),
+    do: raise(File.Error, reason: reason, action: action, path: path)
 
   def stat(path, opts \\ []), do: file_info(path, opts, :stat)
   def lstat(path, opts \\ []), do: file_info(path, opts, :lstat)
@@ -583,7 +734,7 @@ defmodule Shuttle.FileAccess.Journal do
   end
 
   def handle_call({:path, ref, physical, logical}, _from, state) do
-    root = Enum.find(state.roots, &within?(physical, &1))
+    root = root_for(state, physical) || (logical && root_for(state, logical))
 
     continuing =
       case state.jobs[ref] do
@@ -591,16 +742,16 @@ defmodule Shuttle.FileAccess.Journal do
         _ -> false
       end
 
-    known_alias =
-      logical &&
-        Enum.any?(state.aliases, fn {prefix, mapped_root} ->
-          mapped_root == root and within?(logical, prefix)
-        end)
-
     state =
-      if root && logical && logical != physical && not known_alias,
-        do: put_in(state.aliases[logical], root),
-        else: state
+      if root do
+        Enum.reduce([logical, physical], state, fn prefix, state ->
+          if prefix && prefix != root && root_for(state, prefix) != root,
+            do: put_in(state.aliases[prefix], root),
+            else: state
+        end)
+      else
+        state
+      end
 
     state = if Map.has_key?(state.jobs, ref), do: put_in(state.jobs[ref].root, root), else: state
 
@@ -699,6 +850,9 @@ defmodule Shuttle.FileAccess.Journal do
     {state, {:transient, %Error{reason: :blocked, path: root, cause: reason}}}
   end
 
+  defp completion(state, job, {:result, {:error, reason}}) when reason in [:eacces, :eperm],
+    do: {state, {:transient, %Error{reason: :denied, path: job.path, cause: reason}}}
+
   defp completion(state, _job, result), do: {state, result}
 
   defp cancel_timer(nil), do: :ok
@@ -738,7 +892,7 @@ defmodule Shuttle.FileAccess.Journal do
       Logger.warning(
         "Filesystem access blocked for #{root} (#{cause}). " <>
           "Grant the shuttle launcher Files & Folders access or Full Disk Access in " <>
-          "macOS System Settings → Privacy & Security, then reset FileAccess or complete the pending request."
+          "macOS System Settings → Privacy & Security, then restart the daemon or complete the pending request."
       )
 
       put_in(state.blocked[root], %{

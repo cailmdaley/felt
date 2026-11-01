@@ -255,12 +255,14 @@ defmodule Shuttle.RemotesTest do
       assert Remotes.registered() == []
     end
 
-    test "an unreadable file degrades the same way" do
+    test "an unreadable file reports the denied path" do
       path = write_remotes(~s({"remotes": [{"name": "a", "port": 4001}]}))
       File.chmod!(path, 0o000)
       on_exit(fn -> File.chmod(path, 0o644) end)
       Shuttle.Test.Env.put_env("SHUTTLE_REMOTES_FILE", path)
-      assert Remotes.registered() == []
+      error = assert_raise Shuttle.FileAccess.Error, fn -> Remotes.registered() end
+      assert error.reason == :denied
+      assert error.path == path
     end
 
     test "a disabled entry stays on file without being polled" do

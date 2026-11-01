@@ -133,7 +133,7 @@ defmodule ShuttleWeb.ProjectsController do
       Path.type(trimmed) != :absolute and not String.starts_with?(trimmed, "~") ->
         conn |> put_status(400) |> json(%{ok: false, error: "path must be absolute"})
 
-      not File.dir?(expanded) ->
+      not Shuttle.FileAccess.dir?(expanded) ->
         conn |> put_status(400) |> json(%{ok: false, error: "not a directory: #{expanded}"})
 
       true ->
@@ -147,7 +147,7 @@ defmodule ShuttleWeb.ProjectsController do
   # `initialized` reports whether `.felt/` was absent before `felt init` ran;
   # felt itself is idempotent and leaves an existing store's files alone.
   defp ensure_store(root) do
-    already? = File.dir?(Path.join(root, ".felt"))
+    already? = Shuttle.FileAccess.dir?(Path.join(root, ".felt"))
 
     case Felt.run(["-C", root, "init"]) do
       {:ok, _output} ->

@@ -66,7 +66,7 @@ defmodule Shuttle.Terminal.Tmux do
   def paste(runner, session, text) when is_binary(text) do
     buffer = "shuttle-paste-" <> Integer.to_string(System.unique_integer([:positive]))
     path = Path.join(System.tmp_dir!(), buffer)
-    File.write!(path, text)
+    Shuttle.FileAccess.write!(path, text)
 
     try do
       runner.cmd("tmux", ["send-keys", "-t", session, "-X", "cancel"], stderr_to_stdout: true)
@@ -85,7 +85,7 @@ defmodule Shuttle.Terminal.Tmux do
         {output, _status} -> {:error, "tmux: " <> String.trim(to_string(output))}
       end
     after
-      File.rm(path)
+      Shuttle.FileAccess.rm(path)
     end
   end
 

@@ -363,7 +363,7 @@ defmodule Shuttle.SessionLink do
   end
 
   defp transcript_path(%{path: path}, session, roots) do
-    case File.stat(path) do
+    case Shuttle.FileAccess.stat(path) do
       {:ok, %{type: :regular}} ->
         {:ok, path}
 

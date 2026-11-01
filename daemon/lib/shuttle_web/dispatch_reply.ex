@@ -112,6 +112,18 @@ defmodule ShuttleWeb.DispatchReply do
      }}
   end
 
+  def render(fiber_id, {:error, {reason, message}})
+      when reason in [:filesystem_unavailable, :store_inventory_unavailable] do
+    {503,
+     %{
+       dispatched: false,
+       retryable: true,
+       reason: to_string(reason),
+       fiber_id: fiber_id,
+       message: message
+     }}
+  end
+
   def render(fiber_id, {:error, :poller_busy}) do
     {504,
      %{

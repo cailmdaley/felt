@@ -163,6 +163,8 @@ defmodule Shuttle.Poller do
       # start_link; false when the caller passed an explicit list (tests,
       # manual overrides — respect them).
       :auto_discover_felt_stores,
+      :felt_store_inventory_error,
+      :filesystem_error,
       :runner,
       reconciliation_hold: nil,
       poll_check_in_progress: false,
@@ -835,10 +837,19 @@ defmodule Shuttle.Poller do
     Shuttle.ThreadOutbox.boot_baseline()
     sweep_stale_ids_dirs()
 
-    {felt_stores, auto_discover} =
+    {felt_stores, auto_discover, inventory_error} =
       case Keyword.fetch(opts, :felt_stores) do
-        {:ok, hosts} -> {hosts, false}
-        :error -> {Shuttle.FeltStores.configured_stores(), true}
+        {:ok, hosts} ->
+          {hosts, false, nil}
+
+        :error ->
+          try do
+            {Shuttle.FeltStores.configured_stores(), true, nil}
+          rescue
+            error in Shuttle.FileAccess.Error ->
+              Logger.error("felt store inventory unavailable: #{Exception.message(error)}")
+              {[], true, Exception.message(error)}
+          end
       end
 
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
@@ -880,6 +891,7 @@ defmodule Shuttle.Poller do
       felt_stores: felt_stores,
       own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
+      felt_store_inventory_error: inventory_error,
       runner: runner,
       full_scan_budget_ms:
         Keyword.get_lazy(opts, :full_scan_budget_ms, fn ->
@@ -954,10 +966,12 @@ defmodule Shuttle.Poller do
     # `running` from tmux by adopting any live shuttle sessions — a restart
     # re-scans tmux and is immediately correct, and running work survives because
     # tmux owns the worker process.
-    state = recover_migrations(state)
+    state = if inventory_error, do: state, else: recover_migrations(state)
 
     state =
-      if state.reconciliation_hold, do: state, else: SessionReconciliation.adopt_orphans(state)
+      if state.reconciliation_hold || inventory_error,
+        do: state,
+        else: SessionReconciliation.adopt_orphans(state)
 
     # Adoption must settle before a healthy crash boot can release fresh work.
     state = maybe_auto_release_boot_quarantine(state, previous_heartbeat)
@@ -1106,14 +1120,46 @@ defmodule Shuttle.Poller do
 
   @impl true
   def handle_call(request, from, state) do
-    transition_call(request, from, state)
-    |> publish_after_transition(request)
+    if state.felt_store_inventory_error && is_tuple(request) &&
+         elem(request, 0) in [
+           :dispatch,
+           :capture,
+           :claim_session,
+           :migrate,
+           :lifecycle_transition
+         ] do
+      {:reply, {:error, {:store_inventory_unavailable, state.felt_store_inventory_error}}, state}
+    else
+      transition_call(request, from, state)
+      |> publish_after_transition(request)
+    end
+  rescue
+    error in Shuttle.FileAccess.Error ->
+      reason = {:filesystem_unavailable, Exception.message(error)}
+      Logger.warning("Poller request refused: #{Exception.message(error)}")
+
+      {:reply, {:error, reason}, %{state | filesystem_error: Exception.message(error)}}
+      |> publish_after_transition(request)
   end
 
   @impl true
   def handle_info(message, state) do
     transition_info(message, state)
     |> publish_after_transition(message)
+  rescue
+    error in Shuttle.FileAccess.Error ->
+      Logger.warning("Poller observation deferred: #{Exception.message(error)}")
+      state = state |> cancel_poll_stall_timer() |> stop_poll_task()
+
+      state = %{
+        state
+        | filesystem_error: Exception.message(error),
+          poll_check_in_progress: false,
+          poll_token: nil
+      }
+
+      {:noreply, schedule_tick(state, state.poll_interval_ms)}
+      |> publish_after_transition(message)
   end
 
   defp initialize_publication(%State{} = state) do
@@ -1239,6 +1285,8 @@ defmodule Shuttle.Poller do
       :felt_stores,
       :max_concurrent_workers,
       :reconciliation_hold,
+      :felt_store_inventory_error,
+      :filesystem_error,
       :poll_check_in_progress,
       :poll_stalls,
       :last_poll_stalled_at,
@@ -2437,6 +2485,11 @@ defmodule Shuttle.Poller do
            document_cache_refresh_ms: document_cache_refresh_ms
          } = world
        ) do
+    state =
+      if state.felt_store_inventory_error,
+        do: recover_migrations(%{state | felt_stores: felt_stores}),
+        else: state
+
     log_discovery_mode_changes(state.discovery, discovery)
     log_document_cache_refresh(state, document_cache_stats, document_cache_refresh_ms)
 
@@ -2463,6 +2516,8 @@ defmodule Shuttle.Poller do
     state = %{
       state
       | felt_stores: felt_stores,
+        felt_store_inventory_error: nil,
+        filesystem_error: nil,
         last_known_listings:
           state.last_known_listings |> Map.merge(store_listings) |> Map.take(felt_stores),
         last_full_listings:
@@ -3166,7 +3221,7 @@ defmodule Shuttle.Poller do
       with true <- cli == "pi",
            {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
         cond do
-          signal != nil and not File.exists?(signal) ->
+          signal != nil and not Shuttle.FileAccess.exists?(signal) ->
             Dispatcher.monitor_resume_fallback(
               fiber_id,
               cli,
@@ -3411,7 +3466,7 @@ defmodule Shuttle.Poller do
   defp list_shuttle_fibers(store, state, ids_from, timeout_ms, slow_scan? \\ false) do
     felt_dir = Path.join(store, ".felt")
 
-    case File.lstat(felt_dir) do
+    case Shuttle.FileAccess.lstat(felt_dir) do
       {:ok, %File.Stat{type: :symlink}} ->
         {:ok, %{rows: [], foreign_ids: []}}
 
@@ -3431,7 +3486,7 @@ defmodule Shuttle.Poller do
   end
 
   defp empty_dir?(dir) do
-    case File.ls(dir) do
+    case Shuttle.FileAccess.ls(dir) do
       {:ok, entries} -> entries == []
       _ -> true
     end
@@ -3789,7 +3844,7 @@ defmodule Shuttle.Poller do
 
     cond do
       is_nil(declared) -> {:ok, nil}
-      File.dir?(declared) -> {:ok, declared}
+      Shuttle.FileAccess.dir?(declared) -> {:ok, declared}
       true -> {:error, {:project_dir_missing, declared}}
     end
   end
@@ -4121,10 +4176,12 @@ defmodule Shuttle.Poller do
   # The fiber the dispatch then reads is fetched afresh, so the worker's cwd is
   # the `project_dir` the CLI saved.
   defp prepare_forced_start(%State{} = state, fiber_id, runtime_key, uid, opts) do
+    # An uncertain app-worker observation cannot authorize even a fresh cut.
+    open? = open_session?(state, fiber_id, runtime_key, uid)
+
     launches? =
       Keyword.get(opts, :force, false) and
-        (Keyword.get(opts, :resume_mode) == "fresh" or
-           not open_session?(state, fiber_id, runtime_key, uid))
+        (Keyword.get(opts, :resume_mode) == "fresh" or not open?)
 
     if launches? do
       case fetch_fiber_full(fiber_id, state) do
@@ -4191,7 +4248,7 @@ defmodule Shuttle.Poller do
             )
 
           dir ->
-            if File.dir?(dir),
+            if Shuttle.FileAccess.dir?(dir),
               do: {:ok, :declared},
               else:
                 arm_refused(
@@ -4297,6 +4354,11 @@ defmodule Shuttle.Poller do
         work_dir = project_dir || felt_store
         spawn_worker(state, fiber, fiber_id, runtime_key, felt_store, work_dir, opts)
     end
+  rescue
+    error in Shuttle.FileAccess.Error ->
+      reason = {:filesystem_unavailable, Exception.message(error)}
+      Logger.warning("Dispatch deferred for #{fiber["id"]}: #{Exception.message(error)}")
+      {record_dispatch_failure(state, fiber, reason), {:error, reason}}
   end
 
   # The spawn itself, once the work directory has been vouched for.
@@ -4578,7 +4640,9 @@ defmodule Shuttle.Poller do
             get_in(cached_fiber(state, fiber_id) || %{}, ["shuttle", "runtime", "dispatched_at"])
 
           signal = Dispatcher.pending_resume_fallback(worker.session, boundary)
-          if signal && File.exists?(signal), do: Dispatcher.complete_resume_fallback(signal, uuid)
+
+          if signal && Shuttle.FileAccess.exists?(signal),
+            do: Dispatcher.complete_resume_fallback(signal, uuid)
 
           worker =
             worker
@@ -6019,20 +6083,24 @@ defmodule Shuttle.Poller do
         "shuttle-ids-#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}"
       )
 
-    case File.mkdir(dir) do
+    case Shuttle.FileAccess.mkdir(dir) do
       :ok ->
         try do
-          :ok = File.chmod(dir, 0o700)
+          :ok = Shuttle.FileAccess.chmod(dir, 0o700)
           path = Path.join(dir, "ids")
 
-          case File.write(path, Enum.join(ids, "\n") <> if(ids == [], do: "", else: "\n"), [
-                 :exclusive
-               ]) do
+          case Shuttle.FileAccess.write(
+                 path,
+                 Enum.join(ids, "\n") <> if(ids == [], do: "", else: "\n"),
+                 [
+                   :exclusive
+                 ]
+               ) do
             :ok -> fun.(path)
             {:error, reason} -> {:error, {:ids_file, reason}}
           end
         after
-          File.rm_rf(dir)
+          Shuttle.FileAccess.rm_rf(dir)
         end
 
       {:error, reason} ->
@@ -6044,13 +6112,13 @@ defmodule Shuttle.Poller do
     tmp_dir = System.tmp_dir!()
     cutoff = System.os_time(:second) - 3_600
 
-    case File.ls(tmp_dir) do
+    case Shuttle.FileAccess.ls(tmp_dir) do
       {:ok, names} ->
         Enum.each(names, fn name ->
           if String.starts_with?(name, "shuttle-ids-") do
             path = Path.join(tmp_dir, name)
 
-            case File.lstat(path) do
+            case Shuttle.FileAccess.lstat(path) do
               {:ok, %File.Stat{type: :directory, mtime: mtime}} ->
                 mtime_seconds =
                   mtime
@@ -6061,7 +6129,7 @@ defmodule Shuttle.Poller do
                     )
                   )
 
-                if mtime_seconds < 0, do: File.rm_rf(path)
+                if mtime_seconds < 0, do: Shuttle.FileAccess.rm_rf(path)
 
               _ ->
                 :ok
@@ -6227,7 +6295,12 @@ defmodule Shuttle.Poller do
       full_scan_budget_ms: state.full_scan_budget_ms,
       discovery: discovery_snapshot(state),
       stalls: state.poll_stalls,
-      last_stalled_at: iso8601_or_nil(state.last_poll_stalled_at)
+      last_stalled_at: iso8601_or_nil(state.last_poll_stalled_at),
+      filesystem_error: state.filesystem_error,
+      store_inventory: %{
+        state: if(state.felt_store_inventory_error, do: "unavailable", else: "available"),
+        reason: state.felt_store_inventory_error
+      }
     })
   end
 

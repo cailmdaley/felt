@@ -664,7 +664,7 @@ defmodule ShuttleWeb.FileControllerTest do
       assert [etag] = get_resp_header(conn, "etag")
       assert etag =~ ~r/^W\/"stat-/
       assert reads == []
-      assert conn.state == :file
+      assert conn.state == :chunked
     end
 
     @tag :tmp_dir
@@ -683,7 +683,7 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
-    test "large full GET delegates to send_file without a whole-file read", %{tmp_dir: dir} do
+    test "large full GET streams bounded chunks without a whole-file read", %{tmp_dir: dir} do
       path = sparse_file(dir, 2 * 1024 * 1024)
 
       {conn, reads} =
@@ -692,7 +692,7 @@ defmodule ShuttleWeb.FileControllerTest do
         end)
 
       assert conn.status == 200
-      assert conn.state == :file
+      assert conn.state == :chunked
       assert reads == []
     end
 
@@ -719,7 +719,7 @@ defmodule ShuttleWeb.FileControllerTest do
     end
 
     @tag :tmp_dir
-    test "large suffix ranges and If-Range fallbacks keep file-backed responses", %{tmp_dir: dir} do
+    test "large suffix ranges and If-Range fallbacks stream bounded chunks", %{tmp_dir: dir} do
       path = sparse_file(dir, 2 * 1024 * 1024)
       url = "/api/v1/file?path=#{URI.encode_www_form(path)}"
       first = api_conn() |> head(url)
@@ -729,7 +729,7 @@ defmodule ShuttleWeb.FileControllerTest do
       suffix = api_conn() |> put_req_header("range", "bytes=-3") |> get(url)
       assert suffix.status == 206
       assert suffix.resp_body == <<0, 0, 0>>
-      assert suffix.state == :file
+      assert suffix.state == :chunked
       assert get_resp_header(suffix, "content-range") == ["bytes 2097149-2097151/2097152"]
 
       for {validator, status} <- [
@@ -746,7 +746,7 @@ defmodule ShuttleWeb.FileControllerTest do
           end)
 
         assert conn.status == status
-        assert conn.state == :file
+        assert conn.state == :chunked
         assert reads == []
       end
     end
@@ -802,7 +802,7 @@ defmodule ShuttleWeb.FileControllerTest do
 
       first = get(api_conn(), url)
       assert first.status == 200
-      assert first.state == :file
+      assert first.state == :chunked
       assert get_resp_header(first, "etag") == [~s(W/"sha256-#{digest}")]
 
       again = api_conn() |> put_req_header("if-none-match", ~s(W/"sha256-#{digest}")) |> get(url)

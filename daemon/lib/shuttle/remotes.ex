@@ -379,7 +379,7 @@ defmodule Shuttle.Remotes do
     with "/" <> _ <- home,
          path = Path.join(home, @default_socket_path),
          {:ok, ^path} <- Remote.normalize_socket_path(path),
-         {:ok, _stat} <- File.lstat(path) do
+         {:ok, _stat} <- Shuttle.FileAccess.lstat(path) do
       cond do
         (Shuttle.Env.app(:os_type) || :os.type()) != {:unix, :linux} ->
           {:refused, path, "default socket is Linux-only"}
@@ -464,7 +464,7 @@ defmodule Shuttle.Remotes do
           {{integer(), non_neg_integer()} | nil, non_neg_integer(), String.t() | nil}
   def config_token do
     file =
-      case File.stat(config_path(), time: :posix) do
+      case Shuttle.FileAccess.stat(config_path(), time: :posix) do
         {:ok, %File.Stat{mtime: mtime, size: size}} -> {mtime, size}
         _ -> nil
       end
@@ -496,7 +496,7 @@ defmodule Shuttle.Remotes do
   defp read_document do
     path = config_path()
 
-    with {:ok, content} <- File.read(path),
+    with {:ok, content} <- Shuttle.FileAccess.read(path),
          {:ok, decoded} <- Jason.decode(content) do
       {:ok, decoded}
     else

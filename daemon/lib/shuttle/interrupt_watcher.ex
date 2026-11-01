@@ -83,7 +83,7 @@ defmodule Shuttle.InterruptWatcher do
     path = memo[:path] || state.path.(id)
     memo = Map.merge(%{size: nil, emitted: nil}, memo) |> Map.put(:path, path)
 
-    case is_binary(path) && File.stat(path) do
+    case is_binary(path) && Shuttle.FileAccess.stat(path) do
       {:ok, %{size: size}} when size != memo.size ->
         memo = %{memo | size: size}
 
@@ -104,7 +104,7 @@ defmodule Shuttle.InterruptWatcher do
   defp tail(path, size) do
     offset = max(size - @tail_bytes, 0)
 
-    case File.open(path, [:read, :binary], &:file.pread(&1, offset, size - offset)) do
+    case Shuttle.FileAccess.open(path, [:read, :binary], &:file.pread(&1, offset, size - offset)) do
       {:ok, {:ok, bytes}} -> bytes
       _ -> ""
     end

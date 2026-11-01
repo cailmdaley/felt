@@ -22,6 +22,7 @@ defmodule Shuttle.RuntimeCacheTest do
 
   test "path and executable lookup work before the cache owner starts" do
     script = """
+    {:ok, _} = Shuttle.FileAccess.start_link()
     false = Process.whereis(Shuttle.RuntimeCache) != nil
     true = is_binary(Shuttle.Env.home())
     true = is_binary(Shuttle.Env.expand("~/.config"))

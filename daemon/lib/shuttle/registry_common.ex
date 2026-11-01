@@ -185,19 +185,19 @@ defmodule Shuttle.RegistryCommon do
 
     # No ancestry walk on steady-state writes. Recreate a missing cache
     # directory on demand, including after an operator deletes it at runtime.
-    case File.write(tmp, data) do
+    case Shuttle.FileAccess.write(tmp, data) do
       :ok ->
         :ok
 
       {:error, :enoent} ->
-        File.mkdir_p!(dir)
-        File.write!(tmp, data)
+        Shuttle.FileAccess.mkdir_p!(dir)
+        Shuttle.FileAccess.write!(tmp, data)
 
       {:error, reason} ->
         raise File.Error, reason: reason, action: "write file", path: tmp
     end
 
-    File.rename!(tmp, path)
+    Shuttle.FileAccess.rename!(tmp, path)
     :ok
   rescue
     error ->
@@ -223,7 +223,7 @@ defmodule Shuttle.RegistryCommon do
   def load_all(nil), do: %{}
 
   def load_all(dir) do
-    case File.ls(dir) do
+    case Shuttle.FileAccess.ls(dir) do
       {:ok, files} ->
         files
         |> Enum.filter(&String.ends_with?(&1, ".json"))
@@ -235,7 +235,7 @@ defmodule Shuttle.RegistryCommon do
   end
 
   defp load_file(path) do
-    with {:ok, raw} <- File.read(path),
+    with {:ok, raw} <- Shuttle.FileAccess.read(path),
          {:ok, %{} = decoded} <- Jason.decode(raw) do
       decoded
     else

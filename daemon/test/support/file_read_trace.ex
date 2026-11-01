@@ -4,6 +4,7 @@ defmodule Shuttle.Test.FileReadTrace do
   def run(fun) do
     parent = self()
     :erlang.trace_pattern({File, :read, 1}, true, [:local])
+    :erlang.trace_pattern({Shuttle.FileAccess, :read, 2}, true, [:local])
 
     worker =
       spawn(fn ->
@@ -27,14 +28,21 @@ defmodule Shuttle.Test.FileReadTrace do
       collect(worker, [])
     after
       :erlang.trace_pattern({File, :read, 1}, false, [:local])
+      :erlang.trace_pattern({Shuttle.FileAccess, :read, 2}, false, [:local])
       Process.exit(worker, :kill)
     end
   end
 
   defp collect(worker, reads) do
     receive do
-      {:trace, ^worker, :call, {File, :read, [path]}} -> collect(worker, [path | reads])
-      {:result, ^worker, result} -> {result, Enum.reverse(reads)}
+      {:trace, ^worker, :call, {File, :read, [path]}} ->
+        collect(worker, [path | reads])
+
+      {:trace, ^worker, :call, {Shuttle.FileAccess, :read, [path, _opts]}} ->
+        collect(worker, [path | reads])
+
+      {:result, ^worker, result} ->
+        {result, Enum.reverse(reads)}
     after
       10_000 -> raise "file request did not complete"
     end

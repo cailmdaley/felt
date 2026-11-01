@@ -331,8 +331,8 @@ defmodule Shuttle.RemoteControl do
   defp spawn_host(state, config, script) do
     path = WorkerProcess.script_path(@session)
 
-    with :ok <- File.write(path, script),
-         :ok <- File.chmod(path, 0o700) do
+    with :ok <- Shuttle.FileAccess.write(path, script),
+         :ok <- Shuttle.FileAccess.chmod(path, 0o700) do
       # An empty pane cannot race to exit before remain-on-exit and the digest
       # are set. Only respawn-pane starts the login shell / host command.
       args = [
