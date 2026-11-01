@@ -115,8 +115,9 @@ func (a *app) resolveMessageTargetOnce(target string) (string, error) {
 			return "", err
 		}
 	}
-	if fiberLookup.candidateCount() == 0 && !fiberLookup.refused() {
-		fiberLookup.Fibers = a.ownerFeedFibers(target)
+	var feedErr error
+	if len(sessionCandidates) == 0 && fiberLookup.candidateCount() == 0 && !fiberLookup.refused() {
+		fiberLookup.Fibers, feedErr = a.ownerFeedFibers(target)
 	}
 	sessionCandidates = uniqueMessageCandidates(sessionCandidates)
 	if len(unmappedLedger) > 0 {
@@ -140,6 +141,9 @@ func (a *app) resolveMessageTargetOnce(target string) (string, error) {
 	}
 	if len(lookupErrors) > 0 {
 		return "", fmt.Errorf("message target %q did not resolve (%s)", target, strings.Join(lookupErrors, "; "))
+	}
+	if feedErr != nil {
+		return "", fmt.Errorf("message target %q did not match a discovered session or exact fiber (the owner feed was unreadable: %v)", target, feedErr)
 	}
 	return "", fmt.Errorf("message target %q did not match a discovered session or exact fiber", target)
 }
@@ -484,11 +488,11 @@ func shuttleRuntimeSessionID(f *felt.Felt) string {
 
 // ownerFeedFibers finds a constitution its owner reports by exact path or UID
 // when this host's stores do not hold it: a thread created on another host is
-// addressable before Git carries its document here. Feed errors mean no match.
-func (a *app) ownerFeedFibers(target string) []*felt.Felt {
+// addressable before Git carries its document here.
+func (a *app) ownerFeedFibers(target string) ([]*felt.Felt, error) {
 	feed, err := a.fetchStatusFeed()
-	if err != nil || feed == nil {
-		return nil
+	if err != nil {
+		return nil, err
 	}
 	var fibers []*felt.Felt
 	for _, entry := range feed.Fibers {
@@ -504,5 +508,5 @@ func (a *app) ownerFeedFibers(target string) []*felt.Felt {
 		}
 		fibers = append(fibers, f)
 	}
-	return fibers
+	return fibers, nil
 }
