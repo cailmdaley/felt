@@ -76,7 +76,8 @@ defmodule ShuttleWeb.TranscriptController do
           end
 
         {:remote, %Remote{} = remote} ->
-          query = Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
+          query =
+            Map.take(params, ["since"]) |> Map.merge(%{"session" => session, "host" => "local"})
 
           case OriginRouter.forward_get(remote, "/api/v1/transcript/messages", query) do
             {:forwarded, status, content_type, body} ->

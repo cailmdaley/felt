@@ -41,7 +41,11 @@ defmodule ShuttleWeb.TranscriptMessagesControllerTest do
 
   test "passes an incremental cursor to the host-local reader" do
     local_conn()
-    |> get("/api/v1/transcript/messages", %{"session" => @session, "host" => "local", "since" => "123456"})
+    |> get("/api/v1/transcript/messages", %{
+      "session" => @session,
+      "host" => "local",
+      "since" => "123456"
+    })
     |> json_response(200)
 
     assert_received {:argv, ["transcript", "messages", @session, "--json", "--since", "123456"]}
@@ -78,7 +82,11 @@ defmodule ShuttleWeb.TranscriptMessagesControllerTest do
 
     assert response(
              local_conn()
-             |> get("/api/v1/transcript/messages", %{"session" => @session, "host" => "owner-a", "since" => "123456"}),
+             |> get("/api/v1/transcript/messages", %{
+               "session" => @session,
+               "host" => "owner-a",
+               "since" => "123456"
+             }),
              200
            ) == payload
 

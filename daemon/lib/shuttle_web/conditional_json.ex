@@ -11,7 +11,9 @@ defmodule ShuttleWeb.ConditionalJSON do
   def send(conn, body) do
     encoded = Jason.encode!(body)
     validator_body = Map.delete(body, :generated_at) |> Jason.encode!()
-    etag = "W/\"" <> (:crypto.hash(:sha256, validator_body) |> Base.encode16(case: :lower)) <> "\""
+
+    etag =
+      "W/\"" <> (:crypto.hash(:sha256, validator_body) |> Base.encode16(case: :lower)) <> "\""
 
     conn =
       conn

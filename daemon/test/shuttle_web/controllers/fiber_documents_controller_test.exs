@@ -805,7 +805,12 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     """)
 
     File.write!(Path.join([store, ".felt", "tests", "single", "report.html"]), "<p>report</p>\n")
-    File.write!(Path.join([store, ".felt", "tests", "single", "artifact.html"]), "<p>artifact</p>\n")
+
+    File.write!(
+      Path.join([store, ".felt", "tests", "single", "artifact.html"]),
+      "<p>artifact</p>\n"
+    )
+
     report = Path.join(real_fiber_dir(store, "tests/single"), "artifact.html")
 
     conn = get(api_conn(), "/api/v1/fibers/tests/single")
@@ -1130,8 +1135,15 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] == "fiber not found on test-host: tests/absent"
   end
 
-  test "GET /api/v1/fibers/composite honors ETag and changes it when its body changes", %{store: store} do
-    write_fiber!(store, "tests/etag", "---\nname: Before\nstatus: active\nshuttle:\n  host: test-host\n---\n")
+  test "GET /api/v1/fibers/composite honors ETag and changes it when its body changes", %{
+    store: store
+  } do
+    write_fiber!(
+      store,
+      "tests/etag",
+      "---\nname: Before\nstatus: active\nshuttle:\n  host: test-host\n---\n"
+    )
+
     warm_poller!(store)
 
     first = get(api_conn(), "/api/v1/fibers/composite")
@@ -1140,11 +1152,18 @@ defmodule ShuttleWeb.FiberDocumentsControllerTest do
     assert get_resp_header(first, "cache-control") == ["no-cache"]
     assert etag =~ ~r/^W\/\"[0-9a-f]{64}\"$/
 
-    unchanged = api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers/composite")
+    unchanged =
+      api_conn() |> put_req_header("if-none-match", etag) |> get("/api/v1/fibers/composite")
+
     assert unchanged.status == 304
     assert unchanged.resp_body == ""
 
-    write_fiber!(store, "tests/etag", "---\nname: After\nstatus: active\nshuttle:\n  host: test-host\n---\n")
+    write_fiber!(
+      store,
+      "tests/etag",
+      "---\nname: After\nstatus: active\nshuttle:\n  host: test-host\n---\n"
+    )
+
     warm_poller!(store)
     changed = get(api_conn(), "/api/v1/fibers/composite")
     assert changed.status == 200

@@ -17,8 +17,10 @@ defmodule Shuttle.Messaging.SessionFiberCache do
   end
 
   def lookup do
-    case :ets.lookup(@table, @entry) do
-      [{@entry, value}] -> value
+    key = Shuttle.Env.scope_key(@entry)
+
+    case :ets.lookup(@table, key) do
+      [{^key, value}] -> value
       _ -> nil
     end
   rescue
@@ -26,14 +28,14 @@ defmodule Shuttle.Messaging.SessionFiberCache do
   end
 
   def store(value) do
-    :ets.insert(@table, {@entry, value})
+    :ets.insert(@table, {Shuttle.Env.scope_key(@entry), value})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
   def clear do
-    :ets.delete(@table, @entry)
+    :ets.delete(@table, Shuttle.Env.scope_key(@entry))
     :ok
   rescue
     ArgumentError -> :ok

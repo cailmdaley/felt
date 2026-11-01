@@ -662,6 +662,8 @@ defmodule Shuttle.ThreadReceiverTest do
   end
 
   defp drain_results!(poller) do
+    # Process queued delivery requests so every task they start is enumerated.
+    :sys.get_state(poller, :infinity)
     # Poll completion schedules delivery tasks. Finish only this Poller's tasks
     # before assertions/teardown, without waiting on concurrent tests' work.
     for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor),

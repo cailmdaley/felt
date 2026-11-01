@@ -91,12 +91,15 @@ defmodule Shuttle.EnvIsolationTest.Shared do
     # independent in-memory runners; their outbox transaction locks differ.
     runner = Shuttle.Test.FeltStoreRunner
     runner.start!()
-    {:ok, poller} = Shuttle.Test.PollerHelpers.start_poller!(
-      runner: runner,
-      felt_stores: [runner.felt_root()],
-      own_host_id: "test-host",
-      poll_interval_ms: 600_000
-    )
+
+    {:ok, poller} =
+      Shuttle.Test.PollerHelpers.start_poller!(
+        runner: runner,
+        felt_stores: [runner.felt_root()],
+        own_host_id: "test-host",
+        poll_interval_ms: 600_000
+      )
+
     Shuttle.Test.PollerHelpers.await_boot_cycle!(poller)
     data = Shuttle.data_dir()
     sessions = Shuttle.Env.get("SHUTTLE_SESSIONS_FILE")

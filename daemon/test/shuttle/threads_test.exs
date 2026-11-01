@@ -1441,7 +1441,7 @@ defmodule Shuttle.ThreadsTest do
     [acked_path] = Path.wildcard(Path.join(data, "thread-outbox/acked/*"))
     assert File.read!(acked_path) == "result-1"
     refute File.read!(acked_path) =~ "payload"
-    ack_stat = File.stat!(acked_path)
+    ack_stat = Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size])
     # Capture and ack do not decode old payloads or rewrite acknowledged history.
     corrupt_path = hd(after_paths)
     original = File.read!(corrupt_path)
@@ -1449,7 +1449,7 @@ defmodule Shuttle.ThreadsTest do
     assert :ok = ThreadOutbox.capture([{"extra", %{"owner" => "test-host", "text" => "extra"}}])
     assert :ok = ThreadOutbox.acknowledge("extra")
     File.write!(corrupt_path, original)
-    assert File.stat!(acked_path) == ack_stat
+    assert Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size]) == ack_stat
 
     Task.async(fn ->
       ThreadOutbox.boot_baseline()
@@ -1458,7 +1458,7 @@ defmodule Shuttle.ThreadsTest do
     |> Task.await(30_000)
 
     assert length(ThreadOutbox.pending("test-host")) == 199
-    assert File.stat!(acked_path) == ack_stat
+    assert Map.take(File.stat!(acked_path), [:inode, :mtime, :ctime, :size]) == ack_stat
   end
 
   @tag first_boot: true

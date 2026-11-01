@@ -84,6 +84,7 @@ defmodule Shuttle.Test.PollerHelpers do
     end
 
     poller_refs = Enum.reject([pid, name], &is_nil/1)
+
     on_exit(fn ->
       stop_watchers_of(poller_refs)
       stop_tasks_of(poller_refs)

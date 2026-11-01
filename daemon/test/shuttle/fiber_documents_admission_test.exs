@@ -66,11 +66,12 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
       File.write!(Path.join(dir, "report.html"), "legacy")
       File.write!(Path.join(dir, "tapestry.html"), "current")
 
-      assert [%{report_path: path}] = FiberDocuments.entries_for_fiber("/tmp/store", %{
-               "id" => "task",
-               "path" => Path.join(dir, "task.md"),
-               "report_path" => Path.join(dir, "tapestry.html")
-             })
+      assert [%{report_path: path}] =
+               FiberDocuments.entries_for_fiber("/tmp/store", %{
+                 "id" => "task",
+                 "path" => Path.join(dir, "task.md"),
+                 "report_path" => Path.join(dir, "tapestry.html")
+               })
 
       assert path == Path.join(dir, "tapestry.html")
     end
@@ -82,11 +83,12 @@ defmodule Shuttle.FiberDocumentsAdmissionTest do
       File.write!(Path.join(dir, "task.md"), "---\nname: Task\n---\n")
       File.write!(Path.join(dir, "report.html"), "legacy")
 
-      assert [%{report_path: path}] = FiberDocuments.entries_for_fiber("/tmp/store", %{
-               "id" => "task",
-               "path" => Path.join(dir, "task.md"),
-               "report_path" => Path.join(dir, "report.html")
-             })
+      assert [%{report_path: path}] =
+               FiberDocuments.entries_for_fiber("/tmp/store", %{
+                 "id" => "task",
+                 "path" => Path.join(dir, "task.md"),
+                 "report_path" => Path.join(dir, "report.html")
+               })
 
       assert path == Path.join(dir, "report.html")
     end
