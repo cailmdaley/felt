@@ -522,6 +522,17 @@ defmodule Shuttle.Poller do
     :exit, _ -> :ok
   end
 
+  @doc "Refresh a newly created document from its physical store by intrinsic UID."
+  def refresh_created_document(store, uid, server \\ Shuttle.Env.server(__MODULE__)) do
+    GenServer.call(
+      server,
+      {:refresh_created_document, store, uid},
+      @orchestrator_state_call_timeout_ms
+    )
+  catch
+    :exit, _ -> :ok
+  end
+
   # ── Agent-API Client ──
 
   @spec worker_status(String.t()) :: map() | nil
@@ -1187,6 +1198,7 @@ defmodule Shuttle.Poller do
   defp immediate_publication?(message) do
     case message do
       {:refresh_document, _} -> true
+      {:refresh_created_document, _, _} -> true
       {:lifecycle_transition, _, _, _} -> true
       {:dispatch, _, _} -> true
       {:claim_session, _, _, _} -> true
@@ -1969,6 +1981,19 @@ defmodule Shuttle.Poller do
     stores = Keyword.get(opts, :felt_stores, state.felt_stores)
     cache_meta = document_cache_meta(state)
     {:reply, {:ok, Shuttle.FiberDocuments.envelope(stores, entries, cache_meta)}, state}
+  end
+
+  defp transition_call({:refresh_created_document, store, uid}, _from, state) do
+    if store in state.felt_stores do
+      state =
+        if state.document_cache_ready,
+          do: refresh_document_entry(state, uid, [store]),
+          else: announce_document(state, uid, [store])
+
+      {:reply, :ok, state}
+    else
+      {:reply, :ok, state}
+    end
   end
 
   defp transition_call({:refresh_document, fiber_id}, _from, state) do
@@ -2840,8 +2865,8 @@ defmodule Shuttle.Poller do
 
   defp announce_id(state, _store, _id), do: state
 
-  defp announce_document(%State{} = state, fiber_id) do
-    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: state.felt_stores) do
+  defp announce_document(%State{} = state, fiber_id, stores \\ nil) do
+    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: stores || state.felt_stores) do
       {:ok, %{fibers: [entry | _]}} ->
         announce_id(state, Map.get(entry, :felt_store), get_in(entry, [:fiber, "slug"]))
 
@@ -3328,7 +3353,7 @@ defmodule Shuttle.Poller do
     state
   end
 
-  defp refresh_document_entry(%State{} = state, fiber_id) do
+  defp refresh_document_entry(%State{} = state, fiber_id, stores \\ nil) do
     # A document's `id` is the fiber's uid, so a slug-addressed refresh matches
     # on the carried `slug` too.
     without_fiber =
@@ -3340,7 +3365,7 @@ defmodule Shuttle.Poller do
         state.document_cache
       )
 
-    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: state.felt_stores) do
+    case Shuttle.FiberDocuments.get_shuttle(fiber_id, felt_stores: stores || state.felt_stores) do
       {:ok, %{fibers: [entry | _]}} ->
         fiber = Map.get(entry, :fiber, %{})
         key = Shuttle.Poller.DocumentCache.cache_key(fiber)

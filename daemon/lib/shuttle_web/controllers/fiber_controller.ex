@@ -64,13 +64,25 @@ defmodule ShuttleWeb.FiberController do
       # Announce the new document to the Poller: an armed constitution
       # dispatches on the next tick, and the owner's feed lists it now, even
       # on a store whose discovery stays hot between full scans.
-      Shuttle.Poller.refresh_document(fiber_id)
+      announce_created(path, uid)
       json(conn, %{id: fiber_id, path: path, uid: uid})
     else
       {:error, reason} ->
         conn
         |> put_status(400)
         |> json(%{error: reason})
+    end
+  end
+
+  defp announce_created(path, uid) do
+    {:ok, path} = Shuttle.Realpath.resolve(path)
+
+    FeltStores.configured_stores()
+    |> Enum.filter(&String.starts_with?(path, FeltStores.store_felt_realpath(&1) <> "/"))
+    |> Enum.max_by(&String.length(FeltStores.store_felt_realpath(&1)), fn -> nil end)
+    |> case do
+      nil -> :ok
+      store -> Shuttle.Poller.refresh_created_document(store, uid)
     end
   end
 

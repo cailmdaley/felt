@@ -7448,12 +7448,19 @@ defmodule Shuttle.PollerTest do
     # Written after the full listing (a `POST /fiber/create`): a hot tick
     # alone never finds it.
     MockRunner.set_fiber(created, make_fiber(created, %{"status" => "active"}))
-    MockRunner.set_shuttle(created, "enabled: true\nhost: another-host\nkind: oneshot\n", "active")
+
+    MockRunner.set_shuttle(
+      created,
+      "enabled: true\nhost: another-host\nkind: oneshot\n",
+      "active"
+    )
+
     sync_poll_cycle!(poller)
     assert Poller.snapshot(poller).poll_health.discovery[store].mode == :hot
     refute listed?.(created)
 
-    assert :ok = Poller.refresh_document(poller, created)
+    uid = Shuttle.Test.FiberUid.for(created)
+    assert :ok = Poller.refresh_created_document(store, uid, poller)
     sync_poll_cycle!(poller)
     assert listed?.(created)
     assert Map.has_key?(:sys.get_state(poller, @state_timeout).announced_ids[store], created)

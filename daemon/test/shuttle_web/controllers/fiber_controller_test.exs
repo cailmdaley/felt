@@ -202,6 +202,50 @@ defmodule ShuttleWeb.FiberControllerTest do
            )
   end
 
+  test "create announces the physical store, not the first store with the same slug", %{tmp: tmp} do
+    first = Path.join(tmp, "first")
+    owner = Path.join(tmp, "owner")
+    project = Path.join(tmp, "project")
+    Enum.each([first, owner, project], &File.mkdir_p!/1)
+    assert {_, 0} = System.cmd("felt", ["init"], cd: first)
+    assert {_, 0} = System.cmd("felt", ["init"], cd: owner)
+    assert {_, 0} = System.cmd("felt", ["-C", first, "add", "duplicate", "Other"])
+    File.ln_s!(Path.join(owner, ".felt"), Path.join(project, ".felt"))
+    Env.put_env("SHUTTLE_STORES", first <> "," <> owner)
+
+    test = self()
+
+    poller =
+      spawn(fn ->
+        receive do
+          {:"$gen_call", from, message} ->
+            send(test, {:announcement, message})
+            GenServer.reply(from, :ok)
+        end
+      end)
+
+    Env.put_server(Shuttle.Poller, poller)
+
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/fiber/create",
+        Jason.encode!(%{
+          id: "duplicate",
+          name: "New",
+          frontmatter: %{
+            status: "open",
+            shuttle: %{kind: "oneshot", project_dir: project}
+          }
+        })
+      )
+
+    assert conn.status == 200
+    assert %{"uid" => uid, "path" => path} = Jason.decode!(conn.resp_body)
+    assert String.starts_with?(path, Path.join(owner, ".felt") <> "/")
+    assert_receive {:announcement, {:refresh_created_document, ^owner, ^uid}}
+  end
+
   test "POST /api/v1/fiber/create rejects armed fibers without project_dir" do
     # The controller defaults status to active (armed); an armed shuttle block
     # (slice 5: status is the gate, no enabled flag) requires a project_dir.
