@@ -323,6 +323,24 @@ func (a *app) runStatusOneFiber(query string) error {
 	column := shuttle.Column(f, block, running, time.Now())
 	until := blockerName(st, block.BlockedOn)
 	problem := agentProblem(a.statusAgentRegistry(), block)
+	assessment := a.dispatchAssessment(f, block, column, until)
+	if armed && !running && block.Host != "" && isSessionULID(f.UID) {
+		composite, _ := a.fetchComposite()
+		snapshot := a.ownerSnapshot(composite, block.Host)
+		if snapshot == nil {
+			assessment = fmt.Sprintf("→ Armed; owner %s dispatch hold unknown (daemon unreachable or state unavailable).", block.Host)
+			if strings.TrimSpace(block.ProjectDir) == "" {
+				assessment += fmt.Sprintf(" The block has no project_dir, so its worker starts in the felt store; `shuttle resume %s --project-dir <dir>` sets one.", f.ID)
+			}
+		} else if held := snapshot.pending(f.ID, f.UID); held != nil {
+			assessment = fmt.Sprintf("→ Held on %s: %s%s.", block.Host, held.Reason, held.since())
+			if strings.HasPrefix(held.Reason, "boot quarantine") {
+				assessment += fmt.Sprintf(" Run `shuttle daemon release` on %s, or `shuttle dispatch %s` for this fiber.", block.Host, f.ID)
+			}
+		} else if snapshot.BootQuarantine {
+			assessment = fmt.Sprintf("→ Armed on %s; boot quarantine is holding fresh launches. Run `shuttle daemon release` on that host, or `shuttle dispatch %s` for this fiber.", block.Host, f.ID)
+		}
+	}
 
 	if a.json {
 		out := map[string]any{
@@ -336,7 +354,7 @@ func (a *app) runStatusOneFiber(query string) error {
 			"status":        statusNow,
 			"armed":         armed,
 			"running":       running,
-			"dispatch":      a.dispatchAssessment(f, block, column, until),
+			"dispatch":      assessment,
 			// The board's Desk column and the review verdict (null when none).
 			"column":  column,
 			"verdict": nil,
@@ -383,15 +401,14 @@ func (a *app) runStatusOneFiber(query string) error {
 		fmt.Fprintf(a.env.Stdout, "  worker:      running (tmux %s)\n", session)
 	}
 	fmt.Fprintln(a.env.Stdout, "")
-	fmt.Fprintln(a.env.Stdout, a.dispatchAssessment(f, block, column, until))
+	fmt.Fprintln(a.env.Stdout, assessment)
 	return nil
 }
 
 // dispatchAssessment renders the one line a single-fiber report is really for:
 // where the board files the fiber (its Desk column, as --json reports it),
 // whether it is eligible for dispatch and on which host, and the verb that
-// changes the answer when it is not. It promises eligibility, not a launch:
-// the owning daemon's boot quarantine can hold an eligible fiber. A block
+// changes the answer when it is not. A block
 // without a project_dir still dispatches — its worker starts in the felt
 // store — but no verb arms it again until it has one, so every call named
 // here carries the --project-dir it would need.

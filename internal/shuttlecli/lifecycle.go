@@ -445,6 +445,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 							if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
 								return remoteRouteError(cmd, args, owner, createErr)
 							}
+							if a.ownerBootQuarantine(owner) {
+								a.printResumeHold(owner, f.ID)
+							}
 							return nil
 						}
 					}
@@ -452,7 +455,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				}
 				a.printDaemonBody([]byte(output))
 				if a.ownerBootQuarantine(owner) {
-					fmt.Fprintf(a.env.Stdout, "  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
+					a.printResumeHold(owner, f.ID)
 				}
 				return nil
 			}
@@ -493,6 +496,9 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "resumed %s%s (status: active)\n", args[0], ref.Location())
+			if !resumeLocal && a.ownerBootQuarantine(block.Host) {
+				a.printResumeHold(block.Host, f.ID)
+			}
 			if statusBefore != felt.StatusActive {
 				if statusBefore == "" {
 					fmt.Fprintln(a.env.Stdout, "  status: active (set; was missing)")
@@ -506,6 +512,10 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 	resumeCmd.Flags().StringVar(&resumeProjectDir, "project-dir", "", "Set the worker cwd before arming (required when the block has none); remote paths are validated on the owner")
 	resumeCmd.Flags().BoolVar(&resumeLocal, "local", false, localFlagUsage)
 	return resumeCmd
+}
+
+func (a *app) printResumeHold(owner, id string) {
+	fmt.Fprintf(a.env.Stdout, "  note: %s is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on that host. `shuttle dispatch %s` can launch this fiber.\n", owner, id)
 }
 
 // standingAwaiting reports whether f is a standing constitution awaiting review:
@@ -615,13 +625,16 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 						if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
 							return true, remoteRouteError(cmd, []string{query}, owner, createErr)
 						}
+						if a.ownerBootQuarantine(owner) {
+							a.printResumeHold(owner, f.ID)
+						}
 						return true, nil
 					}
 				}
 			}
 		}
 		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
-			fmt.Fprintf(a.env.Stdout, "  note: the owning daemon is in boot quarantine; this normal resume may stay pending until `shuttle daemon release` runs on %q.\n", owner)
+			a.printResumeHold(owner, f.ID)
 		}
 		return routed, err
 	}
@@ -631,6 +644,9 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	output, err := a.postLifecycle(verb, f.ID, fields...)
 	if err == nil {
 		fmt.Fprint(a.env.Stdout, output)
+		if verb == "resume" && a.ownerBootQuarantine(block.Host) {
+			a.printResumeHold(block.Host, f.ID)
+		}
 		return true, nil
 	}
 	if isLifecycleTransportError(err) {

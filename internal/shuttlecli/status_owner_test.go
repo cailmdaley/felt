@@ -36,6 +36,10 @@ func TestStatusUsesOwnerStateAndLabelsUnavailableLocalCopy(t *testing.T) {
 					_ = json.NewEncoder(w).Encode(map[string]any{"origins": map[string]any{"worker": map[string]any{"stale": false}}, "fibers": []any{map[string]any{"origin": "worker", "fiber": owner}}})
 					return
 				}
+				if r.URL.Path == "/api/v1/state/composite" {
+					http.Error(w, "unavailable", 503)
+					return
+				}
 				if r.URL.Query().Get("origin") != "worker" {
 					t.Errorf("read not owner routed: %s", r.URL.String())
 				}

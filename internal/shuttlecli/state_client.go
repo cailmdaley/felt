@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"time"
 )
 
 // The decoded shapes of the daemon's state endpoints — the structured half of the
@@ -34,12 +35,27 @@ type StandingRoleEntry struct {
 	LastRunAt *int64 `json:"last_run_at,omitempty"`
 }
 
-// Snapshot is the daemon's per-host runtime state (GET /api/v1/state). Used by
-// the raw snapshot passthrough and the cross-host composite render; own-host
-// identity resolution (resolveOwnHost) does not consume this type.
+// PendingLaunch is a fiber parked by the owning daemon.
+type PendingLaunch struct {
+	FiberID  string `json:"fiber_id"`
+	UID      string `json:"uid"`
+	Reason   string `json:"reason"`
+	ParkedAt int64  `json:"parked_at"`
+}
+
+func (p PendingLaunch) since() string {
+	if p.ParkedAt == 0 {
+		return ""
+	}
+	return " since " + time.UnixMilli(p.ParkedAt).UTC().Format(time.RFC3339)
+}
+
+// Snapshot is the daemon's per-host runtime state (GET /api/v1/state).
 type Snapshot struct {
-	Eligible      []SnapshotEntry     `json:"eligible,omitempty"`
-	StandingRoles []StandingRoleEntry `json:"standing_roles,omitempty"`
+	BootQuarantine bool                `json:"boot_quarantine"`
+	PendingLaunch  []PendingLaunch     `json:"pending_launch"`
+	Eligible       []SnapshotEntry     `json:"eligible,omitempty"`
+	StandingRoles  []StandingRoleEntry `json:"standing_roles,omitempty"`
 }
 
 // RemoteRecovery is the laptop daemon's per-origin self-healing state. Healthy is
@@ -96,4 +112,42 @@ func (a *app) fetchCompositeFrom(url string) (*CompositeState, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ownerSnapshot returns only a fresh observation of the owning daemon.
+func (a *app) ownerSnapshot(c *CompositeState, host string) *Snapshot {
+	if c == nil || host == "" {
+		return nil
+	}
+	own, err := a.resolveOwnHost("")
+	if err != nil {
+		return nil
+	}
+	if host == own {
+		return c.Local
+	}
+	r := c.Remotes[host]
+	if r == nil || r.Stale {
+		return nil
+	}
+	return r.Snapshot
+}
+
+func (s *Snapshot) pending(id, uid string) *PendingLaunch {
+	if s == nil {
+		return nil
+	}
+	for i := range s.PendingLaunch {
+		p := &s.PendingLaunch[i]
+		if uid != "" && p.UID != "" {
+			if p.UID == uid {
+				return p
+			}
+			continue
+		}
+		if p.FiberID == id {
+			return p
+		}
+	}
+	return nil
 }

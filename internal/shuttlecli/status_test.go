@@ -507,7 +507,7 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			want: []string{
 				"kind:        standing", "host:        testhost", "agent:       claude-opus",
 				pdir, `schedule:    "0 8 * * *" tz=UTC`, "status:      active (armed)",
-				"→ Resting between firings, armed; eligible for dispatch on this host (testhost)", "boot quarantine",
+				"owner testhost dispatch hold unknown",
 			},
 		},
 		{
@@ -515,14 +515,14 @@ func TestShuttleStatus_SingleFiber(t *testing.T) {
 			name:   "armed, owned elsewhere",
 			status: felt.StatusActive,
 			own:    "laptop",
-			want:   []string{"→ Resting between firings, armed; owned by host testhost", "not this one (laptop)"},
+			want:   []string{"owner testhost dispatch hold unknown"},
 		},
 		{
 			name:         "armed, no project_dir",
 			status:       felt.StatusActive,
 			own:          "testhost",
 			noProjectDir: true,
-			want:         []string{"→ Resting between firings, armed; eligible for dispatch on this host", "no project_dir, so its worker starts in the felt store", "shuttle resume role --project-dir <dir>"},
+			want:         []string{"owner testhost dispatch hold unknown", "no project_dir, so its worker starts in the felt store", "shuttle resume role --project-dir <dir>"},
 		},
 		{
 			name:         "closed, no project_dir",

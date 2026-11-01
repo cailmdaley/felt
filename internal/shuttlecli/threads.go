@@ -16,7 +16,7 @@ import (
 )
 
 // threadStates is the roster's group order; Archived is drawn only under --all.
-var threadStates = []string{"Blocked", "Waiting", "Unknown", "To review", "Working", "Armed", "Draft", "Resting", "Archived"}
+var threadStates = []string{"Blocked", "Waiting", "Unknown", "To review", "Working", "Held", "Armed", "Draft", "Resting", "Archived"}
 
 // ThreadNode is one thread as the daemon's GET /api/v1/threads/*id serves it
 // (Shuttle.Threads.tree/4): its board column, its roster state and its own
@@ -35,6 +35,7 @@ type ThreadNode struct {
 	HostUnreachable bool         `json:"host_unreachable,omitempty"`
 	Outcome         string       `json:"outcome,omitempty"`
 	DispatchError   string       `json:"dispatch_error,omitempty"`
+	Hold            string       `json:"hold,omitempty"`
 	BlockedOn       string       `json:"blocked_on,omitempty"`
 	Until           string       `json:"until,omitempty"`
 	PendingResults  int          `json:"pending_results,omitempty"`
@@ -72,6 +73,7 @@ type threadRow struct {
 	HostUnreachable bool        `json:"host_unreachable,omitempty"`
 	Outcome         string      `json:"outcome,omitempty"`
 	DispatchError   string      `json:"dispatch_error,omitempty"`
+	Hold            string      `json:"hold,omitempty"`
 	BlockedOn       string      `json:"blocked_on,omitempty"`
 	Until           string      `json:"until,omitempty"`
 	Unfinished      int         `json:"unfinished"`
@@ -115,6 +117,9 @@ board column and pending_results.`,
 			}
 			if root, err := felt.ProjectRoot(a.env, a.dir); err == nil {
 				nameBlockers(felt.NewStorage(root), tree.Threads)
+			}
+			if composite, err := a.fetchComposite(); err == nil {
+				a.markHeldThreads(tree.Threads, composite)
 			}
 			rows, archived := threadRows(tree.Threads, all)
 			if a.json {
@@ -216,7 +221,7 @@ func threadRows(nodes []ThreadNode, all bool) ([]threadRow, int) {
 }
 
 func toThreadRow(n ThreadNode, all bool) threadRow {
-	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, OwnerCacheState: n.OwnerCacheState, Outcome: n.Outcome, DispatchError: n.DispatchError, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
+	row := threadRow{ID: n.ID, UID: n.UID, Name: n.Name, Host: n.Host, Column: n.Column, State: n.State, HostUnreachable: n.HostUnreachable, Stale: n.Stale, OwnerCacheState: n.OwnerCacheState, Outcome: n.Outcome, DispatchError: n.DispatchError, Hold: n.Hold, BlockedOn: n.BlockedOn, Until: shuttleNonEmpty(n.Until, n.BlockedOn), Unfinished: unfinishedThreads(n.Threads), PendingResults: n.PendingResults}
 	if all {
 		for _, child := range n.Threads {
 			row.Threads = append(row.Threads, toThreadRow(child, true))
@@ -312,6 +317,8 @@ func (row threadRow) stateLabel() string {
 		return row.State + " · host unreachable"
 	case row.Stale:
 		return row.State + " · owner state stale"
+	case row.Hold != "":
+		return "Held · " + row.Hold
 	case row.DispatchError != "":
 		return row.State + " · " + row.DispatchError
 	case row.BlockedOn != "":
@@ -350,4 +357,19 @@ func firstSentence(text string) string {
 		return string(runes[:119]) + "…"
 	}
 	return text
+}
+
+func (a *app) markHeldThreads(nodes []ThreadNode, composite *CompositeState) {
+	for i := range nodes {
+		n := &nodes[i]
+		if n.State == "Armed" {
+			if snapshot := a.ownerSnapshot(composite, n.Host); snapshot != nil {
+				if held := snapshot.pending(n.ID, n.UID); held != nil {
+					n.State = "Held"
+					n.Hold = n.Host + ": " + held.Reason + held.since()
+				}
+			}
+		}
+		a.markHeldThreads(n.Threads, composite)
+	}
 }

@@ -340,30 +340,15 @@ func (a *app) readLaunchMessage(cmd *cobra.Command, message, messageFile string)
 	return string(data), true, nil
 }
 
-// ownerBootQuarantine reads the local daemon's already owner-routed composite
-// snapshot. A fresh remote snapshot in quarantine means an ordinary resume may
+// ownerBootQuarantine reads the owning daemon's fresh composite snapshot.
+// A snapshot in quarantine means an ordinary resume may
 // remain pending until the operator releases that host; force-dispatch paths do
 // not use this warning because they bypass the quarantine.
 func (a *app) ownerBootQuarantine(owner string) bool {
-	endpoint, err := a.daemonEndpoint("/api/v1/state/composite")
+	composite, err := a.fetchComposite()
 	if err != nil {
 		return false
 	}
-	body, err := a.getDaemon(endpoint, daemonReadTimeout)
-	if err != nil {
-		return false
-	}
-	var response struct {
-		Remotes map[string]struct {
-			Stale    bool `json:"stale"`
-			Snapshot *struct {
-				BootQuarantine bool `json:"boot_quarantine"`
-			} `json:"snapshot"`
-		} `json:"remotes"`
-	}
-	if json.Unmarshal(body, &response) != nil {
-		return false
-	}
-	remote, ok := response.Remotes[owner]
-	return ok && !remote.Stale && remote.Snapshot != nil && remote.Snapshot.BootQuarantine
+	snapshot := a.ownerSnapshot(composite, owner)
+	return snapshot != nil && snapshot.BootQuarantine
 }
