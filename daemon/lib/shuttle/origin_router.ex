@@ -132,9 +132,7 @@ defmodule Shuttle.OriginRouter do
     url = Remote.url_for(remote, path)
     body = payload |> Map.delete("origin") |> Map.delete(:origin) |> Jason.encode!()
 
-    case Shuttle.RelayClient.run(remote, client, timeout, opts, fn ->
-           client.post(url, body, "application/json", timeout)
-         end) do
+    case client.post(url, body, "application/json", timeout) do
       {:ok, status, resp} -> {:forwarded, status, resp}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
     end
@@ -162,9 +160,7 @@ defmodule Shuttle.OriginRouter do
     stripped = query |> Map.delete("origin") |> Map.delete(:origin)
     url = Remote.url_for(remote, path) <> "?" <> URI.encode_query(stripped)
 
-    case Shuttle.RelayClient.run(remote, client, timeout, opts, fn ->
-           client.get_file(url, timeout)
-         end) do
+    case client.get_file(url, timeout) do
       {:ok, status, content_type, body} -> {:forwarded, status, content_type, body}
       {:error, reason} -> {:error, {:forward_failed, remote.name, reason}}
     end
@@ -227,24 +223,22 @@ defmodule Shuttle.OriginRouter do
     Code.ensure_loaded?(client)
 
     response =
-      Shuttle.RelayClient.run(remote, client, timeout, opts, fn ->
-        case Keyword.get(opts, :method, :get) do
-          :head ->
-            headers =
-              Enum.reject(req_headers, fn {name, _} ->
-                String.downcase(name) in ["range", "if-range"]
-              end)
+      case Keyword.get(opts, :method, :get) do
+        :head ->
+          headers =
+            Enum.reject(req_headers, fn {name, _} ->
+              String.downcase(name) in ["range", "if-range"]
+            end)
 
-            if function_exported?(client, :head_file, 3),
-              do: client.head_file(url, headers, timeout),
-              else: {:error, :head_not_supported}
+          if function_exported?(client, :head_file, 3),
+            do: client.head_file(url, headers, timeout),
+            else: {:error, :head_not_supported}
 
-          :get ->
-            if function_exported?(client, :get_file, 3),
-              do: client.get_file(url, bounded_file_headers(req_headers), timeout),
-              else: client.get_file(url, timeout)
-        end
-      end)
+        :get ->
+          if function_exported?(client, :get_file, 3),
+            do: client.get_file(url, bounded_file_headers(req_headers), timeout),
+            else: client.get_file(url, timeout)
+      end
 
     case response do
       {:ok, status, headers, content_type, body} when is_list(headers) ->

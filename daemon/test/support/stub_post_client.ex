@@ -19,10 +19,7 @@ defmodule Shuttle.Test.StubPostClient do
   use Agent
 
   @doc "Start this test's instance (see the moduledoc); returns its pid."
-  def start! do
-    Shuttle.Test.ForwardStub.start_gate!()
-    Shuttle.Test.Env.start_scoped!(__MODULE__)
-  end
+  def start!, do: Shuttle.Test.Env.start_scoped!(__MODULE__)
 
   defp server, do: Shuttle.Test.Env.server!(__MODULE__)
 

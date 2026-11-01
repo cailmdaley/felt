@@ -213,7 +213,6 @@ defmodule Shuttle.Application do
 
   defp runtime_specs do
     core = [
-      Shuttle.RelayGate,
       ShuttleWeb.RequestDeadline,
       {Registry, keys: :duplicate, name: ShuttleWeb.TranscriptStreams},
       {DynamicSupervisor, strategy: :one_for_one, name: Shuttle.WatcherSupervisor},

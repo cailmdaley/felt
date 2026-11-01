@@ -16,8 +16,7 @@ defmodule Shuttle.TailnetDial.Bridge do
   # Response bytes can belong to an open stream, not just a pooled keep-alive.
   # Leave room for 15 s stream heartbeats and scheduling/network jitter.
   @idle_timeout_ms 60_000
-  @send_options [send_timeout: 1_000, send_timeout_close: true]
-  @socket_options [:binary, active: false, packet: :http_bin] ++ @send_options
+  @socket_options [:binary, active: false, packet: :http_bin]
 
   def child_spec(opts) do
     %{
@@ -44,16 +43,13 @@ defmodule Shuttle.TailnetDial.Bridge do
   end
 
   defp start_listener(path, opts) do
-    case :gen_tcp.listen(
-           0,
-           [
-             :binary,
-             active: false,
-             packet: :raw,
-             ifaddr: {:local, path},
-             backlog: 128
-           ] ++ @send_options
-         ) do
+    case :gen_tcp.listen(0, [
+           :binary,
+           active: false,
+           packet: :raw,
+           ifaddr: {:local, path},
+           backlog: 128
+         ]) do
       {:ok, listener} ->
         :ok = Shuttle.Host.restrict_bound_socket!(path)
         owner = self()
@@ -321,7 +317,6 @@ defmodule Shuttle.TailnetDial.Bridge do
       Shuttle.RemoteRegistry.Client.Default.tls_opts()
       |> Keyword.put(:server_name_indication, String.to_charlist(host))
       |> Keyword.put(:active, false)
-      |> Keyword.merge(@send_options)
 
     case :ssl.connect(socket, tls_opts, @connect_timeout_ms) do
       {:ok, tls_socket} -> {:ok, tls_socket}
