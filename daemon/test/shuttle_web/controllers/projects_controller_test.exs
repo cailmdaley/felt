@@ -176,7 +176,7 @@ defmodule ShuttleWeb.ProjectsControllerTest do
     File.chmod!(file, 0o000)
     on_exit(fn -> File.chmod(file, 0o644) end)
 
-    body = post_project(other, 503)
+    body = post_project(other, 500)
     assert body["error"] =~ "eacces"
 
     File.chmod!(file, 0o644)

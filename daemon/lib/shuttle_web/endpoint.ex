@@ -29,7 +29,7 @@ defmodule ShuttleWeb.Endpoint do
   # clients that accept them. Every name under `assets/` carries its content
   # hash, so a browser keeps those for a year without asking again; the
   # unhashed files keep the default etag revalidation.
-  plug(ShuttleWeb.BoundedStatic,
+  plug(Plug.Static,
     at: "/",
     # MFA form: resolved per request, so the bundle location is a RUNTIME
     # decision (env override / release priv / checkout — see ShuttleWeb.Assets)
@@ -41,7 +41,7 @@ defmodule ShuttleWeb.Endpoint do
     cache_control_for_etags: "public, max-age=31536000, immutable"
   )
 
-  plug(ShuttleWeb.BoundedStatic,
+  plug(Plug.Static,
     at: "/",
     from: {ShuttleWeb.Assets, :dist, []},
     only: ~w(fonts index.html favicon.ico apple-touch-icon.png manifest.webmanifest),

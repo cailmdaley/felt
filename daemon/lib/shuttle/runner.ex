@@ -66,15 +66,12 @@ defmodule Shuttle.Runner do
           "shuttle-input-" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
         )
 
-      prepared =
-        Shuttle.FileAccess.open(path, [:write, :binary, :exclusive], fn file ->
-          with :ok <- Shuttle.FileAccess.chmod(path, 0o600), do: :file.write(file, input)
-        end)
-
-      case prepared do
-        {:ok, result} ->
+      case File.open(path, [:write, :binary, :exclusive]) do
+        {:ok, file} ->
           try do
-            with :ok <- result do
+            with :ok <- File.chmod(path, 0o600),
+                 :ok <- IO.binwrite(file, input),
+                 :ok <- File.close(file) do
               opts =
                 opts
                 |> Keyword.drop([:input_eof, :input, :input_tmp_dir])
@@ -89,7 +86,8 @@ defmodule Shuttle.Runner do
               {:error, reason} -> {"cannot prepare command input: #{inspect(reason)}", 1}
             end
           after
-            Shuttle.FileAccess.rm(path)
+            File.close(file)
+            File.rm(path)
           end
 
         {:error, reason} ->

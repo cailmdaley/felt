@@ -171,7 +171,7 @@ defmodule ShuttleWeb.FileController do
     if Path.type(path) != :absolute do
       conn |> put_status(400) |> json(%{error: "path must be absolute"})
     else
-      case Shuttle.FileAccess.stat(path, time: :posix) do
+      case File.stat(path, time: :posix) do
         {:ok, %File.Stat{type: :regular} = stat} -> found.(stat)
         _ -> missing.()
       end
@@ -196,7 +196,7 @@ defmodule ShuttleWeb.FileController do
 
       true ->
         # Hash and serve the same small snapshot, including same-second rewrites.
-        case Shuttle.FileAccess.read(path) do
+        case File.read(path) do
           {:ok, body} ->
             serve_representation(conn, path, body, stat.mtime, byte_size(body), weak_etag(body))
 
@@ -259,7 +259,7 @@ defmodule ShuttleWeb.FileController do
     cond do
       head_request?(conn) -> send_resp(conn, 200, "")
       is_binary(body) -> send_resp(conn, 200, body)
-      true -> ShuttleWeb.BoundedFileSender.send_file(conn, 200, path, 0, size)
+      true -> send_file(conn, 200, path, 0, size)
     end
   end
 
@@ -275,7 +275,7 @@ defmodule ShuttleWeb.FileController do
     if is_binary(body) do
       send_resp(conn, 206, binary_part(body, first, length))
     else
-      ShuttleWeb.BoundedFileSender.send_file(conn, 206, path, first, length)
+      send_file(conn, 206, path, first, length)
     end
   end
 

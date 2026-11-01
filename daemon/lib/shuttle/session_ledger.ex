@@ -171,18 +171,18 @@ defmodule Shuttle.SessionLedger do
   end
 
   defp append_checked(line, path) do
-    Shuttle.FileAccess.mkdir_p!(Path.dirname(path))
+    File.mkdir_p!(Path.dirname(path))
     maybe_rotate(path)
-    Shuttle.FileAccess.write!(path, line, [:append])
+    File.write!(path, line, [:append])
     :ok
   rescue
     error -> {:error, {:ledger_write_failed, Exception.message(error)}}
   end
 
   defp maybe_rotate(path) do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %File.Stat{size: size}} when size >= @max_bytes ->
-        Shuttle.FileAccess.rename(path, path <> @rotated_suffix)
+        File.rename(path, path <> @rotated_suffix)
 
       _ ->
         :ok
@@ -245,7 +245,7 @@ defmodule Shuttle.SessionLedger do
     path = Keyword.get(opts, :path, default_path())
 
     [path, path <> @rotated_suffix]
-    |> Enum.filter(&Shuttle.FileAccess.regular?/1)
+    |> Enum.filter(&File.regular?/1)
     |> Enum.find_value(&newest_match(&1, session, "session"))
   end
 
@@ -273,7 +273,7 @@ defmodule Shuttle.SessionLedger do
     # rotated sibling, lines back-to-front (append-only, so file order is time
     # order) — with a substring prefilter so only candidate lines are decoded.
     [path, path <> @rotated_suffix]
-    |> Enum.filter(&Shuttle.FileAccess.regular?/1)
+    |> Enum.filter(&File.regular?/1)
     |> Enum.find_value(&newest_match(&1, uid, "uid"))
   end
 
@@ -293,13 +293,13 @@ defmodule Shuttle.SessionLedger do
       end
 
     [path, path <> @rotated_suffix]
-    |> Enum.filter(&Shuttle.FileAccess.regular?/1)
+    |> Enum.filter(&File.regular?/1)
     |> Enum.find_value(&newest_terminal_match(&1, candidates))
   end
 
   defp newest_terminal_match(file, candidates) do
     file
-    |> Shuttle.FileAccess.read!()
+    |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.reverse()
     |> Enum.find_value(fn line ->
@@ -321,7 +321,7 @@ defmodule Shuttle.SessionLedger do
   # lineage rung is only useful if it names a transcript.
   defp newest_match(file, needle, key) do
     file
-    |> Shuttle.FileAccess.read!()
+    |> File.read!()
     |> String.split("\n", trim: true)
     |> Enum.reverse()
     |> Enum.find_value(fn line ->

@@ -8,8 +8,8 @@ defmodule Shuttle.FileTail do
   then read *only what was appended*, and say so when the file shrank or was
   rotated away.
 
-  Every read opens the file `:raw`, in a bounded FileAccess worker. A plain
-  `Shuttle.FileAccess.read/1` goes through the `file_server_2` process, which then holds the
+  Every read opens the file `:raw`, in the calling process. A plain
+  `File.read/1` goes through the `file_server_2` process, which then holds the
   whole file's binary until it next collects — 50 MB pinned in a process that
   rarely does.
 
@@ -54,9 +54,7 @@ defmodule Shuttle.FileTail do
   starts empty and picks the file up on a later `advance/2`.
   """
   @spec snapshot(Path.t()) :: {[String.t()], offset(), non_neg_integer() | nil}
-  def snapshot(path), do: Shuttle.FileAccess.task(path, fn -> raw_snapshot(path) end)
-
-  defp raw_snapshot(path) do
+  def snapshot(path) do
     with {:ok, file} <- :file.open(path, [:read, :binary, :raw]) do
       try do
         with {:ok, info} <- :file.read_file_info(file),
@@ -110,7 +108,7 @@ defmodule Shuttle.FileTail do
   @spec advance(Path.t(), offset(), keyword()) ::
           {:append, [String.t()], offset()} | {:reset, offset()} | :noop
   def advance(path, offset, opts) do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %{size: size}} when size > offset ->
         read_appended(path, offset, size - offset, opts[:max_bytes])
 
@@ -131,7 +129,7 @@ defmodule Shuttle.FileTail do
   """
   @spec drain(Path.t(), offset()) :: [String.t()]
   def drain(path, offset) do
-    with {:ok, %{size: size}} when size > offset <- Shuttle.FileAccess.stat(path),
+    with {:ok, %{size: size}} when size > offset <- File.stat(path),
          {:ok, chunk} <- read_range(path, offset, size - offset) do
       String.split(chunk, "\n", trim: true)
     else
@@ -145,7 +143,7 @@ defmodule Shuttle.FileTail do
   """
   @spec inode(Path.t()) :: non_neg_integer() | nil
   def inode(path) do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %{inode: inode}} -> inode
       _ -> nil
     end
@@ -220,10 +218,6 @@ defmodule Shuttle.FileTail do
   end
 
   defp read_range(path, offset, length) do
-    Shuttle.FileAccess.task(path, fn -> raw_read_range(path, offset, length) end)
-  end
-
-  defp raw_read_range(path, offset, length) do
     with {:ok, file} <- :file.open(path, [:read, :binary, :raw]) do
       try do
         :file.position(file, offset)

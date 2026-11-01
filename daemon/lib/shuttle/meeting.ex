@@ -515,8 +515,8 @@ defmodule Shuttle.Meeting do
     candidate = if suffix == 1, do: name, else: "#{name}-#{suffix}"
 
     with {:ok, paths} <- meeting_paths(candidate, origin, opts),
-         :ok <- Shuttle.FileAccess.mkdir_p(Path.dirname(paths.local_transcript)) do
-      if Shuttle.FileAccess.exists?(paths.local_transcript),
+         :ok <- File.mkdir_p(Path.dirname(paths.local_transcript)) do
+      if File.exists?(paths.local_transcript),
         do: reserve_meeting_paths(name, origin, opts, suffix + 1),
         else: {:ok, paths}
     end
@@ -686,7 +686,7 @@ defmodule Shuttle.Meeting do
   end
 
   defp read_meeting_json(opts) do
-    case Shuttle.FileAccess.read(Path.join(hark_dir(opts), "meeting.json")) do
+    case File.read(Path.join(hark_dir(opts), "meeting.json")) do
       {:ok, content} ->
         case Jason.decode(content) do
           {:ok, data} when is_map(data) -> data
@@ -850,11 +850,7 @@ defmodule Shuttle.Meeting do
   defp transcript_tail(_), do: []
 
   defp read_file_tail(path, limit) do
-    Shuttle.FileAccess.task(path, fn -> raw_file_tail(path, limit) end)
-  end
-
-  defp raw_file_tail(path, limit) do
-    case :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
+    case :file.open(String.to_charlist(path), [:read, :binary]) do
       {:ok, file} ->
         try do
           with {:ok, size} <- :file.position(file, :eof),
@@ -1035,7 +1031,7 @@ defmodule Shuttle.Meeting do
   end
 
   defp executable_file?(path) when is_binary(path) and path != "" do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %File.Stat{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
       _ -> false
     end

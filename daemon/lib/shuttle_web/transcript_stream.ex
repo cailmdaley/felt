@@ -210,7 +210,7 @@ defmodule ShuttleWeb.TranscriptStream do
 
     stat =
       Keyword.get_lazy(opts, :stat, fn ->
-        case Shuttle.FileAccess.stat(path) do
+        case File.stat(path) do
           {:ok, stat} -> stat
           {:error, _} -> %{inode: nil, size: offset}
         end
@@ -230,7 +230,7 @@ defmodule ShuttleWeb.TranscriptStream do
     else
       result = FileTail.advance(path, offset, max_bytes: cfg[:event_bytes])
 
-      case Shuttle.FileAccess.stat(path) do
+      case File.stat(path) do
         {:ok, %{inode: current, size: size}} when current != inode or is_nil(inode) ->
           reset(conn, size)
 

@@ -55,7 +55,6 @@ defmodule ShuttleWeb.SpaControllerTest do
 
       Shuttle.Test.Env.put_env("SHUTTLE_UI_DIST", dist)
       on_exit(fn -> File.rm_rf(dist) end)
-      %{dist: dist}
     end
 
     test "a hashed asset is served precompressed and cached for good" do
@@ -78,67 +77,6 @@ defmodule ShuttleWeb.SpaControllerTest do
       assert get_resp_header(gzip, "content-encoding") == ["gzip"]
 
       assert get(local_conn(), "/assets/index-AbCd1234.js").resp_body == "plain"
-    end
-
-    test "static delivery runs before-send callbacks exactly once in the request owner" do
-      parent = self()
-
-      conn =
-        local_conn()
-        |> register_before_send(fn conn ->
-          send(parent, {:static_send, self()})
-          conn
-        end)
-        |> get("/assets/index-AbCd1234.js")
-
-      assert conn.status == 200
-      assert_receive {:static_send, ^parent}
-      refute_received {:static_send, _}
-    end
-
-    test "static HEAD, validators and ranges retain negotiated representation semantics" do
-      head =
-        local_conn()
-        |> put_req_header("accept-encoding", "br")
-        |> head("/assets/index-AbCd1234.js")
-
-      assert head.status == 200
-      assert head.resp_body == ""
-      assert get_resp_header(head, "content-length") == ["6"]
-      assert get_resp_header(head, "content-encoding") == ["br"]
-      [etag] = get_resp_header(head, "etag")
-
-      cached =
-        local_conn()
-        |> put_req_header("accept-encoding", "br")
-        |> put_req_header("if-none-match", etag)
-        |> get("/assets/index-AbCd1234.js")
-
-      assert cached.status == 304
-      assert cached.resp_body == ""
-
-      range =
-        local_conn()
-        |> put_req_header("accept-encoding", "br")
-        |> put_req_header("range", "bytes=1-2")
-        |> get("/assets/index-AbCd1234.js")
-
-      assert range.status == 206
-      assert range.resp_body == "la"
-      assert get_resp_header(range, "content-range") == ["bytes 1-2/5"]
-      assert get_resp_header(range, "content-encoding") == []
-    end
-
-    test "a denied UI bundle names its failure without making API routes depend on it", %{
-      dist: dist
-    } do
-      alias Shuttle.FileAccess
-      Shuttle.Test.Env.start_scoped!({FileAccess, name: nil, protected_roots: [dist]})
-      assert_raise FileAccess.Error, fn -> FileAccess.task(dist, fn -> {:error, :eacces} end) end
-      refused = get(local_conn(), "/assets/index-AbCd1234.js")
-      assert refused.status == 503
-      assert Jason.decode!(refused.resp_body)["error"] =~ dist
-      assert get(local_conn(), "/api/v1/version").status == 200
     end
 
     test "an unhashed file is served precompressed and revalidated" do

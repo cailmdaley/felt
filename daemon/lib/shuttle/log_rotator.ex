@@ -160,7 +160,7 @@ defmodule Shuttle.LogRotator do
     # with `shuttle remotes add` (and its new tunnel log) is picked up
     # without a daemon bounce. Path.wildcard on a missing directory returns [],
     # which is the silent no-op non-hub hosts need.
-    dir |> Path.join(@tunnel_log_glob) |> Shuttle.FileAccess.wildcard()
+    dir |> Path.join(@tunnel_log_glob) |> Path.wildcard()
   rescue
     error ->
       warn("could not list tunnel logs in #{dir}", error)
@@ -172,7 +172,7 @@ defmodule Shuttle.LogRotator do
   # `false`, never a raise: this process must not be able to take the daemon
   # down, and one bad file must not skip the rest of the pass.
   defp rotate_if_oversized(path, max_bytes) do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %File.Stat{type: :regular, size: size}} when size > max_bytes ->
         copytruncate(path, size)
 
@@ -199,7 +199,9 @@ defmodule Shuttle.LogRotator do
   defp copytruncate(path, size) do
     previous = path <> ".1"
 
-    with {:ok, _bytes} <- copy_raw(path, previous),
+    # :file.copy/2 opens the destination for writing, which truncates it — so
+    # an existing .1 is replaced, not appended to.
+    with {:ok, _bytes} <- :file.copy(path, previous),
          :ok <- truncate(path) do
       Logger.info("LogRotator: rotated #{path} → #{previous}, reclaimed #{human_bytes(size)}")
       true
@@ -210,36 +212,12 @@ defmodule Shuttle.LogRotator do
     end
   end
 
-  defp copy_raw(path, previous) do
-    Shuttle.FileAccess.run(path, fn source ->
-      Shuttle.FileAccess.run(previous, fn target ->
-        with {:ok, input} <- :file.open(String.to_charlist(source), [:read, :binary, :raw]) do
-          try do
-            with {:ok, output} <- :file.open(String.to_charlist(target), [:write, :binary, :raw]) do
-              try do
-                :file.copy(input, output)
-              after
-                :file.close(output)
-              end
-            end
-          after
-            :file.close(input)
-          end
-        end
-      end)
-    end)
-  end
-
   # In place, keeping the inode — see the moduledoc. Opened :read + :write so
   # the open itself doesn't truncate (a plain :write open would, but then a
   # failure to open leaves ambiguity about whether the file was already
   # emptied); position 0 then truncate is explicit about what happened.
   defp truncate(path) do
-    Shuttle.FileAccess.task(path, fn -> raw_truncate(path) end)
-  end
-
-  defp raw_truncate(path) do
-    case :file.open(path, [:read, :write, :binary, :raw]) do
+    case :file.open(path, [:read, :write, :binary]) do
       {:ok, fd} ->
         try do
           case :file.position(fd, 0) do

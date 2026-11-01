@@ -58,7 +58,7 @@ defmodule Shuttle.ProcNetTcp do
   @doc "Whether `/proc/net/tcp` can be read under `proc_root`."
   @spec readable?(String.t()) :: boolean()
   def readable?(proc_root \\ "/proc") do
-    case Shuttle.FileAccess.read(Path.join([proc_root, "net", "tcp"])) do
+    case File.read(Path.join([proc_root, "net", "tcp"])) do
       {:ok, _data} -> true
       {:error, _reason} -> false
     end
@@ -129,7 +129,7 @@ defmodule Shuttle.ProcNetTcp do
 
   defp read_tables(proc_root) do
     for name <- ["tcp", "tcp6"],
-        {:ok, data} <- [Shuttle.FileAccess.read(Path.join([proc_root, "net", name]))],
+        {:ok, data} <- [File.read(Path.join([proc_root, "net", name]))],
         do: data
   end
 

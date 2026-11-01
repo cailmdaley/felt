@@ -20,7 +20,6 @@ defmodule ShuttleWeb.VersionController do
       conn,
       Shuttle.BuildStamp.stamp()
       |> Map.put(:ready, readiness.ready)
-      |> Map.put(:filesystem, Shuttle.FileAccess.status())
       |> Map.put(:boot_duration_ms, readiness.duration_ms)
       |> Map.put(:poller_publication, Shuttle.Poller.published_state_metrics())
       |> Map.merge(health)

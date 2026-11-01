@@ -19,9 +19,9 @@ defmodule Shuttle.HarnessTasks do
 
   defp claude(session, opts) do
     Path.join([HarnessPaths.claude_tasks_root(opts), session, "*.json"])
-    |> Shuttle.FileAccess.wildcard()
+    |> Path.wildcard()
     |> Enum.flat_map(fn path ->
-      with {:ok, bytes} <- Shuttle.FileAccess.read(path),
+      with {:ok, bytes} <- File.read(path),
            {:ok, %{"id" => id, "subject" => subject, "status" => status} = task} <-
              Jason.decode(bytes),
            true <- is_binary(id) and is_binary(subject) and status in @statuses do

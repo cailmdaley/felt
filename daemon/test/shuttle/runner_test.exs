@@ -60,7 +60,6 @@ defmodule Shuttle.RunnerTest do
 
   test "relative PATH lookup and runner tolerate an unlinked working directory" do
     script = """
-    {:ok, _} = Shuttle.FileAccess.start_link()
     detached = Path.join(System.tmp_dir!(), "shuttle-detached-cwd-#{System.unique_integer([:positive])}")
     File.mkdir_p!(detached)
     File.cd!(detached)

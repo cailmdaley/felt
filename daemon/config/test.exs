@@ -38,10 +38,6 @@ config :shuttle,
   tailscale_home: false,
   tailnet_dial_test_cacerts_enabled: true
 
-# Concurrent fixtures share the application pool. Native saturation tests
-# start isolated one/two-slot services; production uses two slots.
-config :shuttle, Shuttle.FileAccess, capacity: 64
-
 # Test daemon identity. Application start freezes SHUTTLE_HOST when it is set
 # and asks `shuttle host --json` otherwise, so pinning it keeps the suite
 # independent of the operator's host config and stable across machines. Nothing is pinned at

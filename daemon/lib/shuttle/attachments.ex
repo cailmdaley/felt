@@ -135,31 +135,28 @@ defmodule Shuttle.Attachments do
 
     for fiber_dir <- entries(root), lstat_type(fiber_dir) == :directory do
       for file <- entries(fiber_dir) do
-        case Shuttle.FileAccess.lstat(file, time: :posix) do
-          {:ok, %File.Stat{type: :regular, mtime: mtime}} when mtime < cutoff ->
-            Shuttle.FileAccess.rm(file)
-
-          _ ->
-            :ok
+        case File.lstat(file, time: :posix) do
+          {:ok, %File.Stat{type: :regular, mtime: mtime}} when mtime < cutoff -> File.rm(file)
+          _ -> :ok
         end
       end
 
       # rmdir refuses a non-empty directory, so this only removes empty ones.
-      if entries(fiber_dir) == [], do: Shuttle.FileAccess.rmdir(fiber_dir)
+      if entries(fiber_dir) == [], do: File.rmdir(fiber_dir)
     end
 
     :ok
   end
 
   defp entries(dir) do
-    case Shuttle.FileAccess.ls(dir) do
+    case File.ls(dir) do
       {:ok, names} -> Enum.map(names, &Path.join(dir, &1))
       {:error, _} -> []
     end
   end
 
   defp lstat_type(path) do
-    case Shuttle.FileAccess.lstat(path) do
+    case File.lstat(path) do
       {:ok, %File.Stat{type: type}} -> type
       _ -> nil
     end
@@ -304,13 +301,13 @@ defmodule Shuttle.Attachments do
   # `parent` is created if absent; `dir` is created 0700 if absent and refused
   # if it is a link or a non-directory.
   defp ensure_private_dir(parent, dir) do
-    with :ok <- Shuttle.FileAccess.mkdir_p(parent) |> io_error("create #{parent}") do
+    with :ok <- File.mkdir_p(parent) |> io_error("create #{parent}") do
       ensure_dir(dir)
     end
   end
 
   defp ensure_dir(dir) do
-    case Shuttle.FileAccess.lstat(dir) do
+    case File.lstat(dir) do
       {:ok, %File.Stat{type: :directory}} ->
         :ok
 
@@ -318,8 +315,8 @@ defmodule Shuttle.Attachments do
         {:error, :io, "#{dir} is a #{type}, not a directory"}
 
       {:error, :enoent} ->
-        case Shuttle.FileAccess.mkdir(dir) do
-          :ok -> Shuttle.FileAccess.chmod(dir, 0o700) |> io_error("chmod #{dir}")
+        case File.mkdir(dir) do
+          :ok -> File.chmod(dir, 0o700) |> io_error("chmod #{dir}")
           {:error, :eexist} -> ensure_dir(dir)
           {:error, reason} -> {:error, :io, "create #{dir}: #{:file.format_error(reason)}"}
         end
@@ -348,32 +345,28 @@ defmodule Shuttle.Attachments do
 
     result =
       with :ok <- write_exclusive(tmp, bytes),
-           :ok <- Shuttle.FileAccess.rename(tmp, dest) |> io_error("rename into #{dest}") do
+           :ok <- File.rename(tmp, dest) |> io_error("rename into #{dest}") do
         {:ok, %{name: name, path: dest, sha256: sha, size: byte_size(bytes)}}
       end
 
-    if match?({:error, _, _}, result), do: Shuttle.FileAccess.rm(tmp)
+    if match?({:error, _, _}, result), do: File.rm(tmp)
     result
   end
 
   # `:exclusive` is O_CREAT|O_EXCL: it fails rather than open whatever already
   # sits at the temp name, link or not.
   defp write_exclusive(path, bytes) do
-    Shuttle.FileAccess.task(path, fn -> raw_write_exclusive(path, bytes) end)
-  end
-
-  defp raw_write_exclusive(path, bytes) do
     case :file.open(path, [:write, :raw, :binary, :exclusive]) do
       {:ok, fd} ->
-        try do
-          with :ok <- Shuttle.FileAccess.chmod(path, 0o600) |> io_error("chmod #{path}"),
+        result =
+          with :ok <- File.chmod(path, 0o600) |> io_error("chmod #{path}"),
                :ok <- :file.write(fd, bytes) |> io_error("write #{path}"),
                :ok <- :file.sync(fd) |> io_error("sync #{path}") do
             :ok
           end
-        after
-          :file.close(fd)
-        end
+
+        :file.close(fd)
+        result
 
       {:error, reason} ->
         {:error, :io, "create #{path}: #{:file.format_error(reason)}"}

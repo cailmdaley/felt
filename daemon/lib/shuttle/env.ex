@@ -46,9 +46,17 @@ defmodule Shuttle.Env do
   def find_executable(name) do
     lookup = fn ->
       case {Path.type(name), get("PATH")} do
-        {:absolute, _} -> Shuttle.FileAccess.find_executable(name)
-        {_, nil} -> nil
-        {_, path} -> Shuttle.FileAccess.find_executable(name, search_path: path)
+        {:absolute, _} ->
+          System.find_executable(name)
+
+        {_, nil} ->
+          nil
+
+        {_, path} ->
+          case :os.find_executable(String.to_charlist(name), String.to_charlist(path)) do
+            false -> nil
+            found -> List.to_string(found)
+          end
       end
     end
 
@@ -71,8 +79,8 @@ defmodule Shuttle.Env do
               Enum.any?(String.split(path, ":"), &(Path.type(&1) != :absolute))))
 
     if relative? do
-      case :prim_file.get_cwd() do
-        {:ok, cwd} -> {__MODULE__, :executable, name, path, to_string(cwd)}
+      case File.cwd() do
+        {:ok, cwd} -> {__MODULE__, :executable, name, path, cwd}
         {:error, _reason} -> nil
       end
     else

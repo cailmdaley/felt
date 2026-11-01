@@ -102,7 +102,7 @@ defmodule Shuttle.Transcript do
         HarnessPaths.codex_session_glob(session, opts)
       ]
       |> Enum.find_value(fn pattern ->
-        pattern |> Shuttle.FileAccess.wildcard() |> Enum.find(&Shuttle.FileAccess.regular?/1)
+        pattern |> Path.wildcard() |> Enum.find(&File.regular?/1)
       end)
     end
   end
@@ -139,7 +139,7 @@ defmodule Shuttle.Transcript do
   defp under?(path, root), do: path == root or String.starts_with?(path, root <> "/")
 
   defp byte_count(path) do
-    case Shuttle.FileAccess.stat(path) do
+    case File.stat(path) do
       {:ok, %File.Stat{size: size}} -> size
       _ -> 0
     end
@@ -147,7 +147,7 @@ defmodule Shuttle.Transcript do
 
   defp sha256(path) do
     path
-    |> Shuttle.FileAccess.stream!([], 64 * 1024)
+    |> File.stream!([], 64 * 1024)
     |> Enum.reduce(:crypto.hash_init(:sha256), fn chunk, digest ->
       :crypto.hash_update(digest, chunk)
     end)

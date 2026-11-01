@@ -79,17 +79,6 @@ defmodule ShuttleWeb.ClaimController do
               )
             )
 
-          {:error, {reason, message}}
-          when reason in [:filesystem_unavailable, :store_inventory_unavailable] ->
-            conn
-            |> put_status(503)
-            |> json(%{
-              claimed: false,
-              reason: to_string(reason),
-              fiber_id: fiber_id,
-              error: message
-            })
-
           {:error, reason} ->
             {status, code} = error_status(reason)
 

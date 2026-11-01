@@ -147,11 +147,6 @@ defmodule ShuttleWeb.RelayHelpers do
     conn |> put_resp_content_type("text/plain") |> send_resp(400, reason)
   end
 
-  def send_cli_result(conn, _tool, {:error, {reason, message}})
-      when reason in [:filesystem_unavailable, :store_inventory_unavailable] do
-    conn |> put_resp_content_type("text/plain") |> send_resp(503, message)
-  end
-
   def send_cli_result(conn, tool, {:command_error, status, output}) do
     conn
     |> put_resp_content_type("text/plain")

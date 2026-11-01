@@ -239,7 +239,7 @@ defmodule Shuttle.Messaging do
   defp session_ledger_file_token(path) do
     [path, path <> ".1"]
     |> Enum.map(fn file ->
-      case Shuttle.FileAccess.stat(file, time: :posix) do
+      case File.stat(file, time: :posix) do
         {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} -> {mtime, size, inode}
         _ -> nil
       end
@@ -334,10 +334,10 @@ defmodule Shuttle.Messaging do
 
     records =
       Path.join(path, "*.json")
-      |> Shuttle.FileAccess.wildcard()
+      |> Path.wildcard()
       |> Enum.sort()
       |> Enum.map(fn file ->
-        case Shuttle.FileAccess.stat(file, time: :posix) do
+        case File.stat(file, time: :posix) do
           {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} ->
             {Path.basename(file), mtime, size, inode}
 

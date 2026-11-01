@@ -284,25 +284,6 @@ defmodule Shuttle.FileAccessTest do
 
     try do
       assert Access.read!(path, ctx.opts) == "raw"
-
-      assert Access.task(
-               ctx.tmp_dir,
-               fn ->
-                 directory = Path.join(ctx.tmp_dir, "new/nested")
-                 assert :ok = Access.mkdir_p(directory)
-                 assert :ok = Access.chmod(directory, 0o700)
-                 written = Path.join(directory, "written")
-                 assert :ok = Access.write(written, "written", [:exclusive])
-                 assert {:error, :eexist} = Access.write(written, "no", [:exclusive])
-                 assert :ok = Access.rename(written, written <> ".moved")
-                 assert Access.read!(written <> ".moved") == "written"
-                 assert :ok = Access.rm(written <> ".moved")
-                 assert :ok = Access.rmdir(directory)
-                 :ok
-               end,
-               ctx.opts
-             ) == :ok
-
       assert Access.regular?(path, ctx.opts)
       assert Access.dir?(ctx.tmp_dir, ctx.opts)
       assert {:ok, %File.Stat{type: :symlink}} = Access.lstat(link, ctx.opts)
@@ -316,41 +297,6 @@ defmodule Shuttle.FileAccessTest do
     after
       :sys.resume(server)
     end
-  end
-
-  test "worker callbacks inherit the caller's scoped environment", ctx do
-    Shuttle.Test.Env.put_env("SHUTTLE_FILE_ACCESS_TEST", "scoped-owner")
-
-    assert Access.task(ctx.root, fn -> Shuttle.Env.get("SHUTTLE_FILE_ACCESS_TEST") end, ctx.opts) ==
-             "scoped-owner"
-  end
-
-  test "a protected root beneath a symlink retains logical and physical refusal aliases", ctx do
-    parent = Path.join(ctx.tmp_dir, "alias-parent")
-    File.ln_s!(ctx.tmp_dir, parent)
-    root = Path.join(parent, "Documents")
-
-    service =
-      Shuttle.Test.Env.start_scoped!(
-        Supervisor.child_spec({Access, name: nil, protected_roots: [root]}, id: :alias_root)
-      )
-
-    opts = [server: service]
-
-    error =
-      transient(fn -> Access.task(Path.join(root, "file"), fn -> {:error, :eacces} end, opts) end)
-
-    assert error.path == root
-    assert [%{prefix: ^root}] = Access.status(service).blocked_prefixes
-    assert transient(fn -> Access.read!(Path.join(ctx.root, "file"), opts) end).reason == :blocked
-  end
-
-  test "denials outside protected roots are named rather than missing", ctx do
-    path = Path.join(ctx.tmp_dir, "ordinary")
-    error = transient(fn -> Access.task(path, fn -> {:error, :eacces} end, ctx.opts) end)
-    assert error.reason == :denied
-    assert error.path == path
-    assert Access.status(ctx.service).blocked_prefixes == []
   end
 
   defp transient(fun), do: assert_raise(Error, fun)

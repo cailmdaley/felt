@@ -547,7 +547,7 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp worker_pid(_name, b, procs) do
-    with {:ok, receipt} <- Shuttle.FileAccess.read(pid_path(b["block_id"])),
+    with {:ok, receipt} <- File.read(pid_path(b["block_id"])),
          [pid, sid, bid] <- String.split(String.trim(receipt), "\n"),
          true <- sid == b["session_id"] and bid == b["block_id"],
          {pid, ""} <- Integer.parse(pid),

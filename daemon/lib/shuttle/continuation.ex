@@ -85,7 +85,7 @@ defmodule Shuttle.Continuation do
   @spec transcript_stat(String.t(), keyword()) :: %{path: String.t(), mtime: DateTime.t()} | nil
   def transcript_stat(session, opts \\ []) when is_binary(session) do
     with path when is_binary(path) <- Shuttle.Transcript.path(session, opts),
-         {:ok, %File.Stat{mtime: mtime}} <- Shuttle.FileAccess.stat(path, time: :posix) do
+         {:ok, %File.Stat{mtime: mtime}} <- File.stat(path, time: :posix) do
       %{path: path, mtime: DateTime.from_unix!(mtime)}
     else
       _ -> nil

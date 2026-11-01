@@ -108,7 +108,7 @@ defmodule Shuttle.TailnetDial.Bridge do
     Process.demonitor(monitor, [:flush])
     :gen_tcp.close(listener)
     Shuttle.TailnetDial.unregister_bridge(name, host, port)
-    Shuttle.FileAccess.rm(path)
+    File.rm(path)
     :ok
   end
 

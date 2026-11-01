@@ -357,7 +357,7 @@ defmodule Shuttle.SessionResume do
   defp work_dir(harness, path) do
     case safe_cwd(harness, path) do
       cwd when is_binary(cwd) ->
-        if Shuttle.FileAccess.dir?(cwd),
+        if File.dir?(cwd),
           do: {:ok, cwd},
           else: {:error, "#{cwd}, where the session ran, is not a directory on this host"}
 
@@ -392,7 +392,7 @@ defmodule Shuttle.SessionResume do
   # Claude Code's project-directory name for a working directory.
   def claude_slug(cwd), do: String.replace(cwd, ~r/[^A-Za-z0-9]/, "-")
 
-  defp head(path), do: path |> Shuttle.FileAccess.stream!() |> Stream.take(@head_lines)
+  defp head(path), do: path |> File.stream!() |> Stream.take(@head_lines)
 
   defp record_cwd(line, keys) do
     if String.contains?(line, "\"cwd\"") do

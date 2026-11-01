@@ -3084,7 +3084,7 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [Shuttle.FileAccess, :dir?, :x])
+    apply(:dbg, :tpl, [File, :dir?, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
@@ -3092,7 +3092,7 @@ defmodule Shuttle.PollerTest do
     stat_calls = drain_dbg_relay!(poller)
 
     refute Enum.any?(stat_calls, fn
-             {:trace, _pid, :call, {Shuttle.FileAccess, :dir?, [^sentinel_dir]}} -> true
+             {:trace, _pid, :call, {File, :dir?, [^sentinel_dir]}} -> true
              _ -> false
            end),
            "poller must not stat a paused fiber's project_dir " <>
@@ -6461,7 +6461,7 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [Shuttle.FileAccess, :dir?, :x])
+    apply(:dbg, :tpl, [File, :dir?, :x])
     apply(:dbg, :tpl, [:file, :read_link, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
@@ -6486,9 +6486,11 @@ defmodule Shuttle.PollerTest do
   end
 
   test "an active fiber's unreachable project_dir is stat'd once, then sits out the cooldown" do
-    # The dispatch-time gate probes an absent project once. Protected-folder
-    # denials are typed FileAccess failures; both refusals respect the breaker
-    # rather than repeatedly entering a filesystem that cannot answer.
+    # The dispatch-time gate, and the breaker behind it. A project_dir that is
+    # absent and one this daemon is DENIED are the same `File.dir?` answer, and
+    # under a macOS file provider the denial arrives as an un-grantable TCC
+    # prompt — so re-stat'ing every tick puts a dialog on someone's screen
+    # forever, on exactly the configuration that cannot come good by itself.
     # The refusal lands in `dispatch_failures`, and `preflight_cooldown_open?`
     # keeps the fiber out of the eligible set until the window lapses.
     home = Path.join(System.tmp_dir!(), "shuttle-test-home-#{System.unique_integer([:positive])}")
@@ -6535,7 +6537,7 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [Shuttle.FileAccess, :dir?, :x])
+    apply(:dbg, :tpl, [File, :dir?, :x])
     apply(:dbg, :tpl, [:file, :read_link, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
@@ -6568,7 +6570,7 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
     first = drain.()
 
-    assert first == [{Shuttle.FileAccess, :dir?, expanded_dir}],
+    assert first == [{File, :dir?, expanded_dir}],
            "the dispatch attempt must stat the project_dir exactly once: #{inspect(first)}"
 
     # The refusal shows as a blocked row rather than the fiber silently

@@ -411,7 +411,7 @@ defmodule Shuttle.Activity do
   @spec first_timestamp(Path.t()) :: integer() | nil
   def first_timestamp(path) do
     path
-    |> Shuttle.FileAccess.stream!()
+    |> File.stream!()
     |> Enum.find_value(fn line ->
       case EventStream.decode(line) do
         %{"timestamp" => ts, "type" => type} when is_integer(ts) and is_binary(type) -> ts

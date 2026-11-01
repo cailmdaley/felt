@@ -35,7 +35,7 @@ defmodule Shuttle.CodexContext do
   defp wake do
     path = Path.join([Shuttle.Env.home(), ".codex", "WAKE.md"])
 
-    case Shuttle.FileAccess.read(path) do
+    case File.read(path) do
       {:ok, text} -> {:ok, text}
       {:error, :enoent} -> {:ok, nil}
       {:error, reason} -> {:error, {:codex_context_unavailable, {:wake, reason}}}

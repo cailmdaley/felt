@@ -39,8 +39,7 @@ defmodule Shuttle.CodexEndpoint do
 
     with :ok <- ancestors(Path.dirname(parent), uid),
          :ok <- create_root(parent),
-         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <-
-           Shuttle.FileAccess.lstat(parent),
+         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <- File.lstat(parent),
          true <- (mode &&& 0o777) == 0o700 do
       :ok
     else
@@ -50,7 +49,7 @@ defmodule Shuttle.CodexEndpoint do
 
   @doc "Accept a private socket or Codex 0.162.1's exact protected rendezvous alias, never an arbitrary symlink."
   def verify_socket(endpoint, uid \\ Shuttle.Host.euid()) do
-    case Shuttle.FileAccess.lstat(endpoint) do
+    case File.lstat(endpoint) do
       {:error, :enoent} ->
         :ok
 
@@ -68,7 +67,7 @@ defmodule Shuttle.CodexEndpoint do
 
   defp verify_alias(endpoint, uid) do
     tmp =
-      case Shuttle.FileAccess.read_link("/tmp") do
+      case File.read_link("/tmp") do
         {:ok, target} when target in ["/private/tmp", "private/tmp"] -> "/private/tmp"
         _ -> "/tmp"
       end
@@ -82,9 +81,9 @@ defmodule Shuttle.CodexEndpoint do
     root = Path.join(tmp, "codex-daemon-#{uid}")
     expected = Path.join(root, hash)
 
-    with {:ok, ^expected} <- Shuttle.FileAccess.read_link(endpoint),
+    with {:ok, ^expected} <- File.read_link(endpoint),
          :ok <- alias_root(root, uid) do
-      case Shuttle.FileAccess.lstat(expected) do
+      case File.lstat(expected) do
         {:ok, %File.Stat{uid: ^uid, mode: mode}}
         when (mode &&& 0o170000) == 0o140000 and (mode &&& 0o077) == 0 ->
           :ok
@@ -105,7 +104,7 @@ defmodule Shuttle.CodexEndpoint do
   # prunes when idle. A genuine alias whose root has been cleared is dangling
   # like any other: the next Codex server recreates the root.
   defp alias_root(root, uid) do
-    case Shuttle.FileAccess.lstat(root) do
+    case File.lstat(root) do
       {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} when (mode &&& 0o777) == 0o700 ->
         :ok
 
@@ -118,7 +117,7 @@ defmodule Shuttle.CodexEndpoint do
   end
 
   defp create_root(parent) do
-    case Shuttle.FileAccess.lstat(parent) do
+    case File.lstat(parent) do
       {:error, :enoent} ->
         # umask belongs to this short-lived shell, never the BEAM process.
         # A losing creator still validates the winner's owner/type/mode.
@@ -127,7 +126,7 @@ defmodule Shuttle.CodexEndpoint do
                timeout_ms: 3_000
              ) do
           {_, 0} -> :ok
-          failure -> if Shuttle.FileAccess.exists?(parent), do: :ok, else: {:error, failure}
+          failure -> if File.exists?(parent), do: :ok, else: {:error, failure}
         end
 
       {:ok, _} ->
@@ -143,10 +142,10 @@ defmodule Shuttle.CodexEndpoint do
   defp ancestors("/", _uid), do: :ok
 
   defp ancestors("/tmp", uid) do
-    case Shuttle.FileAccess.lstat("/tmp") do
+    case File.lstat("/tmp") do
       {:ok, %File.Stat{type: :symlink, uid: 0}} ->
         with {:ok, target} when target in ["/private/tmp", "private/tmp"] <-
-               Shuttle.FileAccess.read_link("/tmp"),
+               File.read_link("/tmp"),
              do: ancestors("/private/tmp", uid)
 
       _ ->
@@ -159,7 +158,7 @@ defmodule Shuttle.CodexEndpoint do
   end
 
   defp directory(path, uid) do
-    case Shuttle.FileAccess.lstat(path) do
+    case File.lstat(path) do
       {:ok, %File.Stat{type: :directory, uid: owner, mode: mode}}
       when owner == 0 or owner == uid ->
         if (mode &&& 0o022) == 0 or (owner == 0 and (mode &&& 0o1000) != 0),

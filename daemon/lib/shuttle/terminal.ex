@@ -142,8 +142,8 @@ defmodule Shuttle.Terminal do
 
       with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)) do
         path = WorkerProcess.script_path(name)
-        Shuttle.FileAccess.write!(path, script_text)
-        Shuttle.FileAccess.chmod!(path, 0o755)
+        File.write!(path, script_text)
+        File.chmod!(path, 0o755)
 
         case backend.launch(runner, name, cwd, path, opts) do
           :ok ->
@@ -151,7 +151,7 @@ defmodule Shuttle.Terminal do
             :ok
 
           {:error, _} = error ->
-            Shuttle.FileAccess.rm(path)
+            File.rm(path)
             error
         end
       end

@@ -141,11 +141,8 @@ defmodule Shuttle.TailnetDial do
   """
   def socket_root do
     case Shuttle.Env.get("XDG_RUNTIME_DIR", "") do
-      "/" <> _ = dir ->
-        if Shuttle.FileAccess.dir?(dir), do: Path.join(dir, "shuttle"), else: Shuttle.data_dir()
-
-      _ ->
-        Shuttle.data_dir()
+      "/" <> _ = dir -> if File.dir?(dir), do: Path.join(dir, "shuttle"), else: Shuttle.data_dir()
+      _ -> Shuttle.data_dir()
     end
   end
 

@@ -182,7 +182,7 @@ defmodule Shuttle.DaemonHeartbeat do
   """
   @spec read(String.t()) :: {:ok, record()} | {:error, term()}
   def read(path) when is_binary(path) do
-    with {:ok, body} <- Shuttle.FileAccess.read(path),
+    with {:ok, body} <- File.read(path),
          {:ok, %{} = json} <- Jason.decode(body),
          {:ok, at} <- fetch_ms(json, "at"),
          {:ok, booted_at} <- fetch_ms(json, "booted_at") do
@@ -233,12 +233,12 @@ defmodule Shuttle.DaemonHeartbeat do
 
     with {:ok, body} <- Jason.encode(record),
          :ok <- write_heartbeat(tmp, body),
-         :ok <- Shuttle.FileAccess.rename(tmp, path) do
+         :ok <- File.rename(tmp, path) do
       :ok
     else
       {:error, reason} ->
         Logger.debug("daemon heartbeat write failed (#{path}): #{inspect(reason)}")
-        _ = Shuttle.FileAccess.rm(tmp)
+        _ = File.rm(tmp)
         :ok
     end
   rescue
@@ -248,10 +248,9 @@ defmodule Shuttle.DaemonHeartbeat do
   end
 
   defp write_heartbeat(path, body) do
-    case Shuttle.FileAccess.write(path, body) do
+    case File.write(path, body) do
       {:error, :enoent} ->
-        with :ok <- Shuttle.FileAccess.mkdir_p(Path.dirname(path)),
-             do: Shuttle.FileAccess.write(path, body)
+        with :ok <- File.mkdir_p(Path.dirname(path)), do: File.write(path, body)
 
       result ->
         result
@@ -293,8 +292,8 @@ defmodule Shuttle.DaemonHeartbeat do
   def mark_stopped(heartbeat_path) when is_binary(heartbeat_path) do
     marker = stop_marker_path(heartbeat_path)
 
-    with :ok <- Shuttle.FileAccess.mkdir_p(Path.dirname(marker)),
-         :ok <- Shuttle.FileAccess.touch(marker) do
+    with :ok <- File.mkdir_p(Path.dirname(marker)),
+         :ok <- File.touch(marker) do
       :ok
     else
       {:error, reason} ->
@@ -308,7 +307,7 @@ defmodule Shuttle.DaemonHeartbeat do
   """
   @spec stopped_at_s(String.t()) :: integer() | nil
   def stopped_at_s(heartbeat_path) when is_binary(heartbeat_path) do
-    case Shuttle.FileAccess.stat(stop_marker_path(heartbeat_path), time: :posix) do
+    case File.stat(stop_marker_path(heartbeat_path), time: :posix) do
       {:ok, %File.Stat{mtime: mtime}} when is_integer(mtime) -> mtime
       _ -> nil
     end
@@ -407,7 +406,7 @@ defmodule Shuttle.DaemonHeartbeat do
   """
   @spec machine_booted_at_ms() :: integer() | nil
   def machine_booted_at_ms do
-    with {:ok, stat} <- Shuttle.FileAccess.read("/proc/stat"),
+    with {:ok, stat} <- File.read("/proc/stat"),
          [_, secs] <- Regex.run(~r/^btime (\d+)$/m, stat) do
       String.to_integer(secs) * 1000
     else

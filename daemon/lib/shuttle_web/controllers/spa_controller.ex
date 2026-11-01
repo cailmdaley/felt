@@ -19,10 +19,10 @@ defmodule ShuttleWeb.SpaController do
   defp page(conn, file) do
     path = Path.join(ShuttleWeb.Assets.dist(), file)
 
-    if Shuttle.FileAccess.regular?(path) do
+    if File.regular?(path) do
       conn
       |> put_resp_content_type("text/html")
-      |> send_resp(200, Shuttle.FileAccess.read!(path))
+      |> send_file(200, path)
     else
       conn
       |> put_resp_content_type("text/plain")

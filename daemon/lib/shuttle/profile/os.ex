@@ -7,14 +7,14 @@ defmodule Shuttle.Profile.OS do
 
   @doc false
   def snapshot(root) do
-    with {:ok, stat} <- Shuttle.FileAccess.read(Path.join(root, "stat")),
+    with {:ok, stat} <- File.read(Path.join(root, "stat")),
          {:ok, process} <- parse_stat(stat) do
       threads =
-        case Shuttle.FileAccess.ls(Path.join(root, "task")) do
+        case File.ls(Path.join(root, "task")) do
           {:ok, tids} ->
             for tid <- tids,
-                {:ok, comm} <- [Shuttle.FileAccess.read(Path.join([root, "task", tid, "comm"]))],
-                {:ok, stat} <- [Shuttle.FileAccess.read(Path.join([root, "task", tid, "stat"]))],
+                {:ok, comm} <- [File.read(Path.join([root, "task", tid, "comm"]))],
+                {:ok, stat} <- [File.read(Path.join([root, "task", tid, "stat"]))],
                 {:ok, cpu} <- [parse_stat(stat)],
                 into: %{} do
               {tid, %{name: String.trim(comm), cpu: cpu}}
@@ -88,7 +88,7 @@ defmodule Shuttle.Profile.OS do
   end
 
   defp limits(root) do
-    case Shuttle.FileAccess.read(Path.join(root, "limits")) do
+    case File.read(Path.join(root, "limits")) do
       {:ok, text} ->
         case Regex.run(~r/^Max cpu time\s+(\S+)\s+(\S+)/m, text, capture: :all_but_first) do
           [soft, hard] -> %{soft: limit(soft), hard: limit(hard)}

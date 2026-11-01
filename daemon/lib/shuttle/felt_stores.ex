@@ -86,12 +86,6 @@ defmodule Shuttle.FeltStores do
         :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
         expanded
     end
-  rescue
-    error in Shuttle.FileAccess.Error ->
-      case :persistent_term.get(Shuttle.Env.scope_key(@expanded_cache_key), :none) do
-        {_base, [_ | _] = expanded, _walked_at} -> expanded
-        _ -> reraise error, __STACKTRACE__
-      end
   end
 
   defp cached_or_base({base, expanded, _walked_at}, base), do: expanded
@@ -168,7 +162,7 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case Shuttle.FileAccess.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
+    case File.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
       {:ok, %File.Stat{type: :symlink}} -> true
       _ -> false
     end
@@ -212,7 +206,7 @@ defmodule Shuttle.FeltStores do
           |> Enum.flat_map(fn path ->
             with {:ok, real} <- Shuttle.Realpath.resolve(path),
                  ".felt" <- Path.basename(real),
-                 true <- Shuttle.FileAccess.dir?(real),
+                 true <- File.dir?(real),
                  false <- inside?(real, store_real) do
               [Path.dirname(real)]
             else
@@ -230,7 +224,7 @@ defmodule Shuttle.FeltStores do
   # An absent `.felt` has no links. Check only the root, never each entry;
   # other filesystem errors remain discovery failures rather than empty scans.
   defp substore_links(dir, args) do
-    case Shuttle.FileAccess.stat(dir) do
+    case File.stat(dir) do
       {:error, reason} when reason in [:enoent, :enotdir] ->
         {"", 0}
 

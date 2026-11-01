@@ -44,7 +44,7 @@ defmodule Shuttle.FiberDoc do
   @spec read_path(String.t()) ::
           {:ok, String.t(), String.t(), map(), String.t()} | {:error, String.t()}
   def read_path(path) when is_binary(path) do
-    with {:ok, text} <- Shuttle.FileAccess.read(path),
+    with {:ok, text} <- File.read(path),
          {:ok, frontmatter_yaml, body} <- split_frontmatter(text),
          {:ok, frontmatter} <- parse_frontmatter(frontmatter_yaml, path) do
       {:ok, path, frontmatter_yaml, frontmatter, body}
@@ -99,12 +99,11 @@ defmodule Shuttle.FiberDoc do
     tmp = temp_path(target)
 
     try do
-      Shuttle.FileAccess.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
-
-      Shuttle.FileAccess.rename!(tmp, target)
+      File.write!(tmp, ["---\n", new_fm, "---", body, ensure_trailing_newline(body)])
+      File.rename!(tmp, target)
     rescue
       error ->
-        Shuttle.FileAccess.rm(tmp)
+        File.rm(tmp)
         reraise error, __STACKTRACE__
     end
 
@@ -114,8 +113,8 @@ defmodule Shuttle.FiberDoc do
   # An existing symlink target is written through; a dangling link, which
   # cannot be followed, is replaced like any other path.
   defp write_target(path) do
-    with {:ok, %File.Stat{type: :symlink}} <- Shuttle.FileAccess.lstat(path),
-         true <- Shuttle.FileAccess.exists?(path),
+    with {:ok, %File.Stat{type: :symlink}} <- File.lstat(path),
+         true <- File.exists?(path),
          {:ok, resolved} <- Realpath.resolve(path) do
       resolved
     else

@@ -188,9 +188,9 @@ defmodule Shuttle.Kitty do
   defp find_kitty_rooted_socket(runner) do
     socket_dir()
     |> Path.join("kitty-*")
-    |> Shuttle.FileAccess.wildcard()
+    |> Path.wildcard()
     |> Enum.flat_map(fn path ->
-      case Shuttle.FileAccess.stat(path, time: :posix) do
+      case File.stat(path, time: :posix) do
         {:ok, %File.Stat{mtime: mtime}} -> [{path, mtime}]
         _ -> []
       end
@@ -456,12 +456,12 @@ defmodule Shuttle.Kitty do
         _ -> []
       end
 
-    (Shuttle.FileAccess.wildcard("/tmp/kitty-*") ++ env_candidate)
+    (Path.wildcard("/tmp/kitty-*") ++ env_candidate)
     |> Enum.uniq()
     |> Enum.flat_map(fn p ->
       # File.stat failing drops a stale `$KITTY_LISTEN_ON` whose socket file is
       # already gone — the exact stale-inherited-env case.
-      case Shuttle.FileAccess.stat(p, time: :posix) do
+      case File.stat(p, time: :posix) do
         {:ok, %File.Stat{mtime: m}} -> [{p, m, socket_kind(p)}]
         _ -> []
       end
@@ -526,7 +526,7 @@ defmodule Shuttle.Kitty do
       )
 
   defp find_bin(name, candidates, error_message) do
-    case Shuttle.Env.find_executable(name) || Enum.find(candidates, &Shuttle.FileAccess.exists?/1) do
+    case Shuttle.Env.find_executable(name) || Enum.find(candidates, &File.exists?/1) do
       nil -> {:error, error_message}
       path -> {:ok, path}
     end

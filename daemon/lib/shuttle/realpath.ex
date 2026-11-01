@@ -40,8 +40,10 @@ defmodule Shuttle.Realpath do
   defp resolve_segments(current, [segment | rest], hops) do
     candidate = Path.join(current, segment)
 
-    case Shuttle.FileAccess.read_link(candidate) do
-      {:ok, target_path} ->
+    case :file.read_link(String.to_charlist(candidate)) do
+      {:ok, target} ->
+        target_path = List.to_string(target)
+
         expanded_target =
           case Path.type(target_path) do
             :absolute -> Shuttle.Env.expand(target_path)

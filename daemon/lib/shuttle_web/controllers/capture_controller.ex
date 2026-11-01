@@ -97,7 +97,7 @@ defmodule ShuttleWeb.CaptureController do
       not present?(project_dir) ->
         capture_error(conn, 400, %{error: "project_dir is required"}, meeting_row)
 
-      not Shuttle.FileAccess.dir?(project_dir) ->
+      not File.dir?(project_dir) ->
         capture_error(
           conn,
           422,
