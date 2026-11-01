@@ -70,6 +70,8 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
 		case "/api/v1/lifecycle":
 			http.Error(w, `{"error":"fiber not found on worker"}`, http.StatusNotFound)
+		case "/api/v1/state/composite":
+			fmt.Fprint(w, `{"remotes":{"worker":{"snapshot":{"boot_quarantine":true}}}}`)
 		case "/api/v1/fiber/create":
 			create.record(t, r)
 			payload := create.last()

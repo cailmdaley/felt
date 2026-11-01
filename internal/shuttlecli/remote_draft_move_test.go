@@ -34,6 +34,8 @@ func TestRemoteResumeMovesDraft(t *testing.T) {
 				switch r.URL.Path {
 				case "/api/v1/lifecycle":
 					http.Error(w, "not found", http.StatusNotFound)
+				case "/api/v1/state/composite":
+					fmt.Fprint(w, `{"remotes":{"worker":{"snapshot":{"boot_quarantine":true}}}}`)
 				case "/api/v1/fiber/create":
 					if tc.fail {
 						http.Error(w, "failed", http.StatusBadRequest)
