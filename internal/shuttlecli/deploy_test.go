@@ -112,6 +112,10 @@ config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("supervisor migration: %v\n%s", err, out)
 	}
+	pointer, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
+	if err != nil || strings.TrimSpace(string(pointer)) != release.Dir {
+		t.Fatalf("deploy did not select its release: %q, %v; want %s", pointer, err, release.Dir)
+	}
 	captured, err := os.ReadFile(capture)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -230,7 +234,7 @@ func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T)
 				lines = append(lines, line)
 			}
 		}
-		return strings.Join(lines, "\n")
+		return strings.Join(lines, "\n") + "\nEnvironment=\"SHUTTLE_RELEASE=" + release.Dir + "\"\n"
 	}
 	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
 		"shuttle-daemon.service": []byte(without("KillMode=process")),
@@ -396,8 +400,9 @@ respawn_launcher_restart_cmd "$CHECKOUT" "${SHUTTLE_TEST_OWNER:-}" | /bin/bash
 		t.Fatalf("installed launcher differs from checkout: err=%v", err)
 	}
 	repo, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
-	if err != nil || strings.TrimSpace(string(repo)) != checkout {
-		t.Fatalf("deployed checkout state = %q, %v; want %q", repo, err, checkout)
+	wantRelease, _ := filepath.EvalSymlinks(filepath.Join(checkout, "bin", "rel"))
+	if err != nil || strings.TrimSpace(string(repo)) != wantRelease {
+		t.Fatalf("selected release = %q, %v; want %q", repo, err, wantRelease)
 	}
 	tmuxLog, _ := os.ReadFile(calls)
 	supervisorOut, _ := os.ReadFile(supervisorLog)
@@ -673,7 +678,7 @@ eval "$(build_checkout_cmd "$SOURCE" 1)"
 	}
 }
 
-func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
+func TestDeployRemovesReleasePinAndPreservesSettings(t *testing.T) {
 	t.Parallel()
 	old := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "old"))
 	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "revision"))
@@ -691,9 +696,10 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rendered += "\nEnvironment=\"SHUTTLE_RELEASE=" + old.Dir + "\"\n"
 	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(rendered)})
 	if len(calls) != 1 {
-		t.Fatalf("current supervisor was not retargeted: %v", calls)
+		t.Fatalf("pinned supervisor was not migrated: %v", calls)
 	}
 	for name, want := range map[string]string{
 		"--stores": options.Stores, "--path": options.Path, "--log": options.Log,
@@ -706,6 +712,10 @@ func TestDeployRetargetsCurrentSupervisorAndPreservesSettings(t *testing.T) {
 	}
 	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
 		t.Fatalf("supervisor environment not retained: %v", calls[0])
+	}
+	matchingPin := strings.ReplaceAll(rendered, old.Dir, release.Dir)
+	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(matchingPin)}); len(calls) != 1 {
+		t.Fatalf("a matching pin still needs removal: %v", calls)
 	}
 }
 

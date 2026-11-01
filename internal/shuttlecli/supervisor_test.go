@@ -82,7 +82,7 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 					}
 				}
 			} else {
-				if !strings.Contains(rendered, "WorkingDirectory="+release.Dir+"\n") || strings.Contains(rendered, `WorkingDirectory="`) {
+				if !strings.Contains(rendered, "WorkingDirectory=/") || strings.Contains(rendered, release.Dir) || strings.Contains(rendered, `WorkingDirectory="`) {
 					t.Fatalf("systemd WorkingDirectory must be unquoted:\n%s", rendered)
 				}
 				for _, want := range []string{
@@ -91,7 +91,6 @@ func TestSupervisorTemplatesRenderBothPlatforms(t *testing.T) {
 					`StandardOutput=append:/tmp/log dir/"quoted"\literal %%log`,
 					`StandardError=append:/tmp/log dir/"quoted"\literal %%log`,
 					`Environment="SHUTTLE_LOG=/tmp/log dir/\"quoted\"\\literal %%log"`,
-					`Environment="SHUTTLE_RELEASE=` + systemdQuotedValue(release.Dir) + `"`,
 					`Environment="TMUX_TMPDIR=/scratch/tmux dir/\"quoted\"\\literal %%tmux & <x>"`,
 				} {
 					if !strings.Contains(rendered, want) {
@@ -327,7 +326,7 @@ func TestSupervisorTemplatesOmitEmptyOptionalValues(t *testing.T) {
 	}
 }
 
-func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *testing.T) {
+func TestSupervisorWorkingDirectoryIsIndependentOfRelease(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name       string
@@ -340,13 +339,6 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 			t.Parallel()
 			root := t.TempDir()
 			release := writeTestDaemonRelease(t, tc.releaseDir(root))
-			want, err := filepath.EvalSymlinks(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.name == "fetched release" {
-				want = release.Dir
-			}
 			options := supervisorOptions{
 				Label: defaultDaemonLabel, ShuttleBin: "/tmp/shuttle", StoresFile: "/tmp/stores.json",
 				Path: "/bin", Log: "/tmp/shuttle.log",
@@ -356,7 +348,9 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 				if osName == "Darwin" {
 					template = supervisorTemplateFixtures()["io.shuttle.daemon.plist.template"]
 				}
-				rendered, err := newApp(testEnv(t)).renderSupervisorTemplate(osName, template, options, release)
+				env := testEnv(t)
+				want, _ := env.UserHomeDir()
+				rendered, err := newApp(env).renderSupervisorTemplate(osName, template, options, release)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -366,11 +360,8 @@ func TestSupervisorWorkingDirectoryUsesCheckoutRootAndFetchedReleaseRoot(t *test
 				if osName == "Darwin" && !strings.Contains(rendered, "<key>WorkingDirectory</key>\n<string>"+want+"</string>") {
 					t.Errorf("launchd working directory does not use %q:\n%s", want, rendered)
 				}
-				if osName == "Linux" && !strings.Contains(rendered, `Environment="SHUTTLE_RELEASE=`+release.Dir+`"`) {
-					t.Errorf("rendered supervisor lost SHUTTLE_RELEASE=%q:\n%s", release.Dir, rendered)
-				}
-				if osName == "Darwin" && !strings.Contains(rendered, `<key>Release</key><string>`+release.Dir+`</string>`) {
-					t.Errorf("rendered supervisor lost its release path %q:\n%s", release.Dir, rendered)
+				if strings.Contains(rendered, "SHUTTLE_RELEASE") || strings.Contains(rendered, release.Dir) {
+					t.Errorf("supervisor pins a release:\n%s", rendered)
 				}
 			}
 		})
@@ -646,7 +637,6 @@ func supervisorTemplateFixtures() map[string]string {
 		"io.shuttle.daemon.plist.template": `<?xml version="1.0"?><plist><dict>
 <key>Label</key><string>__LABEL__</string>
 <key>Program</key><string>__SHUTTLE_BIN__</string>
-<key>Release</key><string>__SHUTTLE_RELEASE__</string>
 <key>WorkingDirectory</key>
 <string>__WORKING_DIRECTORY__</string>
 <key>Log</key><string>__LOG__</string>
@@ -674,7 +664,6 @@ LimitNOFILE=8192
 WorkingDirectory=__WORKING_DIRECTORY__
 ExecStart="__SHUTTLE_BIN__" daemon start
 ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ]; then :; fi'
-Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
 Environment="PATH=__PATH__"
 Environment="SHUTTLE_PORT=__PORT__"
 Environment="SHUTTLE_STORES=__SHUTTLE_STORES__"
@@ -796,7 +785,7 @@ func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
 func TestSupervisorCodexMalformedExistingConfiguration(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ osName, source string }{{"Darwin", "<plist><dict>"}, {"Linux", `Environment="SHUTTLE_CODEX_SOCKET=/tmp/unclosed`}} {
-		if _, err := supervisorCodexEnvironment(tc.osName, tc.source); err == nil {
+		if _, err := supervisorEnvironment(tc.osName, tc.source); err == nil {
 			t.Errorf("%s accepted malformed settings", tc.osName)
 		}
 	}

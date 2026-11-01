@@ -149,7 +149,7 @@ The daemon tarball carries what the release needs to run *and* to keep
 running. Under its root sit `bin/`, `erts-*/`, `lib/`, `releases/` and
 `share/`. `bin/` contains `shuttled`, the BEAM launcher; `share/` holds the
 launchd plist and systemd unit templates. The supervisor invokes the installed
-Go `shuttle` CLI with the release path, and `shuttle daemon install` renders
+Go `shuttle` CLI, which reads the release selected in `~/.shuttle/repo` at launch, and `shuttle daemon install` renders
 the same templates in a checkout or fetched install. Both templates raise the
 daemon's open-file limit to 8192 (the soft `NumberOfFiles` for launchd, leaving
 the hard limit at its default; `LimitNOFILE` for systemd). launchd's default soft limit of 256 is fewer descriptors than a
@@ -335,8 +335,8 @@ Six steps run in order.
 2. **Go CLIs.** `make cli-install` builds and installs `felt` and `shuttle`
    from *this* checkout, so the daemon and its CLIs share one source revision.
 3. **Daemon release.** `make daemon` assembles the Mix release into `bin/rel`.
-   The step records the checkout path in `~/.shuttle/repo`, which lets
-   `shuttle daemon` find this release and supports remote revival over SSH.
+   The step atomically records the absolute release path in `~/.shuttle/repo`, which lets
+   supervisors and remote revival over SSH boot the most recently built release.
 4. **`ui/dist`.** Builds the served board bundle with Node and npm on this host.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match both CLIs. Then it pipes a probe
@@ -446,9 +446,13 @@ make install-agent
 The `shuttle` Go CLI is installed on `PATH` with `felt`; the Makefile target
 builds the same CLI from a checkout. Both paths render the templates from
 `daemon/share/` in a checkout or `share/` in a fetched installation. The
-service records the absolute `shuttle` executable and sets `SHUTTLE_RELEASE`
-to the Mix release directory, then starts it with `shuttle daemon start
---force`. The same templates serve both installation paths.
+service records the absolute installed `shuttle` executable and starts it with `shuttle daemon start`.
+The CLI reads `~/.shuttle/repo` on each launch; the service's working directory is the user's home.
+`shuttle daemon install`, source builds, and deployments select the release in that one pointer.
+Source builds and deployments refresh release-pinned supervisor definitions automatically, preserving their settings and replacing checkout-dependent working directories.
+The same templates serve both installation paths.
+`/api/v1/version` and `shuttle daemon status` report `release_path`, the absolute release root the running VM booted from (`"unknown"` under Mix).
+The pointer selects the next boot; changing it does not change a running VM's receipt.
 
 The install fixes these values into the job:
 
@@ -701,8 +705,10 @@ respawn it:
 lsof -ti:4000 -sTCP:LISTEN | xargs kill
 ```
 
-A fetched daemon installation writes `~/.shuttle/repo` with its release directory, which lets `shuttle-launch` locate it during remote revival.
-If you move the release manually, update that path too.
+`~/.shuttle/repo` selects the release for both supervisors and the respawn loop.
+The loop rereads it between daemon starts, so a build can select a different checkout without replacing the loop.
+The pointer also accepts a checkout root containing `bin/rel`.
+If you move the release manually, select its new absolute path with `shuttle daemon select-release <path>`.
 
 ## Rex terminal backend
 

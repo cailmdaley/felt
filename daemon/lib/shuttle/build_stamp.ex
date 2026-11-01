@@ -1,7 +1,6 @@
 defmodule Shuttle.BuildStamp do
   @moduledoc """
-  What this daemon is, as four fields: the commit it was built from, when it
-  was built, when it booted, and its release version.
+  The daemon's build identity, boot time, version, and absolute boot release path.
 
   Two consumers, and the second is why this module exists rather than the
   fields being assembled inline where they were first needed:
@@ -30,7 +29,8 @@ defmodule Shuttle.BuildStamp do
           git_short_sha: String.t(),
           built_at: String.t(),
           booted_at: String.t(),
-          mix_vsn: String.t()
+          mix_vsn: String.t(),
+          release_path: String.t()
         }
   def stamp do
     sha = git_sha()
@@ -40,7 +40,8 @@ defmodule Shuttle.BuildStamp do
       git_short_sha: short_sha(sha),
       built_at: built_at(),
       booted_at: booted_at(),
-      mix_vsn: mix_vsn()
+      mix_vsn: mix_vsn(),
+      release_path: release_path()
     }
   end
 
@@ -70,6 +71,14 @@ defmodule Shuttle.BuildStamp do
   @spec short_sha(String.t()) :: String.t()
   def short_sha(sha) when is_binary(sha), do: String.slice(sha, 0, 7)
   def short_sha(_), do: "unknown"
+
+  @doc "Absolute root of the running release, or `\"unknown\"` under Mix."
+  def release_path do
+    case Shuttle.Dispatcher.release_root() do
+      nil -> "unknown"
+      root -> root
+    end
+  end
 
   defp mix_vsn do
     Shuttle.version()

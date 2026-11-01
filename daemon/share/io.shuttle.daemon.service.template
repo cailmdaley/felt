@@ -1,14 +1,13 @@
 # Shuttle daemon systemd **user** unit — the Linux analog of
 # share/io.shuttle.daemon.plist.template. `shuttle daemon install` renders it
 # to ~/.config/systemd/user/shuttle-daemon.service. Placeholders:
-# __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__, __SHUTTLE_STORES__,
+# __SHUTTLE_BIN__, __WORKING_DIRECTORY__, __LOG__, __SHUTTLE_STORES__,
 # __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, __SSH_AUTH_SOCK__, and
 # __TMUX_TMPDIR__, __CODEX_SOCKET__, and __CODEX_HOME__.
 # The unrendered template is not a valid unit.
 #
-# __SHUTTLE_BIN__ is the absolute Go CLI path; __SHUTTLE_RELEASE__ is the Mix
-# release directory. There is no TCC on Linux, so the release may live
-# anywhere, including under ~/Documents.
+# __SHUTTLE_BIN__ is the installed Go CLI path. It reads ~/.shuttle/repo on
+# each launch. WorkingDirectory is the user's home, independent of a checkout.
 #
 # A *user* unit, not a system one: the daemon runs as you, reads your felt
 # stores, writes your ~/.shuttle, and uses `felt` for fiber data and `shuttle`
@@ -47,8 +46,7 @@ ExecStartPre=/bin/sh -c 'if [ -f "__LOG__" ] && [ "$$(wc -c < "__LOG__")" -gt 67
 # The daemon start guard refuses any listener that survives a service restart.
 ExecStart="__SHUTTLE_BIN__" daemon start
 
-# The release and user's real login PATH, set at install time.
-Environment="SHUTTLE_RELEASE=__SHUTTLE_RELEASE__"
+# The user's real login PATH, set at install time.
 Environment="PATH=__PATH__"
 # Absent by default (the daemon binds 4000); set only to supervise a second
 # instance beside the real one. The renderer drops this line when empty.

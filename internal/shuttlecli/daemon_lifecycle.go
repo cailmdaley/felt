@@ -33,6 +33,8 @@ func (a *app) shuttleDaemonCmd() *cobra.Command {
 		a.newShuttleDaemonInstallCommand(),
 		a.newShuttleDaemonUninstallCommand(),
 		a.daemonLoopPresentCmd(),
+		a.daemonSelectReleaseCmd(),
+		a.daemonRefreshReleaseCmd(),
 	)
 	return shuttleDaemonCmd
 }
@@ -101,6 +103,14 @@ func (a *app) shuttleDaemonStatusCmd() *cobra.Command {
 			}
 			state, err := a.daemonLifecycleGet(settings, "/api/v1/state", 5*time.Second)
 			if err == nil {
+				var receipt map[string]any
+				var snapshot map[string]any
+				if json.Unmarshal(version, &receipt) == nil && json.Unmarshal(state, &snapshot) == nil {
+					if path, ok := receipt["release_path"]; ok {
+						snapshot["release_path"] = path
+					}
+					state, _ = json.Marshal(snapshot)
+				}
 				a.printDaemonBody(state)
 			} else {
 				a.printDaemonBody(version)
@@ -240,6 +250,22 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 		}
 		return a.validateDaemonRelease(dir)
 	}
+	if home != "" {
+		data, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
+		if err == nil && strings.TrimSpace(string(data)) != "" {
+			dir, err := a.expandUserPath(strings.TrimSpace(string(data)))
+			if err != nil {
+				return daemonRelease{}, err
+			}
+			if release, err := a.validateDaemonRelease(dir); err == nil {
+				return release, nil
+			}
+			return a.validateDaemonRelease(filepath.Join(dir, "bin", "rel"))
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return daemonRelease{}, err
+		}
+	}
 	executableDir := filepath.Dir(executable)
 	if release, err := a.validateDaemonRelease(executableDir); err == nil {
 		return release, nil
@@ -247,22 +273,6 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 	if info, err := os.Stat(filepath.Join(executableDir, "shuttled")); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
 		if release, err := a.validateDaemonRelease(filepath.Dir(executableDir)); err == nil {
 			return release, nil
-		}
-	}
-	if home != "" {
-		data, readErr := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
-		if readErr == nil {
-			repo := strings.TrimSpace(string(data))
-			if repo != "" {
-				if expanded, expandErr := a.expandUserPath(repo); expandErr == nil {
-					if release, releaseErr := a.validateDaemonRelease(expanded); releaseErr == nil {
-						return release, nil
-					}
-					if release, releaseErr := a.validateDaemonRelease(filepath.Join(expanded, "bin", "rel")); releaseErr == nil {
-						return release, nil
-					}
-				}
-			}
 		}
 	}
 	return daemonRelease{}, errors.New("no daemon release found; set SHUTTLE_RELEASE or build/install a Mix release")
@@ -338,6 +348,16 @@ func (a *app) newShuttleDaemonStopCommand() *cobra.Command {
 			release, err := a.findDaemonRelease()
 			if err != nil {
 				return err
+			}
+			if settings, err := a.resolveHostSettings(); err == nil {
+				if body, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
+					var receipt struct {
+						ReleasePath string `json:"release_path"`
+					}
+					if json.Unmarshal(body, &receipt) == nil && filepath.IsAbs(receipt.ReleasePath) {
+						release.Dir = receipt.ReleasePath
+					}
+				}
 			}
 			return a.stopDaemonRelease(release)
 		},

@@ -787,6 +787,10 @@ here" rather than as a missing file.
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
 | `POST /remotes/:name/reset` | Restart recovery for a tripped, degraded or unreachable remote; one reset buys one attempt, and it 409s when no recovery action is waiting |
 
+`release_path` is the absolute root of the release the running VM booted from, or `"unknown"` when running under Mix.
+It describes the current process, not the release selected for the next boot in `~/.shuttle/repo`.
+`shuttle daemon status` includes this field even when it prints the state response.
+
 `codex_backend` is a cached, bounded-read health object with `state` (`starting`, `ready`, or `waiting`), `endpoint`, `error`, and `next_attempt_at` (UTC timestamp or null).
 Its reconciliation runs off the request path and independently of worker boot quarantine.
 `ready: true` at the top level means the daemon has initialized, not that Codex can accept work.

@@ -52,9 +52,16 @@ first — stray `.beam` files at the project root shadow the real ones.
 Terminal workers live in tmux and app conversations live in the managed Codex
 App Server. Both survive Shuttle restarts; the daemon re-adopts their ownership.
 
-**A supervisor owns the daemon's restart policy.** After `make install-agent`,
-launchd (`io.shuttle.daemon`) or the systemd user unit starts the daemon with an
-absolute path. `make stop` identifies the release boot path under `bin/rel`
+**A supervisor owns the daemon's restart policy.**
+Launchd (`io.shuttle.daemon`), the systemd user unit, and the tmux loop read one launch pointer, `~/.shuttle/repo`.
+A successful `make daemon` (including `make build` and `make restart`) atomically selects that checkout's absolute `bin/rel` path there.
+Plain and `--ref` deployments select their built release in the same file.
+Supervisor definitions invoke the installed Go CLI and use the user's home as their working directory; neither value depends on the selected checkout.
+A build refreshes any installed release-pinned definition through the ownership-checked installer, preserving its operator settings.
+That one-time migration cycles the service; builds with pointer-independent definitions only select the next launch target.
+`/api/v1/version` reports `release_path`, the absolute release root of the running VM, independently of the pointer's current value.
+`shuttle daemon status` includes the same field.
+An explicit `SHUTTLE_RELEASE` still selects a release for a direct CLI invocation. `make stop` identifies the release boot path under `bin/rel`
 whether that path is absolute or relative, but a supervisor immediately
 respawns a process that it owns, so `make stop` is not a durable stop while the
 supervisor is enabled. Use the supervisor for an explicit cycle:
@@ -160,7 +167,8 @@ Push the verified revision, then deploy it on each host:
 2. Re-render an installed daemon supervisor that an older template wrote — a
    pre-split one (it bakes `FELT_STORES`), one that predates `TMUX_TMPDIR`
    (the word appears nowhere in it), or one without an open-file limit
-   (no `NumberOfFiles` or `LimitNOFILE`) — through `shuttle daemon install`, keeping
+   (no `NumberOfFiles` or `LimitNOFILE`), or one with a release path pinned in
+   `SHUTTLE_RELEASE` — through `shuttle daemon install`, keeping
    its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
    `TMUX_TMPDIR` from the login shell.
 3. Run `felt setup <harness>` for each harness that carries felt's plugin, so

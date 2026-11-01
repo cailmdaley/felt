@@ -1,6 +1,6 @@
 defmodule Shuttle.BuildStampTest do
   @moduledoc """
-  `Shuttle.BuildStamp` — what this daemon is, as four fields plus a version.
+  `Shuttle.BuildStamp` — the daemon's build identity and runtime boot receipt.
 
   Its contract is narrower than it looks and is the whole reason it exists as a
   module: every field is a STRING, `"unknown"` where a source is absent, so the
@@ -13,7 +13,7 @@ defmodule Shuttle.BuildStampTest do
 
   alias Shuttle.BuildStamp
 
-  test "the stamp is five string-valued fields, whatever the build did or did not stamp" do
+  test "the stamp includes build identity and boot release path" do
     stamp = BuildStamp.stamp()
 
     assert Enum.sort(Map.keys(stamp)) == [
@@ -21,13 +21,18 @@ defmodule Shuttle.BuildStampTest do
              :built_at,
              :git_sha,
              :git_short_sha,
-             :mix_vsn
+             :mix_vsn,
+             :release_path
            ]
 
     for {key, value} <- stamp do
       assert is_binary(value), "#{key} was #{inspect(value)}, not a string"
       assert value != ""
     end
+  end
+
+  test "Mix has no boot release path" do
+    assert BuildStamp.release_path() == "unknown"
   end
 
   test "the short sha is the first seven characters of the long one" do

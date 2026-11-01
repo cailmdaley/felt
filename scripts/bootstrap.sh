@@ -175,15 +175,7 @@ step "Build the daemon release"
 make -C "$REPO" daemon SKIP_CLI=1 || die "daemon release build failed."
 ok "daemon release built → bin/rel."
 
-# Record the bootstrapped checkout in ~/.shuttle (alongside the daemon's other
-# state: events.jsonl, tmux.sock). bin/shuttle-launch resolves its repo as
-# $SHUTTLE_DIR > ~/.shuttle/repo > script location, so this state file is what
-# lets a bare `~/.local/bin/shuttle-launch` (remote revival — remote_registry.ex
-# invoking it over SSH, no env) find this checkout.
-mkdir -p "$HOME/.shuttle" \
-  && printf '%s\n' "$REPO" > "$HOME/.shuttle/repo" \
-  || die "failed to record checkout path in ~/.shuttle/repo."
-ok "checkout recorded → ~/.shuttle/repo ($REPO)."
+# The build selects bin/rel in ~/.shuttle/repo for supervisors and SSH revival.
 
 # ── 4. ui/dist ─────────────────────────────────────────────────────────────
 step "UI bundle (ui/dist)"

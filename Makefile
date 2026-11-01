@@ -205,6 +205,10 @@ endif
 	fi
 	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
 	mv bin/rel.next bin/rel
+	@# Publish only an assembled release. A path-pinned supervisor is migrated
+	@# once through the installer; pointer-independent supervisors stay running.
+	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon select-release '$(CURDIR)/bin/rel'
+	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon refresh-release
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
@@ -254,6 +258,7 @@ lint-personal:
 all: restart
 
 start:
+	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon refresh-release
 	@# Readiness is binding :4000, not a fixed wait. Two boot paths converge here:
 	@#   - nohup dev launch: we spawn the Go shuttle CLI ourselves.
 	@#   - launchd KeepAlive: `make stop` killed the daemon and launchd is already
@@ -270,7 +275,7 @@ start:
 	  echo "shuttle already running (pid $$pid); waiting for :4000"; \
 	else \
 	  echo "=== shuttle start $$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> $(LOG); \
-	  nohup env PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' shuttle daemon start >> $(LOG) 2>&1 & \
+	  nohup env -u SHUTTLE_RELEASE PATH="$(INSTALL_DIR):$$PATH" shuttle daemon start >> $(LOG) 2>&1 & \
 	  pid=$$!; \
 	fi; \
 	deadline=$$(( $$(date +%s) + 120 )); \
@@ -290,7 +295,7 @@ start:
 # The Go lifecycle command marks a requested stop before signaling the daemon,
 # preserving the boot-quarantine boundary in one place.
 stop:
-	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' shuttle daemon stop
+	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon stop
 
 # Rebuild the UI and daemon together before restarting the service.
 restart:

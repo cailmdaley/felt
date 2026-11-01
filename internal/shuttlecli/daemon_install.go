@@ -251,6 +251,9 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 	if err := touchDaemonStopMarker(filepath.Join(installSettings.DataDir, "heartbeat.stopped")); err != nil {
 		return fmt.Errorf("marking the target service stop: %w", err)
 	}
+	if err := a.selectDaemonRelease(release); err != nil {
+		return fmt.Errorf("selecting daemon release: %w", err)
+	}
 	if options.OS == "Darwin" {
 		err = a.installLaunchAgent(options, rendered)
 	} else {
@@ -370,7 +373,7 @@ func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
 	previous := map[string]string{}
 	source, err := os.ReadFile(path)
 	if err == nil {
-		previous, err = supervisorCodexEnvironment(options.OS, string(source))
+		previous, err = supervisorEnvironment(options.OS, string(source))
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("preserving supervisor settings from %s: %w", path, err)
@@ -397,25 +400,24 @@ func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
 	return validateSupervisorOptions(*options)
 }
 
-func supervisorCodexEnvironment(osName, source string) (map[string]string, error) {
+func supervisorEnvironment(osName, source string) (map[string]string, error) {
 	values := map[string]string{}
-	keep := func(key, value string) {
-		if key == "SHUTTLE_CODEX_SOCKET" || key == "CODEX_HOME" || key == "SHUTTLE_STORES" {
-			values[key] = value
-		}
-	}
 	if osName == "Linux" {
 		for _, line := range strings.Split(source, "\n") {
 			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "Environment=") || (!strings.Contains(line, "SHUTTLE_CODEX_SOCKET=") && !strings.Contains(line, "CODEX_HOME=") && !strings.Contains(line, "SHUTTLE_STORES=")) {
+			if !strings.HasPrefix(line, "Environment=") {
 				continue
 			}
-			assignment, err := strconv.Unquote(strings.TrimPrefix(line, "Environment="))
+			assignment := strings.TrimPrefix(line, "Environment=")
+			var err error
+			if strings.HasPrefix(assignment, "\"") {
+				assignment, err = strconv.Unquote(assignment)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("cannot decode supervisor Environment assignment: %w", err)
 			}
 			key, value, _ := strings.Cut(assignment, "=")
-			keep(key, strings.ReplaceAll(value, "%%", "%"))
+			values[key] = strings.ReplaceAll(value, "%%", "%")
 		}
 		return values, nil
 	}
@@ -440,7 +442,7 @@ func supervisorCodexEnvironment(osName, source string) (map[string]string, error
 				if element.Name.Local == "key" {
 					key = value
 				} else if depth == envDepth {
-					keep(key, value)
+					values[key] = value
 				}
 			} else {
 				depth++
@@ -501,10 +503,13 @@ func (a *app) renderSupervisorTemplate(osName, source string, options supervisor
 			return "", err
 		}
 	}
+	home, err := a.env.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
 	values := map[string]string{
 		"__SHUTTLE_BIN__":         shuttleBin,
-		"__SHUTTLE_RELEASE__":     release.Dir,
-		"__WORKING_DIRECTORY__":   daemonWorkingDirectory(release.Dir),
+		"__WORKING_DIRECTORY__":   home,
 		"__LOG__":                 options.Log,
 		"__SHUTTLE_STORES__":      options.Stores,
 		"__SHUTTLE_STORES_FILE__": options.StoresFile,
@@ -559,7 +564,7 @@ var optionalSupervisorEnv = []struct{ key, placeholder string }{
 }
 
 func validateTemplatePlaceholderSet(osName, source string) error {
-	want := []string{"__SHUTTLE_BIN__", "__SHUTTLE_RELEASE__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__", "__TMUX_TMPDIR__"}
+	want := []string{"__SHUTTLE_BIN__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__", "__TMUX_TMPDIR__"}
 	for _, optional := range []string{"__CODEX_SOCKET__", "__CODEX_HOME__"} {
 		if strings.Contains(source, optional) {
 			want = append(want, optional)
@@ -582,13 +587,6 @@ func validateTemplatePlaceholderSet(osName, source string) error {
 		return fmt.Errorf("supervisor template placeholders are %v; want exactly %v", got, want)
 	}
 	return nil
-}
-
-func daemonWorkingDirectory(releaseDir string) string {
-	if filepath.Base(releaseDir) == "rel" && filepath.Base(filepath.Dir(releaseDir)) == "bin" {
-		return filepath.Dir(filepath.Dir(releaseDir))
-	}
-	return releaseDir
 }
 
 func rejectUnrenderedPlaceholders(source string) (string, error) {

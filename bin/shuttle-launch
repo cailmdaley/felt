@@ -15,9 +15,8 @@
 #   shuttle-launch --recover start a dead daemon without stopping an existing owner
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
-# Repo resolution precedence: $SHUTTLE_DIR; else ~/.shuttle/repo (the state
-# file scripts/bootstrap.sh writes at install time, so remote revival over SSH needs
-# no env to find the bootstrapped checkout); else the script's own directory
+# SHUTTLE_DIR selects a release for this invocation. ~/.shuttle/repo is the
+# shared launch pointer, read again for every respawn; otherwise use the script's own directory
 # if it looks like <repo>/bin. Source checkouts contain bin/rel/bin/shuttled;
 # fetched releases contain bin/shuttled. If none resolves, this exits loudly.
 #
@@ -64,10 +63,14 @@ resolve_repo() {
   fi
   if [ -r "$HOME/.shuttle/repo" ]; then
     state_repo=$(head -n 1 "$HOME/.shuttle/repo")
-    if [ -n "$state_repo" ] && [ -n "$(release_dir "$state_repo")" ]; then
+    if [ -n "$state_repo" ]; then
       printf '%s\n' "$state_repo"
       return
     fi
+  fi
+  if [ -n "${REPO:-}" ] && [ -n "$(release_dir "$REPO")" ]; then
+    printf '%s\n' "$REPO"
+    return
   fi
   script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
   candidate=$(dirname -- "$script_dir")
@@ -76,6 +79,9 @@ resolve_repo() {
   fi
 }
 
+if [ "${1:-}" = "--loop" ] && [ -r "$HOME/.shuttle/repo" ]; then
+  unset SHUTTLE_DIR
+fi
 REPO=$(resolve_repo)
 SHUTTLE_RELEASE=""
 [ -n "$REPO" ] && SHUTTLE_RELEASE=$(release_dir "$REPO")
@@ -84,10 +90,20 @@ SHUTTLE_RELEASE=""
   exit 1
 }
 
+# An explicit launch selects the same pointer used by service supervisors.
+# Loop children only read it: an inherited SHUTTLE_DIR must not pin respawns.
+if [ "${1:-}" != "--loop" ] && [ -n "${SHUTTLE_DIR:-}" ]; then
+  SHUTTLE_RELEASE=$(CDPATH= cd -- "$SHUTTLE_RELEASE" && pwd -P) || exit 1
+  mkdir -p "$HOME/.shuttle" || exit 1
+  pointer=$(mktemp "$HOME/.shuttle/.repo-XXXXXX") || exit 1
+  printf '%s\n' "$SHUTTLE_RELEASE" > "$pointer" && mv -f "$pointer" "$HOME/.shuttle/repo" || exit 1
+fi
+
 if [ "${1:-}" = "--loop" ]; then
+  unset SHUTTLE_DIR
   SHUTTLE_RESPAWN_LOOP=1
   export SHUTTLE_RESPAWN_LOOP
-  cd "$REPO" || exit 1
+  cd "$HOME" || exit 1
   # Durable daemon logging. Redirect the daemon's stdout+stderr to a file so
   # dispatch history survives tmux scrollback — a Linux host running this
   # respawn loop otherwise logs only to its pane, and a failed force-reopen
@@ -133,6 +149,8 @@ if [ "${1:-}" = "--loop" ]; then
       fi
       continue
     fi
+    REPO=$(resolve_repo)
+    SHUTTLE_RELEASE=$(release_dir "$REPO")
     started=$(date +%s)
     echo "=== shuttle start $(date '+%Y-%m-%dT%H:%M:%S%z') ===" >> "$LOG"
     SHUTTLE_RELEASE="$SHUTTLE_RELEASE" shuttle daemon start --force >> "$LOG" 2>&1
@@ -257,6 +275,6 @@ if [ "$RECOVERY" -eq 0 ]; then
   tmux kill-session -t "$SESSION" 2>/dev/null
 fi
 tmux new-session -d -s "$SESSION" \
-  "exec env SHUTTLE_RESPAWN_LOOP=1 SHUTTLE_DIR='$REPO' '$SELF' --loop" \
+  "exec env SHUTTLE_RESPAWN_LOOP=1 '$SELF' --loop" \
   || { echo "shuttle-launch: failed to start tmux session '$SESSION'" >&2; exit 1; }
 echo "shuttle-launch: respawn loop running in tmux session '$SESSION' (repo: $REPO)"

@@ -68,7 +68,7 @@ done
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   for candidate in "$HOME"/.config/systemd/user/*.service; do
     [ -f "$candidate" ] || continue
-    if grep -q 'shuttle' "$candidate" && { grep -q 'start --force' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; } && systemctl --user is-active --quiet "$(basename "$candidate" .service)" 2>/dev/null; then echo 1; exit 0; fi
+    if grep -q 'shuttle' "$candidate" && { grep -Eq 'start([[:space:]]|$)' "$candidate" || grep -q 'SHUTTLE_RELEASE' "$candidate"; } && systemctl --user is-active --quiet "$(basename "$candidate" .service)" 2>/dev/null; then echo 1; exit 0; fi
   done
 fi
 echo 0
@@ -81,7 +81,9 @@ respawn_launcher_restart_cmd() {
   cat <<SH
 set -eu
 mkdir -p "\$HOME/.shuttle" "\$HOME/.local/bin"
-printf '%s\\n' $(shell_quote "$checkout") > "\$HOME/.shuttle/repo"
+pointer=\$(mktemp "\$HOME/.shuttle/.repo-XXXXXX")
+printf '%s\\n' $(shell_quote "$checkout/bin/rel") > "\$pointer"
+mv -f "\$pointer" "\$HOME/.shuttle/repo"
 install -m 755 $(shell_quote "$checkout/bin/shuttle-launch") "\$HOME/.local/bin/shuttle-launch"
 PATH="\$HOME/.local/bin:\$PATH"
 export PATH
@@ -104,6 +106,12 @@ done
 SH
   if [ "$reinstall" = 1 ]; then
     printf 'export SHUTTLE_RELEASE=%s\n' "$(shell_quote "$release")"
+    cat <<'SH'
+mkdir -p "$HOME/.shuttle"
+pointer=$(mktemp "$HOME/.shuttle/.repo-XXXXXX")
+printf '%s\n' "$SHUTTLE_RELEASE" > "$pointer"
+mv -f "$pointer" "$HOME/.shuttle/repo"
+SH
     printf 'if [ "$(%s)" = 1 ]; then\n' "$(supervisor_probe_cmd)"
     cat <<'SH'
   PATH="$HOME/.local/bin:$PATH"
@@ -143,27 +151,14 @@ SH
 
     for candidate in "$HOME"/Library/LaunchAgents/*.plist "$HOME"/.config/systemd/user/*.service; do
       [ -f "$candidate" ] || continue
-      # Re-render a daemon supervisor rendered by an older template, keeping
-      # every option it carries: the pre-split shim bakes FELT_STORES (current
-      # templates never write it); current templates mention TMUX_TMPDIR in
-      # their comments even when the value is empty and the entry is dropped,
-      # so a supervisor without the word was never offered one (install
-      # captures it from the login shell); and a current systemd unit sets
-      # KillMode=process. Tunnel supervisors carry no SHUTTLE_RELEASE.
+      # Migrate pre-split and release-pinned daemon definitions, preserving
+      # their operator settings. Pointer-independent definitions and tunnels
+      # need no refresh.
       grep -q 'shuttle' "$candidate" || continue
       if ! grep -q 'FELT_STORES' "$candidate"; then
         grep -q 'SHUTTLE_RELEASE' "$candidate" || continue
-        stale=0
-        grep -q 'TMUX_TMPDIR' "$candidate" || stale=1
-        case "$candidate" in
-          *.service)
-            grep -q '^KillMode=process' "$candidate" || stale=1
-            installed_release=$(systemd_value "$candidate" SHUTTLE_RELEASE)
-            ;;
-          *.plist) installed_release=$(plist_value "$candidate" EnvironmentVariables.SHUTTLE_RELEASE) ;;
-        esac
-        [ "$installed_release" = "$SHUTTLE_RELEASE" ] || stale=1
-        [ "$stale" = 1 ] || continue
+        # Every release-pinned definition needs the pointer-independent
+        # template, including one whose pin happens to match today's build.
       fi
 
       case "$candidate" in

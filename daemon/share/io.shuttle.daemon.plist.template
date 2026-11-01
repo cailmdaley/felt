@@ -2,14 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Shuttle's launchd LaunchAgent is rendered by `shuttle daemon install`.
-  Placeholders: __LABEL__, __SHUTTLE_BIN__, __SHUTTLE_RELEASE__, __LOG__,
+  Placeholders: __LABEL__, __SHUTTLE_BIN__, __WORKING_DIRECTORY__, __LOG__,
   __SHUTTLE_STORES__, __SHUTTLE_STORES_FILE__, __PATH__, __PORT__,
   __SSH_AUTH_SOCK__, __TMUX_TMPDIR__, __CODEX_SOCKET__, and __CODEX_HOME__.
   The unrendered template is not a valid plist.
 
-  __SHUTTLE_BIN__ is the absolute path to the Go CLI. __SHUTTLE_RELEASE__ is
-  the Mix release directory. Launchd starts the Go CLI in its forced start
-  mode, which skips the already-running guard during a restart.
+  __SHUTTLE_BIN__ is the absolute path to the installed Go CLI.
+  The CLI reads ~/.shuttle/repo at each launch to select the release.
+  WorkingDirectory is the user's home, independent of any checkout.
 
   Launchd starts with a near-empty environment. The daemon needs both `felt`
   for fiber data and `shuttle` for orchestration, and it must reach the tmux
@@ -42,8 +42,6 @@
 
     <key>EnvironmentVariables</key>
     <dict>
-        <key>SHUTTLE_RELEASE</key>
-        <string>__SHUTTLE_RELEASE__</string>
         <!-- The user's real login PATH, captured at install time (see header). -->
         <key>PATH</key>
         <string>__PATH__</string>

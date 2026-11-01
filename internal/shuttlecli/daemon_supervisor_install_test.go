@@ -131,6 +131,31 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 				port = tc.targetPort
 			}
 			options := supervisorOptions{OS: osName, Label: defaultDaemonLabel, Port: port, Path: env.Getenv("PATH"), Log: filepath.Join(home, "daemon.log"), Stores: "test-store", TmuxTmpdirSet: true, SSHSocketSet: true}
+			install := func() error { return a.installDaemonSupervisor(options) }
+			if tc.name == "matching supervisor" {
+				// Exercise migration through the same real process handoff as install.
+				if err := a.selectDaemonRelease(release); err != nil {
+					t.Fatal(err)
+				}
+				rendered, err := a.renderSupervisorTemplate(osName, string(source), options, release)
+				if err != nil {
+					t.Fatal(err)
+				}
+				unit := filepath.Join(home, ".config", "systemd", "user", "shuttle-daemon.service")
+				if osName == "Darwin" {
+					unit = filepath.Join(home, "Library", "LaunchAgents", defaultDaemonLabel+".plist")
+					rendered = strings.Replace(rendered, "<key>PATH</key>", "<key>SHUTTLE_RELEASE</key><string>/deleted/old/release</string>\n<key>PATH</key>", 1)
+				} else {
+					rendered += "\nEnvironment=\"SHUTTLE_RELEASE=/deleted/old/release\"\n"
+				}
+				rendered = strings.ReplaceAll(rendered, home+"</string>", "/deleted/old/checkout</string>")
+				rendered = strings.ReplaceAll(rendered, "WorkingDirectory="+home+"\n", "WorkingDirectory=/deleted/old/checkout\n")
+				if err := os.MkdirAll(filepath.Dir(unit), 0755); err != nil {
+					t.Fatal(err)
+				}
+				write(unit, rendered)
+				install = func() error { command := a.daemonRefreshReleaseCmd(); return command.RunE(command, nil) }
+			}
 			// Darwin has no systemd reachability probe; exercise that separately.
 			want := tc.want || (osName == "Darwin" && tc.name == "unreachable manager")
 			if want {
@@ -143,7 +168,7 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 					time.Sleep(time.Millisecond)
 				}
 				result := make(chan error, 1)
-				go func() { result <- a.installDaemonSupervisor(options) }()
+				go func() { result <- install() }()
 				select {
 				case <-awaiting:
 				case early := <-result:
@@ -166,7 +191,7 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 					t.Fatal("handoff did not finish")
 				}
 			} else {
-				err = a.installDaemonSupervisor(options)
+				err = install()
 			}
 			if (err == nil) != want {
 				t.Fatalf("install error=%v, want success=%t", err, want)
@@ -193,6 +218,16 @@ func TestSupervisorReinstallVerifiesTargetListener(t *testing.T) {
 				}
 				if _, err := os.Stat(unit); err != nil {
 					t.Fatalf("refresh did not install supervisor: %v", err)
+				}
+				if tc.name == "matching supervisor" {
+					contents, e := os.ReadFile(unit)
+					if e != nil || strings.Contains(string(contents), "SHUTTLE_RELEASE") || strings.Contains(string(contents), "/deleted/old") {
+						t.Fatalf("migration retained a release or working-directory pin: %v\n%s", e, contents)
+					}
+					values, e := supervisorEnvironment(osName, string(contents))
+					if e != nil || values["SHUTTLE_PORT"] != port || values["SHUTTLE_STORES"] != "test-store" || values["SHUTTLE_LOG"] != options.Log {
+						t.Fatalf("migration lost operator settings: %v %v", values, e)
+					}
 				}
 				if tc.targetPort == "4402" {
 					contents, err := os.ReadFile(unit)

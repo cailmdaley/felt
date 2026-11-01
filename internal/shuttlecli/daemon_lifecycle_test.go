@@ -450,8 +450,8 @@ func TestFindDaemonReleasePrecedence(t *testing.T) {
 		t.Fatalf("environment release = %+v, %v", got, err)
 	}
 	got, err = a.findDaemonReleaseAt("", filepath.Join(sibling.Dir, "bin", "shuttle"), home)
-	if err != nil || got.Dir != sibling.Dir {
-		t.Fatalf("sibling release = %+v, %v", got, err)
+	if err != nil || got.Dir != repository.Dir {
+		t.Fatalf("pointer must beat sibling release = %+v, %v", got, err)
 	}
 	if _, err := a.findDaemonReleaseAt("", filepath.Join(repo, "shuttle"), t.TempDir()); err == nil {
 		t.Fatal("release lookup should require SHUTTLE_RELEASE, a sibling launcher, or ~/.shuttle/repo")
