@@ -12,3 +12,5 @@
 .ws-reader.ws-keyboard .ws-tree-archived > summary:focus-visible { outline: var(--ws-focus-width) solid var(--ws-focus); }
 .ws-phone-threads .ws-tree-archived > summary { min-height: var(--ws-phone-target); padding-left: calc(4px + var(--ws-thread-depth, 0) * 12px); }
 .ws-phone-threads .kbn-thread-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ws-phone-threads .ws-tree-attention { grid-column: 3; }
+.ws-phone-threads .ws-tree-state { grid-column: 4; }
