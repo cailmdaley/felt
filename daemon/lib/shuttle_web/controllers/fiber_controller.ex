@@ -26,10 +26,11 @@ defmodule ShuttleWeb.FiberController do
 
   alias Shuttle.{FeltStores, FrontmatterEdit, OriginRouter}
 
-  # These native keys are initialized through felt add. Transfer identity and
-  # source timestamps are restored with the custom fields in the final patch;
-  # they are excluded from the generic splice to avoid duplicate YAML keys.
-  @felt_native_keys ~w(id name status tags outcome due created-at)
+  # These native keys are initialized through felt add or restored by the
+  # final patch (transfer identity, description and source timestamps). The
+  # generic splice of custom fields excludes them all: felt refuses a document
+  # whose frontmatter repeats a key.
+  @felt_native_keys ~w(id name status tags outcome due description created-at updated-at closed-at)
 
   def create(conn, params) do
     case OriginRouter.route(Map.get(params, "origin")) do
