@@ -756,6 +756,15 @@ defmodule Shuttle.TailnetDialTest do
     )
 
     assert_private_dial_error(
+      Shuttle.RemoteRegistry.Client.Default.post_once(
+        url,
+        "{}",
+        "application/json",
+        @http_timeout_ms
+      )
+    )
+
+    assert_private_dial_error(
       Shuttle.RemoteRegistry.Client.Default.get_file(url, @http_timeout_ms)
     )
 

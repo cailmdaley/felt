@@ -677,6 +677,83 @@ defmodule Shuttle.RemoteRegistry.ClientTest do
       :gen_tcp.close(listener)
     end
 
+    test "a single-attempt POST also uses the configured https proxy" do
+      Shuttle.Test.Env.put_app_env(:host_class, :single_user)
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+      Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:#{port}")
+      parent = self()
+
+      Task.start(fn ->
+        with {:ok, conn} <- :gen_tcp.accept(listener, 30_000),
+             {:ok, data} <- :gen_tcp.recv(conn, 0, 30_000) do
+          send(parent, {:proxy_saw, data})
+          :gen_tcp.close(conn)
+        end
+      end)
+
+      result =
+        Default.post_once(
+          "https://hub.example.invalid/api/v1/state",
+          "{}",
+          "application/json",
+          30_000
+        )
+
+      assert_receive {:proxy_saw, data},
+                     30_000,
+                     "the proxy saw no request; post_once returned #{inspect(result)}"
+
+      assert {:error, _} = result
+      assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
+      :gen_tcp.close(listener)
+    end
+
+    test "single-attempt POST refuses the proxy on a shared host" do
+      Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
+
+      assert Default.post_once(
+               "https://hub.example.invalid/api/v1/state",
+               "{}",
+               "application/json",
+               @http_timeout_ms
+             ) == {:error, "https_proxy refused: host class shared-multi-user"}
+    end
+
+    test "single-attempt POST applies its timeout while waiting for proxy CONNECT" do
+      Shuttle.Test.Env.put_app_env(:host_class, :single_user)
+      {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
+      {:ok, port} = :inet.port(listener)
+      Shuttle.Test.Env.put_app_env(:https_proxy, "127.0.0.1:#{port}")
+      parent = self()
+
+      Task.start(fn ->
+        with {:ok, conn} <- :gen_tcp.accept(listener, 5_000),
+             {:ok, data} <- :gen_tcp.recv(conn, 0, 5_000) do
+          send(parent, {:proxy_saw, data})
+          :gen_tcp.recv(conn, 0, 5_000)
+          :gen_tcp.close(conn)
+        end
+      end)
+
+      started_at = System.monotonic_time(:millisecond)
+
+      result =
+        Default.post_once(
+          "https://hub.example.invalid/api/v1/state",
+          "{}",
+          "application/json",
+          500
+        )
+
+      elapsed = System.monotonic_time(:millisecond) - started_at
+      assert_receive {:proxy_saw, data}, 5_000
+      assert data =~ ~r/\ACONNECT hub\.example\.invalid:443 HTTP\/1\.1\r\n/
+      assert {:error, _} = result
+      assert elapsed < 3_000
+      :gen_tcp.close(listener)
+    end
+
     test "an upper-case HTTPS:// scheme is refused like a lower-case one" do
       Shuttle.Test.Env.put_app_env(:host_class, :shared_multi_user)
 

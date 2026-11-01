@@ -34,7 +34,9 @@ defmodule Shuttle.MeetingTransportTest do
           {Bandit,
            plug: {Shuttle.Test.RecorderHTTP, owner: self(), counter: counter},
            ip: {127, 0, 0, 1},
-           port: 0}, id: make_ref())
+           port: 0},
+          id: make_ref()
+        )
 
       {:ok, {_, port}} = ThousandIsland.listener_info(server)
 

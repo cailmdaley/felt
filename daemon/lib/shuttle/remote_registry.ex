@@ -1569,12 +1569,13 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     end
   end
 
-  @doc "A non-replayable POST: no redirects, Retry-After retries, or keepalive reuse."
+  @doc "A non-replayable POST without redirects or connection reuse."
   def post_once(url, body, content_type, timeout_ms) do
-    case request(:post, url, [{"connection", "close"}], {content_type, body}, timeout_ms, true) do
-      {:ok, status, _headers, response} -> {:ok, status, response}
-      {:error, _reason} = error -> error
-    end
+    request_once(url, body, content_type, timeout_ms)
+  rescue
+    e -> {:error, {:exception, Exception.message(e)}}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 
   # File fetch used by owner-routed byte reads. The header-aware form carries
@@ -1730,7 +1731,7 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
   # it, httpc returns a charlist of *bytes*, and `List.to_string/1` then reads
   # each byte as a Unicode codepoint and re-UTF-8-encodes it — double-encoding
   # every multibyte char (— × é …) and corrupting images and PDFs.
-  defp request(method, url, req_headers, payload, timeout_ms, single_attempt? \\ false) do
+  defp request(method, url, req_headers, payload, timeout_ms) do
     with {:ok, {profile, request_url, private_dial?}} <- prepare(url) do
       headers =
         Enum.map(req_headers, fn {k, v} -> {String.to_charlist(k), String.to_charlist(v)} end)
@@ -1744,14 +1745,13 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
             {String.to_charlist(request_url), headers, String.to_charlist(type), body}
         end
 
-      http_opts = http_opts(request_url, timeout_ms, private_dial?)
-
-      http_opts =
-        if single_attempt?,
-          do: Keyword.merge(http_opts, autoredirect: false, autoretry: 0),
-          else: http_opts
-
-      case :httpc.request(method, request, http_opts, [body_format: :binary], profile) do
+      case :httpc.request(
+             method,
+             request,
+             http_opts(request_url, timeout_ms, private_dial?),
+             [body_format: :binary],
+             profile
+           ) do
         {:ok, {{_, status, _}, resp_headers, body}} ->
           {:ok, status, normalize_headers(resp_headers), body}
 
@@ -1768,6 +1768,195 @@ defmodule Shuttle.RemoteRegistry.Client.Default do
     # state — down with the request.
     :exit, reason -> {:error, {:exit, reason}}
   end
+
+  # httpc retries 503 responses with a short Retry-After header internally,
+  # without a request option that disables it. Recorder POSTs carry side
+  # effects, so use one fresh Mint connection and consume its single response.
+  # `prepare/1` keeps the same direct, proxy, and private Tailnet routes as the
+  # buffered client; Mint adds neither redirect handling nor status retries.
+  defp request_once(url, body, content_type, timeout_ms) do
+    task =
+      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+        request_once_inner(url, body, content_type, timeout_ms)
+      end)
+
+    case Task.yield(task, timeout_ms) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        {:error, {:exit, reason}}
+
+      nil ->
+        Task.shutdown(task, :brutal_kill)
+        {:error, :timeout}
+    end
+  end
+
+  defp request_once_inner(url, body, content_type, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    with {:ok, {_profile, request_url, private_dial?}} <- prepare(url),
+         {:ok, connect_timeout} <- remaining_time(deadline),
+         {:ok, conn} <- connect_once(url, request_url, private_dial?, connect_timeout) do
+      try do
+        headers = [
+          {"host", request_authority(url)},
+          {"content-type", content_type},
+          {"connection", "close"}
+        ]
+
+        case Mint.HTTP.request(conn, "POST", request_target(url), headers, body) do
+          {:ok, conn, request_ref} ->
+            case receive_once(conn, request_ref, deadline) do
+              {:ok, _conn, status, _headers, response} -> {:ok, status, response}
+              {:error, _conn, reason} -> transport_error(mint_reason(reason), private_dial?, url)
+            end
+
+          {:error, _conn, reason} ->
+            transport_error(mint_reason(reason), private_dial?, url)
+        end
+      after
+        Mint.HTTP.close(conn)
+      end
+    else
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp connect_once(url, _request_url, true, timeout_ms) do
+    uri = URI.parse(url)
+    host = String.downcase(uri.host)
+    port = uri.port || 443
+
+    case Shuttle.TailnetDial.socket_for(host, port) do
+      path when is_binary(path) ->
+        Mint.HTTP.connect(:http, {:local, String.to_charlist(path)}, 0,
+          hostname: uri.host,
+          protocols: [:http1],
+          mode: :passive,
+          transport_opts: [timeout: timeout_ms, send_timeout: timeout_ms]
+        )
+
+      _ ->
+        {:error, {:tailnet_dial, :unavailable, {:no_bridge, host, port}}}
+    end
+  end
+
+  defp connect_once(url, _request_url, false, timeout_ms) do
+    uri = URI.parse(url)
+    scheme = if https?(url), do: :https, else: :http
+
+    transport_opts =
+      if scheme == :https,
+        do: Keyword.merge(tls_opts(), timeout: timeout_ms, send_timeout: timeout_ms),
+        else: [timeout: timeout_ms, send_timeout: timeout_ms]
+
+    opts = [
+      hostname: uri.host,
+      protocols: [:http1],
+      mode: :passive,
+      transport_opts: transport_opts
+    ]
+
+    opts =
+      case {scheme, current_proxy()} do
+        {:https, {proxy_host, proxy_port}} ->
+          Keyword.put(
+            opts,
+            :proxy,
+            {:http, proxy_host, proxy_port, [timeout: timeout_ms]}
+          )
+
+        _ ->
+          opts
+      end
+
+    Mint.HTTP.connect(scheme, uri.host, uri.port || default_port(scheme), opts)
+  end
+
+  defp receive_once(conn, request_ref, deadline),
+    do: receive_once(conn, request_ref, deadline, {nil, [], []})
+
+  defp remaining_time(deadline) do
+    case deadline - System.monotonic_time(:millisecond) do
+      timeout when timeout > 0 -> {:ok, timeout}
+      _ -> {:error, :timeout}
+    end
+  end
+
+  defp receive_once(conn, request_ref, deadline, response) do
+    timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    case Mint.HTTP.recv(conn, 0, timeout) do
+      {:ok, conn, events} ->
+        case collect_once(events, request_ref, response) do
+          {:done, {status, headers, chunks}} when is_integer(status) ->
+            {:ok, conn, status, normalize_headers(headers),
+             IO.iodata_to_binary(Enum.reverse(chunks))}
+
+          {:done, _response} ->
+            {:error, conn, :empty_response}
+
+          {:continue, response} ->
+            receive_once(conn, request_ref, deadline, response)
+
+          {:error, reason} ->
+            {:error, conn, reason}
+        end
+
+      {:error, conn, reason, events} ->
+        case collect_once(events, request_ref, response) do
+          {:done, {status, headers, chunks}} when is_integer(status) ->
+            {:ok, conn, status, normalize_headers(headers),
+             IO.iodata_to_binary(Enum.reverse(chunks))}
+
+          {:error, event_reason} ->
+            {:error, conn, event_reason}
+
+          _ ->
+            {:error, conn, reason}
+        end
+    end
+  end
+
+  defp collect_once([], _request_ref, response), do: {:continue, response}
+
+  defp collect_once([{:status, ref, status} | events], ref, {_old, headers, chunks}) do
+    collect_once(events, ref, {status, headers, chunks})
+  end
+
+  defp collect_once([{:headers, ref, headers} | events], ref, {status, _old, chunks}) do
+    collect_once(events, ref, {status, headers, chunks})
+  end
+
+  defp collect_once([{:data, ref, chunk} | events], ref, {status, headers, chunks}) do
+    collect_once(events, ref, {status, headers, [chunk | chunks]})
+  end
+
+  defp collect_once([{:done, ref} | _events], ref, response), do: {:done, response}
+  defp collect_once([{:error, ref, reason} | _events], ref, _response), do: {:error, reason}
+  defp collect_once([_event | events], ref, response), do: collect_once(events, ref, response)
+
+  defp request_target(url) do
+    uri = URI.parse(url)
+    (uri.path || "/") <> if(uri.query, do: "?" <> uri.query, else: "")
+  end
+
+  defp request_authority(url) do
+    %URI{host: host, scheme: scheme, port: port} = URI.parse(url)
+    host = if String.contains?(host, ":"), do: "[#{host}]", else: host
+    default_port = default_port(if(String.downcase(scheme) == "https", do: :https, else: :http))
+    port = port || default_port
+
+    if port == default_port, do: host, else: "#{host}:#{port}"
+  end
+
+  defp default_port(:https), do: 443
+  defp default_port(:http), do: 80
+
+  defp mint_reason(%{reason: reason}), do: reason
+  defp mint_reason(reason), do: reason
 
   defp transport_error(reason, true, url) do
     case URI.parse(url) do
