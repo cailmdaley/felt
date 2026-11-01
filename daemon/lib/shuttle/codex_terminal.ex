@@ -59,7 +59,7 @@ defmodule Shuttle.CodexTerminal do
         with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
              true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
              :ok <- AppWorkers.check_endpoint(record),
-             :ok <- verified_thread(id) do
+             :ok <- verified_thread(id, 10) do
           tmux = record["terminal_tmux"] || tmux_name(id)
 
           case Terminal.status(runner, tmux) do
@@ -83,7 +83,7 @@ defmodule Shuttle.CodexTerminal do
     result
   end
 
-  defp verified_thread(id) do
+  defp verified_thread(id, retries) do
     # A systemError describes a failed turn in a loaded conversation. Native
     # resume and a new turn still use this exact thread, even while that status
     # remains visible.
@@ -94,6 +94,14 @@ defmodule Shuttle.CodexTerminal do
 
       {:error, {:peer, %{"code" => -32_600, "message" => "thread not loaded: " <> ^id}}} ->
         :ok
+
+      {:error, {:peer, %{"code" => -32_603, "message" => message}}} = error when retries > 0 ->
+        if String.contains?(message, "rollout at ") and String.ends_with?(message, " is empty") do
+          Process.sleep(100)
+          verified_thread(id, retries - 1)
+        else
+          error
+        end
 
       {:error, reason} ->
         {:error, reason}

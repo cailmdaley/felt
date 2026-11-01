@@ -100,14 +100,17 @@ defmodule Shuttle.AppWorkersTest do
       if hook = Agent.get(__MODULE__, &Map.get(&1, :read_hook)), do: hook.(id)
       record({:read, id})
 
-      Agent.get(
+      Agent.get_and_update(
         __MODULE__,
         fn state ->
           thread =
             get_in(state, [:native_threads, id]) ||
               %{"id" => id, "status" => %{"type" => "active"}}
 
-          Map.get(state, :read_result, {:ok, thread})
+          case Map.get(state, :read_results, []) do
+            [result | rest] -> {result, Map.put(state, :read_results, rest)}
+            [] -> {Map.get(state, :read_result, {:ok, thread}), state}
+          end
         end
       )
     end
@@ -873,6 +876,25 @@ defmodule Shuttle.AppWorkersTest do
              |> json_response(404)
   end
 
+  test "viewer preparation retries an empty rollout read" do
+    terminal_fiber("tests/terminal")
+
+    App.set(:read_results, [
+      {:error,
+       {:peer,
+        %{
+          "code" => -32_603,
+          "message" => "failed to read thread: rollout at /tmp/rollout.jsonl is empty"
+        }}},
+      {:ok, %{"id" => "app-session-1", "status" => %{"type" => "active"}}}
+    ])
+
+    assert {:ok, ref} = dispatch("tests/terminal")
+    assert :alive = Shuttle.Terminal.status(Runner, WorkerBackend.tmux(ref))
+    assert 2 == Enum.count(App.calls(), &match?({:read, "app-session-1"}, &1))
+    assert {:ok, %{"terminal_error" => nil}} = AppWorkers.get("app-session-1")
+  end
+
   test "a lost initial rollout is never replaced and exposes terminal refusal" do
     terminal_fiber("tests/terminal")
 
@@ -881,25 +903,13 @@ defmodule Shuttle.AppWorkersTest do
 
     App.set(:resume_result, {:error, reason})
 
-    assert {:error, {:app_launch_failed, "app-session-1", {:terminal_unavailable, ^reason}}} =
-             dispatch("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    assert :alive = WorkerBackend.session_status(Runner, ref)
 
-    assert {:ok, %{"active" => true, "terminal_error" => error}} = AppWorkers.get("app-session-1")
+    assert {:ok, %{"active" => true, "launch_state" => "running", "terminal_error" => error}} =
+             AppWorkers.get("app-session-1")
+
     assert error =~ "no rollout found"
-
-    assert {502,
-            %{
-              surface: "cli",
-              session_uuid: "app-session-1",
-              terminal_error: ^error,
-              message: message
-            }} =
-             ShuttleWeb.DispatchReply.render(
-               "tests/terminal",
-               {:error, {:app_launch_failed, "app-session-1", {:terminal_unavailable, reason}}}
-             )
-
-    assert message =~ "Use shuttle attach"
 
     {:ok, poller} =
       start_poller!(
@@ -909,8 +919,9 @@ defmodule Shuttle.AppWorkersTest do
         poll_interval_ms: 60_000
       )
 
-    assert [%{terminal_error: ^error, session_uuid: "app-session-1"}] =
-             Poller.snapshot(poller).eligible
+    snapshot = Poller.snapshot(poller)
+    assert [%{terminal_error: ^error, session_uuid: "app-session-1"}] = snapshot.eligible
+    assert snapshot.blocked == []
 
     assert {:error, :already_running} = dispatch("tests/terminal")
     assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
