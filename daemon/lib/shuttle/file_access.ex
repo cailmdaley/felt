@@ -96,20 +96,13 @@ defmodule Shuttle.FileAccess do
     end
   end
 
-  def cwd do
-    task("/", fn ->
+  def cwd! do
+    run("/", fn _ ->
       case :prim_file.get_cwd() do
-        {:ok, path} -> {:ok, to_string(path)}
-        error -> error
+        {:ok, path} -> to_string(path)
+        {:error, reason} -> raise File.Error, reason: reason, action: "get working directory"
       end
     end)
-  end
-
-  def cwd! do
-    case cwd() do
-      {:ok, path} -> path
-      {:error, reason} -> raise File.Error, reason: reason, action: "get working directory"
-    end
   end
 
   def protected_roots do

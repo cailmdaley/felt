@@ -387,20 +387,6 @@ defmodule Shuttle.SessionLink do
   defp missing_retry_ms(_, _now), do: @young_retry_ms
 
   defp advance_claude(key, session, path, cursors, table, chunk_bytes) do
-    result =
-      Shuttle.FileAccess.task(path, fn ->
-        advance_claude_raw(key, path, cursors, chunk_bytes)
-      end)
-
-    case result do
-      {:done, next, _bytes} -> publish(table, key, session, Map.fetch!(next, key).url)
-      _ -> :ok
-    end
-
-    result
-  end
-
-  defp advance_claude_raw(key, path, cursors, chunk_bytes) do
     case :file.open(path, [:read, :binary, :raw]) do
       {:ok, file} ->
         try do
@@ -431,6 +417,8 @@ defmodule Shuttle.SessionLink do
 
             cond do
               cursor.offset >= target ->
+                if reset?, do: publish(table, key, session, cursor.url)
+
                 {:done,
                  Map.put(cursors, key, %{cursor | observed_size: target, mtime: stat.mtime}), 0}
 
@@ -445,6 +433,7 @@ defmodule Shuttle.SessionLink do
                   if next.offset >= target do
                     case current_generation?(path, stat, target) do
                       :current ->
+                        publish(table, key, session, next.url)
                         {:done, Map.put(cursors, key, next), byte_size(bytes)}
 
                       :changed ->
@@ -495,8 +484,10 @@ defmodule Shuttle.SessionLink do
   end
 
   defp current_generation?(path, read_stat, target) do
-    case Shuttle.FileAccess.stat(path) do
-      {:ok, current} ->
+    case :file.read_file_info(path) do
+      {:ok, info} ->
+        current = File.Stat.from_record(info)
+
         if current.inode == read_stat.inode and current.size >= target and
              not (current.size == target and current.mtime != read_stat.mtime),
            do: :current,

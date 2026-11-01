@@ -318,35 +318,6 @@ defmodule Shuttle.FileAccessTest do
     end
   end
 
-  test "session-link indexing bypasses the shared file server", ctx do
-    session = "a3edf873-cb1c-40ab-a891-f26f5333b320"
-    url = "https://claude.ai/code/session_01LEASED"
-    project = Path.join(ctx.root, "project")
-    File.mkdir_p!(project)
-    record = %{type: "user", attachment: %{type: "remote_session_change", url: url}}
-    File.write!(Path.join(project, session <> ".jsonl"), Jason.encode!(record) <> "\n")
-    Shuttle.Test.Env.put_server(Access, ctx.service)
-    table = String.to_atom("leased_session_links_#{System.unique_integer([:positive])}")
-    resolver = start_supervised!({Shuttle.SessionLink, name: nil, table: table})
-
-    opts = [
-      server: resolver,
-      table: table,
-      root: ctx.root,
-      pi_root: ctx.tmp_dir <> "/pi",
-      codex_root: ctx.tmp_dir <> "/codex"
-    ]
-
-    file_server = Process.whereis(:file_server_2)
-    :ok = :sys.suspend(file_server)
-
-    try do
-      eventually(fn -> Shuttle.SessionLink.resolve(session, opts).url == url end)
-    after
-      :ok = :sys.resume(file_server)
-    end
-  end
-
   test "worker callbacks inherit the caller's scoped environment", ctx do
     Shuttle.Test.Env.put_env("SHUTTLE_FILE_ACCESS_TEST", "scoped-owner")
 

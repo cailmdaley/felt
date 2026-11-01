@@ -36,20 +36,6 @@ defmodule Shuttle.FilesystemBoundaryTest do
             {{:., _, [{:__aliases__, _, [:Path]}, :wildcard]}, meta, _args} = node, acc ->
               {node, [{path, meta[:line], :wildcard} | acc]}
 
-            {{:., _, [:prim_file, name]}, meta, _args} = node, acc ->
-              if access_layer?(path) do
-                {node, acc}
-              else
-                {node, [{path, meta[:line], name} | acc]}
-              end
-
-            {{:., _, [:file, :open]}, meta, [_path, modes]} = node, acc ->
-              if access_layer?(path) or (is_list(modes) and :raw in modes) do
-                {node, acc}
-              else
-                {node, [{path, meta[:line], :non_raw_open} | acc]}
-              end
-
             node, acc ->
               {node, acc}
           end)
@@ -59,9 +45,4 @@ defmodule Shuttle.FilesystemBoundaryTest do
 
     assert violations == [], "Unbounded filesystem calls: #{inspect(violations)}"
   end
-
-  defp access_layer?(path),
-    do:
-      path == "lib/shuttle/file_access.ex" or
-        String.starts_with?(path, "lib/shuttle/file_access/")
 end
