@@ -11,6 +11,16 @@ The command builds both bundles, runs every suite even when one fails, and exits
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
+## Production boot gate
+
+`daemon/test/shuttle/application_boot_test.exs` compiles production BEAMs once per suite in a private `MIX_BUILD_PATH`, with `REBAR_BASE_DIR` isolating dependency compiler state too, independent of release builds.
+Separate VMs verify the loaded BEAM path and production environment, enable every production child, use real Go CLIs and isolate operator files.
+A synthetic Tailscale CLI drives sixteen probes against reserved `.invalid` names.
+The healthy case reaches ready; the FIFO case keeps HTTP diagnostics live beyond sixteen seconds, refuses dispatch, and recovers in the same daemon after an external writer replaces the registry.
+The realistic case uses 3,000 managed fibers and real tmux on a private socket, delays inventory eighteen seconds, then requires ready and all documents cached.
+Codex is an external executable stub. These gates require tmux, preserve production quarantine and read the dirty-I/O scheduler count from release VM arguments.
+A new production child belongs in the independent manifest in `test/support/production_boot.exs`.
+
 ## Native filesystem I/O
 
 `daemon/test/shuttle/fs_test.exs` exercises caller-owned raw operations with `file_server_2` suspended in an isolated VM.
