@@ -75,6 +75,10 @@ defmodule Shuttle.Test.PollerHelpers do
         restart: :temporary
       })
 
+    # start_link acknowledges the I/O-free init; wait for the boot
+    # continuation before a test starts its scenario.
+    :sys.get_state(pid, 30_000)
+
     # A watcher names its poller by the registered atom or the pid (Poller's
     # `self_ref`), so those are the only names this cleanup can match.
     name = Keyword.get(opts, :name)

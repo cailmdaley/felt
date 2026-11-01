@@ -20,6 +20,9 @@ defmodule ShuttleWeb.VersionController do
       conn,
       Shuttle.BuildStamp.stamp()
       |> Map.put(:ready, readiness.ready)
+      |> Map.put(:boot_hold, readiness.boot_hold)
+      |> Map.put(:boot, readiness.boot)
+      |> Map.put(:excluded_stores, Shuttle.FeltStores.excluded_stores())
       |> Map.put(:boot_duration_ms, readiness.duration_ms)
       |> Map.put(:poller_publication, Shuttle.Poller.published_state_metrics())
       |> Map.merge(health)
@@ -32,7 +35,6 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:peer_gate_uid_source, Shuttle.Env.app(:peer_gate_uid_source))
       |> Map.put(:tailnet_dial, tailnet_dial_status(readiness.ready))
       |> Map.put(:discovery, Shuttle.TailnetPeers.status())
-      |> Map.put(:excluded_stores, Shuttle.FeltStores.excluded_stores())
       |> Map.put(:codex_backend, Shuttle.CodexBackend.status())
       |> Map.put(:rex_backend, Shuttle.Terminal.backend_health())
       |> Map.put(:transcript_indexer, Shuttle.TranscriptIndexer.status())

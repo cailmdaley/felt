@@ -1,3 +1,7 @@
+defmodule Shuttle.ThreadOutbox.Corrupt do
+  defexception [:message]
+end
+
 defmodule Shuttle.ThreadOutbox do
   @moduledoc "Host-local pending thread payloads and retained, payload-free acknowledgment IDs."
   @retention_ms 14 * 24 * 60 * 60 * 1_000
@@ -91,7 +95,8 @@ defmodule Shuttle.ThreadOutbox do
   defp capture_one(root, id, record, cutoff) do
     path = pending_path(root, id)
 
-    if not retained?(record, cutoff) or Shuttle.FS.exists?(acked_path(root, id)) or Shuttle.FS.exists?(path) do
+    if not retained?(record, cutoff) or Shuttle.FS.exists?(acked_path(root, id)) or
+         Shuttle.FS.exists?(path) do
       false
     else
       write_atomic!(path, Jason.encode!(%{id: id, record: record}))
@@ -236,7 +241,7 @@ defmodule Shuttle.ThreadOutbox do
           # A missing cutoff in an established store is corruption, not first
           # deployment. Never recover by resetting it and dropping pending work.
           if Shuttle.FS.exists?(Path.join(root, "version")) or payloads?(root) or not boot?,
-            do: raise("missing thread outbox baseline: #{path}")
+            do: raise(Shuttle.ThreadOutbox.Corrupt, "missing thread outbox baseline: #{path}")
 
           value =
             valid_baseline!(
@@ -258,7 +263,11 @@ defmodule Shuttle.ThreadOutbox do
 
     if legacy do
       if legacy["baseline"] && legacy["baseline"] != baseline,
-        do: raise("thread outbox snapshot cutoff differs from durable baseline: #{snapshot}")
+        do:
+          raise(
+            Shuttle.ThreadOutbox.Corrupt,
+            "thread outbox snapshot cutoff differs from durable baseline: #{snapshot}"
+          )
 
       # Idempotent across interruption at any record; remove the full snapshot
       # only after every pending payload and acknowledgment has been installed.
@@ -285,10 +294,18 @@ defmodule Shuttle.ThreadOutbox do
     end)
   end
 
-  defp valid_baseline!(value) do
-    {:ok, _, _} = DateTime.from_iso8601(value)
-    value
+  defp valid_baseline!(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, _, _} ->
+        value
+
+      {:error, _} ->
+        raise Shuttle.ThreadOutbox.Corrupt, "invalid thread outbox baseline: #{inspect(value)}"
+    end
   end
+
+  defp valid_baseline!(value),
+    do: raise(Shuttle.ThreadOutbox.Corrupt, "invalid thread outbox baseline: #{inspect(value)}")
 
   defp read_snapshot!(path) do
     case Shuttle.FS.read(path) do
@@ -298,12 +315,15 @@ defmodule Shuttle.ThreadOutbox do
         case state do
           %{"version" => version, "records" => records}
           when version in [1, 2, 3] and is_map(records) ->
-            if version != 1, do: valid_baseline!(Map.fetch!(state, "baseline"))
-            true = Enum.all?(records, fn {id, record} -> is_binary(id) and is_map(record) end)
+            if version != 1, do: valid_baseline!(Map.get(state, "baseline"))
+
+            unless Enum.all?(records, fn {id, record} -> is_binary(id) and is_map(record) end),
+              do: raise(Shuttle.ThreadOutbox.Corrupt, "invalid thread outbox records: #{path}")
+
             state
 
           _ ->
-            raise "invalid thread outbox snapshot: #{path}"
+            raise Shuttle.ThreadOutbox.Corrupt, "invalid thread outbox snapshot: #{path}"
         end
 
       {:error, :enoent} ->

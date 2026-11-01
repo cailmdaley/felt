@@ -164,6 +164,7 @@ defmodule Shuttle.Poller do
       # manual overrides — respect them).
       :auto_discover_felt_stores,
       :runner,
+      boot_hold: nil,
       reconciliation_hold: nil,
       poll_check_in_progress: false,
       poll_stalls: 0,
@@ -295,7 +296,7 @@ defmodule Shuttle.Poller do
       # Unknown boot observations defer completion to a healthy poll. The
       # auto-release judges continuity only after this boundary.
       adopted?: false,
-      # `Shuttle.Contract.check/1`'s result, probed ONCE at `init/1`: the
+      # `Shuttle.Contract.check/1`'s result, probed once during boot: the
       # daemon shells `shuttle contract` and compares it to
       # `Shuttle.Contract.expected_level/0`. `ok: false` (a mismatched level,
       # unparseable stdout, or a nonzero exit, including an unknown subcommand)
@@ -830,32 +831,153 @@ defmodule Shuttle.Poller do
 
   @impl true
   def init(opts) do
-    # Establish the durable deployment cutoff before scheduling or reading work.
-    # Corrupt/unreadable state refuses startup rather than replaying history.
-    Shuttle.ThreadOutbox.boot_baseline()
-    sweep_stale_ids_dirs()
-
-    {felt_stores, auto_discover} =
-      case Keyword.fetch(opts, :felt_stores) do
-        {:ok, hosts} -> {hosts, false}
-        :error -> {Shuttle.FeltStores.configured_stores(), true}
-      end
-
-    runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-
-    own_host_id =
-      Keyword.get_lazy(opts, :own_host_id, fn -> resolve_own_host_id(runner: runner) end)
-
-    # Use the registered name (atom) when available so cross-process sends
-    # survive a supervisor restart of this Poller. Process.info/2 returns
-    # `{:registered_name, atom}` for named processes and `{:registered_name, []}`
-    # for unnamed ones (typical in tests started without a `name:` opt; we fall
-    # back to self() pid so behavior is unchanged in that case).
     self_ref =
       case Process.info(self(), :registered_name) do
         {:registered_name, name} when is_atom(name) -> name
         _ -> self()
       end
+
+    host =
+      to_string(
+        Keyword.get(opts, :own_host_id, :persistent_term.get(@daemon_host_key, "unresolved"))
+      )
+
+    :persistent_term.put({@own_host_pt_namespace, self_ref}, host)
+
+    hold = %{
+      stage: "initializing",
+      reason: "booting",
+      attempt: 1,
+      started_ms: System.monotonic_time(:millisecond)
+    }
+
+    Shuttle.Readiness.poller_boot(hold)
+
+    state = %State{
+      self_ref: self_ref,
+      own_host_id: host,
+      felt_stores: [],
+      max_concurrent_workers: :infinity,
+      boot_quarantine: true,
+      boot_hold: hold
+    }
+
+    {:ok, state, {:continue, {:boot, opts}}}
+  end
+
+  @impl true
+  def handle_continue({:boot, opts}, initial) do
+    step = &boot_step/2
+
+    with {:ok, _} <- step.("outbox_baseline", &Shuttle.ThreadOutbox.boot_baseline/0),
+         {:ok, {stores, auto}} <-
+           step.("store_inventory", fn ->
+             case Keyword.fetch(opts, :felt_stores) do
+               {:ok, stores} -> {stores, false}
+               :error -> {Shuttle.FeltStores.configured_stores(), true}
+             end
+           end),
+         {:ok, state} <-
+           step.("configuration", fn -> boot_state(opts, initial.self_ref, stores, auto) end),
+         {:ok, contract} <-
+           step.("contract_check", fn -> Shuttle.Contract.check_and_log(state.runner) end),
+         state = %{state | contract_check: contract},
+         {:ok, previous} <-
+           step.("heartbeat", fn -> DaemonHeartbeat.read(state.daemon_heartbeat_file) end),
+         {:ok, state} <- step.("migration_recovery", fn -> recover_migrations(state) end),
+         {:ok, state} <-
+           step.("orphan_adoption", fn ->
+             if state.reconciliation_hold,
+               do: state,
+               else: adopt_boot_orphans(state)
+           end),
+         {:ok, state} <-
+           step.("quarantine_verdict", fn ->
+             maybe_auto_release_boot_quarantine(state, previous)
+           end) do
+      boots =
+        case previous do
+          {:ok, hb} -> DaemonHeartbeat.push_boot(hb["boots"] || [], state.daemon_booted_at)
+          {:error, _} -> [state.daemon_booted_at]
+        end
+
+      state = write_daemon_heartbeat(%{state | daemon_boots: boots})
+      state = state |> schedule_tick(0) |> initialize_publication()
+      Shuttle.Readiness.poller_boot(nil)
+      {:noreply, state}
+    else
+      {:error, hold} ->
+        Logger.error("Poller boot held: #{inspect(hold)}")
+        state = initialize_publication(%{initial | boot_hold: hold})
+        Shuttle.Readiness.poller_boot(hold)
+        {:noreply, state}
+    end
+  end
+
+  defp boot_step(stage, fun, attempt \\ 1, started \\ System.monotonic_time(:millisecond)) do
+    progress = %{stage: stage, reason: "booting", attempt: attempt, started_ms: started}
+    Shuttle.Readiness.poller_boot(progress)
+
+    try do
+      {:ok, fun.()}
+    rescue
+      reason ->
+        message = Exception.format(:error, reason, __STACKTRACE__)
+
+        if stage == "outbox_baseline" and
+             (is_struct(reason, Jason.DecodeError) or
+                is_struct(reason, Shuttle.ThreadOutbox.Corrupt)) do
+          {:error, %{progress | reason: message}}
+        else
+          retry_boot_step(stage, fun, progress, message)
+        end
+    catch
+      kind, reason ->
+        retry_boot_step(stage, fun, progress, Exception.format(kind, reason, __STACKTRACE__))
+    end
+  end
+
+  # An adoption exception discards its partial state. Roll back only the new
+  # observers before retrying; their backend workers remain untouched.
+  defp adopt_boot_orphans(state) do
+    Process.put({__MODULE__, :boot_watchers}, [])
+
+    try do
+      SessionReconciliation.adopt_orphans(state)
+    catch
+      kind, reason ->
+        for pid <- Process.get({__MODULE__, :boot_watchers}) do
+          DynamicSupervisor.terminate_child(Shuttle.WatcherSupervisor, pid)
+        end
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    after
+      Process.delete({__MODULE__, :boot_watchers})
+    end
+  end
+
+  defp retry_boot_step(stage, fun, progress, message) do
+    delay = min(30_000, 1_000 * Integer.pow(2, min(progress.attempt - 1, 5)))
+    Logger.warning("Poller boot #{stage} failed; retrying in #{delay}ms: #{message}")
+
+    Shuttle.Readiness.poller_boot(
+      Map.merge(progress, %{
+        reason: "retrying",
+        error: message,
+        retry_at_ms: System.monotonic_time(:millisecond) + delay
+      })
+    )
+
+    Process.sleep(delay)
+    boot_step(stage, fun, progress.attempt + 1, progress.started_ms)
+  end
+
+  defp boot_state(opts, self_ref, felt_stores, auto_discover) do
+    sweep_stale_ids_dirs()
+    runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
+
+    own_host_id =
+      Keyword.get_lazy(opts, :own_host_id, fn -> resolve_own_host_id(runner: runner) end)
 
     own_host_id = to_string(own_host_id)
 
@@ -866,7 +988,7 @@ defmodule Shuttle.Poller do
     # BEAM (multi-host tests) never stomp on each other's frozen identity.
     :persistent_term.put({@own_host_pt_namespace, self_ref}, own_host_id)
 
-    state = %State{
+    %State{
       self_ref: self_ref,
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, @default_poll_interval_ms),
       max_concurrent_workers:
@@ -919,11 +1041,6 @@ defmodule Shuttle.Poller do
           :boot_quarantine,
           Shuttle.Env.app(:boot_quarantine, @default_boot_quarantine)
         ),
-      # Boot-time version handshake: probe ONCE here, before the first
-      # tick, so a skewed CLI is caught (and fresh dispatch held) before any
-      # autonomous work is even considered. Runner-bounded, so a slow/wedged
-      # `shuttle` degrades to a logged skew rather than hanging boot.
-      contract_check: Shuttle.Contract.check_and_log(runner),
       # Where this daemon records its OWN liveness, and how often — the evidence
       # the next boot reads to tell a fast bounce (a kernel rlimit kill nobody
       # asked for, respawned seconds later) from a real gap. Nothing to do with
@@ -943,39 +1060,6 @@ defmodule Shuttle.Poller do
       quarantine_auto_release:
         Keyword.get_lazy(opts, :quarantine_auto_release, &Shuttle.Host.quarantine_auto_release?/0)
     }
-
-    Logger.info("configured felt stores: #{inspect(felt_stores)}")
-
-    # Read the PREVIOUS incarnation's heartbeat before this one overwrites it —
-    # the only evidence that distinguishes a fast bounce from a real gap.
-    previous_heartbeat = DaemonHeartbeat.read(state.daemon_heartbeat_file)
-
-    # Daemon state is derived and disposable. Rebuild
-    # `running` from tmux by adopting any live shuttle sessions — a restart
-    # re-scans tmux and is immediately correct, and running work survives because
-    # tmux owns the worker process.
-    state = recover_migrations(state)
-
-    state =
-      if state.reconciliation_hold, do: state, else: SessionReconciliation.adopt_orphans(state)
-
-    # Adoption must settle before a healthy crash boot can release fresh work.
-    state = maybe_auto_release_boot_quarantine(state, previous_heartbeat)
-
-    # Carry the previous ring forward with this boot appended, then write
-    # immediately: an incarnation that dies seconds in still leaves its own
-    # `booted_at`, which is what lets the next boot see a crash loop.
-    boots =
-      case previous_heartbeat do
-        {:ok, hb} -> DaemonHeartbeat.push_boot(hb["boots"] || [], state.daemon_booted_at)
-        {:error, _} -> [state.daemon_booted_at]
-      end
-
-    state = write_daemon_heartbeat(%{state | daemon_boots: boots})
-
-    state = schedule_tick(state, 0)
-    state = initialize_publication(state)
-    {:ok, state}
   end
 
   # Auto-release: the one non-human exit from the boot quarantine, for the
@@ -1105,12 +1189,18 @@ defmodule Shuttle.Poller do
   end
 
   @impl true
+  def handle_call(_request, _from, %State{boot_hold: hold} = state) when not is_nil(hold),
+    do: {:reply, {:error, {:boot_hold, hold}}, state}
+
   def handle_call(request, from, state) do
     transition_call(request, from, state)
     |> publish_after_transition(request)
   end
 
   @impl true
+  def handle_info(_message, %State{boot_hold: hold} = state) when not is_nil(hold),
+    do: {:noreply, state}
+
   def handle_info(message, state) do
     transition_info(message, state)
     |> publish_after_transition(message)
@@ -3876,7 +3966,7 @@ defmodule Shuttle.Poller do
   # identity and OS-hostname fallback, so the CLI's `host:` stamp and this
   # daemon's dispatch predicate cannot disagree about which machine this is.
   # Runs once per daemon (`freeze_daemon_host_id!/1`) and once per Poller
-  # started without an `:own_host_id` opt (test pollers; `init/1` passes its
+  # started without an `:own_host_id` opt (test pollers; boot passes its
   # `:runner`).
   #
   # Raises when Shuttle cannot answer: a daemon with no identity would match no
@@ -4587,7 +4677,9 @@ defmodule Shuttle.Poller do
             get_in(cached_fiber(state, fiber_id) || %{}, ["shuttle", "runtime", "dispatched_at"])
 
           signal = Dispatcher.pending_resume_fallback(worker.session, boundary)
-          if signal && Shuttle.FS.exists?(signal), do: Dispatcher.complete_resume_fallback(signal, uuid)
+
+          if signal && Shuttle.FS.exists?(signal),
+            do: Dispatcher.complete_resume_fallback(signal, uuid)
 
           worker =
             worker
@@ -5900,6 +5992,9 @@ defmodule Shuttle.Poller do
 
     case DynamicSupervisor.start_child(Shuttle.WatcherSupervisor, {WorkerWatcher, watcher_opts}) do
       {:ok, watcher_pid} ->
+        if watchers = Process.get({__MODULE__, :boot_watchers}),
+          do: Process.put({__MODULE__, :boot_watchers}, [watcher_pid | watchers])
+
         {:ok, Map.put(metadata, :pid, watcher_pid)}
 
       {:error, reason} ->
@@ -6232,6 +6327,7 @@ defmodule Shuttle.Poller do
           else: if(state.poll_check_in_progress, do: "reading", else: "idle")
         ),
       reconciliation_hold: state.reconciliation_hold,
+      boot_hold: state.boot_hold,
       stall_timeout_ms: state.stall_timeout_ms,
       full_scan_budget_ms: state.full_scan_budget_ms,
       discovery: discovery_snapshot(state),

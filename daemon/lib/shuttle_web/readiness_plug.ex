@@ -40,7 +40,13 @@ defmodule ShuttleWeb.ReadinessPlug do
       |> send_resp(
         :service_unavailable,
         Jason.encode!(%{
-          error: "booting",
+          error:
+            if(readiness.boot_hold && readiness.boot_hold.reason != "booting",
+              do: "boot_hold",
+              else: "booting"
+            ),
+          boot_hold: readiness.boot_hold,
+          boot: readiness.boot,
           ready: false,
           pending: readiness.pending,
           elapsed_ms: readiness.duration_ms

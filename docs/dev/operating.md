@@ -36,6 +36,15 @@ shuttle validate-identity                # fiber UID invariants across daemon fe
 felt setup receipt --json                     # Felt binary and loaded plugin generations
 ```
 
+## Boot diagnostics
+
+The HTTP listener starts before independent Local and Fleet supervision trees.
+Poller initialization acknowledges immediately; its continuation runs observable boot stages inline.
+`/api/v1/version` reports `boot.stage`, `attempt`, `elapsed_ms` and transient retry details while `ready` is false.
+Slow stages are not killed. Transient exceptions retry with 1–30 second backoff; an adoption retry stops only its partial observers, leaving workers alive.
+Only deterministic outbox corruption creates `boot_hold`. Repair the outbox and restart; `shuttle daemon release` cannot clear it.
+State-dependent API routes return 503 until boot completes, while version diagnostics remain available.
+
 ## Native filesystem I/O
 
 Daemon file operations use caller-owned raw descriptors and direct metadata calls, without a global I/O admission limit.

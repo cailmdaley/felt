@@ -11,7 +11,7 @@ defmodule Shuttle.Contract do
   skew that shipped 80ce7b3: a post-fix daemon shelling a pre-fix CLI that
   silently failed every dispatch write because it didn't know `--host`.
 
-  At `Shuttle.Poller.init/1` the daemon shells `shuttle contract` and
+  During the Poller's contract-check stage the daemon shells `shuttle contract` and
   compares its bare-integer stdout against `expected_level/0` — catching a
   stale CLI installed alongside a newer daemon (or vice versa) once at boot
   instead of failing one shelled write at a time with "unknown flag".
@@ -55,8 +55,8 @@ defmodule Shuttle.Contract do
   def expected_level, do: @expected_level
 
   @doc """
-  Shell `shuttle contract` through `runner` (Runner-bounded — tolerant of
-  a slow node, never hangs boot) and compare its output to `expected_level/0`.
+  Shell `shuttle contract` through `runner`, using its command timeout,
+  and compare its output to `expected_level/0`.
 
   Always returns a map, never raises:
 

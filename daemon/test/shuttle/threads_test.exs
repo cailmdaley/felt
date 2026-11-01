@@ -1340,7 +1340,7 @@ defmodule Shuttle.ThreadsTest do
         ThreadOutbox.boot_baseline()
         flunk("corrupt baseline was accepted")
       rescue
-        _ in [Jason.DecodeError, MatchError, RuntimeError, KeyError] -> :ok
+        _ in [Jason.DecodeError, ThreadOutbox.Corrupt] -> :ok
       end
 
       assert File.read!(path) == corrupt
@@ -1362,11 +1362,11 @@ defmodule Shuttle.ThreadsTest do
     [payload] = Path.wildcard(Path.join(data, "thread-outbox/pending/*.json"))
     bytes = File.read!(payload)
     File.write!(baseline_path, "corrupt")
-    assert_raise MatchError, fn -> ThreadOutbox.boot_baseline() end
+    assert_raise ThreadOutbox.Corrupt, fn -> ThreadOutbox.boot_baseline() end
     assert File.read!(payload) == bytes
     assert File.read!(baseline_path) == "corrupt"
     File.rm!(baseline_path)
-    assert_raise RuntimeError, fn -> ThreadOutbox.boot_baseline() end
+    assert_raise ThreadOutbox.Corrupt, fn -> ThreadOutbox.boot_baseline() end
     assert File.read!(payload) == bytes
     # Operator restores the exact trusted cutoff, never a new current time.
     File.write!(baseline_path, cutoff)

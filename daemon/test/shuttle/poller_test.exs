@@ -770,12 +770,12 @@ defmodule Shuttle.PollerTest do
       assert Poller.own_host_id(:test_poller_shuttle_host) == "candide"
     end
 
-    test "a Poller whose shuttle cannot name the host refuses to boot" do
+    test "a Poller whose shuttle cannot name the host retries and recovers" do
       Env.delete_env("SHUTTLE_HOST")
       MockRunner.set_host_json("parsing host.json: not a JSON object", 1)
 
       ExUnit.CaptureLog.capture_log(fn ->
-        assert {:error, reason} =
+        assert {:ok, poller} =
                  start_supervised(%{
                    id: make_ref(),
                    start:
@@ -792,7 +792,21 @@ defmodule Shuttle.PollerTest do
                    restart: :temporary
                  })
 
-        assert inspect(reason) =~ "shuttle host --json"
+        assert wait_until(fn ->
+                 match?(
+                   %{boot: %{stage: "configuration", reason: "retrying"}},
+                   Shuttle.Readiness.status()
+                 )
+               end)
+
+        assert %{boot_hold: nil, boot: %{error: error, retry_in_ms: retry_in}} =
+                 Shuttle.Readiness.status()
+
+        assert error =~ "shuttle host --json"
+        assert retry_in <= 1_000
+        MockRunner.set_host_json(~s({"id": "recovered-host"}))
+        assert %{boot_hold: nil, own_host_id: "recovered-host"} = :sys.get_state(poller, 30_000)
+        assert Process.alive?(poller)
       end)
     end
   end

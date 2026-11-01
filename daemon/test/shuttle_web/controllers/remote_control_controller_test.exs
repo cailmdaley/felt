@@ -63,8 +63,15 @@ defmodule ShuttleWeb.RemoteControlControllerTest do
   end
 
   test "Remote Control is an optional child, disabled during tests" do
-    refute Enum.any?(Shuttle.Application.child_specs(), &(&1.id == Shuttle.RemoteControl))
+    local_children = fn ->
+      %{start: {Shuttle.Local, :start_link, [children]}} =
+        Enum.find(Shuttle.Application.child_specs(), &(&1.id == Shuttle.Local))
+
+      children
+    end
+
+    refute Shuttle.RemoteControl in local_children.()
     Env.put_app_env(:start_remote_control, true)
-    assert Enum.any?(Shuttle.Application.child_specs(), &(&1.id == Shuttle.RemoteControl))
+    assert Shuttle.RemoteControl in local_children.()
   end
 end

@@ -114,18 +114,18 @@ defmodule Shuttle.Application do
   # these children so it binds before slow store, event-stream, follower seed,
   # or bridge initialization.
   @optional_children [
-    {:start_tailnet_peers, Shuttle.TailnetPeers},
-    {:start_tailnet_dial, Shuttle.TailnetDial},
-    {:start_remote_registry, Shuttle.RemoteRegistry},
-    {:start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
-    {:start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
-    {:start_event_stream, Shuttle.EventStream},
-    {:start_interrupt_watcher, Shuttle.InterruptWatcher},
-    {:start_log_rotator, Shuttle.LogRotator},
-    {:start_remote_control, Shuttle.RemoteControl},
-    {:start_codex_backend, Shuttle.CodexBackend},
-    {:start_transcript_indexer, Shuttle.TranscriptIndexer},
-    {:start_poller, Shuttle.Poller}
+    {Shuttle.Fleet, :start_tailnet_peers, Shuttle.TailnetPeers},
+    {Shuttle.Fleet, :start_tailnet_dial, Shuttle.TailnetDial},
+    {Shuttle.Fleet, :start_remote_registry, Shuttle.RemoteRegistry},
+    {Shuttle.Fleet, :start_remote_fiber_registry, Shuttle.RemoteFiberRegistry},
+    {Shuttle.Fleet, :start_remote_temporal_registry, Shuttle.RemoteTemporalRegistry},
+    {Shuttle.Local, :start_event_stream, Shuttle.EventStream},
+    {Shuttle.Local, :start_interrupt_watcher, Shuttle.InterruptWatcher},
+    {Shuttle.Local, :start_log_rotator, Shuttle.LogRotator},
+    {Shuttle.Local, :start_remote_control, Shuttle.RemoteControl},
+    {Shuttle.Local, :start_codex_backend, Shuttle.CodexBackend},
+    {Shuttle.Local, :start_transcript_indexer, Shuttle.TranscriptIndexer},
+    {Shuttle.Local, :start_poller, Shuttle.Poller}
   ]
 
   @impl true
@@ -166,7 +166,7 @@ defmodule Shuttle.Application do
     case Supervisor.start_link(child_specs(), strategy: :one_for_one, name: Shuttle.Supervisor) do
       {:ok, pid} ->
         duration_ms = Shuttle.Readiness.mark_ready()
-        Logger.info("Shuttle ready after #{duration_ms}ms")
+        Logger.info("Shuttle application tree started after #{duration_ms}ms")
         {:ok, pid}
 
       other ->
@@ -204,9 +204,9 @@ defmodule Shuttle.Application do
     ]
 
     optional =
-      for {flag, mod} <- @optional_children,
+      for {group, flag, mod} <- @optional_children,
           Shuttle.Env.app(flag, true),
-          do: optional_child(mod)
+          do: {group, optional_child(mod)}
 
     # The endpoint binds before any synchronous child that may walk stores,
     # seed events.jsonl or reconcile Tailnet bridges. Its start callback logs
@@ -216,8 +216,15 @@ defmodule Shuttle.Application do
         start: {__MODULE__, :start_endpoint, []}
       )
 
+    local = for {Shuttle.Local, child} <- optional, do: child
+    fleet = for {Shuttle.Fleet, child} <- optional, do: child
+
     Enum.map(core, &Supervisor.child_spec(&1, [])) ++
-      [endpoint] ++ Enum.map(optional, &Supervisor.child_spec(&1, []))
+      [
+        endpoint,
+        Supervisor.child_spec({Shuttle.Local, local}, []),
+        Supervisor.child_spec({Shuttle.Fleet, fleet}, [])
+      ]
   end
 
   # The Poller takes the identity `start/2` froze rather than resolving its

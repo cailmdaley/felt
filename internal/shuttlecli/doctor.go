@@ -44,6 +44,7 @@ type ReceiptDaemon struct {
 	Observed           any                 `json:"observed,omitempty"`
 	Contract           bool                `json:"contract_ok"`
 	ReconciliationHold string              `json:"reconciliation_hold,omitempty"`
+	BootHold           *ReceiptBootHold    `json:"boot_hold,omitempty"`
 	Ready              *bool               `json:"ready,omitempty"`
 	Listen             string              `json:"listen,omitempty"`
 	HostClass          string              `json:"host_class,omitempty"`
@@ -52,6 +53,11 @@ type ReceiptDaemon struct {
 	PeerGateUIDSource  string              `json:"peer_gate_uid_source,omitempty"`
 	TailnetDial        *ReceiptTailnetDial `json:"tailnet_dial,omitempty"`
 	Discovery          *daemonDiscovery    `json:"discovery,omitempty"`
+}
+
+type ReceiptBootHold struct {
+	Stage  string `json:"stage"`
+	Reason string `json:"reason"`
 }
 
 type ReceiptTailnetDial struct {
@@ -324,7 +330,7 @@ func (a *app) printDiscoveryReceipt(discovery *daemonDiscovery) {
 
 func (a *app) collectHostReceiptWhenReady(daemon ReceiptDaemon) ReceiptHost {
 	if daemon.Ready != nil && !*daemon.Ready {
-		return ReceiptHost{Status: receiptBooting, Repair: daemon.Repair}
+		return ReceiptHost{Status: daemon.Status, Repair: daemon.Repair}
 	}
 	return a.collectHostReceipt(daemon)
 }
@@ -349,6 +355,7 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 		Discovery          *daemonDiscovery    `json:"discovery"`
 		Ready              *bool               `json:"ready"`
 		ReconciliationHold string              `json:"reconciliation_hold"`
+		BootHold           *ReceiptBootHold    `json:"boot_hold"`
 		Contract           struct {
 			Expected json.RawMessage `json:"expected"`
 			Observed json.RawMessage `json:"observed"`
@@ -361,8 +368,14 @@ func (a *app) collectDaemonReceipt() ReceiptDaemon {
 	d.TailnetDial, d.Ready = response.TailnetDial, response.Ready
 	d.Discovery = response.Discovery
 	d.ReconciliationHold = response.ReconciliationHold
+	d.BootHold = response.BootHold
 	if decodeErr != nil {
 		d.Status, d.Repair = receiptMismatch, "upgrade or restart Shuttle so /api/v1/version exposes the contract receipt"
+		return d
+	}
+	if d.BootHold != nil && d.BootHold.Reason != "booting" {
+		d.Status = receiptMismatch
+		d.Repair = fmt.Sprintf("Poller boot holds every launch at %s: %s; repair the outbox data and restart the daemon; daemon release cannot clear this hold", d.BootHold.Stage, d.BootHold.Reason)
 		return d
 	}
 	if response.Ready != nil && !*response.Ready {

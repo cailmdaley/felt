@@ -258,6 +258,10 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			"ready": true, "contract": map[string]any{"expected": 2, "observed": 2, "ok": true},
 			"reconciliation_hold": "journal_unreadable /state/migrations/broken.json: invalid schema",
 		}, receiptMismatch},
+		{"boot hold", map[string]any{
+			"ready":     false,
+			"boot_hold": map[string]any{"stage": "outbox_baseline", "reason": "corrupt /state/thread-outbox.json"},
+		}, receiptMismatch},
 		{"mismatch", map[string]any{"contract": map[string]any{"expected": 2, "observed": 1, "ok": false}}, receiptMismatch},
 		{"booting ignores incomplete contract and listener evidence", map[string]any{
 			"ready": false, "listen": "tcp://127.0.0.1:4000", "host_class": "shared-multi-user",
@@ -278,6 +282,16 @@ func TestCollectDaemonReceiptRequiresMatchingContract(t *testing.T) {
 			}
 			if tc.name == "migration hold" && (!got.Contract || got.ReconciliationHold != tc.body["reconciliation_hold"] || !strings.Contains(got.Repair, "/state/migrations/broken.json") || !strings.Contains(got.Repair, "daemon release cannot clear")) {
 				t.Fatalf("migration hold must remain visible with a matching contract: %+v", got)
+			}
+			if tc.name == "boot hold" {
+				if got.BootHold == nil || got.BootHold.Stage != "outbox_baseline" || !strings.Contains(got.Repair, "/state/thread-outbox.json") || !strings.Contains(got.Repair, "daemon release cannot clear") {
+					t.Fatalf("boot hold must name the failure rather than advise waiting: %+v", got)
+				}
+				host := newApp(env).collectHostReceiptWhenReady(got)
+				status, repair := combineDoctorReceiptStatus(got.Status, host.Status)
+				if status != receiptMismatch || repair == "" {
+					t.Fatalf("held daemon must not be downgraded to transient booting: %s %s", status, repair)
+				}
 			}
 			if tc.want == receiptHealthy && !got.Contract {
 				t.Fatal("matching daemon contract was not accepted")
