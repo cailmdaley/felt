@@ -335,8 +335,7 @@ Six steps run in order.
 2. **Go CLIs.** `make cli-install` builds and installs `felt` and `shuttle`
    from *this* checkout, so the daemon and its CLIs share one source revision.
 3. **Daemon release.** `make daemon` assembles the Mix release into `bin/rel`.
-   The step atomically records the absolute release path in `~/.shuttle/repo`, which lets
-   supervisors and remote revival over SSH boot the most recently built release.
+   Building does not select a release or touch the host daemon; keep-alive installation selects it.
 4. **`ui/dist`.** Builds the served board bundle with Node and npm on this host.
 5. **Event stream.** Runs `felt setup claude` and `felt setup codex` against
    this checkout, so the plugin hooks match both CLIs. Then it pipes a probe
@@ -352,7 +351,8 @@ Useful flags: `--dry-run`, `--skip-hook`,
 
 Editing daemon source means rebuilding: the release runs the compiled modules
 under `bin/rel`, so a restart alone picks up nothing. `make restart` rebuilds
-and bounces in one step.
+and bounces in one step from the main checkout. In a linked worktree it only builds;
+use `bin/shuttle-deploy --hosts local --ref <commit>` to activate that revision.
 
 ## Verify
 
@@ -448,8 +448,11 @@ builds the same CLI from a checkout. Both paths render the templates from
 `daemon/share/` in a checkout or `share/` in a fetched installation. The
 service records the absolute installed `shuttle` executable and starts it with `shuttle daemon start`.
 The CLI reads `~/.shuttle/repo` on each launch; the service's working directory is the user's home.
-`shuttle daemon install`, source builds, and deployments select the release in that one pointer.
-Source builds and deployments refresh release-pinned supervisor definitions automatically, preserving their settings and replacing checkout-dependent working directories.
+`shuttle daemon install`, main-checkout `make restart`, and deployments select the release in that one pointer. `make start` follows the existing selection without changing it. Builds never select or cycle the daemon.
+Main-checkout activation and deployments share an automatic pin-only migration: remove `SHUTTLE_RELEASE` and replace a checkout-dependent working directory with home, preserving every other environment entry and service setting verbatim.
+Activation selects immediately before cycling and restores the previous selection and migrated definitions on failure.
+Selection, activation and pruning share a lock; deployment verifies the booted `release_path` as well as the revision and readiness.
+A missing selected release fails with its path and repair commands; the tmux loop backs off rather than spinning.
 The same templates serve both installation paths.
 `/api/v1/version` and `shuttle daemon status` report `release_path`, the absolute release root the running VM booted from (`"unknown"` under Mix).
 The pointer selects the next boot; changing it does not change a running VM's receipt.
@@ -698,7 +701,7 @@ A daemon that exits within 60 seconds doubles the sleep, from 2s up to a 300s ca
 One that survives 60 seconds resets it. This exists because a wedged login node
 once drove a fixed 2-second loop to roughly 35,000 restarts.
 
-To cycle onto a freshly built release, kill the listener and let the loop
+To restart the currently selected release, kill the listener and let the loop
 respawn it:
 
 ```bash
@@ -706,7 +709,7 @@ lsof -ti:4000 -sTCP:LISTEN | xargs kill
 ```
 
 `~/.shuttle/repo` selects the release for both supervisors and the respawn loop.
-The loop rereads it between daemon starts, so a build can select a different checkout without replacing the loop.
+The loop rereads it between daemon starts, so deployment can select a different checkout without replacing the loop.
 The pointer also accepts a checkout root containing `bin/rel`.
 If you move the release manually, select its new absolute path with `shuttle daemon select-release <path>`.
 

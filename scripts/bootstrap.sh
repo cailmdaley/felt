@@ -175,7 +175,7 @@ step "Build the daemon release"
 make -C "$REPO" daemon SKIP_CLI=1 || die "daemon release build failed."
 ok "daemon release built → bin/rel."
 
-# The build selects bin/rel in ~/.shuttle/repo for supervisors and SSH revival.
+# Builds leave the host selection unchanged; keep-alive installation selects it.
 
 # ── 4. ui/dist ─────────────────────────────────────────────────────────────
 step "UI bundle (ui/dist)"
@@ -235,6 +235,7 @@ fi
 # unit here. The tmux respawn loop remains the honest fallback for a Linux host
 # with no systemd user session — an HPC login node usually has none.
 start_respawn_loop() {
+  "$SHUTTLE_BIN" daemon select-release "$REPO/bin/rel" || die "failed to select the installed release."
   if tmux has-session -t shuttle-daemon 2>/dev/null; then
     ok "respawn loop already running (tmux session 'shuttle-daemon')."
     note "to cycle to the freshly-built release, kill the :4000 listener — the loop respawns it:"

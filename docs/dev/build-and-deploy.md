@@ -17,10 +17,10 @@ make daemon SKIP_CLI=1 # same, trusting felt and shuttle on PATH
 make test         # go test ./...  +  mix test  +  the board's vitest suite  +  the plugin hooks  +  the bootstrap shims
 make go-test / mix-test / js-test / plugin-hooks-test / bootstrap-test   # one suite each
 make lint-personal   # the hygiene test alone: no maintainer host or account names in tracked source
-make restart      # rebuild UI and release, then stop + start
+make restart      # rebuild; main checkout selects and cycles, linked worktrees only build
 make all          # restart
-make start        # nohup detached; logs → $(LOG) (macOS ~/Library/Logs/shuttle.log, Linux ~/.shuttle/shuttle.log)
-make stop         # SIGTERM with 5s grace
+make start        # main checkout starts the existing selection; logs → $(LOG)
+make stop         # SIGTERM with 5s grace; linked worktrees refuse a foreign release
 make logs         # tail -f the log
 make status       # daemon status and snapshot summary
 make clean        # rm daemon/_build, stray Elixir.*.beam, built binaries
@@ -54,15 +54,21 @@ App Server. Both survive Shuttle restarts; the daemon re-adopts their ownership.
 
 **A supervisor owns the daemon's restart policy.**
 Launchd (`io.shuttle.daemon`), the systemd user unit, and the tmux loop read one launch pointer, `~/.shuttle/repo`.
-A successful `make daemon` (including `make build` and `make restart`) atomically selects that checkout's absolute `bin/rel` path there.
-Plain and `--ref` deployments select their built release in the same file.
+**Builds never select, migrate, install CLIs, or restart the host daemon.**
+`make restart` selects only from the main checkout, identified by Git's common directory.
+`make start` is also main-checkout-only and follows the existing selection without changing it.
+In a linked worktree, restart builds and prints deployment guidance without touching the host lifecycle; stop refuses a daemon whose reported release lies outside that worktree.
+Use `bin/shuttle-deploy --hosts local --ref <commit>` to activate a linked worktree's committed revision.
+Main-checkout activation and fleet deployment use the checkout-built CLI, not an older installed CLI.
+They install the matching CLI pair, then share one activation path that removes only supervisor release pins and checkout-dependent working directories, preserving all other definition bytes and environment entries.
+The target release is validated under a host-local lock, selected atomically immediately before cycling, and the previous selection and migrated definitions are restored if migration or cycling fails.
+The same lock excludes pruning and competing selections throughout the cycle.
 Supervisor definitions invoke the installed Go CLI and use the user's home as their working directory; neither value depends on the selected checkout.
-A build refreshes any installed release-pinned definition through the ownership-checked installer, preserving its operator settings.
-That one-time migration cycles the service; builds with pointer-independent definitions only select the next launch target.
 `/api/v1/version` reports `release_path`, the absolute release root of the running VM, independently of the pointer's current value.
 `shuttle daemon status` includes the same field.
-An explicit `SHUTTLE_RELEASE` still selects a release for a direct CLI invocation. `make stop` identifies the release boot path under `bin/rel`
-whether that path is absolute or relative, but a supervisor immediately
+An explicit `SHUTTLE_RELEASE` still selects a release for a direct CLI invocation.
+A missing selected release fails with its path and instructions to deploy locally or restart from the main checkout; the tmux loop retries with exponential backoff.
+`make stop` uses the running daemon's release receipt, but a supervisor immediately
 respawns a process that it owns, so `make stop` is not a durable stop while the
 supervisor is enabled. Use the supervisor for an explicit cycle:
 
@@ -71,11 +77,11 @@ launchctl kickstart -k gui/$(id -u)/io.shuttle.daemon   # macOS
 systemctl --user restart shuttle-daemon                 # Linux
 ```
 
-`make restart` also works: it rebuilds, stops the matching release process and
+`make restart` in the main checkout also works: it rebuilds, selects, stops the running release process and
 `make start` waits for the supervisor's replacement to answer. A daemon started
 by `make start` follows the same target without a supervisor. Where
 `shuttle-launch --loop` runs in tmux session `shuttle-daemon`, kill the `:4000`
-listener directly so the loop respawns it from the rebuilt release:
+listener directly so the loop respawns it from the selected release:
 
 ```bash
 lsof -ti:4000 -sTCP:LISTEN | xargs kill
@@ -149,7 +155,9 @@ The regular checkout's branch and local edits stay in place; every deploy runs t
 
 Before retargeting the launcher, the helper reads the live daemon's commit from `/api/v1/version`.
 After the new daemon verifies a fresh ready boot, harness setup succeeds, and quarantine release succeeds, it removes other worktrees under the deploy root with `git worktree remove --force`, then runs `git worktree prune`.
-It keeps the new tree, the previous live tree, and any tree referenced by `pi list`.
+It keeps the new tree, the previous live tree, any tree referenced by `pi list`, the current pointer target, and the running daemon's reported `release_path`.
+Pruning observes and removes under the same lock as activation and selection, so concurrent deployments cannot delete a selected or running release.
+An unavailable or unreported running release refuses pruning.
 Generated files and local edits do not prevent removal of other trees.
 
 A new worktree seeds `daemon/deps`, `daemon/_build`, and `ui/node_modules` from the previous live tree.
@@ -163,22 +171,19 @@ Use `--hosts local,hub-a` to deploy a subset.
 
 Push the verified revision, then deploy it on each host:
 
-1. Pull the checkout and run `make build` in the host's login shell.
-2. Re-render an installed daemon supervisor that an older template wrote — a
-   pre-split one (it bakes `FELT_STORES`), one that predates `TMUX_TMPDIR`
-   (the word appears nowhere in it), or one without an open-file limit
-   (no `NumberOfFiles` or `LimitNOFILE`), or one with a release path pinned in
-   `SHUTTLE_RELEASE` — through `shuttle daemon install`, keeping
-   its label, stores, port, log, `PATH`, and `SSH_AUTH_SOCK` and capturing
-   `TMUX_TMPDIR` from the login shell.
+1. Pull the checkout, run `make build`, then explicitly run `make cli-install` in the host's login shell.
+2. Prepare the pin-only supervisor migration with the checkout-built CLI.
+   Every environment entry except `SHUTTLE_RELEASE` stays verbatim, including
+   host identity, proxies, and an absent `TMUX_TMPDIR`.
+   Other service settings and unrelated definitions stay untouched.
 3. Run `felt setup <harness>` for each harness that carries felt's plugin, so
    its hooks and skills match the felt just built, and check that `felt setup
    receipt` passes (see [harness plugins](#harness-plugins)).
-4. Cycle the daemon through its supervisor or respawn loop.
+4. Atomically select the built release immediately before cycling through its supervisor or respawn loop.
    A verified live tmux loop takes precedence over service files.
    The helper carries that choice into the restart, disabling a reachable competing systemd unit or unloading a loaded launchd agent before recreating the loop.
 5. Poll `/api/v1/version` until `git_short_sha` matches, `booted_at` advances,
-   and `ready` is `true` (up to 15 minutes by default; set
+   `release_path` equals the selected release, and `ready` is `true` (up to 15 minutes by default; set
    `SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS` to override).
 6. Check the changed behavior through the live API or board.
 7. Run `shuttle daemon release` to release the boot quarantine.

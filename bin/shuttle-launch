@@ -15,8 +15,8 @@
 #   shuttle-launch --recover start a dead daemon without stopping an existing owner
 #   shuttle-launch --loop   the respawn loop itself (runs in the foreground)
 #
-# SHUTTLE_DIR selects a release for this invocation. ~/.shuttle/repo is the
-# shared launch pointer, read again for every respawn; otherwise use the script's own directory
+# ~/.shuttle/repo is the shared launch pointer, read again for every respawn.
+# SHUTTLE_DIR and the script's own directory locate a release when no pointer exists
 # if it looks like <repo>/bin. Source checkouts contain bin/rel/bin/shuttled;
 # fetched releases contain bin/shuttled. If none resolves, this exits loudly.
 #
@@ -57,16 +57,16 @@ release_dir() {
 }
 
 resolve_repo() {
-  if [ -n "${SHUTTLE_DIR:-}" ]; then
-    printf '%s\n' "$SHUTTLE_DIR"
-    return
-  fi
   if [ -r "$HOME/.shuttle/repo" ]; then
     state_repo=$(head -n 1 "$HOME/.shuttle/repo")
     if [ -n "$state_repo" ]; then
       printf '%s\n' "$state_repo"
       return
     fi
+  fi
+  if [ -n "${SHUTTLE_DIR:-}" ]; then
+    printf '%s\n' "$SHUTTLE_DIR"
+    return
   fi
   if [ -n "${REPO:-}" ] && [ -n "$(release_dir "$REPO")" ]; then
     printf '%s\n' "$REPO"
@@ -85,18 +85,9 @@ fi
 REPO=$(resolve_repo)
 SHUTTLE_RELEASE=""
 [ -n "$REPO" ] && SHUTTLE_RELEASE=$(release_dir "$REPO")
-[ -n "$SHUTTLE_RELEASE" ] || {
-  echo "shuttle-launch: could not find a daemon release. Set \$SHUTTLE_DIR to its checkout or release path (or write that path to \$HOME/.shuttle/repo)." >&2
+if [ -z "$SHUTTLE_RELEASE" ] && [ "${1:-}" != "--loop" ]; then
+  echo "shuttle-launch: could not find a daemon release at '${REPO:-unset}' (pointer: $HOME/.shuttle/repo). Fix: bin/shuttle-deploy --hosts local, or make restart in the main checkout." >&2
   exit 1
-}
-
-# An explicit launch selects the same pointer used by service supervisors.
-# Loop children only read it: an inherited SHUTTLE_DIR must not pin respawns.
-if [ "${1:-}" != "--loop" ] && [ -n "${SHUTTLE_DIR:-}" ]; then
-  SHUTTLE_RELEASE=$(CDPATH= cd -- "$SHUTTLE_RELEASE" && pwd -P) || exit 1
-  mkdir -p "$HOME/.shuttle" || exit 1
-  pointer=$(mktemp "$HOME/.shuttle/.repo-XXXXXX") || exit 1
-  printf '%s\n' "$SHUTTLE_RELEASE" > "$pointer" && mv -f "$pointer" "$HOME/.shuttle/repo" || exit 1
 fi
 
 if [ "${1:-}" = "--loop" ]; then

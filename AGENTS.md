@@ -197,6 +197,14 @@ make restart               # rebuild UI + release, then stop + start
 make status / make logs    # daemon status / tail the daemon log
 ```
 
+**Worktree builds never touch the host daemon.** `make build` and `make daemon`
+only build local artifacts. `make restart` selects and cycles only from the main
+checkout; `make start` follows the existing selection and is also main-checkout-only.
+Linked-worktree restart only builds and prints deployment
+guidance, and linked-worktree stop refuses a foreign release. Deploy a committed
+worktree revision with `bin/shuttle-deploy --hosts local --ref <commit>`, or run
+`make restart` in the main checkout.
+
 `npm ci` is stamped on `ui/package-lock.json` and runs only when the lockfile
 moves; `npm run build` runs every time.
 

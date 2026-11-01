@@ -403,21 +403,35 @@ func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
 func supervisorEnvironment(osName, source string) (map[string]string, error) {
 	values := map[string]string{}
 	if osName == "Linux" {
-		for _, line := range strings.Split(source, "\n") {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "Environment=") {
+		for _, line := range systemdLogicalLines(source) {
+			line = strings.ReplaceAll(line, "\\\n", " ")
+			key, assignments, ok := strings.Cut(line, "=")
+			if !ok || strings.TrimSpace(key) != "Environment" {
 				continue
 			}
-			assignment := strings.TrimPrefix(line, "Environment=")
-			var err error
-			if strings.HasPrefix(assignment, "\"") {
-				assignment, err = strconv.Unquote(assignment)
-			}
+			words, err := systemdEnvironmentWords(assignments)
 			if err != nil {
-				return nil, fmt.Errorf("cannot decode supervisor Environment assignment: %w", err)
+				return nil, err
 			}
-			key, value, _ := strings.Cut(assignment, "=")
-			values[key] = strings.ReplaceAll(value, "%%", "%")
+			if len(words) == 0 {
+				clear(values)
+			}
+			for _, word := range words {
+				assignment := word.value
+				raw := assignments[word.start:word.end]
+				if strings.HasPrefix(raw, "\"") {
+					assignment, err = strconv.Unquote(raw)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if assignment == "" {
+					clear(values)
+					continue
+				}
+				key, value, _ := strings.Cut(assignment, "=")
+				values[key] = strings.ReplaceAll(value, "%%", "%")
+			}
 		}
 		return values, nil
 	}

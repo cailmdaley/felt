@@ -83,7 +83,7 @@ AGENT_STORES ?=
 AGENT_PATH ?=
 
 .PHONY: build cli cli-install ui ui-unlocked daemon daemon-unlocked test test-linux go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test \
-        all start stop restart \
+        all start start-selected stop restart \
         logs status clean help install install-agent uninstall-agent lint-personal
 
 help:
@@ -154,10 +154,8 @@ cli-install:
 	GOBIN=$(INSTALL_DIR) go install ./cmd/felt ./cmd/shuttle
 
 # The daemon calls both CLIs: felt for fiber content and shuttle for orchestration.
-# Keep the installed pair in lockstep with the release. SKIP_CLI=1 skips the
-# rebuild and requires both executables on PATH; without Go, the same pair is
-# required rather than building only part of the daemon's interface.
-# With Go available the build installs both before compiling the release.
+# Build the pair locally with the release; activation installs it explicitly.
+# SKIP_CLI=1 trusts both CLIs on PATH. Without Go, both must already be installed.
 daemon:
 	@sh scripts/build-lock.sh $(MAKE) daemon-unlocked
 
@@ -166,7 +164,7 @@ ifeq ($(SKIP_CLI),1)
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH (SKIP_CLI=1)."; exit 1; }
 	@command -v shuttle >/dev/null 2>&1 || { echo "shuttle not found on PATH (SKIP_CLI=1)."; exit 1; }
 else ifneq ($(shell command -v go 2>/dev/null),)
-	$(MAKE) cli-install
+	$(MAKE) cli
 else
 	@command -v felt >/dev/null 2>&1 || { echo "felt not found on PATH and no Go toolchain to build it — install both CLIs first."; exit 1; }
 	@command -v shuttle >/dev/null 2>&1 || { echo "shuttle not found on PATH and no Go toolchain to build it — install shuttle first."; exit 1; }
@@ -205,10 +203,6 @@ endif
 	fi
 	@[ -d bin/rel ] && mv bin/rel bin/rel.prev || true
 	mv bin/rel.next bin/rel
-	@# Publish only an assembled release. A path-pinned supervisor is migrated
-	@# once through the installer; pointer-independent supervisors stay running.
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon select-release '$(CURDIR)/bin/rel'
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon refresh-release
 
 # ── test ─────────────────────────────────────────────────────────────────
 test: go-test mix-test js-test plugin-hooks-test bootstrap-test migrate-test
@@ -257,8 +251,10 @@ lint-personal:
 # ── daemon lifecycle ──────────────────────────────────────────────────────
 all: restart
 
-start:
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon refresh-release
+start: cli
+	@sh scripts/checkout-daemon.sh start
+
+start-selected:
 	@# Readiness is binding :4000, not a fixed wait. Two boot paths converge here:
 	@#   - nohup dev launch: we spawn the Go shuttle CLI ourselves.
 	@#   - launchd KeepAlive: `make stop` killed the daemon and launchd is already
@@ -275,7 +271,7 @@ start:
 	  echo "shuttle already running (pid $$pid); waiting for :4000"; \
 	else \
 	  echo "=== shuttle start $$(date -u +%Y-%m-%dT%H:%M:%SZ) ===" >> $(LOG); \
-	  nohup env -u SHUTTLE_RELEASE PATH="$(INSTALL_DIR):$$PATH" shuttle daemon start >> $(LOG) 2>&1 & \
+	  nohup env -u SHUTTLE_RELEASE PATH="$(INSTALL_DIR):$$PATH" '$(CURDIR)/shuttle' daemon start >> $(LOG) 2>&1 & \
 	  pid=$$!; \
 	fi; \
 	deadline=$$(( $$(date +%s) + 120 )); \
@@ -294,8 +290,8 @@ start:
 
 # The Go lifecycle command marks a requested stop before signaling the daemon,
 # preserving the boot-quarantine boundary in one place.
-stop:
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle daemon stop
+stop: cli
+	@sh scripts/checkout-daemon.sh stop
 
 # Rebuild the UI and daemon together before restarting the service.
 restart:
@@ -305,8 +301,8 @@ else
 	$(MAKE) ui
 endif
 	$(MAKE) daemon
-	$(MAKE) stop
-	$(MAKE) start
+	$(MAKE) cli
+	@sh scripts/checkout-daemon.sh restart
 
 # ── One-command bootstrap ─────────────────────────────────────────────────
 # The full fresh-machine install: prerequisites → felt/shuttle CLIs → daemon
@@ -328,24 +324,25 @@ install:
 # AGENT_LOG is passed explicitly so `make logs` and the supervisor cannot disagree.
 # The release is built first; install checks supervisor availability before
 # stopping anything, so a host without systemd can keep its daemon running.
-install-agent: daemon
-	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' shuttle daemon install \
+install-agent: daemon cli
+	@$(MAKE) --no-print-directory cli-install
+	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' '$(CURDIR)/shuttle' daemon install \
 	 $(if $(strip $(AGENT_STORES)),--stores '$(AGENT_STORES)',) \
 	 $(if $(strip $(AGENT_PATH)),--path '$(AGENT_PATH)',) \
 	 --log '$(LOG)' \
 	 $(if $(filter undefined,$(origin AGENT_SSH_AUTH_SOCK)),,--ssh-auth-sock '$(AGENT_SSH_AUTH_SOCK)') \
 	 $(if $(filter undefined,$(origin AGENT_TMUX_TMPDIR)),,--tmux-tmpdir '$(AGENT_TMUX_TMPDIR)')
 
-uninstall-agent:
-	@PATH="$(INSTALL_DIR):$$PATH" SHUTTLE_RELEASE='$(CURDIR)/bin/rel' shuttle daemon uninstall
+uninstall-agent: cli
+	@PATH="$(INSTALL_DIR):$$PATH" '$(CURDIR)/shuttle' daemon uninstall
 
 logs:
 	@tail -f $(LOG)
 
-status:
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle ps 2>/dev/null || echo "(shuttle ps unavailable)"
+status: cli
+	@PATH="$(INSTALL_DIR):$$PATH" '$(CURDIR)/shuttle' ps 2>/dev/null || echo "(shuttle ps unavailable)"
 	@echo
-	@PATH="$(INSTALL_DIR):$$PATH" shuttle snapshot 2>/dev/null | python3 -c "import json,sys; o=json.load(sys.stdin); \
+	@PATH="$(INSTALL_DIR):$$PATH" '$(CURDIR)/shuttle' snapshot 2>/dev/null | python3 -c "import json,sys; o=json.load(sys.stdin); \
 	  print('felt_stores:', o.get('felt_stores','MISSING')); \
 	  print('running:', [e.get('fiber_id') for e in o.get('eligible',[])]); \
 	  print('claimed:', o.get('claimed_count'),'/',o.get('max_concurrent') or 'no cap')" \

@@ -1,12 +1,15 @@
 package shuttlecli
 
 import (
-	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -16,7 +19,7 @@ func TestShuttleDeployWaitsForFreshReadyVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wait := shellFunction(t, string(script), "wait_for_sha")
+	wait := "EXPECTED_RELEASE=/expected/release\n" + shellFunction(t, string(script), "wait_for_sha")
 	callsFile := filepath.Join(t.TempDir(), "version-calls")
 
 	harness := `TARGET_SHA=abc123
@@ -31,7 +34,7 @@ version_json() {
   if [ "$calls" -eq 1 ]; then
     printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":false}'
   else
-    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true}'
+    printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","release_path":"/expected/release","ready":true}'
   fi
 }
 sleep() { :; }
@@ -46,234 +49,6 @@ printf 'polls=%s\n' "$(cat "$CALLS_FILE")"
 	}
 	if !strings.Contains(string(out), "still booting") || !strings.Contains(string(out), "polls=2") {
 		t.Fatalf("did not wait through ready:false before success: %s", out)
-	}
-}
-
-// runDeploySupervisorMigration writes each unit into a fake home's systemd
-// user directory, runs deploy's supervisor migration against a fake shuttle,
-// and returns each `shuttle daemon install` call as SHUTTLE_STORES_FILE plus
-// its argv.
-func runDeploySupervisorMigration(t *testing.T, release daemonRelease, units map[string][]byte, loopPresent ...bool) [][]string {
-	t.Helper()
-	script, err := os.ReadFile("../../bin/shuttle-deploy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
-	migration := shellFunction(t, string(script), "config_migration_cmd")
-	home := t.TempDir()
-	unitDir := filepath.Join(home, ".config", "systemd", "user")
-	localBin := filepath.Join(home, ".local", "bin")
-	for _, dir := range []string{unitDir, localBin} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, unit := range units {
-		if err := os.WriteFile(filepath.Join(unitDir, name), unit, 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	capture := filepath.Join(t.TempDir(), "install-args")
-	fakeSystemctl := filepath.Join(localBin, "systemctl")
-	if err := os.WriteFile(fakeSystemctl, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	fakeShuttle := `#!/bin/sh
-if [ "$1 $2" = "daemon loop-present" ]; then [ "$SHUTTLE_TEST_LIVE_LOOP" = 1 ]; exit $?; fi
-[ "$1 $2" = "daemon install" ] || exit 2
-{
-  printf 'CALL\n'
-  printf 'STORES_FILE=%s\n' "$SHUTTLE_STORES_FILE"
-  shift 2
-  for arg do printf 'ARG=%s\n' "$arg"; done
-  printf 'CODEX_HOME=%s\n' "$CODEX_HOME"
-} >> "$SHUTTLE_CAPTURE_FILE"
-`
-	if err := os.WriteFile(filepath.Join(localBin, "shuttle"), []byte(fakeShuttle), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	harness := `shell_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-` + probe + migration + `
-config_migration_cmd 1 "$SHUTTLE_RELEASE" | /bin/bash
-`
-	cmd := exec.Command("/bin/bash", "-c", harness)
-	liveLoop := "0"
-	if len(loopPresent) > 0 && loopPresent[0] {
-		liveLoop = "1"
-	}
-	cmd.Env = append(os.Environ(),
-		"SHUTTLE_TEST_LIVE_LOOP="+liveLoop,
-		"HOME="+home,
-		"PATH="+localBin+":/usr/bin:/bin",
-		"SHUTTLE_RELEASE="+release.Dir,
-		"SHUTTLE_CAPTURE_FILE="+capture,
-	)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("supervisor migration: %v\n%s", err, out)
-	}
-	pointer, err := os.ReadFile(filepath.Join(home, ".shuttle", "repo"))
-	if err != nil || strings.TrimSpace(string(pointer)) != release.Dir {
-		t.Fatalf("deploy did not select its release: %q, %v; want %s", pointer, err, release.Dir)
-	}
-	captured, err := os.ReadFile(capture)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
-		t.Fatal(err)
-	}
-	var calls [][]string
-	for _, line := range strings.Split(strings.TrimSpace(string(captured)), "\n") {
-		if line == "CALL" {
-			calls = append(calls, nil)
-			continue
-		}
-		calls[len(calls)-1] = append(calls[len(calls)-1], line)
-	}
-	return calls
-}
-
-// installFlag reads one flag's value from a captured install call.
-func installFlag(t *testing.T, call []string, name string) string {
-	t.Helper()
-	for i := 1; i+1 < len(call); i++ {
-		if call[i] == "ARG="+name {
-			return strings.TrimPrefix(call[i+1], "ARG=")
-		}
-	}
-	t.Fatalf("install call %v lacks %s", call, name)
-	return ""
-}
-
-func TestDeployMigrationSkipsServiceRefreshForLiveTmuxOwner(t *testing.T) {
-	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	// A reachable enabled systemd unit would otherwise trigger daemon install.
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": legacy}, true)
-	if len(calls) != 0 {
-		t.Fatalf("live tmux owner refreshed a competing systemd service: %v", calls)
-	}
-}
-
-func TestDeployMigrationPreservesLegacySupervisorOptionsInNewRender(t *testing.T) {
-	t.Parallel()
-	legacy, err := os.ReadFile("testdata/legacy-shuttle-daemon.service")
-	if err != nil {
-		t.Fatal(err)
-	}
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"second.service": legacy})
-	if len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one", calls)
-	}
-	call := calls[0]
-	flag := func(name string) string { return installFlag(t, call, name) }
-	options := supervisorOptions{
-		OS: "Linux", Label: flag("--label"), Stores: flag("--stores"), StoresFile: strings.TrimPrefix(call[0], "STORES_FILE="),
-		Port: flag("--port"), Log: flag("--log"), Path: flag("--path"), SSHSocket: flag("--ssh-auth-sock"),
-		ShuttleBin: "/opt/shuttle",
-	}
-	if options.Label != "io.shuttle.second" || options.Stores != `/mnt/store one,/mnt/store "two" \archive %data` ||
-		options.StoresFile != "/tmp/custom config/stores.json" || options.Port != "4401" ||
-		options.Log != "/tmp/custom logs/shuttle.log" || options.Path != "/opt/custom bin:/usr/bin:/opt/felt bin" ||
-		options.SSHSocket != "/tmp/ssh agent.sock" {
-		t.Fatalf("migrated supervisor options = %+v", options)
-	}
-	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`Environment="SHUTTLE_STORES=/mnt/store one,/mnt/store \"two\" \\archive %%data"`,
-		`Environment="SHUTTLE_STORES_FILE=/tmp/custom config/stores.json"`,
-		`Environment="SHUTTLE_PORT=4401"`,
-		`Environment="PATH=/opt/custom bin:/usr/bin:/opt/felt bin"`,
-		`Environment="SSH_AUTH_SOCK=/tmp/ssh agent.sock"`,
-		`Environment="SHUTTLE_LOG=/tmp/custom logs/shuttle.log"`,
-		`StandardOutput=append:/tmp/custom logs/shuttle.log`,
-	} {
-		if !strings.Contains(rendered, want) {
-			t.Errorf("new supervisor render missing migrated value %q:\n%s", want, rendered)
-		}
-	}
-}
-
-func TestDeployMigrationRerendersOnlySupervisorsFromOlderTemplates(t *testing.T) {
-	t.Parallel()
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	serviceTemplate, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := supervisorOptions{
-		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
-		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
-		SSHSocket: "/tmp/agent.sock",
-	}
-	current, err := testApp(t).renderSupervisorTemplate("Linux", string(serviceTemplate), options, release)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(current, "TMUX_TMPDIR") {
-		t.Fatalf("a current unit with an empty TMUX_TMPDIR must still name it, or deploy re-renders it forever:\n%s", current)
-	}
-	if !strings.Contains(current, "\nKillMode=process\n") {
-		t.Fatalf("a current unit must set KillMode=process, or deploy re-renders it forever:\n%s", current)
-	}
-	without := func(marker string) string {
-		var lines []string
-		for _, line := range strings.Split(current, "\n") {
-			if !strings.Contains(line, marker) {
-				lines = append(lines, line)
-			}
-		}
-		return strings.Join(lines, "\n") + "\nEnvironment=\"SHUTTLE_RELEASE=" + release.Dir + "\"\n"
-	}
-	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(without("KillMode=process")),
-	}); len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one for the unit without KillMode=process", calls)
-	}
-	older := strings.Split(without("TMUX_TMPDIR"), "\n")
-	tunnel := "[Service]\nExecStart=/usr/bin/ssh -N shuttle-remote\nEnvironment=SSH_AUTH_SOCK=/tmp/agent.sock\n"
-
-	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(current),
-		"shuttle-tunnel.service": []byte(tunnel),
-	}); len(calls) != 0 {
-		t.Fatalf("current and tunnel supervisors were re-rendered: %v", calls)
-	}
-
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{
-		"shuttle-daemon.service": []byte(strings.Join(older, "\n")),
-		"shuttle-tunnel.service": []byte(tunnel),
-	})
-	if len(calls) != 1 {
-		t.Fatalf("install calls = %v; want one for the pre-TMUX_TMPDIR daemon unit", calls)
-	}
-	call := calls[0]
-	for flag, want := range map[string]string{
-		"--label": defaultDaemonLabel, "--stores": "/srv/store", "--path": "/opt/bin:/usr/bin",
-		"--log": "/tmp/logs/shuttle.log", "--ssh-auth-sock": "/tmp/agent.sock", "--port": "",
-	} {
-		if got := installFlag(t, call, flag); got != want {
-			t.Errorf("%s = %q; want %q", flag, got, want)
-		}
-	}
-	if call[0] != "STORES_FILE=/tmp/cfg/stores.json" {
-		t.Errorf("stores file = %q", call[0])
-	}
-	for _, arg := range call {
-		if strings.HasPrefix(arg, "ARG=--tmux-tmpdir") {
-			t.Errorf("migration pinned %s; install must capture TMUX_TMPDIR from the login shell", arg)
-		}
 	}
 }
 
@@ -343,6 +118,13 @@ func runLauncherRestart(t *testing.T, supervisor string, selectedOwner ...string
 		}
 	}
 	if err := os.WriteFile(filepath.Join(checkout, "bin", "rel", "bin", "shuttled"), []byte("release"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	selected, _ := filepath.EvalSymlinks(filepath.Join(checkout, "bin", "rel"))
+	if err := os.MkdirAll(filepath.Join(home, ".shuttle"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".shuttle", "repo"), []byte(selected+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	freshLauncher, err = os.ReadFile("../../bin/shuttle-launch")
@@ -450,6 +232,7 @@ func TestShuttleDeployReportsBootingAtReadyTimeout(t *testing.T) {
 	}
 
 	harness := `TARGET_SHA=abc123
+EXPECTED_RELEASE=/expected/release
 DEPLOY_STARTED_AT=2026-01-01T00:00:00
 SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
 SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1
@@ -658,6 +441,7 @@ func TestDeployBuildCommandStampsBothCLIs(t *testing.T) {
 	output := t.TempDir()
 	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + `
 make() {
+  [ "$*" != 'cli-install' ] || return 0
   [ "$*" = 'build SKIP_UI=1' ] || return 3
   [ "$SHUTTLE_VERSION" = 2.0.0-rc.1 ] || return 4
   go build -o "$OUTPUT/felt" ./cmd/felt && go build -o "$OUTPUT/shuttle" ./cmd/shuttle
@@ -675,47 +459,6 @@ eval "$(build_checkout_cmd "$SOURCE" 1)"
 		if err != nil || !strings.Contains(string(out), "2.0.0-rc.1") {
 			t.Errorf("%s release version: %v\n%s", name, err, out)
 		}
-	}
-}
-
-func TestDeployRemovesReleasePinAndPreservesSettings(t *testing.T) {
-	t.Parallel()
-	old := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "old"))
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "revision"))
-	template, err := os.ReadFile("../../daemon/share/io.shuttle.daemon.service.template")
-	if err != nil {
-		t.Fatal(err)
-	}
-	options := supervisorOptions{
-		Label: defaultDaemonLabel, ShuttleBin: "/opt/shuttle", Stores: "/srv/store",
-		StoresFile: "/tmp/cfg/stores.json", Path: "/opt/bin:/usr/bin", Log: "/tmp/logs/shuttle.log",
-		SSHSocket: "/tmp/agent.sock", TmuxTmpdir: "/tmp/tmux operator",
-		CodexSocket: "/tmp/codex.sock", CodexHome: "/tmp/codex home",
-	}
-	rendered, err := testApp(t).renderSupervisorTemplate("Linux", string(template), options, old)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rendered += "\nEnvironment=\"SHUTTLE_RELEASE=" + old.Dir + "\"\n"
-	calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(rendered)})
-	if len(calls) != 1 {
-		t.Fatalf("pinned supervisor was not migrated: %v", calls)
-	}
-	for name, want := range map[string]string{
-		"--stores": options.Stores, "--path": options.Path, "--log": options.Log,
-		"--ssh-auth-sock": options.SSHSocket, "--tmux-tmpdir": options.TmuxTmpdir,
-		"--codex-socket": options.CodexSocket,
-	} {
-		if got := installFlag(t, calls[0], name); got != want {
-			t.Errorf("%s = %q, want %q", name, got, want)
-		}
-	}
-	if calls[0][0] != "STORES_FILE="+options.StoresFile || calls[0][len(calls[0])-1] != "CODEX_HOME="+options.CodexHome {
-		t.Fatalf("supervisor environment not retained: %v", calls[0])
-	}
-	matchingPin := strings.ReplaceAll(rendered, old.Dir, release.Dir)
-	if calls := runDeploySupervisorMigration(t, release, map[string][]byte{"shuttle-daemon.service": []byte(matchingPin)}); len(calls) != 1 {
-		t.Fatalf("a matching pin still needs removal: %v", calls)
 	}
 }
 
@@ -937,7 +680,7 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	git("add", "tracked")
 	git("commit", "-m", "zero")
 	commits := []string{git("rev-parse", "HEAD")}
-	for i := 1; i < 5; i++ {
+	for i := 1; i < 7; i++ {
 		if err := os.WriteFile(filepath.Join(repo, "tracked"), []byte(strconv.Itoa(i)), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -963,19 +706,42 @@ func TestDeployPruneKeepsCurrentPreviousAndPiTrees(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(fakeBin, "pi"), []byte("#!/bin/sh\nprintf 'local package\\n    %s\\n' \"$PI_TREE\"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	build := exec.Command("go", "build", "-o", filepath.Join(repo, "shuttle"), "../../cmd/shuttle")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, out)
+	}
+	env := testEnv(t)
+	selectedRelease := writeTestDaemonRelease(t, filepath.Join(paths[0], "bin", "rel"))
+	if err := newApp(env).selectDaemonRelease(selectedRelease); err != nil {
+		t.Fatal(err)
+	}
+	var observedLock atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		observedLock.Store(releaseLockHeld(env.Getenv("HOME")))
+		fmt.Fprintf(w, `{"release_path":%q}`, filepath.Join(paths[1], "bin", "rel"))
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_LISTEN", "tcp://"+strings.TrimPrefix(server.URL, "http://"))
+	env.Set("REPO", repo)
+	env.Set("PREVIOUS", paths[3])
+	env.Set("TARGET_COMMIT", commits[4])
+	env.Set("PI_TREE", paths[2])
+	env.Set("PATH", fakeBin+":"+env.Getenv("PATH"))
 	command := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "prune_deploy_cmd") + `prune_deploy_cmd "$REPO" "$PREVIOUS" | bash -eu`
-	cmd := exec.Command("bash", "-c", command)
-	cmd.Env = append(os.Environ(), "REPO="+repo, "PREVIOUS="+paths[3], "TARGET_COMMIT="+commits[4], "PI_TREE="+paths[2], "PATH="+fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd := env.Command("bash", "-c", command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("prune: %v\n%s", err, out)
 	}
-	for _, path := range paths[2:] {
+	if !observedLock.Load() {
+		t.Fatal("pruning observed releases without excluding concurrent selections")
+	}
+	for _, path := range paths[:5] {
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("retained worktree %s missing: %v", path, err)
 		}
 	}
-	for _, path := range paths[:2] {
+	for _, path := range paths[5:] {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("obsolete worktree remains: %s (%v)", path, err)
 		}
@@ -1099,9 +865,9 @@ verify_and_finish() { printf 'verified\n' >> "$EVENTS"; }
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := "git pull --ff-only -q\nmake build\nverified\n"
+			want := "git pull --ff-only -q\nmake build\nmake cli-install\nverified\n"
 			if buildUI == "0" {
-				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nverified\n"
+				want = "ship\ngit pull --ff-only -q\nmake build SKIP_UI=1\nmake cli-install\nverified\n"
 			}
 			if wrap != "" {
 				want = strings.Replace(want, "make build", "wrap\nmake build", 1)
@@ -1167,9 +933,10 @@ func TestDeployRefRejectsWrongDaemonVersion(t *testing.T) {
 	}
 	harness := `TARGET_SHA=abc123
 DEPLOY_VERSION=2.0.0-rc.1
+EXPECTED_RELEASE=/expected/release
 DEPLOY_STARTED_AT=2026-01-01T00:00:00
 SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0
-version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"mix_vsn":"0.1.0"}'; }
+version_json() { printf '%s\n' '{"git_short_sha":"abc123","booted_at":"2026-01-02T00:00:00Z","ready":true,"release_path":"/expected/release","mix_vsn":"0.1.0"}'; }
 ` + shellFunction(t, string(script), "version_ready") + shellFunction(t, string(script), "wait_for_sha") + "\nwait_for_sha ''\n"
 	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "expected 2.0.0-rc.1") {

@@ -88,6 +88,11 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(filepath.Join(root, "bin", "rel", "bin", "shuttled"), "#!/bin/sh\nexit 0\n")
+	write(filepath.Join(data, "repo"), filepath.Join(root, "bin", "rel")+"\n")
+	build := exec.Command("go", "build", "-o", filepath.Join(root, "shuttle"), "../../cmd/shuttle")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v %s", err, out)
+	}
 	startLoop := exec.Command("/usr/bin/env", "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"), "SHUTTLE_DIR="+root, "SHUTTLE_DATA_DIR="+data, "SHUTTLE_PORT="+port, "SHUTTLE_CYCLE_CHILD_PORT="+port, "SHUTTLE_CYCLE_CHILD_PID_FILE="+pidFile, filepath.Join(bin, "shuttle-launch"), "--tmux")
 	if out, err := startLoop.CombinedOutput(); err != nil {
 		t.Fatalf("start real tmux loop: %v\n%s", err, out)
@@ -123,6 +128,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	probe := shellFunction(t, string(script), "supervisor_probe_cmd")
 	cycle := shellFunction(t, string(script), "remote_host_cycle")
 	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + cycle + `run_on() { /bin/dash -c "$2"; }
+run_on_visible() { /bin/dash -c "$2"; }
 bad() { echo "$*" >&2; }
 remote_host_cycle remote "$SHUTTLE_DIR"
 `

@@ -34,7 +34,8 @@ func (a *app) shuttleDaemonCmd() *cobra.Command {
 		a.newShuttleDaemonUninstallCommand(),
 		a.daemonLoopPresentCmd(),
 		a.daemonSelectReleaseCmd(),
-		a.daemonRefreshReleaseCmd(),
+		a.daemonActivateReleaseCmd(),
+		a.daemonPruneReleasesCmd(),
 	)
 	return shuttleDaemonCmd
 }
@@ -260,7 +261,10 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 			if release, err := a.validateDaemonRelease(dir); err == nil {
 				return release, nil
 			}
-			return a.validateDaemonRelease(filepath.Join(dir, "bin", "rel"))
+			if release, err := a.validateDaemonRelease(filepath.Join(dir, "bin", "rel")); err == nil {
+				return release, nil
+			}
+			return daemonRelease{}, fmt.Errorf("selected daemon release is missing or unbuilt at %q (pointer %s); fix: bin/shuttle-deploy --hosts local, or make restart in the main checkout", dir, filepath.Join(home, ".shuttle", "repo"))
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return daemonRelease{}, err
@@ -275,7 +279,7 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 			return release, nil
 		}
 	}
-	return daemonRelease{}, errors.New("no daemon release found; set SHUTTLE_RELEASE or build/install a Mix release")
+	return daemonRelease{}, errors.New("no daemon release selected; fix: bin/shuttle-deploy --hosts local, or make restart in the main checkout; SHUTTLE_RELEASE overrides selection for a direct invocation")
 }
 
 func (a *app) validateDaemonRelease(dir string) (daemonRelease, error) {
@@ -340,15 +344,13 @@ func (a *app) runReleaseVersion(path string) error {
 }
 
 func (a *app) newShuttleDaemonStopCommand() *cobra.Command {
-	return &cobra.Command{
+	var within string
+	command := &cobra.Command{
 		Use:   "stop",
-		Short: "Stop the daemon process for this release",
+		Short: "Stop the running daemon using its booted release",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			release, err := a.findDaemonRelease()
-			if err != nil {
-				return err
-			}
+			var release daemonRelease
 			if settings, err := a.resolveHostSettings(); err == nil {
 				if body, err := a.daemonLifecycleGet(settings, "/api/v1/version", 5*time.Second); err == nil {
 					var receipt struct {
@@ -359,9 +361,22 @@ func (a *app) newShuttleDaemonStopCommand() *cobra.Command {
 					}
 				}
 			}
+			if within != "" {
+				if release.Dir == "" || !releasePathWithin(within, release.Dir) {
+					return fmt.Errorf("refusing to stop daemon outside worktree %q (running release_path: %q)", within, release.Dir)
+				}
+			} else if release.Dir == "" {
+				var err error
+				release, err = a.findDaemonRelease()
+				if err != nil {
+					return err
+				}
+			}
 			return a.stopDaemonRelease(release)
 		},
 	}
+	command.Flags().StringVar(&within, "within", "", "Refuse to stop a daemon whose reported release is outside this directory")
+	return command
 }
 
 func (a *app) stopDaemonRelease(release daemonRelease) error {

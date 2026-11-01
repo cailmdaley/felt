@@ -115,6 +115,9 @@ func daemonRespawnLoopPresent(env *sysenv.Env) bool {
 	for _, repo := range repos {
 		if filepath.IsAbs(repo) {
 			paths = append(paths, filepath.Join(repo, "bin", "shuttle-launch"))
+			if filepath.Base(repo) == "rel" && filepath.Base(filepath.Dir(repo)) == "bin" {
+				paths = append(paths, filepath.Join(filepath.Dir(filepath.Dir(repo)), "bin", "shuttle-launch"))
+			}
 		}
 	}
 	// Include the current checkout's launcher, including invocation before install.

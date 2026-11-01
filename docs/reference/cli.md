@@ -267,8 +267,9 @@ configured stores; they refuse guessed paths and duplicate matches.
 |---|---|
 | `shuttle doctor` | Diagnose the shuttle binary, host identity/configuration, listener, daemon contract, and tmux integration; warn about local fiber context pending for at least ten minutes |
 | `shuttle daemon start [--force]` | Start the local Mix release in the foreground; atomically claims its endpoint and refuses an answering daemon or live start/install claim even with `--force` |
-| `shuttle daemon stop` | Stop the local daemon and mark the shutdown as intentional |
-| `shuttle daemon status` | Print daemon state; exits 2 when the daemon is down |
+| `shuttle daemon stop [--within <directory>]` | Stop the local daemon using its reported boot path and mark the shutdown intentional; `--within` refuses a missing or out-of-directory release receipt |
+| `shuttle daemon status` | Print daemon state including its booted `release_path`; exits 2 when the daemon is down |
+| `shuttle daemon select-release <path>` | Validate a built release and atomically select it in `~/.shuttle/repo` for the next launch; does not cycle a running daemon |
 | `shuttle daemon release` | Release the boot quarantine |
 | `shuttle daemon reset <remote>` | Restart recovery for a tripped, degraded or unreachable remote |
 | `shuttle daemon install [options]` | Install the per-user keep-alive supervisor; `--stores` pins its store list, `--codex-socket` persists an explicit Codex endpoint (`--codex-socket=` clears it) |

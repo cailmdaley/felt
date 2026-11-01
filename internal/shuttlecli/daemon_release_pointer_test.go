@@ -14,7 +14,7 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
-func TestReleasePointerSelectsLastBuildWithoutRerenderingSupervisor(t *testing.T) {
+func TestExplicitReleaseActivationDoesNotRerenderIndependentSupervisor(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	home, _ := env.UserHomeDir()
@@ -61,7 +61,7 @@ func TestReleasePointerThroughInstalledCLI(t *testing.T) {
 		if err := os.WriteFile(release.Launcher, []byte("#!/bin/sh\nprintf '%s\\n' \"$0\"\n"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		for _, args := range [][]string{{"daemon", "select-release", release.Dir}, {"daemon", "refresh-release"}, {"daemon", "start"}} {
+		for _, args := range [][]string{{"daemon", "select-release", release.Dir}, {"daemon", "activate-release", release.Dir, "--", "/bin/sh", "-c", ":"}, {"daemon", "start"}} {
 			output, err := env.Command(binary, args...).CombinedOutput()
 			if err != nil {
 				t.Fatalf("%v: %v %s", args, err, output)
@@ -70,6 +70,15 @@ func TestReleasePointerThroughInstalledCLI(t *testing.T) {
 				t.Fatalf("launched %q, want %q", output, release.Launcher)
 			}
 		}
+	}
+	pointer, _ := os.ReadFile(filepath.Join(env.Getenv("HOME"), ".shuttle", "repo"))
+	missing := strings.TrimSpace(string(pointer))
+	if err := os.RemoveAll(missing); err != nil {
+		t.Fatal(err)
+	}
+	output, err := env.Command(binary, "daemon", "start").CombinedOutput()
+	if err == nil || !strings.Contains(string(output), missing) || !strings.Contains(string(output), "bin/shuttle-deploy --hosts local") || !strings.Contains(string(output), "main checkout") {
+		t.Fatalf("missing selection diagnostic: %v %s", err, output)
 	}
 }
 
