@@ -168,7 +168,7 @@ defmodule Shuttle.WorkerProcess do
     key = :crypto.hash(:sha256, uuid) |> Base.encode16(case: :lower)
     path = Path.join([Shuttle.data_dir(), "mailboxes", "codex", key, "receiver.json"])
 
-    with {:ok, bytes} <- File.read(path),
+    with {:ok, bytes} <- Shuttle.FS.read(path),
          {:ok, %{"id" => ^uuid, "host" => host, "pid" => pid} = reg} <- Jason.decode(bytes),
          true <- host == Shuttle.Poller.own_host_id() and reg["ended"] != true,
          %{} = proc <- Enum.find(procs, &(&1.pid == pid)) do
@@ -312,7 +312,7 @@ defmodule Shuttle.WorkerProcess do
   defp script_session_in(args) do
     case script_token(args) do
       {token, session} ->
-        case File.read(alias_path(token)) do
+        case Shuttle.FS.read(alias_path(token)) do
           {:ok, name} when name != "" -> name
           _ -> session
         end
@@ -338,7 +338,7 @@ defmodule Shuttle.WorkerProcess do
         {token, _} <- [script_token(proc.args)],
         uniq: true do
       path = alias_path(token)
-      {path, File.read(path), new}
+      {path, Shuttle.FS.read(path), new}
     end
   end
 
@@ -359,7 +359,7 @@ defmodule Shuttle.WorkerProcess do
             write_alias(path, old)
 
           {:error, :enoent} ->
-            case File.rm(path) do
+            case Shuttle.FS.rm(path) do
               {:error, :enoent} -> :ok
               result -> result
             end
@@ -382,13 +382,13 @@ defmodule Shuttle.WorkerProcess do
   defp write_alias(path, value) do
     tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
-    with :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(tmp, value),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
+         :ok <- Shuttle.FS.write(tmp, value),
+         :ok <- Shuttle.FS.rename(tmp, path) do
       :ok
     else
       error ->
-        File.rm(tmp)
+        Shuttle.FS.rm(tmp)
         error
     end
   end

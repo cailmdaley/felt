@@ -68,7 +68,7 @@ defmodule Shuttle.Dispatcher do
   Options:
     * `:runner` — module implementing `Shuttle.Runner` behavior for test injection.
       Defaults to `Shuttle.Runner.Default`.
-    * `:work_dir` — working directory for the tmux session. Defaults to `File.cwd!()`.
+    * `:work_dir` — working directory for the tmux session. Defaults to `Shuttle.FS.cwd!()`.
     * `:felt_store` — directory containing the `.felt/` index this dispatch
       should read fibers from. Defaults to the first configured store; the
       Poller passes the fiber's owning store.
@@ -97,7 +97,7 @@ defmodule Shuttle.Dispatcher do
   @spec dispatch(String.t(), keyword()) :: dispatch_result()
   def dispatch(fiber_id, opts \\ []) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
-    work_dir = Keyword.get(opts, :work_dir, File.cwd!())
+    work_dir = Keyword.get(opts, :work_dir, Shuttle.FS.cwd!())
     prompt_context = Keyword.get(opts, :prompt_context, :constitution)
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
     force = Keyword.get(opts, :force, false)
@@ -961,7 +961,7 @@ defmodule Shuttle.Dispatcher do
   # the dispatch (`project_dir_for_dispatch/1`). This check covers every other work_dir — a
   # capture's, a direct caller's — and one that vanished between the two.
   defp check_work_dir(work_dir) when is_binary(work_dir) and work_dir != "" do
-    if File.dir?(work_dir) do
+    if Shuttle.FS.dir?(work_dir) do
       :ok
     else
       dispatch_refused(
@@ -1764,7 +1764,7 @@ defmodule Shuttle.Dispatcher do
               )
 
             if fallback_signal != nil and match?({:error, _}, result),
-              do: File.rm_rf(Path.dirname(fallback_signal))
+              do: Shuttle.FS.rm_rf(Path.dirname(fallback_signal))
 
             result
 
@@ -1857,7 +1857,7 @@ defmodule Shuttle.Dispatcher do
 
       "pi" ->
         command = Agents.build_command(agent, prompt)
-        work_dir = Keyword.get(opts, :work_dir, File.cwd!())
+        work_dir = Keyword.get(opts, :work_dir, Shuttle.FS.cwd!())
         {command, {:capture, "pi", work_dir, DateTime.utc_now()}}
 
       _ ->
@@ -1954,9 +1954,9 @@ defmodule Shuttle.Dispatcher do
 
   defp private_fallback_signal(session, dispatched_at, predecessor) do
     path = fallback_signal_path(session, DateTime.to_iso8601(dispatched_at))
-    File.mkdir_p!(Path.dirname(path))
-    File.chmod!(Path.dirname(path), 0o700)
-    File.write!(Path.join(Path.dirname(path), "predecessor"), predecessor)
+    Shuttle.FS.mkdir_p!(Path.dirname(path))
+    Shuttle.FS.chmod!(Path.dirname(path), 0o700)
+    Shuttle.FS.write!(Path.join(Path.dirname(path), "predecessor"), predecessor)
     path
   end
 
@@ -1970,8 +1970,8 @@ defmodule Shuttle.Dispatcher do
     path = fallback_signal_path(session, boundary)
     dir = Path.dirname(path)
 
-    if File.exists?(Path.join(dir, "predecessor")) and
-         not File.exists?(Path.join(dir, "completed")),
+    if Shuttle.FS.exists?(Path.join(dir, "predecessor")) and
+         not Shuttle.FS.exists?(Path.join(dir, "completed")),
        do: path
   end
 
@@ -1981,7 +1981,7 @@ defmodule Shuttle.Dispatcher do
   def complete_resume_fallback(nil, _uuid), do: :ok
 
   def complete_resume_fallback(signal, uuid) do
-    case File.write(Path.join(Path.dirname(signal), "completed"), uuid) do
+    case Shuttle.FS.write(Path.join(Path.dirname(signal), "completed"), uuid) do
       :ok ->
         :ok
 
@@ -2031,7 +2031,7 @@ defmodule Shuttle.Dispatcher do
     now = System.monotonic_time(:millisecond)
 
     cond do
-      File.exists?(path) ->
+      Shuttle.FS.exists?(path) ->
         true
 
       now >= next_liveness_check ->
@@ -2228,7 +2228,7 @@ defmodule Shuttle.Dispatcher do
   defp candidate_session_files("pi", work_dir, _dispatched_after) do
     dir = Shuttle.HarnessPaths.pi_sessions_dir(work_dir)
 
-    case File.ls(dir) do
+    case Shuttle.FS.ls(dir) do
       {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
       {:error, _} -> []
     end
@@ -2267,7 +2267,7 @@ defmodule Shuttle.Dispatcher do
   # (~1s after the header), so the WHOLE file is searched — the retry loop
   # above re-reads until it matches.
   defp session_matches?(cli, path, work_dir, fiber_id, dispatched_after) do
-    with {:ok, content} <- File.read(path),
+    with {:ok, content} <- Shuttle.FS.read(path),
          {:ok, header} <- session_header(cli, content),
          cwd when is_binary(cwd) <- Map.get(header, "cwd"),
          timestamp when is_binary(timestamp) <- Map.get(header, "timestamp"),
@@ -2284,7 +2284,7 @@ defmodule Shuttle.Dispatcher do
   # `find_session_file/4` just returned, and `session_matches?/5` already
   # required the header's cwd to expand to `work_dir` before returning it.
   defp read_uuid_from_jsonl(cli, path) do
-    with {:ok, content} <- File.read(path),
+    with {:ok, content} <- Shuttle.FS.read(path),
          {:ok, header} <- session_header(cli, content),
          uuid when is_binary(uuid) and uuid != "" <- Map.get(header, "id") do
       {:ok, uuid}

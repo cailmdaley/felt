@@ -25,7 +25,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
       :ok = DaemonHeartbeat.write(path, booted_at: 1)
       session = :trace.session_create(:heartbeat_dirs, self(), [])
       on_exit(fn -> :trace.session_destroy(session) end)
-      :trace.function(session, {File, :mkdir_p, 1}, true, [:local])
+      :trace.function(session, {Shuttle.FS, :mkdir_p, 1}, true, [:local])
 
       task =
         Task.async(fn ->
@@ -39,7 +39,7 @@ defmodule Shuttle.DaemonHeartbeatTest do
       assert Task.await(task) == :ok
       delivered = :trace.delivered(session, :all)
       assert_receive {:trace_delivered, :all, ^delivered}
-      refute_receive {:trace, _, :call, {File, :mkdir_p, _}}, 0
+      refute_receive {:trace, _, :call, {Shuttle.FS, :mkdir_p, _}}, 0
       assert {:ok, %{"booted_at" => 2}} = DaemonHeartbeat.read(path)
 
       File.rm_rf!(Path.dirname(path))

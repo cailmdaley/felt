@@ -535,7 +535,7 @@ defmodule Shuttle.TailnetPeers do
   end
 
   defp executable?(path) do
-    case File.stat(path) do
+    case Shuttle.FS.stat(path) do
       {:ok, %File.Stat{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
       _ -> false
     end

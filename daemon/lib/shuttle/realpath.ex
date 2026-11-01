@@ -4,7 +4,7 @@ defmodule Shuttle.Realpath do
 
   Resolves a path to its physical location, following symlinks along every
   segment so that an ownership prefix matches felt's symlink-resolved `path`.
-  Each segment is probed with `:file.read_link`; a segment that isn't a symlink
+  Each segment is probed with `Shuttle.FS.read_link`; a segment that isn't a symlink
   falls back to `Path.expand`. `@max_symlink_hops` bounds the resolution so a
   symlink loop returns `{:error, :symlink_loop}` rather than spinning.
 
@@ -40,9 +40,9 @@ defmodule Shuttle.Realpath do
   defp resolve_segments(current, [segment | rest], hops) do
     candidate = Path.join(current, segment)
 
-    case :file.read_link(String.to_charlist(candidate)) do
+    case Shuttle.FS.read_link(String.to_charlist(candidate)) do
       {:ok, target} ->
-        target_path = List.to_string(target)
+        target_path = to_string(target)
 
         expanded_target =
           case Path.type(target_path) do

@@ -26,14 +26,14 @@ defmodule Shuttle.Ledger do
         ]
   def read_window(path, since_ms, until_ms, require_key, label) do
     [path <> @rotated_suffix, path]
-    |> Enum.filter(&File.regular?/1)
+    |> Enum.filter(&Shuttle.FS.regular?/1)
     |> Enum.flat_map(&stream_records(&1, since_ms, until_ms, require_key, label))
     |> Enum.sort_by(& &1["at"])
   end
 
   defp stream_records(path, since_ms, until_ms, require_key, label) do
     path
-    |> File.stream!()
+    |> Shuttle.FS.stream!()
     |> Stream.flat_map(&parse_line(&1, since_ms, until_ms, require_key))
     |> Enum.to_list()
   rescue

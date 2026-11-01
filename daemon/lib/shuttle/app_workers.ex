@@ -92,9 +92,9 @@ defmodule Shuttle.AppWorkers do
         check_endpoint(record, id)
 
       {:error, :not_found} ->
-        case File.lstat(record_path(id)) do
+        case Shuttle.FS.lstat(record_path(id)) do
           {:error, :enoent} ->
-            case {File.stat(root()), File.lstat(root())} do
+            case {Shuttle.FS.stat(root()), Shuttle.FS.lstat(root())} do
               {{:error, :enoent}, {:ok, _}} -> {:error, :ownership_record_unreadable}
               _ -> :ok
             end
@@ -191,7 +191,7 @@ defmodule Shuttle.AppWorkers do
   def sender_capability(id) when is_binary(id) do
     with {:ok, record} <- get(id),
          :ok <- check_endpoint(record, id),
-         {:ok, capability} <- File.read(capability_path(id)),
+         {:ok, capability} <- Shuttle.FS.read(capability_path(id)),
          capability = String.trim(capability),
          true <-
            byte_size(capability) == 64 and
@@ -212,22 +212,22 @@ defmodule Shuttle.AppWorkers do
     path = capability_path(id)
     tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
-    with :ok <- File.mkdir_p(root()),
-         :ok <- File.chmod(root(), 0o700),
-         :ok <- File.write(tmp, capability <> "\n", [:exclusive]),
-         :ok <- File.chmod(tmp, 0o600),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.FS.mkdir_p(root()),
+         :ok <- Shuttle.FS.chmod(root(), 0o700),
+         :ok <- Shuttle.FS.write(tmp, capability <> "\n", [:exclusive]),
+         :ok <- Shuttle.FS.chmod(tmp, 0o600),
+         :ok <- Shuttle.FS.rename(tmp, path) do
       :ok
     else
       error ->
-        File.rm(tmp)
+        Shuttle.FS.rm(tmp)
         error
     end
   end
 
   def get(id) when is_binary(id) do
     with :ok <- check_id(id),
-         {:ok, bytes} <- File.read(record_path(id)),
+         {:ok, bytes} <- Shuttle.FS.read(record_path(id)),
          {:ok, record} when is_map(record) <- Jason.decode(bytes),
          true <- record["session_uuid"] == id and record["thread_id"] == id do
       {:ok, record}
@@ -319,16 +319,16 @@ defmodule Shuttle.AppWorkers do
       path = Path.join(root(), id <> ".json")
       tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
-      with :ok <- File.mkdir_p(root()),
-           :ok <- File.chmod(root(), 0o700),
-           :ok <- File.write(tmp, "", [:exclusive]),
-           :ok <- File.chmod(tmp, 0o600),
-           :ok <- File.write(tmp, Jason.encode!(record)),
-           :ok <- File.rename(tmp, path) do
+      with :ok <- Shuttle.FS.mkdir_p(root()),
+           :ok <- Shuttle.FS.chmod(root(), 0o700),
+           :ok <- Shuttle.FS.write(tmp, "", [:exclusive]),
+           :ok <- Shuttle.FS.chmod(tmp, 0o600),
+           :ok <- Shuttle.FS.write(tmp, Jason.encode!(record)),
+           :ok <- Shuttle.FS.rename(tmp, path) do
         :ok
       else
         error ->
-          File.rm(tmp)
+          Shuttle.FS.rm(tmp)
           error
       end
     else
@@ -337,7 +337,7 @@ defmodule Shuttle.AppWorkers do
   end
 
   def active do
-    Path.wildcard(Path.join(root(), "*.json"))
+    Shuttle.FS.wildcard(Path.join(root(), "*.json"))
     |> Enum.flat_map(fn path ->
       case get(Path.basename(path, ".json")) do
         {:ok, %{"active" => true} = record} -> [record]
@@ -626,7 +626,7 @@ defmodule Shuttle.AppWorkers do
           {:error, :not_found} ->
             # Only an absent path may become a new owner; a dangling
             # record symlink still requires explicit repair.
-            case File.lstat(record_path(id)) do
+            case Shuttle.FS.lstat(record_path(id)) do
               {:error, :enoent} ->
                 write_record(%{
                   "session_uuid" => id,

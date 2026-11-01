@@ -183,7 +183,7 @@ defmodule ShuttleWeb.FeltStoresController do
   defp format_error(%{message: message}) when is_binary(message), do: message
 
   defp format_error({:file_error, reason}),
-    do: :file.format_error(reason) |> IO.iodata_to_binary()
+    do: Shuttle.FS.format_error(reason) |> IO.iodata_to_binary()
 
   defp format_error(reason), do: inspect(reason)
 end

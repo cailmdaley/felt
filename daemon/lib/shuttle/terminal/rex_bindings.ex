@@ -4,7 +4,7 @@ defmodule Shuttle.Terminal.RexBindings do
   def path, do: Path.join([Shuttle.data_dir(), "terminals", "rex.json"])
 
   def read do
-    case File.read(path()) do
+    case Shuttle.FS.read(path()) do
       {:ok, json} -> decode(json)
       {:error, :enoent} -> {:ok, %{"version" => 1, "server" => nil, "bindings" => %{}}}
       {:error, reason} -> {:error, reason}
@@ -135,7 +135,7 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp remove_receipts(before, after_doc) do
     removed = MapSet.difference(block_ids(before), block_ids(after_doc))
-    Enum.each(removed, &File.rm(pid_path(&1)))
+    Enum.each(removed, &Shuttle.FS.rm(pid_path(&1)))
   end
 
   defp block_ids(doc) do
@@ -150,14 +150,14 @@ defmodule Shuttle.Terminal.RexBindings do
     tmp = target <> ".#{System.unique_integer([:positive])}.tmp"
 
     try do
-      with :ok <- File.mkdir_p(Path.dirname(target)),
-           :ok <- File.write(tmp, Jason.encode!(doc)),
-           :ok <- File.chmod(tmp, 0o600),
-           :ok <- File.rename(tmp, target) do
+      with :ok <- Shuttle.FS.mkdir_p(Path.dirname(target)),
+           :ok <- Shuttle.FS.write(tmp, Jason.encode!(doc)),
+           :ok <- Shuttle.FS.chmod(tmp, 0o600),
+           :ok <- Shuttle.FS.rename(tmp, target) do
         :ok
       end
     after
-      File.rm(tmp)
+      Shuttle.FS.rm(tmp)
     end
   end
 

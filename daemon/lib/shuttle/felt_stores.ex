@@ -13,6 +13,26 @@ defmodule Shuttle.FeltStores do
   """
 
   alias Shuttle.PathListConfig
+  require Logger
+
+  def excluded_stores,
+    do: :persistent_term.get(Shuttle.Env.scope_key({__MODULE__, :excluded}), [])
+
+  defp publish_excluded(stores) do
+    stores = stores |> Enum.uniq() |> Enum.sort_by(& &1.path)
+    previous = excluded_stores()
+
+    for store <- stores, store not in previous do
+      Logger.warning("Autonomous store walk excluded #{store.path}: #{store.reason}")
+    end
+
+    :persistent_term.put(Shuttle.Env.scope_key({__MODULE__, :excluded}), stores)
+  end
+
+  defp exclusion(path), do: %{path: path, reason: "protected_folder"}
+
+  defp protected_store?(store),
+    do: Shuttle.FS.protected?(store) or Shuttle.FS.protected?(store_felt_realpath(store))
 
   @spec_ %{
     env: "SHUTTLE_STORES",
@@ -77,8 +97,13 @@ defmodule Shuttle.FeltStores do
       {{:ok, base}, cached} ->
         expanded =
           case expand_with_symlinked_substores(base) do
-            {:ok, expanded} -> expanded
-            {:error, _reason} -> cached_or_base(cached, base)
+            {:ok, expanded, excluded} ->
+              publish_excluded(excluded)
+              expanded
+
+            {:error, _reason, excluded} ->
+              publish_excluded(excluded)
+              Enum.reject(cached_or_base(cached, base), &protected_store?/1)
           end
 
         # Cache the attempt too: failed discovery retains the same base's list,
@@ -116,25 +141,33 @@ defmodule Shuttle.FeltStores do
   # listed once and no two stores enumerate the same fibers. Dangling symlinks and
   # links resolving back inside the linking store are skipped.
   defp expand_with_symlinked_substores(stores) do
-    Enum.reduce_while(stores, {:ok, []}, fn store, {:ok, discovered} ->
+    {excluded, stores} = Enum.split_with(stores, &protected_store?/1)
+    excluded = Enum.map(excluded, &exclusion/1)
+
+    Enum.reduce_while(stores, {:ok, [], excluded}, fn store, {:ok, discovered, excluded} ->
       case symlinked_substore_roots(store) do
-        {:ok, roots} -> {:cont, {:ok, discovered ++ roots}}
-        {:error, _reason} = error -> {:halt, error}
+        {:ok, roots, skipped} -> {:cont, {:ok, discovered ++ roots, excluded ++ skipped}}
+        {:error, reason} -> {:halt, {:error, reason, excluded}}
       end
     end)
     |> case do
-      {:ok, discovered} ->
+      {:ok, discovered, excluded} ->
+        {late_excluded, candidates} =
+          Enum.split_with(
+            Enum.map(stores ++ discovered, &Shuttle.Env.expand/1),
+            &protected_store?/1
+          )
+
         expanded =
-          (stores ++ discovered)
-          |> Enum.map(&Shuttle.Env.expand/1)
+          candidates
           # The poller skips stores whose `.felt` is a symlink. Prefer the
           # real-directory store when two stores share a `.felt` realpath.
           |> Enum.sort_by(&felt_symlink?/1)
           |> Enum.uniq_by(&store_felt_realpath/1)
 
-        {:ok, expanded}
+        {:ok, expanded, excluded ++ Enum.map(late_excluded, &exclusion/1)}
 
-      {:error, _reason} = error ->
+      {:error, _reason, _excluded} = error ->
         error
     end
   end
@@ -162,7 +195,7 @@ defmodule Shuttle.FeltStores do
   # Such a store is skipped by the poller's enumerator, so it must lose a dedup
   # tie to a real-directory store sharing the same `.felt/` realpath.
   defp felt_symlink?(store) do
-    case File.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
+    case Shuttle.FS.lstat(Path.join(Shuttle.Env.expand(store), ".felt")) do
       {:ok, %File.Stat{type: :symlink}} -> true
       _ -> false
     end
@@ -198,23 +231,37 @@ defmodule Shuttle.FeltStores do
       "-print0"
     ]
 
-    case substore_links(store_real, args) do
+    case if(Shuttle.FS.protected?(store_real),
+           do: {"", 0},
+           else: substore_links(store_real, args)
+         ) do
       {output, 0} ->
-        roots =
+        {roots, skipped} =
           output
           |> String.split(<<0>>, trim: true)
-          |> Enum.flat_map(fn path ->
-            with {:ok, real} <- Shuttle.Realpath.resolve(path),
-                 ".felt" <- Path.basename(real),
-                 true <- File.dir?(real),
-                 false <- inside?(real, store_real) do
-              [Path.dirname(real)]
-            else
-              _ -> []
+          |> Enum.reduce({[], []}, fn path, {roots, skipped} ->
+            case Shuttle.Realpath.resolve(path) do
+              {:ok, real} ->
+                cond do
+                  Path.basename(real) != ".felt" ->
+                    {roots, skipped}
+
+                  Shuttle.FS.protected?(real) ->
+                    {roots, [exclusion(path) | skipped]}
+
+                  not inside?(real, store_real) and Shuttle.FS.dir?(real) ->
+                    {[Path.dirname(real) | roots], skipped}
+
+                  true ->
+                    {roots, skipped}
+                end
+
+              {:error, _} ->
+                {roots, skipped}
             end
           end)
 
-        {:ok, roots}
+        {:ok, Enum.reverse(roots), skipped}
 
       {_output, status} ->
         {:error, status}
@@ -224,7 +271,7 @@ defmodule Shuttle.FeltStores do
   # An absent `.felt` has no links. Check only the root, never each entry;
   # other filesystem errors remain discovery failures rather than empty scans.
   defp substore_links(dir, args) do
-    case File.stat(dir) do
+    case Shuttle.FS.stat(dir) do
       {:error, reason} when reason in [:enoent, :enotdir] ->
         {"", 0}
 

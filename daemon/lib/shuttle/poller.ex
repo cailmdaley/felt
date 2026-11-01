@@ -3166,7 +3166,7 @@ defmodule Shuttle.Poller do
       with true <- cli == "pi",
            {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
         cond do
-          signal != nil and not File.exists?(signal) ->
+          signal != nil and not Shuttle.FS.exists?(signal) ->
             Dispatcher.monitor_resume_fallback(
               fiber_id,
               cli,
@@ -3411,7 +3411,16 @@ defmodule Shuttle.Poller do
   defp list_shuttle_fibers(store, state, ids_from, timeout_ms, slow_scan? \\ false) do
     felt_dir = Path.join(store, ".felt")
 
-    case File.lstat(felt_dir) do
+    if Shuttle.FS.protected?(felt_dir) or
+         Shuttle.FS.protected?(Shuttle.FeltStores.store_felt_realpath(store)) do
+      {:ok, %{rows: [], foreign_ids: []}}
+    else
+      list_unprotected_shuttle_fibers(store, felt_dir, state, ids_from, timeout_ms, slow_scan?)
+    end
+  end
+
+  defp list_unprotected_shuttle_fibers(store, felt_dir, state, ids_from, timeout_ms, slow_scan?) do
+    case Shuttle.FS.lstat(felt_dir) do
       {:ok, %File.Stat{type: :symlink}} ->
         {:ok, %{rows: [], foreign_ids: []}}
 
@@ -3431,7 +3440,7 @@ defmodule Shuttle.Poller do
   end
 
   defp empty_dir?(dir) do
-    case File.ls(dir) do
+    case Shuttle.FS.ls(dir) do
       {:ok, entries} -> entries == []
       _ -> true
     end
@@ -3789,7 +3798,7 @@ defmodule Shuttle.Poller do
 
     cond do
       is_nil(declared) -> {:ok, nil}
-      File.dir?(declared) -> {:ok, declared}
+      Shuttle.FS.dir?(declared) -> {:ok, declared}
       true -> {:error, {:project_dir_missing, declared}}
     end
   end
@@ -4191,7 +4200,7 @@ defmodule Shuttle.Poller do
             )
 
           dir ->
-            if File.dir?(dir),
+            if Shuttle.FS.dir?(dir),
               do: {:ok, :declared},
               else:
                 arm_refused(
@@ -4578,7 +4587,7 @@ defmodule Shuttle.Poller do
             get_in(cached_fiber(state, fiber_id) || %{}, ["shuttle", "runtime", "dispatched_at"])
 
           signal = Dispatcher.pending_resume_fallback(worker.session, boundary)
-          if signal && File.exists?(signal), do: Dispatcher.complete_resume_fallback(signal, uuid)
+          if signal && Shuttle.FS.exists?(signal), do: Dispatcher.complete_resume_fallback(signal, uuid)
 
           worker =
             worker
@@ -6019,20 +6028,20 @@ defmodule Shuttle.Poller do
         "shuttle-ids-#{Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)}"
       )
 
-    case File.mkdir(dir) do
+    case Shuttle.FS.mkdir(dir) do
       :ok ->
         try do
-          :ok = File.chmod(dir, 0o700)
+          :ok = Shuttle.FS.chmod(dir, 0o700)
           path = Path.join(dir, "ids")
 
-          case File.write(path, Enum.join(ids, "\n") <> if(ids == [], do: "", else: "\n"), [
+          case Shuttle.FS.write(path, Enum.join(ids, "\n") <> if(ids == [], do: "", else: "\n"), [
                  :exclusive
                ]) do
             :ok -> fun.(path)
             {:error, reason} -> {:error, {:ids_file, reason}}
           end
         after
-          File.rm_rf(dir)
+          Shuttle.FS.rm_rf(dir)
         end
 
       {:error, reason} ->
@@ -6044,13 +6053,13 @@ defmodule Shuttle.Poller do
     tmp_dir = System.tmp_dir!()
     cutoff = System.os_time(:second) - 3_600
 
-    case File.ls(tmp_dir) do
+    case Shuttle.FS.ls(tmp_dir) do
       {:ok, names} ->
         Enum.each(names, fn name ->
           if String.starts_with?(name, "shuttle-ids-") do
             path = Path.join(tmp_dir, name)
 
-            case File.lstat(path) do
+            case Shuttle.FS.lstat(path) do
               {:ok, %File.Stat{type: :directory, mtime: mtime}} ->
                 mtime_seconds =
                   mtime
@@ -6061,7 +6070,7 @@ defmodule Shuttle.Poller do
                     )
                   )
 
-                if mtime_seconds < 0, do: File.rm_rf(path)
+                if mtime_seconds < 0, do: Shuttle.FS.rm_rf(path)
 
               _ ->
                 :ok

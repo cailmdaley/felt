@@ -49,7 +49,7 @@ defmodule Shuttle.Projects do
   def registered_projects, do: PathListConfig.registered(@spec_)
 
   @doc "The persisted list, or `{:error, reason}` when projects.json cannot be read."
-  @spec read_registered_projects() :: {:ok, project_list()} | {:error, File.posix()}
+  @spec read_registered_projects() :: {:ok, project_list()} | {:error, Shuttle.FS.posix()}
   def read_registered_projects, do: PathListConfig.read_registered(@spec_)
 
   @doc """

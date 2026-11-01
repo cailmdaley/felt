@@ -207,7 +207,7 @@ defmodule Shuttle.CodexBackend do
   end
 
   defp socket_absent_or_owned_dead(path, slot, reason) do
-    case File.lstat(path) do
+    case Shuttle.FS.lstat(path) do
       {:error, :enoent} ->
         :ok
 
@@ -215,7 +215,7 @@ defmodule Shuttle.CodexBackend do
       # its target gone (a reboot or /tmp pruning clears it) nothing can be
       # listening, and Codex's own lock reclaims the dangling alias on start.
       {:ok, %File.Stat{type: :symlink}} when reason == {:transport, :enoent} ->
-        if File.exists?(path), do: {:error, :alias_target_present}, else: :ok
+        if Shuttle.FS.exists?(path), do: {:error, :alias_target_present}, else: :ok
 
       # A refused connect means no listener is bound, and the scan found no
       # holder: either the retained owned pane shows the server died, or the
@@ -317,8 +317,8 @@ defmodule Shuttle.CodexBackend do
         "shuttle-run-" <> session(path) <> ".#{System.unique_integer([:positive])}.sh"
       )
 
-    with :ok <- File.write(script, script(path), [:exclusive]),
-         :ok <- File.chmod(script, 0o700),
+    with :ok <- Shuttle.FS.write(script, script(path), [:exclusive]),
+         :ok <- Shuttle.FS.chmod(script, 0o700),
          do: {:ok, script}
   end
 

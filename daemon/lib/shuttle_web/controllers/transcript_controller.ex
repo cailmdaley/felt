@@ -116,7 +116,7 @@ defmodule ShuttleWeb.TranscriptController do
 
   defp local_stream(conn, session, offset) do
     with path when is_binary(path) <- Transcript.path(session),
-         {:ok, %{size: size} = stat} <- File.stat(path) do
+         {:ok, %{size: size} = stat} <- Shuttle.FS.stat(path) do
       if offset > size do
         conn
         |> put_resp_content_type("application/json")
@@ -174,7 +174,7 @@ defmodule ShuttleWeb.TranscriptController do
   defp local_bytes(conn, session, offset) when is_integer(offset) do
     case Transcript.path(session) do
       path when is_binary(path) ->
-        case File.stat(path) do
+        case Shuttle.FS.stat(path) do
           {:ok, %File.Stat{size: size}} when offset <= size ->
             conn
             |> put_resp_content_type("application/x-ndjson", nil)

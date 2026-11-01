@@ -171,7 +171,7 @@ defmodule ShuttleWeb.FileController do
     if Path.type(path) != :absolute do
       conn |> put_status(400) |> json(%{error: "path must be absolute"})
     else
-      case File.stat(path, time: :posix) do
+      case Shuttle.FS.stat(path, time: :posix) do
         {:ok, %File.Stat{type: :regular} = stat} -> found.(stat)
         _ -> missing.()
       end
@@ -196,7 +196,7 @@ defmodule ShuttleWeb.FileController do
 
       true ->
         # Hash and serve the same small snapshot, including same-second rewrites.
-        case File.read(path) do
+        case Shuttle.FS.read(path) do
           {:ok, body} ->
             serve_representation(conn, path, body, stat.mtime, byte_size(body), weak_etag(body))
 

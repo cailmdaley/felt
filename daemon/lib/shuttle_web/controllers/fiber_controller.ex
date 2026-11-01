@@ -142,7 +142,7 @@ defmodule ShuttleWeb.FiberController do
       not is_binary(Map.get(shuttle, "project_dir")) or Map.get(shuttle, "project_dir") == "" ->
         {:error, "shuttle.project_dir is required when status: active"}
 
-      not File.dir?(Shuttle.Env.expand(Map.fetch!(shuttle, "project_dir"))) ->
+      not Shuttle.FS.dir?(Shuttle.Env.expand(Map.fetch!(shuttle, "project_dir"))) ->
         {:error, "shuttle.project_dir does not exist on this host"}
 
       true ->
@@ -184,7 +184,7 @@ defmodule ShuttleWeb.FiberController do
   # `init` ignores `-C` for placement and writes `.felt/` at its working
   # directory, so we drive it with `cd:` rather than `-C`.
   defp ensure_felt_repo(root) do
-    File.mkdir_p!(root)
+    Shuttle.FS.mkdir_p!(root)
 
     case Shuttle.Felt.run(["init"], cd: root) do
       {:ok, _output} -> :ok
@@ -227,7 +227,7 @@ defmodule ShuttleWeb.FiberController do
       |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
       |> Enum.map(fn {key, value} -> {:put, key, value} end)
 
-    with {:ok, content} <- File.read(path),
+    with {:ok, content} <- Shuttle.FS.read(path),
          ["", raw_frontmatter, body] <- String.split(content, "---\n", parts: 3) do
       frontmatter =
         if extra == %{},
@@ -239,7 +239,7 @@ defmodule ShuttleWeb.FiberController do
 
       atomic_write(path, ["---\n", frontmatter, "---\n", body])
     else
-      {:error, reason} -> {:error, "reading created fiber: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "reading created fiber: #{Shuttle.FS.format_error(reason)}"}
       _ -> {:error, "created fiber has unexpected frontmatter layout"}
     end
   end
@@ -290,11 +290,11 @@ defmodule ShuttleWeb.FiberController do
   defp atomic_write(path, payload) do
     tmp = path <> ".tmp"
 
-    with :ok <- File.write(tmp, payload),
-         :ok <- File.rename(tmp, path) do
+    with :ok <- Shuttle.FS.write(tmp, payload),
+         :ok <- Shuttle.FS.rename(tmp, path) do
       :ok
     else
-      {:error, reason} -> {:error, "writing fiber: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "writing fiber: #{Shuttle.FS.format_error(reason)}"}
     end
   end
 

@@ -579,7 +579,7 @@ defmodule Shuttle.FiberDocuments do
       _ ->
         Enum.find(
           ["tapestry.html", "artifact.html", "report.html"],
-          &File.exists?(Path.join(dir, &1))
+          &Shuttle.FS.exists?(Path.join(dir, &1))
         )
     end
   end

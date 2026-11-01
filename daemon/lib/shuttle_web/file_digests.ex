@@ -72,12 +72,12 @@ defmodule ShuttleWeb.FileDigests do
   end
 
   defp hash(path) do
-    case File.open(path, [:read, :binary, :raw]) do
+    case Shuttle.FS.open(path, [:read, :binary, :raw]) do
       {:ok, file} ->
         try do
           hash_chunks(file, :crypto.hash_init(:sha256))
         after
-          File.close(file)
+          Shuttle.FS.close(file)
         end
 
       {:error, _reason} ->
@@ -86,7 +86,7 @@ defmodule ShuttleWeb.FileDigests do
   end
 
   defp hash_chunks(file, state) do
-    case :file.read(file, @chunk) do
+    case Shuttle.FS.read(file, @chunk) do
       {:ok, chunk} -> hash_chunks(file, :crypto.hash_update(state, chunk))
       :eof -> {:ok, :crypto.hash_final(state) |> Base.encode16(case: :lower)}
       {:error, _reason} -> :error

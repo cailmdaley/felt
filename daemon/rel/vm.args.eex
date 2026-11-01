@@ -13,14 +13,14 @@
 ##
 ##   +S 2:2       two normal schedulers, both online
 ##   +SDcpu 2:2   two dirty-CPU schedulers (JSON and TLS bursts are short)
-##   +SDio 4      four dirty-IO schedulers for file operations, which the
-##                poller issues in bursts across every store
+##   +SDio 16     dirty-IO headroom for independent raw file operations;
+##                a parked native open occupies one scheduler
 ##   +sbwt*       no busy-wait on any scheduler class: an idle thread sleeps
 ##                at once, trading microseconds of wake-up latency the daemon
 ##                cannot notice for CPU it would otherwise burn.
 +S 2:2
 +SDcpu 2:2
-+SDio 4
++SDio 16
 +sbwt none
 +sbwtdcpu none
 +sbwtdio none

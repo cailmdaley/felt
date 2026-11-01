@@ -11,6 +11,12 @@ The command builds both bundles, runs every suite even when one fails, and exits
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
+## Native filesystem I/O
+
+`daemon/test/shuttle/fs_test.exs` exercises caller-owned raw operations with `file_server_2` suspended in an isolated VM.
+An exact-path source audit covers all daemon modules; only `shuttle/fs.ex` may use the file APIs behind that boundary.
+The suite also checks raw stream read-ahead, explicit buffer options, universal timestamps in a negative-offset host zone, and protected-store exclusion diagnostics.
+
 ## Real Rex tests
 
 `daemon/test/shuttle/terminal/rex_real_test.exs` and `internal/shuttlecli/terminal_rex_real_test.go` start a private Rex server on a temporary Unix socket with its own state directory.

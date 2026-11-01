@@ -363,7 +363,7 @@ defmodule Shuttle.SessionLink do
   end
 
   defp transcript_path(%{path: path}, session, roots) do
-    case File.stat(path) do
+    case Shuttle.FS.stat(path) do
       {:ok, %{type: :regular}} ->
         {:ok, path}
 
@@ -387,7 +387,7 @@ defmodule Shuttle.SessionLink do
   defp missing_retry_ms(_, _now), do: @young_retry_ms
 
   defp advance_claude(key, session, path, cursors, table, chunk_bytes) do
-    case :file.open(path, [:read, :binary, :raw]) do
+    case Shuttle.FS.open(path, [:read, :binary, :raw]) do
       {:ok, file} ->
         try do
           with {:ok, info} <- file_info(file) do
@@ -453,7 +453,7 @@ defmodule Shuttle.SessionLink do
             {:error, reason} -> {:retry, reason, cursors, 0}
           end
         after
-          :file.close(file)
+          Shuttle.FS.close(file)
         end
 
       {:error, reason} ->
@@ -462,21 +462,21 @@ defmodule Shuttle.SessionLink do
   end
 
   defp file_info(file) do
-    case :file.read_file_info(file) do
+    case Shuttle.FS.read_file_info(file) do
       {:ok, info} -> {:ok, info}
       {:error, reason} -> {:error, {:stat, reason}}
     end
   end
 
   defp file_position(file, offset) do
-    case :file.position(file, offset) do
+    case Shuttle.FS.position(file, offset) do
       {:ok, position} -> {:ok, position}
       {:error, reason} -> {:error, {:seek, reason}}
     end
   end
 
   defp file_read(file, count) do
-    case :file.read(file, count) do
+    case Shuttle.FS.read(file, count) do
       {:ok, bytes} -> {:ok, bytes}
       :eof -> {:error, {:read, :eof}}
       {:error, reason} -> {:error, {:read, reason}}
@@ -484,7 +484,7 @@ defmodule Shuttle.SessionLink do
   end
 
   defp current_generation?(path, read_stat, target) do
-    case :file.read_file_info(path) do
+    case Shuttle.FS.read_file_info(path) do
       {:ok, info} ->
         current = File.Stat.from_record(info)
 

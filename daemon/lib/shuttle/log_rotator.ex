@@ -158,9 +158,9 @@ defmodule Shuttle.LogRotator do
   defp tunnel_logs(dir) do
     # Globbed every pass rather than resolved once at boot, so a remote added
     # with `shuttle remotes add` (and its new tunnel log) is picked up
-    # without a daemon bounce. Path.wildcard on a missing directory returns [],
+    # without a daemon bounce. Shuttle.FS.wildcard on a missing directory returns [],
     # which is the silent no-op non-hub hosts need.
-    dir |> Path.join(@tunnel_log_glob) |> Path.wildcard()
+    dir |> Path.join(@tunnel_log_glob) |> Shuttle.FS.wildcard()
   rescue
     error ->
       warn("could not list tunnel logs in #{dir}", error)
@@ -172,7 +172,7 @@ defmodule Shuttle.LogRotator do
   # `false`, never a raise: this process must not be able to take the daemon
   # down, and one bad file must not skip the rest of the pass.
   defp rotate_if_oversized(path, max_bytes) do
-    case File.stat(path) do
+    case Shuttle.FS.stat(path) do
       {:ok, %File.Stat{type: :regular, size: size}} when size > max_bytes ->
         copytruncate(path, size)
 
@@ -183,7 +183,7 @@ defmodule Shuttle.LogRotator do
         false
 
       {:error, reason} ->
-        Logger.warning("LogRotator: cannot stat #{path}: #{:file.format_error(reason)}")
+        Logger.warning("LogRotator: cannot stat #{path}: #{Shuttle.FS.format_error(reason)}")
         false
     end
   rescue
@@ -199,15 +199,15 @@ defmodule Shuttle.LogRotator do
   defp copytruncate(path, size) do
     previous = path <> ".1"
 
-    # :file.copy/2 opens the destination for writing, which truncates it — so
+    # Shuttle.FS.copy/2 opens the destination for writing, which truncates it — so
     # an existing .1 is replaced, not appended to.
-    with {:ok, _bytes} <- :file.copy(path, previous),
+    with {:ok, _bytes} <- Shuttle.FS.copy(path, previous),
          :ok <- truncate(path) do
       Logger.info("LogRotator: rotated #{path} → #{previous}, reclaimed #{human_bytes(size)}")
       true
     else
       {:error, reason} ->
-        Logger.warning("LogRotator: cannot rotate #{path}: #{:file.format_error(reason)}")
+        Logger.warning("LogRotator: cannot rotate #{path}: #{Shuttle.FS.format_error(reason)}")
         false
     end
   end
@@ -217,16 +217,16 @@ defmodule Shuttle.LogRotator do
   # failure to open leaves ambiguity about whether the file was already
   # emptied); position 0 then truncate is explicit about what happened.
   defp truncate(path) do
-    case :file.open(path, [:read, :write, :binary]) do
+    case Shuttle.FS.open(path, [:read, :write, :binary]) do
       {:ok, fd} ->
         try do
-          case :file.position(fd, 0) do
-            {:ok, 0} -> :file.truncate(fd)
+          case Shuttle.FS.position(fd, 0) do
+            {:ok, 0} -> Shuttle.FS.truncate(fd)
             {:ok, _other} -> {:error, :eio}
             {:error, reason} -> {:error, reason}
           end
         after
-          :file.close(fd)
+          Shuttle.FS.close(fd)
         end
 
       {:error, reason} ->

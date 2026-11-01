@@ -36,6 +36,13 @@ shuttle validate-identity                # fiber UID invariants across daemon fe
 felt setup receipt --json                     # Felt binary and loaded plugin generations
 ```
 
+## Native filesystem I/O
+
+Daemon file operations use caller-owned raw descriptors and direct metadata calls, without a global I/O admission limit.
+Raw streams use read-ahead; stat/lstat default to universal timestamps and preserve explicit local/POSIX options.
+On macOS, Documents, Desktop and Downloads, including resolved store aliases, are excluded from autonomous store walks.
+`excluded_stores` in `/api/v1/version` lists omitted paths and reasons; newly excluded paths emit warnings.
+
 ## Remote Control host
 
 `shuttle remote-control` reads this daemon's managed Claude Remote Control status; `--json` returns the complete snapshot from `GET /api/v1/remote_control`.

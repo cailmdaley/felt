@@ -13,9 +13,9 @@ defmodule Mix.Tasks.Shuttle.GenVersion do
     git_sha = git(["rev-parse", "HEAD"])
     built_at = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
-    File.mkdir_p!(Path.dirname(@target))
+    Shuttle.FS.mkdir_p!(Path.dirname(@target))
 
-    File.write!(@target, """
+    Shuttle.FS.write!(@target, """
     defmodule Shuttle.BuildInfo do
       @moduledoc false
 

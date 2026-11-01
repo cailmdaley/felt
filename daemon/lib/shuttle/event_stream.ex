@@ -259,9 +259,9 @@ defmodule Shuttle.EventStream do
   end
 
   defp fold_file(acc, path, fun) do
-    if File.regular?(path) do
+    if Shuttle.FS.regular?(path) do
       path
-      |> File.stream!()
+      |> Shuttle.FS.stream!()
       |> Enum.reduce(acc, fn line, acc ->
         case decode(line) do
           nil -> acc

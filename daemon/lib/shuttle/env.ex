@@ -79,7 +79,7 @@ defmodule Shuttle.Env do
               Enum.any?(String.split(path, ":"), &(Path.type(&1) != :absolute))))
 
     if relative? do
-      case File.cwd() do
+      case Shuttle.FS.cwd() do
         {:ok, cwd} -> {__MODULE__, :executable, name, path, cwd}
         {:error, _reason} -> nil
       end

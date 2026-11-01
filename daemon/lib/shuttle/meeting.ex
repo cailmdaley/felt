@@ -515,8 +515,8 @@ defmodule Shuttle.Meeting do
     candidate = if suffix == 1, do: name, else: "#{name}-#{suffix}"
 
     with {:ok, paths} <- meeting_paths(candidate, origin, opts),
-         :ok <- File.mkdir_p(Path.dirname(paths.local_transcript)) do
-      if File.exists?(paths.local_transcript),
+         :ok <- Shuttle.FS.mkdir_p(Path.dirname(paths.local_transcript)) do
+      if Shuttle.FS.exists?(paths.local_transcript),
         do: reserve_meeting_paths(name, origin, opts, suffix + 1),
         else: {:ok, paths}
     end
@@ -686,7 +686,7 @@ defmodule Shuttle.Meeting do
   end
 
   defp read_meeting_json(opts) do
-    case File.read(Path.join(hark_dir(opts), "meeting.json")) do
+    case Shuttle.FS.read(Path.join(hark_dir(opts), "meeting.json")) do
       {:ok, content} ->
         case Jason.decode(content) do
           {:ok, data} when is_map(data) -> data
@@ -850,18 +850,18 @@ defmodule Shuttle.Meeting do
   defp transcript_tail(_), do: []
 
   defp read_file_tail(path, limit) do
-    case :file.open(String.to_charlist(path), [:read, :binary]) do
+    case Shuttle.FS.open(String.to_charlist(path), [:read, :binary]) do
       {:ok, file} ->
         try do
-          with {:ok, size} <- :file.position(file, :eof),
-               {:ok, _} <- :file.position(file, max(size - limit, 0)),
-               {:ok, data} <- :file.read(file, min(size, limit)) do
+          with {:ok, size} <- Shuttle.FS.position(file, :eof),
+               {:ok, _} <- Shuttle.FS.position(file, max(size - limit, 0)),
+               {:ok, data} <- Shuttle.FS.read(file, min(size, limit)) do
             {data, size <= limit}
           else
             _ -> nil
           end
         after
-          :file.close(file)
+          Shuttle.FS.close(file)
         end
 
       _ ->
@@ -1031,7 +1031,7 @@ defmodule Shuttle.Meeting do
   end
 
   defp executable_file?(path) when is_binary(path) and path != "" do
-    case File.stat(path) do
+    case Shuttle.FS.stat(path) do
       {:ok, %File.Stat{type: :regular, mode: mode}} -> Bitwise.band(mode, 0o111) != 0
       _ -> false
     end

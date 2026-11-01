@@ -3084,7 +3084,7 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [File, :dir?, :x])
+    apply(:dbg, :tpl, [Shuttle.FS, :dir?, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
@@ -3092,7 +3092,7 @@ defmodule Shuttle.PollerTest do
     stat_calls = drain_dbg_relay!(poller)
 
     refute Enum.any?(stat_calls, fn
-             {:trace, _pid, :call, {File, :dir?, [^sentinel_dir]}} -> true
+             {:trace, _pid, :call, {Shuttle.FS, :dir?, [^sentinel_dir]}} -> true
              _ -> false
            end),
            "poller must not stat a paused fiber's project_dir " <>
@@ -6461,8 +6461,8 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [File, :dir?, :x])
-    apply(:dbg, :tpl, [:file, :read_link, :x])
+    apply(:dbg, :tpl, [Shuttle.FS, :dir?, :x])
+    apply(:dbg, :tpl, [Shuttle.FS, :read_link, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
@@ -6537,8 +6537,8 @@ defmodule Shuttle.PollerTest do
     ])
 
     apply(:dbg, :p, [poller, [:call]])
-    apply(:dbg, :tpl, [File, :dir?, :x])
-    apply(:dbg, :tpl, [:file, :read_link, :x])
+    apply(:dbg, :tpl, [Shuttle.FS, :dir?, :x])
+    apply(:dbg, :tpl, [Shuttle.FS, :read_link, :x])
 
     on_exit(fn -> apply(:dbg, :stop_clear, []) end)
 
@@ -6570,7 +6570,7 @@ defmodule Shuttle.PollerTest do
     sync_poll_cycle!(poller)
     first = drain.()
 
-    assert first == [{File, :dir?, expanded_dir}],
+    assert first == [{Shuttle.FS, :dir?, expanded_dir}],
            "the dispatch attempt must stat the project_dir exactly once: #{inspect(first)}"
 
     # The refusal shows as a blocked row rather than the fiber silently

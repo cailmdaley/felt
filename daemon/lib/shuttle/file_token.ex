@@ -15,7 +15,7 @@ defmodule Shuttle.FileToken do
 
   @spec of(term()) :: {integer(), non_neg_integer()} | nil
   def of(path) when is_binary(path) do
-    case File.stat(path, time: :posix) do
+    case Shuttle.FS.stat(path, time: :posix) do
       {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} -> {mtime, size}
       _ -> nil
     end
