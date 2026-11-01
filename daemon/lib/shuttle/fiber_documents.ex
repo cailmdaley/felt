@@ -387,9 +387,16 @@ defmodule Shuttle.FiberDocuments do
           {:error, error} -> {:error, %{felt_store: store, error: Exception.message(error)}}
         end
 
-      {output, status} ->
-        {:error, %{felt_store: store, status: status, error: String.trim(output)}}
+      {_output, status} ->
+        {:error, %{felt_store: store, status: status, error: failure_diagnostic(cli, args, store)}}
     end
+  end
+
+  # A failed listing explains itself on stderr, which the parse path above must
+  # not merge. Re-run once with stderr folded in so the error names its cause.
+  defp failure_diagnostic(cli, args, store) do
+    {output, _status} = runner().cmd(cli, args, cd: store, stderr_to_stdout: true)
+    output |> String.trim() |> String.slice(0, 2000)
   end
 
   # The bounded command runner. No injection seam, unlike `Shuttle.Felt` and

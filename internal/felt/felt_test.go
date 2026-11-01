@@ -1443,3 +1443,10 @@ func looksLikeULID(value string) bool {
 	}
 	return true
 }
+
+func TestParseRejectsDuplicateKeyInsideExtraField(t *testing.T) {
+	content := []byte("---\nname: x\nshuttle:\n    role: a\n    role: a\n---\nbody\n")
+	if _, err := Parse("x", content); err == nil || !strings.Contains(err.Error(), `"shuttle"`) {
+		t.Fatalf("want a parse error naming the shuttle field, got %v", err)
+	}
+}

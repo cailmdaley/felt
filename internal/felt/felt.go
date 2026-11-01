@@ -528,6 +528,15 @@ func parseFrontmatter(id string, frontmatter []byte) (*Felt, error) {
 				extra[key] = mapping.Content[i+1]
 			}
 		}
+		// A parsed fiber must marshal: decoding each opaque value surfaces
+		// nested faults (a duplicated key inside `shuttle:`, say) here, as one
+		// unparseable fiber, rather than in every later listing of its store.
+		for _, key := range order {
+			var value any
+			if err := extra[key].Decode(&value); err != nil {
+				return nil, fmt.Errorf("parsing YAML frontmatter field %q: %w", key, err)
+			}
+		}
 		if len(extra) > 0 {
 			f.ExtraFields = extra
 			f.ExtraFieldOrder = order
