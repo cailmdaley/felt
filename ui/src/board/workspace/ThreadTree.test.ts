@@ -14,8 +14,35 @@ it('names each row state and distinguishes question, blocked and discarded', () 
   container.append(...renderThreadTree(index, root, root, c => threadRow(c, index, vi.fn())))
   const row = (name: string) => [...container.querySelectorAll<HTMLElement>('.kbn-thread-row')].find(el => el.querySelector('.kbn-thread-name')?.textContent === name)!
   expect(row(root.name).querySelector('.ws-tree-state')?.textContent).toBe('Working')
-  expect(row(root.name).querySelector<HTMLElement>('.ws-tree-attention')?.dataset.state).toBe('waiting')
+  expect(container.querySelector('.ws-tree-attention')).toBeNull()
+  expect(row(question.name).getAttribute('aria-label')).toBe('question, Waiting, Your question')
+  expect(row(question.name).getAttribute('aria-level')).toBe('2')
+  expect(row(question.name).querySelector('[title="Your question"]')?.textContent).toBe(' ?')
+  expect(row(blocked.name).querySelector('[title="Blocked"]')?.textContent).toBe(' !')
+  expect(row(dropped.name).querySelector('[title="Discarded"]')?.textContent).toBe(' ×')
   expect(row(question.name).querySelector('.ws-tree-state')?.textContent).toBe('Waiting ?')
   expect(row(blocked.name).querySelector('.ws-tree-state')?.textContent).toBe('Waiting !')
   expect(row(dropped.name).querySelector('.ws-tree-state')?.textContent).toBe('Archived ×')
+})
+
+it('keeps a waiting descendant visible beneath its archived ancestor', () => {
+  const root = card({ id: 'root' }), archived = card({ id: 'old', orchestrator: 'root', status: 'closed', tempered: true }),
+    waiting = card({ id: 'ask', orchestrator: 'old', status: 'active', ask: { text: 'Which?', at: '2026-01-01T00:00:00Z' } }),
+    quiet = card({ id: 'quiet', orchestrator: 'root', status: 'closed', tempered: true })
+  const index = new ThreadIndex([root, archived, waiting, quiet]), container = document.createElement('div')
+  container.append(...renderThreadTree(index, root, root, c => threadRow(c, index, vi.fn())))
+  const ask = container.querySelector<HTMLElement>('[data-card-uid="ask"]')!
+  expect(ask.closest('details:not([open])')).toBeNull()
+  expect(ask.getAttribute('aria-level')).toBe('3')
+  expect(container.querySelector<HTMLElement>('[data-card-uid="old"]')!.closest('details:not([open])')).toBeNull()
+  expect(container.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+})
+
+it('opens a disclosure when the current thread becomes archived without navigating', () => {
+  const root = card({ id: 'root' }), current = card({ id: 'child', orchestrator: 'root', status: 'active' })
+  const index = new ThreadIndex([root, { ...current, status: 'closed', tempered: true }]), container = document.createElement('div')
+  container.append(...renderThreadTree(index, root, current, c => threadRow(c, index, vi.fn()), new Map()))
+  const fold = container.querySelector<HTMLDetailsElement>('details')!
+  expect(fold.open).toBe(true)
+  expect(fold.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('child')
 })

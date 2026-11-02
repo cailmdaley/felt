@@ -31,7 +31,7 @@ export class PhoneThreads {
       const row = threadRow(thread, index, open)
       row.querySelector<HTMLElement>('.constitution-state-dot')!.dataset.threadFocus = JSON.stringify([focus, 'dot'])
       return row
-    }, this.openFolds, arriving))
+    }, this.openFolds))
     this.section = section
     if (arriving && threadKey(card) !== threadKey(root)) requestAnimationFrame(() => {
       if (section.isConnected) section.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({ block: 'nearest' })

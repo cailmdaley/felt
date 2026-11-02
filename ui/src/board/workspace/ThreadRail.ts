@@ -260,7 +260,7 @@ export class ThreadRail {
       pin.hidden = !here && pin.getAttribute('aria-pressed') !== 'true'
       pin.tabIndex = pin.hidden ? -1 : 0
       return item
-    }, open, arriving)
+    }, open)
     this.tree.replaceChildren(...rows)
     const currentRow = this.tree.querySelector<HTMLElement>('.ws-thread-current')
     this.layout()

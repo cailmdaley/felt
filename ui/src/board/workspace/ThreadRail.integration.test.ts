@@ -8,13 +8,13 @@ import { THREAD_PIN, type ThreadPinRequest } from '../ThreadPeek.js'
 it('draws ancestry, marks current, and preserves archive folds and focus on repaint', () => {
   vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const root = card({ id: 'hub' }), old = card({ id: 'hub/old', orchestrator: 'hub', status: 'closed', tempered: true }),
-    child = card({ id: 'hub/old/child', orchestrator: 'hub/old', status: 'active', ask: { text: 'Choose', at: '2026-07-02T12:00:00Z' } })
+    child = card({ id: 'hub/old/child', orchestrator: 'hub/old', status: 'closed', tempered: true })
   const rail = new ThreadRail(vi.fn(), vi.fn()); document.body.append(rail.el)
   try {
     rail.show(root, new ThreadIndex([root, old, child]))
     const fold = rail.el.querySelector<HTMLDetailsElement>('.ws-tree-archived')!
     expect(fold.open).toBe(false)
-    expect(fold.querySelector('summary .ws-tree-attention')?.textContent).toBe('Waiting')
+    expect(fold.querySelector('summary .ws-tree-attention')).toBeNull()
     expect(rail.el.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe(root.name)
     fold.open = true
     fold.querySelector<HTMLElement>('.kbn-thread-row')!.focus()
@@ -29,8 +29,22 @@ it('draws ancestry, marks current, and preserves archive folds and focus on repa
     expect(rail.el.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe(child.name)
     rail.el.querySelector<HTMLDetailsElement>('.ws-tree-archived')!.open = false
     rail.show(child, new ThreadIndex([root, old, { ...child, outcome: 'changed' }]))
-    expect(rail.el.querySelector<HTMLDetailsElement>('.ws-tree-archived')!.open).toBe(false)
+    expect(rail.el.querySelector<HTMLDetailsElement>('.ws-tree-archived')!.open).toBe(true)
   } finally { rail.el.remove(); vi.unstubAllGlobals() }
+})
+
+it('keeps the current row visible when it is archived mid-visit', () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
+  try {
+    const root = card({ id: 'root' }), child = card({ id: 'child', orchestrator: root.id, status: 'active' })
+    const rail = new ThreadRail(vi.fn(), vi.fn())
+    rail.show(child, new ThreadIndex([root, child]))
+    const archived = { ...child, status: 'closed', tempered: true }
+    rail.show(archived, new ThreadIndex([root, archived]))
+    const fold = rail.el.querySelector<HTMLDetailsElement>('details')!
+    expect(fold.open).toBe(true)
+    expect(fold.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('child')
+  } finally { vi.unstubAllGlobals() }
 })
 
 it('reorders siblings on a creation-time change but not a live state change', () => {

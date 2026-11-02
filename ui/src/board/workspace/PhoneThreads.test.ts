@@ -29,11 +29,11 @@ describe('the phone thread page', () => {
     expect(phoneThreads(feed[0], index, open)!.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub')
   })
 
-  it('retains each disclosure across renders and opens archived ancestry only on arrival', () => {
+  it('retains disclosures and reveals the current archived lineage on repaint', () => {
     const root = thread({ id: 'root', status: 'open' })
     const old = thread({ id: 'root/old', orchestrator: 'root', status: 'closed', tempered: true })
     const nested = thread({ id: 'root/old/nested', orchestrator: 'root-old', status: 'closed', tempered: false })
-    const deep = thread({ id: 'root/old/nested/deep', orchestrator: 'root-old-nested', status: 'active' })
+    const deep = thread({ id: 'root/old/nested/deep', orchestrator: 'root-old-nested', status: 'closed', tempered: true })
     const tree = new ThreadIndex([root, old, nested, deep]), phone = new PhoneThreads(), open = vi.fn()
     const fold = (section: HTMLElement, n: number) => section.querySelectorAll<HTMLDetailsElement>('details')[n]
     let page = phone.render(root, tree, open)!
@@ -43,10 +43,10 @@ describe('the phone thread page', () => {
     expect(fold(page, 0).open).toBe(true)
     fold(page, 0).open = false
     page = phone.render(deep, tree, open)!
-    expect([...page.querySelectorAll('details')].map(el => el.open)).toEqual([true, true])
+    expect([...page.querySelectorAll('details')].map(el => el.open)).toEqual([true, true, true])
     fold(page, 0).open = false
-    page = phone.render(deep, tree, open)!
-    expect(fold(page, 0).open).toBe(false)
+    page = phone.render(deep, new ThreadIndex([root, old, nested, { ...deep, outcome: 'Changed' }]), open)!
+    expect(fold(page, 0).open).toBe(true)
     expect(fold(page, 1).open).toBe(true)
   })
 

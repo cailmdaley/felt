@@ -64,6 +64,8 @@ export class PageSheet {
     const focus = active instanceof HTMLElement && this.threads.contains(active) ? active.dataset.threadFocus : undefined
     const scroll = this.body.scrollTop
     this.threads.replaceChildren(...(threads ? [threads] : [])); this.threads.hidden = !threads
+    const filesHeading = this.list.querySelector<HTMLElement>('h3')
+    if (filesHeading) filesHeading.hidden = !threads
     this.heading.textContent = threads ? 'Threads and sent files' : 'Sent files'
     this.el.setAttribute('aria-label', this.heading.textContent)
     this.body.scrollTop = scroll
@@ -76,7 +78,8 @@ export class PageSheet {
     if (!this.model) return
     const { channel, selected, fresh } = this.model
     const files = sentFiles(channel, selected, fresh, key => this.close(() => this.onChoose(key)), this.expanded, expanded => { this.expanded = expanded; this.render(); this.list.querySelector<HTMLElement>('[data-part="sent-files-more"]')?.focus({ preventScroll: true }) })
-    if (this.threads.hidden) files.querySelector('h3')?.remove()
+    const filesHeading = files.querySelector('h3')
+    if (filesHeading) filesHeading.hidden = this.threads.hidden
     this.list.replaceChildren(files)
   }
   private open(): void {
