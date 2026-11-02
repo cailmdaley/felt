@@ -36,6 +36,20 @@ describe('workspace style contracts', () => {
     expect(themes.length).toBeGreaterThan(0)
     for (const theme of themes) expect(read(`themes/${theme}`), theme).not.toContain('sidebar-card')
   })
+  it('gives back controls a hover background only on hover-capable devices', () => {
+    let controls = 0
+    for (const file of ['chat.css', 'reader.css']) postcss.parse(read(file)).walkRules(rule => {
+      if (!/:hover/.test(rule.selector) || !/\.ws-(chat-back|return|document-back)/.test(rule.selector)) return
+      if (!rule.nodes.some(node => node.type === 'decl' && node.prop === 'background')) return
+      controls++
+      const media: string[] = []
+      for (let parent = rule.parent; parent; parent = parent.parent) {
+        if (parent.type === 'atrule' && parent.name === 'media') media.push(parent.params)
+      }
+      expect(media.join(' '), rule.selector).toContain('(hover: hover)')
+    })
+    expect(controls).toBeGreaterThan(0)
+  })
   it('limits the constitution name to two wrapping lines', () => {
     expect(read('chat.css')).toMatch(/\.ws-chat-title\s*\{[^}]*-webkit-line-clamp:\s*2;/)
     expect(read('chat.css')).not.toMatch(/\.ws-chat-title\s*\{[^}]*white-space:\s*nowrap/)

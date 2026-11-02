@@ -190,7 +190,7 @@ export class Reader {
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
     this.railToggle.title = 'Threads and sent files · ⌘|'
     this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
-    this.returnButton = button('ws-return', '‹', () => this.back(), 'Back to Desk')
+    this.returnButton = button('ws-return', '', () => this.back(), 'Back to Desk')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
@@ -296,8 +296,8 @@ export class Reader {
   get isActive(): boolean { return this.active }
   setBackDestination(label: string): void {
     this.backDestination = label
-    this.returnButton.replaceChildren(element('span', 'ws-back-label', label))
     for (const button of this.el.querySelectorAll<HTMLElement>('.ws-return, .ws-document-back')) {
+      button.replaceChildren(element('span', 'ws-back-label', label))
       button.title = `Back to ${label}`
       button.setAttribute('aria-label', button.title)
     }
@@ -549,7 +549,8 @@ export class Reader {
     const provenance = element('span', 'ws-provenance')
     const expand = button('ws-icon-button ws-expand-button', '⤢', () => this.toggleExpand(), 'Expand document')
     const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
-    const back = button('ws-icon-button ws-document-back', '‹', () => this.back(), `Back to ${this.backDestination}`)
+    const back = button('ws-document-back', '', () => this.back(), `Back to ${this.backDestination}`)
+    back.append(element('span', 'ws-back-label', this.backDestination))
     back.title = `Back to ${this.backDestination}`
     frame.label.append(back, glyph, title, provenance, expand, menu)
     this.labels.set(frame, { glyph, title, provenance, expand })

@@ -37,6 +37,11 @@ for (const phone of [false, true]) it(`delegates Back and Escape to navigation w
   reader.setBackDestination('Earlier constitution')
   expect(reader.el.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Earlier constitution')
   expect(reader.el.querySelector('.ws-document-back')?.getAttribute('title')).toBe('Back to Earlier constitution')
+  const documentBacks = [...reader.el.querySelectorAll('.ws-document-back')]
+  expect(documentBacks.length).toBeGreaterThan(0)
+  for (const back of documentBacks) expect(back.querySelector('.ws-back-label')?.textContent).toBe('Earlier constitution')
+  reader.setBackDestination('Chat')
+  for (const back of documentBacks) expect(back.querySelector('.ws-back-label')?.textContent).toBe('Chat')
   reader.back()
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   expect(onReturn).toHaveBeenCalledTimes(2)

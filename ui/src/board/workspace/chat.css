@@ -45,11 +45,13 @@
 .ws-chat .ws-chat-back {
   display: inline-flex; align-items: center; gap: 5px;
   flex: none; width: auto; height: 32px; min-width: 32px; min-height: 32px; padding: 0; margin-left: -6px;
-  border: 0 !important; background: transparent; color: var(--ws-ink-muted);
-  font: var(--type-label)/var(--leading-tight) var(--font-serif) !important;
+  border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted);
+  font: var(--type-label)/var(--leading-tight) var(--font-serif);
   max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
+@media (hover: hover) {
+  .ws-chat .ws-chat-back:hover { color: var(--ws-ink); background: var(--ws-hover); }
+}
 .ws-chat-identity { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0 10px; }
 .ws-chat-identity > .ws-chat-title { flex: 1; }
 /* The name wraps to two lines; a measured overflow puts actions beneath it. */

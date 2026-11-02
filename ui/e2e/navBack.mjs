@@ -22,7 +22,14 @@ export function registerNavigationJourneys(test) {
       assert.equal(await control.getAttribute('aria-label'), `Back to ${label}`)
       assert.equal(await control.getAttribute('title'), `Back to ${label}`)
       assert.ok(await control.isVisible())
+      assert.equal(await control.locator('.ws-back-label').textContent(), label)
+      assert.ok(await control.locator('.ws-back-label').isVisible())
+      if (!phone && !chat) assert.equal(await control.evaluate(el => getComputedStyle(el).textIndent), '0px')
       if (phone) {
+        await control.hover()
+        assert.equal(await control.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)', 'Touch back controls have no sticky hover background')
+        await page.mouse.move(viewport.width - 1, viewport.height - 1)
+
         const bounds = await control.evaluate(button => {
           const chat = button.matches('.ws-chat-origin')
           const head = button.closest(chat ? '.ws-chat-head' : '.ws-navbar')

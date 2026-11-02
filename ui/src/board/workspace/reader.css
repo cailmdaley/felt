@@ -53,8 +53,8 @@
 .ws-navbar { display: none; position: relative; z-index: 3; flex: none; }
 .ws-nav-lead { display: flex; min-width: 0; }
 .ws-back-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
-/* Both back controls use the same drawn stroke beside their destination. */
-:is(.ws-return, .ws-chat-origin)::before { content: ''; flex: none; width: 11px; height: 11px; margin-inline: 3px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); }
+/* Back controls use the same drawn stroke beside their destination. */
+:is(.ws-return, .ws-chat-origin, .ws-document-back)::before { content: ''; flex: none; width: 11px; height: 11px; margin-inline: 3px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: rotate(45deg); }
 .ws-chat-origin .ws-back-label { color: var(--ws-ink-muted); }
 .ws-return, .ws-channel-title { font: var(--type-label)/var(--ws-control-height) var(--font-serif); letter-spacing: 0; white-space: nowrap; }
 .ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -124,9 +124,10 @@
 .ws-kind-glyph { flex: none; color: var(--ws-ink-muted); }
 /* The header line's controls speak at the chrome's own size, as the corner toggles do. */
 .ws-labelbar .ws-icon-button { font: var(--type-row)/var(--leading-solid) var(--font-serif); color: var(--ws-ink-muted); }
-/* Back is the phone's drawn chevron at the desktop's scale. */
-.ws-labelbar .ws-document-back { position: relative; overflow: hidden; text-indent: -9999px; }
-.ws-labelbar .ws-document-back::before { content: ''; position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
+.ws-document-back { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 32px; max-width: 150px; height: var(--ws-control-height); padding: 0 6px; border-radius: var(--ws-control-radius); color: var(--ws-ink-muted); font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+@media (hover: hover) {
+  :is(.ws-return, .ws-document-back):hover { background: var(--ws-hover); color: var(--ws-ink); }
+}
 .ws-label-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ws-ink); font: var(--type-label)/var(--leading-tight) var(--font-serif); letter-spacing: 0; }
 .ws-label-title.ws-declared-title { font: var(--type-label)/var(--leading-tight) var(--font-serif); letter-spacing: 0; }
 .ws-provenance { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
