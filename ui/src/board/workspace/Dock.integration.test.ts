@@ -828,7 +828,7 @@ describe('state-shaped act zone', () => {
     trail.querySelector<HTMLButtonElement>('.ws-ancestry-link')!.click()
     expect(chair).toHaveBeenCalled()
     const item = band.el.querySelector<HTMLButtonElement>('.ws-chat-lead button')!
-    expect(item.textContent).toBe('‹Board')
+    expect(item.querySelector('.ws-back-label')?.textContent).toBe('Board')
     expect(item.getAttribute('aria-label')).toBe('Back to Board')
     item.click()
     expect(origin).toHaveBeenCalled()

@@ -747,7 +747,7 @@ export class Workspace {
   }
   private namePage(state: ChannelState, key: DocKey): void {
     const doc = state.channel.documents.find(doc => doc.key === key)
-    this.history.name(doc && doc.kind !== 'chat' && doc.kind !== 'fiber' ? doc.name : state.channel.name)
+    this.history.name(state.channel.name, doc?.kind === 'chat' ? 'Chat' : doc?.kind === 'fiber' ? 'Constitution' : doc?.name)
   }
   private select(key: DocKey): void {
     const state = this.current

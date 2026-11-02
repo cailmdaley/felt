@@ -239,8 +239,8 @@
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
   .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
-  .ws-chat .ws-chat-origin { display: inline-flex; align-items: center; font-size: var(--type-title) !important; }
-  .ws-chat .ws-chat-back { max-width: 100px; min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; justify-content: center; }
+  .ws-chat .ws-chat-back { max-width: calc(100vw / 3); min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; padding-inline: 6px; justify-content: center; }
+  .ws-chat-head > .ws-chat-identity { align-self: center; }
   .ws-chat-head { align-items: flex-start; }
   .ws-chat-lead:not([hidden]) { display: inline-flex; }
   .ws-chat-title { font-size: var(--type-label); }
@@ -255,7 +255,7 @@
   .ws-chat-acts > .kbn-ctl-verdict { flex: none; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
   .ws-chat-head > .ws-chat-leave { align-self: center; }
-  .ws-chat-title { -webkit-line-clamp: 2; }
+  .ws-chat-title { width: 100%; text-align: center; -webkit-line-clamp: 2; }
   .ws-chat-head > .ws-chat-acts { flex-wrap: nowrap; }
   .ws-chat-acts > .kbn-ctl-verdict { flex-wrap: nowrap; white-space: nowrap; }
   .ws-chat-acts > .kbn-ctl-verdict { border-left: 0; padding-left: 0; }

@@ -8,7 +8,7 @@ export type WorkspaceRoute =
 const OVERVIEW_HASH = '#/board'
 const STATE_KEY = 'shuttleWorkspace'
 export type WorkspaceOriginView = 'desk' | 'chronicle' | 'board'
-interface RouteState { depth: number; base: boolean; baseHash: string; originView?: WorkspaceOriginView; label?: string; backLabel?: string }
+interface RouteState { depth: number; base: boolean; baseHash: string; originView?: WorkspaceOriginView; label?: string; pageLabel?: string; backLabel?: string }
 type StateObject = Record<string, unknown>
 
 function encode(value: string): string {
@@ -65,9 +65,9 @@ function stateObject(value: unknown): StateObject {
 function readRouteState(value: unknown): RouteState | null {
   const entry = stateObject(value)[STATE_KEY]
   if (!entry || typeof entry !== 'object') return null
-  const { depth, base, baseHash, originView, label, backLabel } = entry as Partial<RouteState>
+  const { depth, base, baseHash, originView, label, pageLabel, backLabel } = entry as Partial<RouteState>
   return Number.isInteger(depth) && depth! >= 0 && typeof base === 'boolean' && typeof baseHash === 'string'
-    ? { depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}), label: typeof label === 'string' ? label : undefined, backLabel: typeof backLabel === 'string' ? backLabel : undefined }
+    ? { depth: depth!, base, baseHash, ...(isOriginView(originView) ? { originView } : {}), label: typeof label === 'string' ? label : undefined, pageLabel: typeof pageLabel === 'string' ? pageLabel : undefined, backLabel: typeof backLabel === 'string' ? backLabel : undefined }
     : null
 }
 
@@ -99,9 +99,9 @@ export class WorkspaceHistory {
   }
   private get originLabel(): string { return { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }[this.routeOrigin] }
 
-  /** Name this entry so the next page can identify its return point, including after reload. */
-  name(label: string): void {
-    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label }), '')
+  /** Name the constitution and its selected page so Back can distinguish them, including after reload. */
+  name(label: string, pageLabel = label): void {
+    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label, pageLabel }), '')
   }
 
   /** Follow the visited path, or return a direct address to its origin view. */
@@ -149,8 +149,11 @@ export class WorkspaceHistory {
     if (originView) this.routeOrigin = originView
     // Back lands on this entry, so it needs the channel's origin as well.
     window.history.replaceState(withRouteState(window.history.state, this.routeState()), '')
-    const backLabel = this.current?.kind === 'channel' ? readRouteState(window.history.state)?.label ?? this.current.uid : this.originLabel
-    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(nextDepth), label: undefined, backLabel }), '', hash)
+    const saved = readRouteState(window.history.state)
+    const sameChannel = this.current?.kind === 'channel' && this.current.uid === uid && this.current.owner === owner
+    const backLabel = this.current?.kind === 'channel'
+      ? (sameChannel ? saved?.pageLabel : saved?.label) ?? this.current.uid : this.originLabel
+    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(nextDepth), label: undefined, pageLabel: undefined, backLabel }), '', hash)
     this.current = route
     this.currentHash = hash
     this.depth = nextDepth
@@ -168,7 +171,7 @@ export class WorkspaceHistory {
     this.routeOrigin = originFromHash(hash) ?? 'board'
     this.currentHash = hash
     this.current = { kind: 'overview', hash }
-    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, backLabel: undefined }), '', hash)
+    window.history.pushState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, backLabel: undefined }), '', hash)
     this.onRoute(this.current)
   }
 
@@ -207,7 +210,7 @@ export class WorkspaceHistory {
     this.depth = 0
     this.base = true
     this.baseHash = hash
-    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, backLabel: undefined }), '', hash)
+    window.history.replaceState(withRouteState(window.history.state, { ...this.routeState(), label: undefined, pageLabel: undefined, backLabel: undefined }), '', hash)
     this.onRoute(overview)
   }
 
@@ -226,7 +229,7 @@ export class WorkspaceHistory {
 
   private routeState(depth = this.depth): RouteState {
     const saved = readRouteState(window.history.state)
-    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin, label: saved?.label, backLabel: saved?.backLabel }
+    return { depth, base: this.base, baseHash: this.baseHash, originView: this.routeOrigin, label: saved?.label, pageLabel: saved?.pageLabel, backLabel: saved?.backLabel }
   }
 
   private adoptDepth(state: unknown, route: WorkspaceRoute, hash: string): void {

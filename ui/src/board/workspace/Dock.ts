@@ -587,7 +587,7 @@ export class Dock {
     paintAncestry(this.ancestry, nav.ancestry ?? [])
     if (nav.origin) {
       const { label, open } = nav.origin
-      const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
+      const button = ctlButton('', 'ws-chat-back ws-chat-origin')
       const destination = document.createElement('span')
       destination.className = 'ws-back-label'
       destination.textContent = label

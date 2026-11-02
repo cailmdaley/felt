@@ -22,13 +22,27 @@ export function registerNavigationJourneys(test) {
       assert.equal(await control.getAttribute('aria-label'), `Back to ${label}`)
       assert.equal(await control.getAttribute('title'), `Back to ${label}`)
       assert.ok(await control.isVisible())
-      if (phone && chat) {
-        const bounds = await selected(page).locator('.ws-chat-head').evaluate(head => {
-          const back = head.querySelector('.ws-chat-origin').getBoundingClientRect()
-          const title = head.querySelector('.ws-chat-identity').getBoundingClientRect()
-          return { backRight: back.right, titleLeft: title.left, titleWidth: title.width }
+      if (phone) {
+        const bounds = await control.evaluate(button => {
+          const chat = button.matches('.ws-chat-origin')
+          const head = button.closest(chat ? '.ws-chat-head' : '.ws-navbar')
+          const box = node => { const r = node.getBoundingClientRect(); return { left: r.left, right: r.right, width: r.width, height: r.height, center: r.top + r.height / 2 } }
+          const title = head.querySelector(chat ? '.ws-chat-title' : '.ws-channel-title')
+          const stroke = getComputedStyle(button, '::before')
+          return {
+            back: box(button), title: box(title), label: box(button.querySelector('.ws-back-label')),
+            leave: chat ? box(head.querySelector('.ws-chat-leave')) : null,
+            stroke: { width: stroke.width, height: stroke.height, left: stroke.borderLeftWidth, bottom: stroke.borderBottomWidth, content: stroke.content },
+          }
         })
-        assert.ok(bounds.backRight <= bounds.titleLeft && bounds.titleWidth > 80, JSON.stringify(bounds))
+        assert.ok(bounds.back.right <= bounds.title.left && bounds.title.width > 80, JSON.stringify(bounds))
+        assert.ok(bounds.back.height >= 44 && bounds.back.width <= viewport.width / 3, JSON.stringify(bounds))
+        assert.ok(Math.abs(bounds.back.center - bounds.title.center) < 1, `Back and title share a centerline: ${JSON.stringify(bounds)}`)
+        if (bounds.leave) assert.ok(Math.abs(bounds.back.center - bounds.leave.center) < 1, `Back and × share a centerline: ${JSON.stringify(bounds)}`)
+        assert.ok(bounds.label.height < 25, `The destination stays on one line: ${JSON.stringify(bounds)}`)
+        assert.deepEqual([bounds.stroke.width, bounds.stroke.height, bounds.stroke.content], ['11px', '11px', '""'])
+        assert.ok(parseFloat(bounds.stroke.left) >= 1 && bounds.stroke.left === bounds.stroke.bottom, JSON.stringify(bounds.stroke))
+        if (label === 'Choose the response cut') assert.ok(bounds.back.width >= 120, `Long destinations get a third of the bar: ${JSON.stringify(bounds)}`)
       }
       return control
     }
@@ -46,12 +60,12 @@ export function registerNavigationJourneys(test) {
     await selected(page).getByRole('button', { name: 'Constitution', exact: true }).click()
     await selected(page).getByRole('link', { name: 'Open validation', exact: true }).click()
     await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Review the null tests', false)
+    await checkBack('Constitution', false)
     await shot('03-linked-file')
     const fileHash = new URL(page.url()).hash
     await page.reload()
     await selected(page).frameLocator('iframe').getByRole('heading', { name: 'Independent patches agree' }).waitFor()
-    await checkBack('Review the null tests', false)
+    await checkBack('Constitution', false)
     await shot('04-file-reloaded')
     const fileBack = phone ? page.locator('.ws-return') : selected(page).locator('.ws-document-back')
     await fileBack.click()

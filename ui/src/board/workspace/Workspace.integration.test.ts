@@ -200,6 +200,23 @@ it('follows visited files after reload and returns a fresh deep link to its orig
   expect(window.location.hash).toBe('#/board')
 })
 
+it.each(['fiber', 'chat'])('names the %s page behind a file, and the constitution behind another channel', async kind => {
+  if (kind === 'chat') {
+    bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', shuttleAgent: 'claude-opus' }, cards[1]]
+    workspace.open(bodyCards[0], 'Desk', 'chat:host-a:alpha')
+  } else workspace.open(cards[0], 'Desk')
+  await flush()
+  expect(workspace.reader.document?.kind).toBe(kind)
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+  await flush()
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe(`Back to ${kind === 'chat' ? 'Chat' : 'Constitution'}`)
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
+  await flush()
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to report.html')
+  workspace.open(cards[1]); await flush()
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Alpha')
+})
+
 it('visits documents and retraces them without re-reading the channel or its receipt feed', async () => {
   workspace.open(cards[0], 'Desk'); await flush()
   const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/v1\/(fibers\/|sent-files\?)/.test(String(url))).length

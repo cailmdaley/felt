@@ -293,7 +293,7 @@ export class Reader {
   get isActive(): boolean { return this.active }
   setBackDestination(label: string): void {
     this.backDestination = label
-    this.returnButton.replaceChildren(element('span', 'ws-back-chevron', '‹'), element('span', 'ws-back-label', label))
+    this.returnButton.replaceChildren(element('span', 'ws-back-label', label))
     for (const button of this.el.querySelectorAll<HTMLElement>('.ws-return, .ws-document-back')) {
       button.title = `Back to ${label}`
       button.setAttribute('aria-label', button.title)

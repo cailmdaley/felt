@@ -202,7 +202,8 @@ The Constitutions sidebar starts closed and remembers an explicit choice.
 It lists the Desk's columns in the Desk's order: Drafts, In flight (as its Your turn and Working groups), Awaiting review, Roles and Resting; each group's caption holds the top of the list while you scroll through it.
 An index strip at its top names each non-empty column with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
 The ‹ button, browser Back and the phone's right swipe follow the pages you visited, across constitutions and linked files.
-The back control names its destination; a direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
+The back control names the constitution across channels, or the page within the same channel: Chat, Constitution or the file's name.
+A direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
 Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
 Selecting a channel's own page in place does not add a history stop.
