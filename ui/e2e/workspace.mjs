@@ -1369,7 +1369,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
   for (const scrollTop of [200, 400, 1e6]) for (const { caption, holds } of await stuck(scrollTop)) assert.ok(holds, `${caption} sticks only inside its own group`)
 }, { width: 1440, height: 360 }, 'true')
 
-test('Wide reader steps through Desk cards, retraces them on Escape, and returns the current card through its origin tab', async p => {
+test('Wide reader scans Desk cards and returns the last viewed card with one Escape or its origin tab', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
@@ -1377,7 +1377,7 @@ test('Wide reader steps through Desk cards, retraces them on Escape, and returns
   assert.deepEqual([...knownDrafts].sort(), [...deskDrafts].sort())
   const drafts = deskDrafts
   const names = [...drafts, ...flight, ...review]
-  await open(p)
+  await open(p, 'Chat')
   const sidebar = p.locator('.ws-sidebar').first()
   assert.ok(await sidebar.isVisible(), 'wide desktop defaults open')
   assert.deepEqual(await sidebar.locator('.kbn-flight-caption').allTextContents(), ['Drafts', 'Working', 'Awaiting review'], 'the sidebar groups drafts, work in flight and review')
@@ -1394,11 +1394,10 @@ test('Wide reader steps through Desk cards, retraces them on Escape, and returns
   assert.equal(await current.locator('.ws-channel-name').innerText(), next)
   assert.ok(await current.evaluate(e => { const r = e.getBoundingClientRect(), col = e.closest('.ws-sidebar').getBoundingClientRect(); return r.left >= col.left && r.right <= col.right && r.width >= col.width * .9 }), 'the selected card occupies the sidebar without obscuring the reader')
   await p.keyboard.press('Escape')
-  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, name)
-  await leave(p)
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
-  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), name, 'Escape keeps the original Desk selection')
-  await open(p)
+  assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), next, 'Escape selects the last card viewed')
+  await open(p, 'Chat')
   await p.keyboard.press('j')
   await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, next)
   await barTab(p, 'desk').click()
@@ -2591,7 +2590,7 @@ test('Reader slash with the sidebar shut hangs the constitution list under the b
   assert.equal(await picker.count(), 0)
 })
 
-test('Sidebar current card follows j/k, Alt navigation and browser Back immediately in a Board-opened reader', async p => {
+test('Sidebar current card follows j/k and Alt scans immediately; browser Back returns to Board', async p => {
   await p.locator('[data-view="shelf"]').click()
   await p.locator('.ws-overview-folio').filter({ hasText: name }).click()
   await reportReady(p)
@@ -2615,8 +2614,8 @@ test('Sidebar current card follows j/k, Alt navigation and browser Back immediat
     if (key.startsWith('Alt+')) assert.ok(await selected(p).count(), 'keyboard channel navigation retains a selected page')
   }
   await p.goBack()
-  await poll(p, previous => document.querySelector('.ws-channel-title')?.textContent === previous, names[index + 1])
-  await assertCurrent(names[index + 1])
+  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  assert.equal(new URL(p.url()).hash, '#/board')
 
   async function assertCurrent(expected) {
     // One browser observation after each key: title and current row must agree

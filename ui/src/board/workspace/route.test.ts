@@ -73,7 +73,7 @@ describe('workspace routes', () => {
     history.name('Thread B')
     expect(history.backLabel).toBe('Thread A')
     history.openDocument('other-host:/files/F.html')
-    history.name('F.html')
+    history.name('Thread B', 'F.html')
     expect(history.backLabel).toBe('Thread B')
     history.openDocument('other-host:/files/G.html')
     expect(history.backLabel).toBe('F.html')
@@ -107,13 +107,14 @@ describe('workspace routes', () => {
     expect(history.backLabel).toBe('Constitution')
     history.name('Second constitution', 'F.html')
     history.openDocument('G.html')
+    history.name('Second constitution', 'G.html')
     expect(history.backLabel).toBe('F.html')
-    history.select('chat')
+    history.openDocument('chat')
     history.name('Second constitution', 'Chat')
     history.dispose()
     history = create()
     history.start()
-    expect(history.backLabel).toBe('F.html')
+    expect(history.backLabel).toBe('G.html')
     history.openDocument('F.html')
     expect(history.backLabel).toBe('Chat')
     history.name('Second constitution', 'F.html')
@@ -134,25 +135,45 @@ describe('workspace routes', () => {
     expect(window.location.hash).toBe('#/board')
   })
 
-  it('refreshes navigation when a tab selection gives consecutive entries the same address', async () => {
+  it('pops to the preceding Chat instead of creating consecutive equal addresses', async () => {
     resetHash('#/desk')
-    const onRoute = vi.fn()
-    const history = create(onRoute)
+    const history = create()
     history.start()
     history.enter('one', 'host', 'chat')
-    history.name('One')
+    history.name('One', 'Chat')
     history.openDocument('file')
-    history.select('chat')
-    expect(history.backLabel).toBe('One')
-    onRoute.mockClear()
-    await nextPop(() => history.back())
+    await nextPop(() => history.openDocument('chat'))
     expect(history.backLabel).toBe('Desk')
-    expect(onRoute).toHaveBeenCalledOnce()
     await nextPop(() => history.back())
     expect(window.location.hash).toBe('#/desk')
   })
 
-  it('pushes channel entries and replaces the selected document in place', () => {
+  it('issues one browser Back until its popstate lands', async () => {
+    resetHash('#/desk')
+    const history = create()
+    history.start()
+    history.enter('one', 'host', 'chat')
+    history.openDocument('file')
+    const back = vi.spyOn(window.history, 'back')
+    await nextPop(() => { history.back(); history.back() })
+    expect(back).toHaveBeenCalledOnce()
+    await nextPop(() => history.back())
+    expect(back).toHaveBeenCalledTimes(2)
+    expect(window.location.hash).toBe('#/desk')
+  })
+
+  it('does not rewrite unchanged page and constitution names', () => {
+    resetHash('#/desk')
+    const history = create()
+    history.start()
+    history.enter('one', 'host', 'chat')
+    history.name('One', 'Chat')
+    const replace = vi.spyOn(window.history, 'replaceState')
+    history.name('One', 'Chat')
+    expect(replace).not.toHaveBeenCalled()
+  })
+
+  it('pushes different pages and leaves a reselection untouched', () => {
     resetHash('#/board')
     const onRoute = vi.fn()
     const history = create(onRoute)
@@ -161,12 +182,27 @@ describe('workspace routes', () => {
     history.enter('one', 'host-a')
     expect(push).toHaveBeenCalledOnce()
     const entryLength = window.history.length
-    history.select('host-a:/store/report.html')
-    expect(window.history.length).toBe(entryLength)
+    history.openDocument('host-a:/store/report.html')
+    history.openDocument('host-a:/store/report.html')
+    expect(window.history.length).toBe(entryLength + 1)
     expect(parseRoute(window.location.hash)).toEqual({
       kind: 'channel', uid: 'one', owner: 'host-a', doc: 'host-a:/store/report.html',
     })
-    expect(onRoute).toHaveBeenCalledTimes(2)
+    expect(onRoute).toHaveBeenCalledTimes(3)
+  })
+
+  it('pops when a sidebar scan would duplicate the preceding channel address', async () => {
+    resetHash('#/desk')
+    const history = create()
+    history.start()
+    history.enter('one', 'host', 'chat')
+    history.name('One', 'Chat')
+    history.enter('two', 'host', 'chat')
+    history.name('Two', 'Chat')
+    await nextPop(() => history.enter('one', 'host', 'chat', undefined, true))
+    expect(history.backLabel).toBe('Desk')
+    await nextPop(() => history.back())
+    expect(window.location.hash).toBe('#/desk')
   })
 
   it('establishes a view-key return point without retaining an older channel depth', async () => {
@@ -187,7 +223,7 @@ describe('workspace routes', () => {
     const first = create()
     first.start()
     first.enter('one', 'host', undefined, 'desk')
-    first.select('host:/store/report.html')
+    first.name('One', 'report.html', 'host:/store/report.html')
     expect(window.history.state).toMatchObject({
       shuttleWorkspace: { depth: 1, base: true, baseHash: '', originView: 'desk' },
     })
@@ -258,7 +294,7 @@ describe('workspace routes', () => {
     history.enter('two', 'host')
     const returned = nextPop(() => history.leave())
     history.enter('three', 'host')
-    history.select('host:/store/report.html')
+    history.openDocument('host:/store/report.html')
     await returned
     expect(window.location.hash).toBe(formatRoute({
       kind: 'channel', uid: 'three', owner: 'host', doc: 'host:/store/report.html',

@@ -78,6 +78,7 @@ const VIEW_HASHES: Record<string, WorkspaceView> = { '#/desk': 'desk', '#/chroni
 const VIEW_LABELS: Record<WorkspaceView, string> = { desk: 'Desk', chronicle: 'Chronicle', board: 'Board' }
 const viewForOrigin = (origin: string): WorkspaceOriginView => origin === 'Desk' ? 'desk' : origin === 'Chronicle' ? 'chronicle' : 'board'
 const channelId = (uid: string, owner: string): string => JSON.stringify([owner, uid])
+const pageLabel = (doc: WorkspaceDocument): string => doc.kind === 'chat' ? 'Chat' : doc.kind === 'fiber' ? 'Constitution' : doc.name
 const threadFamilyRevision = (card: KanbanCard, index: ThreadIndex): string => {
   const current = index.card(card)
   const ancestry = index.ancestry(current).flatMap(entry => entry.card ? [index.card(entry.card)] : [])
@@ -192,11 +193,11 @@ export class Workspace {
       find: opts.find,
       onFind: () => opts.focusFind?.() ?? false,
       onExpand: expanded => opts.onExpand?.(expanded),
-      onSelect: key => this.select(key),
+      onSelect: key => this.visit(key),
       onNavigate: (source, href) => this.openRelative(source, href),
       onCrossing: travel => this.depth.cross(travel),
       onReturn: () => this.history.back(),
-      onOpenDocument: key => this.history.openDocument(key),
+      onOpenDocument: key => this.visit(key),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
@@ -204,6 +205,7 @@ export class Workspace {
       onRest: (card, anchor) => this.opts.onRest?.(card, anchor),
       onEscapeLayer: () => this.controls(this.current)?.handleEscape() ?? false,
       onChannel: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card)),
+      onScan: card => this.open(card, this.origin, undefined, this.overview.hasMetadata(card), true, true),
       onOrchestrator: () => this.openOrchestrator(),
       buildProse: doc => doc.kind === 'chat' ? this.chat(doc.key) : this.prose(doc.key),
       onRefreshProse: async doc => {
@@ -309,7 +311,7 @@ export class Workspace {
     return true
   }
 
-  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true): void {
+  open(card: KanbanCard, origin = this.opts.origin(), doc?: DocKey, authoritative = true, fromDeskColumn = true, scan = false): void {
     const outsideColumn = this.isActive && this.column && !this.column.some(entry => cardIdentity(entry.card) === cardIdentity(card))
     if (!this.isActive || origin !== this.origin || outsideColumn || !fromDeskColumn) {
       const column = fromDeskColumn && !outsideColumn && origin === 'Desk' ? this.opts.deskColumn?.(card) : undefined
@@ -321,7 +323,7 @@ export class Workspace {
     this.readLately = [id, ...this.readLately.filter(seen => seen !== id)].slice(0, READ_LATELY * 2)
     const state = this.ensure(card, authoritative)
     this.overview.opened(card, state.metadataKnown)
-    this.history.enter(state.channel.uid, state.channel.owner, doc ?? (chatDocument(state.channel)?.key ?? state.selected), viewForOrigin(origin))
+    this.history.enter(state.channel.uid, state.channel.owner, doc ?? (chatDocument(state.channel)?.key ?? state.selected), viewForOrigin(origin), scan)
   }
 
   /**
@@ -455,7 +457,7 @@ export class Workspace {
     // A key verdict given from another page waits where the verdict lives,
     // on the chat's header line, so the page comes forward to show it.
     const prose = this.landing(state.channel)
-    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.select(prose)
+    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.visit(prose)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
    * Answers whether the verdict entered its undo window. */
@@ -505,7 +507,10 @@ export class Workspace {
     const state = this.current
     if (!state) return false
     const key = this.landing(state.channel)
-    if (key) this.select(key)
+    if (key && state.selected !== key) {
+      this.composing = cardIdentity(state.card)
+      this.visit(key)
+    }
     return this.controls(state)?.focusComposer() ?? false
   }
   /** A channel opened to write to takes the composer's focus on its first
@@ -535,7 +540,7 @@ export class Workspace {
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
       origin: { label: this.history.backLabel, open: () => this.reader.back() },
       desk: () => this.escapeHome(),
-      constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
+      constitution: () => { const page = proseDocument(state.channel); if (page) this.visit(page.key) },
     })
   }
   /** The chat page: the constitution's band, seated whole. */
@@ -568,7 +573,7 @@ export class Workspace {
     const page = buildFiberProse(state.card, state.channel, {
       controls: chat ? undefined : dock?.el,
       onContinueReading: dock && state.card.sessionUuid ? text => {
-        if (chat) this.select(chat.key)
+        if (chat) this.visit(chat.key)
         dock.openOutcome(text)
       } : undefined,
       acts: chat ? undefined : dock?.head,
@@ -655,6 +660,7 @@ export class Workspace {
       this.reader.setBackDestination(this.history.backLabel)
       const dock = this.controls(state)
       if (dock) this.seatNav(state, dock)
+      this.landComposer(state, true)
       this.startTimer()
       return
     }
@@ -698,7 +704,6 @@ export class Workspace {
     }
     this.show(state, loadedBefore)
     this.landComposer(state, true)
-    this.history.select(this.shown(state))
     this.startTimer()
   }
   /**
@@ -746,8 +751,12 @@ export class Workspace {
     }
   }
   private namePage(state: ChannelState, key: DocKey): void {
-    const doc = state.channel.documents.find(doc => doc.key === key)
-    this.history.name(state.channel.name, doc?.kind === 'chat' ? 'Chat' : doc?.kind === 'fiber' ? 'Constitution' : doc?.name)
+    const doc = state.channel.documents.find(doc => doc.key === key)!
+    this.history.name(state.channel.name, pageLabel(doc), key)
+  }
+  private visit(key: DocKey): void {
+    const doc = this.current?.channel.documents.find(doc => doc.key === key)
+    if (doc) this.history.openDocument(key, pageLabel(doc))
   }
   private select(key: DocKey): void {
     const state = this.current
@@ -755,7 +764,6 @@ export class Workspace {
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
-    this.history.select(key)
     this.namePage(state, key)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
@@ -987,7 +995,7 @@ export class Workspace {
       const state = this.current
       if (!state || !this.isActive) return
       void this.load(state, true).then(() => {
-        if (this.current === state && this.isActive && !this.disposed) { this.show(state); this.history.select(this.shown(state)); this.startTimer() }
+        if (this.current === state && this.isActive && !this.disposed) { this.show(state); this.startTimer() }
       })
     }, 15000)
   }

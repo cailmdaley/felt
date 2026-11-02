@@ -206,7 +206,10 @@ The back control names the constitution across channels, or the page within the 
 A direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
 Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
-Selecting a channel's own page in place does not add a history stop.
+Opening a different page adds a history stop; returning to the page immediately behind it pops that visit.
+Reselecting the same page leaves history untouched.
+Sidebar scanning, including j/k, J/K and the column index, replaces the current visit.
+One Back or root Escape returns from a sidebar scan to its predecessor; returning to Desk selects the last card viewed.
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.

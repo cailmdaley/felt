@@ -10,6 +10,7 @@ import { response as boardResponse } from '../testFixtures.js'
 import { Dock } from './Dock.js'
 import { docKey } from './documents.js'
 import { resetLanes } from '../requestLanes.js'
+import * as FiberProse from './FiberProse.js'
 
 vi.mock('../FileViewerPanel.js', () => ({
   readThumbnailMetadata: vi.fn(async () => {}),
@@ -175,6 +176,84 @@ it('discovers a report only after it exists, including creation on a later refre
   exists = true
   await vi.advanceTimersByTimeAsync(15000); await flush()
   expect(workspace.reader.host.get(key)).toBeDefined()
+})
+
+it('keeps B Chat behind its Constitution after visiting A from Desk', async () => {
+  bodyCards = cards.map(card => ({ ...card, shuttleKind: 'oneshot' }))
+  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.open(bodyCards[1], 'Desk'); await flush()
+  expect(workspace.reader.document?.kind).toBe('chat')
+  document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!.click()
+  await flush()
+  expect(workspace.reader.document?.kind).toBe('fiber')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Chat')
+  await pop(() => workspace.reader.back())
+  expect(workspace.reader.document?.key).toBe('chat:host-b:beta')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Alpha')
+})
+
+it.each(['t', 'r'])('%s returns a report to its preceding Chat without an empty Back stop', async key => {
+  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', status: 'closed' }]
+  workspace.open(bodyCards[0], 'Desk'); await flush()
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Chat')
+  await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+  expect(workspace.reader.document?.kind).toBe('chat')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
+  if (key === 'r') expect(document.activeElement?.tagName).toBe('TEXTAREA')
+  document.activeElement instanceof HTMLElement && document.activeElement.blur()
+  await pop(() => workspace.reader.back())
+  expect(workspace.isActive).toBe(false)
+  if (key === 't') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true, cancelable: true }))
+})
+
+it('the continue-reading callback returns Constitution to its preceding Chat without an empty Back stop', async () => {
+  const prose = vi.spyOn(FiberProse, 'buildFiberProse')
+  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot', sessionUuid: 'session-alpha', workerState: 'running' }]
+  boardCards = bodyCards
+  workspace.open(bodyCards[0], 'Desk'); await flush()
+  document.querySelector<HTMLButtonElement>('.ws-selected .ws-chat-constitution')!.click(); await flush()
+  const outcome = vi.spyOn(workspace.dock.bandFor(bodyCards[0]), 'openOutcome').mockImplementation(() => {})
+  const continueReading = prose.mock.calls.at(-1)![2].onContinueReading!
+  await pop(() => continueReading('Checked result'))
+  expect(outcome).toHaveBeenCalledOnce()
+  expect(workspace.reader.document?.kind).toBe('chat')
+  expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
+  await pop(() => workspace.reader.back())
+  expect(workspace.isActive).toBe(false)
+})
+
+it('scans sidebar cards in one history entry and returns the last viewed card to Desk', async () => {
+  workspace.dispose()
+  bodyCards = [0, 1, 2, 3].map(i => ({ ...cards[0], id: `work/scan-${i}`, uid: `scan-${i}`, name: `Scan ${i}` }))
+  const returned = vi.fn()
+  workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => bodyCards, deskRows: () => bodyCards,
+    origin: () => 'Desk', onVisibility: visibility, onReturnCard: returned, dock: new Dock('', changed) })
+  workspace.open(bodyCards[0], 'Desk'); await flush()
+  const length = window.history.length
+  for (let i = 1; i < bodyCards.length; i++) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true, cancelable: true })); await flush()
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe(`Scan ${i}`)
+  }
+  expect(window.history.length).toBe(length)
+  await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(workspace.isActive).toBe(false)
+  expect(returned).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ uid: bodyCards[3].uid }))
+})
+
+it('does not rewrite unchanged names on show and writes a page selection once', async () => {
+  bodyCards = [{ ...cards[0], shuttleKind: 'oneshot' }]
+  workspace.open(bodyCards[0], 'Desk'); await flush()
+  const replace = vi.spyOn(window.history, 'replaceState')
+  const push = vi.spyOn(window.history, 'pushState')
+  for (const runtimePhase of ['waiting', 'working'] as const) {
+    bodyCards = [{ ...bodyCards[0], runtimePhase }]
+    workspace.update(); await flush()
+  }
+  expect(replace).not.toHaveBeenCalled()
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a')); await flush()
+  expect(push).toHaveBeenCalledOnce()
+  expect(replace).not.toHaveBeenCalled()
 })
 
 it('follows visited files after reload and returns a fresh deep link to its origin', async () => {
@@ -583,7 +662,7 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
     await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
-    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+    expect(workspace.isActive).toBe(false)
     expect(returned).not.toHaveBeenCalled()
   })
   it('captions In flight as its Your turn and Working bands even from an interleaved feed; j/k walk one flow and J/K stop at each column', async () => {
@@ -1606,7 +1685,7 @@ describe('workspace reader integration', () => {
     workspace.reader.openDocument(tableKey)
     await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
-    expect(window.history.state).toMatchObject({ shuttleWorkspace: { backLabel: 'report.html', depth: 2 } })
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { back: { pageLabel: 'report.html' }, depth: 2 } })
 
     workspace.dispose()
     document.body.replaceChildren()

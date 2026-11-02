@@ -47,6 +47,8 @@ export interface ReaderOptions {
   onRest?(card: KanbanCard, anchor: HTMLElement): void
   onEscapeLayer?(): boolean
   onChannel(card: KanbanCard): void
+  /** Sidebar scanning replaces the open history entry. */
+  onScan?(card: KanbanCard): void
   /** Open the open thread's orchestrator; false outside a thread. */
   onOrchestrator?(): boolean
   cards(): KanbanCard[]
@@ -220,6 +222,7 @@ export class Reader {
     }
     this.sidebarPicker = new ConstitutionPicker({
       ...pickerOptions, cards: () => this.sidebarCards(), revealCurrent: true,
+      onOpen: card => this.scan(card),
       find: opts.find, active: () => this.active && this.sidebarShown,
       // Escape on a sidebar row follows the reader's back chain.
       onEscape: () => { this.handleIntent('back', false, true) },
@@ -759,7 +762,7 @@ export class Reader {
   private sidebarCard(card: KanbanCard): HTMLElement {
     const face = element('div', 'kbn-card ws-constitution-card ws-constitution-row')
     const header = element('div', 'kbn-card-header')
-    header.append(stateDot(card, c => this.opts.onChannel(c)), element('span', 'kbn-card-name ws-channel-name', card.name))
+    header.append(stateDot(card, c => this.scan(c)), element('span', 'kbn-card-name ws-channel-name', card.name))
     face.append(header)
     face.dataset.part = 'sidebar-card'
     face.dataset.wsThemeBoundary = ''
@@ -1031,13 +1034,13 @@ export class Reader {
       const cards = this.sidebarCards()
       const index = this.sidebarPosition(cards)
       const card = cards[index + (intent === 'prevChannel' ? -1 : 1)]
-      if (index >= 0 && card) this.opts.onChannel(card)
+      if (index >= 0 && card) this.scan(card)
     } else if (intent === 'prevGroup' || intent === 'nextGroup') {
       const cards = this.sidebarCards()
       const index = this.sidebarPosition(cards)
       this.rememberStop()
       const card = groupJump(cards, index, intent === 'prevGroup' ? -1 : 1, this.stopOf, cardIdentity, this.groupMemory)
-      if (card) this.opts.onChannel(card)
+      if (card) this.scan(card)
     } else if (['scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp'].includes(intent)) this.scrollDocument(intent, repeat)
     else return false
     return true
@@ -1108,8 +1111,9 @@ export class Reader {
     this.rememberStop()
     const card = stopLanding(stop, cardIdentity, this.groupMemory)
     if (this.currentCard && cardIdentity(card) === cardIdentity(this.currentCard)) this.sidebarPicker.reveal()
-    else this.opts.onChannel(card)
+    else this.scan(card)
   }
+  private scan(card: KanbanCard): void { (this.opts.onScan ?? this.opts.onChannel)(card) }
 
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document

@@ -464,6 +464,19 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.fiberId).toBe('renamed')
     press('k'); expect(selected()).toBe('d2')
   })
+  it.each([['j', 'head-uid'], ['J', 'review']])('%s scans two sidebar stops and one Escape selects the last viewed Desk card', async (key, expected) => {
+    press('j'); press('h'); press('h'); press('Enter')
+    for (let i = 0; i < 200; i++) await Promise.resolve()
+    for (let step = 0; step < 2; step++) {
+      press(key)
+      for (let i = 0; i < 200; i++) await Promise.resolve()
+    }
+    expect(window.location.hash).toContain(expected)
+    await pop(() => press('Escape'))
+    expect(inside.workspace.isActive).toBe(false)
+    expect(selected()).toBe(expected)
+    expect(document.activeElement).toBe(document.querySelector('.kbn-key-selected'))
+  })
   it('opens with Enter and restores the opened card after reader return and a deferred refresh', async () => {
     press('j'); press('h'); press('h'); press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)
