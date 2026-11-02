@@ -46,3 +46,16 @@ it('opens a disclosure when the current thread becomes archived without navigati
   expect(fold.open).toBe(true)
   expect(fold.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('child')
 })
+
+it('draws threads in play as the tree, then the resting, then the archived below it', () => {
+  const root = card({ id: 'root', status: 'active' })
+  const working = card({ id: 'working', orchestrator: 'root', status: 'active', createdAt: '2026-11-01T10:00:00Z' })
+  const parked = card({ id: 'parked', orchestrator: 'root', status: 'open', effectiveHorizon: 'stashed', createdAt: '2026-11-01T09:00:00Z' })
+  const done = card({ id: 'done', orchestrator: 'root', status: 'closed', tempered: true, createdAt: '2026-11-01T08:00:00Z' })
+  const index = new ThreadIndex([root, working, parked, done]), container = document.createElement('div')
+  container.append(...renderThreadTree(index, root, root, c => threadRow(c, index, vi.fn())))
+  const order = [...container.querySelectorAll<HTMLElement>('.kbn-thread-row, summary')].map(el => el.matches('summary') ? el.textContent : el.dataset.cardUid)
+  expect(order).toEqual(['root', 'working', '1 resting', 'parked', '1 archived', 'done'])
+  const [resting, archived] = container.querySelectorAll<HTMLDetailsElement>('details')
+  expect([resting.open, archived.open]).toEqual([true, false])
+})

@@ -4,7 +4,7 @@ import fc from 'fast-check'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { ThreadIndex, threadKey } from '../threads.js'
-import { renderThreadTree, threadTree, type TreeNode } from './ThreadTree.js'
+import { renderThreadTree, shelfOf, threadTree, type TreeNode } from './ThreadTree.js'
 
 const dates = ['', '2026-11-02T09:00:00-08:00', '2026-11-02T10:00:00+01:00', '2026-11-02T09:00:00Z', '2026-11-02T17:00:00Z', '2026-11-01T23:00:00-08:00']
 const spec = fc.array(fc.record({ parent: fc.nat(), age: fc.integer({ min: 0, max: 5 }), state: fc.integer({ min: 0, max: 4 }) }), { minLength: 1, maxLength: 30 })
@@ -50,7 +50,7 @@ it('keeps every node once in creation-ordered ancestry, independent of state', (
   }), run)
 })
 
-it('folds only archive-only branches and keeps every non-archived row visible', () => {
+it('keeps threads in play in the tree and shelves the other resting, then archived, threads below it', () => {
   fc.assert(fc.property(spec, rows => {
     const cards = make(rows), index = new ThreadIndex(cards), root = cards[0]
     const container = document.createElement('div')
@@ -58,20 +58,17 @@ it('folds only archive-only branches and keeps every non-archived row visible', 
       const row = document.createElement('div'); row.className = 'kbn-thread-row'; row.dataset.id = c.id; return row
     }))
     expect(container.querySelectorAll('.kbn-thread-row')).toHaveLength(cards.length)
-    for (const parent of cards) {
-      const archived = index.children(parent).filter(c => index.state(c) === 'archived' && index.subtree(c).every(child => index.state(child) === 'archived'))
-      const group = [...container.querySelectorAll<HTMLDetailsElement>('details')].find(el => el.dataset.threadDetails === threadKey(parent))
-      expect(Boolean(group)).toBe(archived.length > 0)
-      if (!group) continue
-      for (const child of archived) {
-        const row = group.querySelector<HTMLElement>(`[data-id="${child.id}"]`)
-        expect(row?.closest('details')).toBe(group)
-      }
-    }
-    for (const c of cards.filter(c => index.state(c) !== 'archived')) {
+    const quiet = (c: KanbanCard) => shelfOf(index, c) !== 'tree'
+    const context = (c: KanbanCard) => index.subtree(c).some(child => !quiet(child))
+    for (const c of cards) {
       const row = container.querySelector<HTMLElement>(`[data-id="${c.id}"]`)!
-      expect(row.closest('details:not([open])')).toBeNull()
+      const shelf = row.closest<HTMLDetailsElement>('details')?.dataset.threadDetails
+      if (c === root || !quiet(c) || context(c)) expect(shelf).toBeUndefined()
+      else expect(shelf).toBe(shelfOf(index, c))
     }
+    for (const shelf of container.querySelectorAll<HTMLDetailsElement>('details')) expect(shelf.open).toBe(shelf.dataset.threadDetails === 'resting')
+    const order = [...container.querySelectorAll('details')].map(el => el.dataset.threadDetails)
+    expect(order).toEqual(['resting', 'archived'].filter(s => order.includes(s)))
     expect(container.querySelector('.ws-tree-attention')).toBeNull()
   }), { ...run, numRuns: 100 })
 })

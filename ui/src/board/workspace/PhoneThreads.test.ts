@@ -29,7 +29,7 @@ describe('the phone thread page', () => {
     expect(phoneThreads(feed[0], index, open)!.querySelector('[aria-current="page"] .kbn-thread-name')?.textContent).toBe('hub')
   })
 
-  it('retains disclosures and reveals the current archived lineage on repaint', () => {
+  it('retains disclosures and reveals the current archived thread on repaint', () => {
     const root = thread({ id: 'root', status: 'open' })
     const old = thread({ id: 'root/old', orchestrator: 'root', status: 'closed', tempered: true })
     const nested = thread({ id: 'root/old/nested', orchestrator: 'root-old', status: 'closed', tempered: false })
@@ -43,11 +43,10 @@ describe('the phone thread page', () => {
     expect(fold(page, 0).open).toBe(true)
     fold(page, 0).open = false
     page = phone.render(deep, tree, open)!
-    expect([...page.querySelectorAll('details')].map(el => el.open)).toEqual([true, true, true])
+    expect([...page.querySelectorAll('details')].map(el => el.open)).toEqual([true])
     fold(page, 0).open = false
     page = phone.render(deep, new ThreadIndex([root, old, nested, { ...deep, outcome: 'Changed' }]), open)!
     expect(fold(page, 0).open).toBe(true)
-    expect(fold(page, 1).open).toBe(true)
   })
 
   it('refreshes an open tree without closing folds or losing keyboard focus', () => {
