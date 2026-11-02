@@ -129,8 +129,8 @@ defmodule Shuttle.RemoteControlTmuxTest do
 
     first = start_supervised!({RemoteControl, opts})
     assert %{state: :starting} = RemoteControl.status(first)
-    await(fn -> File.exists?(receipt) end)
-    assert File.read!(receipt) == Enum.join(["remote-control" | args], <<0>>) <> <<0>>
+    expected_receipt = Enum.join(["remote-control" | args], <<0>>) <> <<0>>
+    await(fn -> File.read(receipt) == {:ok, expected_receipt} end)
     refute File.exists?(Path.join(dir, "wrapper"))
     refute File.exists?(Path.join(dir, "injected"))
     assert %{state: :running, pid: pid, started_at: at} = RemoteControl.reconcile(first)
