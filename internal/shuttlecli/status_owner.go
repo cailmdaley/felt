@@ -311,6 +311,9 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 	}
 	for _, row := range disagreements {
 		key := row.Origin + ":" + row.FiberID
+		if row.Origin == "" {
+			key = own + ":" + row.FiberID
+		}
 		if !seen[key] && (only == "" || only == row.Origin) {
 			rows = append(rows, row)
 			seen[key] = true

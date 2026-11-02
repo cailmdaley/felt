@@ -216,7 +216,7 @@ func TestStatusUnknownOwnerAndMirrorInventory(t *testing.T) {
 		case "/api/v1/state/composite":
 			fmt.Fprint(w, `{"local":{"host":"hub"},"remotes":{}}`)
 		case "/api/v1/fibers/composite":
-			fmt.Fprint(w, `{"host":"hub","origins":{"hub":{}},"fibers":[{"origin":"hub","fiber":{"slug":"retired","status":"closed","shuttle":{"kind":"oneshot","host":"retired"}}},{"origin":"hub","fiber":{"slug":"owned","status":"active","shuttle":{"kind":"oneshot"}}}]}`)
+			fmt.Fprint(w, `{"host":"hub","origins":{"hub":{}},"fibers":[{"origin":"hub","fiber":{"slug":"retired","status":"closed","shuttle":{"kind":"oneshot","host":"retired"}}},{"origin":"hub","fiber":{"slug":"owned","status":"active","shuttle":{"kind":"oneshot"}}},{"origin":"another","fiber":{"slug":"owned","status":"active","shuttle":{"kind":"oneshot"}}}]}`)
 		default:
 			http.Error(w, `unknown origin "retired": not in this daemon's fleet`, 400)
 		}
@@ -231,7 +231,11 @@ func TestStatusUnknownOwnerAndMirrorInventory(t *testing.T) {
 			t.Fatal(err)
 		}
 		count := 0
+		ownedCount := 0
 		for _, row := range rows {
+			if row.FiberID == "owned" {
+				ownedCount++
+			}
 			if row.FiberID == "owned" && row.State == "ownership disagreement" {
 				t.Fatalf("hostless local document misclassified: %s", out)
 			}
@@ -242,7 +246,7 @@ func TestStatusUnknownOwnerAndMirrorInventory(t *testing.T) {
 				}
 			}
 		}
-		if count != 1 {
+		if count != 1 || (len(args) == 3 && ownedCount != 1) {
 			t.Fatalf("rows: %s", out)
 		}
 	}
