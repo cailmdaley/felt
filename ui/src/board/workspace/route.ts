@@ -137,15 +137,20 @@ export class WorkspaceHistory {
     else this.leave()
   }
 
-  /** A different page is a visit; returning to the page behind this entry pops to it. */
+  /** Explicit page opens add a visit, including links to a page just visited. */
   openDocument(doc: DocKey, pageLabel?: string): void {
     if (this.pendingOwnPop !== null) {
       if (this.queuedEnter) this.queuedEnter.doc = doc
       return
     }
     if (this.current?.kind !== 'channel' || this.current.doc === doc) return
-    if (formatRoute({ ...this.current, doc }) === readRouteState(window.history.state)?.back?.hash) { this.back(); return }
     this.enter(this.current.uid, this.current.owner, doc, undefined, false, pageLabel)
+  }
+
+  /** Returning to controls reuses their preceding visit; otherwise it adds one. */
+  revisitDocument(doc: DocKey, pageLabel?: string): void {
+    if (this.current?.kind === 'channel' && formatRoute({ ...this.current, doc }) === readRouteState(window.history.state)?.back?.hash) this.back()
+    else this.openDocument(doc, pageLabel)
   }
 
   start(): void {

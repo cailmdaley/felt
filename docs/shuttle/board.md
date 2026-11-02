@@ -206,7 +206,8 @@ The back control names the constitution across channels, or the page within the 
 A direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
 Reloads retain this path in browser history.
 Ancestry links and `b` go up the thread tree separately.
-Opening a different page adds a history stop; returning to the page immediately behind it pops that visit.
+Opening a different page adds a history stop, including a link to a page just visited.
+Returning to the chat for a verdict, composer or continue-reading action pops to it when it is immediately behind the current page; otherwise it adds a visit.
 Reselecting the same page leaves history untouched.
 Sidebar scanning, including j/k, J/K and the column index, replaces the current visit.
 One Back or root Escape returns from a sidebar scan to its predecessor; returning to Desk selects the last card viewed.

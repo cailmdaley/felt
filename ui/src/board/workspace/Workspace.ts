@@ -457,7 +457,7 @@ export class Workspace {
     // A key verdict given from another page waits where the verdict lives,
     // on the chat's header line, so the page comes forward to show it.
     const prose = this.landing(state.channel)
-    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.visit(prose)
+    if (this.queueVerdict(state.card, verdict) && prose && state.selected !== prose) this.revisit(prose)
   }
   /** Desk, plates, act-zone buttons and keys authorize the same delayed write.
    * Answers whether the verdict entered its undo window. */
@@ -509,7 +509,7 @@ export class Workspace {
     const key = this.landing(state.channel)
     if (key && state.selected !== key) {
       this.composing = cardIdentity(state.card)
-      this.visit(key)
+      this.revisit(key)
     }
     return this.controls(state)?.focusComposer() ?? false
   }
@@ -573,7 +573,7 @@ export class Workspace {
     const page = buildFiberProse(state.card, state.channel, {
       controls: chat ? undefined : dock?.el,
       onContinueReading: dock && state.card.sessionUuid ? text => {
-        if (chat) this.visit(chat.key)
+        if (chat) this.revisit(chat.key)
         dock.openOutcome(text)
       } : undefined,
       acts: chat ? undefined : dock?.head,
@@ -757,6 +757,10 @@ export class Workspace {
   private visit(key: DocKey): void {
     const doc = this.current?.channel.documents.find(doc => doc.key === key)
     if (doc) this.history.openDocument(key, pageLabel(doc))
+  }
+  private revisit(key: DocKey): void {
+    const doc = this.current?.channel.documents.find(doc => doc.key === key)
+    if (doc) this.history.revisitDocument(key, pageLabel(doc))
   }
   private select(key: DocKey): void {
     const state = this.current
