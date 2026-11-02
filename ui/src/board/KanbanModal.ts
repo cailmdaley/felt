@@ -66,7 +66,7 @@ import { deskCardKey, deskOrder, type DeskOrder } from './deskOrdering.js'
 import { moveDestinations, seatAtRest } from './MoveDestinations.js'
 import type { MoveAction, MoveBroker } from './MoveDestinations.js'
 import { openMoveMenu } from './MoveMenu.js'
-import { parseCompositeFeed } from './KanbanComposite.js'
+import { parseCompositeFeed, type CompositeFeed } from './KanbanComposite.js'
 import { restPopover } from './RestPopover.js'
 import { rolePopover, type RoleChoice, type RoleProfile } from './RolePopover.js'
 import { buildKanbanResponseFromComposite, deriveCycleLens, isQuestion, surfaceTotals, projectDeskFrontier } from './KanbanReadModel.js'
@@ -1774,32 +1774,8 @@ export class KanbanModal {
       // → assembles the exact `KanbanResponse` the renderer already consumes.
       this.compositeEtag = res.headers.get('ETag')
       const feed = parseCompositeFeed(await res.json())
-      applyTerminalHost(feed.entries, this.terminalHost.current)
-      const data = buildKanbanResponseFromComposite(feed)
       if (token !== this.inflightFetchToken) return
-      // Skip re-render when the response is semantically unchanged —
-      // every 15-second poll otherwise tears down ~50 cards × ~30 nodes
-      // each just to rebuild them identically. Hash the meaningful
-      // payload (columns + totals + staleness); `generatedAt` flickers each
-      // poll even on no-op refreshes.
-      // A response landed: clear any error page the views were showing.
-      this.lastFetchFailed = false
-      this.daemonBooting = false
-      const sig = this.computeResponseSignature(data)
-      const wasFirstRender = this.lastResponse === null
-      this.lastResponse = data
-      this.ensureFleetMetadata(data)
-      if (!wasFirstRender && sig === this.lastResponseSig) {
-        // The Desk skips an identical-payload re-render, but a temporal view
-        // still gets its poll: its content moves with the clock (and with
-        // activity and the ledgers), not only with the fiber feed. The open
-        // card's worker pill crosses its idle threshold on the clock too.
-        this.syncWorkspaceRuntime()
-        this.mountOrRefreshActiveView()
-        return
-      }
-      this.lastResponseSig = sig
-      this.render(data)
+      this.presentFeed(feed)
     } catch (err: unknown) {
       if (token !== this.inflightFetchToken) return
       if (isDaemonBooting(err)) {
@@ -1808,6 +1784,36 @@ export class KanbanModal {
         this.markFetchFailed(errText(err))
       }
     }
+  }
+
+  /** Classify and draw a parsed feed; the last one is kept so the hub's terminal can be applied when learned. */
+  private presentFeed(feed: CompositeFeed): void {
+    this.lastFeed = feed
+    applyTerminalHost(feed.entries, this.terminalHost.current)
+    const data = buildKanbanResponseFromComposite(feed)
+    // Skip re-render when the response is semantically unchanged —
+    // every 15-second poll otherwise tears down ~50 cards × ~30 nodes
+    // each just to rebuild them identically. Hash the meaningful
+    // payload (columns + totals + staleness); `generatedAt` flickers each
+    // poll even on no-op refreshes.
+    // A response landed: clear any error page the views were showing.
+    this.lastFetchFailed = false
+    this.daemonBooting = false
+    const sig = this.computeResponseSignature(data)
+    const wasFirstRender = this.lastResponse === null
+    this.lastResponse = data
+    this.ensureFleetMetadata(data)
+    if (!wasFirstRender && sig === this.lastResponseSig) {
+      // The Desk skips an identical-payload re-render, but a temporal view
+      // still gets its poll: its content moves with the clock (and with
+      // activity and the ledgers), not only with the fiber feed. The open
+      // card's worker pill crosses its idle threshold on the clock too.
+      this.syncWorkspaceRuntime()
+      this.mountOrRefreshActiveView()
+      return
+    }
+    this.lastResponseSig = sig
+    this.render(data)
   }
 
   private computeResponseSignature(data: KanbanResponse): string {
@@ -2045,10 +2051,12 @@ export class KanbanModal {
   private deskProjection: DeskOrder = deskOrder(null)
   /** Meeting fiber used to build the current Desk projection. */
   private deskMeetingFiber: string | null = null
-  /** The hub's terminal backs runtimes that report none; learning it refetches the full feed. */
+  /** The last parsed composite feed, redrawn when the hub's terminal is learned. */
+  private lastFeed: CompositeFeed | null = null
+  /** The hub's terminal backs runtimes that report none; learning it redraws the last feed. */
   private readonly terminalHost = new TerminalHostReader(
     () => inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/version`)),
-    () => { this.compositeEtag = null; void this.fetchAndRender() },
+    () => { if (this.lastFeed && !this.lastFetchFailed) this.presentFeed(this.lastFeed) },
   )
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
