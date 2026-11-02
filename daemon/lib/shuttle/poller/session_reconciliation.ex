@@ -25,7 +25,6 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # restarting; the workers kept running. Each live session is mapped back to its
   # fiber and re-watched (or killed if the fiber has since closed).
   def adopt_orphans(%State{} = state) do
-    state = adopt_app_sessions(state)
     # An {:error, :unknown} scan (wedged tmux, timeout) means the session list
     # is UNCERTAIN, not empty — adopting off an empty read would boot the
     # daemon believing no workers exist. Skip; the per-poll
@@ -54,8 +53,6 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # the cycle's `Poller.list_shuttle_sessions/1` result; on an :unknown scan
   # there is nothing safe to reconcile — retry next poll.
   def reconcile_orphaned_sessions(%State{} = state, scan, listings_ok?) do
-    state = adopt_app_sessions(state)
-
     case scan do
       {:ok, sessions} -> state |> adopt_unwatched(sessions) |> complete_adoption(listings_ok?)
       {:error, :unknown} -> state
@@ -111,7 +108,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
             Logger.debug("Skipping adoption for #{fiber_id}: the fiber has no intrinsic id")
             state
 
-          Map.get(fiber, "status") != "closed" or Shuttle.AppWorkers.app?(session) ->
+          Map.get(fiber, "status") != "closed" ->
             adopt_live_session(state, fiber_id, fiber, uid, session)
 
           true ->
@@ -133,70 +130,34 @@ defmodule Shuttle.Poller.SessionReconciliation do
     now = DateTime.utc_now()
     runtime_key = Poller.runtime_key_for_fiber(fiber)
 
-    app_record =
-      case Shuttle.AppWorkers.id(session) do
-        nil ->
-          %{}
-
-        id ->
-          case Shuttle.AppWorkers.get(id) do
-            {:ok, record} -> record
-            _ -> %{}
-          end
-      end
-
-    # A re-adopted worker keeps the start it already had: the app record's,
-    # else the fiber's durable dispatch stamp; `now` only when neither exists.
     started_at =
-      [app_record["started_at"], get_in(fiber, ["shuttle", "runtime", "dispatched_at"])]
-      |> Enum.find_value(now, fn
+      case get_in(fiber, ["shuttle", "runtime", "dispatched_at"]) do
         stamp when is_binary(stamp) ->
           case DateTime.from_iso8601(stamp) do
             {:ok, timestamp, _} -> timestamp
-            _ -> nil
+            _ -> now
           end
 
         _ ->
-          nil
-      end)
+          now
+      end
 
     running_meta = %{
-      state: Map.get(app_record, "launch_state", "running"),
-      launch_error: app_record["last_error"],
+      state: "running",
+      launch_error: nil,
       fiber_id: fiber_id,
       session: session,
-      agent_id: app_record["agent_id"] || agent_id,
+      agent_id: agent_id,
       role: get_in(fiber, ["shuttle", "role"]),
       uid: uid,
-      felt_store:
-        if(Shuttle.AppWorkers.app?(session),
-          do: app_record["felt_store"],
-          else: Poller.owning_store(fiber_id, state)
-        ),
+      felt_store: Poller.owning_store(fiber_id, state),
       started_at: started_at,
       last_activity_at: started_at
     }
 
-    case Shuttle.WorkerBackend.retire_assignment(state.runner, session, fiber) do
-      :retired ->
-        cond do
-          fiber["status"] == "closed" ->
-            Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-
-          get_in(fiber, ["shuttle", "kind"]) == "standing" ->
-            Shuttle.Poller.StandingRoles.mark_standing_awaiting(fiber_id)
-
-          true ->
-            :ok
-        end
-
-        state
-
-      :retained ->
-        # Restore the owned receiver only for an assignment we still supervise.
-        running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
-        watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta)
-    end
+    # Restore the owned receiver only for an assignment we still supervise.
+    running_meta = Poller.recover_context_receiver(state, running_meta, fiber)
+    watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta)
   end
 
   defp watch_adopted_session(state, fiber_id, fiber, runtime_key, running_meta) do
@@ -213,151 +174,6 @@ defmodule Shuttle.Poller.SessionReconciliation do
       {:error, reason} ->
         Logger.warning("Failed to adopt session #{session}: #{inspect(reason)}")
         state
-    end
-  end
-
-  defp adopt_app_sessions(state) do
-    Enum.reduce(Shuttle.AppWorkers.active(), state, fn record, acc ->
-      fiber_id = record["fiber_id"]
-
-      cond do
-        not is_binary(fiber_id) or record["felt_store"] not in state.felt_stores ->
-          acc
-
-        app_session_tracked?(acc, fiber_id, record["session_uuid"]) ->
-          restore_terminal_viewer(record, acc.runner)
-          acc
-
-        Poller.running_key(acc, fiber_id) != nil ->
-          acc
-
-        true ->
-          fetched =
-            case Poller.fetch_fiber_full(fiber_id, acc) do
-              {:ok, _} = found -> found
-              _ -> Poller.fetch_fiber_full(record["uid"] || fiber_id, acc)
-            end
-
-          case fetched do
-            {:ok, fiber} ->
-              if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
-                   Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
-                case refresh_app_fiber(record, fiber["id"]) do
-                  :ok ->
-                    state =
-                      if app_session_tracked?(acc, fiber["id"], record["session_uuid"]),
-                        do: acc,
-                        else:
-                          adopt_session(
-                            acc,
-                            fiber["id"],
-                            Shuttle.AppWorkers.ref(record["session_uuid"])
-                          )
-
-                    restore_terminal_viewer(record, acc.runner)
-                    state
-
-                  {:error, reason} ->
-                    Logger.warning(
-                      "Cannot update app worker #{record["session_uuid"]}'s fiber address: #{inspect(reason)}"
-                    )
-
-                    acc
-                end
-              else
-                acc
-              end
-
-            _ ->
-              acc
-          end
-      end
-    end)
-  end
-
-  defp refresh_app_fiber(%{"fiber_id" => id}, id), do: :ok
-
-  defp refresh_app_fiber(record, id),
-    do: Shuttle.AppWorkers.update(record["session_uuid"], %{"fiber_id" => id})
-
-  defp app_session_tracked?(state, fiber_id, session_uuid) do
-    case Poller.running_key(state, fiber_id) do
-      nil ->
-        false
-
-      key ->
-        get_in(state.running, [key, :session]) == Shuttle.AppWorkers.ref(session_uuid)
-    end
-  end
-
-  # The App Server owns the conversation across daemon restarts, but a terminal
-  # viewer belongs to its terminal backend and may have died with its server.
-  # Check every poll: the backend can still be starting during boot adoption. Recreate only the
-  # viewer for CLI-surface records; prepare verifies the exact stored thread and
-  # starts its TUI without creating a model turn. App-surface records need none.
-  defp restore_terminal_viewer(%{"surface" => "cli", "session_uuid" => id} = record, runner)
-       when is_binary(id) do
-    if terminal_retry_due?(record) do
-      schedule_terminal_restore(record, runner, id)
-    end
-  end
-
-  defp restore_terminal_viewer(_record, _runner), do: :ok
-
-  defp terminal_retry_due?(record) do
-    retry_at = record["terminal_retry_at"]
-
-    not is_integer(retry_at) or retry_at <= System.system_time(:millisecond)
-  end
-
-  defp schedule_terminal_restore(record, runner, id) do
-    tmux = record["terminal_tmux"] || Shuttle.CodexTerminal.tmux_name(id)
-    callers = Shuttle.Env.callers()
-
-    case Task.Supervisor.start_child(Shuttle.TaskSupervisor, fn ->
-           Shuttle.Env.adopt_callers(callers)
-           lock = {{__MODULE__, {:restore_terminal_viewer, id}}, self()}
-
-           case :global.trans(
-                  lock,
-                  fn ->
-                    case Shuttle.Terminal.status(runner, tmux) do
-                      :gone -> Shuttle.CodexTerminal.prepare(id, runner: runner)
-                      :alive -> :ok
-                      :unknown -> Shuttle.CodexTerminal.prepare(id, runner: runner)
-                    end
-                  end,
-                  [node()],
-                  0
-                ) do
-             {:ok, _} ->
-               Shuttle.AppWorkers.update(id, %{"terminal_retry_at" => nil})
-
-             :ok ->
-               :ok
-
-             {:error, :terminal_busy} ->
-               :ok
-
-             {:error, _reason} ->
-               :ok
-
-             :aborted ->
-               :ok
-
-             other ->
-               Logger.warning(
-                 "Unexpected Codex terminal restoration result for #{id}: #{inspect(other)}"
-               )
-           end
-         end) do
-      {:ok, _pid} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning(
-          "Could not schedule Codex terminal restoration for #{id}: #{inspect(reason)}"
-        )
     end
   end
 

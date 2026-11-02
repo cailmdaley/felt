@@ -560,14 +560,14 @@ const MIRRORED: MockFiber[] = [
   },
 ]
 
-const APP_THREAD = '01a0be38-6c36-7cd1-aec9-53a680d1f693'
-const APP_CONVERSATION = fiber({
+const LEGACY_SURFACE_THREAD = '01a0be38-6c36-7cd1-aec9-53a680d1f693'
+const LEGACY_SURFACE_CONVERSATION = fiber({
   id: 'operator/app-conversation',
   uid: '01KVBR2G7CXDWMG85592QW78ZZ',
-  name: 'App conversation continuity',
+  name: 'Legacy surface field is ignored',
   status: 'active',
   created_at: iso(-1 * 86_400_000),
-  outcome: 'Continue this conversation from the ChatGPT app on desktop or phone.',
+  outcome: 'A stored surface value does not change terminal execution.',
   shuttle: shuttleBlock(),
 })
 
@@ -584,8 +584,7 @@ const TURN_FIXTURES: ReadonlyArray<readonly [string, string, Record<string, unkn
   ['working', 'Working right now', { phase: 'working', last_activity_at: now - 4_000 }],
   ['silent-working', 'Working, no sign of life for 18h', { phase: 'working', last_activity_at: now - 18 * 3_600_000 }],
   ['no-signal', 'Live, no hook event yet', { last_activity_at: now - 20 * 3_600_000 }],
-  ['blocked', 'Turn could not start', { state: 'blocked', launch_error: 'codex app-server refused the turn: thread not loaded', last_activity_at: now - 12 * 60_000 }],
-  ['system-error', 'Codex turn needs recovery', { state: 'running', backend_error: 'systemError: the previous Codex turn failed. Resume this conversation to continue.', last_activity_at: now - 12 * 60_000 }],
+  ['blocked', 'Terminal worker could not start', { state: 'blocked', terminal_error: 'terminal launch failed', last_activity_at: now - 12 * 60_000 }],
 ]
 
 /**
@@ -676,20 +675,23 @@ const MOCK_FEED = {
       runtime: { state: 'running', surface: 'cli', tmux_session: `fixture-turn-${i}-shuttle`, started_at: now - 20 * 3_600_000, ...runtime },
     })) : []),
     {
-      ...APP_CONVERSATION,
+      ...LEGACY_SURFACE_CONVERSATION,
       origin: 'ada-workstation',
       fiber: {
-        ...APP_CONVERSATION.fiber,
+        ...LEGACY_SURFACE_CONVERSATION.fiber,
         shuttle: {
           ...shuttleBlock(),
           agent: 'codex-luna',
           surface: 'app',
-          runtime: { session_uuid: APP_THREAD },
+          runtime: { session_uuid: LEGACY_SURFACE_THREAD },
         },
       },
       runtime: {
         state: 'running',
-        desktop_link: `codex://threads/${APP_THREAD}`,
+        phase: 'working',
+        tmux_session: 'legacy-surface-codex-shuttle',
+        session_uuid: LEGACY_SURFACE_THREAD,
+        agent: 'codex-luna',
         last_activity_at: now,
       },
     },
@@ -747,28 +749,26 @@ const MOCK_FEED = {
       ? { ...fiber(f), pulse: { next_tick: iso(31 * 60_000), last_tick: iso(-28 * 60_000), state: 'scheduled' } }
       : fiber(f)),
     ...SEATS.map(fiber),
-    // An older seat with a live Codex app worker that raised its hand. A
+    // An older seat with a live Codex terminal worker that raised its hand. A
     // question leads Your turn, so it sits ABOVE the newer reimbursement idle
-    // at its prompt. No tmux session: liveness and the app link are native.
+    // at its prompt.
     {
       ...fiber({
-        id: 'seats/seat-app',
-        name: 'codex app seat',
+        id: 'seats/seat-codex',
+        name: 'codex terminal seat',
         status: 'active',
         created_at: iso(-7 * 86_400_000),
-        outcome: 'The app worker needs a decision about the next run.',
+        outcome: 'The Codex worker needs a decision about the next run.',
         shuttle: { ...shuttleBlock('oneshot'), agent: 'codex-sol', surface: 'app' },
       }),
       origin: 'ada-workstation',
       runtime: {
         state: 'running',
         phase: 'attention',
-        surface: 'app',
-        tmux_session: null,
+        tmux_session: 'codex-seat-shuttle',
         session_uuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',
         agent: 'codex-sol',
         last_activity_at: now - 25 * 60_000,
-        desktop_link: 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693',
       },
     },
     ...CYCLES.map(fiber),
@@ -1546,9 +1546,9 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         tmux_session: 'hark-meeting',
         error: null,
       }
-      return json({ spawned: true, tmux_session: 'capture-scribe', surface: 'cli', meeting: mockMeeting }, 202)
+      return json({ spawned: true, tmux_session: 'capture-scribe', meeting: mockMeeting }, 202)
     }
-    return json({ spawned: true, tmux_session: 'capture-session', surface: 'cli' }, 202)
+    return json({ spawned: true, tmux_session: 'capture-session' }, 202)
   }
 
   // ── The settings plane ─────────────────────────────────────────────────

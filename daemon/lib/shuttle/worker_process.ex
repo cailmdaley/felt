@@ -143,6 +143,32 @@ defmodule Shuttle.WorkerProcess do
 
   def holder(_procs, _uuid, _runner), do: nil
 
+  @doc "The native Codex process resuming `uuid` inside terminal `session`, or nil."
+  def codex_session_process(procs, session, uuid) when is_binary(session) and is_binary(uuid) do
+    worker = session_process(procs, session)
+
+    Enum.find(procs, fn %{args: args} = proc ->
+      tokens = String.split(args)
+
+      not is_nil(worker) and not tmux?(proc) and
+        Path.basename(List.first(tokens) || "") == "codex" and
+        Enum.any?(Enum.chunk_every(tokens, 2, 1, [nil]), &(&1 == ["resume", uuid])) and
+        descends_from?(procs, proc, worker.pid)
+    end)
+  end
+
+  def codex_session_process(_procs, _session, _uuid), do: nil
+
+  defp descends_from?(procs, %{pid: pid}, ancestor) when pid != ancestor do
+    case Enum.find(procs, &(&1.pid == pid)) do
+      %{ppid: ^ancestor} -> true
+      %{ppid: parent} when parent != pid -> descends_from?(procs, %{pid: parent}, ancestor)
+      _ -> false
+    end
+  end
+
+  defp descends_from?(_procs, _proc, _ancestor), do: false
+
   defp bound_holder(procs, uuid, runner) do
     row = Shuttle.SessionLedger.latest_for_session(uuid)
 

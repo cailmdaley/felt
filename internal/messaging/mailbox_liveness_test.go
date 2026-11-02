@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,6 +69,15 @@ func TestMailboxSessionEndDiffersFromNeverRegistered(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "pi"} {
 		t.Run(harness, func(t *testing.T) {
 			env := testEnv(t)
+			if harness == "codex" {
+				listener, err := net.Listen("tcp", "127.0.0.1:0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				endpoint := "http://" + listener.Addr().String()
+				_ = listener.Close()
+				env.Set("SHUTTLE_DAEMON_URL", endpoint)
+			}
 			if err := RegisterMailbox(env, harness, "ended", "host", "/project", os.Getpid(), true); err != nil {
 				t.Fatal(err)
 			}
@@ -77,6 +87,18 @@ func TestMailboxSessionEndDiffersFromNeverRegistered(t *testing.T) {
 			for _, wake := range []bool{false, true} {
 				req := Request{Address: "shuttle://host/" + harness + "/ended", Text: "reply", MessageID: "ended-" + strconv.FormatBool(wake), Wake: wake}
 				receipt, err := Send(context.Background(), env, "host", req)
+				if harness == "codex" && wake {
+					if err == nil || receipt.Status != StatusUnknown || receipt.Transport != "codex-terminal" {
+						t.Fatalf("Codex wake did not report the terminal submission outcome: %#v %v", receipt, err)
+					}
+					continue
+				}
+				if harness == "codex" {
+					if err == nil || receipt.Status != StatusRejected || !strings.Contains(receipt.Detail, "Codex receiver") {
+						t.Fatalf("Codex context-only send did not require a live terminal receiver: %#v %v", receipt, err)
+					}
+					continue
+				}
 				if err == nil || receipt.Status != StatusRejected || !strings.Contains(receipt.Detail, "session has ended") || strings.Contains(receipt.Detail, "not registered") {
 					t.Fatalf("ended: %#v %v", receipt, err)
 				}
@@ -260,7 +282,6 @@ func TestHookReceiverPIDSkipsShells(t *testing.T) {
 func TestSendToExitedHookReceiverIsRejectedNotQueued(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(t.TempDir(), "absent.sock"))
 	receiver := startReceiver(t)
 	if err := RegisterMailbox(env, "codex", "gone", "host", "/", receiver.Process.Pid, true); err != nil {
 		t.Fatal(err)

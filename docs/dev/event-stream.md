@@ -57,7 +57,7 @@ the `.lock` sidecar, however many hooks see it full at the same moment — and a
 ### Terminal program status
 
 `shuttle hook event` bridges OSC 7501 status to the outer terminal only when `TMUX` is set and the harness is Claude or Pi.
-Direct terminals are left to the harness's native reporter; Codex hooks do not emit because they run in the shared App Server rather than its viewer.
+Direct terminals are left to the harness's native reporter.
 Set `SHUTTLE_PROGRAM_STATUS=off` or `0` in the agent environment to disable the bridge independently of event and message recording.
 Each report uses the harness app id (`claude-code` or `pi`) and the fiber slug as its title when available.
 
@@ -128,7 +128,7 @@ A timeout also carries `identity_error`; the failure remains visible during retr
 An existing-worker claim with an explicit UUID repairs missing identity without moving `dispatched_at` or replacing an already-known UUID.
 There is no first-hook or first-session-in-the-pane fallback.
 The runtime timestamp falls back to the worker's liveness timestamp when no session state is available.
-Codex app workers retain their App Server's native phase signal.
+Codex workers report lifecycle through their terminal harness hooks.
 
 Hook lines can also carry `receiverPid` and `receiverBirth`: the harness process's PID and birth token, obtained from the process running the hook rather than from an inherited worker environment variable.
 Pi supplies its own process id; Claude and Codex hooks resolve their nearest non-shell ancestor.

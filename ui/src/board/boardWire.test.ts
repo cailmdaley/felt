@@ -372,25 +372,19 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     })
   })
 
-  it('rests a blocked app launch — the owner stops it through its backend', async () => {
+  it('does not stop a blocked launch that has no live worker', async () => {
     const c = card({
       id: 'app-blocked-1',
       status: 'open',
       shuttleKind: 'oneshot',
-      shuttleSurface: 'app',
-      sessionUuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',
       runtimePhase: 'blocked',
       launchError: 'turn/start could not be confirmed',
       storedHorizon: 'stashed',
       effectiveHorizon: 'stashed',
     })
     asPrivate(makeBoard()).setSurface(c, 'stashed', {})
-    await wire.settled()
-
-    expect(wire.writes().map((w) => w.url)).toEqual([
-      `${BASE}/api/v1/lifecycle`,
-      `${BASE}/api/v1/felt-edit`,
-    ])
+    await new Promise((r) => setTimeout(r, 20))
+    expect(wire.writes()).toEqual([])
   })
 
   it('reopens a card that carries a verdict as a draft — rest refuses one past review', async () => {
@@ -418,15 +412,15 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
   })
 })
 
-describe('verdicts stop app workers before changing the card lifecycle', () => {
-  it('confirms then stops an app worker before tempering', async () => {
+describe('verdicts stop workers before changing the card lifecycle', () => {
+  it('confirms then stops a worker before tempering', async () => {
     const c = card({
       id: 'app-verdict-1',
       status: 'active',
       shuttleKind: 'oneshot',
-      shuttleSurface: 'app',
-      sessionUuid: '01a0be38-6c36-7cd1-aec9-53a680d1f693',
-      shuttleHost: 'app-host',
+      workerState: 'running',
+      tmuxSession: 'worker-shuttle',
+      shuttleHost: 'worker-host',
     })
     const board = asPrivate(makeBoard())
     board.lastResponse = response({ now: { drafts: [], inFlight: [c], awaitingReview: [] } })
@@ -436,7 +430,7 @@ describe('verdicts stop app workers before changing the card lifecycle', () => {
     await wire.settled()
 
     expect(wire.writes().map((w) => [w.url, w.body])).toEqual([
-      [`${BASE}/api/v1/kill`, { fiber_id: 'app-verdict-1', origin: 'app-host' }],
+      [`${BASE}/api/v1/kill`, { fiber_id: 'app-verdict-1', origin: 'worker-host' }],
       [`${BASE}/api/v1/transition`, { fiber_id: 'app-verdict-1', target: 'tempered', origin: 'local' }],
     ])
   })

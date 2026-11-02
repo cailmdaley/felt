@@ -5,7 +5,7 @@ defmodule Shuttle.Dispatcher do
   - Refuses a fiber without an intrinsic id (its worker would have no name)
   - Checks status (refuses closed)
   - Checks for an existing worker
-  - Starts the selected terminal or app surface with the dispatch prompt
+  - Starts the selected terminal with the dispatch prompt
   - Records the session identity for continuation
   """
 
@@ -62,8 +62,7 @@ defmodule Shuttle.Dispatcher do
   @doc """
   Dispatches a worker for the given fiber ID.
 
-  Returns `{:ok, worker_reference}` on success, or an error tuple. Terminal
-  references are tmux names; app references are `codex-app:<session UUID>`.
+  Returns `{:ok, terminal_name}` on success, or an error tuple.
 
   Options:
     * `:runner` — module implementing `Shuttle.Runner` behavior for test injection.
@@ -86,9 +85,9 @@ defmodule Shuttle.Dispatcher do
     * `:user_message` — the user's free-text directive for this dispatch,
       inlined into the prompt at launch (the "From User" block). Transient: it
       rides the dispatch call, never a persisted felt event.
-    * `:developer_instructions` — optional Codex developer text, appended after
-      WAKE, felt session context and the agent record's instructions at thread
-      creation. On resume, an explicit value requests a native context override;
+    * `:developer_instructions` — optional Codex developer text, combined with
+      the agent record's instructions as a native CLI configuration override.
+      On resume, an explicit value requests a native context override;
       absence preserves the thread's existing developer instructions.
     * `:threads` — `{entries, live}`: the poller's cached constitutions and its
       running workers' runtime keys, from which an orchestrator's launch prompt
@@ -107,19 +106,12 @@ defmodule Shuttle.Dispatcher do
          :ok <- check_dispatchable(fiber, force),
          {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
          {:ok, uid} <- check_uid(fiber_id, fiber),
-         :ok <- check_terminal_config(get_in(fiber, ["shuttle", "surface"])),
-         :ok <- check_not_running(fiber_id, uid, runner, get_in(fiber, ["shuttle", "surface"])),
-         :ok <- check_app_not_running(fiber_id, uid),
+         :ok <- Shuttle.Terminal.require_config(),
+         :ok <- check_not_running(fiber_id, uid, runner),
          {:ok, agent} <- resolve_agent(fiber, fiber_id),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <-
-           preflight_surface(
-             Map.get(fiber["shuttle"] || %{}, "surface", "cli"),
-             agent,
-             work_dir,
-             runner
-           ) do
+         :ok <- preflight_terminal(agent, work_dir, runner) do
       resume_intent =
         if restoration?(opts, fiber, prompt_context, force) do
           {:previous, Shuttle.Continuation.resumable_session_id(fiber)}
@@ -150,7 +142,6 @@ defmodule Shuttle.Dispatcher do
             poller: Keyword.get(opts, :poller),
             identity_token: Keyword.get(opts, :identity_token),
             felt_store: felt_store,
-            surface: get_in(fiber, ["shuttle", "surface"]) || "cli",
             uid: uid,
             kind: Shuttle.Poller.fiber_kind(fiber),
             fiber_path: Map.get(fiber, "path"),
@@ -208,17 +199,10 @@ defmodule Shuttle.Dispatcher do
           fun.(session_id)
 
         _ ->
-          Shuttle.EventStream.catch_up_session_phase(event_session_id(session_id))
+          Shuttle.EventStream.catch_up_session_phase(session_id)
       end
 
     phase != "working"
-  end
-
-  defp event_session_id(session_id) do
-    case Shuttle.AppWorkers.get(session_id) do
-      {:ok, record} -> record["transcript_session_uuid"] || session_id
-      _ -> session_id
-    end
   end
 
   @doc """
@@ -274,8 +258,7 @@ defmodule Shuttle.Dispatcher do
       standing constitution starts fresh, since it runs discrete occurrences.
 
   The no-handoff rule: with no session, or a clean handoff since dispatch
-  (`handed_off_at >= dispatched_at`), start fresh. Managed Codex conversations
-  keep their identity in the App Server, so they resume on either surface.
+  (`handed_off_at >= dispatched_at`), start fresh.
   Otherwise the session's transcript decides — see `continue_or_cold/3`.
 
   Options:
@@ -326,7 +309,6 @@ defmodule Shuttle.Dispatcher do
       is_nil(session_id) -> :fresh
       Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) -> :fresh
       want == :resume_always -> {:previous, session_id}
-      managed_codex?(fiber) -> {:previous, session_id}
       true -> continue_or_cold(fiber, session_id, opts, want)
     end
   end
@@ -356,15 +338,6 @@ defmodule Shuttle.Dispatcher do
       true ->
         {:cold, session_id, transcript && transcript.path}
     end
-  end
-
-  defp managed_codex?(fiber) do
-    get_in(fiber, ["shuttle", "resolved", "agent", "cli"]) == "codex" or
-      get_in(fiber, ["shuttle", "surface"]) == "app" or
-      case Shuttle.AppWorkers.get(Shuttle.Continuation.resumable_session_id(fiber) || "") do
-        {:ok, _} -> true
-        {:error, reason} -> reason in [:session_owner_mismatch, :ownership_record_unreadable]
-      end
   end
 
   # The previous-session record for a fresh launch after a cut-off session.
@@ -477,8 +450,7 @@ defmodule Shuttle.Dispatcher do
 
   # A launch message carries only what this dispatch knows and the skill
   # cannot: the fiber's store-relative id with the store it resolves in, the
-  # conversation surface and headless mode when they differ from a terminal
-  # session, and the previous session. Everything else (the exit contract,
+  # headless mode and the previous session. Everything else (the exit contract,
   # standing runs' handoff) lives in the fiber or the shuttle skill.
   defp compose_prompt(header, opts, fiber_id) do
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
@@ -486,8 +458,6 @@ defmodule Shuttle.Dispatcher do
     [
       header,
       if(felt_store, do: "Felt store: #{felt_store}", else: ""),
-      if(Keyword.get(opts, :surface) == "app", do: "Surface: app", else: ""),
-      if(Keyword.get(opts, :managed_codex), do: "Backend: codex-app-server", else: ""),
       if(Keyword.get(opts, :headless) == true, do: "Headless: true", else: ""),
       render_previous_session_line(opts),
       Shuttle.Threads.prompt(fiber_id, Keyword.put(opts, :felt_store, felt_store))
@@ -543,49 +513,47 @@ defmodule Shuttle.Dispatcher do
     chrome = Keyword.get(opts, :chrome) == true
     host = Keyword.get(opts, :host)
 
-    surface = Keyword.get(opts, :surface) || "cli"
-
     with {:ok, agent} <- resolve_agent_axes(agent_name, effort, chrome, runner),
          :ok <- validate_agent(agent),
          :ok <- check_work_dir(work_dir),
-         :ok <- preflight_surface(surface, agent, work_dir, runner) do
-      if agent.cli == "codex" or surface == "app" do
-        capture_app(yap, agent, work_dir, felt_store, opts)
-      else
-        session = capture_session_name()
+         :ok <- preflight_terminal(agent, work_dir, runner) do
+      session = capture_session_name()
 
-        # Only claude can be handed a session id up front; `build_command/3` and
-        # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
-        # as absent, so the other harnesses need no separate path.
-        session_uuid = if agent.cli == "claude", do: generate_uuid4()
+      # Only claude can be handed a session id up front; `build_command/3` and
+      # `render_capture_prompt/2` both treat a nil `session_id`/`session_uuid`
+      # as absent, so the other harnesses need no separate path.
+      session_uuid = if agent.cli == "claude", do: generate_uuid4()
 
-        prompt =
-          render_capture_prompt(yap,
-            session: session,
-            felt_store: felt_store,
-            session_uuid: session_uuid,
-            agent_id: agent.id,
-            project_dir: work_dir,
-            host: host,
-            meeting: Keyword.get(opts, :meeting),
-            effort: effort,
-            chrome: chrome,
-            headless: agent[:headless] == true
-          )
+      prompt =
+        render_capture_prompt(yap,
+          session: session,
+          felt_store: felt_store,
+          session_uuid: session_uuid,
+          agent_id: agent.id,
+          project_dir: work_dir,
+          host: host,
+          meeting: Keyword.get(opts, :meeting),
+          effort: effort,
+          chrome: chrome,
+          headless: agent[:headless] == true
+        )
 
-        command = Agents.build_command(agent, prompt, session_id: session_uuid)
+      command = Agents.build_command(agent, prompt, session_id: session_uuid)
 
-        # No `session:` opt: capture sessions are headless by design (the user
-        # stays on the board), so the wait-for-client gate would only delay the
-        # worker by its 10s timeout.
-        run_script = build_run_script(session, command, agent.id, display_fiber_id: "capture")
+      # No `session:` opt: capture sessions are headless by design (the user
+      # stays on the board), so the wait-for-client gate would only delay the
+      # worker by its 10s timeout.
+      run_script =
+        build_run_script(session, command, agent.id,
+          display_fiber_id: "capture",
+          terminal_session: session
+        )
 
-        Logger.info("Capture session via #{agent.id} → terminal #{session}")
+      Logger.info("Capture session via #{agent.id} → terminal #{session}")
 
-        case Shuttle.Terminal.launch(runner, session, work_dir, run_script, preflighted: true) do
-          :ok -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
-          error -> error
-        end
+      case Shuttle.Terminal.launch(runner, session, work_dir, run_script, preflighted: true) do
+        :ok -> {:ok, %{session: session, session_uuid: session_uuid, agent_id: agent.id}}
+        error -> error
       end
     end
   end
@@ -634,19 +602,15 @@ defmodule Shuttle.Dispatcher do
 
   @doc false
   def render_capture_prompt(yap, opts) do
-    render_capture_entrypoint(yap, Keyword.put(opts, :surface, "cli"))
+    render_capture_entrypoint(yap, opts)
   end
 
   defp render_capture_entrypoint(yap, opts) do
-    surface = Keyword.fetch!(opts, :surface)
-    claim = %{fiber_id: "<fiber id>", agent: Keyword.get(opts, :agent_id, "")}
-
-    claim =
-      if surface == "app" or Keyword.get(opts, :managed_codex, false),
-        do: Map.put(claim, :surface, surface),
-        else: Map.put(claim, :tmux_session, Keyword.fetch!(opts, :session))
-
-    if surface == "app", do: Keyword.fetch!(opts, :session_uuid)
+    claim = %{
+      fiber_id: "<fiber id>",
+      agent: Keyword.get(opts, :agent_id, ""),
+      tmux_session: Keyword.fetch!(opts, :session)
+    }
 
     claim =
       Enum.reduce([:session_uuid, :meeting], claim, fn key, acc ->
@@ -658,7 +622,6 @@ defmodule Shuttle.Dispatcher do
 
     install = %{
       kind: "oneshot",
-      surface: surface,
       agent: Keyword.get(opts, :agent_id, ""),
       project_dir: Keyword.fetch!(opts, :project_dir)
     }
@@ -674,7 +637,6 @@ defmodule Shuttle.Dispatcher do
     header = """
     You are a Shuttle capture worker. Activate the felt and shuttle skills and read shuttle references/capture.md.
     Felt store: #{Keyword.fetch!(opts, :felt_store)}
-    #{if Keyword.get(opts, :managed_codex), do: "Backend: codex-app-server"}
     Project dir: #{Keyword.fetch!(opts, :project_dir)}
     Headless: #{Keyword.get(opts, :headless, false)}
     Install: #{Jason.encode!(install)}
@@ -914,15 +876,10 @@ defmodule Shuttle.Dispatcher do
   # inconclusive `has-session` as present, so a transient tmux failure can
   # never let a dispatch (especially a resume) spawn over a still-live worker —
   # the daemon refuses with :already_running and the caller adopts instead.
-  defp check_terminal_config("app"), do: :ok
-  defp check_terminal_config(_surface), do: Shuttle.Terminal.require_config()
-
-  defp check_not_running(fiber_id, uid, runner, surface) do
-    cond do
-      surface == "app" and not Shuttle.Terminal.available?() -> :ok
-      Shuttle.Terminal.present?(runner, session_name(fiber_id, uid)) -> {:error, :already_running}
-      true -> :ok
-    end
+  defp check_not_running(fiber_id, uid, runner) do
+    if Shuttle.Terminal.present?(runner, session_name(fiber_id, uid)),
+      do: {:error, :already_running},
+      else: :ok
   end
 
   defp resolve_agent(fiber, fiber_id) do
@@ -1168,457 +1125,31 @@ defmodule Shuttle.Dispatcher do
   defp prompt_context_run_id({:standing_run, run_id, _}), do: run_id
   defp prompt_context_run_id(_), do: nil
 
-  defp preflight_surface("cli", %{cli: "codex", headless: true}, _work_dir, _runner),
+  def preflight_terminal(%{cli: "codex", headless: true}, _work_dir, _runner),
     do:
       {:error,
        {:invalid_axes, "Codex workers require an interactive agent; headless is not supported."}}
-
-  defp preflight_surface("cli", %{cli: "codex"} = agent, work_dir, runner) do
-    with :ok <- validate_codex_agent(agent),
-         :ok <- Shuttle.CodexBackend.require_ready(),
-         do: preflight_terminal(agent, work_dir, runner)
-  end
-
-  defp preflight_surface("cli", agent, work_dir, runner),
-    do: preflight_terminal(agent, work_dir, runner)
-
-  defp preflight_surface("app", %{cli: "codex", headless: false} = agent, _work_dir, _runner) do
-    with :ok <- validate_codex_agent(agent), do: Shuttle.CodexBackend.require_ready()
-  end
-
-  defp preflight_surface(_, _, _, _),
-    do:
-      {:error,
-       {:invalid_axes,
-        "App surface requires an interactive Codex agent; surface must be cli or app."}}
 
   def preflight_terminal(agent, work_dir, runner) do
     with :ok <- preflight_wrapper(agent, work_dir, runner), do: ensure_terminal_ready(runner)
   end
 
-  @doc "Validates agent configuration that must be honored by the shared Codex backend."
-  def validate_codex_agent(agent) do
-    cond do
-      map_size(agent[:env] || %{}) != 0 ->
-        {:error,
-         {:invalid_axes,
-          "Managed Codex uses the App Server environment; per-worker agent env overrides cannot be honored. Configure the shared server environment instead."}}
-
-      agent[:extra_flags] not in [
-        nil,
-        "",
-        "--approve-for-me",
-        "--not-so-yolo",
-        "--dangerously-bypass-approvals-and-sandbox"
-      ] ->
-        {:error,
-         {:invalid_axes,
-          "Managed Codex supports structured model, effort, developer_instructions and approval presets, not arbitrary extra_flags (including --resume, --session, --model and -c/--config). Put developer instructions in the agent record's developer_instructions field or the dispatch option."}}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp check_app_not_running(fiber_id, uid) do
-    if Shuttle.AppWorkers.for_fiber(fiber_id, uid), do: {:error, :already_running}, else: :ok
-  end
-
-  defp create_worker(fiber_id, agent, work_dir, runner, context, intent, opts) do
-    if agent.cli == "codex" or Keyword.get(opts, :surface) == "app" do
-      create_app_worker(fiber_id, agent, work_dir, runner, context, intent, opts)
-    else
-      # A saved app conversation is never silently resumed through a terminal.
-      case intent do
-        {:previous, id} ->
-          case Shuttle.AppWorkers.get(id) do
-            {:ok, _} ->
-              {:error, :session_surface_mismatch}
-
-            {:error, :not_found} ->
-              with :ok <- Shuttle.AppWorkers.check_known_endpoint(id),
-                   do:
-                     create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
-
-            {:error, _} = error ->
-              error
-          end
-
-        _ ->
-          create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
-      end
-    end
-  end
-
-  @doc "Protocol options shared by managed dispatch and historical Codex resume."
-  def codex_options(agent, work_dir, opts),
-    do: [
-      cwd: work_dir,
-      felt_store: Keyword.get(opts, :felt_store),
-      model: agent.model,
-      effort: agent.effort,
-      approval_policy: codex_permissions(agent)[:approval_policy],
-      approvals_reviewer: codex_permissions(agent)[:approvals_reviewer],
-      sandbox: codex_permissions(agent)[:sandbox],
-      developer_instructions:
-        Keyword.get(opts, :developer_instructions, agent[:developer_instructions]),
-      sender_capability: Keyword.get(opts, :sender_capability)
-    ]
-
-  defp codex_permissions(agent) do
-    case agent[:extra_flags] do
-      flags when flags in ["--approve-for-me", "--not-so-yolo"] ->
-        [
-          approval_policy: "on-request",
-          approvals_reviewer: "auto_review",
-          sandbox: "workspace-write"
-        ]
-
-      "--dangerously-bypass-approvals-and-sandbox" ->
-        [approval_policy: "never", sandbox: "danger-full-access"]
-
-      _ ->
-        []
-    end
-  end
-
-  defp create_app_worker(fiber_id, agent, work_dir, runner, context, intent, opts) do
-    case resume_sender_capability(intent) do
-      {:ok, capability} ->
-        create_app_worker_with_capability(
-          fiber_id,
-          agent,
-          work_dir,
-          runner,
-          context,
-          intent,
-          Keyword.put(opts, :sender_capability, capability)
-        )
-
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  defp create_app_worker_with_capability(fiber_id, agent, work_dir, runner, context, intent, opts) do
-    opts =
-      opts
-      |> Keyword.put(:managed_codex, true)
-
-    client = Shuttle.AppWorkers.client()
-
-    start =
-      with {:ok, context_opts} <-
-             Shuttle.CodexContext.prepare(
-               agent,
-               work_dir,
-               opts,
-               if(intent == :fresh, do: :fresh, else: :resume)
-             ) do
-        case intent do
-          :fresh ->
-            client.start_thread(
-              codex_options(
-                agent,
-                work_dir,
-                Keyword.put(context_opts, :sender_capability, opts[:sender_capability])
-              )
-            )
-
-          {:previous, id} ->
-            resume_app_thread(
-              id,
-              fiber_id,
-              agent,
-              work_dir,
-              Keyword.put(context_opts, :runner, runner)
-            )
-        end
-      end
-
-    with {:ok, %{"id" => id} = thread} <- start,
-         :ok <-
-           put_app_worker(
-             thread,
-             agent,
-             work_dir,
-             %{
-               "fiber_id" => fiber_id,
-               "uid" => Keyword.get(opts, :uid),
-               "felt_store" => Keyword.get(opts, :felt_store)
-             },
-             opts
-           ) do
-      # Identity is durable before naming, turning, or adopting the conversation.
-      if intent == :fresh, do: name_app_thread(id, Path.basename(fiber_id))
-
-      marker =
-        Shuttle.Continuation.write_dispatch(runner, Keyword.get(opts, :felt_store), fiber_id, %{
-          session_uuid: id,
-          run_id: Keyword.get(opts, :run_id)
-        })
-
-      if marker == :ok do
-        append_session_ledger(
-          fiber_id,
-          app_transcript_id(thread),
-          Keyword.merge(opts,
-            harness: "codex",
-            ledger_kind: if(intent == :fresh, do: :dispatch, else: :resume),
-            thread_id: id
-          )
-        )
-
-        if Keyword.get(opts, :restoration) and quiet_restoration?(id, opts) do
-          with :ok <-
-                 Shuttle.AppWorkers.update(id, %{
-                   "launch_state" => "running",
-                   "pending_prompt" => nil,
-                   "last_error" => nil
-                 }),
-               do: finish_app_launch(id, runner)
-        else
-          prompt =
-            case intent do
-              :fresh -> render_context_prompt(fiber_id, context, opts)
-              _ -> render_resume_prompt(fiber_id, opts)
-            end
-
-          case Shuttle.AppWorkers.start_turn(id, prompt, codex_options(agent, work_dir, opts)) do
-            {:ok, _} -> finish_app_launch(id, runner)
-            error -> error
-          end
-        end
-      else
-        # Keep the durable record: a retry must recover this exact identity.
-        :ok =
-          Shuttle.AppWorkers.update(id, %{
-            "launch_state" => "blocked",
-            "last_error" => inspect(marker)
-          })
-
-        {:error, {:app_launch_failed, id, {:runtime_marker_failed, marker}}}
-      end
-    end
-  end
-
-  defp resume_app_thread(id, fiber_id, agent, work_dir, opts) do
-    with {:ok, capability} <- resume_sender_capability({:previous, id}, opts),
-         opts = Keyword.put(opts, :sender_capability, capability),
-         {:ok, loaded} <- reserve_app_resume(id, fiber_id, agent, work_dir, opts),
-         :ok <-
-           Shuttle.AppWorkers.reserve_resume(
-             id,
-             fiber_id,
-             Keyword.get(opts, :uid),
-             Keyword.get(opts, :felt_store)
-           ) do
-      result =
-        if loaded,
-          do: {:ok, loaded},
-          else:
-            Shuttle.AppWorkers.call(id, :resume_thread, [codex_options(agent, work_dir, opts)])
-
-      case result do
-        {:ok, %{"id" => ^id}} = result ->
-          result
-
-        result ->
-          reason =
-            case result do
-              {:ok, _} -> :resume_identity_mismatch
-              {:error, reason} -> reason
-            end
-
-          :ok =
-            Shuttle.AppWorkers.update(id, %{
-              "launch_state" => "blocked",
-              "last_error" => inspect(reason)
-            })
-
-          {:error, {:app_launch_failed, id, reason}}
-      end
-    end
-  end
-
-  defp resume_sender_capability(:fresh), do: {:ok, Shuttle.AppWorkers.new_sender_capability()}
-
-  defp resume_sender_capability({:previous, id}) when is_binary(id) do
-    case Shuttle.AppWorkers.get(id) do
-      {:ok, _record} -> Shuttle.AppWorkers.ensure_sender_capability(id)
-      {:error, :not_found} -> {:ok, Shuttle.AppWorkers.new_sender_capability()}
-      {:error, _} = error -> error
-    end
-  end
-
-  defp resume_sender_capability({:previous, id}, opts) when is_list(opts) do
-    case Keyword.get(opts, :sender_capability) do
-      capability when is_binary(capability) and byte_size(capability) == 64 -> {:ok, capability}
-      _ -> resume_sender_capability({:previous, id})
-    end
-  end
-
-  defp capture_app(yap, agent, work_dir, felt_store, opts) do
-    opts =
-      opts
-      |> Keyword.put(:felt_store, felt_store)
-      |> Keyword.put_new(:sender_capability, Shuttle.AppWorkers.new_sender_capability())
-
-    client = Shuttle.AppWorkers.client()
-
-    with {:ok, context_opts} <- Shuttle.CodexContext.prepare(agent, work_dir, opts, :fresh),
-         {:ok, %{"id" => id} = thread} <-
-           client.start_thread(
-             codex_options(
-               agent,
-               work_dir,
-               Keyword.put(context_opts, :sender_capability, opts[:sender_capability])
-             )
-           ),
-         :ok <-
-           put_app_worker(
-             thread,
-             agent,
-             work_dir,
-             %{
-               "fiber_id" => nil,
-               "uid" => nil,
-               "felt_store" => felt_store
-             },
-             opts
-           ),
-         :ok <- name_app_thread(id, yap),
-         {:ok, _} <-
-           Shuttle.AppWorkers.start_turn(
-             id,
-             render_capture_entrypoint(
-               yap,
-               Keyword.merge(opts,
-                 session_uuid: id,
-                 agent_id: agent.id,
-                 project_dir: work_dir,
-                 felt_store: felt_store,
-                 surface: Keyword.get(opts, :surface) || "cli",
-                 managed_codex: true
-               )
-             ),
-             codex_options(agent, work_dir, Keyword.put(opts, :felt_store, felt_store))
-           ),
-         {:ok, _} <- finish_app_launch(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)) do
-      {:ok,
-       %{
-         session: Shuttle.AppWorkers.ref(id),
-         session_uuid: id,
-         agent_id: agent.id,
-         surface: Keyword.get(opts, :surface) || "cli",
-         tmux_session: Shuttle.WorkerBackend.tmux(Shuttle.AppWorkers.ref(id))
-       }}
-    end
-  end
-
-  # The durable record of a just-started app conversation; `fiber` carries its
-  # `fiber_id`, `uid` and `felt_store` (nil fiber and uid for a capture).
-  defp put_app_worker(%{"id" => id} = thread, agent, work_dir, fiber, opts) do
-    with :ok <- Shuttle.AppWorkers.check_known_endpoint(id) do
-      Shuttle.AppWorkers.put_with_sender_capability(
-        Map.merge(fiber, %{
-          "session_uuid" => id,
-          "thread_id" => id,
-          "transcript_session_uuid" => app_transcript_id(thread),
-          "project_id" => thread["projectId"],
-          "cwd" => work_dir,
-          "agent_id" => agent.id,
-          "surface" => Keyword.get(opts, :surface) || "cli",
-          "terminal_wrapper" => agent.wrapper,
-          "backend_host" => Shuttle.Poller.own_host_id(),
-          "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
-          "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id),
-          "active" => true,
-          "launch_state" => "starting",
-          "started_at" => DateTime.to_iso8601(DateTime.utc_now())
-        }),
-        Keyword.fetch!(opts, :sender_capability)
-      )
-    end
-  end
-
-  defp finish_app_launch(id, runner) do
-    case Shuttle.AppWorkers.get(id) do
-      {:ok, %{"surface" => "cli"}} ->
-        Shuttle.CodexTerminal.prepare(id, runner: runner, preflighted: true)
-        {:ok, Shuttle.AppWorkers.ref(id)}
-
-      {:ok, _} ->
-        {:ok, Shuttle.AppWorkers.ref(id)}
-
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  defp reserve_app_resume(id, fiber_id, agent, work_dir, opts) do
-    attributes = %{
-      "fiber_id" => fiber_id,
-      "uid" => Keyword.get(opts, :uid),
-      "felt_store" => Keyword.get(opts, :felt_store),
-      "cwd" => work_dir,
-      "agent_id" => agent.id,
-      "surface" => Keyword.get(opts, :surface) || "cli",
-      "terminal_wrapper" => agent.wrapper,
-      "terminal_tmux" => Shuttle.CodexTerminal.tmux_name(id)
-    }
-
-    with :ok <-
-           check_unowned_resume_viewer(id, Keyword.get(opts, :runner, Shuttle.Runner.Default)) do
-      case Shuttle.AppWorkers.import_embedded(
-             id,
-             attributes,
-             codex_options(agent, work_dir, opts),
-             Keyword.get(opts, :runner, Shuttle.Runner.Default)
-           ) do
-        {:error, {tag, message}} when tag in [:held, :unknown] ->
-          dispatch_refused(:transcript_held, message)
-
-        result ->
-          result
-      end
-    end
-  end
-
-  defp check_unowned_resume_viewer(id, runner) do
-    case Shuttle.AppWorkers.get(id) do
-      {:error, :not_found} -> check_no_human_resume(id, runner)
-      _ -> :ok
-    end
-  end
-
-  defp app_transcript_id(%{"id" => id} = thread),
-    do: thread["sessionId"] || Shuttle.AppWorkers.transcript_id(id)
-
-  defp name_app_thread(id, title) do
-    label =
-      title
-      |> String.split(~r/\R/, trim: true)
-      |> List.first()
-      |> then(&(&1 || "conversation"))
-      |> String.replace(~r/[\x00-\x1f\x7f]/, " ")
-      |> String.trim()
-      |> String.slice(0, 80)
-
-    # Naming is cosmetic; a rejected rename must not block the durable worker.
-    _ = Shuttle.AppWorkers.call(id, :name_thread, ["Shuttle — " <> label])
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    :exit, _ -> :ok
-  end
-
-  def render_app_capture_prompt(yap, opts) do
-    render_capture_entrypoint(yap, Keyword.put(opts, :surface, "app"))
-  end
+  defp create_worker(fiber_id, agent, work_dir, runner, context, intent, opts),
+    do: create_tmux_session(fiber_id, agent, work_dir, runner, context, intent, opts)
 
   defp create_tmux_session(fiber_id, agent, work_dir, runner, prompt_context, resume_intent, opts) do
+    agent =
+      if agent.cli == "codex" do
+        instructions =
+          [agent[:developer_instructions], opts[:developer_instructions]]
+          |> Enum.reject(&(&1 in [nil, ""]))
+          |> Enum.join("\n\n")
+
+        Map.put(agent, :developer_instructions, instructions)
+      else
+        agent
+      end
+
     resume_intent = effective_resume_intent(resume_intent, agent, opts)
     session = session_name(fiber_id, Keyword.get(opts, :uid))
     felt_store = Keyword.get(opts, :felt_store, default_felt_store())
@@ -1662,7 +1193,7 @@ defmodule Shuttle.Dispatcher do
             # including when it was mid-turn. A failed resume stays visible as
             # a blocked worker instead of waking a new conversation.
             fallback_command =
-              if Keyword.get(opts, :restoration) do
+              if Keyword.get(opts, :restoration) or agent.cli == "codex" do
                 nil
               else
                 fresh_fallback_command(
@@ -1683,7 +1214,7 @@ defmodule Shuttle.Dispatcher do
 
             command =
               cond do
-                Keyword.get(opts, :restoration) ->
+                is_nil(fallback_command) ->
                   resume_command
 
                 fallback_signal ->
@@ -1708,7 +1239,8 @@ defmodule Shuttle.Dispatcher do
                 dismiss_resume_warning: agent.cli == "claude" and not headless,
                 session: session,
                 headless: headless,
-                fiber_path: Keyword.get(opts, :fiber_path)
+                fiber_path: Keyword.get(opts, :fiber_path),
+                terminal_session: session
               )
 
             # Resume stamps a fresh dispatch boundary with the requested UUID.
@@ -1779,7 +1311,8 @@ defmodule Shuttle.Dispatcher do
 
         run_script =
           build_run_script(fiber_id, command, agent.id,
-            fiber_path: Keyword.get(opts, :fiber_path)
+            fiber_path: Keyword.get(opts, :fiber_path),
+            terminal_session: session
           )
 
         # Store the session UUID in the dispatch marker so "Resume previous"
@@ -1842,7 +1375,7 @@ defmodule Shuttle.Dispatcher do
   end
 
   # Build the fresh dispatch command. For Claude we generate and inject a UUID
-  # upfront (--session-id) so we can store it synchronously. Pi's UUID is
+  # upfront (--session-id) so we can store it synchronously. Codex/Pi identity is
   # captured asynchronously after spawn.
   defp build_fresh_command(agent, fiber_id, prompt_context, opts) do
     prompt = render_context_prompt(fiber_id, prompt_context, opts)
@@ -1853,10 +1386,10 @@ defmodule Shuttle.Dispatcher do
         command = Agents.build_command(agent, prompt, session_id: uuid)
         {command, {:claude, uuid}}
 
-      "pi" ->
+      cli when cli in ["pi", "codex"] ->
         command = Agents.build_command(agent, prompt)
         work_dir = Keyword.get(opts, :work_dir, Shuttle.FS.cwd!())
-        {command, {:capture, "pi", work_dir, DateTime.utc_now()}}
+        {command, {:capture, cli, work_dir, DateTime.utc_now()}}
 
       _ ->
         command = Agents.build_command(agent, prompt)
@@ -1903,14 +1436,14 @@ defmodule Shuttle.Dispatcher do
   # agent, `record_dispatch_session/4` runs SYNCHRONOUSLY here, before
   # `store_session_id` returns (a bounded blocking call: the Runner bounds
   # every CLI shell-out). Only the piece that
-  # genuinely can't be known yet — Pi's session UUID, scraped from a
+  # genuinely can't be known yet — Codex/Pi session identity, scraped from a
   # JSONL file the harness hasn't necessarily written when tmux launches — is
   # deferred to an async task, and that task only BACKFILLS `session_uuid`
   # into the marker already stamped here; it never creates the marker itself.
   #
   # - Claude: UUID was pre-specified (`--session-id`) — the sync write already
   #   carries it, nothing left to backfill.
-  # - Pi: sync write carries `dispatched_at` (+ `run_id`) with no
+  # - Codex/Pi: sync write carries `dispatched_at` (+ `run_id`) with no
   #   `session_uuid` yet; the async task backfills it once scraped.
   # - None: agent doesn't support session IDs; sync write still stamps
   #   `dispatched_at` so the continuation heuristic has a real boundary.
@@ -2151,11 +1684,9 @@ defmodule Shuttle.Dispatcher do
   defp append_session_ledger(fiber_id, uuid, opts) do
     Shuttle.SessionLedger.record(
       fiber: fiber_id,
-      # Explicit, not tmux-inferred: an app worker has no tmux name to infer
-      # from, and the claim path passes it the same way.
+      # Preserve the intrinsic fiber identity across terminal renames.
       uid: Keyword.get(opts, :uid),
       session: uuid,
-      thread_id: Keyword.get(opts, :thread_id),
       tmux: Keyword.get(opts, :tmux),
       harness: Keyword.get(opts, :harness),
       kind: Keyword.get(opts, :ledger_kind, :dispatch),
@@ -2165,13 +1696,13 @@ defmodule Shuttle.Dispatcher do
     )
   end
 
-  # Backfill `session_uuid` into an ALREADY-STAMPED marker — the Pi
+  # Backfill `session_uuid` into an ALREADY-STAMPED marker — the Codex/Pi
   # async capture path. Deliberately does not touch `dispatched_at`: it shells
   # `shuttle mark-runtime --session <uuid>` with no `--dispatched-at`
   # flag, and mark-runtime only writes fields whose flag is present, so the
   # boundary `record_dispatch_session/4` stamped synchronously at launch is
   # left exactly as it was.
-  # (The ledger line the shared writer appends is the Pi `dispatch` line:
+  # (The ledger line the shared writer appends is the harness `dispatch` line:
   # that pairing becomes known here, not at launch.)
   defp backfill_session_uuid(fiber_id, uuid, runner, opts) do
     write_runtime_marker(fiber_id, uuid, opts, "session UUID backfill", fn store ->
@@ -2179,7 +1710,7 @@ defmodule Shuttle.Dispatcher do
     end)
   end
 
-  # Poll Pi's session JSONL files until the elapsed-time deadline. A candidate
+  # Poll the harness's session JSONL files until the elapsed-time deadline. A candidate
   # must match cwd, dispatch time and the fiber prompt, so concurrent workers
   # sharing a checkout cannot borrow one another's identity.
   @doc false
@@ -2232,6 +1763,16 @@ defmodule Shuttle.Dispatcher do
     end
   end
 
+  defp candidate_session_files("codex", _work_dir, dispatched_after) do
+    Shuttle.HarnessPaths.codex_session_dirs(since: dispatched_after)
+    |> Enum.flat_map(fn dir ->
+      case Shuttle.FS.ls(dir) do
+        {:ok, files} -> files |> Enum.sort(:desc) |> Enum.map(&Path.join(dir, &1))
+        {:error, _} -> []
+      end
+    end)
+  end
+
   defp candidate_session_files(_cli, _work_dir, _dispatched_after), do: []
 
   defp find_session_file(cli, work_dir, fiber_id, dispatched_after) do
@@ -2251,6 +1792,9 @@ defmodule Shuttle.Dispatcher do
       case {cli, event} do
         {"pi", %{"type" => "session"}} ->
           {:ok, event}
+
+        {"codex", %{"type" => "session_meta", "payload" => payload}} ->
+          {:ok, payload}
 
         _ ->
           :error
@@ -2336,6 +1880,7 @@ defmodule Shuttle.Dispatcher do
     display_fiber_id = Keyword.get(opts, :display_fiber_id, fiber_id)
     terminal = Keyword.get_lazy(opts, :terminal, &Shuttle.Terminal.primary/0)
     snippets = terminal.script(session)
+    terminal_session = Keyword.get(opts, :terminal_session, session)
 
     # The fiber's `.md` path for the worker's `shuttle handoff`: it stamps
     # `shuttle.handed_off_at` directly into this file (no felt-store resolution,
@@ -2364,6 +1909,7 @@ defmodule Shuttle.Dispatcher do
     set -e
     trap 'rm -f "$0"' EXIT
 
+    export SHUTTLE_TERMINAL_SESSION=#{shell_single_quote(terminal_session)}
     #{snippets.env}#{erts_scrub_block(Keyword.get_lazy(opts, :release_root, &release_root/0))}#{snippets.passthrough}#{fiber_key_block}#{wait_for_client_block}
     echo ""
     echo "Shuttle worker — #{display_fiber_id} — agent=#{agent_id} — $(date '+%H:%M:%S')"

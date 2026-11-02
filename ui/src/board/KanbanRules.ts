@@ -204,7 +204,7 @@ export function lensCycles(
  * of truth for "what column is this?". Reads ONLY the document-lifecycle
  * signals the frozen Shuttle contract names — `status`, `tempered`, `kind`,
  * and whether the owning daemon holds a worker (`liveWorker`, from the
- * card's `hasLiveWorker` — a CLI or app worker alike). There is no `enabled` and no
+ * card's `hasLiveWorker`). There is no `enabled` and no
  * `review.state`: lifecycle is `status + tempered`, uniform across kinds.
  *
  *   1. A closed fiber is a human verdict, terminal regardless of tags or
@@ -218,7 +218,7 @@ export function lensCycles(
  *   2. A live worker overrides the open/active branch — the user dragging a
  *      card and seeing it stay in drafts is the dissonance we're avoiding.
  *      Liveness is the owning daemon's observation (never stored), for a
- *      terminal and an app worker alike; only shuttle fibers have workers. A
+ *      worker alike; only shuttle fibers have workers. A
  *      running standing constitution is caught here too, so it shows as live
  *      work in Now rather than waiting on the timeline.
  *

@@ -221,6 +221,18 @@ defmodule ShuttleWeb.ClaimControllerTest do
     assert Jason.decode!(conn.resp_body)["error"] =~ "tmux_session"
   end
 
+  test "legacy app surface and session UUID do not substitute for a terminal session" do
+    conn =
+      api_conn()
+      |> post(
+        "/api/v1/claim",
+        Jason.encode!(%{fiber_id: "tests/x", surface: "app", session_uuid: "old-thread"})
+      )
+
+    assert conn.status == 400
+    assert Jason.decode!(conn.resp_body)["error"] =~ "tmux_session"
+  end
+
   test "forwards a remote-origin claim to the owning daemon, origin stripped, relaying its response" do
     ForwardStub.stub_forward(
       "candide",

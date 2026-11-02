@@ -53,9 +53,8 @@ Without `--disabled`, creation arms it immediately; don't leave a worker racing 
 Draft threads are queued work: leave them disabled until their inputs or decisions are ready, then have the orchestrator arm the next useful one.
 Closing a sibling does not itself arm a draft.
 
-Host, project directory, role, agent and compatible execution surface inherit from the parent; runtime, schedule and seat do not.
+Host, project directory, role and agent inherit from the parent; runtime, schedule, seat and legacy surface do not.
 Override the agent for the work rather than assuming the orchestrator's model fits every thread.
-An absent surface means CLI; inherited app execution falls back to CLI for a non-Codex agent, while explicit `--surface app` requires Codex.
 Changing `--host` requires `--project-dir` even for a draft: the parent's path belongs to another machine.
 Armed remote work is created by its owning daemon, which validates paths on that host and writes its store directly; an unreachable owner fails without a local copy.
 Use `--disabled` for an offline local draft ([operating.md](operating.md#remote-hosts)).
@@ -80,7 +79,7 @@ Keys must match `[A-Za-z_][A-Za-z0-9_]*`, values must contain no NUL, and shell 
 Registry layers replace records wholesale by id; aliases inherit base environment variables and override named variables with their own `env` map.
 Resolved aliases keep their own id so capture and resume reapply all overlays.
 A resume that falls back to a bare agent because no registry record resolves carries no `env` overrides.
-The Codex app surface uses an existing App Server and does not apply per-worker environment variables.
+Codex workers use the terminal harness and support the same per-worker environment configuration as other CLI agents.
 See the [registry configuration reference](https://cailmdaley.github.io/felt/shuttle/installation/#configuring-agents).
 
 Use the agent the user or constitution names; otherwise pick from `shuttle agents`, the registry on this machine (built-ins plus `~/.config/shuttle/agents.json`, read separately on each host). Check the listing before assuming an agent exists, and remember there is no `human` agent — write a human gate instead. Change it with `shuttle set-agent <fiber> <agent-id> [--effort E] [--chrome]`. Claude agents run with `--permission-mode auto`. For headless (`claude -p`) runs, add an alias to the registry, such as `{"id": "claude-opus-headless", "alias_of": "claude-opus", "axes": {"headless": true}}`; no built-in agent is headless.

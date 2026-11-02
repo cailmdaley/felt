@@ -127,7 +127,7 @@ func SetRuntimeField(f *felt.Felt, key, value string) error {
 
 var configKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
-	"effort": true, "chrome": true, "surface": true, "schedule": true, "pulse": true,
+	"effort": true, "chrome": true, "schedule": true, "pulse": true,
 	"role": true, "seat": true, "thread_parent": true,
 }
 
@@ -145,6 +145,9 @@ func SetConfig(f *felt.Felt, block *Block) error {
 	if encoded.Kind != yaml.MappingNode {
 		return fmt.Errorf("shuttle: encoded config block is not a mapping")
 	}
+	// Surface is a legacy opaque value: preserve its source node without
+	// validating or rewriting it as part of current configuration.
+	felt.RemoveMappingKey(&encoded, "surface")
 	// Questions are worker state, not configuration; preserve the live node.
 	felt.RemoveMappingKey(&encoded, "ask")
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -208,22 +211,8 @@ func Resolve(f *felt.Felt, reg *AgentRegistry, now time.Time) error {
 			if _, exists := flat["resolved"]; !exists {
 				flat["resolved"] = resolved
 			}
-			// A Codex block with no recorded surface and no session yet starts
-			// in the app; a block that already ran keeps the transport it ran on.
-			if surface, _ := flat["surface"].(string); surface == "" && resolved.Agent != nil &&
-				resolved.Agent.CLI == "codex" && !hasRuntimeSession(flat) {
-				flat["surface"] = "app"
-			}
 		}
 	}
 	f.SetJSONField(FacetKey, flat)
 	return nil
-}
-
-// hasRuntimeSession reports whether the flat facet records a worker session.
-func hasRuntimeSession(flat map[string]interface{}) bool {
-	runtime, _ := flat["runtime"].(map[string]interface{})
-	id, _ := runtime["session_uuid"].(string)
-	flatID, _ := flat["session_uuid"].(string)
-	return id != "" || flatID != ""
 }

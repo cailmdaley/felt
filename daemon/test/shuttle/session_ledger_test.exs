@@ -61,9 +61,6 @@ defmodule Shuttle.SessionLedgerTest do
     assert %{"fiber" => "work/new"} =
              SessionLedger.latest_for_terminal("resume-transcript", path: path)
 
-    assert %{"fiber" => "work/new"} =
-             SessionLedger.latest_for_terminal("codex-terminal-thread", path: path)
-
     assert %{"fiber" => "work/old"} = SessionLedger.latest_for_terminal("old-name", path: path)
     assert nil == SessionLedger.latest_for_terminal("unrelated", path: path)
   end
@@ -167,19 +164,21 @@ defmodule Shuttle.SessionLedgerTest do
              }
     end
 
-    test "records a Codex App thread separately from its transcript id", %{path: path} do
+    test "Codex session UUID is the terminal identity", %{path: path} do
       SessionLedger.record(
         path: path,
         fiber: "work/worker",
         uid: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        session: "transcript-42",
-        thread_id: "thread-42",
+        session: "codex-session-42",
+        thread_id: "ignored-old-alias",
         harness: "codex",
         kind: :claim
       )
 
-      assert [%{"session" => "transcript-42", "thread_id" => "thread-42", "harness" => "codex"}] =
-               decoded(path)
+      assert [record] = decoded(path)
+      assert record["session"] == "codex-session-42"
+      assert record["harness"] == "codex"
+      refute Map.has_key?(record, "thread_id")
     end
 
     test "derives the fiber uid from the tmux session name", %{path: path} do

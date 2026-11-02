@@ -65,9 +65,8 @@ func programStatusFor(input eventHookInput, harness, fiberPath string) (progstat
 	return r, true
 }
 
-// reportProgramStatus bridges tmux only: Claude and Pi report natively in a
-// direct terminal. Codex hooks run in the shared App Server, not its viewer.
-// Terminal lookup and write failures never affect a hook's result or output.
+// reportProgramStatus bridges tmux only. Terminal lookup and write failures
+// never affect a hook's result or output.
 func (a *app) reportProgramStatus(input eventHookInput) {
 	if off := a.env.Getenv("SHUTTLE_PROGRAM_STATUS"); off == "off" || off == "0" {
 		return

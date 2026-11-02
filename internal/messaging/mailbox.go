@@ -34,6 +34,7 @@ type mailboxRegistration struct {
 	ID       string `json:"id"`
 	Host     string `json:"host"`
 	CWD      string `json:"cwd"`
+	State    string `json:"state,omitempty"`
 	LastSeen int64  `json:"last_seen"`
 	PID      int    `json:"pid,omitempty"`
 	Start    string `json:"start,omitempty"`
@@ -157,6 +158,7 @@ func registerMailboxWith(env *sysenv.Env, harness, id, host, cwd string, pid int
 		if current.PID != pid || current.Start != candidateStart {
 			return errCode("unavailable", "mailbox session is already registered to a live receiver process")
 		}
+		reg.State = current.State
 	}
 	if active {
 		reg.CWD, reg.LastSeen, reg.PID, reg.Start = cwd, time.Now().UnixMilli(), pid, processStartToken(pid)
@@ -210,6 +212,77 @@ func mailboxRegistrationFor(env *sysenv.Env, harness, id string) (mailboxRegistr
 		return r, err
 	}
 	return r, nil
+}
+
+// SetMailboxState records the turn phase observed by a harness hook. Unknown
+// remains unknown until a lifecycle hook establishes a safe input boundary.
+func SetMailboxState(env *sysenv.Env, harness, id, host, state string) error {
+	if state != "idle" && state != "working" {
+		return errCode("invalid_request", "invalid mailbox turn state")
+	}
+	dir := mailboxDir(env, harness, id)
+	lock, err := os.OpenFile(filepath.Join(dir, ".registration.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	r, err := mailboxRegistrationFor(env, harness, id)
+	if err != nil || r.ID != id || r.Host != host || !r.live() {
+		return errCode("unavailable", "mailbox session has no live receiver registration")
+	}
+	r.State = state
+	r.LastSeen = time.Now().UnixMilli()
+	b, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return mailboxWrite(filepath.Join(dir, "receiver.json"), b, false)
+}
+
+func mailboxSessionState(env *sysenv.Env, harness, id, host string) (string, error) {
+	r, err := mailboxRegistrationFor(env, harness, id)
+	if err != nil || r.ID != id || r.Host != host || !r.live() {
+		return "", errCode("unavailable", "session has no live Shuttle message hook on this host")
+	}
+	if r.State == "" {
+		return "unknown", nil
+	}
+	return r.State, nil
+}
+
+func lockMailboxSessionState(env *sysenv.Env, harness, id, host string) (string, func(), error) {
+	dir := mailboxDir(env, harness, id)
+	lock, err := os.OpenFile(filepath.Join(dir, ".registration.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		lock.Close()
+		return "", nil, err
+	}
+	unlock := func() {
+		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+		_ = lock.Close()
+	}
+	r, err := mailboxRegistrationFor(env, harness, id)
+	if err != nil || r.ID != id || r.Host != host || !r.live() {
+		unlock()
+		return "", nil, errCode("unavailable", "session has no live Shuttle message hook on this host")
+	}
+	state := r.State
+	if state == "" {
+		state = "unknown"
+	}
+	return state, unlock, nil
+}
+
+// MailboxState reports the last turn phase observed by a live harness hook.
+func MailboxState(env *sysenv.Env, harness, id, host string) (string, error) {
+	return mailboxSessionState(env, harness, id, host)
 }
 
 func queueMailbox(env *sysenv.Env, a Address, r Request) (Receipt, error) {
@@ -695,7 +768,14 @@ func mailboxSessions(env *sysenv.Env, harness, host string) []Session {
 		if err != nil {
 			continue
 		}
-		out = append(out, Session{Address: address, Host: host, Harness: harness, ID: r.ID, CWD: r.CWD, State: "hook", Capabilities: []string{"context"}, LastSeen: r.LastSeen})
+		state := r.State
+		if state == "" {
+			state = "hook"
+			if harness == "codex" {
+				state = "unknown"
+			}
+		}
+		out = append(out, Session{Address: address, Host: host, Harness: harness, ID: r.ID, CWD: r.CWD, State: state, Capabilities: []string{"context"}, LastSeen: r.LastSeen})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
 	return out

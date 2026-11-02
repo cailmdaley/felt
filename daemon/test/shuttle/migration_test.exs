@@ -123,7 +123,6 @@ defmodule Shuttle.MigrationTest do
     data = Path.join(root, "data")
     Env.put_env("SHUTTLE_DATA_DIR", data)
     Env.delete_env("SHUTTLE_SESSIONS_FILE")
-    Env.put_app_env(:app_workers_dir, Path.join(data, "app-workers"))
     Env.put_env("SHUTTLE_STORES", root)
     on_exit(fn -> File.rm_rf(root) end)
 
@@ -372,96 +371,6 @@ defmodule Shuttle.MigrationTest do
     GenServer.stop(p)
     {:ok, restarted} = restart(root)
     assert :sys.get_state(restarted).reconciliation_hold != nil
-  end
-
-  test "an app-backed Codex migration reassigns its held Rex terminal viewer", %{
-    poller: p,
-    root: root
-  } do
-    alias Shuttle.{AppWorkers, Terminal, Test.FakeRex}
-    alias Shuttle.Terminal.{Rex, RexBindings}
-    Env.put_env("SHUTTLE_REX_BIN", "/bin/echo")
-    Env.put_app_env(:fake_rex, start_supervised!({FakeRex, []}))
-    Env.put_app_env(:migration_rex, true)
-    Env.put_app_env(:terminal_backend, Rex)
-    id = "native-session"
-    tmux = Shuttle.CodexTerminal.tmux_name(id)
-
-    :ok =
-      AppWorkers.put(%{
-        "session_uuid" => id,
-        "thread_id" => id,
-        "active" => true,
-        "fiber_id" => "source",
-        "uid" => FiberUid.for("source"),
-        "felt_store" => root,
-        "surface" => "cli",
-        "terminal_tmux" => tmux,
-        "backend_host" => "test-host",
-        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
-      })
-
-    :sys.replace_state(p, fn s ->
-      put_in(s.running[Poller.running_key(s, "source")].session, AppWorkers.ref(id))
-    end)
-
-    assert :ok = Terminal.launch(Runner, tmux, root, "sleep 30\n", fiber: "source")
-    assert {:ok, %{"bindings" => %{^tmux => %{"session_id" => sid}}}} = RexBindings.read()
-    assert FakeRex.state().sessions[sid].label == "source"
-    assert {:ok, _} = Poller.migrate(p, "source", "dest", rest: true)
-
-    assert {:ok, %{"bindings" => %{^tmux => %{"session_id" => ^sid, "fiber" => "dest"}}}} =
-             RexBindings.read()
-
-    assert FakeRex.state().sessions[sid].label == "source"
-    assert {:ok, [%{"label" => "dest"}]} = Shuttle.Rex.windows(FakeRex, sid)
-    assert {:ok, %{"fiber_id" => "dest", "thread_id" => ^id}} = AppWorkers.get(id)
-    assert Shuttle.CodexTerminal.tmux_name(id) == tmux
-  end
-
-  test "concurrent app status writes cannot undo migration", %{poller: p, root: root} do
-    alias Shuttle.AppWorkers
-    id = "native-session"
-
-    record = %{
-      "session_uuid" => id,
-      "thread_id" => id,
-      "active" => true,
-      "fiber_id" => "source",
-      "uid" => FiberUid.for("source"),
-      "felt_store" => root,
-      "backend_host" => "test-host",
-      "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
-    }
-
-    :ok = AppWorkers.put(record)
-
-    :sys.replace_state(p, fn s ->
-      put_in(s.running[Poller.running_key(s, "source")].session, AppWorkers.ref(id))
-    end)
-
-    parent = self()
-
-    writer =
-      Task.async(fn ->
-        :global.trans({{AppWorkers, id}, self()}, fn ->
-          {:ok, snapshot} = AppWorkers.get(id)
-          send(parent, :read)
-
-          receive do
-            :commit -> AppWorkers.put(Map.put(snapshot, "remote_state", "running"))
-          end
-        end)
-      end)
-
-    assert_receive :read
-    moving = Task.async(fn -> Poller.migrate(p, "source", "dest", rest: true) end)
-    early = Task.yield(moving, 2000)
-    send(writer.pid, :commit)
-    Task.await(writer, 30_000)
-    if early == nil, do: Task.await(moving, 30_000)
-    {:ok, current} = AppWorkers.get(id)
-    assert current["fiber_id"] == "dest"
   end
 
   test "stale intent cannot move a replacement conversation", %{poller: p} do
@@ -976,53 +885,6 @@ defmodule Shuttle.MigrationTest do
     assert :sys.get_state(old.pid).session == old.session
     assert receiver(poller, "dest") == {:error, :no_worker}
     assert {:ok, "shuttle://test-host/claude/native-session", _} = receiver(poller, "source")
-  end
-
-  test "owned Codex migration rekeys durable record without changing the thread or endpoint", %{
-    poller: poller,
-    root: root
-  } do
-    old = Poller.worker_status(poller, "source")
-
-    record = %{
-      "session_uuid" => "native-session",
-      "thread_id" => "native-session",
-      "active" => true,
-      "fiber_id" => "source",
-      "uid" => FiberUid.for("source"),
-      "felt_store" => root,
-      "backend_host" => "test-host",
-      "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket(),
-      "surface" => "app"
-    }
-
-    assert :ok = Shuttle.AppWorkers.put(record)
-    ref = Shuttle.AppWorkers.ref("native-session")
-
-    :sys.replace_state(poller, fn state ->
-      key = Poller.running_key(state, "source")
-      %{state | running: Map.put(state.running, key, %{old | session: ref})}
-    end)
-
-    assert {:ok, _} =
-             Poller.migrate(poller, "source", "dest",
-               session_id: "native-session",
-               tmux_pane: "%unrelated",
-               rest: true
-             )
-
-    assert {:ok, moved} = Shuttle.AppWorkers.get("native-session")
-    assert moved["fiber_id"] == "dest"
-    assert moved["uid"] == FiberUid.for("dest")
-    assert moved["felt_store"] == root
-    assert moved["thread_id"] == record["thread_id"]
-    assert moved["backend_endpoint"] == record["backend_endpoint"]
-    assert Shuttle.AppWorkers.for_fiber("source", FiberUid.for("source")) == nil
-    assert Shuttle.AppWorkers.for_fiber("dest", FiberUid.for("dest")) == moved
-    assert Poller.worker_status(poller, "dest").session == ref
-    assert :sys.get_state(old.pid).session == ref
-    assert Poller.live_worker(poller, "dest").cli == "codex"
-    assert_native_delivery("dest", "codex")
   end
 
   test "live destination and unknown native identity are refused before writes", %{poller: poller} do

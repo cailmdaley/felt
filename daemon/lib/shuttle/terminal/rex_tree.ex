@@ -70,16 +70,11 @@ defmodule Shuttle.Terminal.RexTree do
     |> Enum.filter(&is_map/1)
     |> Enum.find_value(fn row ->
       session = if is_binary(row["session"]), do: row["session"], else: ""
-      thread = if is_binary(row["thread_id"]), do: row["thread_id"], else: ""
 
       if is_binary(row["fiber"]) and row["fiber"] != "" and
            (row["tmux"] == name or
               (uid != nil and row["uid"] == uid) or
-              name in [
-                "codex-terminal-" <> thread,
-                "codex-terminal-" <> session,
-                "resume-" <> session
-              ]) do
+              name == "resume-" <> session) do
         row["fiber"]
       end
     end)

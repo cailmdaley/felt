@@ -161,7 +161,7 @@ defmodule Shuttle.MeetingTest do
       language = unquote(language)
       meeting = if language, do: Map.put(meeting, "language", language), else: meeting
 
-      assert {:ok, _} = Meeting.start(meeting, {:capture, "cli"}, "Shear review", nil)
+      assert {:ok, _} = Meeting.start(meeting, :capture, "Shear review", nil)
 
       {"tmux", ["new-session" | args], _} =
         Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
@@ -352,7 +352,7 @@ defmodule Shuttle.MeetingTest do
     end)
 
     assert {:ok, %{meeting: row, prompt: prompt}} =
-             Meeting.start(%{"mode" => "phone"}, {:capture, "cli"}, "Lunch", nil)
+             Meeting.start(%{"mode" => "phone"}, :capture, "Lunch", nil)
 
     assert %{state: "loading", phone: true} = row
     assert prompt =~ "Meeting mode (phone)."
@@ -417,7 +417,7 @@ defmodule Shuttle.MeetingTest do
     refute joined =~ "Do not ask the user for a title"
     refute joined =~ "provisional date-based name"
     refute joined =~ "rename it when the transcript clarifies the subject"
-    refute Meeting.meeting_message("call", "x", {:capture, "cli"}) =~ "joins this constitution"
+    refute Meeting.meeting_message("call", "x", :capture) =~ "joins this constitution"
   end
 
   test "joining a constitution records locally, names the fiber, and delivers to its owner", %{
@@ -1102,24 +1102,7 @@ defmodule Shuttle.MeetingTest do
         })
       )
 
-    assert conn.status == 422
-    assert Jason.decode!(conn.resp_body)["error"] =~ "requires a terminal"
-
-    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
-             cmd == "tmux" and match?(["new-session" | _], args)
-           end)
-
-    conn =
-      api_conn()
-      |> post(
-        "/api/v1/capture",
-        Jason.encode!(%{
-          "meeting" => %{"mode" => "call"},
-          "prompt" => "Shear review\nDiscuss the residuals",
-          "project_dir" => Path.join(tmp_dir, "remote-project"),
-          "origin" => "project-host"
-        })
-      )
+    assert conn.status == 200
 
     assert conn.status == 200
 
@@ -1140,7 +1123,7 @@ defmodule Shuttle.MeetingTest do
     request = Jason.decode!(forwarded.body)
     refute Map.has_key?(request, "meeting")
     refute Map.has_key?(request, "origin")
-    assert request["surface"] == "cli"
+    refute Map.has_key?(request, "surface")
     assert request["prompt"] =~ "Meeting mode (call)."
     assert request["prompt"] =~ "Discuss the residuals"
 
@@ -1169,7 +1152,7 @@ defmodule Shuttle.MeetingTest do
     Env.put_app_env(:meeting_fibers, fn -> [] end)
 
     {:ok, %{launch: launch}} =
-      Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", nil)
+      Meeting.start(%{"mode" => "call"}, :capture, "Shear review", nil)
 
     assert {:ok, %{meeting: %{fiber: nil, joined: false}}} = Meeting.show()
 
@@ -1242,16 +1225,6 @@ defmodule Shuttle.MeetingTest do
     assert Shuttle.Test.MeetingRunner.calls() == []
 
     Env.put_app_env(:hark_path, hark_path)
-
-    conn =
-      api_conn()
-      |> post(
-        "/api/v1/capture",
-        Jason.encode!(%{"meeting" => %{"mode" => "call"}, "surface" => "app"})
-      )
-
-    assert conn.status == 422
-    assert Jason.decode!(conn.resp_body)["error"] =~ "requires a terminal"
   end
 
   test "a live meeting conflicts before a second tmux session can be created", %{
@@ -1292,7 +1265,7 @@ defmodule Shuttle.MeetingTest do
     results =
       1..2
       |> Task.async_stream(
-        fn _ -> Meeting.start(request, {:capture, "cli"}, "", "local") end,
+        fn _ -> Meeting.start(request, :capture, "", "local") end,
         timeout: 60_000
       )
       |> Enum.to_list()
@@ -1621,7 +1594,7 @@ defmodule Shuttle.MeetingTest do
     set_starting_meeting_handler(hark_dir)
 
     assert {:ok, %{prompt: prompt}} =
-             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
+             Meeting.start(%{"mode" => "call"}, :capture, "Shear review", "local")
 
     {"tmux", ["new-session" | args], _} =
       Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
@@ -1694,7 +1667,7 @@ defmodule Shuttle.MeetingTest do
     set_starting_meeting_handler(dir, false)
 
     assert {:ok, %{meeting: %{state: "live", launch: launch}}} =
-             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", nil)
+             Meeting.start(%{"mode" => "call"}, :capture, "Shear review", nil)
 
     assert {:ok, %{meeting: %{state: "live", launch: ^launch}}} = Meeting.show()
   end
@@ -1720,7 +1693,7 @@ defmodule Shuttle.MeetingTest do
     end)
 
     assert {:ok, %{meeting: %{state: "starting", tmux_session: "hark-meeting"}}} =
-             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
+             Meeting.start(%{"mode" => "call"}, :capture, "Shear review", "local")
   end
 
   test "an unmatched observation after creation is uncertain, not a failed launch", %{
@@ -1742,7 +1715,7 @@ defmodule Shuttle.MeetingTest do
     end)
 
     assert {:ok, %{meeting: %{state: "starting", title: "Shear review"}}} =
-             Meeting.start(%{"mode" => "call"}, {:capture, "cli"}, "Shear review", "local")
+             Meeting.start(%{"mode" => "call"}, :capture, "Shear review", "local")
   end
 
   test "a reap never kills a newer launch that replaced the inspected one", %{

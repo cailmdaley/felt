@@ -28,7 +28,7 @@ Return the working board URL once the setup card is visible.
 A successful claim verifies adoption, not fresh dispatch.
 The guide distinguishes the optional read-only worker test from connecting this conversation.
 Record separately whether the board, dispatch, messaging, and chosen opener were actually verified.
-Don't mark an unavailable desktop backend as working by silently substituting a terminal worker.
+Verify the selected terminal backend before marking worker dispatch as working.
 
 ## Add a remote
 
@@ -60,16 +60,10 @@ Verify a live recorded Remote Control link before promising browser/app opening.
 For Kitty, explain that the opener runs on the daemon serving the page and needs SSH for a remote worker.
 Offer the quick-access panel after normal terminal attachment works.
 
-For Codex app workers, follow the [desktop backend guide](https://cailmdaley.github.io/felt/shuttle/codex-desktop/) and inspect the installed app rather than assuming its bundle path.
-Use the native bundled executable, preserve the app's tools environment, and give Shuttle the same explicit socket as the bridge.
-Keep any existing supervisor overrides when reinstalling.
-A restart can interrupt this very conversation if it owns that backend; arrange the verification from an independent session before quitting the app.
-Don't substitute a CLI worker to hide an unavailable app backend.
-
 ## Leave a verified setup
 
 Check the intended workflow end to end, not only process liveness: the board sees the host, a task runs there, and the chosen opener returns to that exact conversation.
-A Codex thread file or a successful `thread/start` response does not prove the desktop or phone can continue it.
+A successful claim proves adoption of this terminal session; a separate worker launch verifies fresh dispatch.
 Record what was actually tested, the relevant host/store/project choices, and any remaining human login or device check.
 Keep machine-specific paths and operational notes in the user's store, not public docs.
-Leave rollback instructions for any app override or service you added.
+Leave rollback instructions for any service you added.

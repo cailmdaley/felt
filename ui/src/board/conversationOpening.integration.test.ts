@@ -60,7 +60,7 @@ describe('conversation opening', () => {
     expect((workerPill({ ...worker, sessionLink: url }) as HTMLAnchorElement).href).toBe(url)
   })
 
-  it.each(['terminal', 'browser', 'app', 'chatgpt'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
+  it.each(['terminal', 'browser', 'app'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
     saveConversationOpening(choice)
     vi.stubGlobal('matchMedia', () => ({ matches: true }))
     expect((workerPill(worker) as HTMLAnchorElement).href).toBe(bridge)
@@ -70,12 +70,13 @@ describe('conversation opening', () => {
     expect(mark.title).toContain('Remote Control')
   })
 
-  it('labels Rex and opens Codex app workers in ChatGPT regardless of an unavailable preference', () => {
+  it('labels Rex and opens Codex workers in their terminal', () => {
     const rex = workerPill({ ...worker, terminalBackend: 'rex' }, { openWorker: vi.fn() })
     expect(rex.getAttribute('aria-label')).toBe('working. Open in Rex')
-    const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
-    expect(workerPill(card({ id: 'codex', workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route })).getAttribute('href')).toBe(route)
-    expect(conversationDestinations({ ...worker, workerSurface: 'app', sessionUuid: 'app-session' }, desktop, vi.fn()).map(d => d.id)).toEqual(['chatgpt'])
+    const open = vi.fn()
+    const codex = workerPill(card({ id: 'codex', tmuxSession: 'codex-shuttle' }), { openWorker: open })
+    codex.click()
+    expect(open).toHaveBeenCalledWith('codex-shuttle', undefined)
   })
 
   it('treats a stored Rex preference as no preference', () => {
@@ -98,7 +99,7 @@ describe('conversation opening', () => {
   })
 
   it('resolves remembered-if-available-else-first, never duplicates ids or offers phone terminals', () => {
-    const id = fc.constantFrom<ConversationOpening>('terminal', 'browser', 'app', 'chatgpt')
+    const id = fc.constantFrom<ConversationOpening>('terminal', 'browser', 'app')
     fc.assert(fc.property(fc.uniqueArray(id), id, fc.boolean(), fc.boolean(), fc.boolean(), (ids, remembered, phone, hasLink, hasOpener) => {
       const entries = ids.map(id => ({ id }))
       expect(resolveDestination(entries, remembered)).toBe(entries.find(entry => entry.id === remembered) ?? entries[0])

@@ -39,7 +39,10 @@ defmodule Shuttle.HarnessPaths do
   @spec codex_sessions_root(keyword()) :: String.t()
   def codex_sessions_root(opts \\ []) do
     configured_path(opts, [:codex_root], "SHUTTLE_CODEX_SESSIONS_DIR", fn ->
-      Path.join([Shuttle.Env.home(), ".codex", "sessions"])
+      case Shuttle.Env.get("CODEX_HOME") do
+        home when is_binary(home) and home != "" -> Path.join(home, "sessions")
+        _ -> Path.join([Shuttle.Env.home(), ".codex", "sessions"])
+      end
     end)
   end
 

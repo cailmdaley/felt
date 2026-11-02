@@ -582,7 +582,7 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 		t.Fatalf("sessions: %#v", sessions)
 	}
 	s := sessions[0]
-	if s.State != "hook" || s.LastSeen == 0 || len(s.Capabilities) != 1 || s.Capabilities[0] != "context" {
+	if s.State != "unknown" || s.LastSeen == 0 || len(s.Capabilities) != 1 || s.Capabilities[0] != "context" {
 		t.Fatalf("hook registration was mislabeled: %#v", s)
 	}
 	req := Request{Address: s.Address, Text: "context", MessageID: "m"}
@@ -597,17 +597,15 @@ func TestCodexMailboxIsHostScopedAndDiscoverableAsHook(t *testing.T) {
 	}
 }
 
-func TestMailboxWakeRejectedForEveryHookHarness(t *testing.T) {
+func TestClaudeMailboxWakeRejected(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	for _, harness := range []string{"claude", "codex"} {
-		if err := RegisterMailbox(env, harness, "s", "host", "/", os.Getpid(), true); err != nil {
-			t.Fatal(err)
-		}
-		req := Request{Address: "shuttle://host/" + harness + "/s", Text: "wake", Wake: true, MessageID: harness}
-		if receipt, err := Send(context.Background(), env, "host", req); err == nil || receipt.Status != StatusRejected {
-			t.Fatalf("%s wake: %#v %v", harness, receipt, err)
-		}
+	if err := RegisterMailbox(env, "claude", "s", "host", "/", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	req := Request{Address: "shuttle://host/claude/s", Text: "wake", Wake: true, MessageID: "claude"}
+	if receipt, err := Send(context.Background(), env, "host", req); err == nil || receipt.Status != StatusRejected {
+		t.Fatalf("Claude wake: %#v %v", receipt, err)
 	}
 }
 

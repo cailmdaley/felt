@@ -87,9 +87,9 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   …") inline. The UI picks between the two from the `native_folder_picker` flag
   on each origin of `GET /api/v1/felt-stores`. Both endpoints are owner-routed.
 - **Dispatcher** (`daemon/lib/shuttle/dispatcher.ex`) resolves the agent and chooses its execution backend.
-  Claude and Pi workers use `<leaf>-<uid>-shuttle` worker names, parsed by `Shuttle.ULID.from_tmux/1`, on the selected terminal backend.
-  Codex uses a durable `AppWorkers` record on either surface; terminal presentation opens a `codex-terminal-<thread-id>` viewer after the backend confirms the initial turn.
-  Conversation identity is known before dispatch is published, without scraping a rollout or guessing which thread a terminal currently shows.
+  Workers use `<leaf>-<uid>-shuttle` names, parsed by `Shuttle.ULID.from_tmux/1`, on the selected terminal backend.
+  Codex runs its interactive CLI; fresh conversation identity is captured from a rollout matching the launch time, project directory and fiber prompt.
+  Resuming Codex uses the recorded native session UUID and never falls back to a fresh conversation.
   A fiber without a ULID `id:` is refused with `{:uid_missing, message}`, a preflight refusal like the others (the `blocked` row, the dispatch API's 422, the preflight cooldown).
 - **Standing constitutions** — `shuttle.kind: standing` with a cron
   `schedule:`. Nothing due is stored: an armed (`active`, untempered) one is due when a
@@ -117,7 +117,6 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   transcript's size. The lookup is one resolve through
   `Shuttle.Transcript.path/2` and one stat, taken only on that no-handoff
   branch.
-  A durably owned Codex conversation on either surface is exempt from the transcript check: it keeps its identity in the App Server, so it resumes whenever it did not hand off.
   A standing constitution starts fresh on the autonomous loop.
 
   A dirty-death restoration is separate from launching another turn. The daemon
@@ -144,76 +143,14 @@ The operator-facing lifecycle is in [Lifecycle](../shuttle/lifecycle.md).
   the checkpoint instead of handing off. This is
   the contract, not a gap.
 
-## Codex conversation ownership and terminal viewers
+## Codex terminal workers
 
-Both Codex presentations use the App Server selected by `SHUTTLE_CODEX_SOCKET`, or `/tmp/shuttle-codex-<euid>-<host-hash>/control.sock`, with the first 16 lowercase SHA-256 hexadecimal characters of the actual OS hostname.
-`CODEX_HOME` stays persistent and doesn't select this control path.
-`Shuttle.CodexBackend` ensures the dependency asynchronously, even under worker boot quarantine, and adopts a healthy existing server without changing it.
-It never creates a project, thread, or model turn merely to establish readiness.
-Dispatch and capture preflight the cached health before creating a conversation; a non-ready backend returns retryable `backend_not_ready` waiting responses.
-The Poller shows the wait with zero failed attempts and retries on the ordinary poll, without the five-minute preflight cooldown.
-An explicit request isn't queued for an unbounded future launch, and a capture must be repeated after readiness.
-The backend's endpoint-specific tmux session survives Shuttle restarts; a dead or missing owned pane, a refused socket and healthy process observations authorize native locked stale recovery, never live-server replacement.
-`GET /api/v1/version` exposes its independent `codex_backend` health.
-Terminal dispatch preflights its wrapper and selected terminal backend before creating a conversation.
-The backend owns the thread, configured model and effort, initial turn, and task assignment.
-A terminal viewer only renders and accepts human input for that conversation.
-Native messages address the thread through `thread/read`, `turn/steer`, `turn/start`, and `thread/inject_items` on that same server.
-There is no terminal-paste transport.
-
-The durable record precedes the initial turn.
-A failed or ambiguous turn start preserves that identity and its pending prompt rather than launching fresh.
-The initial turn must be confirmed before attaching a viewer because an empty thread has no resumable rollout.
-Viewer failure leaves the conversation owned; `shuttle attach <fiber>` prepares the same viewer again without sending a prompt.
-Idle turns, closed viewers, and server transport errors never become worker-death evidence.
-Restart recovery adopts the durable conversation, not a second CLI execution.
-`WorkerProcess.holder` still protects historical embedded transcripts and non-Codex CLI resumes; it does not serialize viewers of an already-owned App Server conversation.
-
-A shared backend inherits its server's environment.
-Per-worker agent `env` and unsupported arbitrary `extra_flags` are refused; supported approval presets, model, and effort are expressed through thread/turn protocol fields.
-The worker prompt identifies the App Server backend even with terminal presentation, so worker tools do not mistake the viewer's tmux context for their own execution environment.
-See [operating](operating.md#terminal-codex-workers) for starting the dependency and handling hook-only sessions.
-
-## Managed Codex context and registry compatibility
-
-Managed Codex creates conversations with native `thread/start.developerInstructions` on both `cli` and `app` surfaces.
-It does not depend on a terminal wrapper forwarding CLI config or on a worker inheriting the daemon's session identity.
-The developer instruction text joins these producers, in this order, separated by blank lines:
-
-1. The daemon user's optional `~/.codex/WAKE.md`.
-2. `felt session` run in the worker's project directory.
-   This is the read-only plaintext producer behind `felt hook session`'s `hookSpecificOutput.additionalContext` envelope; the JSON envelope itself is not an instruction.
-3. The resolved agent record's optional `developer_instructions` string.
-4. The optional `developer_instructions` dispatch/capture keyword option.
-
-The context command runs directly, without a login shell, with a 15-second deadline and inherited `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, `TMUX`, `TMUX_PANE`, `SHUTTLE_FIBER_PATH`, and `SHUTTLE_SESSION_ID` unset.
-Its cwd selects the project's felt view; the launch prompt separately names the owning felt store and the felt/shuttle skills.
-It neither runs a session-registration hook nor starts a model turn to retrieve instructions.
-A missing WAKE file is allowed; an unreadable WAKE file or failed context command refuses launch instead of silently losing context.
-
-This combined text **replaces**, rather than appends to, config-level `developer_instructions`, matching a wrapper's explicit `--config developer_instructions=...` override.
-Agent and dispatch text are both retained, with dispatch text last; Shuttle does not interpret or resolve contradictory prose.
-Project `AGENTS.md`, server configuration other than this explicit override, and native server requirements still load through Codex.
-On resume without an explicit dispatch instruction, Shuttle omits `developerInstructions` so Codex retains the conversation's persisted native context, including its original agent and dispatch instructions.
-An explicit dispatch instruction on resume rebuilds the same four-part context with the current agent record and supplies it through `thread/resume.developerInstructions`.
-Codex applies resume overrides when loading a thread; for a loaded thread with subscribers or a running turn, Codex preserves its existing native context and can ignore these overrides.
-Shuttle does not unload or replace an observed conversation to force a context change.
-A view-only TUI attach supplies no context override.
-
-The Go registry owns `developer_instructions` on base agent records and projects it through both `shuttle agents resolve --json` and `shuttle show --json`; the daemon consumes that resolved field.
-For example, a custom record can carry `"developer_instructions": "Keep the verification evidence."` alongside `"extra_flags": "--approve-for-me"`.
-The shipped `codex-terra`, `codex-sol`, `codex-luna`, and `codex-astra` records use models `gpt-terra`, `gpt-sol`, `gpt-luna`, and `gpt-astra`, default efforts `medium`, `low`, `max`, and `medium`, and `--approve-for-me`.
-Model families resolve through the Go CLI's model catalog; effort overrides remain registry-owned.
-The managed renderer maps `--approve-for-me` and `--not-so-yolo` to `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, and `sandbox: workspace-write`.
-It maps `--dangerously-bypass-approvals-and-sandbox` to `approvalPolicy: never` and `sandbox: danger-full-access`.
-An absent preset leaves the server's permission configuration untouched.
-
-Arbitrary `extra_flags` are **refused before creating or resuming a thread**, not silently ignored or executed through a shell.
-Only an empty value or one complete approval preset above is accepted.
-Examples refused include `--resume <id>`, `--session <id>`, `--model other`, `-c model=other`, and `--config developer_instructions=...`, including any of these appended to an approval preset.
-A custom record containing `--approve-for-me -c developer_instructions=...` must move its instruction text to `developer_instructions`; Shuttle does not parse shell quoting, interpolate variables, or translate arbitrary CLI config.
-Use the structured `model`, `effort`, and `developer_instructions` fields instead.
-Per-worker agent `env` is also refused because tools execute in the shared server's environment; configure that environment on the server itself.
+Codex runs through the Codex CLI in the selected terminal backend, like Claude
+Code and Pi. The daemon launches and observes the CLI process; the harness owns
+the conversation and native session identity. Resume and message delivery use
+the existing terminal session, and closing a viewer does not mean the worker
+has exited. App Server APIs used by `felt setup codex` are transient hook-trust
+operations and do not participate in Shuttle dispatch.
 
 ## Terminal backend and macOS ownership
 
@@ -289,8 +226,6 @@ shuttle skills.` and carry only what this dispatch knows and the skill cannot:
 - `Fiber:` — the fiber's id relative to the store root — and `Felt store:`,
   so `felt -C <store> show <id>` resolves it whatever the worker's project
   view is.
-- `Surface: app` and `Headless: true`, only when the conversation is not an
-  attachable terminal session.
 - `Mode: resume` on a resumed session, which may have slept for any length of
   time.
 - Standing run ID and scheduled/ad-hoc mode when applicable.

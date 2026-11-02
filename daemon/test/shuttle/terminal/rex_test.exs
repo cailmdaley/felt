@@ -279,6 +279,8 @@ defmodule Shuttle.Terminal.RexTest do
     Env.put_env("SSH_AUTH_SOCK", "/daemon/agent.sock")
     Env.put_env("SECRET_TOKEN", "never-export")
     Env.put_env("TMUX_TMPDIR", "/daemon/tmux")
+    Env.put_env("CODEX_HOME", "/operator/codex")
+    Env.delete_env("SHUTTLE_LISTEN")
     snippets = Rex.script(@name)
     assert snippets.wait_for_viewer == ""
     assert snippets.env =~ "unset TMUX TMUX_PANE"
@@ -286,6 +288,8 @@ defmodule Shuttle.Terminal.RexTest do
     assert snippets.env =~ "export PATH='/daemon/tools:/bin'"
     assert snippets.env =~ "export SSH_AUTH_SOCK='/daemon/agent.sock'"
     assert snippets.env =~ "export TMUX_TMPDIR='/daemon/tmux'"
+    assert snippets.env =~ "export CODEX_HOME='/operator/codex'"
+    assert snippets.env =~ "unset SHUTTLE_LISTEN"
     refute snippets.env =~ "SECRET_TOKEN"
     assert snippets.submit_key =~ ~s(send-key -s "$REX_SESSION" -b "$REX_BLOCK" enter)
     refute snippets.submit_key =~ "tmux"

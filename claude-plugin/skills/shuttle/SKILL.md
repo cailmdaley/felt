@@ -69,7 +69,7 @@ Commit, `felt -C <store> sync --push`, then pick one. `close`, `handoff` and `re
 
 The human's words name the command, not a summary: "hand off" means `handoff`; "close out", "wrap it up" or "I'm done for now" mean `close`, even with more to do; "rest it" means `rest`.
 
-A Codex worker's conversation lives in a shared App Server: an idle turn, a chat reply or a dropped connection is not an exit, and never kill the server or a parent process to leave.
+Codex workers run in the terminal through the Codex CLI. An idle turn or dropped terminal viewer does not end a worker; never kill a parent process to leave.
 
 ## Threads
 

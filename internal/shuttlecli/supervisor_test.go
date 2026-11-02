@@ -650,8 +650,6 @@ func supervisorTemplateFixtures() map[string]string {
 <key>TMUX_TMPDIR</key>
 <string>__TMUX_TMPDIR__</string>
 <key>EnvironmentVariables</key><dict>
-<key>SHUTTLE_CODEX_SOCKET</key>
-<string>__CODEX_SOCKET__</string>
 <key>CODEX_HOME</key>
 <string>__CODEX_HOME__</string>
 </dict>
@@ -670,7 +668,6 @@ Environment="SHUTTLE_STORES=__SHUTTLE_STORES__"
 Environment="SHUTTLE_STORES_FILE=__SHUTTLE_STORES_FILE__"
 Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
 Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
-Environment="SHUTTLE_CODEX_SOCKET=__CODEX_SOCKET__"
 Environment="CODEX_HOME=__CODEX_HOME__"
 Environment="SHUTTLE_LOG=__LOG__"
 StandardOutput=append:__LOG__
@@ -679,130 +676,11 @@ StandardError=append:__LOG__
 	}
 }
 
-func TestSupervisorCodexEndpointPreservedAcrossReinstall(t *testing.T) {
-	t.Parallel()
-	for _, osName := range []string{"Darwin", "Linux"} {
-		t.Run(osName, func(t *testing.T) {
-			t.Parallel()
-			env, home := envWithHome(t)
-			env.Unset("SHUTTLE_CODEX_SOCKET")
-			env.Unset("CODEX_HOME")
-			name := "io.shuttle.daemon.plist.template"
-			path := filepath.Join(home, "Library", "LaunchAgents", defaultDaemonLabel+".plist")
-			if osName == "Linux" {
-				name = "io.shuttle.daemon.service.template"
-				path = filepath.Join(home, ".config", "systemd", "user", systemdUnitName(defaultDaemonLabel))
-			}
-			source, err := os.ReadFile(filepath.Join("..", "..", "daemon", "share", name))
-			if err != nil {
-				t.Fatal(err)
-			}
-			original := supervisorOptions{OS: osName, Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", Path: "/bin", Log: "/tmp/shuttle.log",
-				CodexSocket: `/tmp/desktop "quoted" & 50%/control.sock`, CodexHome: "/tmp/codex home"}
-			rendered, err := newApp(env).renderSupervisorTemplate(osName, string(source), original, daemonRelease{Dir: "/opt/shuttle"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, []byte(rendered), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			for _, tc := range []struct {
-				name, env, flag, want string
-				explicit              bool
-			}{
-				{name: "preserve", want: original.CodexSocket},
-				{name: "environment", env: "/tmp/env.sock", want: "/tmp/env.sock"},
-				{name: "flag beats environment", env: "/tmp/env.sock", flag: "/tmp/flag.sock", explicit: true, want: "/tmp/flag.sock"},
-				{name: "explicit reset", env: "/tmp/env.sock", explicit: true},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					t.Parallel()
-					env := env.Clone()
-					if tc.env != "" {
-						env.Set("SHUTTLE_CODEX_SOCKET", tc.env)
-					}
-					options := supervisorOptions{OS: osName, Label: defaultDaemonLabel, CodexSocket: tc.flag, CodexSocketSet: tc.explicit}
-					if err := newApp(env).resolveSupervisorCodex(&options); err != nil {
-						t.Fatal(err)
-					}
-					if options.CodexSocket != tc.want || options.CodexHome != original.CodexHome {
-						t.Fatalf("resolved %+v; want socket %q and home %q", options, tc.want, original.CodexHome)
-					}
-				})
-			}
-			codexHome := env.Clone()
-			codexHome.Set("CODEX_HOME", "/tmp/env home")
-			options := supervisorOptions{OS: osName, Label: defaultDaemonLabel}
-			if err := newApp(codexHome).resolveSupervisorCodex(&options); err != nil || options.CodexHome != "/tmp/env home" {
-				t.Fatalf("home override: %+v, %v", options, err)
-			}
-		})
-	}
-}
-
-func TestDaemonInstallCodexSocketFlagAndValidation(t *testing.T) {
-	t.Parallel()
-	release := writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release"))
-	share := filepath.Join(release.Dir, "share")
-	if err := os.MkdirAll(share, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for name, source := range supervisorTemplateFixtures() {
-		if err := os.WriteFile(filepath.Join(share, name), []byte(source), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	env := testEnv(t)
-	env.Set("SHUTTLE_RELEASE", release.Dir)
-	env.Set("SHUTTLE_CODEX_SOCKET", "/tmp/env.sock")
-	env.Unset("CODEX_HOME")
-	a := stubLoginEnv(env, loginEnv{Path: "/bin"})
-	for _, osName := range []string{"Darwin", "Linux"} {
-		for _, endpoint := range []string{"/tmp/not-created-yet.sock", ""} {
-			out, stderr, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print", "--os", osName, "--codex-socket="+endpoint)
-			if err != nil {
-				t.Fatalf("%s: %v %s", osName, err, stderr)
-			}
-			if endpoint == "" && strings.Contains(out, "SHUTTLE_CODEX_SOCKET") {
-				t.Fatalf("reset retained endpoint: %s", out)
-			}
-			if endpoint != "" && !strings.Contains(out, endpoint) {
-				t.Fatalf("missing endpoint: %s", out)
-			}
-		}
-	}
-	for _, path := range []string{"relative.sock", "unix:///tmp/control.sock", "/tmp/../control.sock", "/tmp/control\nsock", "/tmp/control\x00sock"} {
-		_, _, err := executeApp(t, a, t.TempDir(), "daemon", "install", "--print", "--codex-socket="+path)
-		if err == nil || !strings.Contains(err.Error(), "--codex-socket") {
-			t.Errorf("invalid endpoint %q: %v", path, err)
-		}
-	}
-}
-
 func TestSupervisorCodexMalformedExistingConfiguration(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ osName, source string }{{"Darwin", "<plist><dict>"}, {"Linux", `Environment="SHUTTLE_CODEX_SOCKET=/tmp/unclosed`}} {
+	for _, tc := range []struct{ osName, source string }{{"Darwin", "<plist><dict>"}, {"Linux", `Environment="CODEX_HOME=/tmp/unclosed`}} {
 		if _, err := supervisorEnvironment(tc.osName, tc.source); err == nil {
 			t.Errorf("%s accepted malformed settings", tc.osName)
 		}
-	}
-}
-
-func TestSupervisorCodexOlderTemplateCompatibility(t *testing.T) {
-	t.Parallel()
-	a := newApp(testEnv(t))
-	source := supervisorTemplateFixtures()["io.shuttle.daemon.service.template"]
-	source = removeEnvironmentLine(source, "SHUTTLE_CODEX_SOCKET", "__CODEX_SOCKET__")
-	source = removeEnvironmentLine(source, "CODEX_HOME", "__CODEX_HOME__")
-	options := supervisorOptions{Label: defaultDaemonLabel, ShuttleBin: "/bin/shuttle", Path: "/bin", Log: "/tmp/shuttle.log"}
-	if _, err := a.renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err != nil {
-		t.Fatalf("old template without endpoint: %v", err)
-	}
-	options.CodexSocket = "/tmp/control.sock"
-	if _, err := a.renderSupervisorTemplate("Linux", source, options, daemonRelease{Dir: "/opt/shuttle"}); err == nil {
-		t.Fatal("old template silently discarded the endpoint")
 	}
 }

@@ -148,7 +148,6 @@ func TestSendMaterializesFilesAndQueuesReferencesOnce(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dataDir := dataDir(env)
-	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -212,8 +211,6 @@ func TestMaterializePreservesMaximumLengthName(t *testing.T) {
 func TestAttachmentPayloadChangeConflictsOnMessageID(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
-	dataDir := dataDir(env)
-	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +228,6 @@ func TestPreexistingSymlinkPreventsDelivery(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dataDir := dataDir(env)
-	env.Set("SHUTTLE_CODEX_SOCKET", filepath.Join(dataDir, "missing.sock"))
 	if err := RegisterMailbox(env, "codex", "session", "host", "/work", os.Getpid(), true); err != nil {
 		t.Fatal(err)
 	}

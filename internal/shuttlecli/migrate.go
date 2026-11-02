@@ -97,12 +97,8 @@ func (a *app) migrateWorker(cmd *cobra.Command, source, target *felt.Felt, rest,
 	if err != nil {
 		return nil, err
 	}
-	harness, session := a.harnessSessionFromEnv()
+	_, session := a.harnessSessionFromEnv()
 	pane := a.currentTerminalPane()
-	if harness == "codex" && session != "" {
-		// App Server tools can inherit a pane belonging to another conversation.
-		pane = ""
-	}
 	body, err := json.Marshal(map[string]any{"from": from, "to": to, "session_id": session, "tmux_pane": pane, "rest": rest, "disabled": disabled})
 	if err != nil {
 		return nil, err

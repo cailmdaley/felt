@@ -92,8 +92,8 @@ func TestNativeWorkerIdentityFollowsLedgerAcrossStores(t *testing.T) {
 			env.Set("CODEX_THREAD_ID", "native-thread")
 			env.Set("SHUTTLE_FIBER_PATH", src.Path)
 			env.Set("SHUTTLE_HOST", "test-host")
-			// Shared App Server environment contains the source terminal, not this
-			// native thread's viewer. Never terminate that unrelated terminal.
+			// The terminal session belongs to the dispatched worker, not to the
+			// source fiber's previous assignment. Never terminate it here.
 			kills, _ := stubWorkerExitTmux(t, env, shuttleTmuxSessionName(src.ID, src.UID), src.Path)
 			records := []SessionProvenance{
 				{Kind: "dispatch", Host: "test-host", Harness: "codex", Session: "native-thread", Fiber: src.ID, UID: src.UID, At: 1},
@@ -248,10 +248,8 @@ func TestWorkerLedgerPathRequiresMatchingUID(t *testing.T) {
 	}
 }
 
-// A Codex worker's tools run in a shared App Server whose environment may carry
-// another worker's tmux pane and dispatch path. Plain exit verbs, implicit or
-// naming the worker's own fiber, act on the native thread's fiber and never
-// end the inherited terminal, so workers need no environment scrubbing.
+// Plain exit verbs act on the worker's assigned fiber and leave its terminal
+// session available for the next command.
 func TestCodexWorkerExitsPlainlyUnderInheritedTerminal(t *testing.T) {
 	t.Parallel()
 	for _, verb := range []string{"handoff", "close", "rest"} {

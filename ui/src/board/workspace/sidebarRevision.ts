@@ -12,8 +12,8 @@ export function sidebarRevision(card: KanbanCard): string {
     card.id, card.uid, card.originId, card.name, card.outcome, isAgentCard(card), onDesk(card),
     card.status === 'active' && card.runtimePhase !== 'attention' ? card.ask?.text : undefined,
     deskColumn(card), card.workerState, card.runtimePhase, card.launchError,
-    card.tmuxSession, card.terminalBackend, card.sessionLink, card.sessionUuid, card.desktopLink, card.shuttleHost,
-    card.shuttleProjectDir, card.workerSurface, card.shuttleSurface, card.workerAgent, card.shuttleAgent,
+    card.tmuxSession, card.terminalBackend, card.sessionLink, card.sessionUuid, card.shuttleHost,
+    card.shuttleProjectDir, card.workerAgent, card.shuttleAgent,
     card.lastActivityAt, card.ask?.at, card.originStale?.since, workerPlateFacts(card), conversationOpening(), coarsePointer(),
   ])
 }

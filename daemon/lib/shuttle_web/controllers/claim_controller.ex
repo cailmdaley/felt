@@ -54,14 +54,12 @@ defmodule ShuttleWeb.ClaimController do
       not present?(fiber_id) ->
         conn |> put_status(400) |> json(%{error: "fiber_id is required"})
 
-      not present?(tmux_session) and
-          not (params["surface"] in ["app", "cli"] and present?(params["session_uuid"])) ->
+      not present?(tmux_session) ->
         conn |> put_status(400) |> json(%{error: "tmux_session is required"})
 
       true ->
         case Shuttle.Poller.claim_session(fiber_id, tmux_session,
                agent: Map.get(params, "agent"),
-               surface: Map.get(params, "surface"),
                tmux_pane: Map.get(params, "tmux_pane"),
                session_uuid: Map.get(params, "session_uuid"),
                meeting: Map.get(params, "meeting")

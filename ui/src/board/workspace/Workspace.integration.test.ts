@@ -598,7 +598,7 @@ describe('workspace reader integration', () => {
   it('asks to stop a worker at gesture time and carries the answer to the delayed write', async () => {
     workspace.dispose()
     const app = card({ id: 'work/app', uid: 'app-uid', originId: 'host-a', status: 'active', shuttleKind: 'oneshot',
-      shuttleSurface: 'app', sessionUuid: 'thread-1' })
+      workerState: 'running', tmuxSession: 'worker-shuttle', sessionUuid: 'thread-1' })
     let live = [app]
     bodyCards = live
     const commit = vi.fn()

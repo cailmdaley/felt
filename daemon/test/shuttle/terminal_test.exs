@@ -269,10 +269,32 @@ defmodule Shuttle.TerminalTest do
 
     test "writes an executable script and launches bash -l at its tracked path" do
       name = "terminal-test-#{System.unique_integer([:positive])}"
+      Env.put_env("SHUTTLE_HOST", "worker-host")
+      Env.put_env("SHUTTLE_DATA_DIR", "/daemon/state")
+      Env.put_env("CODEX_HOME", "/operator/codex")
       assert :ok = Terminal.launch(stub(@absent), name, "/tmp", "echo worker\n")
 
-      assert_received {:tmux_args,
-                       ["new-session", "-d", "-s", ^name, "-c", "/tmp", "bash", "-l", path]}
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | args]}
+
+      assert Enum.any?(
+               Enum.chunk_every(args, 2, 1, :discard),
+               &(&1 == ["-e", "SHUTTLE_HOST=worker-host"])
+             )
+
+      assert Enum.any?(
+               Enum.chunk_every(args, 2, 1, :discard),
+               &(&1 == ["-e", "SHUTTLE_DATA_DIR=/daemon/state"])
+             )
+
+      assert Enum.any?(
+               Enum.chunk_every(args, 2, 1, :discard),
+               &(&1 == ["-e", "CODEX_HOME=/operator/codex"])
+             )
+
+      assert ["-e", "SHUTTLE_LISTEN"] =
+               Enum.find(Enum.chunk_every(args, 2, 1, :discard), &(&1 == ["-e", "SHUTTLE_LISTEN"]))
+
+      assert ["-c", "/tmp", "bash", "-l", path] = Enum.drop_while(args, &(&1 != "-c"))
 
       on_exit(fn -> File.rm(path) end)
       assert File.read!(path) == "echo worker\n"

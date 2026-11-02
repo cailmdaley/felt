@@ -61,7 +61,7 @@ Resumes retain these files; delete a session's claims only to deliberately re-en
 [Codex supports these hooks and `additionalContext`](https://developers.openai.com/codex/hooks/).
 Its rollout `event_msg/token_count` records provide `info.last_token_usage.total_tokens` and `info.model_context_window`; cumulative billing totals are never used.
 The transcript format isn't a stable Codex hook API, so unsupported formats fail open rather than estimating context.
-`felt setup codex` records trust for felt's own plugin hooks through Codex's App Server API (Codex 0.166.0 or newer), only after verifying that Codex's cache holds the promoted generation, and verifies the shared server when it answers.
+`felt setup codex` records trust for felt's own plugin hooks through a temporary Codex App Server config API (Codex 0.166.0 or newer), only after verifying that Codex's cache holds the promoted generation.
 Other hooks' trust is untouched; `felt setup codex --trust-hooks` repairs trust without reinstalling, and `felt setup receipt` detects untrusted or modified hooks.
 An older Codex or an unreachable shared server is a receipt note, not a failure.
 

@@ -1004,22 +1004,18 @@ describe('Dock settings queue', () => {
       band.el.querySelector<HTMLElement>(`[aria-label="${group}"] [aria-checked="true"]`)!
         .dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
     }
-    step('Session', 'ArrowRight'); step('Session', 'ArrowRight'); step('Session', 'ArrowRight')
-    expect(writes()).toHaveLength(0)
-    await vi.advanceTimersByTimeAsync(200)
-    expect(writes()).toEqual([{ action: 'set-agent', origin: 'owner', fiber: 'a/task', surface: 'app' }])
     select('Effort').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     change('Effort', 'low')
     select('Effort').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
     change('Effort', 'high')
-    expect(writes()).toHaveLength(1)
+    expect(writes()).toHaveLength(0)
     await vi.advanceTimersByTimeAsync(200)
     expect(writes().at(-1)).toEqual({ action: 'set-agent', origin: 'owner', fiber: 'a/task', effort: 'high' })
     // Through a staged Standing and back: an abandoned promotion writes nothing.
     step('Kind', 'ArrowLeft'); step('Kind', 'ArrowRight')
-    expect(writes()).toHaveLength(2)
+    expect(writes()).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(200)
-    expect(writes()).toHaveLength(2)
+    expect(writes()).toHaveLength(1)
   })
 })
 
@@ -1075,11 +1071,10 @@ describe('Dock poll reconciliation', () => {
     const draft = band.el.querySelector<HTMLTextAreaElement>('textarea')!
     draft.value = 'unsent'
     dock.syncRuntime(task({ id: 'b/task', shuttleAgent: 'codex-luna', shuttleEffort: 'low',
-      shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC', shuttleSurface: 'app', due: '2026-10-12' }))
+      shuttleKind: 'standing', shuttleSchedule: '0 9 * * *', shuttleTz: 'UTC', due: '2026-10-12' }))
     expect(select('Agent').value).toBe('codex-luna')
     expect(select('Effort').value).toBe('low')
     expect(band.el.querySelector('[aria-label="Kind"] [aria-checked="true"]')?.textContent).toBe('Standing')
-    expect(band.el.querySelector('[aria-label="Session"] [aria-checked="true"]')?.textContent).toBe('App')
     expect(band.el.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-10-12')
     expect(band.el.querySelector('.kbn-ctl-parent')?.textContent).toBe('b')
     expect(band.el.querySelector('.kbn-ctl-strip')?.textContent).toContain('codex-luna')

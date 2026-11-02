@@ -5,7 +5,6 @@ defmodule ShuttleWeb.DispatchReply do
   with the same envelope, so a client reads one vocabulary of launch outcomes.
   """
 
-  import ShuttleWeb.RelayHelpers, only: [app_server_unavailable_message: 0]
   require Shuttle.Dispatcher
 
   @spec render(String.t(), term()) :: {pos_integer(), map()}
@@ -48,15 +47,6 @@ defmodule ShuttleWeb.DispatchReply do
        message: message
      }}
   end
-
-  def render(fiber_id, {:error, {:app_launch_failed, id, :app_server_unavailable}}),
-    do: app_server_unavailable(fiber_id, %{session_uuid: id})
-
-  def render(_fiber_id, {:error, {:app_launch_failed, id, reason}}) do
-    {502, Map.put(app_launch_failure(id, reason), :dispatched, false)}
-  end
-
-  def render(fiber_id, {:error, :app_server_unavailable}), do: app_server_unavailable(fiber_id)
 
   def render(fiber_id, {:error, :already_running}), do: {409, already_running_body(fiber_id)}
 
@@ -144,40 +134,11 @@ defmodule ShuttleWeb.DispatchReply do
     end
   end
 
-  def app_launch_failure(id, reason) do
-    message =
-      case reason do
-        {:terminal_unavailable, _} ->
-          "The conversation and initial turn were created, but its terminal viewer could not be opened. Use shuttle attach to retry the same conversation."
-
-        _ ->
-          "The conversation was created, but its turn could not be confirmed. Inspect this same conversation before retrying."
-      end
-
-    Shuttle.WorkerBackend.wire(Shuttle.AppWorkers.ref(id))
-    |> Map.merge(%{reason: "app_launch_failed", error: inspect(reason), message: message})
-  end
-
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
 
   defp maybe_unix_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
   defp maybe_unix_ms(_), do: nil
-
-  defp app_server_unavailable(fiber_id, extra \\ %{}) do
-    {503,
-     Map.merge(
-       %{
-         dispatched: false,
-         surface: "app",
-         fiber_id: fiber_id,
-         tmux_session: nil,
-         reason: "app_server_unavailable",
-         message: app_server_unavailable_message()
-       },
-       extra
-     )}
-  end
 
   # Turns a structured ineligibility detail into a stable `detail` code plus a
   # human `message`. The kanban renders `detail` to accurate copy and falls

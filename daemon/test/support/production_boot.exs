@@ -31,7 +31,6 @@ try do
         "SHUTTLE_COMMITS_FILE" => root <> "/commits.jsonl",
         "SHUTTLE_EVENTS_FILE" => root <> "/events.jsonl",
         "CODEX_HOME" => root <> "/codex",
-        "SHUTTLE_CODEX_SOCKET" => root <> "/codex.sock",
         "CLAUDE_CONFIG_DIR" => root <> "/claude",
         "PI_CODING_AGENT_DIR" => root <> "/pi",
         "TMUX_TMPDIR" => root <> "/tmux"
@@ -160,7 +159,6 @@ try do
         Shuttle.InterruptWatcher,
         Shuttle.LogRotator,
         Shuttle.RemoteControl,
-        Shuttle.CodexBackend,
         Shuttle.TranscriptIndexer,
         Shuttle.TailnetPeers,
         Shuttle.TailnetDial,

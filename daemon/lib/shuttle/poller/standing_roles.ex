@@ -89,9 +89,6 @@ defmodule Shuttle.Poller.StandingRoles do
       Poller.running_key(state, fiber_id) != nil ->
         state
 
-      Shuttle.AppWorkers.for_fiber(fiber_id, Map.get(fiber, "uid")) != nil ->
-        state
-
       # A live worker session means the worker is still up —
       # `reconcile_orphaned_sessions`/`adopt_orphans` will adopt it. Not dead.
       MapSet.member?(live_sessions, Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))) ->

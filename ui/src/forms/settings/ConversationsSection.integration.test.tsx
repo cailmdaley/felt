@@ -38,7 +38,7 @@ it('saves a browser preference without writing host configuration and notifies t
   expect(changed).toHaveBeenCalledOnce()
   expect(fetch).not.toHaveBeenCalled()
   expect(document.body.textContent).toContain('Long-press or right-click Console or a worker pill')
-  expect(document.body.textContent).toContain('ChatGPT for Codex app workers')
+  expect(document.body.textContent).toContain('terminal on desktop or Claude browser')
   window.removeEventListener(CONVERSATION_OPENING_CHANGED, changed)
 })
 

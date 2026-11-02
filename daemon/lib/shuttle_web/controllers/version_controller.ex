@@ -35,7 +35,6 @@ defmodule ShuttleWeb.VersionController do
       |> Map.put(:peer_gate_uid_source, Shuttle.Env.app(:peer_gate_uid_source))
       |> Map.put(:tailnet_dial, tailnet_dial_status(readiness.ready))
       |> Map.put(:discovery, Shuttle.TailnetPeers.status())
-      |> Map.put(:codex_backend, Shuttle.CodexBackend.status())
       |> Map.put(:rex_backend, Shuttle.Terminal.backend_health())
       |> Map.put(:transcript_indexer, Shuttle.TranscriptIndexer.status())
     )

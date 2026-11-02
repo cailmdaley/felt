@@ -42,7 +42,6 @@ import { parseCaptureMeetingCapabilities, type MeetingLanguage, type MeetingMode
 import { agentGroups, resolveEffort, type AgentEntry } from './agents'
 import { useAgentRegistry } from './useAgentRegistry'
 import type { Host, Project } from './projectModel'
-import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
 import { AddProjectPath, useProjectSelection } from './ProjectPicker'
 import {
   ChromeFlag,
@@ -51,7 +50,6 @@ import {
   FormError,
   FormFoot,
   HostProjectFields,
-  SessionField,
   injectFormKitStyles,
 } from './formKit'
 
@@ -78,8 +76,8 @@ export interface CaptureFormProps {
   /** Register a new project directory and hand back the refreshed project set
    *  (the island re-derives it from the daemon). Absent → no add-project row. */
   onProjectAdded?: (path: string) => Promise<Project[]>
-  /** Called after an ordinary successful launch. App runs have no tmux name. */
-  onSpawned: (launch: { tmuxSession: string; surface: ExecutionSurface }) => void
+  /** Called after an ordinary successful launch. */
+  onSpawned: (launch: { tmuxSession: string }) => void
   /** Called once the daemon confirms meeting recording began. */
   onMeetingResult: (result: { host: string; error?: string; meeting: MeetingRecord | null }) => void
   /** Called on cancel / Esc / overlay click. */
@@ -110,7 +108,6 @@ export function CaptureForm({
   // the chosen agent's own default_effort thereafter.
   const [effort, setEffort] = useState<string>(CAPTURE_DEFAULT_EFFORT)
   const [chrome, setChrome] = useState<boolean>(false)
-  const [surface, setSurface] = useState<ExecutionSurface>('cli')
   const [mobileMeeting] = useState(() => isMobileViewport())
   const [meetingIntent, setMeetingIntent] = useState(false)
   const [meetingLanguage, setMeetingLanguage] = useState<MeetingLanguage>('auto')
@@ -192,12 +189,10 @@ export function CaptureForm({
   }, [chromeCapable])
 
   const handleAgentChange = (id: string): void => {
-    const wasCodex = isCodexAgent(agents.find((a) => a.id === agent))
     setAgent(id)
     const rec = agents.find((a) => a.id === id)
     setEffort(resolveEffort(rec, ''))
     if (!(selectedHost.browserCapable && rec?.chrome_capable === true)) setChrome(false)
-    if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
   const handleCaptureHostChange = (id: string): void => {
@@ -247,7 +242,6 @@ export function CaptureForm({
           agent,
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
           chrome: chrome && chromeCapable,
-          ...(!meetingEnabled && isCodexAgent(agentRec) ? { surface } : {}),
           meetingMode: requestedMeetingMode,
           meetingLanguage,
           recorder: meetingCapabilities.recorder,
@@ -281,7 +275,6 @@ export function CaptureForm({
       }
       onSpawned({
         tmuxSession: outcome.tmuxSession,
-        surface: outcome.surface ?? (isCodexAgent(agentRec) ? surface : 'cli'),
       })
     } catch (err) {
       pendingAudio.current?.cancel()
@@ -372,9 +365,6 @@ export function CaptureForm({
                 <option value="en">English</option>
               </select>
             </Field>
-          )}
-          {isCodexAgent(agentRec) && !meetingEnabled && (
-            <SessionField surface={surface} onChange={setSurface} />
           )}
         </div>
         {addProject.pathOpen && onProjectAdded && (

@@ -10,13 +10,12 @@ const common = {
 }
 
 describe('meeting capture request', () => {
-  it('adds the mode to an ordinary capture body, permits an empty note, and forces the terminal surface', () => {
-    expect(captureRequestBody({ ...common, prompt: '  ', surface: 'app', meetingMode: 'call' })).toEqual({
+  it('adds the mode to an ordinary capture body and permits an empty note', () => {
+    expect(captureRequestBody({ ...common, prompt: '  ', meetingMode: 'call' })).toEqual({
       project_dir: '/projects/shear',
       origin: 'remote-project',
       agent: 'claude-opus',
       effort: 'high',
-      surface: 'cli',
       meeting: { mode: 'call', language: 'auto' },
     })
     expect(captureRequestBody({ ...common, meetingMode: 'call' })).toEqual({
@@ -25,7 +24,6 @@ describe('meeting capture request', () => {
       origin: 'remote-project',
       agent: 'claude-opus',
       effort: 'high',
-      surface: 'cli',
       meeting: { mode: 'call', language: 'auto' },
     })
   })

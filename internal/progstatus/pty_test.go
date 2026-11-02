@@ -126,6 +126,7 @@ func TestWritePTYFullFailsFast(t *testing.T) {
 
 func fillPTY(t *testing.T, slave int) {
 	t.Helper()
+	stopPTYOutput(t, slave)
 	buf := bytes.Repeat([]byte("x"), 4096)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {

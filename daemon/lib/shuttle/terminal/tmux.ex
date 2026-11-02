@@ -23,7 +23,9 @@ defmodule Shuttle.Terminal.Tmux do
 
   @impl true
   def launch(runner, name, cwd, script_path, _opts) do
-    args = ["new-session", "-d", "-s", name, "-c", cwd, "bash", "-l", script_path]
+    args =
+      ["new-session", "-d", "-s", name] ++
+        Shuttle.Terminal.RuntimeEnv.tmux_args() ++ ["-c", cwd, "bash", "-l", script_path]
 
     case runner.cmd("tmux", args, stderr_to_stdout: true) do
       {_, 0} -> :ok

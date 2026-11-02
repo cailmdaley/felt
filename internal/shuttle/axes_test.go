@@ -158,14 +158,13 @@ func TestValidate_AxesIntegration(t *testing.T) {
 	}
 }
 
-func TestValidate_AppSurfaceRequiresCodex(t *testing.T) {
+func TestValidate_IgnoresLegacySurface(t *testing.T) {
 	t.Parallel()
 	reg := loadReg(t)
-	if errs := Validate(&Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "codex-sol", Surface: "app"}, reg); len(errs) != 0 {
-		t.Fatalf("Codex app surface should validate, got: %v", errs)
-	}
-	if errs := Validate(&Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "claude-opus", Surface: "app"}, reg); len(errs) == 0 {
-		t.Fatal("app surface on Claude must fail validation")
+	for _, surface := range []string{"app", "cli", "old-value"} {
+		if errs := Validate(&Block{Kind: "oneshot", ProjectDir: "/tmp/p", Host: "h", Agent: "claude-opus", Surface: surface}, reg); len(errs) != 0 {
+			t.Fatalf("legacy surface %q should be ignored, got: %v", surface, errs)
+		}
 	}
 }
 

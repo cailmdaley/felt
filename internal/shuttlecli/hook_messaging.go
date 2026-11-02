@@ -71,6 +71,11 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		}
 		return nil
 	}
+	if harness == "codex" {
+		if state := codexMailboxState(input); state != "" {
+			_ = messaging.SetMailboxState(a.env, harness, input.SessionID, host, state)
+		}
+	}
 	if harness == "pi" && input.NativeSocket != "" {
 		_ = messaging.RegisterPiNative(a.env, input.SessionID, host, input.CWD, input.NativeSocket, input.TranscriptPath, input.NativePID, input.HookEventName != "SessionEnd")
 	}
@@ -100,6 +105,22 @@ func (a *app) runEventAndMessageHook(r io.Reader, w io.Writer) error {
 		return json.NewEncoder(w).Encode(sessionEnvelope{HookSpecificOutput: sessionInner{HookEventName: input.HookEventName, AdditionalContext: digest}})
 	}
 	return nil
+}
+
+func codexMailboxState(input eventHookInput) string {
+	switch input.HookEventName {
+	case "SessionStart":
+		return "idle"
+	case "UserPromptSubmit", "PreToolUse", "PostToolUse":
+		return "working"
+	case "Stop":
+		if countBackgroundTasks(input.BackgroundTasks) > 0 {
+			return "working"
+		}
+		return "idle"
+	default:
+		return ""
+	}
 }
 
 func (a *app) messageHookHarness(input eventHookInput) string {

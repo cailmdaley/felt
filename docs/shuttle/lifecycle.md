@@ -15,12 +15,6 @@ prints the name. The daemon composes a deliberately thin
 prompt: the fiber id, the felt store path, an exit contract, and an optional
 per-dispatch "From User" directive.
 
-A Codex app worker (`shuttle.surface: app`) runs in the managed App Server and
-belongs to the project matching `shuttle.project_dir`. Shuttle persists its
-conversation identity before starting a turn. The conversation stays owned
-while idle, survives a Shuttle restart, and can receive replies from another
-app client. Existing blocks without `surface` use the terminal surface.
-
 It does **not** paste the constitution into the prompt. The worker reads the
 fiber fresh from disk, so it picks up an edit you make mid-session instead of
 freezing a stale snapshot.
@@ -37,12 +31,6 @@ From there the worker:
    `shuttle handoff <fiber>` to continue, `shuttle close <fiber>` to stop for
    review, or `shuttle rest <fiber>` to stop with nothing to review.
 
-App workers run the same verbs and then finish the turn; their native
-conversation id identifies the fiber, so no fiber or store argument is needed. The daemon releases ownership once
-that turn is idle. A normal final reply without a handoff or a close keeps the
-conversation available for the human. Stop interrupts an app turn and releases
-ownership; Resume uses that same conversation, while New session explicitly
-starts another one. Unknown connection state never authorizes a duplicate.
 
 Workers should exit earlier than feels natural. A clean handoff at half a
 context window beats pushing through a compaction. `## Status` plus the
@@ -117,8 +105,7 @@ missing or older than `dispatched_at`, which is why the handoff verb matters.
 A transcript is warm when it was written in the last 45 minutes, while the
 model's prompt cache still holds it; resuming a colder one would replay it
 uncached, so the worker starts fresh instead and its prompt names the cut-off
-session and its transcript. A Codex app conversation (`surface: app`) that
-died dirty resumes whatever its transcript's age.
+session and its transcript. Codex workers follow the same warm transcript rule as other terminal harnesses.
 
 New session on the board always starts fresh. Scheduled runs, ad-hoc standing
 runs, daemon recovery, and orphan adoption start fresh too.

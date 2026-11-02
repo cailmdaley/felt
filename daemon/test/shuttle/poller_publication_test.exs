@@ -11,13 +11,6 @@ defmodule Shuttle.PollerPublicationTest do
 
   @endpoint ShuttleWeb.Endpoint
 
-  defmodule App do
-    def read_thread(id, _opts \\ []), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
-
-    def status(_id),
-      do: %{state: :idle, phase: Shuttle.Env.app(:publication_app_phase, "waiting")}
-  end
-
   defmodule Runner do
     @behaviour Shuttle.Runner
 
@@ -53,7 +46,6 @@ defmodule Shuttle.PollerPublicationTest do
     Env.delete_env("SHUTTLE_SESSIONS_FILE")
     Env.put_app_env(:felt_runner, Runner)
     Env.put_app_env(:publication_test_pid, self())
-    Env.put_app_env(:app_workers_dir, Path.join(data, "app-workers"))
 
     on_exit(fn ->
       File.rm_rf(root)
@@ -254,72 +246,6 @@ defmodule Shuttle.PollerPublicationTest do
   end
 
   @tag :timing
-  test "dirty worker observations publish while subsequent observations keep arriving", %{
-    root: root
-  } do
-    id = "tests/published-continuous"
-    {poller, watcher, thread} = app_worker(root, id)
-    before = Poller.published_state_metrics(poller)
-    producer = Task.async(fn -> observations(watcher, thread, now_ms() + 3_000) end)
-
-    try do
-      await(
-        fn -> Poller.published_state_metrics(poller).generation > before.generation end,
-        2_000
-      )
-
-      assert Task.yield(producer, 0) == nil,
-             "publication waited for observations to stop instead of retaining the first deadline"
-
-      {:ok, response} = Poller.published_state_response(poller)
-      assert [%{"terminal_error" => error}] = Jason.decode!(response.body)["eligible"]
-      assert error =~ "observation-"
-    after
-      Task.shutdown(producer, :brutal_kill)
-    end
-  end
-
-  @tag :timing
-  test "app phase observations publish and unchanged heartbeats do not encode", %{root: root} do
-    id = "tests/published-app"
-    {poller, watcher, thread} = app_worker(root, id)
-    before = Poller.published_state_metrics(poller)
-    send(watcher, :heartbeat)
-    :sys.get_state(watcher)
-    :sys.get_state(poller)
-
-    through_deadline(now_ms() + 1_200, fn ->
-      assert Poller.published_state_metrics(poller).publish_count == before.publish_count
-    end)
-
-    Env.put_app_env(:publication_app_phase, "working")
-    send(watcher, :heartbeat)
-    :sys.get_state(watcher)
-    await(fn -> hd(Poller.snapshot(poller).eligible)[:phase] == "working" end)
-    assert Poller.published_state_metrics(poller).generation > before.generation
-    {:ok, response} = Poller.published_state_response(poller)
-    assert [%{"phase" => "working"}] = Jason.decode!(response.body)["eligible"]
-
-    assert :ok = Shuttle.AppWorkers.update(thread, %{"terminal_error" => "viewer unavailable"})
-    send(watcher, :heartbeat)
-    :sys.get_state(watcher)
-    await(fn -> hd(Poller.snapshot(poller).eligible)[:terminal_error] == "viewer unavailable" end)
-    {:ok, external_change} = Poller.published_state_response(poller)
-
-    assert [%{"terminal_error" => "viewer unavailable"}] =
-             Jason.decode!(external_change.body)["eligible"]
-
-    after_change = Poller.published_state_metrics(poller)
-    send(watcher, :heartbeat)
-    :sys.get_state(watcher)
-    :sys.get_state(poller)
-
-    through_deadline(now_ms() + 1_200, fn ->
-      assert Poller.published_state_metrics(poller).publish_count == after_change.publish_count
-    end)
-  end
-
-  @tag :timing
   test "thread liveness expires a remote report while the Poller is suspended", %{root: root} do
     id = "tests/published-fleet-expiry"
     put_fiber(id)
@@ -390,8 +316,6 @@ defmodule Shuttle.PollerPublicationTest do
            }
          }}
       )
-
-      send(poller, {:app_worker_observed, "absent-worker", "absent-session"})
     end
 
     # The barrier proves the events were applied; the observation window also
@@ -409,23 +333,6 @@ defmodule Shuttle.PollerPublicationTest do
   defp put_fiber(id, status \\ "active") do
     Store.set_fiber(id, make_fiber(id, %{"status" => status}))
     Store.set_shuttle(id, oneshot_shuttle(), status)
-  end
-
-  defp app_worker(root, id) do
-    thread = Path.basename(id) <> "-thread"
-    Store.set_fiber(id, make_fiber(id, %{"status" => "open"}))
-    Store.set_shuttle(id, "kind: oneshot\nagent: codex\nsurface: app\n", "open")
-    Env.put_app_env(:codex_app_client, App)
-    {:ok, poller} = boot(root)
-
-    assert {:ok, %{session: "codex-app:" <> ^thread}} =
-             Poller.claim_session(poller, id, nil, surface: "app", session_uuid: thread)
-
-    watcher = Poller.worker_status(poller, id).pid
-    send(watcher, :heartbeat)
-    :sys.get_state(watcher)
-    await(fn -> hd(Poller.snapshot(poller).eligible)[:phase] == "waiting" end)
-    {poller, watcher, thread}
   end
 
   defp boot(root, opts \\ []) do
@@ -466,19 +373,6 @@ defmodule Shuttle.PollerPublicationTest do
   end
 
   defp same_age({:ok, response}, before), do: {:ok, %{response | age_ms: before.age_ms}}
-
-  defp observations(watcher, thread, deadline) do
-    if now_ms() < deadline do
-      :ok = Shuttle.AppWorkers.update(thread, %{"terminal_error" => "observation-#{now_ms()}"})
-      send(watcher, :heartbeat)
-      :sys.get_state(watcher)
-
-      receive do
-      after
-        100 -> observations(watcher, thread, deadline)
-      end
-    end
-  end
 
   defp through_deadline(deadline, check) do
     check.()

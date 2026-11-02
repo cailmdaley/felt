@@ -118,15 +118,30 @@ func TestEventHookOffersCodexMailbox(t *testing.T) {
 	if out.Len() != 0 || !messaging.MailboxAvailable(env, "codex", "s", "host") {
 		t.Fatal("Codex hook failed to register a mailbox")
 	}
+	if state, err := codexHookStateForTest(env, "s"); err != nil || state != "idle" {
+		t.Fatalf("Codex SessionStart state = %q, %v", state, err)
+	}
 	r := messaging.Request{Address: "shuttle://host/codex/s", Text: "peer context", From: "shuttle://peer/pi/A", ReplyTo: "work/fiber", MessageID: "m"}
 	if receipt, err := messaging.Send(context.Background(), env, "host", r); err != nil || receipt.Transport != "codex-hook" {
 		t.Fatalf("send: %+v %v", receipt, err)
 	}
 	out.Reset()
 	_ = newApp(env).runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"UserPromptSubmit","session_id":"s","model":"gpt-6"}`), &out)
+	if state, err := codexHookStateForTest(env, "s"); err != nil || state != "working" {
+		t.Fatalf("Codex prompt state = %q, %v", state, err)
+	}
 	if !bytes.Contains(out.Bytes(), []byte("[Shuttle message m from shuttle://peer/pi/A; reply to work/fiber]\\npeer context")) {
 		t.Fatalf("Codex context missing: %s", out.String())
 	}
+	out.Reset()
+	_ = newApp(env).runEventAndMessageHook(bytes.NewBufferString(`{"hook_event_name":"Stop","session_id":"s","model":"gpt-6"}`), &out)
+	if state, err := codexHookStateForTest(env, "s"); err != nil || state != "idle" {
+		t.Fatalf("Codex Stop state = %q, %v", state, err)
+	}
+}
+
+func codexHookStateForTest(env *sysenv.Env, id string) (string, error) {
+	return messaging.MailboxState(env, "codex", id, "host")
 }
 
 func TestEventHookOffersPiMailboxOnlyOnPrompt(t *testing.T) {

@@ -1,7 +1,6 @@
 defmodule Shuttle.Migration do
   @moduledoc "Validation and reversible backend changes for a Poller-owned session migration."
   alias Shuttle.{
-    AppWorkers,
     Dispatcher,
     FeltStores,
     LifecycleStore,
@@ -86,26 +85,23 @@ defmodule Shuttle.Migration do
   defp retry_identity(_state, nil, _to, _requested, _pane), do: nil
 
   defp retry_identity(state, dest, to, requested, pane) do
-    uuid = AppWorkers.id(dest.session) || dest[:session_uuid]
+    uuid = dest[:session_uuid]
 
     proof =
       (requested && matches?(dest, requested)) ||
-        (present(pane) && verify_pane(state.runner, dest.session, pane) == :ok &&
-           not AppWorkers.app?(dest.session))
+        (present(pane) && verify_pane(state.runner, dest.session, pane) == :ok)
 
     if uuid && proof && migrated_to?(uuid, to), do: uuid
   end
 
   defp matches?(nil, _), do: false
 
-  defp matches?(worker, uuid),
-    do: (AppWorkers.id(worker.session) || worker[:session_uuid]) == uuid
+  defp matches?(worker, uuid), do: worker[:session_uuid] == uuid
 
   defp prepare_worker(state, from, to, worker, requested, opts) do
     # An explicitly nil captured identity must not fall back to a predecessor's mirror.
     uuid =
-      AppWorkers.id(worker.session) ||
-        Map.get(worker, :session_uuid, get_in(from, ["shuttle", "runtime", "session_uuid"]))
+      Map.get(worker, :session_uuid, get_in(from, ["shuttle", "runtime", "session_uuid"]))
 
     canonical = Dispatcher.session_name(to["id"], to["uid"])
 
@@ -123,7 +119,7 @@ defmodule Shuttle.Migration do
          uuid: uuid,
          backend: backend,
          documents: documents,
-         session: if(AppWorkers.app?(worker.session), do: worker.session, else: canonical)
+         session: canonical
        }}
     else
       false -> {:error, :surface_unsupported}
@@ -134,52 +130,27 @@ defmodule Shuttle.Migration do
   defp verify_uuid(id, id), do: :ok
   defp verify_uuid(_, nil), do: :ok
   defp verify_uuid(_, _), do: {:error, :identity_mismatch}
-  defp verify_pane(_, "codex-app:" <> _, _), do: :ok
   defp verify_pane(_, _, nil), do: :ok
   defp verify_pane(_, _, ""), do: :ok
 
   defp verify_pane(runner, session, pane) do
-    if AppWorkers.app?(session) do
-      {:error, :surface_unsupported}
-    else
-      if Terminal.owns_pane?(runner, session, pane),
-        do: :ok,
-        else: {:error, :identity_mismatch}
-    end
+    if Terminal.owns_pane?(runner, session, pane),
+      do: :ok,
+      else: {:error, :identity_mismatch}
   end
 
-  defp backend(state, worker, _from, to, canonical, uuid) do
-    if AppWorkers.app?(worker.session) do
-      with {:ok, record} <- AppWorkers.get(AppWorkers.id(worker.session)),
-           :ok <-
-             AppWorkers.check_owner(
-               record,
-               record["session_uuid"],
-               state.own_host_id,
-               Shuttle.CodexApp.Transport.default_socket()
-             ) do
-        {:ok,
-         {:app, record,
-          Map.merge(record, %{
-            "fiber_id" => to["id"],
-            "uid" => to["uid"],
-            "felt_store" => to["store"],
-            "fiber_path" => to["path"]
-          })}}
-      end
+  defp backend(state, worker, _from, _to, canonical, uuid) do
+    if is_nil(canonical) do
+      {:error, :uid_missing}
     else
-      if is_nil(canonical) do
-        {:error, :uid_missing}
+      with backend when not is_nil(backend) <- Terminal.locate(state.runner, worker.session),
+           {:ok, procs} <- WorkerProcess.scan(state.runner),
+           {:ok, terminal_identity} <- Terminal.identity(state.runner, worker.session) do
+        aliases = WorkerProcess.migration_aliases(procs, worker.session, canonical)
+        identity = Map.put(terminal_identity, "session_uuid", uuid)
+        {:ok, {:terminal, backend.id(), worker.session, canonical, aliases, identity}}
       else
-        with backend when not is_nil(backend) <- Terminal.locate(state.runner, worker.session),
-             {:ok, procs} <- WorkerProcess.scan(state.runner),
-             {:ok, terminal_identity} <- Terminal.identity(state.runner, worker.session) do
-          aliases = WorkerProcess.migration_aliases(procs, worker.session, canonical)
-          identity = Map.put(terminal_identity, "session_uuid", uuid)
-          {:ok, {:terminal, backend.id(), worker.session, canonical, aliases, identity}}
-        else
-          _ -> {:error, :surface_unsupported}
-        end
+        _ -> {:error, :surface_unsupported}
       end
     end
   end
@@ -187,30 +158,6 @@ defmodule Shuttle.Migration do
   @doc "Idempotently reconcile a journal's backend assignment in its durable direction."
   def reconcile_backend(_, %{"resolution" => "unresolvable", "reason" => reason}),
     do: {:error, {:journal_unresolvable, reason}}
-
-  def reconcile_backend(state, %{"backend" => %{"type" => "app"} = backend} = entry) do
-    old = backend["before"]
-    target = backend[if(entry["direction"] == "forward", do: "after", else: "before")]
-    fiber = entry[if(entry["direction"] == "forward", do: "to", else: "from")]
-    target = Map.put(target, "fiber_path", fiber["path"])
-
-    AppWorkers.update(entry["uuid"], fn current ->
-      with :ok <-
-             AppWorkers.check_owner(
-               current,
-               entry["uuid"],
-               state.own_host_id,
-               Shuttle.CodexApp.Transport.default_socket()
-             ),
-           true <- current["uid"] in [old["uid"], backend["after"]["uid"]] do
-        # Assignment fields change; contemporaneous backend state is retained.
-        {:ok, Map.merge(current, Map.take(target, ~w(fiber_id uid felt_store fiber_path)))}
-      else
-        false -> {:error, :backend_assignment_conflict}
-        error -> error
-      end
-    end)
-  end
 
   def reconcile_backend(state, %{"backend" => %{"type" => type} = backend} = entry)
       when type in ["tmux", "rex"] do

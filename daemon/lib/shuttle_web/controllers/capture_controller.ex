@@ -19,7 +19,7 @@ defmodule ShuttleWeb.CaptureController do
   use Phoenix.Controller, formats: [:json]
 
   import ShuttleWeb.RelayHelpers,
-    only: [app_server_unavailable_message: 0, relay_json: 3, present?: 1]
+    only: [relay_json: 3, present?: 1]
 
   alias Shuttle.{Meeting, MeetingRouter, OriginRouter}
   require Shuttle.Dispatcher
@@ -47,7 +47,7 @@ defmodule ShuttleWeb.CaptureController do
   defp create_meeting_local(conn, params) do
     case Meeting.start(
            params["meeting"],
-           {:capture, Map.get(params, "surface")},
+           :capture,
            Map.get(params, "prompt"),
            Map.get(params, "origin")
          ) do
@@ -56,7 +56,6 @@ defmodule ShuttleWeb.CaptureController do
           params
           |> Map.delete("meeting")
           |> Map.put("prompt", prompt)
-          |> Map.put("surface", "cli")
           |> Map.put("meeting_launch", launch)
 
         row = Map.put(row, "recorder", MeetingRouter.own_host())
@@ -68,6 +67,8 @@ defmodule ShuttleWeb.CaptureController do
   end
 
   defp route_capture(conn, params, meeting_row) do
+    params = Map.delete(params, "surface")
+
     case OriginRouter.route_host(Map.get(params, "origin")) do
       {:remote, remote} ->
         result = OriginRouter.forward(remote, "/api/v1/capture", params)
@@ -111,7 +112,6 @@ defmodule ShuttleWeb.CaptureController do
                agent: Map.get(params, "agent"),
                effort: Map.get(params, "effort"),
                chrome: Map.get(params, "chrome") == true,
-               surface: Map.get(params, "surface"),
                meeting: Map.get(params, "meeting_launch")
              ) do
           {:ok, %{session: session, agent_id: agent_id} = launched} ->
@@ -122,21 +122,6 @@ defmodule ShuttleWeb.CaptureController do
               |> put_session_uuid(launched[:session_uuid]),
               meeting_row
             )
-
-          {:error, {:app_launch_failed, id, reason}} ->
-            if reason == :app_server_unavailable do
-              app_server_unavailable(conn, %{session_uuid: id}, meeting_row)
-            else
-              capture_error(
-                conn,
-                502,
-                Map.put(ShuttleWeb.DispatchReply.app_launch_failure(id, reason), :spawned, false),
-                meeting_row
-              )
-            end
-
-          {:error, :app_server_unavailable} ->
-            app_server_unavailable(conn, %{}, meeting_row)
 
           {:error, {:backend_not_ready, message}} ->
             capture_error(
@@ -229,22 +214,6 @@ defmodule ShuttleWeb.CaptureController do
 
   defp error_code(reason) when is_binary(reason), do: reason
   defp error_code(reason), do: inspect(reason)
-
-  defp app_server_unavailable(conn, extra, meeting_row) do
-    payload =
-      Map.merge(
-        %{
-          spawned: false,
-          surface: "app",
-          tmux_session: nil,
-          reason: "app_server_unavailable",
-          message: app_server_unavailable_message()
-        },
-        extra
-      )
-
-    capture_error(conn, 503, payload, meeting_row)
-  end
 
   defp capture_failed(name, reason),
     do: %{spawned: false, reason: "forward_failed", origin: name, error: inspect(reason)}

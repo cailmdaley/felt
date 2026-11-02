@@ -356,7 +356,7 @@ func fiberWorkerAddress(f *felt.Felt, worker *SessionProvenance, harness, runtim
 		nativeID = runtimeID
 	}
 	block, _, blockErr := shuttle.BlockOf(f)
-	cliCodex := harness == "codex" && blockErr == nil && block != nil && block.Surface != "app"
+	cliCodex := harness == "codex" && blockErr == nil && block != nil
 	addresses := map[string]bool{}
 	for _, session := range peers {
 		address, err := messaging.ParseAddress(session.Address)

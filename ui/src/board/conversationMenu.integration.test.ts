@@ -83,7 +83,7 @@ it('opens a single destination without changing the preference', () => {
   expect(attach).toHaveBeenCalledOnce()
 })
 
-it.each(['terminal', 'browser', 'app', 'chatgpt'] as const)('choosing sole destination %s leaves the stored preference unchanged', id => {
+it.each(['terminal', 'browser', 'app'] as const)('choosing sole destination %s leaves the stored preference unchanged', id => {
   saveConversationOpening(id === 'browser' ? 'app' : 'browser')
   const remembered = conversationOpening()
   const save = vi.spyOn(localStorage, 'setItem')

@@ -509,17 +509,16 @@ func TestResolve_PureNoteIsNoOp(t *testing.T) {
 	}
 }
 
-func TestResolve_CodexSurfaceDefaultsToAppUntilItHasRun(t *testing.T) {
+func TestResolve_PreservesLegacySurfaceWithoutDefaulting(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		block map[string]any
 		want  any
 	}{
-		{"fresh codex", map[string]any{"agent": "codex-sol"}, "app"},
-		{"explicit cli", map[string]any{"agent": "codex-sol", "surface": "cli"}, "cli"},
-		{"codex that already ran", map[string]any{"agent": "codex-sol", "runtime": map[string]any{"session_uuid": "abc"}}, nil},
-		{"claude", map[string]any{"agent": "claude-opus"}, nil},
+		{"fresh codex", map[string]any{"agent": "codex-sol"}, nil},
+		{"legacy app", map[string]any{"agent": "codex-sol", "surface": "app"}, "app"},
+		{"legacy cli", map[string]any{"agent": "claude-opus", "surface": "cli"}, "cli"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

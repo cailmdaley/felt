@@ -56,15 +56,18 @@ defmodule Shuttle.Terminal.RexTreeTest do
     assert [%{label: "leaf"}] = RexTree.layout([%{fiber: "a/deep/leaf", session_id: "s"}])
   end
 
-  test "Codex viewers resolve the App Server thread independently of the transcript id" do
+  test "worker and resume terminals resolve through their durable session identity" do
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    session = "fork-session"
+
     records = [
-      %{"fiber" => "work/source", "session" => "source-transcript", "thread_id" => "fork-thread"},
-      %{"fiber" => "work/fork", "session" => "fork-transcript", "thread_id" => "fork-thread"}
+      %{"fiber" => "work/source", "session" => "source-session", "uid" => uid},
+      %{"fiber" => "work/fork", "session" => session, "uid" => uid}
     ]
 
-    assert RexTree.fiber_for("codex-terminal-fork-thread", records) == "work/fork"
-    assert RexTree.fiber_for("resume-fork-transcript", records) == "work/fork"
-    assert RexTree.fiber_for("codex-terminal-unrelated", records) == nil
+    assert RexTree.fiber_for("worker-#{uid}-shuttle", records) == "work/fork"
+    assert RexTree.fiber_for("resume-#{session}", records) == "work/fork"
+    assert RexTree.fiber_for("unrelated", records) == nil
   end
 
   test "launch, claim and observed exit refresh only bound sessions; worker recovery labels survive" do
@@ -164,7 +167,8 @@ defmodule Shuttle.Terminal.RexTreeTest do
     Env.put_env("PATH", tools)
     FakeRex.reply("tmux", {"", 0})
 
-    for name <- ["old-worker", "resume-session", "codex-terminal-thread"], _ <- 1..3 do
+    for name <- ["old-worker", "resume-session", "worker-01ARZ3NDEKTSV4RRFFQ69G5FAV-shuttle"],
+        _ <- 1..3 do
       assert :alive = Terminal.status(FakeRex, name)
       assert Terminal.locate(FakeRex, name) == Terminal.Tmux
     end
@@ -172,20 +176,23 @@ defmodule Shuttle.Terminal.RexTreeTest do
     assert Enum.all?(FakeRex.calls(), fn {bin, _, _} -> bin == "tmux" end)
   end
 
-  test "refresh resolves ledger identity once and persists the fiber", %{tmp_dir: dir} do
+  test "refresh resolves canonical terminal identity once and persists the fiber", %{tmp_dir: dir} do
     Env.put_env("SHUTTLE_SESSIONS_FILE", Path.join(dir, "sessions.jsonl"))
+    tmux = "worker-01ARZ3NDEKTSV4RRFFQ69G5FAV-shuttle"
 
     Shuttle.SessionLedger.record(
       fiber: "work/fork",
-      session: "transcript",
-      thread_id: "thread",
+      uid: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      session: "codex-session-42",
+      tmux: tmux,
+      harness: "codex",
       kind: :dispatch
     )
 
-    assert :ok = Backend.launch(FakeRex, "codex-terminal-thread", "/tmp", "worker.sh", [])
+    assert :ok = Backend.launch(FakeRex, tmux, "/tmp", "worker.sh", [])
     RexTree.refresh(FakeRex)
 
-    assert {:ok, %{"bindings" => %{"codex-terminal-thread" => %{"fiber" => "work/fork"}}}} =
+    assert {:ok, %{"bindings" => %{^tmux => %{"fiber" => "work/fork"}}}} =
              RexBindings.read()
 
     File.rm!(Path.join(dir, "sessions.jsonl"))

@@ -2,7 +2,7 @@ import { turnOf } from '../turn.js'
 import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
-import { appConversationTarget, canOpenDesktopApp, atDesktop, workerPill } from '../appConversation.js'
+import { atDesktop, workerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, resolveDestination, openDestination } from '../conversationOpening.js'
 import { attachConversationPicker } from '../conversationMenu.js'
@@ -10,7 +10,6 @@ import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type 
 import { agentGroups } from '../../forms/agents.js'
 import type { MeetingMode } from '../../forms/meetingApi.js'
 import { meetingActions, meetingHostCard, meetingStateWord, paintTranscript, type MeetingRecord } from '../meeting.js'
-import { defaultSurface, isCodexAgent, persistedSurface, type ExecutionSurface } from '../../forms/executionSurface.js'
 import { dispatchFailureMessage, isAgentCard, needsProjectDir, postDaemonJson, postForceDispatch, type DispatchFailureBody } from '../KanbanModalShared.js'
 import { buildProjectDirPrompt } from '../projectDirPrompt.js'
 import { fetchFiberIndex, filterParentCandidates, type FiberSearchResult } from '../fiberSearch.js'
@@ -31,7 +30,7 @@ import './dock.css'
 import './chat.css'
 
 type Directive = string | (() => Promise<string>)
-interface AgentAxes { agent: string; effort: string; chrome: boolean; surface: ExecutionSurface }
+interface AgentAxes { agent: string; effort: string; chrome: boolean }
 interface ComposerSend {
   draftKey(): string
   compose(unlessUnchanged?: string): Promise<string>
@@ -40,7 +39,7 @@ interface ComposerSend {
   sent(): void
 }
 function workerIdentity(card: KanbanCard): string {
-  return JSON.stringify([card.workerState, card.workerSurface, card.sessionUuid, card.tmuxSession, card.runtimePhase])
+  return JSON.stringify([card.workerState, card.sessionUuid, card.tmuxSession, card.runtimePhase])
 }
 function latestTarget(card: KanbanCard): TranscriptTarget | null {
   return card.sessionUuid ? {
@@ -498,7 +497,6 @@ export class Dock {
   private composerBusy: ((on: boolean, except?: HTMLButtonElement) => void) | null = null
   private composerDisposers: (() => void)[] = []
   private workerPillCard: KanbanCard | null = null
-  private guidance: HTMLElement | null = null
   private meetingArmed: () => boolean = () => false
   private meetingStart: (() => void) | null = null
   private dismissParent: (() => boolean) | null = null
@@ -646,9 +644,6 @@ export class Dock {
     // opening targets without replacing the textarea or settings fields.
     this.card = { ...card }
     const view = this.card
-    this.guidance = document.createElement('p')
-    this.guidance.className = 'kbn-detail-app-guide'
-    this.el.append(this.guidance)
     this.el.append(this.buildControls(view, isAgentCard(view)))
     this.syncRuntime(view)
   }
@@ -695,7 +690,7 @@ export class Dock {
     this.transcriptBand?.dispose()
     this.transcriptBand = null
     this.constitutionButton = this.openConstitution = null
-    this.transcriptPane = this.guidance = null
+    this.transcriptPane = null
     this.meetingPaint = this.composerBusy = null
     this.meetingChip = null
     this.meetingGlobalStop = null
@@ -759,14 +754,6 @@ export class Dock {
     return this.drawerClose?.() ?? false
   }
 
-
-  private paintGuidance(card: KanbanCard): void {
-    if (!this.guidance) return
-    const coarse = coarsePointer()
-    const target = appConversationTarget(card, canOpenDesktopApp(navigator.userAgent, coarse), navigator.userAgent, coarse)
-    this.guidance.hidden = !((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid && !target.conversationSpecific)
-    this.guidance.textContent = target.guidance
-  }
 
   private buildTranscriptPane(card: KanbanCard): HTMLElement {
     const pane = document.createElement('section')
@@ -861,11 +848,10 @@ export class Dock {
   /**
    * The worker control is the Desk card's own pill: same turn, same word,
    * same destination under a mouse or a finger (see `workerPill`).
-   * An app worker's destination follows the conversation backend.
+   * Codex workers use the same terminal path as every other worker.
    */
   workerPillFor(card: KanbanCard): HTMLElement | null {
-    const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid
-    return app || card.tmuxSession || card.sessionLink ? workerPill(card, { openWorker: this.onOpenWorker }) : null
+    return card.tmuxSession || card.sessionLink ? workerPill(card, { openWorker: this.onOpenWorker }) : null
   }
 
   /** Keyboard opening activates the exact destination used by the worker pill. */
@@ -921,7 +907,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -943,7 +929,6 @@ export class Dock {
     }
     this.workerPillCard = card
     this.transcriptBand?.follow(latestTarget(card))
-    this.paintGuidance(card)
   }
 
   refreshConversationOpening(): void {
@@ -1005,7 +990,7 @@ export class Dock {
     const reseed = (fn: () => void): void => { reseeders.push(fn) }
     this.settingsSync = (view) => {
       if (ledger.contains(document.activeElement) || this.savesPending || this.settingStep) return
-      for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleSurface', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
+      for (const key of ['name', 'due', 'storedHorizon', 'isCycle', 'shuttleAgent', 'shuttleEffort', 'shuttleChrome', 'shuttleKind', 'shuttleSchedule', 'shuttleTz', 'inheritedProjectDir'] as const) {
         Object.assign(card, { [key]: view[key] })
       }
       for (const sync of reseeders) sync()
@@ -1228,7 +1213,6 @@ export class Dock {
     const empty = document.createElement('p')
     empty.className = 'ws-chat-empty'
     empty.textContent = 'No conversation yet. Write below to start a worker.'
-    if (this.guidance) log.append(this.guidance)
     if (this.transcriptBand) log.append(this.transcriptBand.el, empty)
     const compose = document.createElement('div')
     compose.className = 'ws-chat-compose'
@@ -1732,17 +1716,6 @@ export class Dock {
     // Until the registry says which agents take it, show Chrome where it is on.
     chrome.label.hidden = !chrome.input.checked
 
-    const surface = segmented<ExecutionSurface>(
-      'Session',
-      [['cli', 'Terminal'], ['app', 'App']],
-      persistedSurface(card.shuttleSurface),
-    )
-    const surfaceRow = field('Session', surface.el)
-    // Revealed once the registry confirms a Codex agent — the only harness
-    // with a choice to make — and inert until then.
-    surfaceRow.hidden = persistedSurface(card.shuttleSurface) !== 'app'
-    surface.setDisabled(true)
-
     if (!shuttleManaged) {
       const promote = ctlButton('Promote', 'kbn-ctl-send')
       promote.addEventListener('click', (e) => {
@@ -1762,21 +1735,20 @@ export class Dock {
       // The picker only fills the select the promotion reads; there is no
       // block to write to yet.
       void this.loadAgentPicker(
-        { agentSelect, effortSelect, chromeToggle: chrome.input, surface, surfaceRow: null },
-        { agent: '', effort: '', chrome: false, surface: 'cli' },
+        { agentSelect, effortSelect, chromeToggle: chrome.input },
+        { agent: '', effort: '', chrome: false },
         async () => true,
       )
       return col
     }
 
-    col.append(field('Agent', agentSelect, effortSelect, chrome.label), surfaceRow)
+    col.append(field('Agent', agentSelect, effortSelect, chrome.label))
     void this.loadAgentPicker(
-      { agentSelect, effortSelect, chromeToggle: chrome.input, surface, surfaceRow },
+      { agentSelect, effortSelect, chromeToggle: chrome.input },
       {
         agent: card.shuttleAgent ?? '',
         effort: card.shuttleEffort ?? '',
         chrome: card.shuttleChrome ?? false,
-        surface: persistedSurface(card.shuttleSurface),
       },
       async (axes) => {
         const ok = await this.commitAxes(card, axes, statusEl, errorEl)
@@ -1785,7 +1757,6 @@ export class Dock {
           if ('agent' in axes) patch.shuttleAgent = axes.agent
           if ('effort' in axes) patch.shuttleEffort = axes.effort || undefined
           if ('chrome' in axes) patch.shuttleChrome = axes.chrome
-          if ('surface' in axes) patch.shuttleSurface = axes.surface
           reflect(patch)
         }
         return ok
@@ -1793,7 +1764,7 @@ export class Dock {
     ).then(sync => {
       if (!sync) return
       const reset = (): void => sync({ agent: card.shuttleAgent ?? '', effort: card.shuttleEffort ?? '',
-        chrome: card.shuttleChrome ?? false, surface: persistedSurface(card.shuttleSurface) })
+        chrome: card.shuttleChrome ?? false })
       reseed(reset)
       reset()
       if (!card.shuttleEffort && effortSelect.value) reflect({ shuttleEffort: effortSelect.value })
@@ -2447,18 +2418,14 @@ export class Dock {
       agentSelect: HTMLSelectElement
       effortSelect: HTMLSelectElement
       chromeToggle: HTMLInputElement
-      surface: Segmented<ExecutionSurface>
-      /** The session row; null where there is no block to carry the choice. */
-      surfaceRow: HTMLElement | null
     },
     current: AgentAxes,
     onCommit: (axes: Partial<AgentAxes>) => Promise<boolean>,
   ): Promise<((axes: AgentAxes) => void) | undefined> {
-    const { agentSelect, effortSelect, chromeToggle, surface, surfaceRow } = controls
+    const { agentSelect, effortSelect, chromeToggle } = controls
     const chromeChip = chromeToggle.parentElement
     const freeze = (why: string): void => {
       for (const el of [agentSelect, effortSelect, chromeToggle]) el.disabled = true
-      surface.setDisabled(true)
       effortSelect.hidden = effortSelect.options.length === 0
       agentSelect.title = why
     }
@@ -2510,7 +2477,7 @@ export class Dock {
     const recordFor = (id: string): AgentRecord | undefined => records.find((a) => a.id === id)
     const selectedAgent = (): string => agentSelect.value
 
-    // Repopulate effort, chrome and session from an agent's metadata. The
+    // Repopulate effort and chrome from an agent's metadata. The
     // selected effort is always concrete: an omitted/invalid fiber value
     // resolves to the agent's registry default, so an agent change writes the
     // new agent's explicit effective effort.
@@ -2531,21 +2498,15 @@ export class Dock {
       if (!chromeOk) chromeToggle.checked = false
       if (chromeChip) chromeChip.hidden = !chromeOk
 
-      const supportsApp = isCodexAgent(rec)
-      if (rec && !supportsApp) surface.set('cli')
-      surface.setDisabled(!supportsApp)
-      if (surfaceRow) surfaceRow.hidden = !supportsApp
     }
 
     syncDependents(selectedAgent() || current.agent, current.effort)
     chromeToggle.checked = current.chrome && !chromeToggle.disabled
-    if (isCodexAgent(recordFor(selectedAgent()))) surface.set(current.surface)
 
     let landed = {
       agent: selectedAgent(),
       effort: effortSelect.value,
       chrome: chromeToggle.checked,
-      surface: surface.value,
     }
     let intended = { ...landed }
     let revision = 0
@@ -2557,15 +2518,14 @@ export class Dock {
       agentSelect.value = axes.agent || defaultAgent || ''
       syncDependents(selectedAgent(), axes.effort)
       chromeToggle.checked = axes.chrome && !chromeToggle.disabled
-      surface.set(isCodexAgent(recordFor(selectedAgent())) ? axes.surface : 'cli')
-      return { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+      return { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked }
     }
     const sync = (axes: AgentAxes): void => {
       landed = paint(axes)
       intended = { ...landed }
     }
     const commit = (axis: keyof AgentAxes): void => {
-      const axes: AgentAxes = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked, surface: surface.value }
+      const axes: AgentAxes = { agent: selectedAgent(), effort: effortSelect.value, chrome: chromeToggle.checked }
       const patch: Partial<AgentAxes> = axis === 'agent'
         ? Object.fromEntries(Object.entries(axes).filter(([key, value]) => value !== intended[key as keyof AgentAxes]))
         : { [axis]: axes[axis] }
@@ -2597,19 +2557,13 @@ export class Dock {
       this.deferSetting(axis, () => commit(axis), keyboard)
     }
     agentSelect.addEventListener('change', () => {
-      // New agent: select and persist its concrete default effort, re-gate
-      // chrome, and pick the session a fresh task on that agent would get —
-      // unless the card was already Codex, whose choice carries over.
+      // New agent: select its concrete default effort and re-gate chrome.
       syncDependents(selectedAgent(), '')
       chromeToggle.checked = chromeToggle.checked && !chromeToggle.disabled
-      const rec = recordFor(selectedAgent())
-      if (!isCodexAgent(rec)) surface.set('cli')
-      else if (!isCodexAgent(recordFor(intended.agent))) surface.set(defaultSurface(rec))
       scheduleCommit('agent')
     })
     effortSelect.addEventListener('change', () => scheduleCommit('effort'))
     chromeToggle.addEventListener('change', () => scheduleCommit('chrome', false))
-    surface.onPick((_, keyboard) => scheduleCommit('surface', keyboard))
     return sync
   }
 

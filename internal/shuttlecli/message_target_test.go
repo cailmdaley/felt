@@ -477,7 +477,7 @@ func TestResolveMessageTargetFiberRequiresLedgerEvidence(t *testing.T) {
 	}
 }
 
-func TestResolveMessageTargetCodexAppUsesPeerThreadAddress(t *testing.T) {
+func TestResolveMessageTargetCodexPeerAddressUsesTranscriptProvenance(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	const threadID = "11111111-1111-4111-8111-111111111111"
@@ -510,7 +510,7 @@ func TestResolveMessageTargetCodexAppUsesPeerThreadAddress(t *testing.T) {
 	}
 }
 
-func TestResolveMessageTargetCodexAppUsesLedgerThreadID(t *testing.T) {
+func TestResolveMessageTargetCodexLedgerThreadIDUsesNativeAddress(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	const threadID = "11111111-1111-4111-8111-111111111111"

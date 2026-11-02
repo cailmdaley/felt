@@ -23,13 +23,6 @@ defmodule ShuttleWeb.RelayHelpers do
     |> json(%{error: Shuttle.OriginRouter.unknown_origin_message(origin)})
   end
 
-  @doc "Recovery guidance for an unavailable managed Codex App Server."
-  def app_server_unavailable_message do
-    "The selected Codex App Server on this host is unavailable. " <>
-      "Shuttle reconciles the dependency without replacing live servers; inspect codex_backend in /api/v1/version. " <>
-      "Restore the recorded endpoint for an existing conversation. Both Codex surfaces wait; no embedded fallback is used."
-  end
-
   @doc """
   Relay a JSON-bodied forward verbatim, or render a 502 tunnel failure.
 

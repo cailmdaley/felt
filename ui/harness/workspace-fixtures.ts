@@ -270,13 +270,11 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       entry.runtime = {
         state: 'running',
         phase: 'working',
-        surface: console === 'chatgpt' ? 'app' : 'cli',
-        tmux_session: console === 'chatgpt' ? undefined : 'fixture-transcript-worker',
+        tmux_session: 'fixture-transcript-worker',
         terminal: console?.startsWith('rex-') ? undefined : console === 'rex' ? 'rex' : 'tmux',
-        session_link: console && !console.startsWith('rex-') && console !== 'unlinked' && console !== 'chatgpt' ? 'https://claude.ai/code/session_fixture' : undefined,
-        desktop_link: console === 'chatgpt' ? 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693' : undefined,
+        session_link: console && !console.startsWith('rex-') && console !== 'unlinked' ? 'https://claude.ai/code/session_fixture' : undefined,
         session_uuid: WORKSPACE_LATEST_SESSION,
-        agent: console === 'rex-pi' ? 'pi-sol' : console === 'chatgpt' || console === 'rex-codex' ? 'codex-sol' : 'claude-opus',
+        agent: console === 'rex-pi' ? 'pi-sol' : console === 'rex-codex' ? 'codex-sol' : 'claude-opus',
         last_activity_at: now - 5_000,
         started_at: now - 3 * minute,
       }

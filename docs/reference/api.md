@@ -35,9 +35,9 @@ for its mailbox. It returns a generation ETag; a matching `If-None-Match`
 returns 304 with no body. `X-State-Age-Ms` reports how old the published view
 was when served, including when the Poller is busy. State changes are
 coalesced for up to one second while the Poller is available; successful
-lifecycle and worker actions publish before answering. External AppWorkers
-presentation fields are observed on the existing five-second watcher cadence,
-then published within the one-second coalescing window. A missing publication
+lifecycle and worker actions publish before answering. Terminal worker state is
+observed on the five-second watcher cadence, then published within the
+one-second coalescing window. A missing publication
 during startup or Poller restart returns 503 with `ready: false`. The
 `/api/v1/version` response includes cumulative `poller_publication` counters
 (`publish_count`, `encode_us`, `total_publish_us`, and `state_request_count`),
@@ -75,6 +75,7 @@ time.
 | `POST /attach` | **not** owner-routed | Open a worker or past-session viewer on the local display using Kitty or Rex; remote tmux uses SSH, and remote Rex opening is unsupported |
 | `POST /sessions/resume` | local | Start (or find) a past session's terminal viewer; an active terminal Codex worker reuses its owned thread |
 | `POST /sessions/prepare-terminal` | host-addressed | Prepare the terminal viewer of an owned Codex thread by fiber UID or recorded tmux name, without starting a turn |
+| `POST /sessions/receiver` | host-addressed | Resolve the live native Codex process for `{session_uuid}` and return `{session_uuid, pid, process_start}` from a kernel lifetime probe; 404 means absent or stale, 503 means process state is unknown |
 | `POST /messages` | host-addressed | Deliver a durable, idempotent text message to an exact `shuttle://HOST/HARNESS/NATIVE_ID` address |
 | `POST /messages/files` | host-addressed | Deliver a message with receiver-local attachment copies to an exact session address |
 
@@ -153,7 +154,7 @@ Removing a journal alone is not recovery: it discards the evidence that prevents
 
 Success returns `{ok: true, from, to, session_uuid}`.
 A retry identifying the same session and destination succeeds without moving it again.
-Refusals carry a `reason` and a corrective message, including `not_installed`, `already_running`, `other_host`, `same_fiber`, and `surface_unsupported`.
+Refusals carry a `reason` and a corrective message, including `not_installed`, `already_running`, `other_host`, and `same_fiber`.
 Ordinary refusals return 422; incomplete rollback or unresolved recovery returns 503 because the assignment needs inspection rather than a blind retry.
 Messages to the destination follow the moved session; messages to the source wait for its next worker.
 Messages to the exact session address keep reaching the same conversation.
@@ -161,12 +162,11 @@ No conversation context is copied or merged.
 
 ### Capture and meeting mode
 
-`POST /capture` accepts `surface: "app"` for a Codex agent or `"cli"` for
-terminal execution. It also accepts an optional
-`meeting: {mode: "call" | "phone"}` object and an optional `recorder` host id.
+`POST /capture` accepts an optional `meeting: {mode: "call" | "phone"}` object
+and an optional `recorder` host id. Workers run through the selected terminal
+backend, including Codex CLI workers.
 Meeting mode starts hark on the selected recorder before owner-routing the capture, so recording and the scribe can run on different hosts.
-Meeting mode rejects `surface: "app"`,
-allows `prompt` to be omitted, and replaces the prompt with the meeting's facts
+Meeting mode allows `prompt` to be omitted and replaces the prompt with the meeting's facts
 (mode and transcript path, plus a pointer to the shuttle skill's
 `references/meeting.md`) followed by the user's note.
 The capture scribe infers the meeting's identity, participants, and filing location from the transcript and felt tree; it doesn't require a title before recording.
@@ -184,84 +184,17 @@ scribe is not launched and the response is **503** with the failed `meeting` row
 and `recording: false`. A recording that is still loading, or whose state tmux
 can't report yet, counts as started (`state: "starting"`).
 
-### Codex conversations and terminal presentation
+### Codex terminal workers
 
-Existing-fiber dispatch reads the persisted `shuttle.surface`; omission selects terminal presentation.
-Both Codex surfaces use the owning host's selected App Server and report an error if it cannot be reached.
-Model and effort remain agent-registry choices.
-The daemon ensures the selected backend asynchronously, without creating a project, thread, or model turn during dependency startup.
-Before readiness, dispatch and capture return HTTP 503 with `reason: "backend_not_ready"`, `waiting: true`, and `retryable: true`, without creating a conversation or queuing a launch request.
-An armed fiber retries on the ordinary poll without a preflight cooldown; a capture must be repeated after readiness.
-A server that becomes unavailable during a native operation can still return HTTP 503 with `reason: "app_server_unavailable"`; a known conversation identity remains owned and must not be replaced.
-Shuttle never launches embedded, replaces a live server, or silently changes the selected endpoint.
+Codex workers use the Codex CLI through the owning host's selected terminal
+backend. Capture, dispatch and claim responses include the worker's native
+session identity and terminal coordinates. The stored `shuttle.surface` field
+is ignored by execution and may remain in older fiber documents.
 
-Successful app capture, dispatch, and claim responses carry `surface: "app"`,
-`project_id`, `thread_id`, `session_uuid`, `transcript_session_uuid`, and
-`tmux_session: null`. For app workers, `session_uuid` is the resumable
-conversation identity (the same value as `thread_id`);
-`transcript_session_uuid` is the native transcript identity, which can differ
-for a fork. Session ledgers keep the transcript identity in `session` and carry
-`thread_id` as the Codex address identity.
-Terminal Codex responses carry the same conversation identities, `surface: "cli"`, and their real `tmux_session`.
-`terminal_error` on a running snapshot row reports a failed viewer launch without releasing the conversation.
-Other CLI responses carry `surface: "cli"` and their real `tmux_session`.
-A claim can attach an existing
-native Codex conversation only after the connected App Server read-verifies its
-exact id and active or idle state. The claim records ownership without starting,
-resuming, naming, or interrupting a turn. An app conversation waiting
-for the next phone reply remains assigned; its idle state does not authorize
-another launch.
-
-App responses and runtime rows can also carry `desktop_link`, the validated
-`codex://threads/<thread_id>` desktop route. This is separate from a verified
-phone `session_link`. The board uses native working, waiting, and attention
-states without treating an idle conversation as released ownership. An idle
-conversation with an active loaded thread descended from it (a spawned agent
-naming it as `parentThreadId`) reads as working, not waiting.
-
-A created conversation whose first turn could not be confirmed returns HTTP
-502 with `reason: "app_launch_failed"`, its conversation id, and a recovery
-`message`. Ownership remains reserved; inspect and resume that conversation
-instead of creating a duplicate. Confirmed missing conversations are marked
-blocked and can be explicitly stopped or replaced. A temporary connection
-failure remains unknown.
-
-To claim an app conversation, post `fiber_id`, `surface: "app"`, and
-`session_uuid` to `/claim`. A Shuttle-created capture claims its durable record
-directly; an existing native conversation is adopted only after exact
-read-verification by this host's App Server. In either case it must not belong
-to another fiber.
-A managed terminal Codex capture also claims by `session_uuid`, with `surface: "cli"`; its durable record supplies its terminal viewer.
-Other CLI claims use `tmux_session`.
-The dispatch prompt supplies the claim information and the appropriate completion instructions.
-A claim carrying `meeting` stamps it on the fiber as `shuttle.runtime.meeting`.
-
-`/attach` is a terminal operation.
-A Codex thread UUID is not a terminal name or a verified mobile URL.
-For a terminal Codex worker, `/attach` prepares its recorded viewer on the owning host before opening the local terminal tab.
-`POST /sessions/prepare-terminal` accepts `{fiber: "<intrinsic UID>"}` or `{tmux_session: "<recorded name>"}`, with optional `origin` or `shuttle_host` for owner routing.
-It returns `{tmux_session, created}` after verifying active ownership and the exact thread on the selected endpoint.
-A missing viewer is recreated without a prompt or model turn; an uncertain endpoint or tmux observation refuses preparation rather than launching a duplicate.
-It returns 404 without an owned terminal conversation, or 422 when preparation is refused.
-Phone conversation access uses the host's Codex project listing until a direct app URL is available.
-
-`/attach` takes `{tmux_session, shuttle_host?}` for a live worker, or
-`{session, shuttle_host?}` for a past harness session (the card's History). For
-the second, the host that ran the session starts a tmux session named
-`resume-<uuid>` running the harness's own resume — the command the dispatcher
-resumes workers with, for the agent that host's ledger recorded, in the working
-directory the transcript records — or finds the one already running; a remote
-host is asked through `/sessions/resume`. The tab then attaches to it like any
-worker's. The name does not end in `-shuttle`, so no dispatch, adoption or
-orphan path treats it as a worker. 409 when the session is that host's running
-worker (attach to its tmux instead); 422 when that host has no transcript or no
-recorded working directory to resume in. The other way round, a dispatcher
-resume of a session whose `resume-<uuid>` is open is refused
-(`session_open_in_resume`) and the fiber shows as blocked, rather than two
-harness processes sharing one transcript.
-An already-owned Codex backend can have multiple viewers of the same thread without opening a second execution runtime.
-For historical Codex sessions, the host verifies/resumes the selected App Server thread and launches an explicit remote TUI; it never falls back to embedded.
-A process holding an unowned embedded transcript still blocks that migration.
+`/attach` prepares an existing terminal worker session on its owning host.
+It does not start a model turn. A missing or uncertain terminal session is
+reported without creating a replacement conversation. Historical sessions
+resume through the harness and the host's session ledger.
 
 ## Remote Control status
 
@@ -370,8 +303,7 @@ Capture and Stash offer `--chrome` only when both the selected host and selected
 configured daemon once with `local=true`; an offline, old, timed-out, or
 malformed peer becomes an explicit `{host, error}` gap while successful peers
 remain usable. A session row includes `fiber` and `fiber_uid` when its host
-knows the pairing. A Codex App row also includes `transcript_id` when the
-addressed thread and native transcript have different ids. Returned addresses
+knows the pairing. Returned addresses
 use the configured routing alias and canonical harness name:
 `shuttle://HOST/HARNESS/NATIVE_ID`, where `HARNESS` is
 `claude`, `codex`, or `pi`.
@@ -473,7 +405,7 @@ prompt. `project_dir` remains required by the ordinary capture flow.
 
 An unavailable hark executable returns **503**. An existing meeting in
 `starting`, `loading`, `live`, or `stopping` returns **409** with its row.
-Meeting mode rejects `surface: "app"`, an invalid mode, or a mode unsupported by the recorder with **422**.
+Meeting mode rejects an invalid mode or a mode unsupported by the recorder with **422**.
 If capture fails after hark starts, the capture's status and error body include
 the meeting row and `recording: true`; recording continues on its recorder.
 A transport failure after forwarding a start returns `recording_unknown: true` and the recorder address.
@@ -781,7 +713,7 @@ here" rather than as a missing file.
 
 | Route | Purpose |
 |---|---|
-| `GET /version` | Daemon build stamp and liveness probe, including `ready`, independent `codex_backend` health, and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
+| `GET /version` | Daemon build stamp and liveness probe, including `ready` and boot duration; deploy verifiers watch `git_short_sha` AND `booted_at`; also carries `host` (the frozen host id this daemon dispatches under, by which other daemons' discovery names it), `listen`, `host_class`, peer-gate mode/uid/source, `tailnet_dial` (with `socket_source`: `configured`, `default`, `system` or `none`, and `default_socket_refused` when an untrusted default socket was passed over), and `discovery` (this daemon's tailnet peer discovery: `enabled`, `state` of `pending`/`ok`/`unavailable`/`disabled`, `via` of `cli`/`localapi`, `error`, `last_run_at`, the `peers` found with `name`, `url`, `dns_name` and `last_seen_at`, and the nodes `rejected` with a `reason`) |
 | `GET /state` | Full local state: running workers, blocked and `pending_launch` rows, standing constitutions, boot quarantine, contract check and `poll_health` |
 | `GET /state/composite` | The same plus per-origin remote snapshots |
 | `POST /quarantine/release` | Release the boot quarantine (host-addressed; `shuttle daemon release`) |
@@ -790,12 +722,6 @@ here" rather than as a missing file.
 `release_path` is the absolute root of the release the running VM booted from, or `"unknown"` when running under Mix.
 It describes the current process, not the release selected for the next boot in `~/.shuttle/repo`.
 `shuttle daemon status` includes this field even when it prints the state response.
-
-`codex_backend` is a cached, bounded-read health object with `state` (`starting`, `ready`, or `waiting`), `endpoint`, `error`, and `next_attempt_at` (UTC timestamp or null).
-Its reconciliation runs off the request path and independently of worker boot quarantine.
-`ready: true` at the top level means the daemon has initialized, not that Codex can accept work.
-Use `codex_backend.state == "ready"` to check the selected App Server; native `codex app-server daemon version` checks Codex's separate `CODEX_HOME` endpoint.
-The default selected endpoint uses literal `/tmp`, effective uid, and the actual OS hostname hash; `SHUTTLE_CODEX_SOCKET` overrides it without migrating durable conversation records.
 
 The endpoint binds before synchronous store resolution, orphan adoption,
 event-stream seeding, and Tailnet bridge reconciliation finish. Until every

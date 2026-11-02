@@ -39,9 +39,8 @@ type Block struct {
 	Host         string        `json:"host,omitempty" yaml:"host,omitempty"`
 	ProjectDir   string        `json:"project_dir,omitempty" yaml:"project_dir,omitempty"`
 	Agent        string        `json:"agent,omitempty" yaml:"agent,omitempty"`
-	// Surface selects how Codex executes: app is the ChatGPT-backed App Server
-	// transport, cli a tmux worker. A Codex block with no surface and no
-	// recorded session resolves to app; any other absent surface is the CLI.
+	// Surface preserves the legacy execution-surface field on stored fibers.
+	// Shuttle execution always uses the host's terminal backend.
 	Surface string `json:"surface,omitempty" yaml:"surface,omitempty"`
 	// Orthogonal dispatch axes layered on top of Agent (the base id). Effort is
 	// a token validated against the resolved base agent's allowed set; Chrome is
@@ -171,11 +170,7 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 		add("kind", fmt.Sprintf("must be one of %v, got %q", ValidKinds, b.Kind))
 	}
 
-	if b.Surface != "" && b.Surface != "cli" && b.Surface != "app" {
-		add("surface", fmt.Sprintf("must be one of cli or app, got %q", b.Surface))
-	}
-
-	if agents != nil && (b.Agent != "" || b.Effort != "" || b.Chrome || b.Surface != "") {
+	if agents != nil && (b.Agent != "" || b.Effort != "" || b.Chrome) {
 		// Resolve the named agent (or registry default when unnamed) together
 		// with the block's axes, surfacing unknown-agent, dangling-alias, and
 		// axis-constraint violations in one shot.
@@ -185,11 +180,9 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 				name = def.ID
 			}
 		}
-		base, _, err := agents.Resolve(name, b.Effort, b.Chrome)
+		_, _, err := agents.Resolve(name, b.Effort, b.Chrome)
 		if err != nil {
 			add("agent", err.Error())
-		} else if b.Surface == "app" && base.CLI != "codex" {
-			add("surface", fmt.Sprintf("app is supported only by Codex agents, got %q", base.ID))
 		}
 	}
 

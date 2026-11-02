@@ -36,7 +36,7 @@ func TestShuttleInstall_Armed(t *testing.T) {
 	}
 }
 
-func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
+func TestShuttleInstallHasNoSurfaceFlag(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "testhost")
@@ -49,16 +49,12 @@ func TestShuttleInstall_CodexDefaultsToAppButExplicitCLIWins(t *testing.T) {
 		t.Fatalf("Codex install: %v\n%s", err, out)
 	}
 	app, _, _ := shuttle.BlockOf(mustRead(t, storage, "app"))
-	if app.Surface != "app" {
-		t.Fatalf("new Codex surface = %q, want app", app.Surface)
+	if app.Surface != "" {
+		t.Fatalf("new Codex surface = %q, want none", app.Surface)
 	}
 
-	if out, err := runIn(t, env, dir, "install", "cli", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol", "--surface", "cli"); err != nil {
-		t.Fatalf("explicit CLI install: %v\n%s", err, out)
-	}
-	cli, _, _ := shuttle.BlockOf(mustRead(t, storage, "cli"))
-	if cli.Surface != "cli" {
-		t.Fatalf("explicit surface = %q, want cli", cli.Surface)
+	if _, err := runIn(t, env, dir, "install", "cli", "--host", "testhost", "--project-dir", pdir, "--model", "codex-sol", "--surface", "cli"); err == nil {
+		t.Fatal("install accepted retired --surface")
 	}
 }
 

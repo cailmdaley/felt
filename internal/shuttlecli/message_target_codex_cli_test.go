@@ -14,7 +14,7 @@ func TestResolveMessageTargetCodexCLIHookSession(t *testing.T) {
 	}{
 		{"cli", "cli", "hook", "codex", messageTargetSession, messageTargetFiberUID, true},
 		{"default_cli", "", "hook", "codex", messageTargetSession, messageTargetFiberUID, true},
-		{"app_unmapped", "app", "hook", "codex", messageTargetSession, messageTargetFiberUID, false},
+		{"legacy_app_ignored", "app", "hook", "codex", messageTargetSession, messageTargetFiberUID, true},
 		{"wrong_session", "cli", "hook", "codex", "other-session", messageTargetFiberUID, false},
 		{"wrong_harness", "cli", "hook", "pi", messageTargetSession, messageTargetFiberUID, false},
 		{"wrong_fiber", "cli", "hook", "codex", messageTargetSession, "other-uid", false},

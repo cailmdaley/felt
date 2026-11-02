@@ -1190,9 +1190,8 @@ func (a *app) setModelCmd() *cobra.Command {
 		Short: "Change only the dispatch agent for a fiber",
 		Long: `Updates shuttle.agent to the given agent ID, validated against the agent
 registry (together with the block's existing effort/chrome axes) before writing.
-Effort, chrome and surface stay as they are — use set-agent to change them
-with the agent; a block on surface: app can only move to another Codex agent
-here. Daemon-owned runtime keys are preserved. This saves the next-launch
+Effort and chrome stay as they are — use set-agent to change them
+with the agent. Daemon-owned runtime keys are preserved. This saves the next-launch
 agent without starting or replacing a worker.`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1213,7 +1212,7 @@ agent without starting or replacing a worker.`,
 				return fmt.Errorf("loading agent registry: %w", err)
 			}
 
-			axes := agentAxes{agent: args[1], effort: block.Effort, chrome: block.Chrome, surface: block.Surface}
+			axes := agentAxes{agent: args[1], effort: block.Effort, chrome: block.Chrome}
 			if err := axes.write(f, reg); err != nil {
 				return err
 			}
@@ -1238,18 +1237,16 @@ agent without starting or replacing a worker.`,
 func (a *app) setAgentCmd() *cobra.Command {
 	var setAgentEffort string
 	var setAgentChrome bool
-	var setAgentSurface string
 	var setAgentProjectDir string
 	setAgentCmd := &cobra.Command{
 		Use:   "set-agent <fiber> [agent]",
-		Short: "Set the dispatch agent and/or axes (effort, chrome, surface) for a fiber",
-		Long: `Composes a fiber's dispatch axes — base agent, effort, chrome, surface — and
+		Short: "Set the dispatch agent and/or axes (effort, chrome) for a fiber",
+		Long: `Composes a fiber's dispatch axes — base agent, effort and chrome — and
 writes them to the shuttle: block after validating the combination against the
 agent registry's per-harness constraints. The base agent argument is optional:
 omit it to mutate only the axes of the current agent; an omitted flag keeps
 that axis as it is. Pass --effort "" to clear effort back to the harness
-default, --chrome=false to drop chrome. --surface app is Codex-only: moving a
-block on the app to another harness takes --surface cli in the same call.
+default, --chrome=false to drop chrome.
 Use --project-dir to update the worker cwd without changing its lifecycle.
 Settings apply to the next launch; this command does not start, stop, resume,
 or replace a worker.`,
@@ -1287,10 +1284,6 @@ or replace a worker.`,
 			if cmd.Flags().Changed("chrome") {
 				chrome = setAgentChrome
 			}
-			surface := block.Surface
-			if cmd.Flags().Changed("surface") {
-				surface = setAgentSurface
-			}
 
 			if owner != "" {
 				fields := map[string]any{}
@@ -1302,9 +1295,6 @@ or replace a worker.`,
 				}
 				if cmd.Flags().Changed("chrome") {
 					fields["chrome"] = setAgentChrome
-				}
-				if cmd.Flags().Changed("surface") {
-					fields["surface"] = setAgentSurface
 				}
 				if cmd.Flags().Changed("project-dir") {
 					fields["project_dir"] = block.ProjectDir
@@ -1318,7 +1308,7 @@ or replace a worker.`,
 			if err != nil {
 				return fmt.Errorf("loading agent registry: %w", err)
 			}
-			axes := agentAxes{agent: agentID, effort: effort, chrome: chrome, surface: surface}
+			axes := agentAxes{agent: agentID, effort: effort, chrome: chrome}
 			if err := axes.write(f, reg); err != nil {
 				return err
 			}
@@ -1339,26 +1329,24 @@ or replace a worker.`,
 	}
 	setAgentCmd.Flags().StringVar(&setAgentEffort, "effort", "", `Effort level (harness-native token, e.g. low|medium|high|xhigh|max); "" clears; omit to preserve`)
 	setAgentCmd.Flags().BoolVar(&setAgentChrome, "chrome", false, "Enable chrome (claude harness only); --chrome=false clears; omit to preserve")
-	setAgentCmd.Flags().StringVar(&setAgentSurface, "surface", "", "Execution surface: cli or app (Codex only); omit to preserve")
 	setAgentCmd.Flags().StringVar(&setAgentProjectDir, "project-dir", "", "Set the worker cwd without changing its lifecycle")
 	setAgentCmd.Flags().Bool("local", false, localFlagUsage)
 	return setAgentCmd
 }
 
 // agentAxes is one composition of a block's dispatch axes: base agent (empty
-// for the registry default), effort, chrome and surface.
+// for the registry default), effort and chrome.
 type agentAxes struct {
-	agent   string
-	effort  string
-	chrome  bool
-	surface string
+	agent  string
+	effort string
+	chrome bool
 }
 
 // write validates the composition against the registry and sets it on f's
 // shuttle: block — surgically, so the daemon-owned runtime keys survive: a
 // cleared agent or effort drops its key, chrome is a real bool or absent.
 // set-model and set-agent both write through here, so neither can leave a
-// block naming a surface its agent cannot run on.
+// block naming a combination its agent cannot run.
 func (a agentAxes) write(f *felt.Felt, reg *shuttle.AgentRegistry) error {
 	name := a.agent
 	if name == "" {
@@ -1366,15 +1354,9 @@ func (a agentAxes) write(f *felt.Felt, reg *shuttle.AgentRegistry) error {
 			name = def.ID
 		}
 	}
-	base, _, err := reg.Resolve(name, a.effort, a.chrome)
+	_, _, err := reg.Resolve(name, a.effort, a.chrome)
 	if err != nil {
 		return err
-	}
-	if a.surface != "" && a.surface != "cli" && a.surface != "app" {
-		return fmt.Errorf("surface must be cli or app, got %q", a.surface)
-	}
-	if a.surface == "app" && base.CLI != "codex" {
-		return fmt.Errorf("surface app is supported only by Codex agents, got %q (to move this block off the app: shuttle set-agent <fiber> %s --surface cli)", base.ID, name)
 	}
 
 	if err := shuttle.SetNodeField(f, "agent", axisValue(a.agent)); err != nil {
@@ -1390,7 +1372,7 @@ func (a agentAxes) write(f *felt.Felt, reg *shuttle.AgentRegistry) error {
 	if err := shuttle.SetNodeField(f, "chrome", chrome); err != nil {
 		return err
 	}
-	return shuttle.SetNodeField(f, "surface", axisValue(a.surface))
+	return nil
 }
 
 // axisValue maps a string axis to a typed-set value: an empty string deletes the

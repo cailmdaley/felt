@@ -68,7 +68,6 @@ const PHASES = [undefined, 'working', 'waiting', 'attention', 'blocked', 'identi
 const runtimeArb = fc.record({
   phase: fc.constantFrom(...PHASES),
   state: fc.constantFrom('running', 'blocked'),
-  surface: fc.constantFrom('cli', 'app'),
   launchError: fc.option(fc.constant('refused'), { nil: undefined }),
   idleMs: fc.integer({ min: 0, max: 48 * 3_600_000 }),
   ask: fc.boolean(),
@@ -86,14 +85,13 @@ function feed(rows: Row[]): KanbanResponse {
       fiber: {
         id: `w-${i}`, uid: `uid-${i}`, name: `w-${i}`, status: 'active', created_at: '2026-10-01T12:00:00Z',
         shuttle: {
-          kind: 'oneshot', host: r.unreachable ? 'far' : 'desk', surface: r.surface,
-          ...(r.surface === 'app' ? { runtime: { session_uuid: `0190a0be-6c36-7cd1-aec9-53a680d1f69${i % 10}` } } : {}),
-          ...(r.ask ? { ask: ASK } : {}),
+          kind: 'oneshot', host: r.unreachable ? 'far' : 'desk',
+                    ...(r.ask ? { ask: ASK } : {}),
         },
       },
       runtime: !r.live ? undefined : {
-        state: r.state, phase: r.phase, surface: r.surface,
-        tmux_session: r.surface === 'cli' ? `tmux-${i}` : undefined,
+        state: r.state, phase: r.phase,
+        tmux_session: `tmux-${i}`,
         last_activity_at: NOW - r.idleMs, started_at: NOW - 20 * 3_600_000,
         launch_error: r.launchError,
       },

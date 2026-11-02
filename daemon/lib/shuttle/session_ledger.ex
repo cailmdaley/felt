@@ -77,8 +77,7 @@ defmodule Shuttle.SessionLedger do
   @doc """
   Append one pairing.
 
-  Required: `:fiber`, `:session`, `:kind`. Optional: `:thread_id` (the Codex
-  App Server address id; `:session` may name a different transcript id), `:tmux`,
+  Required: `:fiber`, `:session`, `:kind`. Optional: `:tmux`,
   `:harness`, `:uid` (derived from the tmux name when omitted), `:host` (this daemon's
   own_host_id when omitted), `:at` (now when omitted), `:agent`, `:model`,
   and `:role` (the launch-time office slug). `:model`
@@ -135,7 +134,6 @@ defmodule Shuttle.SessionLedger do
           "kind" => kind
         }
         |> maybe_put("fiber_path", presence(Keyword.get(fields, :fiber_path)))
-        |> maybe_put("thread_id", presence(Keyword.get(fields, :thread_id)))
         |> maybe_put("agent", presence(Keyword.get(fields, :agent)))
         |> maybe_put("model", presence(Keyword.get(fields, :model)))
         |> maybe_put("role", presence(Keyword.get(fields, :role)))
@@ -287,7 +285,6 @@ defmodule Shuttle.SessionLedger do
 
     candidates =
       case name do
-        "codex-terminal-" <> id -> candidates ++ [{"thread_id", id}, {"session", id}]
         "resume-" <> id -> candidates ++ [{"session", id}]
         _ -> candidates
       end

@@ -1,4 +1,3 @@
-import type { ExecutionSurface } from './executionSurface'
 import type { MeetingLanguage, MeetingMode } from './meetingApi'
 
 // Capture's default worker: claude-opus at xhigh reasoning. A captured yap is
@@ -15,7 +14,6 @@ export interface CaptureRequestInput {
   agent: string
   effort?: string
   chrome?: boolean
-  surface?: ExecutionSurface
   meetingMode?: MeetingMode | null
   meetingLanguage?: MeetingLanguage
   recorder?: string | null
@@ -27,7 +25,6 @@ export interface CaptureResponseData {
   reason?: string
   error?: string
   message?: string
-  surface?: ExecutionSurface
   recording?: boolean
   recording_unknown?: boolean
   recorder?: string
@@ -35,7 +32,7 @@ export interface CaptureResponseData {
 }
 
 export type CaptureOutcome =
-  | { kind: 'spawned'; tmuxSession: string; surface?: ExecutionSurface }
+  | { kind: 'spawned'; tmuxSession: string }
   | { kind: 'meeting-recording'; host: string; error?: string }
   | { kind: 'error'; message: string; uncertain?: boolean }
 
@@ -49,10 +46,8 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
     ...(input.meetingMode
-      ? { surface: 'cli', meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto' }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
-      : input.surface
-        ? { surface: input.surface }
-        : {}),
+      ? { meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto' }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
+      : {}),
   }
 }
 
@@ -86,14 +81,10 @@ export function captureOutcome(
   return {
     kind: 'spawned',
     tmuxSession: data.tmux_session ?? '',
-    surface: data.surface,
   }
 }
 
 function captureError(status: number, data: CaptureResponseData, projectDir: string): string {
-  if (data.reason === 'app_launch_failed') {
-    return 'ChatGPT could not start this Codex run. Check the app connection and try again.'
-  }
   if (data.reason === 'project_dir_missing') {
     return `Project directory not found on the daemon: ${projectDir}`
   }

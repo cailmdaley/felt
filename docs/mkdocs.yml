@@ -57,7 +57,6 @@ nav:
       - Agent setup guide: shuttle/agent-setup.md
       - Connect your machines: shuttle/remotes.md
       - Opening conversations: shuttle/conversations.md
-      - Codex desktop: shuttle/codex-desktop.md
       - Installation reference: shuttle/installation.md
       - Constitutions: shuttle/constitutions.md
       - Lifecycle: shuttle/lifecycle.md

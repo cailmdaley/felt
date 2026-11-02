@@ -137,16 +137,6 @@ shuttle resume <fiber>
 
 Keep that order: arming before the claim lets the poller launch a duplicate worker while the daemon can't yet see you. `session_uuid` is optional but enables resume and transcript lineage. The claim is idempotent, so retry a lost response with the same body. Its errors say what to do first: `already_running` (pause the live worker), `closed` (`shuttle reopen`), `not_installed` (`shuttle install`), `session_not_found` (the tmux name didn't resolve). Stopping a live worker loses whatever sat in its input box, so `tmux capture-pane` anything visible first.
 
-To claim from a Codex app conversation, send `"surface": "app"` with the
-exact conversation id as `session_uuid`, then run
-`shuttle -C <store> resume <fiber>`. Shuttle verifies the id before recording
-ownership, renames nothing and starts no turn; it refuses an unreadable,
-missing or already-owned id. Its exit verbs need no fiber or store: the native
-conversation id identifies the worker. An existing
-native Codex conversation can be adopted the same way when this daemon's App
-Server can read its id. A dropped connection keeps your ownership: don't
-re-claim or start a replacement conversation.
-
 From the claim on, you are the worker, and the skill's loop and exits apply.
 
 ## Arriving

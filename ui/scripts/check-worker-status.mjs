@@ -49,13 +49,12 @@ try {
     })
     const harness = pathToFileURL(resolve('harness-board-dist/index.html')).href
     await page.goto(harness)
-    const appCard = page.locator('.kbn-card').filter({ has: page.getByText('App conversation continuity', { exact: true }) })
-    const appMark = appCard.locator('.kbn-card-worker')
+    const legacyCard = page.locator('.kbn-card').filter({ has: page.getByText('Legacy surface field is ignored', { exact: true }) })
+    const appMark = legacyCard.locator('.kbn-card-worker')
     assert.equal(await appMark.locator('.ws-worker-state').textContent(), 'aloft')
     assert.ok(await appMark.isVisible())
-    const destination = mobile ? 'chatgpt://' : 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
-    assert.equal(await appMark.getAttribute('href'), destination)
-    // The app anchor, a terminal button and the worker-less phase badges share the pill's type.
+    assert.equal(await appMark.tagName(), 'BUTTON')
+    // The terminal button and worker-less phase badges share the pill's type.
     await appMark.evaluate((anchor, typography) => {
       const button = document.createElement('button')
       button.className = 'kbn-card-worker kbn-card-worker-aloft'
@@ -82,10 +81,10 @@ try {
     const deskFaces = await appMark.evaluate(faces)
 
     // The reader's head draws the same pill at its own scale; the fiber page draws none.
-    await appCard.locator('.kbn-card-name').click()
+    await legacyCard.locator('.kbn-card-name').click()
     const head = page.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
     await head.waitFor({ state: 'attached' })
-    assert.equal(await head.getAttribute('href'), destination)
+    assert.equal(await head.tagName(), 'BUTTON')
     assert.equal(await page.locator('.ws-selected .ws-dock .kbn-card-worker').count(), 0)
     await head.evaluate(runParity, parityArgs)
     if (mobile) {

@@ -551,8 +551,8 @@ defmodule Shuttle.DispatcherTest do
     assert standing =~ "Previous session: 0883ade1-08e0-4457-94c6-7ac12137eb0f (claude-code)"
   end
 
-  test "surface and headless appear only when they differ from a terminal session" do
-    assert Dispatcher.render_prompt("tests/a", surface: "app") =~ "\nSurface: app"
+  test "headless is explicit and historical surface options are inert" do
+    refute Dispatcher.render_prompt("tests/a", surface: "app") =~ "Surface:"
     assert Dispatcher.render_prompt("tests/a", headless: true) =~ "\nHeadless: true"
 
     plain = Dispatcher.render_prompt("tests/a", surface: "cli", headless: false)
@@ -1281,6 +1281,20 @@ defmodule Shuttle.DispatcherTest do
     assert cmd =~ "'hello world'"
   end
 
+  test "Codex developer instructions use a literal TOML string on fresh and resume commands" do
+    agent = Map.put(codex(), :developer_instructions, "keep \"quotes\" and $HOME\nnext")
+
+    for command <- [
+          Agents.build_command(agent, "work"),
+          Agents.build_resume_command(agent, "exact-id", "work")
+        ] do
+      assert command =~ "developer_instructions="
+      assert command =~ "$HOME"
+      refute command =~ "--remote"
+      refute command =~ "app-server"
+    end
+  end
+
   test "build_command for codex uses positional arg" do
     agent = codex()
 
@@ -1585,7 +1599,7 @@ defmodule Shuttle.DispatcherTest do
 
         opts = [transcript: lookup, now: @now] ++ if(mode, do: [resume_mode: mode], else: [])
         clean? = runtime in [:undated, :never] or handoff in [:at_dispatch, :after_dispatch]
-        {expected, looks?} = expected_continuation(mode, kind, session, clean?, surface, age)
+        {expected, looks?} = expected_continuation(mode, kind, session, clean?, age)
 
         row =
           "mode #{inspect(mode)}, #{kind}, #{runtime}, handoff #{handoff}, " <>
@@ -1617,17 +1631,14 @@ defmodule Shuttle.DispatcherTest do
     # The rule, in the order it decides: "previous" resumes the stamped session
     # or names its absence; the autonomous loop resumes only oneshots; with no
     # session, or a clean handoff since dispatch (presumed when there is no
-    # dispatch time), the next worker starts fresh; an app conversation lives in
-    # the App Server and resumes unless "fresh" was asked for. Only past those
-    # does the transcript decide — the only time it is looked up.
-    defp expected_continuation(mode, kind, session, clean?, surface, age) do
+    # dispatch time), the next worker starts fresh; otherwise the transcript
+    # decides. Historical surface fields do not affect continuation.
+    defp expected_continuation(mode, kind, session, clean?, age) do
       cond do
         mode == "previous" and session != nil -> {{:previous, session}, false}
         mode == "previous" -> {{:error, :missing_session_id}, false}
         mode == nil and kind == "standing" -> {:fresh, false}
         session == nil or clean? -> {:fresh, false}
-        surface == "app" and mode == "fresh" -> {:fresh, false}
-        surface == "app" -> {{:previous, session}, false}
         true -> {by_transcript(mode, session, age), true}
       end
     end
@@ -2077,60 +2088,41 @@ defmodule Shuttle.DispatcherTest do
     refute Map.has_key?(claim, "session_uuid")
   end
 
-  test "capture identity and install metadata roundtrip JSON on both surfaces" do
-    message = "  preserve\n\tindent, \"quotes\", $HOME and `code`\n\n"
+  test "capture identity and install metadata name the worker terminal" do
+    message = "preserve\nindent and quotes"
 
-    opts = [
-      session: "capture-one",
-      session_uuid: "exact-thread",
-      felt_store: "/tmp/store",
-      project_dir: "/tmp/project \"quoted\"",
-      agent_id: "codex-sol",
-      host: "host-a",
-      effort: "high",
-      chrome: true,
-      listen: "tcp://127.0.0.1:4567"
-    ]
+    prompt =
+      Dispatcher.render_capture_prompt(message,
+        session: "capture-one",
+        session_uuid: "exact-thread",
+        felt_store: "/tmp/store",
+        project_dir: "/tmp/project",
+        agent_id: "codex-sol",
+        host: "host-a",
+        effort: "high",
+        listen: "tcp://127.0.0.1:4567"
+      )
 
-    for surface <- ["cli", "app"] do
-      prompt =
-        if surface == "app",
-          do: Dispatcher.render_app_capture_prompt(message, opts),
-          else: Dispatcher.render_capture_prompt(message, opts)
+    assert String.ends_with?(prompt, "From User:\n" <> message)
+    [_, install_json] = Regex.run(~r/^Install: (.+)$/m, prompt)
+    [_, claim_json] = Regex.run(~r/^Claim: (.+)$/m, prompt)
 
-      assert String.ends_with?(prompt, "From User:\n" <> message)
-      assert prompt =~ "references/capture.md"
-      assert prompt =~ "Claim endpoint: http://127.0.0.1:4567/api/v1/claim"
-      [_, install_json] = Regex.run(~r/^Install: (.+)$/m, prompt)
-      [_, claim_json] = Regex.run(~r/^Claim: (.+)$/m, prompt)
-      install = Jason.decode!(install_json)
-      claim = Jason.decode!(claim_json)
+    assert Jason.decode!(install_json) == %{
+             "kind" => "oneshot",
+             "project_dir" => "/tmp/project",
+             "agent" => "codex-sol",
+             "host" => "host-a",
+             "effort" => "high"
+           }
 
-      assert install == %{
-               "kind" => "oneshot",
-               "surface" => surface,
-               "project_dir" => opts[:project_dir],
-               "agent" => "codex-sol",
-               "host" => "host-a",
-               "effort" => "high",
-               "chrome" => true
-             }
+    assert Jason.decode!(claim_json) == %{
+             "fiber_id" => "<fiber id>",
+             "tmux_session" => "capture-one",
+             "session_uuid" => "exact-thread",
+             "agent" => "codex-sol"
+           }
 
-      assert claim["session_uuid"] == "exact-thread"
-      assert claim["agent"] == "codex-sol"
-      assert claim["fiber_id"] == "<fiber id>"
-
-      if surface == "app" do
-        assert claim["surface"] == "app"
-        refute Map.has_key?(claim, "tmux_session")
-      else
-        assert claim["tmux_session"] == "capture-one"
-        refute Map.has_key?(claim, "surface")
-      end
-
-      refute prompt =~ "shuttle handoff"
-      refute prompt =~ "──"
-    end
+    refute prompt =~ "surface"
   end
 
   test "every dispatch preserves nonblank user instructions verbatim" do
@@ -2175,8 +2167,8 @@ defmodule Shuttle.DispatcherTest do
         cmd == "tmux" and hd(args) == "new-session"
       end)
 
-    assert Enum.at(args, 3) == session
-    assert Enum.at(args, 5) == "/tmp"
+    assert Enum.at(args, Enum.find_index(args, &(&1 == "-s")) + 1) == session
+    assert Enum.at(args, Enum.find_index(args, &(&1 == "-c")) + 1) == "/tmp"
 
     # The run script (written to disk, handed to tmux) carries the yap and
     # the claim call with this session's identity baked in.

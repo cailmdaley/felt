@@ -55,12 +55,11 @@ func TestMigrateRoutesIdentityWithoutLocalLifecycleWrites(t *testing.T) {
 				t.Fatalf("%v: %s", err, out)
 			}
 			wantPane := "%17"
-			if mode == "rex" {
+			if strings.HasPrefix(mode, "rex") {
 				wantPane = "block:source"
 			}
-			if strings.Contains(mode, "codex") {
-				wantPane = ""
-			}
+			// Codex workers run in the selected local terminal backend, so their
+			// migration carries the same pane or Rex block identity as other workers.
 			if body["from"] != "from" || body["to"] != "to" || body["session_id"] != "live-session" || body["tmux_pane"] != wantPane || body["rest"] != (mode == "--rest") || body["disabled"] != (mode == "--disabled") {
 				t.Fatalf("payload %+v", body)
 			}

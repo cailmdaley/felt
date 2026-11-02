@@ -205,7 +205,6 @@ defmodule Shuttle.SessionResumeTest do
     start_supervised!(StubKitty)
     Env.put_app_env(:session_resume_test_owner, self())
     Env.put_app_env(:codex_app_client, App)
-    Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
     Env.put_app_env(:session_resume_runner, Runner)
     Env.put_app_env(:session_resume_live, fn -> [] end)
     Env.put_app_env(:opener_impl, StubKitty)
@@ -233,8 +232,10 @@ defmodule Shuttle.SessionResumeTest do
       assert {:ok, plan} = SessionResume.plan(@codex, runner: Runner)
       assert plan.cwd == project
 
-      assert plan.command ==
-               "env -u TMUX -u TMUX_PANE codex --remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}' -C '#{project}' resume '#{@codex}'"
+      assert plan.command =~ "codex"
+      assert plan.command =~ "resume '#{@codex}'"
+      refute plan.command =~ "--remote"
+      refute plan.command =~ "TMUX"
     end
 
     test "pi with no ledgered agent resumes with the bare CLI, in its header's cwd", %{
@@ -267,8 +268,12 @@ defmodule Shuttle.SessionResumeTest do
 
       assert tmux == "resume-" <> @claude
 
-      assert [{"tmux", ["new-session", "-d", "-s", ^tmux, "-c", ^project, "bash", "-l", script]}] =
+      assert [{"tmux", args}] =
                Enum.filter(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
+
+      assert Enum.at(args, Enum.find_index(args, &(&1 == "-s")) + 1) == tmux
+      assert Enum.at(args, Enum.find_index(args, &(&1 == "-c")) + 1) == project
+      assert ["bash", "-l", script] = Enum.take(args, -3)
 
       assert Path.basename(script) =~ ~r/^shuttle-run-resume-#{@claude}\.\d+\.sh$/
 
@@ -359,37 +364,6 @@ defmodule Shuttle.SessionResumeTest do
                "session.create" in argv
              end)
     end
-
-    test "owned Codex viewers launch in Rex and keep the exact native thread endpoint", %{
-      project: project
-    } do
-      assert :ok =
-               Shuttle.AppWorkers.put(%{
-                 "session_uuid" => @codex,
-                 "thread_id" => @codex,
-                 "active" => true,
-                 "surface" => "cli",
-                 "launch_state" => "running",
-                 "agent_id" => "codex-luna",
-                 "cwd" => project,
-                 "terminal_wrapper" => "codex",
-                 "backend_host" => Shuttle.Poller.own_host_id(),
-                 "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
-               })
-
-      assert {:ok, %{tmux_session: name, created: true}} =
-               SessionResume.prepare(@codex, runner: RexRunner)
-
-      assert name == "codex-terminal-" <> @codex
-      assert_received {:native_resume, @codex}
-      body = rex_script()
-      assert body =~ "unset TMUX TMUX_PANE"
-      assert body =~ "export PATH="
-      assert body =~ "--remote 'unix://#{Shuttle.CodexApp.Transport.default_socket()}'"
-      assert body =~ "resume '#{@codex}'"
-      refute body =~ "list-clients"
-      refute Enum.any?(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
-    end
   end
 
   defp rex_script do
@@ -449,176 +423,6 @@ defmodule Shuttle.SessionResumeTest do
 
       assert StubKitty.opened() == []
     end
-  end
-
-  test "historical Codex rejects unsupported env and flags before loading its thread" do
-    for {patch, diagnostic} <- [
-          {%{"env" => %{"PER_WORKER_ENV" => "cannot-honor"}}, "per-worker agent env"},
-          {%{"extra_flags" => "--unsupported-config"}, "extra_flags"}
-        ] do
-      Runner.set_agent_patch(patch)
-
-      assert {:error, message} =
-               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-      assert message =~ diagnostic
-      refute_received {:native_resume, _}
-
-      refute Enum.any?(Runner.calls(), fn {cmd, args} ->
-               cmd == "tmux" and "new-session" in args
-             end)
-    end
-  end
-
-  test "historical Codex uses dispatch protocol options for supported approval presets" do
-    for {preset, expected} <- [
-          {"--approve-for-me",
-           [
-             approval_policy: "on-request",
-             approvals_reviewer: "auto_review",
-             sandbox: "workspace-write"
-           ]},
-          {"--not-so-yolo",
-           [
-             approval_policy: "on-request",
-             approvals_reviewer: "auto_review",
-             sandbox: "workspace-write"
-           ]},
-          {"--dangerously-bypass-approvals-and-sandbox",
-           [approval_policy: "never", approvals_reviewer: nil, sandbox: "danger-full-access"]}
-        ] do
-      Runner.set_agent_patch(%{
-        "extra_flags" => preset,
-        "developer_instructions" => "AGENT_ONLY_MARKER"
-      })
-
-      assert {:ok, plan} = SessionResume.plan(@codex, runner: Runner)
-      assert Keyword.fetch!(plan.backend_opts, :developer_instructions) == nil
-      assert plan.backend_opts[:model] == "gpt-6-luna"
-      assert plan.backend_opts[:effort] == "max"
-      for {key, value} <- expected, do: assert(plan.backend_opts[key] == value)
-
-      assert {:ok, %{created: true}} =
-               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-      assert_received {:native_resume_options, @codex, native_opts}
-      assert Keyword.fetch!(native_opts, :developer_instructions) == nil
-      assert byte_size(Keyword.fetch!(native_opts, :sender_capability)) == 64
-
-      assert Keyword.delete(native_opts, :sender_capability) ==
-               Keyword.delete(plan.backend_opts, :sender_capability)
-
-      assert plan.command =~ "--remote 'unix://"
-      refute plan.command =~ preset
-    end
-  end
-
-  test "History imports a stopped embedded conversation with its exact ID and durable endpoint" do
-    assert {:ok, %{tmux_session: "resume-" <> @codex}} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert_received {:native_resume, @codex}
-    refute_received {:native_resume, _}
-    assert {:ok, record} = Shuttle.AppWorkers.get(@codex)
-    assert record["backend_host"] == Shuttle.Poller.own_host_id()
-    assert record["backend_endpoint"] == Shuttle.CodexApp.Transport.default_socket()
-    assert record["thread_id"] == @codex
-    assert record["active"] == false
-  end
-
-  test "History rejects a shared rollout without host execution provenance" do
-    File.rm!(Shuttle.SessionLedger.default_path())
-
-    assert {:error, message} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert message =~ "embedded_origin_unverified"
-    refute_received {:native_resume, _}
-    assert {:error, :not_found} = Shuttle.AppWorkers.get(@codex)
-  end
-
-  test "History accepts an old embedded ledger row in the rotated file" do
-    ledger = Shuttle.SessionLedger.default_path()
-    File.rename!(ledger, ledger <> ".1")
-    File.write!(ledger, "")
-
-    assert {:ok, %{created: true}} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert_received {:native_resume, @codex}
-  end
-
-  test "History refuses unknown holder scans before any native call" do
-    Runner.set_ps({"scan failed", 1})
-
-    assert {:error, message} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert message =~ "could not check"
-    refute_received {:native_resume, _}
-  end
-
-  test "historical Codex refuses malformed ownership before native resume" do
-    File.mkdir_p!(Shuttle.AppWorkers.root())
-    path = Path.join(Shuttle.AppWorkers.root(), @codex <> ".json")
-
-    for {bytes, reason} <- [
-          {"null", :ownership_record_unreadable},
-          {Jason.encode!(%{"session_uuid" => "other", "thread_id" => "other"}),
-           :session_owner_mismatch}
-        ] do
-      File.write!(path, bytes)
-
-      assert {:error, ^reason} =
-               SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-      refute_received {:native_resume, _}
-      assert File.read!(path) == bytes
-    end
-  end
-
-  test "historical owned Codex refuses another endpoint before native resume" do
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => @codex,
-               "thread_id" => @codex,
-               "active" => false,
-               "backend_host" => Shuttle.Poller.own_host_id(),
-               "backend_endpoint" => "/another-owner.sock"
-             })
-
-    assert {:error, :app_endpoint_changed} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    refute_received {:native_resume, _}
-  end
-
-  test "historical Codex refuses an embedded holder before native resume" do
-    Runner.set_ps({"1234 1 codex resume #{@codex}\n", 0})
-
-    assert {:error, {:live, message}} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert message =~ "1234"
-    refute_received {:native_resume, _}
-  end
-
-  test "durably owned historical Codex does not confuse an App Server identity with an embedded holder" do
-    :ok =
-      Shuttle.AppWorkers.put(%{
-        "session_uuid" => @codex,
-        "thread_id" => @codex,
-        "active" => false,
-        "backend_host" => Shuttle.Poller.own_host_id(),
-        "backend_endpoint" => Shuttle.CodexApp.Transport.default_socket()
-      })
-
-    Runner.set_ps({"1234 1 codex --remote unix:///control.sock resume #{@codex}\n", 0})
-
-    assert {:ok, %{tmux_session: "resume-" <> @codex, created: true}} =
-             SessionResume.prepare(@codex, runner: Runner, live_sessions: fn -> [] end)
-
-    assert_received {:native_resume, @codex}
   end
 
   test "a double click that races tmux's duplicate-session error is the session, not a failure" do

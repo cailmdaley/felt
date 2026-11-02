@@ -194,19 +194,7 @@ defmodule Shuttle.Messaging do
         end
       end)
 
-    Enum.reduce(index.app_sessions, annotated, fn app_worker, sessions ->
-      address = app_worker["address"]
-
-      case Enum.find_index(sessions, &(&1["address"] == address)) do
-        nil ->
-          sessions ++ [app_worker]
-
-        index ->
-          List.update_at(sessions, index, fn session ->
-            Map.merge(session, Map.take(app_worker, ["fiber", "fiber_uid", "transcript_id"]))
-          end)
-      end
-    end)
+    annotated
   end
 
   # Peer discovery is polled. Re-read the ledger only when either the live or
@@ -216,7 +204,7 @@ defmodule Shuttle.Messaging do
   @doc "Cached session-to-fiber pairings for the local host."
   def cached_session_fiber_index(host) do
     path = SessionLedger.default_path()
-    token = {session_ledger_file_token(path), app_worker_directory_token()}
+    token = session_ledger_file_token(path)
 
     case SessionFiberCache.lookup() do
       %{path: ^path, host: ^host, token: ^token, index: index} ->
@@ -251,7 +239,7 @@ defmodule Shuttle.Messaging do
       SessionLedger.read_since(0)
       |> Enum.reduce(%{}, fn record, acc ->
         session = record["session"]
-        native = record["thread_id"] || session
+        native = session
         fiber = record["fiber"]
         at = if is_integer(record["at"]), do: record["at"], else: 0
 
@@ -270,83 +258,13 @@ defmodule Shuttle.Messaging do
       end)
       |> Map.new(fn {native, {_at, entry}} -> {native, entry} end)
 
-    app_index = app_worker_fiber_index()
-
-    %{
-      fibers_by_session:
-        Map.merge(ledger_index, app_index, fn _native, ledger, app_worker ->
-          Map.merge(ledger, app_worker)
-        end),
-      app_sessions: app_worker_peer_rows(app_index, host)
-    }
-  end
-
-  defp app_worker_peer_rows(app_index, host) do
-    app_index
-    |> Enum.map(fn {native, pairing} ->
-      %{
-        "address" => address(host, "codex", native),
-        "host" => host,
-        "harness" => "codex",
-        "id" => native,
-        "fiber" => pairing["fiber"],
-        "state" => "unknown",
-        "capabilities" => []
-      }
-      |> Map.merge(Map.take(pairing, ["fiber_uid", "transcript_id", "cwd"]))
-    end)
-    |> Enum.sort_by(& &1["address"])
-  end
-
-  defp app_worker_fiber_index do
-    Shuttle.AppWorkers.active()
-    |> Enum.reduce(%{}, fn record, acc ->
-      thread = record["session_uuid"] || record["thread_id"]
-      transcript = record["transcript_session_uuid"] || thread
-      fiber = record["fiber_id"]
-
-      if is_binary(thread) and thread != "" and is_binary(fiber) and fiber != "" do
-        entry =
-          session_fiber_entry(record["uid"], fiber, if(transcript != thread, do: transcript))
-          |> Map.put("app_worker", true)
-          |> Map.put("harness", "codex")
-          |> maybe_map_put("cwd", record["cwd"])
-
-        Map.put(acc, thread, entry)
-      else
-        acc
-      end
-    end)
+    %{fibers_by_session: ledger_index}
   end
 
   defp session_fiber_entry(uid, fiber, transcript) do
     %{"fiber" => fiber}
     |> maybe_map_put("fiber_uid", uid)
     |> maybe_map_put("transcript_id", transcript)
-  end
-
-  # AppWorkers writes records by atomic rename, so directory stats miss a
-  # same-second replacement of an existing record. Fingerprint each record's
-  # own stat (including inode) and the sorted names to catch updates, additions,
-  # and removals without decoding every JSON file on each discovery request.
-  defp app_worker_directory_token do
-    path = Shuttle.AppWorkers.root()
-
-    records =
-      Path.join(path, "*.json")
-      |> Shuttle.FS.wildcard()
-      |> Enum.sort()
-      |> Enum.map(fn file ->
-        case Shuttle.FS.stat(file, time: :posix) do
-          {:ok, %File.Stat{mtime: mtime, size: size, inode: inode}} ->
-            {Path.basename(file), mtime, size, inode}
-
-          _ ->
-            {Path.basename(file), nil}
-        end
-      end)
-
-    {path, records}
   end
 
   defp alias_sessions(sessions, host) do
@@ -948,8 +866,11 @@ defmodule Shuttle.Messaging do
         {"context_added", _transport} ->
           false
 
-        {status, transport} when status in ["queued", "submitted"] ->
+        {"queued", transport} ->
           transport == "claude-native"
+
+        {"submitted", transport} ->
+          transport in ["claude-native", "codex-terminal"]
 
         _ ->
           true

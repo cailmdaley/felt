@@ -64,19 +64,13 @@ describe('the worker control lives in the reader head and the chat header, once 
     expect(dock.openConversation(live)).toBe(true)
     expect(opened).toEqual(['claude://claude.ai/code/session_test'])
     expect(openWorker).not.toHaveBeenCalled()
-    saveConversationOpening('chatgpt')
+    saveConversationOpening('terminal')
     expect(dock.openConversation(live)).toBe(true)
     expect(openWorker).toHaveBeenCalledWith('shuttle-debug', 'host-a')
   })
   it('drops the control when the worker leaves its session', () => {
     expect(show(worker())).not.toBeNull()
     expect(show(worker({ workerState: undefined, tmuxSession: undefined, workerAgent: undefined, status: 'closed' }))).toBeNull()
-  })
-  it('preserves the app conversation destination', () => {
-    const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
-    const pill = show(worker({ tmuxSession: undefined, workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route,
-      runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 })) as HTMLAnchorElement
-    expect(pill.querySelector('.ws-worker-state')?.textContent).toBe('idle'); expect(pill.querySelector('.ws-worker-elapsed')?.textContent).toBe('1m'); expect(pill.href).toBe(route)
   })
   it('follows owner-observed runtime, ignoring stale phase without a worker', () => {
     expect(show(worker({ runtimePhase: 'waiting', lastActivityAt: Date.now() - 61_000 }))?.querySelector('.ws-worker-state')?.textContent).toBe('idle')

@@ -423,7 +423,11 @@ func sendFiberContextAttempt(ctx context.Context, env *sysenv.Env, host string, 
 		return receipt, err
 	}
 	if receipt.Status != StatusContextAdded && receipt.Status != StatusAccepted {
-		return receipt, errCode("unconfirmed", "context delivery: %s", receipt.Status)
+		queuedCodexContext := receipt.Status == StatusQueued && receipt.Transport == "codex-hook" && !request.Wake
+		submittedCodexWake := receipt.Status == StatusSubmitted && receipt.Transport == "codex-terminal" && request.Wake
+		if !queuedCodexContext && !submittedCodexWake {
+			return receipt, errCode("unconfirmed", "context delivery: %s", receipt.Status)
+		}
 	}
 	return receipt, nil
 }

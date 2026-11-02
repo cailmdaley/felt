@@ -65,7 +65,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
             _ -> {"accepted", nil, 0}
           end
 
-        transport = if status in ["queued", "submitted"], do: "claude-native", else: "codex"
+        transport =
+          case status do
+            "queued" -> "claude-native"
+            "submitted" -> "codex-terminal"
+            _ -> "codex"
+          end
 
         receipt = %{
           message_id: request["message_id"],
@@ -219,7 +224,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
            })}
 
         status when status in ["queued", "context_added", "submitted"] ->
-          transport = if status in ["queued", "submitted"], do: "claude-native", else: "peer"
+          transport =
+            case status do
+              "queued" -> "claude-native"
+              "submitted" -> "codex-terminal"
+              _ -> "peer"
+            end
 
           {:ok, 200,
            Jason.encode!(%{
@@ -287,20 +297,13 @@ defmodule ShuttleWeb.MessagingControllerTest do
   setup do
     ledger_path = ledger_setup!("SHUTTLE_SESSIONS_FILE", "messaging_peer_sessions")
 
-    app_workers_dir =
-      Path.join(System.tmp_dir!(), "messaging_app_workers_#{System.unique_integer([:positive])}")
-
-    File.mkdir_p!(app_workers_dir)
-    Shuttle.Test.Env.put_app_env(:app_workers_dir, app_workers_dir)
     host = Shuttle.Poller.own_host_id()
     Process.register(self(), Client)
     Shuttle.Test.Env.put_app_env(:felt_runner, Runner)
     Shuttle.Test.Env.put_app_env(:write_forward_client, Client)
     Shuttle.Test.Env.put_app_env(:remotes, [%Remote{name: "edge", url: "http://remote.test"}])
 
-    on_exit(fn -> File.rm_rf(app_workers_dir) end)
-
-    {:ok, host: host, ledger_path: ledger_path, app_workers_dir: app_workers_dir}
+    {:ok, host: host, ledger_path: ledger_path}
   end
 
   test "successful owner delivery clears the session's fiber question, not failed delivery", %{
@@ -364,181 +367,6 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert body["gaps"] == []
   end
 
-  test "peer discovery maps an AppWorker transcript id to its thread address", %{
-    host: host,
-    ledger_path: path,
-    app_workers_dir: app_workers_dir
-  } do
-    Shuttle.Test.Env.put_app_env(:felt_runner, AppRunner)
-    thread_id = "11111111-1111-4111-8111-111111111111"
-    transcript_id = "22222222-2222-4222-8222-222222222222"
-    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-
-    write_jsonl!(path, [
-      %{
-        "session" => transcript_id,
-        "fiber" => "work/worker",
-        "uid" => uid,
-        "host" => host,
-        "harness" => "codex",
-        "kind" => "claim",
-        "at" => 1
-      }
-    ])
-
-    expected_address = "shuttle://#{host}/codex/#{thread_id}"
-    first = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    assert [%{"address" => ^expected_address}] = first["sessions"]
-    refute Map.has_key?(hd(first["sessions"]), "fiber")
-
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => thread_id,
-               "thread_id" => thread_id,
-               "transcript_session_uuid" => transcript_id,
-               "fiber_id" => "work/worker",
-               "uid" => uid,
-               "active" => true
-             })
-
-    body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-
-    assert [
-             %{
-               "address" => ^expected_address,
-               "fiber" => "work/worker",
-               "fiber_uid" => ^uid,
-               "transcript_id" => ^transcript_id
-             }
-           ] = body["sessions"]
-
-    assert File.exists?(Path.join(app_workers_dir, thread_id <> ".json"))
-  end
-
-  test "peer discovery notices AppWorker replacement with unchanged directory stats", %{
-    host: host,
-    app_workers_dir: app_workers_dir
-  } do
-    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
-    thread_id = "11111111-1111-4111-8111-111111111111"
-    address = "shuttle://#{host}/codex/#{thread_id}"
-    record_path = Path.join(app_workers_dir, thread_id <> ".json")
-
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => thread_id,
-               "thread_id" => thread_id,
-               "fiber_id" => "work/worker",
-               "uid" => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-               "active" => true
-             })
-
-    first = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    assert Enum.any?(first["sessions"], &(&1["address"] == address))
-
-    directory_before = File.stat!(app_workers_dir, time: :posix)
-    record_before = File.stat!(record_path, time: :posix)
-    assert :ok = Shuttle.AppWorkers.deactivate(thread_id)
-
-    # Reproduce an atomic rewrite inside one directory-mtime second. The old
-    # directory token is now byte-for-byte unchanged, but the record inode is not.
-    :ok =
-      File.touch(
-        app_workers_dir,
-        :calendar.system_time_to_universal_time(directory_before.mtime, :second)
-      )
-
-    directory_after = File.stat!(app_workers_dir, time: :posix)
-    record_after = File.stat!(record_path, time: :posix)
-
-    assert {directory_before.mtime, directory_before.size, directory_before.inode} ==
-             {directory_after.mtime, directory_after.size, directory_after.inode}
-
-    refute record_before.inode == record_after.inode
-
-    second = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    refute Enum.any?(second["sessions"], &(&1["address"] == address))
-  end
-
-  test "peer discovery includes active app conversations missing from native listing", %{
-    host: host,
-    ledger_path: path
-  } do
-    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
-
-    write_jsonl!(path, [
-      %{
-        "session" => "transcript-42",
-        "fiber" => "work/worker",
-        "uid" => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        "host" => host,
-        "harness" => "codex",
-        "thread_id" => "11111111-1111-4111-8111-111111111111",
-        "kind" => "claim",
-        "at" => 1
-      }
-    ])
-
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => "11111111-1111-4111-8111-111111111111",
-               "thread_id" => "11111111-1111-4111-8111-111111111111",
-               "transcript_session_uuid" => "transcript-42",
-               "fiber_id" => "work/worker",
-               "uid" => "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-               "active" => true
-             })
-
-    body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    assert [%{"address" => address, "fiber" => "work/worker"}] = body["sessions"]
-    assert address == "shuttle://#{host}/codex/11111111-1111-4111-8111-111111111111"
-  end
-
-  test "peer discovery includes an AppWorker absent from the native session list", %{
-    host: host,
-    ledger_path: path
-  } do
-    Shuttle.Test.Env.put_app_env(:felt_runner, EmptyPeerRunner)
-    thread_id = "11111111-1111-4111-8111-111111111111"
-    transcript_id = "22222222-2222-4222-8222-222222222222"
-    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => thread_id,
-               "thread_id" => thread_id,
-               "transcript_session_uuid" => transcript_id,
-               "fiber_id" => "work/worker",
-               "uid" => uid,
-               "active" => true
-             })
-
-    write_jsonl!(path, [
-      %{
-        "session" => transcript_id,
-        "thread_id" => thread_id,
-        "fiber" => "work/worker",
-        "uid" => uid,
-        "host" => host,
-        "harness" => "codex",
-        "kind" => "claim",
-        "at" => 1
-      }
-    ])
-
-    body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    expected_address = "shuttle://#{host}/codex/#{thread_id}"
-
-    assert [
-             %{
-               "address" => ^expected_address,
-               "fiber" => "work/worker",
-               "fiber_uid" => ^uid,
-               "transcript_id" => ^transcript_id
-             }
-           ] = body["sessions"]
-  end
-
   test "peer discovery refreshes fiber links when the session ledger changes", %{
     host: host,
     ledger_path: path
@@ -577,16 +405,12 @@ defmodule ShuttleWeb.MessagingControllerTest do
         end
       end)
 
-    app_workers_dir = Shuttle.Env.app(:app_workers_dir)
-    app_workers_token = {app_workers_dir, []}
-
     cached = %{
       path: path,
       host: host,
-      token: {ledger_token, app_workers_token},
+      token: ledger_token,
       index: %{
-        fibers_by_session: %{"native/id" => %{"fiber" => "work/cached"}},
-        app_sessions: []
+        fibers_by_session: %{"native/id" => %{"fiber" => "work/cached"}}
       }
     }
 
@@ -600,53 +424,6 @@ defmodule ShuttleWeb.MessagingControllerTest do
 
     body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
     assert hd(body["sessions"])["fiber"] == "work/cached"
-  end
-
-  test "peer discovery maps a Codex App transcript id to its thread address", %{
-    host: host,
-    ledger_path: path,
-    app_workers_dir: app_workers_dir
-  } do
-    Shuttle.Test.Env.put_app_env(:felt_runner, AppRunner)
-    thread_id = "11111111-1111-4111-8111-111111111111"
-    transcript_id = "22222222-2222-4222-8222-222222222222"
-    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-
-    assert :ok =
-             Shuttle.AppWorkers.put(%{
-               "session_uuid" => thread_id,
-               "thread_id" => thread_id,
-               "transcript_session_uuid" => transcript_id,
-               "fiber_id" => "work/worker",
-               "uid" => uid,
-               "active" => true
-             })
-
-    write_jsonl!(path, [
-      %{
-        "session" => transcript_id,
-        "fiber" => "work/worker",
-        "uid" => uid,
-        "host" => host,
-        "harness" => "codex",
-        "kind" => "claim",
-        "at" => 1
-      }
-    ])
-
-    body = api_conn() |> get("/api/v1/peers?local=true") |> json_response(200)
-    address = "shuttle://#{host}/codex/#{thread_id}"
-
-    assert [
-             %{
-               "address" => ^address,
-               "fiber" => "work/worker",
-               "fiber_uid" => ^uid,
-               "transcript_id" => ^transcript_id
-             }
-           ] = body["sessions"]
-
-    assert File.exists?(Path.join(app_workers_dir, thread_id <> ".json"))
   end
 
   test "peer discovery refreshes its fiber index after a ledger append", %{
@@ -1092,7 +869,7 @@ defmodule ShuttleWeb.MessagingControllerTest do
     assert receipt["status"] == "accepted"
   end
 
-  test "wake permits native admission stages only from Claude's native transport", %{host: host} do
+  test "wake receipts accept terminal submissions and Claude's native queue", %{host: host} do
     for target <- [host, "edge"], status <- ["queued", "submitted"] do
       request = %{
         address: "shuttle://#{target}/codex/thread",

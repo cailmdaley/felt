@@ -683,7 +683,9 @@ func (a *app) postMessage(request messaging.Request) (messaging.Receipt, error) 
 		case messaging.StatusContextAdded:
 			return messaging.Receipt{}, fmt.Errorf("daemon returned context-only status %q for a wake request", receipt.Status)
 		case messaging.StatusQueued, messaging.StatusSubmitted:
-			if receipt.Transport != "claude-native" {
+			supported := receipt.Transport == "claude-native" ||
+				(receipt.Status == messaging.StatusSubmitted && receipt.Transport == "codex-terminal")
+			if !supported {
 				return messaging.Receipt{}, fmt.Errorf("daemon returned %q for a wake request from unsupported transport %q", receipt.Status, receipt.Transport)
 			}
 		}

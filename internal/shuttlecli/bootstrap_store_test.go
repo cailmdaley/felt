@@ -110,7 +110,6 @@ func TestDaemonInstallPreviewDoesNotBootstrapStoreAndHonorsStoresEnvironment(t *
 	env.Set("AGENT_STORES", "")
 	env.Set("SHUTTLE_STORES", "/explicit/store")
 	env.Set("SHUTTLE_RELEASE", writeTestDaemonRelease(t, filepath.Join(t.TempDir(), "release")).Dir)
-	env.Unset("SHUTTLE_CODEX_SOCKET")
 	env.Unset("CODEX_HOME")
 	a := stubLoginEnv(env, loginEnv{Path: "/bin"})
 	release, err := a.findDaemonRelease()
@@ -160,7 +159,7 @@ func TestSupervisorPreservesInstalledFixedStores(t *testing.T) {
 		t.Run(osName, func(t *testing.T) {
 			t.Parallel()
 			env, home := envWithHome(t)
-			for _, key := range []string{"AGENT_STORES", "SHUTTLE_STORES", "SHUTTLE_CODEX_SOCKET", "CODEX_HOME"} {
+			for _, key := range []string{"AGENT_STORES", "SHUTTLE_STORES", "CODEX_HOME"} {
 				env.Unset(key)
 			}
 			a := newApp(env)
@@ -177,19 +176,19 @@ func TestSupervisorPreservesInstalledFixedStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			options := supervisorOptions{OS: osName, Label: "test"}
-			if err := a.resolveSupervisorCodex(&options); err != nil {
+			if err := a.resolveSupervisorEnvironment(&options); err != nil {
 				t.Fatal(err)
 			}
 			if options.Stores != "/existing/store" {
 				t.Fatalf("lost installed stores %q", options.Stores)
 			}
 			options.Stores, options.StoresSet = "", true
-			if err := a.resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
+			if err := a.resolveSupervisorEnvironment(&options); err != nil || options.Stores != "" {
 				t.Fatalf("explicit empty ignored: %q %v", options.Stores, err)
 			}
 			options.StoresSet = false
 			env.Set("SHUTTLE_STORES", "")
-			if err := a.resolveSupervisorCodex(&options); err != nil || options.Stores != "" {
+			if err := a.resolveSupervisorEnvironment(&options); err != nil || options.Stores != "" {
 				t.Fatalf("environment reset ignored: %q %v", options.Stores, err)
 			}
 		})

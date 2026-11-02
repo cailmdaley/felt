@@ -78,12 +78,6 @@ Application.put_env(
   Path.join(System.tmp_dir!(), "shuttle-test-heartbeat-#{System.system_time(:nanosecond)}.json")
 )
 
-Application.put_env(
-  :shuttle,
-  :app_workers_dir,
-  Path.join(System.tmp_dir!(), "shuttle-test-app-workers-#{System.system_time(:nanosecond)}")
-)
-
 # A marker executable on the VM's real PATH and on no scoped one:
 # `Shuttle.EnvPathMissTest` asserts a scoped PATH that omits it never runs it.
 # It only prints its name; run once here so macOS assesses it before any test.

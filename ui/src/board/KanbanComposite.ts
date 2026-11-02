@@ -38,7 +38,6 @@
 //     },
 //   }
 
-import { validDesktopThreadLink } from './appConversation.js';
 import { parseWorkerTasks, type WorkerTask } from './transcript/tasks.js';
 import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
 
@@ -49,22 +48,19 @@ import { mapFeltJsonToFiber, type Fiber } from './KanbanFiber.js';
  */
 interface CompositeRuntime {
   tasks?: WorkerTask[];
-  /** `running` for a live worker; `blocked` for an app worker whose launch or
-   * conversation failed and now waits on a human (with `launchError`). */
+  /** `running` for a live worker; `blocked` for a worker whose launch failed. */
   state: 'running' | 'blocked';
   /** Owner-served tmux session name for a CLI worker — the terminal handle.
    * App workers have none. */
   tmuxSession?: string;
   terminalBackend?: 'tmux' | 'rex';
-  surface?: 'cli' | 'app';
   agent?: string;
   sessionUuid?: string;
   /** Owner-served activity category: `"attention"` (stopped on a harness
    * prompt), `"waiting"` (turn ended, nothing running under it) or
    * `"working"` (mid-turn, or idle over work it started), plus the identity
    * phases. The board reads it through `turnOf`. Absent until the worker's
-   * first hook event (or, for an app worker, while its launch is not
-   * running). */
+   * first hook event. */
   phase?: string;
   /** Real ms timestamp of this live session's most-recent hook event of ANY
    * type. Present only for a tracked running worker; drives the turn's age on
@@ -75,8 +71,6 @@ interface CompositeRuntime {
   /** Owner-served: where a phone opens this worker — the claude.ai bridge URL
    * the session wrote into its own transcript. Absent when never bridged. */
   sessionLink?: string;
-  desktopLink?: string;
-  /** A durable app-launch failure reported by the owning daemon. */
   launchError?: string;
 }
 
@@ -221,24 +215,21 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const sessionUuid = typeof value.session_uuid === 'string' && value.session_uuid.length > 0
     ? value.session_uuid
     : undefined;
-  // A record that neither names a worker (terminal or app thread) nor states
-  // one observes nothing.
+  // A record that neither names a worker nor states one observes nothing.
   if (!tmuxSession && !sessionUuid && typeof value.state !== 'string') return undefined;
   const state = value.state === 'blocked' ? 'blocked' : 'running';
   const phase = typeof value.phase === 'string' && value.phase.length > 0 ? value.phase : undefined;
   const lastActivityAt = typeof value.last_activity_at === 'number' ? value.last_activity_at : undefined;
-  const launchError = [value.launch_error, value.terminal_error, value.backend_error]
+  const launchError = [value.launch_error, value.terminal_error]
     .find((error): error is string => typeof error === 'string' && error.length > 0);
   const sessionLink =
     typeof value.session_link === 'string' && value.session_link.startsWith('https://')
       ? value.session_link
       : undefined;
-  const desktopLink = validDesktopThreadLink(value.desktop_link);
-  const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
   const terminalBackend = value.terminal === 'rex' || value.terminal === 'tmux' ? value.terminal : undefined;
-  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
+  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, launchError, tasks: parseWorkerTasks(value.tasks) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

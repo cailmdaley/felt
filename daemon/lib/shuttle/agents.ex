@@ -246,6 +246,7 @@ defmodule Shuttle.Agents do
       flag("--provider", agent.provider),
       flag("--model", model),
       effort_flag(agent.cli, effort),
+      developer_instructions_flag(agent),
       if(chrome, do: "--chrome", else: nil),
       headless_extra_flags(agent, headless)
     ]
@@ -280,6 +281,12 @@ defmodule Shuttle.Agents do
     do: "-c model_reasoning_effort=#{shell_escape(effort)}"
 
   defp effort_flag(_cli, _effort), do: nil
+
+  defp developer_instructions_flag(%{cli: "codex", developer_instructions: instructions})
+       when is_binary(instructions) and instructions != "",
+       do: "-c " <> shell_escape("developer_instructions=" <> Jason.encode!(instructions))
+
+  defp developer_instructions_flag(_agent), do: nil
 
   defp flag(_key, nil), do: nil
   defp flag(key, value), do: "#{key} #{shell_escape(value)}"

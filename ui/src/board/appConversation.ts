@@ -4,7 +4,7 @@ import { conversationDestinations, conversationDevice, linkDestination, resolveD
 import type { KanbanCard } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 
-export { appConversationTarget, canOpenDesktopApp, atDesktop, validDesktopThreadLink } from './conversationLinks.js'
+export { canOpenDesktopApp, atDesktop } from './conversationLinks.js'
 
 /** The pill's hover title: the turn in full, and how long it has held. */
 export function turnTitle(card: TurnInput, nowMs = Date.now()): string {

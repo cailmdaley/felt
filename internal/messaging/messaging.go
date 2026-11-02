@@ -11,6 +11,23 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
 
+func mergeSessions(primary, additions []Session) []Session {
+	seen := make(map[string]bool, len(primary)+len(additions))
+	merged := make([]Session, 0, len(primary)+len(additions))
+	for _, source := range [][]Session{primary, additions} {
+		for _, session := range source {
+			if !seen[session.Address] {
+				seen[session.Address] = true
+				merged = append(merged, session)
+			}
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].Address < merged[j].Address })
+	return merged
+}
+
+func labeled(request Request) string { return Labeled(request) }
+
 func adapters() map[string]adapter {
 	return map[string]adapter{
 		"codex": codexAdapter{}, "pi": piAdapter{}, "claude": claudeAdapter{},
@@ -89,8 +106,10 @@ func Send(ctx context.Context, env *sysenv.Env, host string, req Request) (Recei
 			receipt := rejected(req, "validation", err.Error())
 			return dedupSendResult{Receipt: receipt, Err: errCode("preflight_failed", "message deadline expired before delivery: %v", err)}
 		}
-		if reason := mailboxUnavailable(env, addr.Harness, addr.ID, addr.Host); strings.HasPrefix(reason, "session has ended;") {
-			return dedupSendResult{Receipt: rejected(req, addr.Harness+"-hook", reason), Err: errCode("unavailable", "%s", reason)}
+		if addr.Harness != "codex" {
+			if reason := mailboxUnavailable(env, addr.Harness, addr.ID, addr.Host); strings.HasPrefix(reason, "session has ended;") {
+				return dedupSendResult{Receipt: rejected(req, addr.Harness+"-hook", reason), Err: errCode("unavailable", "%s", reason)}
+			}
 		}
 		files, err := materializeAttachments(env, req.MessageID, req.Attachments)
 		if err != nil {

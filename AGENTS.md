@@ -10,7 +10,7 @@ One repo, one checkout, four artifacts:
   lifecycle, messaging, and resolved fiber views.
 - **shuttle daemon** (`daemon/`, an Elixir/OTP Mix release) — the dispatcher.
   It shells out to `felt` for fiber content and writes, and to `shuttle` for
-  orchestration. It polls the fiber tree, launches terminal or app workers,
+  orchestration. It polls the fiber tree, launches terminal workers,
   exposes a `:4000` snapshot/control API, and watches each worker.
 - **the board UI** (TypeScript, `ui/`) — three full-page views over the fiber
   tree and the fleet's session/commit ledgers (Desk kanban, Chronicle, and the
@@ -62,19 +62,10 @@ For daemon Elixir/OTP changes, read the `practices/elixir` felt practice (`felt 
   Family placement is fixed at launch, and closing a worker removes its window, then its session only if empty and daemon-created.
   A Rex host also observes and stops existing tmux workers when tmux is available.
 - **Execution backends own conversations; shuttle owns task assignment and observation.**
-  Claude and Pi workers use the selected terminal backend.
-  Both Codex surfaces use the selected local App Server; `surface: cli` adds a replaceable terminal TUI attached with explicit `--remote`.
-  `shuttle attach <fiber>` prepares that exact thread's viewer without starting a turn.
-  An idle turn, closed terminal viewer, or unreachable App Server never means the Codex conversation has died.
-  Preserve its identity across daemon restarts; never substitute an embedded CLI launch or a fresh conversation for a backend failure.
-- **Shuttle ensures the Codex dependency without replacing live servers.**
-  `Shuttle.CodexBackend` reconciles asynchronously even under boot quarantine, adopts healthy servers untouched, and starts an absent server in tmux with clean worker identity.
-  Its default control root is private literal `/tmp/shuttle-codex-<euid>-<SHA256(OS-hostname)[0:16]>`; `SHUTTLE_CODEX_SOCKET` is authoritative across daemon, Go messaging, and terminal viewers.
-  `CODEX_HOME` stays persistent; authentication, configuration, and rollouts aren't moved to temporary storage.
-  A refused or missing socket with a healthy process scan and no live owned pane authorizes native locked stale-socket recovery; uncertain observations never authorize replacement.
-  Dispatch waits retryably before creating a conversation, outside the five-minute preflight cooldown.
-  `/api/v1/version` reports independent `codex_backend` health; Codex's native `daemon version` describes its own endpoint, not Shuttle's listener.
-  Durable ownership records retain their pinned endpoint when defaults or configuration change.
+  Claude, Codex and Pi workers use the selected terminal backend. Existing
+  conversations retain their native identity across daemon restarts; a closed
+  terminal viewer does not mean its conversation has died. `shuttle attach`
+  opens the existing worker session when supported by the selected backend.
 - **felt is the fiber library; shuttle owns Shuttle's schema and behavior.**
   felt preserves a `shuttle:` block as opaque frontmatter and never validates
   or resolves it. The shuttle CLI uses felt's Go library to read and write

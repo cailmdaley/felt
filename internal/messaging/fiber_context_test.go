@@ -2,8 +2,11 @@ package messaging
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +16,54 @@ import (
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 )
+
+func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
+	env := testEnv(t)
+	const id = "thread-fiber-resumed"
+	if err := RegisterMailbox(env, "codex", id, "host", "/work", os.Getpid(), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := RegisterMailbox(env, "codex", id, "host", "/work", os.Getpid(), false); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != codexTerminalReceiverRoute {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			SessionUUID string `json:"session_uuid"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload.SessionUUID != id {
+			t.Errorf("receiver lookup UUID = %q", payload.SessionUUID)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"session_uuid": id, "pid": os.Getpid(), "process_start": processStartToken(os.Getpid()),
+		})
+	}))
+	defer server.Close()
+	env.Set("SHUTTLE_DAEMON_URL", server.URL)
+	address := "shuttle://host/codex/" + id
+	generation, err := TransitionFiberReceiver(env, "fiber-quiet-resume", "host", "execution", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{MessageID: "fiber-context-resumed", Text: "context from fiber queue"}
+	if err := QueueFiberContext(env, "fiber-quiet-resume", request); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeliverFiberContext(context.Background(), env, "fiber-quiet-resume", "host", address, generation); err != nil {
+		t.Fatalf("deliver to quiet resumed Codex: %v", err)
+	}
+	if n, err := PendingFiberContext(env, "fiber-quiet-resume"); err != nil || n != 0 {
+		t.Fatalf("fiber context pending after session mailbox queue = %d, %v", n, err)
+	}
+	if !pendingMailboxText(t, env, "codex", id, request.Text) {
+		t.Fatal("fiber context was not moved to the resumed session's next hook")
+	}
+}
 
 func transition(t *testing.T, env *sysenv.Env, identity, address string) uint64 {
 	t.Helper()

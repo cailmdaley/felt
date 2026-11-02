@@ -22,7 +22,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('worker pill terminal errors', () => {
   it('shows the owner’s sentence, not the JSON response envelope', async () => {
-    const message = 'remote-a: The Codex App Server did not answer for this conversation.'
+    const message = 'remote-a: The terminal session could not be opened.'
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ error: message }), { status: 422 }))
     vi.stubGlobal('fetch', fetch)
     state.open!('codex-terminal-probe', 'remote-a')

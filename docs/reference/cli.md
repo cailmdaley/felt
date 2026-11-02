@@ -179,9 +179,9 @@ Armed remote creation transfers the document directly through `/fiber/create`; l
 
 | Command | Purpose |
 |---|---|
-| `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--surface`, `--host`, `--disabled`) |
-| `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--surface`, `--host`) |
-| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role, agent and surface inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`, `--surface cli\|app`. Changing `--host` requires `--project-dir`. Armed remote creation goes through the owning daemon, which validates paths and writes the fiber in its own store. An unreachable owner fails creation without writing a local copy. `--disabled` keeps a local draft. `--slug` names the child (default: derived from the ask). Runtime, schedule and seat do not inherit. `--take` moves the caller's live session into the child and arms its source for a fresh worker; it requires the caller's host and is incompatible with `--disabled`. If migration fails, the child stays created but disabled |
+| `shuttle install <fiber>` | Install as a one-shot dispatch role (`--project-dir` required unless `--disabled`, `-m` agent, `--host`, `--disabled`) |
+| `shuttle repeat <fiber>` | Install as a standing (cron-scheduled) role (`-s/--schedule` and `--project-dir` required, `-z/--tz`, `-m`, `--host`) |
+| `shuttle thread <parent> "<ask>"` | Create a child constitution under `<parent>`, armed unless `--disabled`, and print its id. The ask becomes its name and lede. Host, project_dir, role and agent inherit from the parent; override with `--host`, `--project-dir`, `--role`, `--agent`. Changing `--host` requires `--project-dir`. Armed remote creation goes through the owning daemon, which validates paths and writes the fiber in its own store. An unreachable owner fails creation without writing a local copy. `--disabled` keeps a local draft. `--slug` names the child (default: derived from the ask). Runtime, schedule, seat and legacy surface do not inherit. `--take` moves the caller's live session into the child and arms its source for a fresh worker; it requires the caller's host and is incompatible with `--disabled`. If migration fails, the child stays created but disabled |
 | `shuttle threads <fiber>` | A constitution's direct threads from this host's daemon, using owner-authoritative feeds; unavailable owners permit a labeled stale local copy in every state. A reachable owner's incomplete cache reads Unknown with its cache state, without an unreachable-host claim. Grouped Waiting, Working, Armed, To review, Draft, Resting. Armed is active with no worker running anywhere the daemon can see; `Armed · host unreachable` means its host is out of the daemon's fleet view. Each row gives the id, state, name, the first sentence of the outcome, and the count of unfinished threads below; a thread resting until something reads `⏸ until <name>`; `N waiting for its next worker` counts the thread results and messages queued for a constitution this host owns that has no live worker, on the header for the orchestrator itself and on each row. Archived threads (a tempered or discarded verdict) are a count; `--all` lists them and every deeper level, indented. `--json` adds each thread's board column and `pending_results` |
 | `shuttle reshape <fiber> [kind]` | Change an existing block's `kind` and/or a standing constitution's schedule (`-s/--schedule`, `-z/--tz`) |
 | `shuttle uninstall <fiber>` | Remove the `shuttle:` block; the fiber, its status, and its tags are untouched, and a live worker keeps running |
@@ -202,7 +202,7 @@ untouched by any of this.
 
 | Command | Purpose |
 |---|---|
-| `shuttle claim <fiber>` | Associate the current conversation with an installed draft without launching or activating a worker (`--surface cli\|app`, `--session <native-id>`, `--tmux-session <name>`, `--json`) |
+| `shuttle claim <fiber>` | Associate the current terminal conversation with an installed draft without launching or activating a worker (`--session <native-id>`, `--tmux-session <name>`, `--json`) |
 | `shuttle migrate <to-fiber>` | Move the caller's live conversation to another installed fiber on the same host without ending it. Infer the source from current session/pane identity; `--from <fiber>` overrides it. The destination must have no live worker. The source gets a fresh worker from `## Status`; `--rest` leaves it resting, or `--disabled` leaves it open in Drafts. The destination receives the session UUID, watcher and current assignment; exact-session messages still reach it. Repeating the same session/destination succeeds without a second move. No conversation context is copied or merged. Supports `--json` |
 | `shuttle pause <fiber>` | Set status to `open`, kill any live worker (`--no-kill` to leave it running) |
 | `shuttle resume <fiber>` | Set status to `active`; a standing constitution awaiting review is re-armed and its run concluded (`handed_off_at`), so it runs at the schedule's next tick; any other closed fiber is refused (use `reopen`). Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one; remote paths are validated and saved by the owner, without changing the local Git mirror. `--local` skips the daemon |
@@ -210,8 +210,8 @@ untouched by any of this.
 | `shuttle rest <fiber>` | Put a constitution in Resting without review: `status: open` + `horizon: stashed`, verdict cleared, run concluded, an arrived `due:` cleared, a live worker stopped. Works in any state, including standing and tempered/discarded. `--until` says what the rest lasts until: a `YYYY-MM-DD` return day, or a fiber or free text it waits for (`shuttle.blocked_on`, a fiber stored by uid, whose close reaches the thread's orchestrator as context and arms nothing); `--until ''` rests undated and waiting for nothing. On a constitution already at rest, `--until` changes only that; `resume` and `close` clear the wait. Routes through the owning daemon, which writes it inside its Poller and stops the worker through its backend (tmux or an app interrupt); `--local` writes here and stops nothing, and an unreachable daemon is bypassed with a local write and tmux kill |
 | `shuttle reopen <fiber>` | Reopen a closed/reviewed fiber for active work (`--as-draft` for `open` instead). From another host, a default reopen starts a fresh worker on the owner; `--message <text>` or `--message-file <path>` adds its launch directive on that remote route. Arming requires a `project_dir`: `--project-dir <dir>` sets it on a block without one |
 | `shuttle close <fiber>` | Set status to `closed`; set/clear `tempered` (`--tempered=true\|false`). A thread wakes only its nearest orchestrator by default; `--quiet` sends its outcome as context without waking. The next ordinary close wakes again; ask always wakes. Results never automatically propagate further |
-| `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--surface`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |
-| `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys; a `surface: app` block can only move to another Codex agent here (use `set-agent … --surface cli` to leave the app) |
+| `shuttle set-agent <fiber> [agent]` | Save next-launch agent and axes (`--effort`, `--chrome`, `--project-dir`); leaves the current session running. The agent is a registry id or alias: any other name, a model name included, is refused with `<id> is not an agent; \`shuttle agents\` lists them`, as `set-model`, `install -m`, `repeat -m` and `thread --agent` refuse it |
+| `shuttle set-model <fiber> <agent>` | Change only the dispatch agent, preserving runtime keys |
 | `shuttle roles [--json]` | List one-level charters at `roles/<slug>` in the shared namespace, with `slug`, `name`, and `outcome`; JSON is an array (empty as `[]`) |
 | `shuttle role <fiber> <role-slug> [--new "Office name"]` | Set `shuttle.role` to a role charter slug; `--new` creates a missing charter, and `--clear` clears both role and seat. Preserves lifecycle and execution settings |
 | `shuttle seat <fiber>` | Set `shuttle.seat: true`; requires `shuttle.role`. `--clear` removes the seat field. Preserves lifecycle and execution settings |
@@ -272,47 +272,13 @@ configured stores; they refuse guessed paths and duplicate matches.
 | `shuttle daemon select-release <path>` | Validate a built release and atomically select it in `~/.shuttle/repo` for the next launch; does not cycle a running daemon |
 | `shuttle daemon release` | Release the boot quarantine |
 | `shuttle daemon reset <remote>` | Restart recovery for a tripped, degraded or unreachable remote |
-| `shuttle daemon install [options]` | Install the per-user keep-alive supervisor; `--stores` pins its store list, `--codex-socket` persists an explicit Codex endpoint (`--codex-socket=` clears it) |
+| `shuttle daemon install [options]` | Install the per-user keep-alive supervisor; `--stores` pins its store list |
 | `shuttle daemon uninstall [--label <name>]` | Remove the per-user keep-alive supervisor |
 | `shuttle version` | Print the running daemon version or, when it is down, the local Mix release version |
 
 `shuttle` reads ordinary fiber data through felt's Go library. The daemon
 shells out to `felt` for fiber content and writes and to `shuttle` for resolved
 views and Shuttle-owned operations.
-
-### Codex desktop bridge
-
-`shuttle codex-desktop-bridge` adapts the desktop application's JSONL
-`CODEX_CLI_PATH` protocol to a native Codex App Server websocket. It execs the
-bundled native executable in the original desktop-child process, preserving
-the signed Desktop → Codex → app-tools ancestry. A separate relay child owns
-the desktop JSONL pipes, the private Unix socket lock, and shutdown monitoring.
-The relay stays in the native private process group, pinning its identity until
-shutdown. Desktop stdin EOF or a relay signal stops the native process. Native
-exit cancels the relay even when desktop stdout is blocked. After confirmed
-native exit, the relay removes only the observed socket inode, then terminates
-its entire private group, including itself and any surviving MCP descendants.
-
-Native arguments and environment are preserved, including app-tools pipe
-variables. `CODEX_CLI_PATH` points at the real executable for nested launches.
-Non-server invocations exec the native binary directly, retaining its exit code.
-
-```sh
-shuttle codex-desktop-bridge --codex /absolute/path/to/codex -- \
-  -c features.code_mode_host=true app-server \
-  --analytics-default-enabled \
-  -c plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=true
-```
-
-The default endpoint is `$CODEX_HOME/shuttle-desktop/app-server.sock`; use
-`--socket` (or the configured `SHUTTLE_CODEX_SOCKET`) when Shuttle's native
-transport needs a different private path. A pre-existing endpoint, an
-endpoint owned by another user, or a directory accessible by other users is
-refused. A stale endpoint should only be removed after its owning process has
-been verified stopped.
-
-See [Desktop installation and rollback](../shuttle/codex-desktop.md) for
-explicit endpoint configuration, durable launch setup, and acceptance checks.
 
 ### Session discovery and messaging
 
@@ -376,20 +342,15 @@ receipt's `idle` object gives `state` (`watching` or `unsupported`), the
 `signal`, and a detail. Idle means the turn ended, not that the work is done.
 
 Shuttle routes to the configured owner host and its live harness integration.
-Claude uses its receiver-registered native inbox; Codex uses the owning App
-Server; Pi uses the Felt extension's native endpoint. Existing Confer Pi workers
+Claude uses its receiver-registered native inbox; Codex and Pi use their native
+harness integration. Existing Confer Pi workers
 also remain addressable, but standalone Pi sessions do not require Confer.
 Hooks alone cannot wake Claude or Codex: install and enable the receiver's hooks
 for context delivery, and use a supported live native endpoint for wake.
 A failed wake never silently becomes a context-only send. Pending native input
 or approval is handled by the harness, not by injecting terminal keystrokes.
 
-Both Codex surfaces use the same native App Server transport.
-Terminal Codex viewers attach explicitly with `codex --remote unix://PATH`; native messages address the exact thread even if a terminal is closed or currently showing another thread.
-Shuttle does not paste into Codex terminals.
-Hook-only embedded sessions retain `--context-only` and reject wake with attachment guidance.
-The selected server must be reachable; an endpoint failure never selects another runtime or launches embedded.
-See [terminal Codex operations](../dev/operating.md#terminal-codex-workers) for dependency startup, shared-home limits, and shell-wrapper context injection.
+Codex workers run through the terminal harness. Native messaging addresses the exact terminal session; hook-only sessions support context-only delivery when registered. Shuttle does not paste messages into terminal input.
 
 Receipts describe delivery evidence, not task completion. HTTP 200 carries a
 processed delivery receipt, including `rejected` and `unknown`. HTTP 400 reports
@@ -442,7 +403,7 @@ has enabled or trusted them; discovery reflects receiver registration.
 |---|---|
 | `queued` | Hook mailbox: context-only, no turn starts. Claude-native wake: queued behind the current turn; the detail says it runs when that turn ends |
 | `submitted` | Claude transcript shows the native user row or `queued_command`; admission only, with no model reply observed yet |
-| `context_added` | Codex acknowledged adding persistent context; no turn started |
+| `context_added` | Codex hook acknowledged adding persistent context; no turn started |
 | `accepted` | Claude has a correlated real assistant reply; other transports report their native runtime acknowledgement |
 | `unknown` | Delivery may have succeeded without enough evidence; retry the same ID to re-check |
 | `subscribed` | `--notify-when-idle` with no text: the subscription is recorded and watched; nothing was delivered |
@@ -454,7 +415,7 @@ recording the offer; message IDs remain stable. Repeating the identical send
 with the same `--message-id` retrieves its recorded result without redelivery.
 `--from` is a sender claim; the message header keeps it separate from the sending session detected by Shuttle.
 Shuttle resolves the caller from a live receiver registration bound to the invoking process ancestry.
-Codex callers require a random per-thread capability injected into their exec environment by the App Server and bound to an active conversation owner record.
+Codex callers require a registered native session capability bound to the active terminal worker.
 An environment override on the sending command supplies no sender authority.
 Callers without sufficient evidence are labelled `unverified`, with any asserted sender shown as a neutral claim.
 The CLI binds a resolved identity to the message with one-use local proof before it reaches the daemon.
@@ -475,8 +436,8 @@ Without an unambiguous ledger pairing, the receipt keeps the transport's reason 
 
 Receipts and queued payloads stay under `$SHUTTLE_DATA_DIR` (default
 `~/.shuttle`; trimmed, with a leading `~` expanded), outside the project. Payloads offered by hooks are retained there
-for diagnosis. `SHUTTLE_CODEX_SOCKET` and `SHUTTLE_CONFER_STATE_DIR` override
-native discovery locations when a harness uses a nondefault runtime directory.
+for diagnosis. `SHUTTLE_CONFER_STATE_DIR` overrides native discovery when Pi
+uses a nondefault runtime directory.
 
 Attach up to eight files totaling 20 MiB with the same command:
 

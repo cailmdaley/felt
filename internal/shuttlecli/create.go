@@ -59,7 +59,6 @@ func (a *app) installCmd() *cobra.Command {
 	var installProjectDir string
 	var installHost string
 	var installDisabled bool
-	var installSurface string
 	installCmd := &cobra.Command{
 		Use:   "install <fiber>",
 		Short: "Install a fiber as a one-shot constitution",
@@ -118,11 +117,6 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			if installModel != "" {
 				block.Agent = installModel
 			}
-			if surface, serr := newBlockSurface(block, installSurface, reg); serr != nil {
-				return serr
-			} else {
-				block.Surface = surface
-			}
 			// An armed install requires a cwd. A draft does not — but an explicitly
 			// passed one is still honored (the board's Promote button installs
 			// --disabled WITH a project_dir): arming later refuses a block
@@ -171,7 +165,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 			}
 			if owner != "" && !installDisabled {
 				output, err := a.postOwnerLifecycle("install", owner, f, map[string]any{
-					"model": block.Agent, "surface": block.Surface, "project_dir": block.ProjectDir,
+					"model": block.Agent, "project_dir": block.ProjectDir,
 				})
 				if err != nil {
 					var status daemonStatusError
@@ -222,7 +216,6 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 	installCmd.Flags().StringVar(&installProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required unless --disabled")
 	installCmd.Flags().StringVar(&installHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
 	installCmd.Flags().BoolVar(&installDisabled, "disabled", false, "Install as a draft (status: open); arm it later with 'shuttle resume'")
-	installCmd.Flags().StringVar(&installSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	return installCmd
 }
 
@@ -234,7 +227,6 @@ func (a *app) repeatCmd() *cobra.Command {
 	var repeatModel string
 	var repeatProjectDir string
 	var repeatHost string
-	var repeatSurface string
 	repeatCmd := &cobra.Command{
 		Use:   "repeat <fiber>",
 		Short: "Install a fiber as a standing (recurring) constitution",
@@ -294,11 +286,6 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			if repeatModel != "" {
 				block.Agent = repeatModel
 			}
-			if surface, serr := newBlockSurface(block, repeatSurface, reg); serr != nil {
-				return serr
-			} else {
-				block.Surface = surface
-			}
 
 			if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 				return a.printShuttleValidationErrors(errs)
@@ -331,7 +318,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 			if owner != "" {
 				output, err := a.postOwnerLifecycle("repeat", owner, f, map[string]any{
 					"schedule": repeatSchedule, "tz": repeatTZ, "model": block.Agent,
-					"surface": block.Surface, "project_dir": block.ProjectDir,
+					"project_dir": block.ProjectDir,
 				})
 				if err != nil {
 					var status daemonStatusError
@@ -375,32 +362,6 @@ set-model / set-agent for the agent, uninstall to start over.`,
 	repeatCmd.Flags().StringVarP(&repeatModel, "model", "m", "", "Agent ID (default: registry default)")
 	repeatCmd.Flags().StringVar(&repeatProjectDir, "project-dir", "", "Worker cwd, an existing directory on this machine (stored absolute); required")
 	repeatCmd.Flags().StringVar(&repeatHost, "host", "", "Owning daemon's host id (default: this host's id, as 'shuttle host' reports it; set for a cross-host install)")
-	repeatCmd.Flags().StringVar(&repeatSurface, "surface", "", "Execution surface: cli or app (Codex defaults to app when omitted)")
 	_ = repeatCmd.MarkFlagRequired("schedule")
 	return repeatCmd
-}
-
-// newBlockSurface applies the creation-only transport default. Absence remains
-// CLI on a stored block for compatibility, but a newly created Codex constitution
-// starts in the app unless the caller explicitly asks for CLI.
-func newBlockSurface(block *shuttle.Block, requested string, reg *shuttle.AgentRegistry) (string, error) {
-	if requested != "" {
-		return requested, nil
-	}
-	name := block.Agent
-	if name == "" {
-		def, err := reg.Default()
-		if err != nil {
-			return "", err
-		}
-		name = def.ID
-	}
-	base, _, err := reg.Resolve(name, block.Effort, block.Chrome)
-	if err != nil {
-		return "", err
-	}
-	if base.CLI == "codex" {
-		return "app", nil
-	}
-	return "", nil
 }

@@ -60,5 +60,4 @@ The setup card records which of these checks actually passed.
 - [Agent setup guide](agent-setup.md): the readable checklist and commands behind onboarding.
 - [Opening conversations](conversations.md): terminal, desktop, and browser choices.
 - [Connect your machines](remotes.md): Tailscale, SSH, and shared servers.
-- [Codex desktop setup](codex-desktop.md): connect to the same native desktop backend.
 - [Installation reference](installation.md): configuration files, service management, and recovery.

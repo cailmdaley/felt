@@ -1,7 +1,10 @@
 defmodule ShuttleWeb.TerminalController do
+  @moduledoc "Resolve the terminal currently bound to a worker fiber."
+
   use Phoenix.Controller, formats: [:json]
   import Plug.Conn
-  alias Shuttle.{AppWorkers, CodexTerminal, OriginRouter}
+
+  alias Shuttle.{OriginRouter, SessionLedger, Terminal}
 
   def create(conn, params) do
     case OriginRouter.route_host(params["origin"] || params["shuttle_host"]) do
@@ -9,21 +12,12 @@ defmodule ShuttleWeb.TerminalController do
         create_local(conn, params)
 
       {:remote, remote} ->
-        case OriginRouter.forward(
-               remote,
-               "/api/v1/sessions/prepare-terminal",
-               Map.drop(params, ["origin", "shuttle_host"]),
-               forward_timeout_ms: CodexTerminal.forward_timeout_ms()
-             ) do
+        case OriginRouter.forward(remote, "/api/v1/sessions/prepare-terminal", params) do
           {:forwarded, status, body} ->
             conn |> put_resp_content_type("application/json") |> send_resp(status, body)
 
-          {:error, _reason} ->
-            conn
-            |> put_status(502)
-            |> json(%{
-              error: "#{remote.name} did not answer while preparing this conversation's terminal."
-            })
+          {:error, reason} ->
+            conn |> put_status(502) |> json(%{error: "#{remote.name}: #{inspect(reason)}"})
         end
 
       {:error, {:unknown_origin, origin}} ->
@@ -31,30 +25,47 @@ defmodule ShuttleWeb.TerminalController do
     end
   end
 
-  defp create_local(conn, params) do
-    record =
-      Enum.find(AppWorkers.active(), fn record ->
-        (is_binary(params["fiber"]) and params["fiber"] == record["uid"]) or
-          (is_binary(params["tmux_session"]) and params["tmux_session"] == record["terminal_tmux"])
-      end)
+  defp create_local(conn, %{"fiber" => uid}) when is_binary(uid) and uid != "" do
+    case SessionLedger.latest_for_uid(uid) do
+      %{"uid" => ^uid, "session" => session, "tmux" => terminal}
+      when is_binary(session) and is_binary(terminal) ->
+        latest_terminal = SessionLedger.latest_for_terminal(terminal)
 
-    case record do
-      %{"surface" => "cli", "session_uuid" => id} ->
-        case CodexTerminal.prepare(id,
-               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default),
-               wait_timeout_ms: CodexTerminal.prepare_timeout_ms()
-             ) do
-          {:ok, result} ->
-            json(conn, result)
-
-          {:error, reason} ->
-            conn
-            |> put_status(422)
-            |> json(%{error: CodexTerminal.error_message(reason), session_uuid: id})
+        if is_map(latest_terminal) and latest_terminal["session"] == session and
+             latest_terminal["uid"] == uid and Terminal.status(runner(), terminal) == :alive do
+          json(conn, %{tmux_session: terminal})
+        else
+          not_found(conn)
         end
 
       _ ->
-        conn |> put_status(404) |> json(%{error: "no owned terminal Codex conversation"})
+        not_found(conn)
     end
   end
+
+  defp create_local(conn, %{"session_uuid" => session}) when is_binary(session) do
+    case SessionLedger.latest_for_session(session) do
+      %{"session" => ^session, "uid" => uid, "tmux" => terminal}
+      when is_binary(uid) and is_binary(terminal) ->
+        latest = SessionLedger.latest_for_uid(uid)
+
+        if is_map(latest) and latest["session"] == session and
+             latest["tmux"] == terminal and Terminal.status(runner(), terminal) == :alive do
+          json(conn, %{tmux_session: terminal})
+        else
+          not_found(conn)
+        end
+
+      _ ->
+        not_found(conn)
+    end
+  end
+
+  defp create_local(conn, _params),
+    do: conn |> put_status(400) |> json(%{error: "fiber uid is required"})
+
+  defp runner, do: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
+
+  defp not_found(conn),
+    do: conn |> put_status(404) |> json(%{error: "no current terminal owns this fiber"})
 end

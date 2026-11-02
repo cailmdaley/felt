@@ -15,7 +15,7 @@ defmodule ShuttleWeb.SessionResumeController do
 
   import Plug.Conn
 
-  alias Shuttle.{CodexTerminal, SessionResume, Transcript}
+  alias Shuttle.{SessionResume, Transcript}
 
   def create(conn, %{"session" => session}) when is_binary(session) do
     if Transcript.valid_session?(session) do
@@ -27,7 +27,7 @@ defmodule ShuttleWeb.SessionResumeController do
           conn |> put_status(409) |> json(%{error: reason})
 
         {:error, reason} ->
-          conn |> put_status(422) |> json(%{error: CodexTerminal.error_message(reason)})
+          conn |> put_status(422) |> json(%{error: format_error(reason)})
       end
     else
       conn |> put_status(400) |> json(%{error: "session must be a UUID"})
@@ -36,12 +36,14 @@ defmodule ShuttleWeb.SessionResumeController do
 
   def create(conn, _params), do: conn |> put_status(400) |> json(%{error: "session is required"})
 
+  defp format_error(reason) when is_binary(reason), do: reason
+  defp format_error(reason), do: inspect(reason)
+
   @doc false
   # The runner and the live-session source, injectable for tests.
   def prepare_opts do
     [
       runner: Shuttle.Env.app(:session_resume_runner, Shuttle.Runner.Default),
-      wait_timeout_ms: CodexTerminal.prepare_timeout_ms(),
       live_sessions: Shuttle.Env.app(:session_resume_live, &SessionResume.live_sessions/0)
     ]
   end

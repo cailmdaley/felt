@@ -69,9 +69,7 @@ export interface KanbanCard {
   /** Owner-served live harness checklist, absent without a tracked worker. */
   workerTasks?: import('./transcript/tasks.js').WorkerTask[]
   /**
-   * The live CLI worker's tmux session name — the terminal handle that attach,
-   * open-in-terminal and the join to session ledgers key on. Absent for an app
-   * worker, which is reached through `desktopLink` / `sessionUuid` instead.
+   * The live worker's terminal session name, used by attach and session history.
    */
   tmuxSession?: string
   terminalBackend?: 'tmux' | 'rex'
@@ -130,7 +128,6 @@ export interface KanbanCard {
    */
   sessionLink?: string
   /** Native desktop app route; never treated as a phone universal link. */
-  desktopLink?: string
   /**
    * `shuttle.runtime.session_uuid` — the harness session the daemon most
    * recently launched for this fiber, and the key that says WHICH session
@@ -157,11 +154,6 @@ export interface KanbanCard {
    */
   shuttleChrome?: boolean
 
-  /** `shuttle.surface` — app for a ChatGPT-backed Codex run; absent and cli
-   * both retain the established terminal execution. */
-  shuttleSurface?: 'cli' | 'app'
-  /** Observed worker identity, independent of next-launch configuration. */
-  workerSurface?: 'cli' | 'app'
   workerAgent?: string
   /**
    * `shuttle.host` — the daemon that owns this fiber's dispatch (e.g.
@@ -273,8 +265,7 @@ export interface KanbanCard {
 }
 
 /**
- * Whether the owning daemon holds a worker for this card — a running one of
- * either surface, or a blocked app launch awaiting a human. A card with one is
+ * Whether the owning daemon holds a worker for this card. A card with one is
  * in flight whatever its document says between workers.
  */
 export function hasLiveWorker(card: Pick<KanbanCard, 'workerState'>): boolean {
@@ -283,15 +274,12 @@ export function hasLiveWorker(card: Pick<KanbanCard, 'workerState'>): boolean {
 
 /**
  * Whether lifecycle mutations must ask the owning daemon to stop a worker:
- * any live worker, and also an app card with a durable thread id — a Codex
- * app conversation outlives its turn and still represents owned work, so this
- * is wider than `hasLiveWorker`.
+ * any live worker reported by its owning daemon.
  */
 export function hasWorkerToStop(
-  card: Pick<KanbanCard, 'workerState' | 'shuttleSurface' | 'workerSurface' | 'sessionUuid'>,
+  card: Pick<KanbanCard, 'workerState'>,
 ): boolean {
-  return hasLiveWorker(card) ||
-    ((card.workerSurface ?? card.shuttleSurface) === 'app' && typeof card.sessionUuid === 'string' && card.sessionUuid.length > 0)
+  return hasLiveWorker(card)
 }
 
 /**

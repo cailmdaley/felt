@@ -1,12 +1,6 @@
 defmodule Shuttle.WorkerWatcher do
   @moduledoc """
-  Per-worker GenServer that observes a backend's ownership and liveness.
-
-  Terminal workers use tmux liveness; app conversations use their durable
-  ownership record. An idle app conversation remains assigned until a handoff,
-  fiber closure or explicit stop releases it. Poller retires confirmed unloaded
-  or missing threads; the watcher never reloads them. It reports confirmed absence to Poller;
-  uncertainty never creates a replacement worker.
+  Per-worker GenServer that observes terminal liveness.
   """
 
   # A watcher is bound to one concrete backend worker. Once that session exits,
@@ -25,7 +19,7 @@ defmodule Shuttle.WorkerWatcher do
 
   Options:
     * `:fiber_id` — required. The fiber being watched.
-    * `:session` — required. The terminal session name or durable app worker reference.
+    * `:session` — required. The terminal session name.
     * `:poller` — required. The Poller to notify on exit: its registered name,
       or a pid.
     * `:runner` — module implementing `Shuttle.Runner` behavior. Defaults to `Shuttle.Runner.Default`.
@@ -75,8 +69,7 @@ defmodule Shuttle.WorkerWatcher do
       heartbeat_interval_ms: heartbeat_interval,
       max_consecutive_failures: max_consecutive_failures,
       consecutive_failures: 0,
-      heartbeat_timer_ref: nil,
-      app_projection: app_worker_projection(Shuttle.AppWorkers.id(session))
+      heartbeat_timer_ref: nil
     }
 
     # On init, check if the session exists. `:gone` (confirmed absent) is the
@@ -101,15 +94,12 @@ defmodule Shuttle.WorkerWatcher do
        state
        | fiber_id: fiber_id,
          session: session,
-         consecutive_failures: 0,
-         app_projection: app_worker_projection(Shuttle.AppWorkers.id(session))
+         consecutive_failures: 0
      }}
   end
 
   @impl true
   def handle_info(:heartbeat, state) do
-    state = observe_app(state)
-
     case check_session(state) do
       :alive ->
         ref = Process.send_after(self(), :heartbeat, state.heartbeat_interval_ms)
@@ -152,54 +142,6 @@ defmodule Shuttle.WorkerWatcher do
   end
 
   # ── Internal ──
-
-  defp observe_app(state) do
-    id = Shuttle.AppWorkers.id(state.session)
-
-    case Shuttle.WorkerBackend.observe(state.session) do
-      :missing ->
-        notify_poller_message(state, {:app_worker_missing, state.fiber_id, state.session})
-
-      _ ->
-        :ok
-    end
-
-    projection = app_worker_projection(id)
-
-    if state.app_projection != projection and projection != nil do
-      notify_poller_message(state, {:app_worker_observed, state.fiber_id, state.session})
-    end
-
-    %{state | app_projection: projection}
-  end
-
-  defp app_worker_projection(id) when is_binary(id) do
-    case Shuttle.AppWorkers.get(id) do
-      {:ok, record} ->
-        Map.take(record, [
-          "launch_state",
-          "remote_phase",
-          "phase_changed_at",
-          "surface",
-          "terminal_tmux",
-          "transcript_session_uuid",
-          "project_id",
-          "terminal_error",
-          "backend_error"
-        ])
-
-      _ ->
-        nil
-    end
-  end
-
-  defp app_worker_projection(_), do: nil
-
-  defp notify_poller_message(state, message) do
-    send(state.poller, message)
-  rescue
-    ArgumentError -> :ok
-  end
 
   defp check_session(state), do: Shuttle.WorkerBackend.session_status(state.runner, state.session)
 

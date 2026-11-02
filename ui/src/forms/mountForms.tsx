@@ -114,9 +114,9 @@ export async function openCapture(opts: OpenFormOptions): Promise<void> {
       onProjectAdded={() => refreshProjects(opts.shuttleBase)}
       onCancel={close}
       phoneAudio={opts.phoneAudio}
-      onSpawned={({ tmuxSession: session, surface }) => {
+      onSpawned={({ tmuxSession: session }) => {
         close()
-        opts.onResult?.(surface === 'app' ? 'Codex run started in ChatGPT' : `Capture session spawned${session ? ` · ${session}` : ''}`, true)
+        opts.onResult?.(`Capture session spawned${session ? ` · ${session}` : ''}`, true)
       }}
       onMeetingResult={({ host, error, meeting }) => {
         close()

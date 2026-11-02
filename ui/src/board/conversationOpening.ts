@@ -1,16 +1,16 @@
 import type { KanbanCard } from './KanbanTypes.js'
-import { appConversationTarget, canOpenDesktopApp, claudeAppRoute, claudeWebLink } from './conversationLinks.js'
+import { canOpenDesktopApp, claudeAppRoute, claudeWebLink } from './conversationLinks.js'
 import { coarsePointer } from './mobile.js'
 
 /** Opening belongs to this browser; execution belongs to the worker's host. */
-export type ConversationOpening = 'terminal' | 'browser' | 'app' | 'chatgpt'
+export type ConversationOpening = 'terminal' | 'browser' | 'app'
 export const CLAUDE_OPENING_KEY = 'shuttle.claude-opening'
 export const CONVERSATION_OPENING_CHANGED = 'shuttle-conversation-opening-changed'
 
 export function conversationOpening(): ConversationOpening {
   try {
     const value = globalThis.localStorage?.getItem(CLAUDE_OPENING_KEY)
-    if (value === 'browser' || value === 'app' || value === 'chatgpt') return value
+    if (value === 'browser' || value === 'app') return value
   } catch { /* Site storage may be disabled. */ }
   return 'terminal'
 }
@@ -37,16 +37,11 @@ export type ConversationDestination = { id: ConversationOpening; label: string; 
   | { href: string; run?: never }
   | { run: () => void; href?: never }
 )
-export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'workerSurface' | 'shuttleSurface' | 'sessionUuid' | 'desktopLink' | 'shuttleHost' | 'shuttleProjectDir' | 'launchError'>
+export type ConversationWorker = Pick<KanbanCard, 'tmuxSession' | 'sessionLink' | 'terminalBackend' | 'shuttleHost' | 'launchError'>
 export type WorkerOpener = (session: string, host?: string) => void
 
 /** Every usable destination, best first. An unavailable preference never changes this order. */
 export function conversationDestinations(card: ConversationWorker, device: ConversationDevice, openWorker?: WorkerOpener): ConversationDestination[] {
-  if ((card.workerSurface ?? card.shuttleSurface) === 'app') {
-    if (!card.sessionUuid) return []
-    const target = appConversationTarget(card, device.desktop, device.userAgent, device.coarse)
-    return [{ id: 'chatgpt', label: 'ChatGPT', href: target.href, title: target.title }]
-  }
   const destinations: ConversationDestination[] = []
   if (device.desktop && card.tmuxSession && openWorker) {
     const session = card.tmuxSession

@@ -68,7 +68,6 @@ func (a *app) newShuttleDaemonInstallCommand() *cobra.Command {
 			} else if dir, ok := a.env.LookupEnv("AGENT_TMUX_TMPDIR"); ok {
 				options.TmuxTmpdir, options.TmuxTmpdirSet = dir, true
 			}
-			options.CodexSocketSet = cmd.Flags().Changed("codex-socket")
 			return a.installDaemonSupervisor(options)
 		},
 	}
@@ -76,7 +75,6 @@ func (a *app) newShuttleDaemonInstallCommand() *cobra.Command {
 	command.Flags().StringVar(&options.SSHSocket, "ssh-auth-sock", options.SSHSocket, "SSH agent socket to use (empty omits the setting)")
 	command.Flags().StringVar(&options.Path, "path", options.Path, "PATH for the supervisor (default: captured from a login shell)")
 	command.Flags().StringVar(&options.TmuxTmpdir, "tmux-tmpdir", "", "TMUX_TMPDIR for the supervisor, so the daemon shares your tmux server (default: captured from a login shell; empty omits the setting)")
-	command.Flags().StringVar(&options.CodexSocket, "codex-socket", "", "Codex desktop control socket (absolute path; defaults to SHUTTLE_CODEX_SOCKET or the installed setting; empty resets)")
 	command.Flags().StringVar(&options.Log, "log", options.Log, "Daemon log path")
 	command.Flags().StringVar(&options.Label, "label", options.Label, "Supervisor label")
 	command.Flags().StringVar(&options.Port, "port", options.Port, "Daemon port for an additional instance")
@@ -119,12 +117,10 @@ type supervisorOptions struct {
 	// TmuxTmpdir selects the tmux server directory the daemon shares with
 	// the user's login shells; TmuxTmpdirSet means it was given explicitly
 	// rather than captured.
-	TmuxTmpdir     string
-	TmuxTmpdirSet  bool
-	CodexSocket    string
-	CodexSocketSet bool
-	CodexHome      string
-	Print          bool
+	TmuxTmpdir    string
+	TmuxTmpdirSet bool
+	CodexHome     string
+	Print         bool
 }
 
 func supervisorOS(goos string) string {
@@ -181,7 +177,7 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 		}
 		defer releaseClaim()
 	}
-	if err := a.resolveSupervisorCodex(&options); err != nil {
+	if err := a.resolveSupervisorEnvironment(&options); err != nil {
 		return err
 	}
 	release, err := a.findDaemonRelease()
@@ -327,7 +323,7 @@ func validateSupervisorOptions(options supervisorOptions) error {
 		"--label": options.Label, "--stores": options.Stores, "--stores-file": options.StoresFile,
 		"--path": options.Path, "--log": options.Log, "--port": options.Port,
 		"--ssh-auth-sock": options.SSHSocket, "--tmux-tmpdir": options.TmuxTmpdir,
-		"--codex-socket": options.CodexSocket, "CODEX_HOME": options.CodexHome,
+		"CODEX_HOME": options.CodexHome,
 	} {
 		if strings.ContainsAny(value, "\x00\r\n") {
 			return fmt.Errorf("%s may not contain NUL or newline characters", name)
@@ -344,7 +340,7 @@ func validateSupervisorOptions(options supervisorOptions) error {
 			return fmt.Errorf("--port: %w", err)
 		}
 	}
-	for name, path := range map[string]string{"--codex-socket": options.CodexSocket, "CODEX_HOME": options.CodexHome} {
+	for name, path := range map[string]string{"CODEX_HOME": options.CodexHome} {
 		if path != "" && (!filepath.IsAbs(path) || filepath.Clean(path) != path) {
 			return fmt.Errorf("%s must be a clean absolute filesystem path", name)
 		}
@@ -361,7 +357,7 @@ func defaultDaemonSSHSocket(osName, home string) string {
 
 // Explicit values override the installed supervisor; an omitted option preserves
 // installed desktop endpoints and fixed stores across reinstalls.
-func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
+func (a *app) resolveSupervisorEnvironment(options *supervisorOptions) error {
 	home, err := a.env.UserHomeDir()
 	if err != nil {
 		return err
@@ -383,13 +379,6 @@ func (a *app) resolveSupervisorCodex(options *supervisorOptions) error {
 		_, shuttleSet := a.env.LookupEnv("SHUTTLE_STORES")
 		if !agentSet && !shuttleSet {
 			options.Stores = previous["SHUTTLE_STORES"]
-		}
-	}
-	if !options.CodexSocketSet {
-		if value, present := a.env.LookupEnv("SHUTTLE_CODEX_SOCKET"); present {
-			options.CodexSocket = value
-		} else {
-			options.CodexSocket = previous["SHUTTLE_CODEX_SOCKET"]
 		}
 	}
 	if value, present := a.env.LookupEnv("CODEX_HOME"); present {
@@ -531,12 +520,11 @@ func (a *app) renderSupervisorTemplate(osName, source string, options supervisor
 		"__PORT__":                options.Port,
 		"__SSH_AUTH_SOCK__":       options.SSHSocket,
 		"__TMUX_TMPDIR__":         options.TmuxTmpdir,
-		"__CODEX_SOCKET__":        options.CodexSocket,
 		"__CODEX_HOME__":          options.CodexHome,
 	}
-	for _, placeholder := range []string{"__CODEX_SOCKET__", "__CODEX_HOME__"} {
+	for _, placeholder := range []string{"__CODEX_HOME__"} {
 		if values[placeholder] != "" && !strings.Contains(source, placeholder) {
-			return "", errors.New("supervisor template does not support Codex desktop settings; update the daemon release before installing with a Codex endpoint")
+			return "", errors.New("supervisor template does not support CODEX_HOME; update the daemon release before installing")
 		}
 	}
 	if osName == "Darwin" {
@@ -573,13 +561,12 @@ var optionalSupervisorEnv = []struct{ key, placeholder string }{
 	{"SHUTTLE_PORT", "__PORT__"},
 	{"SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__"},
 	{"TMUX_TMPDIR", "__TMUX_TMPDIR__"},
-	{"SHUTTLE_CODEX_SOCKET", "__CODEX_SOCKET__"},
 	{"CODEX_HOME", "__CODEX_HOME__"},
 }
 
 func validateTemplatePlaceholderSet(osName, source string) error {
 	want := []string{"__SHUTTLE_BIN__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__", "__TMUX_TMPDIR__"}
-	for _, optional := range []string{"__CODEX_SOCKET__", "__CODEX_HOME__"} {
+	for _, optional := range []string{"__CODEX_HOME__"} {
 		if strings.Contains(source, optional) {
 			want = append(want, optional)
 		}

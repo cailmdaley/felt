@@ -138,7 +138,7 @@ Record the current machine, store, project, completed checks, and next step here
 ```
 
 Use the current project directory for the worker; don't substitute the notes folder merely because it holds the fiber.
-Select an agent from `shuttle agents` that matches the current harness and choose its actual execution surface.
+Select an agent from `shuttle agents` that matches the current harness and choose its terminal harness.
 Install the task **as a draft**, then claim the current session, then activate it—in that order.
 The installed Shuttle skill's [capture reference](https://github.com/cailmdaley/felt/blob/main/claude-plugin/skills/shuttle/references/capture.md) explains why: activating before a successful claim can launch a duplicate worker.
 
@@ -146,21 +146,19 @@ For example, after creating the task in the selected store:
 
 ```sh
 shuttle -C "$STORE" install setup-shuttle --disabled \
-  --project-dir "$PROJECT" --model "$AGENT" --surface "$SURFACE"
-shuttle -C "$STORE" claim setup-shuttle --surface "$SURFACE"
+  --project-dir "$PROJECT" --model "$AGENT"
+shuttle -C "$STORE" claim setup-shuttle
 # Only after claim succeeds:
 shuttle -C "$STORE" resume setup-shuttle
 ```
 
-Here `STORE` is the selected store root, `PROJECT` is the current working project, `AGENT` is its installed agent ID, and `SURFACE` is `cli` or `app` for this conversation.
-Set these from the inspected environment before running the commands.
-The claim command can identify the current tmux session, or a Codex app conversation with `CODEX_THREAD_ID`.
+Here `STORE` is the selected store root, `PROJECT` is the current working project, and `AGENT` is its installed agent ID. Set these from the inspected environment before running the commands. The claim command identifies the current terminal session; pass its exact native session id with `--session` when the harness does not expose it automatically.
 When native identity is available through the harness rather than the environment, pass its exact ID with `--session`; an existing terminal session can be specified with `--tmux-session`.
 Claim does not activate or launch anything itself.
 Stop this sequence on any failed command, leaving the fiber as a draft if the claim fails.
 
 A claim must identify the current native conversation or tmux session exactly.
-Never guess an ID, reuse another worker's conversation, or create a replacement App Server to make a claim succeed.
+Never guess an ID or reuse another worker's conversation.
 If this conversation can't be attached, keep the task as a draft, explain that limitation in its outcome, and continue setup from here.
 The board can still show useful progress without a connected worker.
 
@@ -175,7 +173,7 @@ Open the board visually when a browser tool is available; distinguish an API che
 Don't call setup complete solely because a process is listening.
 
 Help the user choose where the worker pill opens, in Settings.
-[Opening conversations](conversations.md) describes which harnesses support terminal, desktop, and browser opening.
+[Opening conversations](conversations.md) describes which harnesses support terminal and browser opening.
 Claude Remote Control, Kitty's control socket, and Codex remote access are separate features; don't tell users to enable all of them indiscriminately.
 A choice in browser settings changes how a conversation opens, not where the worker runs.
 
@@ -183,7 +181,7 @@ A choice in browser settings changes how a conversation opens, not where the wor
 
 Attaching the current setup conversation checks adoption; it doesn't prove Shuttle can launch a fresh worker.
 When the user wants agent execution, prepare a small read-only task in their project, such as describing its contents without changing files.
-Choose an installed agent explicitly and use `--surface cli` for a terminal Codex test; Codex app workers require the [desktop backend setup](codex-desktop.md).
+Choose an installed agent explicitly and Codex runs in the terminal like the other CLI harnesses.
 
 Install the test as a draft before activating it.
 Inspect all eligible tasks before running `shuttle daemon release`: release applies to the whole host after a deliberate restart.

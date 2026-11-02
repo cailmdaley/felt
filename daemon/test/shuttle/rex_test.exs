@@ -166,7 +166,7 @@ defmodule Shuttle.RexTest do
     refute File.exists?(Path.join(Shuttle.Env.get("SHUTTLE_DATA_DIR"), "terminals/rex.json"))
   end
 
-  test "background launch replaces Rex Server's tmux socket directory with the daemon's", %{
+  test "background launch isolates the daemon's tmux socket directory", %{
     tmp_dir: dir
   } do
     receipt = Path.join(dir, "socket-env")

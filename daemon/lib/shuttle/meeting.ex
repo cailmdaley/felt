@@ -29,7 +29,7 @@ defmodule Shuttle.Meeting do
   The transcript and `meeting.json` remain owned by hark; this module controls
   the local capture and derives its state from hark's lifecycle and tmux.
 
-  A meeting starts for a target: `{:capture, surface}` hands it to a new
+  A meeting starts for a target: `:capture` hands it to a new
   capture agent, `{:fiber, id}` joins it to an existing constitution, and
   `:record` only records, for a caller that follows the transcript itself. The
   recording is the same every way; the target shapes the name and the message
@@ -73,7 +73,7 @@ defmodule Shuttle.Meeting do
               launch: String.t() | nil,
               fiber: String.t() | nil
             }
-  @type target :: {:capture, String.t() | nil} | {:fiber, String.t()} | :record
+  @type target :: :capture | {:fiber, String.t()} | :record
   @type meeting :: map() | nil
 
   @doc false
@@ -176,7 +176,7 @@ defmodule Shuttle.Meeting do
   joins, whose worker stays itself.
   """
   @spec meeting_message(String.t(), String.t(), target()) :: String.t()
-  def meeting_message(mode, transcript_path, target \\ {:capture, nil})
+  def meeting_message(mode, transcript_path, target \\ :capture)
       when mode in @modes do
     "Meeting mode (#{mode}). hark is transcribing #{meeting_kind(mode)} to `#{transcript_path}` on this host. " <>
       "Read the shuttle skill's references/meeting.md before anything else and follow it. " <>
@@ -185,7 +185,7 @@ defmodule Shuttle.Meeting do
       "The user's note about the meeting follows (it may be empty)."
   end
 
-  defp capture_scribe_instructions({:capture, _cli}) do
+  defp capture_scribe_instructions(:capture) do
     "Use the transcript and felt tree to infer the meeting's identity, topic, participants, " <>
       "and appropriate filing location. Do not ask the user for a title; use a provisional " <>
       "date-based name if needed and rename it when the transcript clarifies the subject. "
@@ -400,10 +400,7 @@ defmodule Shuttle.Meeting do
     |> String.trim()
   end
 
-  defp validate_target({:capture, "app"}),
-    do: {:error, {:validation, "meeting mode requires a terminal capture surface"}}
-
-  defp validate_target({:capture, _surface}), do: :ok
+  defp validate_target(:capture), do: :ok
   defp validate_target(:record), do: :ok
 
   defp validate_target({:fiber, fiber_id}) when is_binary(fiber_id) do

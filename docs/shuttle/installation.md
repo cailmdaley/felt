@@ -16,7 +16,7 @@ optional; choose how to add them.
   This is what the source deploy script updates; use it when changing daemon code.
   Prebuilt releases also support multi-host fleets.
 
-The daemon needs `tmux` and both Go CLIs at runtime. Terminal workers use the host's selected backend, tmux by default or Rex on a configured host; Codex app workers use a native App Server.
+The daemon needs `tmux` and both Go CLIs at runtime. Terminal workers use the host's selected backend, tmux by default or Rex on a configured host.
 The daemon shells out to `felt` for fiber content and generic writes,
 and to `shuttle` for resolved reads and Shuttle-owned operations.
 
@@ -402,7 +402,7 @@ Install the `shuttle:` block. This is what turns the fiber into something the
 daemon will pick up:
 
 ```bash
-shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus --surface cli
+shuttle install pipeline/first-pass --project-dir "$PWD" --model claude-opus
 shuttle daemon release
 ```
 
@@ -465,7 +465,6 @@ The install fixes these values into the job:
 | — | `SHUTTLE_STORES_FILE` | `~/.config/shuttle/stores.json` |
 | `--path <PATH>` | `AGENT_PATH` | the login shell's `PATH`, captured at install time |
 | `--tmux-tmpdir <dir>` | `AGENT_TMUX_TMPDIR` | the login shell's `TMUX_TMPDIR`, captured at install time; omitted when empty |
-| `--codex-socket <path>` | `SHUTTLE_CODEX_SOCKET` | the installed supervisor's value, else native Codex default; `--codex-socket=` clears it |
 | no flag | `CODEX_HOME` | the installed supervisor's value, else Codex's default home |
 | `--log <file>` | `AGENT_LOG` | `~/Library/Logs/shuttle.log` (macOS), `~/.shuttle/shuttle.log` (Linux) |
 | `--ssh-auth-sock <path>` | `AGENT_SSH_AUTH_SOCK` | `~/.ssh/agent.sock` (macOS), empty (Linux) |
@@ -722,7 +721,7 @@ Run `shuttle doctor` to inspect Rex reachability, its app client and privacy sta
 
 Rex holds worker sessions independently of the daemon; stopping its server ends those sessions.
 Shuttle observes existing tmux workers on a Rex host when tmux is available, but launches new terminal workers in Rex.
-Codex App Server, Claude Remote Control and Hark meetings still use tmux for retained panes and session options.
+Claude Remote Control and Hark meetings still use tmux for retained panes and session options.
 On macOS, their tmux anchor is launched through Rex on a Rex host and through Kitty on a tmux host.
 See [Opening conversations](conversations.md) for attach and remote limitations.
 
@@ -854,7 +853,7 @@ Resolved aliases retain their own id, so capture and resume reapply their enviro
 Interactive Chronicle resumes explicitly clear `headless` because a human is at the terminal.
 This alias overlay does not change the wholesale record replacement rule between registry layers.
 If a resume cannot resolve a registry record and falls back to a bare agent, that agent carries no `env` overrides.
-The Codex app surface connects to an existing App Server and does not set per-worker process environment variables.
+Codex workers run through the selected terminal backend using the Codex CLI.
 
 The file's `builtins` key controls the merge. `"merge"` (the default) folds your
 records over the built-ins by id, last one wins — wholesale, never field by

@@ -3,9 +3,8 @@ defmodule Shuttle.Poller.Snapshot do
   Read-only serialization of `Shuttle.Poller` state into the wire shapes the
   `:4000` API and the kanban feed consume.
 
-  Worker projection reads one fresh `AppWorkers` record per managed worker,
-  then derives its wire fields and runtime presentation from that record.
-  Other inputs come from the poller `State` (or a slice of it), and the
+  Worker projection derives wire fields and runtime presentation from the
+  poller's terminal-worker state. Other inputs come from the poller `State` (or a slice of it), and the
   functions return plain maps/lists. The wire shape is load-bearing — API and
   kanban consumers depend on it byte-for-byte — so changes here must preserve
   it exactly.
@@ -29,10 +28,9 @@ defmodule Shuttle.Poller.Snapshot do
     eligible =
       Enum.map(state.running, fn {_runtime_key, meta} ->
         fiber_id = Poller.fiber_address(meta)
-        record = app_worker_record(meta)
 
         meta
-        |> worker_fields(record)
+        |> worker_fields()
         |> Map.merge(%{
           fiber_id: fiber_id,
           uid: Poller.metadata_uid(meta),
@@ -40,7 +38,6 @@ defmodule Shuttle.Poller.Snapshot do
           last_activity_at: DateTime.to_unix(meta.last_activity_at, :millisecond),
           runtime_seconds: Poller.runtime_seconds(meta.started_at, now)
         })
-        |> native_activity(meta.session, record)
         |> put_tasks(state.task_reads)
       end)
 
@@ -183,7 +180,7 @@ defmodule Shuttle.Poller.Snapshot do
   """
   def runtime_index(running, activity) do
     Enum.reduce(running, %{}, fn {runtime_key, meta}, acc ->
-      payload = runtime_payload(meta, activity, app_worker_record(meta))
+      payload = runtime_payload(meta, activity)
 
       [runtime_key, Poller.metadata_uid(meta), Poller.fiber_address(meta)]
       |> Enum.filter(&(is_binary(&1) and &1 != ""))
@@ -214,17 +211,6 @@ defmodule Shuttle.Poller.Snapshot do
         error -> Map.put(entry, :dispatch_error, error)
       end
     end)
-  end
-
-  defp dispatch_error({:app_launch_failed, id, reason}) do
-    case Shuttle.AppWorkers.get(id) do
-      {:ok, record} ->
-        record["terminal_error"] || record["backend_error"] || record["last_error"] ||
-          format_block_reason(reason)
-
-      _ ->
-        format_block_reason(reason)
-    end
   end
 
   defp dispatch_error(reason), do: format_block_reason(reason)
@@ -316,10 +302,7 @@ defmodule Shuttle.Poller.Snapshot do
   end
 
   defp put_tasks(payload, tasks) do
-    session =
-      if payload.surface == "app", do: payload.transcript_session_uuid, else: payload.session_uuid
-
-    Map.put(payload, :tasks, get_in(tasks, [session, :tasks]) || [])
+    Map.put(payload, :tasks, get_in(tasks, [payload.session_uuid, :tasks]) || [])
   end
 
   # Where a phone opens this worker: the claude.ai bridge URL of the session
@@ -327,10 +310,7 @@ defmodule Shuttle.Poller.Snapshot do
   # on this host — the owner stamps its own rows). Omitted when the session was
   # never bridged, so a viewer renders a stamp rather than a link to nowhere.
   defp put_session_link(payload, fiber) do
-    uuid =
-      if payload.surface == "cli",
-        do: payload.session_uuid,
-        else: get_in(fiber, ["shuttle", "runtime", "session_uuid"])
+    uuid = payload.session_uuid || get_in(fiber, ["shuttle", "runtime", "session_uuid"])
 
     case uuid do
       uuid when is_binary(uuid) and uuid != "" ->
@@ -353,43 +333,18 @@ defmodule Shuttle.Poller.Snapshot do
   # The worker fields the `eligible` snapshot row and the feed's `runtime`
   # payload share, so the two agree on shape. The payload's presence is the
   # viewer's liveness signal and `state` qualifies it; `tmux_session` is only
-  # the CLI worker's terminal handle (nil for an app worker).
-  defp app_worker_record(meta) do
-    case Shuttle.AppWorkers.id(meta.session) do
-      nil ->
-        nil
-
-      id ->
-        case Shuttle.AppWorkers.get(id) do
-          {:ok, record} -> record
-          _ -> nil
-        end
-    end
-  end
-
-  defp worker_fields(meta, record) do
-    app_id = Shuttle.AppWorkers.id(meta.session)
-    backend = Shuttle.WorkerBackend.wire(meta.session, record)
-
-    error =
-      Map.get(meta, :launch_error) || backend[:terminal_error] || backend[:backend_error] ||
-        if(is_map(record) and record["remote_state"] == "system_error",
-          do: "systemError: the previous Codex turn failed. Resume this conversation to continue."
-        )
+  defp worker_fields(meta) do
+    backend = Shuttle.WorkerBackend.wire(meta.session)
+    error = Map.get(meta, :launch_error)
 
     %{
       tmux_session: backend.tmux_session,
       surface: backend.surface,
       terminal: backend.terminal,
-      session_uuid: app_id || Map.get(meta, :session_uuid),
-      thread_id: app_id,
-      desktop_link: Shuttle.SessionLink.desktop_url(app_id),
-      transcript_session_uuid: backend[:transcript_session_uuid],
+      session_uuid: Map.get(meta, :session_uuid),
       agent: Map.get(meta, :agent_id),
       state: if(error, do: "blocked", else: Map.get(meta, :state, "running")),
       launch_error: error,
-      terminal_error: backend[:terminal_error],
-      backend_error: backend[:backend_error],
       run_id: Map.get(meta, :run_id),
       started_at: DateTime.to_unix(meta.started_at, :millisecond)
     }
@@ -428,14 +383,9 @@ defmodule Shuttle.Poller.Snapshot do
   # Fallback: a just-dispatched worker with no hook event yet has no tracker
   # record, so we fall back to `meta.last_activity_at` (≈ `started_at`) and omit
   # `phase` — correct, since a brand-new worker shouldn't outrank an idle review.
-  defp runtime_payload(meta, activity, record) do
-    base = worker_fields(meta, record)
-
-    activity_key =
-      case Shuttle.AppWorkers.id(meta.session) do
-        nil -> Map.get(meta, :session_uuid)
-        _id -> base.transcript_session_uuid
-      end
+  defp runtime_payload(meta, activity) do
+    base = worker_fields(meta)
+    activity_key = Map.get(meta, :session_uuid)
 
     payload =
       case is_binary(activity_key) and Map.get(activity, activity_key) do
@@ -446,26 +396,7 @@ defmodule Shuttle.Poller.Snapshot do
           Map.put(base, :last_activity_at, DateTime.to_unix(meta.last_activity_at, :millisecond))
       end
 
-    native_activity(payload, meta.session, record)
-  end
-
-  defp native_activity(payload, session, record) do
-    case Shuttle.AppWorkers.id(session) do
-      nil ->
-        payload
-
-      _id ->
-        case record do
-          %{"launch_state" => "running", "remote_phase" => phase} = record
-          when phase in ["working", "waiting", "attention"] ->
-            payload
-            |> Map.put(:phase, phase)
-            |> Map.put(:last_activity_at, record["phase_changed_at"] || payload.last_activity_at)
-
-          _ ->
-            Map.delete(payload, :phase)
-        end
-    end
+    payload
   end
 
   defp stringify_keys(value) when is_map(value) do

@@ -30,7 +30,7 @@ defmodule ShuttleWeb.AttachController do
 
   import Plug.Conn
 
-  alias Shuttle.{CodexTerminal, OpenTrace, OriginRouter, Remote, SessionResume, Transcript}
+  alias Shuttle.{OpenTrace, OriginRouter, Remote, SessionResume, Transcript}
   alias ShuttleWeb.SessionResumeController
 
   def create(conn, params) do
@@ -47,13 +47,7 @@ defmodule ShuttleWeb.AttachController do
   defp create_traced(conn, %{"tmux_session" => session} = params) when is_binary(session) do
     host = Map.get(params, "shuttle_host")
 
-    case OpenTrace.step(:prepare_terminal, fn -> prepare_terminal(session, host) end) do
-      :ok ->
-        attach(conn, session, host)
-
-      {:error, reason} ->
-        conn |> put_status(422) |> json(%{error: CodexTerminal.error_message(reason)})
-    end
+    attach(conn, session, host)
   end
 
   defp create_traced(conn, %{"session" => session} = params) when is_binary(session) do
@@ -65,7 +59,7 @@ defmodule ShuttleWeb.AttachController do
           attach(conn, tmux, host)
 
         {:error, status, reason} ->
-          conn |> put_status(status) |> json(%{error: CodexTerminal.error_message(reason)})
+          conn |> put_status(status) |> json(%{error: format_error(reason)})
       end
     else
       conn |> put_status(400) |> json(%{error: "session must be a UUID"})
@@ -76,71 +70,13 @@ defmodule ShuttleWeb.AttachController do
     conn |> put_status(400) |> json(%{error: "tmux_session or session is required"})
   end
 
-  defp prepare_terminal("codex-terminal-" <> id = tmux, host) do
-    case OriginRouter.route_host(host) do
-      :local ->
-        case Shuttle.CodexTerminal.prepare(id,
-               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default),
-               wait_timeout_ms: CodexTerminal.prepare_timeout_ms()
-             ) do
-          {:ok, %{tmux_session: ^tmux}} -> :ok
-          {:error, _} = error -> error
-          _ -> {:error, :terminal_identity_mismatch}
-        end
-
-      {:remote, remote} ->
-        case OriginRouter.forward(
-               remote,
-               "/api/v1/sessions/prepare-terminal",
-               %{
-                 "tmux_session" => tmux
-               },
-               forward_timeout_ms: CodexTerminal.forward_timeout_ms()
-             ) do
-          {:forwarded, 200, body} ->
-            case Jason.decode(body) do
-              {:ok, %{"tmux_session" => ^tmux}} ->
-                :ok
-
-              _ ->
-                {:error,
-                 "#{remote.name} answered with a different or missing terminal; nothing was opened."}
-            end
-
-          {:forwarded, 404, body} ->
-            {:error,
-             remote_error(
-               body,
-               remote,
-               "prepare Codex terminals; deploy the current build there if the route is unavailable"
-             )}
-
-          {:forwarded, _status, body} ->
-            {:error, remote_error(body, remote, "prepare the terminal")}
-
-          {:error, {:forward_failed, _, :timeout}} ->
-            {:error,
-             "#{remote.name}'s daemon did not answer in time to prepare this conversation's terminal."}
-
-          {:error, _} ->
-            {:error,
-             "#{remote.name} could not be reached to prepare this conversation's terminal."}
-        end
-
-      {:error, {:unknown_origin, origin}} ->
-        {:error, OriginRouter.unknown_origin_message(origin)}
-    end
-  end
-
-  defp prepare_terminal(_tmux, _host), do: :ok
-
   defp attach(conn, tmux, host) do
     case OpenTrace.step(:display, fn -> opener().open(tmux, host) end) do
       :ok ->
         json(conn, %{attached: true, session: tmux})
 
       {:error, reason} ->
-        conn |> put_status(502) |> json(%{error: CodexTerminal.error_message(reason)})
+        conn |> put_status(502) |> json(%{error: format_error(reason)})
     end
   end
 
@@ -160,8 +96,7 @@ defmodule ShuttleWeb.AttachController do
             case Jason.decode(body) do
               {:ok, %{"tmux_session" => tmux}} when is_binary(tmux) ->
                 if tmux in [
-                     SessionResume.tmux_name(session),
-                     Shuttle.CodexTerminal.tmux_name(session)
+                     SessionResume.tmux_name(session)
                    ],
                    do: {:ok, tmux},
                    else: {:error, 502, "#{remote.name} answered an unexpected tmux session"}
@@ -193,6 +128,13 @@ defmodule ShuttleWeb.AttachController do
       _ -> "#{remote.name} could not #{action}."
     end
   end
+
+  defp format_error(reason) when is_binary(reason), do: reason
+
+  defp format_error({:display_failed, reason}),
+    do: "could not prepare the terminal: #{inspect(reason)}"
+
+  defp format_error(reason), do: inspect(reason)
 
   defp opener, do: Shuttle.Env.app(:opener_impl, Shuttle.Opener)
 end

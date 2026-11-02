@@ -42,14 +42,12 @@ import {
   FormError,
   FormFoot,
   HostProjectFields,
-  SessionField,
   injectFormKitStyles,
 } from './formKit'
 import { filterParentCandidates, type FiberSearchResult } from '../board/fiberSearch'
 import { fiberIndex } from '../board/wikilinks'
 import { daemonErrorMessage } from '../board/daemonApi'
 import type { Host, Project } from './projectModel'
-import { defaultSurface, isCodexAgent, type ExecutionSurface } from './executionSurface'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,7 +103,6 @@ function buildShuttleBlock(input: {
   tz: string
   projectDir: string
   chrome: boolean
-  surface: ExecutionSurface
 }): Record<string, unknown> {
   const block: Record<string, unknown> = {
     kind: input.kind,
@@ -114,7 +111,6 @@ function buildShuttleBlock(input: {
   if (input.agent) block.agent = input.agent
   if (input.effort.trim()) block.effort = input.effort.trim()
   if (input.chrome) block.chrome = true
-  if (input.surface !== 'cli') block.surface = input.surface
   if (input.kind === 'standing') {
     block.schedule = { expr: input.schedule.trim(), tz: input.tz.trim() || 'UTC' }
   }
@@ -310,7 +306,6 @@ export function StashForm({
   const [schedule, setSchedule] = useState<string>('')
   const [scheduleTz, setScheduleTz] = useState<string>('Europe/Paris')
   const [chrome, setChrome] = useState<boolean>(false)
-  const [surface, setSurface] = useState<ExecutionSurface>('cli')
 
   // Form state
   const [submitting, setSubmitting] = useState(false)
@@ -419,7 +414,6 @@ export function StashForm({
         tz: scheduleTz,
         projectDir: selectedProject.path,
         chrome: chrome && chromeCapable,
-        surface,
       }),
     }
 
@@ -474,11 +468,9 @@ export function StashForm({
   }
 
   const handleAgentChange = (id: string): void => {
-    const wasCodex = isCodexAgent(agents.find((a) => a.id === agentId) ?? defaultAgentEntry)
     setAgentId(id)
     const rec = agents.find((a) => a.id === id) ?? agents.find((a) => a.default)
     setEffort(resolveEffort(rec, ''))
-    if (!wasCodex) setSurface(defaultSurface(rec))
   }
 
   return (
@@ -660,9 +652,6 @@ export function StashForm({
                 <span className="form-hint">IANA name</span>
               </Field>
             </>
-          )}
-          {isCodexAgent(constraintAgent) && (
-            <SessionField surface={surface} onChange={setSurface} />
           )}
         </div>
         {addProject.pathOpen && onProjectAdded && (

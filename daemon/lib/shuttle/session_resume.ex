@@ -80,51 +80,25 @@ defmodule Shuttle.SessionResume do
          {:ok, cwd} <- work_dir(harness, path) do
       agent = agent_for(session, harness, runner, opts)
 
-      with :ok <- validate_resume_agent(harness, agent) do
-        {:ok,
-         %{
-           session: session,
-           tmux: tmux_name(session),
-           fiber:
-             case SessionLedger.latest_for_session(session,
-                    path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
-                  ) do
-               %{"fiber" => fiber} -> fiber
-               _ -> nil
-             end,
-           harness: harness,
-           agent: agent.id,
-           cwd: cwd,
-           wrapper: agent.wrapper,
-           backend_opts:
-             if(harness == "codex",
-               do: Dispatcher.codex_options(agent, cwd, developer_instructions: nil),
-               else: []
-             ),
-           command:
-             if(harness == "codex",
-               do:
-                 Shuttle.CodexTerminal.command(
-                   agent.wrapper,
-                   cwd,
-                   session,
-                   "unix://" <> Shuttle.CodexApp.Transport.default_socket()
-                 ),
-               else: Agents.build_resume_command(agent, session, "")
-             )
-         }}
-      end
+      {:ok,
+       %{
+         session: session,
+         tmux: tmux_name(session),
+         fiber:
+           case SessionLedger.latest_for_session(session,
+                  path: Keyword.get(opts, :ledger_path, SessionLedger.default_path())
+                ) do
+             %{"fiber" => fiber} -> fiber
+             _ -> nil
+           end,
+         harness: harness,
+         agent: agent.id,
+         cwd: cwd,
+         wrapper: agent.wrapper,
+         command: Agents.build_resume_command(agent, session, "")
+       }}
     end
   end
-
-  defp validate_resume_agent("codex", agent) do
-    case Dispatcher.validate_codex_agent(agent) do
-      :ok -> :ok
-      {:error, {:invalid_axes, message}} -> {:error, message}
-    end
-  end
-
-  defp validate_resume_agent(_harness, _agent), do: :ok
 
   @doc """
   Start the resume of `session` in the primary terminal, unless it is already
@@ -145,80 +119,23 @@ defmodule Shuttle.SessionResume do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     live = Keyword.get(opts, :live_sessions, &live_sessions/0)
 
-    case Shuttle.AppWorkers.get(session) do
-      {:ok, %{"active" => true, "surface" => "cli"}} ->
-        Shuttle.CodexTerminal.prepare(session, opts)
+    with :ok <- not_the_worker(session, live.()),
+         {:ok, plan} <- plan(session, opts),
+         :ok <- Terminal.require_config() do
+      case Terminal.status(runner, plan.tmux) do
+        :alive ->
+          {:ok, %{tmux_session: plan.tmux, created: false}}
 
-      {:error, reason} = error
-      when reason in [:session_owner_mismatch, :ownership_record_unreadable] ->
-        error
+        :unknown ->
+          # Uncertainty prevents launch, but does not prove a reusable viewer.
+          with :ok <- not_held(session, runner),
+               do: {:error, "Resume terminal visibility is unknown; holding without launch"}
 
-      _ ->
-        with :ok <- not_the_worker(session, live.()),
-             {:ok, plan} <- plan(session, opts),
-             :ok <- Terminal.require_config() do
-          case Terminal.status(runner, plan.tmux) do
-            :alive ->
-              {:ok, %{tmux_session: plan.tmux, created: false}}
-
-            :unknown ->
-              # Uncertainty prevents launch, but does not prove a reusable viewer.
-              with :ok <- resume_identity_free(plan, runner),
-                   do: {:error, "Resume terminal visibility is unknown; holding without launch"}
-
-            :gone ->
-              with :ok <- resume_identity_free(plan, runner),
-                   :ok <- prepare_backend(plan, runner),
-                   do: start(plan, runner)
-          end
-        end
-    end
-  end
-
-  defp resume_identity_free(%{harness: "codex", session: id}, runner) do
-    case Shuttle.AppWorkers.get(id) do
-      {:ok, record} ->
-        Shuttle.AppWorkers.check_endpoint(record)
-
-      {:error, :not_found} ->
-        with :ok <- Shuttle.AppWorkers.check_known_endpoint(id), do: not_held(id, runner)
-
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  defp resume_identity_free(plan, runner), do: not_held(plan.session, runner)
-
-  defp prepare_backend(%{harness: "codex", session: id, backend_opts: opts} = plan, runner) do
-    attributes = %{
-      "cwd" => plan.cwd,
-      "agent_id" => plan.agent,
-      "surface" => "cli",
-      "terminal_wrapper" => plan.wrapper,
-      "terminal_tmux" => plan.tmux
-    }
-
-    result =
-      with {:ok, loaded} <- Shuttle.AppWorkers.import_embedded(id, attributes, opts, runner),
-           :ok <- Shuttle.CodexBackend.require_ready() do
-        if loaded, do: {:ok, loaded}, else: Shuttle.AppWorkers.call(id, :resume_thread, [opts])
+        :gone ->
+          with :ok <- not_held(session, runner), do: start(plan, runner)
       end
-
-    case result do
-      {:ok, %{"id" => ^id}} ->
-        :ok
-
-      {:error, reason} ->
-        {:error,
-         "Managed Codex resume is waiting: #{inspect(reason)}. Inspect codex_backend in /api/v1/version and restore the recorded endpoint; no embedded fallback is used."}
-
-      _ ->
-        {:error, "Managed Codex resume returned a different thread"}
     end
   end
-
-  defp prepare_backend(_plan, _runner), do: :ok
 
   defp not_the_worker(session, live) do
     if session in live,
@@ -231,8 +148,7 @@ defmodule Shuttle.SessionResume do
 
   @doc """
   The harness sessions this host's workers are running now, from the poller's
-  snapshot: an app conversation's own ids, and for a tmux worker the newest
-  session its fiber's ledger paired (the one it was dispatched or resumed on).
+  snapshot and the newest session each fiber's ledger paired.
   Empty when the poller cannot answer — the dispatcher's own refusal
   (`resume-<uuid>` open) still guards the other direction.
   """
@@ -241,8 +157,6 @@ defmodule Shuttle.SessionResume do
     Shuttle.Poller.snapshot(Shuttle.Env.server(Shuttle.Poller), 5_000)
     |> Map.get(:eligible, [])
     |> Enum.flat_map(fn row ->
-      app = [row[:session_uuid], row[:transcript_session_uuid]]
-
       tmux =
         if is_binary(row[:tmux_session]) do
           case SessionLedger.latest_for_uid(row[:uid]) do
@@ -253,7 +167,7 @@ defmodule Shuttle.SessionResume do
           []
         end
 
-      Enum.filter(app ++ tmux, &is_binary/1)
+      Enum.filter(tmux, &is_binary/1)
     end)
   catch
     :exit, _ -> []

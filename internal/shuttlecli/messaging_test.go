@@ -221,6 +221,8 @@ func TestPostMessageNarrowsWakeReceiptStages(t *testing.T) {
 	}{
 		{"native queued", messaging.StatusQueued, "claude-native", true, true},
 		{"native submitted", messaging.StatusSubmitted, "claude-native", true, true},
+		{"Codex terminal submitted", messaging.StatusSubmitted, "codex-terminal", true, true},
+		{"Codex terminal queued", messaging.StatusQueued, "codex-terminal", true, false},
 		{"other queued", messaging.StatusQueued, "codex", true, false},
 		{"other submitted", messaging.StatusSubmitted, "peer", true, false},
 		{"context added for wake", messaging.StatusContextAdded, "codex", true, false},

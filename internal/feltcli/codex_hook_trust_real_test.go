@@ -2,22 +2,17 @@ package feltcli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
 // No account, inference, operator config or installed plugin is used here.
-// Negative controls: drop batchWrite or trusted_content_hash; the already
-// running observer and the live Unix server must both refuse the new payload.
-func TestCodexHookTrustRealAppServer(t *testing.T) {
+func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	if _, err := env.LookPath("codex"); err != nil {
@@ -32,10 +27,8 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(root, "control.sock")
 	env.Set("HOME", root)
 	env.Set("CODEX_HOME", codexHome)
-	env.Set("SHUTTLE_CODEX_SOCKET", socket)
 	// Setup may run from a project; trust must not depend on it.
 	env.Chdir(repoRoot(t))
 	a := testApp(t, env)
@@ -138,47 +131,13 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A stale socket left by a dead server: the ephemeral stdio server writes
-	// and verifies, the live server is uninspected, and an observer that was
-	// already running sees the write without being reinitialized.
-	stale, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale.(*net.UnixListener).SetUnlinkOnClose(false)
-	stale.Close()
-	if r := a.codexHookTrust(true); r.State != codexTrustTrusted || r.Live != codexLiveUninspected {
-		t.Fatalf("stale socket trust = %+v", r)
+	// Trust is written and verified through this invocation's private stdio
+	// App Server; no shared runtime endpoint is inspected.
+	if r := a.codexHookTrust(true); r.State != codexTrustTrusted {
+		t.Fatalf("private trust = %+v", r)
 	}
 	if err := requireFeltCodexTrust(list()); err != nil {
-		t.Fatalf("ephemeral write was not visible: %v", err)
-	}
-	os.Remove(socket)
-
-	// A real, isolated long-lived Unix App Server proves the WebSocket path
-	// and stays up through every write.
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	server := env.CommandContext(ctx, "codex", "app-server", "--listen", "unix://"+socket)
-	server.Dir = root
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { cancel(); server.Wait() }()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for {
-		if _, err := os.Stat(socket); err == nil {
-			break
-		}
-		select {
-		case <-poll.C:
-		case <-ctx.Done():
-			t.Fatal("private Codex server did not create its socket")
-		}
-	}
-	if r := a.codexHookTrust(false); r.State != codexTrustTrusted || r.Live != codexLiveVerified {
-		t.Fatalf("live view of trusted hooks = %+v", r)
+		t.Fatalf("private write was not visible: %v", err)
 	}
 
 	// Reinstalling identical bytes, including the marker, preserves both hashes.
@@ -231,7 +190,7 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		reinstall()
 		after := list()
 		if m.name == "hook definition" {
-			// A running server keeps the definitions it loaded.
+			// A fresh private server reads the reinstalled definition.
 			fresh, err := a.openCodexTrustRPC()
 			if err != nil {
 				t.Fatal(err)
@@ -260,7 +219,7 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		if r := a.codexHookTrust(false); r.State != codexTrustFailed {
 			t.Fatalf("receipt accepted %s mutation: %+v", m.name, r)
 		}
-		if r := a.codexHookTrust(true); r.State != codexTrustTrusted || r.Live != codexLiveVerified {
+		if r := a.codexHookTrust(true); r.State != codexTrustTrusted {
 			t.Fatalf("repairing %s trust: %+v", m.name, r)
 		}
 		if r := a.codexHookTrust(false); r.State != codexTrustTrusted {
@@ -286,5 +245,5 @@ func TestCodexHookTrustRealAppServer(t *testing.T) {
 		t.Fatal("trust changed another plugin's approval")
 	}
 	// The exact number varies with Codex's supported hook events.
-	t.Logf("Codex trust verified for %d hooks; laundering refusal, stale socket, stdio persistence, live socket, identical reinstall, marker/content/definition invalidation", len(initial))
+	t.Logf("Codex trust verified for %d hooks; laundering refusal, private stdio writes, identical reinstall, marker/content/definition invalidation", len(initial))
 }

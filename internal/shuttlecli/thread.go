@@ -12,24 +12,22 @@ import (
 )
 
 func (a *app) threadCmd() *cobra.Command {
-	var host, agent, projectDir, role, slug, surface string
+	var host, agent, projectDir, role, slug string
 	var disabled, take bool
 	cmd := &cobra.Command{
 		Use:   `thread <parent> "<ask>"`,
 		Short: "Create and install a child constitution",
 		Long: `Create a thread under a constitution and print its new fiber id.
 The ask becomes its name and lede, followed by empty Desired State and Status
-sections. Host, project_dir, role, agent and execution surface inherit from the
-parent unless explicitly overridden. Threads are armed (status: active) unless --disabled.
+sections. Host, project_dir, role and agent inherit from the parent unless explicitly
+overridden. Threads are armed (status: active) unless --disabled.
 
 Changing --host requires an explicit --project-dir, even for a draft: paths on
 different machines are not interchangeable. Inherited paths are kept verbatim;
 explicit paths are validated by the owning daemon for remote threads, never
 against this machine. If that daemon cannot be reached, creation keeps the path
-verbatim and prints a warning. Runtime, schedule and seat do not
-inherit. An absent parent surface means CLI. Inherited app execution falls back
-to CLI when the selected agent is not Codex. --surface cli|app overrides inheritance;
-app requires a Codex agent. Invalid selections never create or arm a child.
+verbatim and prints a warning. Runtime, schedule, seat and legacy execution
+surface do not inherit. Invalid selections never create or arm a child.
 
 --take creates a disabled thread, then moves your live session into it through
 its owning daemon. The source is armed for a fresh worker. If migration fails,
@@ -121,32 +119,6 @@ remote draft made with --disabled stays in this store while you write it;
 			reg, err := shuttle.LoadAgentRegistry(a.env)
 			if err != nil {
 				return err
-			}
-			block.Surface = inherited.Surface
-			if block.Surface == "" {
-				block.Surface = "cli"
-			}
-			if cmd.Flags().Changed("surface") {
-				if surface != "cli" && surface != "app" {
-					return fmt.Errorf("--surface must be cli or app")
-				}
-				block.Surface = surface
-			} else if block.Surface == "app" {
-				name := block.Agent
-				if name == "" {
-					def, err := reg.Default()
-					if err != nil {
-						return err
-					}
-					name = def.ID
-				}
-				base, _, err := reg.Resolve(name, block.Effort, block.Chrome)
-				if err != nil {
-					return err
-				}
-				if base.CLI != "codex" {
-					block.Surface = "cli"
-				}
 			}
 			if errs := shuttle.Validate(block, reg); len(errs) > 0 {
 				return a.printShuttleValidationErrors(errs)
@@ -249,7 +221,6 @@ remote draft made with --disabled stays in this store while you write it;
 	}
 	cmd.Flags().StringVar(&host, "host", "", "Owning daemon (default: parent's host)")
 	cmd.Flags().StringVar(&agent, "agent", "", "Agent id (default: parent's agent)")
-	cmd.Flags().StringVar(&surface, "surface", "", "Execution surface: cli or app (default: compatible parent surface)")
 	cmd.Flags().StringVar(&projectDir, "project-dir", "", "Worker cwd; required when changing host")
 	cmd.Flags().StringVar(&role, "role", "", "Role slug (default: parent's role)")
 	cmd.Flags().StringVar(&slug, "slug", "", "Child slug (default: derived from ask)")

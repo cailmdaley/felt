@@ -9,13 +9,16 @@ import (
 	"testing"
 )
 
-func TestClaimUsesExistingAppIdentityAndNeverActivates(t *testing.T) {
+func TestClaimUsesExistingTerminalIdentityAndNeverActivates(t *testing.T) {
 	t.Parallel()
 	dir, storage := newStore(t)
 	env := testEnv(t)
 	env.Set("SHUTTLE_HOST", "test-host")
 	env.Set("CODEX_THREAD_ID", "native-thread")
+	env.Set("TMUX", "/tmp/tmux,123,0")
+	env.Set("TMUX_PANE", "%1")
 	seedShuttleRole(t, storage, "setup", "open", map[string]any{"kind": "oneshot", "agent": "codex-sol", "host": "test-host", "surface": "app", "project_dir": dir}, nil)
+	stubWorkerExitTmux(t, env, "worker-session", storage.Path("setup"))
 	var calls []string
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -24,7 +27,7 @@ func TestClaimUsesExistingAppIdentityAndNeverActivates(t *testing.T) {
 			t.Error(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"claimed":true,"surface":"app","session_uuid":"native-thread"}`))
+		w.Write([]byte(`{"claimed":true,"session_uuid":"native-thread"}`))
 	}))
 	defer server.Close()
 	env.Set("SHUTTLE_DAEMON_URL", server.URL)
@@ -32,7 +35,7 @@ func TestClaimUsesExistingAppIdentityAndNeverActivates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim %v %s", err, stderr)
 	}
-	if !strings.Contains(out, `"claimed": true`) || body["session_uuid"] != "native-thread" || body["surface"] != "app" || body["agent"] != "codex-sol" {
+	if !strings.Contains(out, `"claimed": true`) || body["session_uuid"] != "native-thread" || body["surface"] != nil || body["tmux_session"] != "worker-session" || body["agent"] != "codex-sol" {
 		t.Fatalf("response %s payload %v", out, body)
 	}
 	if !reflect.DeepEqual(calls, []string{"/api/v1/claim"}) {

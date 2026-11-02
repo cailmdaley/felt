@@ -128,59 +128,6 @@ defmodule Shuttle.PollerTest do
     assert wide_collisions["wide-shared"] |> hd() == {"wide-01", "uid-wide-01", "wide-01"}
   end
 
-  test "runtime projection reads one fresh app record and reuses its transcript identity" do
-    id = "app-session-1"
-
-    root =
-      Path.join(
-        System.tmp_dir!(),
-        "shuttle-poller-projection-#{System.unique_integer([:positive])}"
-      )
-
-    Env.put_app_env(:app_workers_dir, root)
-    on_exit(fn -> File.rm_rf(root) end)
-    File.mkdir_p!(root)
-    path = Path.join(root, id <> ".json")
-
-    File.write!(
-      path,
-      Jason.encode!(%{
-        "session_uuid" => id,
-        "thread_id" => id,
-        "active" => true,
-        "surface" => "app",
-        "transcript_session_uuid" => "native-transcript",
-        "launch_state" => "running",
-        "remote_phase" => "waiting",
-        "phase_changed_at" => 1234
-      })
-    )
-
-    meta = %{
-      session: Shuttle.AppWorkers.ref(id),
-      session_uuid: id,
-      started_at: DateTime.utc_now(),
-      last_activity_at: DateTime.utc_now(),
-      state: "running"
-    }
-
-    callers = Shuttle.Env.callers()
-
-    {index, reads} =
-      Shuttle.Test.FileReadTrace.run(fn ->
-        Shuttle.Env.adopt_callers(callers)
-        Snapshot.runtime_index(%{id => meta}, %{})
-      end)
-
-    assert [%{surface: "app", transcript_session_uuid: "native-transcript", phase: "waiting"}] =
-             Map.values(index)
-
-    assert reads == [path]
-
-    File.write!(path, "null")
-    assert {:error, :ownership_record_unreadable} = Shuttle.AppWorkers.call(id, :interrupt)
-  end
-
   defmodule IdentityRunner do
     def cmd(command, args, opts) do
       if command == "shuttle" and "mark-runtime" in args and
@@ -2344,46 +2291,6 @@ defmodule Shuttle.PollerTest do
     refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "kill-session"
            end)
-  end
-
-  # An app-only host has no tmux. A readable `surface: app` fiber with no live
-  # worker must make /kill and rest clean no-ops there: nothing probes tmux,
-  # nothing tries a terminal stop.
-  test "on a host without tmux, kill and rest of an idle app fiber are no-ops" do
-    fiber_id = "tests/app-no-tmux"
-    uid = "01JZ00000000000000000000WA"
-
-    MockRunner.set_fiber(fiber_id, make_fiber(fiber_id, %{"uid" => uid, "status" => "active"}))
-
-    MockRunner.set_shuttle(
-      fiber_id,
-      "kind: oneshot\nhost: candide\nsurface: app\nagent: codex-sol\n",
-      "active"
-    )
-
-    {:ok, poller} =
-      start_poller!(
-        name: :test_poller_app_no_tmux,
-        runner: MockRunner,
-        own_host_id: "candide",
-        poll_interval_ms: 60_000,
-        max_concurrent_workers: 0,
-        felt_stores: [MockRunner.felt_root()]
-      )
-
-    sync_poll_cycle!(poller)
-    no_tmux = Path.join(System.tmp_dir!(), "no-tmux-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(no_tmux)
-    on_exit(fn -> File.rm_rf(no_tmux) end)
-    Env.put_env("PATH", no_tmux)
-    before = length(MockRunner.commands())
-
-    assert {:ok, :no_session} = Poller.kill_session(poller, fiber_id)
-    assert {:ok, output} = Poller.lifecycle_transition(poller, :rest, fiber_id)
-    refute output =~ "worker: stopped"
-
-    after_calls = Enum.drop(MockRunner.commands(), before)
-    refute Enum.any?(after_calls, fn {cmd, _} -> cmd == "tmux" end)
   end
 
   # The other half of the app-only guard: a TERMINAL fiber is probed even when
@@ -6353,15 +6260,14 @@ defmodule Shuttle.PollerTest do
 
     sync_poll_cycle!(poller)
 
-    # tmux args: ["new-session", "-d", "-s", session, "-c", work_dir, "bash", "-l", script]
-    # work_dir is at index 5
+    # The requested work directory follows tmux's -c option.
     assert_eventually(fn ->
       {_, args} =
         Enum.find(MockRunner.commands(), fn {cmd, args} ->
           cmd == "tmux" and hd(args) == "new-session"
         end)
 
-      assert Enum.at(args, 5) == project_dir
+      assert Enum.at(args, Enum.find_index(args, &(&1 == "-c")) + 1) == project_dir
     end)
   after
     File.rm_rf(Path.join(System.tmp_dir!(), "shuttle-test-proj-*"))
@@ -7224,7 +7130,8 @@ defmodule Shuttle.PollerTest do
     # the requested project dir — the last free boundary before a real agent.
     assert Enum.any?(MockRunner.commands(), fn {cmd, args} ->
              cmd == "tmux" and hd(args) == "new-session" and
-               Enum.at(args, 3) == session and Enum.at(args, 5) == "/tmp"
+               Enum.at(args, Enum.find_index(args, &(&1 == "-s")) + 1) == session and
+               Enum.at(args, Enum.find_index(args, &(&1 == "-c")) + 1) == "/tmp"
            end)
 
     # Pre-claim, the capture session is invisible to the shuttle-session

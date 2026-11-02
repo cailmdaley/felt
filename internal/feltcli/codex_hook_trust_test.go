@@ -5,18 +5,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
-	"github.com/gorilla/websocket"
 )
 
 // fakeTrustServer models the slice of the Codex App Server that trust uses.
@@ -279,72 +275,6 @@ func countMethod(requests []map[string]json.RawMessage, method string) int {
 	return n
 }
 
-// liveMode selects how the fake shared App Server behaves.
-type liveMode string
-
-const (
-	liveAnswers liveMode = "answers"
-	liveHangs   liveMode = "hangs"
-	liveStale   liveMode = "stale"
-)
-
-// fakeLiveCodex serves the fake over a Unix-socket WebSocket, the transport
-// the shared App Server speaks. hooks nil shares the stdio server's view.
-func (f *trustFake) fakeLiveCodex(t *testing.T, mode liveMode, hooks []codexTrustHook) (string, fakeTrustServer) {
-	t.Helper()
-	// Unix socket paths are short; t.TempDir is too long on macOS.
-	dir, err := os.MkdirTemp("/tmp", "fht-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "app.sock")
-	live := f.stdio
-	live.log = filepath.Join(f.dir, "live.log")
-	live.fail = f.env.Getenv("TRUST_FAIL")
-	live.mu = &sync.Mutex{}
-	if hooks != nil {
-		live.hooks = filepath.Join(f.dir, "live-hooks.json")
-		f.setHooks(t, live.hooks, hooks)
-	}
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode == liveStale {
-		// A crashed server leaves its socket file behind; dials are refused.
-		listener.(*net.UnixListener).SetUnlinkOnClose(false)
-		listener.Close()
-		return socket, live
-	}
-	upgrader := websocket.Upgrader{}
-	done := make(chan struct{})
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		defer conn.Close()
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-			if mode == liveHangs {
-				continue
-			}
-			if response := live.handle(message); response != nil {
-				if conn.WriteMessage(websocket.TextMessage, response) != nil {
-					return
-				}
-			}
-		}
-	})}
-	go func() { server.Serve(listener); close(done) }()
-	t.Cleanup(func() { server.Close(); <-done })
-	return socket, live
-}
-
 func trustHook(plugin, key, status string) codexTrustHook {
 	return codexTrustHook{PluginID: plugin, Key: key, Source: "plugin", CurrentHash: "sha256:" + strings.Repeat("a", 64) + "/sha256:" + strings.Repeat("b", 64), TrustStatus: status}
 }
@@ -371,7 +301,7 @@ func TestCodexHookTrustOnlyWritesFeltAndIsIdempotent(t *testing.T) {
 	f := fakeCodexTrust(t, env, []codexTrustHook{felt, other, user, project, impostor})
 	a := testApp(t, env)
 	for range 2 {
-		if r := a.codexHookTrust(true); r.State != codexTrustTrusted || r.Live != codexLiveAbsent {
+		if r := a.codexHookTrust(true); r.State != codexTrustTrusted {
 			t.Fatalf("trust = %+v", r)
 		}
 	}
@@ -571,113 +501,5 @@ func TestCodexHookTrustAbsentCodex(t *testing.T) {
 	}
 	if _, _, err := executeIn(t, env, t.TempDir(), "setup", "codex", "--trust-hooks"); err == nil || !strings.Contains(err.Error(), "codex CLI") {
 		t.Fatalf("--trust-hooks without codex: %v", err)
-	}
-}
-
-// With a live server answering, the write goes through it, and both views
-// are verified.
-func TestCodexHookTrustWritesThroughLiveServer(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	f := fakeCodexTrust(t, env, []codexTrustHook{feltHook("session_start", "modified"), feltHook("stop", "trusted")})
-	socket, live := f.fakeLiveCodex(t, liveAnswers, nil)
-	env.Set("SHUTTLE_CODEX_SOCKET", socket)
-	a := testApp(t, env)
-	r := a.codexHookTrust(true)
-	if r.State != codexTrustTrusted || r.Live != codexLiveVerified || r.Endpoint != socket || r.EndpointSource != "SHUTTLE_CODEX_SOCKET" {
-		t.Fatalf("live trust = %+v", r)
-	}
-	if countMethod(readTrustLog(t, live.log), "config/batchWrite") != 1 || countMethod(f.requests(t), "config/batchWrite") != 0 {
-		t.Fatal("trust was not written through the live server")
-	}
-	receipt := a.collectHookReceipt([]ReceiptBundle{{Harness: "codex", Path: filepath.Join(repoRoot(t), "claude-plugin"), Status: receiptHealthy}})
-	if receipt.Status != receiptHealthy || receipt.CodexTrust.Endpoint != socket || !strings.Contains(receipt.CodexTrust.Note, "verified") {
-		t.Fatalf("receipt = %#v", receipt.CodexTrust)
-	}
-}
-
-// A refused or silent live server must not break setup or deploy: the
-// private server writes and verifies, and the live server is reported
-// uninspected.
-func TestCodexHookTrustUnreachableLiveServerIsAdvisory(t *testing.T) {
-	for _, mode := range []liveMode{liveStale, liveHangs} {
-		t.Run(string(mode), func(t *testing.T) {
-			t.Parallel()
-			env, streams := testEnv(t)
-			f := fakeCodexTrust(t, env, []codexTrustHook{feltHook("session_start", "modified")})
-			socket, live := f.fakeLiveCodex(t, mode, nil)
-			env.Set("SHUTTLE_CODEX_SOCKET", socket)
-			a := testApp(t, env)
-			a.trustTimeout = 500 * time.Millisecond
-			started := time.Now()
-			a.refreshCodexHookTrust()
-			if elapsed := time.Since(started); elapsed > 10*time.Second {
-				t.Fatalf("unreachable live server held setup for %s", elapsed)
-			}
-			if !strings.Contains(streams.Stderr.String(), "was not inspected") || strings.Contains(streams.Stderr.String(), "Warning") {
-				t.Fatalf("setup output: %s", streams.Stderr.String())
-			}
-			if countMethod(f.requests(t), "config/batchWrite") != 1 || countMethod(readTrustLog(t, live.log), "config/batchWrite") != 0 {
-				t.Fatal("trust was not written through the private server")
-			}
-			receipt := a.collectHookReceipt([]ReceiptBundle{{Harness: "codex", Path: filepath.Join(repoRoot(t), "claude-plugin"), Status: receiptHealthy}})
-			if receipt.Status != receiptHealthy || receipt.CodexTrust.Live != codexLiveUninspected || !strings.Contains(receipt.CodexTrust.Note, socket) {
-				t.Fatalf("receipt = %#v %#v", receipt, receipt.CodexTrust)
-			}
-			if _, _, err := executeIn(t, env, t.TempDir(), "setup", "codex", "--trust-hooks"); err != nil {
-				t.Fatalf("--trust-hooks with an unreachable live server: %v", err)
-			}
-		})
-	}
-}
-
-func TestCodexHookTrustRejectsDivergentLiveServer(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	f := fakeCodexTrust(t, env, []codexTrustHook{feltHook("session_start", "modified")})
-	socket, _ := f.fakeLiveCodex(t, liveAnswers, []codexTrustHook{feltHook("session_start", "modified"), feltHook("stop", "modified")})
-	env.Set("SHUTTLE_CODEX_SOCKET", socket)
-	a := testApp(t, env)
-	r := a.codexHookTrust(true)
-	if r.State != codexTrustFailed || !strings.Contains(r.Err.Error(), "different felt hook set") {
-		t.Fatalf("divergent live hooks = %+v", r)
-	}
-	receipt := a.collectHookReceipt([]ReceiptBundle{{Harness: "codex", Path: filepath.Join(repoRoot(t), "claude-plugin"), Status: receiptHealthy}})
-	if receipt.Status == receiptHealthy {
-		t.Fatal("receipt accepted a live server with a different hook set")
-	}
-}
-
-// Deploy over ssh lacks SHUTTLE_CODEX_SOCKET; the running daemon names the
-// endpoint instead.
-func TestCodexHookTrustDiscoversEndpointFromDaemon(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	f := fakeCodexTrust(t, env, []codexTrustHook{feltHook("session_start", "modified")})
-	socket, live := f.fakeLiveCodex(t, liveAnswers, nil)
-	env.Unset("SHUTTLE_CODEX_SOCKET")
-	env.Set("FAKE_DAEMON_ENDPOINT", socket)
-	sysenvtest.FakeCommand(t, env, "shuttle", `[ "$1 $2" = "version --json" ] || exit 2
-printf '{"ready":true,"codex_backend":{"state":"ready","endpoint":"%s"}}\n' "$FAKE_DAEMON_ENDPOINT"
-`)
-	a := testApp(t, env)
-	r := a.codexHookTrust(true)
-	if r.State != codexTrustTrusted || r.Live != codexLiveVerified || r.Endpoint != socket || r.EndpointSource != "shuttle daemon" {
-		t.Fatalf("daemon endpoint = %+v", r)
-	}
-	if countMethod(readTrustLog(t, live.log), "config/batchWrite") != 1 {
-		t.Fatal("trust did not go through the daemon's live server")
-	}
-}
-
-func TestCodexEndpointFallsBackWithoutDaemon(t *testing.T) {
-	t.Parallel()
-	env, _ := testEnv(t)
-	env.Unset("SHUTTLE_CODEX_SOCKET")
-	sysenvtest.FakeCommand(t, env, "shuttle", "exit 1\n")
-	a := testApp(t, env)
-	socket, source, err := a.codexEndpoint()
-	if err != nil || source != "default" || !strings.HasPrefix(socket, "/tmp/shuttle-codex-") {
-		t.Fatalf("endpoint = %q %q %v", socket, source, err)
 	}
 }

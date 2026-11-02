@@ -1215,7 +1215,7 @@ func TestShuttleSettingsPreserveLifecycle(t *testing.T) {
 				before := mustRead(t, storage, "f")
 				args := []string{verb, "f", "claude-sonnet"}
 				if verb == "set-agent" {
-					args = append(args, "--effort", "high", "--chrome", "--surface", "cli")
+					args = append(args, "--effort", "high", "--chrome")
 				}
 				if out, err := runIn(t, env, dir, args...); err != nil {
 					t.Fatalf("settings: %v\n%s", err, out)
@@ -1272,7 +1272,7 @@ func TestShuttleSetAgent_AxesSurgical(t *testing.T) {
 	}
 }
 
-func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
+func TestShuttleSetAgentPreservesLegacySurface(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
@@ -1281,34 +1281,18 @@ func TestShuttleSetAgent_PreservesAndEditsSurface(t *testing.T) {
 		"session_uuid": "keep-me",
 	}, nil)
 
-	// An agent switch within Codex leaves an explicit CLI selection intact.
-	if out, err := runIn(t, env, dir, "set-agent", "f", "codex-luna"); err != nil {
-		t.Fatalf("set-agent preserving surface: %v\n%s", err, out)
+	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-opus"); err != nil {
+		t.Fatalf("set-agent: %v\n%s", err, out)
 	}
 	f := mustRead(t, storage, "f")
 	b, _, err := shuttle.BlockOf(f)
-	if err != nil || b.Surface != "cli" {
-		t.Fatalf("surface after Codex switch = %#v, %v; want cli", b, err)
-	}
-
-	if out, err := runIn(t, env, dir, "set-agent", "f", "codex-luna", "--surface", "app"); err != nil {
-		t.Fatalf("set-agent app: %v\n%s", err, out)
-	}
-	f = mustRead(t, storage, "f")
-	b, _, err = shuttle.BlockOf(f)
-	if err != nil || b.Surface != "app" {
-		t.Fatalf("surface after explicit edit = %#v, %v; want app", b, err)
-	}
-	if _, err := runIn(t, env, dir, "set-agent", "f", "claude-opus"); err == nil {
-		t.Fatal("switching an app block away from Codex without choosing cli must fail")
+	if err != nil || b.Agent != "claude-opus" || b.Surface != "cli" {
+		t.Fatalf("legacy field after agent switch = %#v, %v; want retained cli value", b, err)
 	}
 }
 
-// TestShuttleSetModel_KeepsSurfaceConsistentWithAgent: set-model and set-agent
-// share one composition rule, so set-model cannot move a surface: app block to
-// a non-Codex agent either, which would leave a block set-agent refuses. The
-// refusal names the call that does move it.
-func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
+// Legacy surface data does not constrain agent selection.
+func TestShuttleSetModelIgnoresLegacySurface(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
 	dir, storage := newStore(t)
@@ -1316,29 +1300,11 @@ func TestShuttleSetModel_KeepsSurfaceConsistentWithAgent(t *testing.T) {
 		"kind": "oneshot", "agent": "codex-sol", "surface": "app",
 	}, nil)
 
-	_, err := runIn(t, env, dir, "set-model", "f", "claude-opus")
-	if err == nil || !strings.Contains(err.Error(), "--surface cli") {
-		t.Fatalf("set-model to Claude on an app block: err=%v, want a refusal naming --surface cli", err)
+	if out, err := runIn(t, env, dir, "set-model", "f", "claude-opus"); err != nil {
+		t.Fatalf("set-model: %v\n%s", err, out)
 	}
-	b, _, err := shuttle.BlockOf(mustRead(t, storage, "f"))
-	if err != nil || b.Agent != "codex-sol" || b.Surface != "app" {
-		t.Fatalf("refused set-model still wrote: %#v, %v", b, err)
-	}
-
-	// Within Codex, set-model keeps the surface.
-	if out, err := runIn(t, env, dir, "set-model", "f", "codex-luna"); err != nil {
-		t.Fatalf("set-model within Codex: %v\n%s", err, out)
-	}
-	if b, _, err := shuttle.BlockOf(mustRead(t, storage, "f")); err != nil || b.Agent != "codex-luna" || b.Surface != "app" {
-		t.Fatalf("after set-model codex-luna: %#v, %v", b, err)
-	}
-
-	// The named repair works, and leaves a block set-agent accepts.
-	if out, err := runIn(t, env, dir, "set-agent", "f", "claude-opus", "--surface", "cli"); err != nil {
-		t.Fatalf("set-agent --surface cli: %v\n%s", err, out)
-	}
-	if out, err := runIn(t, env, dir, "set-agent", "f", "--effort", "high"); err != nil {
-		t.Fatalf("set-agent after the move: %v\n%s", err, out)
+	if b, _, err := shuttle.BlockOf(mustRead(t, storage, "f")); err != nil || b.Agent != "claude-opus" || b.Surface != "app" {
+		t.Fatalf("after set-model: %#v, %v", b, err)
 	}
 }
 

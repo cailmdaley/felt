@@ -75,7 +75,6 @@ export interface Fiber {
   /** `shuttle.chrome` — declares the worker should run with `--chrome`. Only
    * surfaced when explicitly true. */
   shuttleChrome?: boolean;
-  shuttleSurface?: 'cli' | 'app';
   /** `shuttle.schedule` — cron expression + IANA timezone for standing constitutions. */
   shuttleSchedule?: { expr: string; tz: string };
   /** `shuttle.pulse` cadence and optional local-time window for a oneshot seat. */
@@ -162,7 +161,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttlePulse: Fiber['shuttlePulse'];
   let shuttleProjectDir: string | undefined;
   let shuttleChrome: boolean | undefined;
-  let shuttleSurface: 'cli' | 'app' | undefined;
   let shuttleHost: string | undefined;
 
   if (hasShuttleBlock) {
@@ -204,7 +202,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     // shuttle.chrome — only surface `true`, collapsing everything else to
     // undefined so consumers can do a single existence check.
     if (s.chrome === true) shuttleChrome = true;
-    if (s.surface === 'app' || s.surface === 'cli') shuttleSurface = s.surface;
 
     // shuttle.schedule = { expr, tz } for standing constitutions. Pre-CLI fibers may
     // carry the legacy `timezone` key; read either. Absent tz falls back to UTC.
@@ -278,7 +275,6 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttlePulse,
     shuttleProjectDir,
     shuttleChrome,
-    shuttleSurface,
     shuttleHost,
     parentId,
     isRoot,

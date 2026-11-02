@@ -7,6 +7,7 @@ defmodule Shuttle.HarnessPathsTest do
     SHUTTLE_CLAUDE_PROJECTS_DIR
     SHUTTLE_PI_SESSIONS_DIR
     SHUTTLE_CODEX_SESSIONS_DIR
+    CODEX_HOME
   )
 
   setup do
@@ -42,6 +43,14 @@ defmodule Shuttle.HarnessPathsTest do
     assert HarnessPaths.claude_projects_root(root: "/option/claude") == "/option/claude"
     assert HarnessPaths.pi_sessions_root(pi_root: "/option/pi") == "/option/pi"
     assert HarnessPaths.codex_sessions_root(codex_root: "/option/codex") == "/option/codex"
+  end
+
+  test "Codex home selects the rollout root unless Shuttle's explicit override is set" do
+    Shuttle.Test.Env.put_env("CODEX_HOME", "/operator/codex-home")
+    assert HarnessPaths.codex_sessions_root() == "/operator/codex-home/sessions"
+
+    Shuttle.Test.Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", "/shuttle/rollouts")
+    assert HarnessPaths.codex_sessions_root() == "/shuttle/rollouts"
   end
 
   test "Codex recovery bounds the date tree by dispatch with civil-day padding" do

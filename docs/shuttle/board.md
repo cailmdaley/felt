@@ -56,7 +56,7 @@ idle at their prompt with nothing they started still running. **Working** holds
 the rest, including a worker idle over its own background shells or
 subagents. The daemon reads those live children from each harness: Claude
 Code's `background_tasks` on `stop`, Codex's `spawn_agent` calls and
-`subagent_stop` events, and the Codex App Server's loaded threads that name
+`subagent_stop` events, and Codex terminal sessions that name
 the worker as `parentThreadId`. A harness that reports none reads as your
 turn when idle. Cards keep creation order within each tier, so a card moves
 only when it crosses the seam or a question is raised or answered.
@@ -145,7 +145,7 @@ A choice between alternatives is remembered; opening a sole destination leaves t
 Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
-Codex app workers use their native desktop link, with remote-access guidance on mobile.
+Codex workers open in their terminal session; remote access depends on the host terminal backend.
 See [Opening conversations](conversations.md) for the choices, prerequisites, and quick-access terminal setup.
 
 ### Desk keyboard

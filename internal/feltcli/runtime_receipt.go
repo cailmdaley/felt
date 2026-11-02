@@ -65,9 +65,7 @@ type ReceiptComponent struct {
 	// Shadowed lists other felt executables on PATH whose build differs from
 	// the resolved one; any entry makes the component a mismatch.
 	Shadowed []ReceiptFeltCopy `json:"shadowed,omitempty"`
-	// CodexTrust accounts for Codex hook trust on the hooks component. An
-	// unsupported Codex or an uninspected live App Server is advisory and
-	// leaves the component healthy.
+	// CodexTrust accounts for Codex hook trust on the hooks component.
 	CodexTrust *ReceiptCodexTrust `json:"codex_trust,omitempty"`
 }
 

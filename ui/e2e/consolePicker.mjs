@@ -86,13 +86,13 @@ try {
       window.__conversationLinks = []
       const click = HTMLAnchorElement.prototype.click
       HTMLAnchorElement.prototype.click = function () {
-        if (/^(https:\/\/claude.ai|claude:|codex:|chatgpt:|rex:|https:\/\/chatgpt.com)/.test(this.href)) {
+        if (/^(https:\/\/claude.ai|claude:|rex:)/.test(this.href)) {
           window.__conversationLinks.push(this.href)
         } else click.call(this)
       }
       document.addEventListener('click', event => {
         const link = event.target.closest?.('a[href]')
-        if (link && /^(https:\/\/claude.ai|claude:|codex:|chatgpt:|rex:|https:\/\/chatgpt.com)/.test(link.href)) {
+        if (link && /^(https:\/\/claude.ai|claude:|rex:)/.test(link.href)) {
           window.__conversationLinks.push(link.href); event.preventDefault()
         }
       }, true)
@@ -141,41 +141,13 @@ try {
       await shot(p, 'desktop-settings-guidance')
       await p.keyboard.press('Escape')
     }
-    await open(p, 'chatgpt')
-    assert.equal(await consoleButton(p).getAttribute('aria-label'), 'Open in ChatGPT')
-    if (phone) await longPress(p, context, consoleButton(p))
-    else await consoleButton(p).click({ button: 'right' })
-    assert.equal(await items(p).count(), 1)
-    await shot(p, phone ? 'phone-picker-chatgpt' : 'desktop-picker-chatgpt')
-    const remembered = await p.evaluate(() => localStorage.getItem('shuttle.claude-opening'))
-    await items(p).click()
-    assert.equal(await p.evaluate(() => localStorage.getItem('shuttle.claude-opening')), remembered, 'a sole ChatGPT destination does not overwrite the Claude preference')
     if (!phone) {
       await open(p, 'tmux')
       await consoleButton(p).click({ button: 'right' })
       assert.match(await items(p).first().innerText(), /Terminal/)
       await shot(p, 'desktop-picker-terminal')
-    } else {
-      await open(p, 'rex')
-      await longPress(p, context, consoleButton(p))
-      assert.equal(await items(p).count(), 1)
-      assert.match(await items(p).innerText(), /Claude browser/)
-      await shot(p, 'phone-picker-rex-host')
-      await p.keyboard.press('Escape')
-      // These fixtures omit runtime.terminal: the local version supplies the backend.
-      for (const harness of ['pi', 'codex']) {
-        await p.goto(`${base}&console=rex-${harness}`)
-        await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-        await selected(p).locator('.ws-chat-head').waitFor()
-        assert.equal(await consoleButton(p).isVisible(), false)
-      }
-      await p.goto(`${base}&console=unlinked`)
-      await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-      await selected(p).locator('.ws-chat-head').waitFor()
-      assert.equal(await consoleButton(p).isVisible(), false)
-      await shot(p, 'phone-header-no-destination')
     }
     await context.close()
-    console.log(`PASS Console header, picker, remembered opening and ChatGPT (${phone ? 'phone' : 'desktop'})`)
+    console.log(`PASS Console header, picker and remembered opening (${phone ? 'phone' : 'desktop'})`)
   }
 } finally { await browser.close() }

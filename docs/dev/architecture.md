@@ -131,60 +131,19 @@ Shuttle data and `shuttle` for Shuttle-owned operations. `shuttle contract`
 checks the CLI/daemon contract at boot, and a test keeps felt's import graph
 free of shuttle and messaging packages.
 
-## Execution surfaces
+## Execution backends
 
-The agent registry determines the harness, model, and reasoning effort.
-`shuttle.surface` chooses the presentation of a Codex conversation: `cli` opens a terminal TUI in the host's selected backend; `app` has no terminal viewer.
-Both use the same local Codex App Server backend, durable conversation ownership, and native message transport.
-An existing block without a surface selects terminal presentation.
-New Codex selections in the board default to app presentation, with CLI available explicitly.
-Other harnesses use their own CLI processes.
+The agent registry selects a harness, model and reasoning effort. Every worker
+runs through the host's selected terminal backend. Shuttle assigns fibers,
+observes worker lifecycle and records native conversation identity so an
+existing session can be recovered after a daemon restart. Closing a terminal
+viewer does not end its worker. `shuttle attach <fiber>` opens the existing
+session when the terminal backend supports attachment.
 
-The App Server owns the conversation and its turns. Shuttle stores the
-conversation identity and task assignment durably on the owning host. Capture
-creates an unassigned conversation that can claim a fiber; an ordinary
-dispatch assigns the conversation immediately. Both use the same execution
-backend. A completed turn can wait for a reply without releasing its task or
-starting another conversation.
-An explicit stop releases the assignment through the backend's interrupt operation.
-A handoff belonging to the current assignment, or a closed fiber, releases an idle assignment.
-A confirmed unloaded or missing thread also releases its assignment without requiring a handoff, because it has no running turn.
-Handoff validation uses the durable assignment start, not watcher-registration time.
-Neither completion nor heartbeat observation interrupts or reloads the conversation.
-Boot adoption applies the same rule as polling.
-The durable conversation identity and endpoint survive assignment retirement, while the next dispatch selects the fiber's current agent.
-An unavailable backend leaves the assignment supervised until its state can be established.
-
-The durable record pins the backend's host and endpoint, independently of presentation.
-Recovery, resume, stop, attachment, and native messaging check that owner before native operations; matching a thread ID in another server's rollout store is insufficient.
-The daemon owns record writes. The Go native adapter reads only the ownership projection needed to refuse a different host or endpoint; shared fixtures enforce that contract.
-Missing ownership fields in an existing record, or an unreadable record, don't authorize migration to the currently configured server.
-An embedded CLI conversation with no AppWorkers record can be imported only with host-local execution evidence and a successful no-holder scan; see [the migration cases](operating.md#terminal-codex-workers).
-
-App Server transport errors preserve uncertainty instead of becoming worker-death signals.
-Resume targets the recorded conversation and reports failures; creating a fresh conversation is an explicit operation.
-For Codex, closing a terminal viewer does not release the task, interrupt the turn, or authorize a replacement conversation.
-`shuttle attach` prepares another viewer of the exact owned thread when needed, without starting a model turn.
-Other harnesses use terminal-backend and process liveness.
-API responses distinguish presentation from conversation identity: terminal Codex has a real `tmux_session` as well as `thread_id` and `session_uuid`.
-
-Both Codex surfaces require the selected App Server's Unix control socket.
-Shuttle creates the thread, saves its identity, and confirms its initial turn before opening `codex --remote unix://PATH resume THREAD_ID` in a terminal.
-An empty thread has no resumable rollout before its first input.
-The explicit endpoint is authoritative: a connection or resume failure never falls back to an embedded CLI runtime or a fresh conversation.
-A desktop application's private stdio App Server is a separate runtime: sharing persisted rollouts does not share loaded-turn ownership.
-Hook-only Codex sessions can receive `--context-only`, but waking them is rejected with attachment guidance.
-Shuttle never pastes messages into their terminals.
-Codex documents its managed daemon lifecycle in the [App Server daemon reference](https://github.com/openai/codex/blob/rust-v0.162.1/codex-rs/app-server-daemon/README.md).
-On macOS, desktop attachment to the managed daemon also depends on the desktop
-transport-selection gate; current failures caused by desktop-injected config
-overrides are tracked upstream in
-[openai/codex#41014](https://github.com/openai/codex/issues/41014).
-
-Phone access uses the host's configured Codex remote access. App Server
-creation and a direct link into the ChatGPT app are separate capabilities:
-session identity does not imply a working phone URL. Shuttle must not invent
-a cloud-task URL for a local conversation.
+Codex conversations run through the Codex CLI in the terminal, like Claude
+Code and Pi. Dispatch, capture, messaging and resume use the terminal worker's
+native identity. Stored `shuttle.surface` values from older fibers remain
+opaque data and do not affect execution; config writes preserve them.
 
 ## Trust boundaries
 
@@ -343,45 +302,15 @@ Session labels name the family; tab labels and order present its fiber tree; blo
 Shuttle closes worker windows independently and destroys only empty daemon-created sessions.
 `Shuttle.Opener` selects Rex or Kitty for the local display: Rex selects a local worker's session and window, and provides viewer windows for local or remote tmux sessions.
 Remote Rex opening is not supported.
-The Codex App Server, Remote Control host and Hark meetings retain tmux for dead panes, options and respawn; daemon supervision loops also retain tmux.
+Remote Control host and Hark meetings retain tmux for dead panes, options and respawn; daemon supervision loops also retain tmux.
 
 Windows is unsupported.
 
-### Managed Codex dependency and endpoint
+### Codex terminal workers
 
-Shuttle ensures that the selected Codex App Server is running, independently of dispatch and boot quarantine.
-`Shuttle.CodexBackend` reconciles asynchronously with bounded observations and exponential launch backoff, from 2 seconds to 300 seconds.
-It initializes a connection without creating a project, thread, or model turn.
-`GET /api/v1/version` reports its independent `codex_backend` health; daemon `ready` does not imply backend readiness.
-Dispatch and capture return a retryable wait before creating a conversation when the backend isn't ready.
-The autonomous poll retries without the five-minute preflight cooldown.
-
-`SHUTTLE_CODEX_SOCKET` is authoritative for daemon transport, native Go messaging, and remote terminal viewers.
-An empty or absent override selects `/tmp/shuttle-codex-<euid>-<host-hash>/control.sock`.
-`host-hash` is the first 16 lowercase hexadecimal characters of SHA-256 over the actual OS hostname, not Shuttle's logical host ID.
-The literal `/tmp` base is independent of `HOME`, `CODEX_HOME`, `TMPDIR`, and `XDG_RUNTIME_DIR`, so separate login environments and network-mounted homes agree on a host-local endpoint.
-Explicit overrides must be clean absolute Unix socket paths of at most 100 bytes.
-The endpoint root must be a real directory owned by the effective uid with mode `0700`; insecure precreated roots and user-controlled symlink components are refused, not repaired.
-The root-controlled macOS `/tmp` alias is accepted.
-Codex 0.162.1's exact protected rendezvous alias is accepted after its target root, ownership, type, and permissions are verified; arbitrary leaf symlinks are refused.
-The socket remains same-user IPC, with filesystem permissions and Codex's peer-UID checks, not cross-host authentication.
-
-The manager starts `command codex app-server --listen unix://PATH` in an endpoint-specific tmux session, after the macOS `TmuxServer.ensure_available` guard.
-It scrubs worker identity, fiber, run, and tmux variables before starting the backend; it doesn't depend on an interactive Codex wrapper.
-The private endpoint root holds exclusively created launch scripts, while tmux owns the backend process across manager and Shuttle restarts.
-A healthy existing server is adopted untouched.
-A successful process scan with no server holder, no live owned pane (dead or gone), and a refused or missing socket authorize recovery through Codex's native per-endpoint startup lock and stale-socket checks.
-Remote TUI clients don't count as server holders.
-Unowned unresponsive sockets, missing sockets with live server holders, failed observations, and another manager still starting remain uncertain and never authorize replacement.
-Shuttle never kills a live backend, unlinks its socket, or restarts it for a config change.
-After reboot, reconciliation starts an absent dependency without releasing worker quarantine.
-
-`CODEX_HOME` stays persistent, defaulting to `~/.codex`; authentication, configuration, and rollouts aren't moved to `/tmp` or copied into another home.
-Codex's native `app-server daemon start` and `daemon version` manage and describe its own `CODEX_HOME` endpoint, not Shuttle's custom listener.
-Plain App Server startup briefly takes Codex's `CODEX_HOME` startup lock, but persistent Shuttle process ownership, death evidence, and endpoint-specific lifecycle state remain host-local.
-Backend tools use the server's environment, not the terminal viewer's environment.
-Managed Codex refuses per-agent environment overrides and unsupported arbitrary CLI flags rather than silently ignoring them.
-
-Durable conversation records pin their host and endpoint.
-Changing the default or an override doesn't rewrite old records or authorize connecting an old thread to a different server.
-Restore the recorded endpoint or deliberately reconcile ownership; shared rollout files aren't evidence of live conversation ownership.
+Codex workers launch through the selected terminal backend. The daemon does
+not manage a separate Codex App Server dependency. Codex CLI authentication,
+configuration and model selection remain in the worker's normal environment.
+Existing terminal conversations retain their session identity and resume
+through their harness. App Server APIs used by `felt setup codex` are transient
+hook-trust operations; they do not run Shuttle workers.

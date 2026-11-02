@@ -17,7 +17,6 @@
 import type { ReactNode } from 'react'
 import { injectStyles } from './injectStyles'
 import { resolveEffort, type AgentEntry } from './agents'
-import { sessionHelp, type ExecutionSurface } from './executionSurface'
 import { HostPicker, ProjectPicker, injectProjectPickerStyles } from './ProjectPicker'
 import type { Host, Project } from './projectModel'
 
@@ -108,30 +107,6 @@ export function EffortField({
           </option>
         ))}
       </select>
-    </Field>
-  )
-}
-
-/** Where a Codex worker runs — the ChatGPT app or a terminal. Spans the row. */
-export function SessionField({
-  surface,
-  onChange,
-}: {
-  surface: ExecutionSurface
-  onChange: (surface: ExecutionSurface) => void
-}): JSX.Element {
-  return (
-    <Field label="Session" className="form-span">
-      <select
-        aria-label="Session"
-        className="form-select"
-        value={surface}
-        onChange={(e) => onChange(e.target.value as ExecutionSurface)}
-      >
-        <option value="app">ChatGPT app</option>
-        <option value="cli">Terminal</option>
-      </select>
-      <span className="form-help">{sessionHelp(surface)}</span>
     </Field>
   )
 }
