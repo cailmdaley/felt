@@ -16,6 +16,17 @@ defmodule Shuttle.AppWorkersTest do
     def open(_tmux, _host), do: :ok
   end
 
+  defmodule TerminalOwner do
+    use Plug.Router
+    plug(Plug.Parsers, parsers: [:json], json_decoder: Jason)
+    plug(:match)
+    plug(:dispatch)
+
+    match "/api/v1/sessions/prepare-terminal" do
+      ShuttleWeb.TerminalController.create(conn, conn.body_params)
+    end
+  end
+
   defmodule App do
     use Agent
 
@@ -533,6 +544,78 @@ defmodule Shuttle.AppWorkersTest do
     assert :alive = WorkerBackend.session_status(Runner, ref)
   end
 
+  test "terminal preparation has a ten-second owner budget and a two-second forward margin" do
+    assert Shuttle.CodexTerminal.prepare_timeout_ms() == 10_000
+    assert Shuttle.CodexTerminal.forward_timeout_ms() == 12_000
+  end
+
+  test "a viewer held by background restoration refuses another preparation without waiting" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, _} = dispatch("tests/terminal")
+    parent = self()
+    root = AppWorkers.root()
+
+    holder =
+      Task.async(fn ->
+        :global.trans({{Shuttle.CodexTerminal, root, "app-session-1"}, self()}, fn ->
+          send(parent, :viewer_locked)
+          receive do: (:release -> :ok)
+        end)
+      end)
+
+    assert_receive :viewer_locked
+    calls = App.calls()
+
+    assert {:error, :terminal_busy} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert App.calls() == calls
+    send(holder.pid, :release)
+    assert :ok = Task.await(holder)
+  end
+
+  @tag :timing
+  test "a wedged thread read times out, releases its lock and retains the conversation" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    parent = self()
+
+    App.set(:read_hook, fn _ ->
+      send(parent, {:read_waiting, self()})
+      receive do: (:release -> :ok)
+    end)
+
+    Env.put_app_env(:terminal_prepare_timeout_ms, 1000)
+
+    prepare = Task.async(fn -> Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner) end)
+    assert_receive {:read_waiting, reader}
+    on_exit(fn -> if Process.alive?(reader), do: Process.exit(reader, :kill) end)
+    monitor = Process.monitor(reader)
+    assert {:error, :terminal_prepare_timeout} = Task.await(prepare)
+    assert_receive {:DOWN, ^monitor, :process, ^reader, _}
+
+    assert {:ok, %{"active" => true, "launch_state" => "running"}} =
+             AppWorkers.get("app-session-1")
+
+    assert :alive = WorkerBackend.session_status(Runner, ref)
+    App.set(:read_hook, nil)
+    Env.put_app_env(:terminal_prepare_timeout_ms, 10_000)
+
+    assert {:ok, %{created: false}} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+  end
+
+  test "a viewer preparation process failure returns an error instead of killing the caller" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, _} = dispatch("tests/terminal")
+    App.set(:read_hook, fn _ -> exit(:probe_failure) end)
+
+    assert {:error, :terminal_prepare_failed} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+  end
+
   test "a failed initial turn retains identity and never creates a viewer or replacement" do
     terminal_fiber("tests/terminal")
     App.set(:result, {:error, :timeout})
@@ -794,9 +877,15 @@ defmodule Shuttle.AppWorkersTest do
 
     assert Shuttle.Terminal.status(Runner, terminal) == :gone
 
+    parent = self()
+    App.set(:read_hook, fn _ -> send(parent, {:terminal_restore, self()}) end)
     App.set(:read_result, {:ok, %{"id" => "app-session-1", "status" => %{"type" => "idle"}}})
     send(poller, :run_poll_cycle)
-    eventually(fn -> Shuttle.Terminal.status(Runner, terminal) == :alive end, 200)
+    assert_receive {:terminal_restore, restorer}
+    monitor = Process.monitor(restorer)
+    assert_receive {:DOWN, ^monitor, :process, ^restorer, _}
+    App.set(:read_hook, nil)
+    assert Shuttle.Terminal.status(Runner, terminal) == :alive
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
     assert Enum.any?(restored_calls, &match?({:resume, "app-session-1", _}, &1))
     refute Enum.any?(restored_calls, &match?({:turn, _, _, _}, &1))
@@ -874,6 +963,65 @@ defmodule Shuttle.AppWorkersTest do
                Jason.encode!(%{"tmux_session" => tmux})
              )
              |> json_response(404)
+  end
+
+  test "owner and board attach report Codex failures as sentences" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Env.put_app_env(:terminal_runner, Runner)
+    Env.put_app_env(:opener_impl, Kitty)
+    App.set(:read_result, {:error, :timeout})
+    tmux = WorkerBackend.tmux(ref)
+
+    for route <- ["/api/v1/sessions/prepare-terminal", "/api/v1/attach"] do
+      assert %{"error" => "The Codex App Server did not answer for this conversation."} =
+               post(api_conn(), route, Jason.encode!(%{"tmux_session" => tmux}))
+               |> json_response(422)
+    end
+
+    uuid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    {:ok, record} = AppWorkers.get("app-session-1")
+    assert :ok = AppWorkers.put(%{record | "session_uuid" => uuid, "thread_id" => uuid})
+
+    assert %{"error" => "The Codex App Server did not answer for this conversation."} =
+             post(api_conn(), "/api/v1/sessions/resume", Jason.encode!(%{session: uuid}))
+             |> json_response(422)
+  end
+
+  @tag :timing
+  test "a real HTTP owner with a wedged read returns a bounded human error to remote attach" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Env.put_app_env(:terminal_runner, Runner)
+    Env.put_app_env(:opener_impl, Kitty)
+    Env.put_app_env(:terminal_prepare_timeout_ms, 1000)
+    Env.put_app_env(:write_forward_client, Shuttle.RemoteRegistry.Client.Default)
+    parent = self()
+
+    App.set(:read_hook, fn _ ->
+      send(parent, {:owner_read, self()})
+      receive do: (:release -> :ok)
+    end)
+
+    server = start_supervised!({Bandit, plug: TerminalOwner, port: 0, ip: {127, 0, 0, 1}})
+    {:ok, {_, port}} = ThousandIsland.listener_info(server)
+    Env.put_app_env(:remotes, [%{name: "prepare-owner", url: "http://127.0.0.1:#{port}"}])
+    tmux = WorkerBackend.tmux(ref)
+
+    assert %{"error" => message} =
+             post(
+               api_conn(),
+               "/api/v1/attach",
+               Jason.encode!(%{tmux_session: tmux, shuttle_host: "prepare-owner"})
+             )
+             |> json_response(422)
+
+    assert message =~ "prepare-owner: Preparing this conversation's terminal timed out"
+    refute message =~ "{:"
+    assert_received {:owner_read, reader}
+    refute Process.alive?(reader)
+    assert {:ok, %{"active" => true}} = AppWorkers.get("app-session-1")
+    assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
   end
 
   test "viewer preparation retries an empty rollout read" do

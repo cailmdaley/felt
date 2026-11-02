@@ -12,17 +12,22 @@ defmodule ShuttleWeb.TerminalController do
         case OriginRouter.forward(
                remote,
                "/api/v1/sessions/prepare-terminal",
-               Map.drop(params, ["origin", "shuttle_host"])
+               Map.drop(params, ["origin", "shuttle_host"]),
+               forward_timeout_ms: CodexTerminal.forward_timeout_ms()
              ) do
           {:forwarded, status, body} ->
             conn |> put_resp_content_type("application/json") |> send_resp(status, body)
 
-          {:error, reason} ->
-            conn |> put_status(502) |> json(%{error: inspect(reason)})
+          {:error, _reason} ->
+            conn
+            |> put_status(502)
+            |> json(%{
+              error: "#{remote.name} did not answer while preparing this conversation's terminal."
+            })
         end
 
-      {:error, reason} ->
-        conn |> put_status(422) |> json(%{error: inspect(reason)})
+      {:error, {:unknown_origin, origin}} ->
+        conn |> put_status(422) |> json(%{error: OriginRouter.unknown_origin_message(origin)})
     end
   end
 
@@ -42,7 +47,9 @@ defmodule ShuttleWeb.TerminalController do
             json(conn, result)
 
           {:error, reason} ->
-            conn |> put_status(422) |> json(%{error: inspect(reason), session_uuid: id})
+            conn
+            |> put_status(422)
+            |> json(%{error: CodexTerminal.error_message(reason), session_uuid: id})
         end
 
       _ ->

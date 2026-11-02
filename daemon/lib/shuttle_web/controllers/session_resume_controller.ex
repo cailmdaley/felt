@@ -15,14 +15,19 @@ defmodule ShuttleWeb.SessionResumeController do
 
   import Plug.Conn
 
-  alias Shuttle.{SessionResume, Transcript}
+  alias Shuttle.{CodexTerminal, SessionResume, Transcript}
 
   def create(conn, %{"session" => session}) when is_binary(session) do
     if Transcript.valid_session?(session) do
       case SessionResume.prepare(session, prepare_opts()) do
-        {:ok, result} -> json(conn, result)
-        {:error, {:live, reason}} -> conn |> put_status(409) |> json(%{error: reason})
-        {:error, reason} -> conn |> put_status(422) |> json(%{error: reason})
+        {:ok, result} ->
+          json(conn, result)
+
+        {:error, {:live, reason}} ->
+          conn |> put_status(409) |> json(%{error: reason})
+
+        {:error, reason} ->
+          conn |> put_status(422) |> json(%{error: CodexTerminal.error_message(reason)})
       end
     else
       conn |> put_status(400) |> json(%{error: "session must be a UUID"})

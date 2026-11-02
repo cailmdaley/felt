@@ -18,6 +18,7 @@ defmodule Shuttle.OpenTrace do
 
         Logger.info(fn ->
           timings = Enum.map_join(steps, " ", fn {step, us} -> "#{step}=#{us / 1000}ms" end)
+
           "Terminal open name=#{inspect(name)} host=#{inspect(host || "local")} total=#{elapsed}ms #{timings}"
         end)
       end

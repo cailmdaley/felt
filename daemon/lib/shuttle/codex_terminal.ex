@@ -34,7 +34,7 @@ defmodule Shuttle.CodexTerminal do
   # stopped elsewhere is left for the next sweep.
   defp retire_leftover(runner, id, tmux) do
     :global.trans(
-      {{__MODULE__, id}, self()},
+      {{__MODULE__, AppWorkers.root(), id}, self()},
       fn ->
         with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
              true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
@@ -51,37 +51,101 @@ defmodule Shuttle.CodexTerminal do
     ) == true
   end
 
+  @doc "The whole viewer preparation budget, including backend I/O and terminal launch."
+  def prepare_timeout_ms, do: Shuttle.Env.app(:terminal_prepare_timeout_ms, 10_000)
+  def forward_timeout_ms, do: prepare_timeout_ms() + 2_000
+
   def prepare(id, opts \\ []) do
+    task = Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn -> prepare_owned(id, opts) end)
+
+    case Task.yield(task, prepare_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, _reason} -> {:error, :terminal_prepare_failed}
+      nil -> {:error, :terminal_prepare_timeout}
+    end
+  end
+
+  defp prepare_owned(id, opts) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
 
     result =
-      :global.trans({{__MODULE__, id}, self()}, fn ->
-        with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
-             true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
-             :ok <- AppWorkers.check_endpoint(record),
-             :ok <- verified_thread(id, 10) do
-          tmux = record["terminal_tmux"] || tmux_name(id)
+      :global.trans(
+        {{__MODULE__, AppWorkers.root(), id}, self()},
+        fn ->
+          with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
+               true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
+               :ok <- AppWorkers.check_endpoint(record),
+               :ok <- verified_thread(id, 10) do
+            tmux = record["terminal_tmux"] || tmux_name(id)
 
-          case Terminal.status(runner, tmux) do
-            :alive -> {:ok, %{tmux_session: tmux, created: false}}
-            :unknown -> {:error, :terminal_visibility_unknown}
-            :gone -> start(id, record, tmux, runner, opts)
+            case Terminal.status(runner, tmux) do
+              :alive -> {:ok, %{tmux_session: tmux, created: false}}
+              :unknown -> {:error, :terminal_visibility_unknown}
+              :gone -> start(id, record, tmux, runner, opts)
+            end
+          else
+            {:ok, _} -> {:error, :not_a_terminal_worker}
+            error -> error
           end
-        else
-          {:ok, _} -> {:error, :not_a_terminal_worker}
-          error -> error
-        end
-      end)
+        end,
+        [node()],
+        0
+      )
 
-    error =
-      case result do
-        {:ok, _} -> nil
-        {:error, reason} -> inspect(reason)
-      end
+    case result do
+      :aborted ->
+        {:error, :terminal_busy}
 
-    AppWorkers.update(id, %{"terminal_error" => error})
-    result
+      result ->
+        error =
+          case result do
+            {:ok, _} -> nil
+            {:error, reason} -> inspect(reason)
+          end
+
+        AppWorkers.update(id, %{"terminal_error" => error})
+        result
+    end
   end
+
+  def error_message(message) when is_binary(message), do: message
+
+  def error_message(:terminal_busy),
+    do: "This conversation's terminal is already being prepared. Try again shortly."
+
+  def error_message(:terminal_prepare_timeout),
+    do:
+      "Preparing this conversation's terminal timed out; the Codex App Server or terminal backend did not answer."
+
+  def error_message(:timeout), do: "The Codex App Server did not answer for this conversation."
+
+  def error_message(:disconnected),
+    do: "The Codex App Server disconnected while preparing this conversation."
+
+  def error_message(:not_found),
+    do: "This conversation has no worker ownership record on its host."
+
+  def error_message(:not_a_terminal_worker),
+    do: "This conversation is not an active terminal worker."
+
+  def error_message(:initial_turn_unconfirmed),
+    do: "This conversation's initial turn is not confirmed; its terminal cannot be opened yet."
+
+  def error_message(:terminal_identity_mismatch),
+    do: "The host answered with a different conversation's terminal; nothing was opened."
+
+  def error_message(:terminal_visibility_unknown),
+    do: "The host cannot currently determine whether this conversation's terminal is running."
+
+  def error_message(:native_thread_unverified),
+    do: "The Codex App Server could not verify this exact conversation; nothing was opened."
+
+  def error_message(:backend_not_ready),
+    do: "The Codex App Server is not ready. Try again shortly."
+
+  def error_message(_reason),
+    do:
+      "The host could not prepare this conversation's terminal. Check its daemon log for details."
 
   defp verified_thread(id, retries) do
     # A systemError describes a failed turn in a loaded conversation. Native

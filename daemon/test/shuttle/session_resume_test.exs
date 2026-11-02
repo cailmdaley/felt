@@ -21,14 +21,15 @@ defmodule Shuttle.SessionResumeTest do
 
   defmodule App do
     def read_thread(id) do
-      status = Shuttle.Env.app(:session_resume_native_status, "notLoaded")
+      status = Shuttle.SessionResumeTest.Runner.native_status()
       {:ok, %{"id" => id, "status" => %{"type" => status}}}
     end
 
     def resume_thread(id, opts) do
-      send(self(), {:native_resume, id})
-      send(self(), {:native_resume_options, id, opts})
-      Shuttle.Test.Env.put_app_env(:session_resume_native_status, "idle")
+      owner = Shuttle.Env.app(:session_resume_test_owner)
+      send(owner, {:native_resume, id})
+      send(owner, {:native_resume_options, id, opts})
+      Shuttle.SessionResumeTest.Runner.set_native_status("idle")
       {:ok, %{"id" => id}}
     end
   end
@@ -63,6 +64,11 @@ defmodule Shuttle.SessionResumeTest do
       do: Agent.start_link(fn -> %{calls: [], running: false} end, name: __MODULE__)
 
     def calls, do: Agent.get(__MODULE__, & &1.calls)
+    def native_status, do: Agent.get(__MODULE__, &Map.get(&1, :native_status, "notLoaded"))
+
+    def set_native_status(status),
+      do: Agent.update(__MODULE__, &Map.put(&1, :native_status, status))
+
     def set_running(running), do: Agent.update(__MODULE__, &Map.put(&1, :running, running))
     def set_duplicate(dup), do: Agent.update(__MODULE__, &Map.put(&1, :duplicate, dup))
     def set_ps(result), do: Agent.update(__MODULE__, &Map.put(&1, :ps, result))
@@ -197,6 +203,7 @@ defmodule Shuttle.SessionResumeTest do
 
     start_supervised!(Runner)
     start_supervised!(StubKitty)
+    Env.put_app_env(:session_resume_test_owner, self())
     Env.put_app_env(:codex_app_client, App)
     Env.put_app_env(:app_workers_dir, Path.join(root, "app-workers"))
     Env.put_app_env(:session_resume_runner, Runner)

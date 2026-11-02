@@ -23,20 +23,22 @@ defmodule Shuttle.DispatchIntegrationTest do
     end
 
     def resume_thread(id, opts) do
-      send(self(), {:codex_resume, id, opts})
+      send(Shuttle.Env.app(:integration_test_owner), {:codex_resume, id, opts})
       mark_loaded(id)
       {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
     end
 
     def read_thread(id) do
-      loaded = Shuttle.Env.app(:integration_native_loaded_threads, MapSet.new())
-      status = if MapSet.member?(loaded, id), do: "idle", else: "notLoaded"
+      status =
+        if Shuttle.DispatchIntegrationTest.IntegrationRunner.native_loaded?(id),
+          do: "idle",
+          else: "notLoaded"
+
       {:ok, %{"id" => id, "status" => %{"type" => status}}}
     end
 
     defp mark_loaded(id) do
-      loaded = Shuttle.Env.app(:integration_native_loaded_threads, MapSet.new())
-      Shuttle.Test.Env.put_app_env(:integration_native_loaded_threads, MapSet.put(loaded, id))
+      Shuttle.DispatchIntegrationTest.IntegrationRunner.mark_native_loaded(id)
     end
 
     def start_turn(id, prompt, opts) do
@@ -84,6 +86,18 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     def commands, do: Agent.get(__MODULE__, & &1.commands)
     def tmux_sessions, do: Agent.get(__MODULE__, & &1.tmux_sessions)
+
+    def native_loaded?(id),
+      do: Agent.get(__MODULE__, &(id in Map.get(&1, :native_loaded, MapSet.new())))
+
+    def mark_native_loaded(id),
+      do:
+        Agent.update(
+          __MODULE__,
+          &Map.update(&1, :native_loaded, MapSet.new([id]), fn loaded ->
+            MapSet.put(loaded, id)
+          end)
+        )
 
     # The process scan's answers, in order; the last one repeats. Defaults to
     # no processes.
@@ -193,6 +207,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     File.mkdir_p!(data_dir)
     Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data_dir)
     Shuttle.Test.Env.put_app_env(:app_workers_dir, Path.join(data_dir, "app-workers"))
+    Shuttle.Test.Env.put_app_env(:integration_test_owner, self())
     Shuttle.Test.Env.put_app_env(:codex_app_client, CodexApp)
 
     # The session ledger lands under the same throwaway data dir, so each test
