@@ -717,8 +717,8 @@ defmodule Shuttle.Poller do
   fiber's document-cache entry so the board reads the transition at once. A
   poll read in flight sees the old document or the new one, whose status and
   `handed_off_at` land in one atomic write. A call that outlives
-  `dispatch_call_timeout_ms/0` answers `{:error, :timeout, reason}`: the write
-  is still queued and may land.
+  `dispatch_call_timeout_ms/0` or a Poller exit leaves the outcome unknown.
+  A queued write can be lost if the Poller stops.
   """
   @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t(), [
           String.t()
@@ -731,11 +731,15 @@ defmodule Shuttle.Poller do
       dispatch_call_timeout_ms()
     )
   catch
-    :exit, {:timeout, _} ->
-      {:error, :timeout,
-       "this daemon's poller did not finish `#{verb}` on #{fiber_id} within " <>
-         "#{div(dispatch_call_timeout_ms(), 1000)}s; the write is still queued and may apply. " <>
-         "Check the fiber before retrying."}
+    :exit, _reason ->
+      lifecycle_uncertain(verb, fiber_id)
+  end
+
+  defp lifecycle_uncertain(verb, fiber_id) do
+    {:error, :timeout,
+     "The outcome of `#{verb}` on #{fiber_id} is unknown: the poller did not answer. " <>
+       "A pending write can be lost on restart or applied later. " <>
+       "Check the fiber after the poller settles or restarts before retrying."}
   end
 
   @spec orchestrator_state(GenServer.server(), non_neg_integer()) :: map()

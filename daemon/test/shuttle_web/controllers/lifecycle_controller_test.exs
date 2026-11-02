@@ -6,6 +6,33 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
   @endpoint ShuttleWeb.Endpoint
 
+  defmodule StoppingPoller do
+    use GenServer
+    def start_link, do: GenServer.start_link(__MODULE__, nil)
+    @impl true
+    def init(state), do: {:ok, state}
+    @impl true
+    def handle_call(_, _, state), do: {:stop, :shutdown, state}
+  end
+
+  test "a poller stopping during a lifecycle request returns a structured uncertainty" do
+    fixture_store!("shuttle-lifecycle-stop", "tests/operator", "Operator")
+    {:ok, poller} = StoppingPoller.start_link()
+    Process.unlink(poller)
+    Shuttle.Test.Env.put_server(Shuttle.Poller, poller)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "close", "fiber" => "tests/operator"})
+      )
+
+    assert %{"retryable" => true, "error" => error} = json_response(conn, 503)
+    assert error =~ "outcome"
+    assert error =~ "Check the fiber after the poller settles or restarts"
+  end
+
   # Interactivity is retired: install never forwards --interactive, even if a
   # stale client still posts the key. The flag is silently dropped, not relayed.
   test "install drops a stale interactive key rather than forwarding it" do
@@ -452,7 +479,8 @@ defmodule ShuttleWeb.LifecycleControllerTest do
   defmodule SeatRunner do
     @behaviour Shuttle.Runner
 
-    def cmd("shuttle", ["-C", _store, verb | _] = args, opts) when verb in ["role", "seat"] do
+    def cmd("shuttle", ["-C", _store, verb | _] = args, opts)
+        when verb in ["role", "seat", "close"] do
       send(Shuttle.Env.app(:seat_writer_observer), {:seat_writer, self(), args})
       Shuttle.Runner.Default.cmd("shuttle", args, opts)
     end
@@ -461,6 +489,30 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       do: Shuttle.Runner.Default.cmd(command, args, opts)
 
     def cmd(_command, _args, _opts), do: {"", 1}
+  end
+
+  test "a close queued in a stopped Poller is not replayed by its replacement" do
+    store = fixture_store!("shuttle-close-restart", "tests/hub", "Hub")
+    install_fake_cli!()
+    Shuttle.Test.Env.put_app_env(:seat_writer_observer, self())
+    Shuttle.Test.Env.put_app_env(:dispatch_call_timeout_ms, 50)
+    opts = [runner: SeatRunner, felt_stores: [store], poll_interval_ms: 60_000]
+    {:ok, poller} = Shuttle.Test.PollerHelpers.start_poller!(opts)
+    :sys.suspend(poller)
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/lifecycle",
+        Jason.encode!(%{"action" => "close", "fiber" => "tests/hub"})
+      )
+
+    assert %{"error" => error} = json_response(conn, 503)
+    assert error =~ "lost on restart"
+
+    Process.exit(poller, :kill)
+    {:ok, _replacement} = Shuttle.Test.PollerHelpers.start_poller!(opts)
+    refute_receive {:seat_writer, _, ["-C", _, "close" | _]}, 100
   end
 
   test "role and seat edits execute in the Poller, serialized with lifecycle writes" do

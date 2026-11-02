@@ -1,6 +1,6 @@
 defmodule Shuttle.PollerCallTimeoutTest do
   # A Poller call that outlives its budget answers instead of exiting its
-  # caller, so `/dispatch` and `/lifecycle` reply "still queued" rather than
+  # caller, so `/dispatch` and `/lifecycle` report uncertainty rather than
   # dropping the connection, and a forwarding daemon always outlasts the owner.
   use ExUnit.Case, async: true
 
@@ -30,7 +30,28 @@ defmodule Shuttle.PollerCallTimeoutTest do
     assert {:error, :timeout, reason} =
              Poller.lifecycle_transition(server, :resume, "a/fiber", [])
 
-    assert reason =~ "still queued"
+    assert reason =~ "outcome"
+    assert reason =~ "lost on restart"
+    assert reason =~ "Check the fiber after the poller settles or restarts"
+  end
+
+  test "a queued close lost when the poller stops has an honest timeout", %{server: server} do
+    :sys.suspend(server)
+    assert {:error, :timeout, reason} = Poller.lifecycle_transition(server, :close, "a/fiber", [])
+    Process.unlink(server)
+    Process.exit(server, :kill)
+    assert reason =~ "lost on restart"
+    assert reason =~ "Check the fiber after the poller settles or restarts"
+  end
+
+  test "a poller stopping while a close waits returns a retryable error", %{server: server} do
+    :sys.suspend(server)
+    caller = Task.async(fn -> Poller.lifecycle_transition(server, :close, "a/fiber", []) end)
+    Process.unlink(server)
+    Process.exit(server, :shutdown)
+    assert {:error, :timeout, reason} = Task.await(caller)
+    assert reason =~ "outcome"
+    assert reason =~ "Check the fiber after the poller settles or restarts"
   end
 
   test "poller_busy renders as 504 with a message naming the uncertainty" do

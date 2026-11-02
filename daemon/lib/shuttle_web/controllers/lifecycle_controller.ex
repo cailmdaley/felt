@@ -41,7 +41,20 @@ defmodule ShuttleWeb.LifecycleController do
         # before the next remote poll — otherwise resting a remote-owned card
         # snaps back until a manual refresh.
         RemoteFiberRegistry.refresh_after_forward(remote.name, result)
-        relay_text(conn, result)
+
+        case result do
+          {:forwarded, 503, body} ->
+            case Jason.decode(body) do
+              {:ok, %{"retryable" => true}} ->
+                conn |> put_resp_content_type("application/json") |> send_resp(503, body)
+
+              _ ->
+                relay_text(conn, result)
+            end
+
+          _ ->
+            relay_text(conn, result)
+        end
 
       :local ->
         create_local(conn, params)
@@ -60,7 +73,11 @@ defmodule ShuttleWeb.LifecycleController do
       |> put_resp_content_type("text/plain")
       |> send_resp(200, output)
     else
-      other -> send_cli_result(conn, "shuttle", other)
+      {:error, :timeout, reason} ->
+        conn |> put_status(503) |> json(%{error: reason, retryable: true})
+
+      other ->
+        send_cli_result(conn, "shuttle", other)
     end
   end
 
