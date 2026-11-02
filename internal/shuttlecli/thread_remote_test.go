@@ -66,6 +66,8 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 	ownerPath := filepath.Join(t.TempDir(), "owner.md")
 	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/v1/document-changed":
+			w.WriteHeader(http.StatusOK)
 		case "/api/v1/project-dir/resolve":
 			_, _ = w.Write([]byte(`{"path":"/remote/project"}`))
 		case "/api/v1/lifecycle":

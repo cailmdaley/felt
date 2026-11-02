@@ -140,7 +140,7 @@ status is the fiber's only dispatch switch; there is no enabled flag.`,
 			if err := unclose(f, felt.StatusOpen); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "paused %s%s (status: open; schedule preserved)\n", args[0], ref.Location())
@@ -290,7 +290,7 @@ this host is killed.` + workerExitIdentityHelp,
 			statusBefore := f.Status
 			if untilSet && statusBefore == felt.StatusOpen && horizonStashed(f) {
 				// Already at rest: only what it lasts until changes.
-				if err := st.Write(f); err != nil {
+				if err := a.writeFiber(st, f); err != nil {
 					return fmt.Errorf("writing fiber: %w", err)
 				}
 				fmt.Fprintf(a.env.Stdout, "rest of %s%s updated\n", args[0], ref.Location())
@@ -318,7 +318,7 @@ this host is killed.` + workerExitIdentityHelp,
 			if err := markOrchestratorAct(st, f, restedAt, actor); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			by := a.boardWorkerParty()
@@ -470,7 +470,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if err := rearmStanding(f); err != nil {
 					return err
 				}
-				if err := st.Write(f); err != nil {
+				if err := a.writeFiber(st, f); err != nil {
 					return fmt.Errorf("writing fiber: %w", err)
 				}
 				fmt.Fprintf(a.env.Stdout, "resumed %s%s (standing constitution re-armed; next run on the schedule's next tick)\n", args[0], ref.Location())
@@ -492,7 +492,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 			if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "resumed %s%s (status: active)\n", args[0], ref.Location())
@@ -835,7 +835,7 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 			if err := markOrchestratorAct(st, f, f.ClosedAt.Format(time.RFC3339Nano), a.actorSession(closeActor)); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -992,7 +992,7 @@ With --as-draft, sets status = open instead: the card reopens as a PAUSED DRAFT
 			if err := clearBlockedOn(f); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -1051,7 +1051,7 @@ Examples:
 			}
 
 			f.Outcome = outcome
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -1158,7 +1158,7 @@ bypassed: the accept may still apply there.`,
 			if err := rearmStanding(f); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "accepted run for %s%s (re-armed; next run on the schedule's next tick)\n  next due: %s\n",
@@ -1211,7 +1211,7 @@ agent without starting or replacing a worker.`,
 			if err := axes.write(f, reg); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -1316,7 +1316,7 @@ or replace a worker.`,
 			if err := axes.write(f, reg); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -1529,7 +1529,7 @@ pause / resume / close / reopen for that.`,
 			} else if err := shuttle.SetNodeField(f, "schedule", nil); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -1617,7 +1617,7 @@ and a live worker is left running.`,
 			if err := f.SetExtraField(shuttle.FacetKey, nil); err != nil {
 				return fmt.Errorf("removing shuttle block: %w", err)
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("removing shuttle block: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "uninstalled %s%s (shuttle: block removed)\n", args[0], ref.Location())

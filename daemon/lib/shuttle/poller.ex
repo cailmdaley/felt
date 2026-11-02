@@ -1198,6 +1198,19 @@ defmodule Shuttle.Poller do
   end
 
   @impl true
+  def handle_cast({:document_changed, _id}, %State{boot_hold: hold} = state)
+      when not is_nil(hold), do: {:noreply, state}
+
+  def handle_cast({:document_changed, id}, state) do
+    state =
+      if state.document_cache_ready,
+        do: refresh_document_entry(state, id),
+        else: announce_document(state, id)
+
+    {:noreply, state} |> publish_after_transition({:refresh_document, id})
+  end
+
+  @impl true
   def handle_info(_message, %State{boot_hold: hold} = state) when not is_nil(hold),
     do: {:noreply, state}
 
@@ -2769,6 +2782,13 @@ defmodule Shuttle.Poller do
                   )
                 end
 
+              next_info =
+                if not full? and missing_hot_rows?(retained, listed, foreign_ids) do
+                  Map.put(next_info, :next_full_due_at, now)
+                else
+                  next_info
+                end
+
               next_fulls = if full?, do: Map.put(fulls, store, listed), else: fulls
               {merged, Map.put(listings, store, merged), next_fulls, next_info}
 
@@ -2984,6 +3004,11 @@ defmodule Shuttle.Poller do
       end
     end)
     |> Map.reject(fn {_store, ids} -> ids == %{} end)
+  end
+
+  defp missing_hot_rows?(previous, listed, foreign_ids) do
+    seen = MapSet.new(Enum.map(listed, & &1["id"]) ++ foreign_ids)
+    Enum.any?(previous, &(not MapSet.member?(seen, &1["id"])))
   end
 
   defp merge_hot_rows(previous, listed, foreign_ids) do

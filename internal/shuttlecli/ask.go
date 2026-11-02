@@ -55,7 +55,7 @@ back to that orchestrator (shuttle.runtime.orchestrator_acted_at).`,
 					return err
 				}
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			// Clearing a fiber with no question is a no-op on the board: the daemon
@@ -114,7 +114,7 @@ func (a *app) clearMessagedFiberAsk(target string, sender ...string) error {
 	if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 		return err
 	}
-	if err := st.Write(f); err != nil {
+	if err := a.writeFiber(st, f); err != nil {
 		return err
 	}
 	var by *boardParty

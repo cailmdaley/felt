@@ -89,6 +89,7 @@ defmodule ShuttleWeb.Router do
     get("/version", VersionController, :show)
     get("/remote_control", RemoteControlController, :show)
     post("/fiber/create", FiberController, :create)
+    post("/document-changed", DocumentChangedController, :create)
     # Cheap owner-routed file metadata for the board's live readers. The UI can
     # detect a changed or newly-created embed without downloading the artifact.
     get("/file-info", FileController, :info)

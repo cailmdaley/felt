@@ -43,7 +43,7 @@ without changing its role, lifecycle or runtime state.`,
 			if err := shuttle.SetNodeField(f, "seat", value); err != nil {
 				return err
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			if clear {

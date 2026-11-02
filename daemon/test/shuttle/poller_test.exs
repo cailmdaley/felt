@@ -7373,6 +7373,37 @@ defmodule Shuttle.PollerTest do
   end
 
   @tag :adaptive_discovery
+  test "a missing hot address schedules a full scan that finds its moved fiber" do
+    old = "tests/move-old"
+    moved = "tests/move-new"
+    uid = Shuttle.Test.FiberUid.for(old)
+    MockRunner.set_fiber(old, make_fiber(old, %{"uid" => uid}))
+    MockRunner.set_shuttle(old, "kind: oneshot\n", "open")
+
+    {:ok, poller} =
+      start_poller!(
+        name: :test_poller_moved_hot,
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        full_scan_budget_ms: 0,
+        full_scan_min_interval_ms: 600_000,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    settle_poller!(poller)
+    sync_poll_cycle!(poller)
+    MockRunner.delete_fiber(old)
+    MockRunner.set_fiber(moved, make_fiber(moved, %{"uid" => uid}))
+    MockRunner.set_shuttle(moved, "kind: oneshot\n", "open")
+    sync_poll_cycle!(poller)
+    sync_poll_cycle!(poller)
+    rows = :sys.get_state(poller, @state_timeout).last_known_listings[MockRunner.felt_root()]
+    assert Enum.any?(rows, &(&1["id"] == moved))
+    refute Enum.any?(rows, &(&1["id"] == old))
+  end
+
+  @tag :adaptive_discovery
   test "a timed-out full scan enters hot mode and waits until its next due time" do
     id = "tests/discovery-timeout"
     MockRunner.set_fiber(id, make_fiber(id, %{"status" => "open"}))

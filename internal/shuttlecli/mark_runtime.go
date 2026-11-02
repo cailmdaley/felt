@@ -71,7 +71,7 @@ touches tmux.`,
 				return fmt.Errorf("mark-runtime: pass at least one of --dispatched-at/--session/--run-id/--handed-off-at/--meeting/--thread-exit-verb")
 			}
 
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			fmt.Fprintf(a.env.Stdout, "marked runtime for %s%s\n", args[0], ref.Location())

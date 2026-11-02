@@ -108,7 +108,7 @@ func (a *app) recordHumanPrompt(input eventHookInput) {
 		if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
 			return
 		}
-		if err := st.Write(f); err != nil {
+		if err := a.writeFiber(st, f); err != nil {
 			fmt.Fprintf(a.env.Stderr, "warning: could not clear question: %v\n", err)
 			return
 		}

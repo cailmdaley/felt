@@ -188,7 +188,7 @@ schedule, set-model / set-agent for the agent, uninstall to start over).`,
 				a.printDaemonBody([]byte(output))
 				return nil
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 
@@ -348,7 +348,7 @@ set-model / set-agent for the agent, uninstall to start over.`,
 				a.printDaemonBody([]byte(output))
 				return nil
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 

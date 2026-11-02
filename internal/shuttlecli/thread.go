@@ -220,7 +220,7 @@ remote draft made with --disabled stays in this store while you write it;
 				child.UID = created.UID
 			} else {
 				child.Touch(child.CreatedAt)
-				if err := st.Write(child); err != nil {
+				if err := a.writeFiber(st, child); err != nil {
 					return err
 				}
 			}

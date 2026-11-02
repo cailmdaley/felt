@@ -22,6 +22,10 @@ func TestThreadTakeCreatesDisabledBeforeMigrating(t *testing.T) {
 			env.Set("SHUTTLE_FIBER_PATH", st.Path("hub"))
 			var calls int
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/document-changed" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
 				calls++
 				if r.URL.Path != "/api/v1/migrate" {
 					t.Errorf("unexpected route %s", r.URL.Path)

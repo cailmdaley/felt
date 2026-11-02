@@ -76,7 +76,7 @@ roles namespace before assigning the role; existing charters are preserved.`,
 					return err
 				}
 			}
-			if err := st.Write(f); err != nil {
+			if err := a.writeFiber(st, f); err != nil {
 				return fmt.Errorf("writing fiber: %w", err)
 			}
 			if clear {
