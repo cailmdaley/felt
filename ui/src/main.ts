@@ -79,7 +79,9 @@ const board = new KanbanModal({
     })
       .then(async (res) => {
         if (!res.ok) {
-          const detail = await res.text().catch(() => '')
+          const detail = await res.json()
+            .then((body: { error?: unknown }) => typeof body?.error === 'string' ? body.error : '')
+            .catch(() => '')
           showToast(detail ? `Couldn’t open terminal: ${detail}` : 'Couldn’t open terminal', 'error')
         }
       })
