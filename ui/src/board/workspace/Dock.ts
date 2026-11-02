@@ -2,7 +2,7 @@ import { turnOf } from '../turn.js'
 import { THREAD_LABEL, threadState } from '../threads.js'
 import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
-import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
+import { appConversationTarget, canOpenDesktopApp, atDesktop, workerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
 import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, resolveDestination, openDestination } from '../conversationOpening.js'
 import { attachConversationPicker } from '../conversationMenu.js'
@@ -860,12 +860,12 @@ export class Dock {
 
   /**
    * The worker control is the Desk card's own pill: same turn, same word,
-   * same destination under a mouse or a finger (see `terminalWorkerPill`).
+   * same destination under a mouse or a finger (see `workerPill`).
    * An app worker's destination follows the conversation backend.
    */
   workerPillFor(card: KanbanCard): HTMLElement | null {
-    if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) return appWorkerLink(card)
-    return card.tmuxSession || card.sessionLink ? terminalWorkerPill(card, { openWorker: this.onOpenWorker }) : null
+    const app = (card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid
+    return app || card.tmuxSession || card.sessionLink ? workerPill(card, { openWorker: this.onOpenWorker }) : null
   }
 
   /** Keyboard opening activates the exact destination used by the worker pill. */

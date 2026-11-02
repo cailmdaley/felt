@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
-import { terminalWorkerPill, appWorkerLink } from './appConversation'
+import { workerPill } from './appConversation'
 import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, REX_APP_HREF, type ConversationOpening } from './conversationOpening'
 import { sessionTargets } from './sessionHistory'
 import { card } from './testFixtures'
@@ -25,7 +25,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('conversation opening', () => {
   it('defaults to terminal and preserves its owner-routed attach action', () => {
     const attach = vi.fn()
-    const pill = terminalWorkerPill(worker, { openWorker: attach })
+    const pill = workerPill(worker, { openWorker: attach })
     expect(pill.tagName).toBe('BUTTON')
     pill.click()
     expect(attach).toHaveBeenCalledWith('test-shuttle', undefined)
@@ -35,7 +35,7 @@ describe('conversation opening', () => {
     ['browser', bridge], ['app', 'claude://claude.ai/code/session_test'],
   ] as const)('makes the worker pill and History open the same %s destination', (choice, href) => {
     expect(saveConversationOpening(choice)).toBe(true)
-    const pill = terminalWorkerPill(worker, { openWorker: vi.fn() }) as HTMLAnchorElement
+    const pill = workerPill(worker, { openWorker: vi.fn() }) as HTMLAnchorElement
     expect(pill.href).toBe(href)
     expect(sessionTargets(record, link, { desktop: true }).primary).toMatchObject({ href })
   })
@@ -43,7 +43,7 @@ describe('conversation opening', () => {
   it('falls back to the best destination without changing the remembered choice or turn word', () => {
     saveConversationOpening('app')
     const attach = vi.fn()
-    const pill = terminalWorkerPill({ ...worker, sessionLink: undefined }, { openWorker: attach })
+    const pill = workerPill({ ...worker, sessionLink: undefined }, { openWorker: attach })
     expect(pill.textContent).toBe('working')
     expect(pill.getAttribute('aria-label')).toBe('Open in Terminal')
     pill.click()
@@ -55,26 +55,26 @@ describe('conversation opening', () => {
   it('uses terminal before browser when a desktop app route is unavailable', () => {
     saveConversationOpening('app')
     const url = `${bridge}?source=remote`
-    expect(terminalWorkerPill({ ...worker, sessionLink: url }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
+    expect(workerPill({ ...worker, sessionLink: url }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
     expect(sessionTargets(record, { ...link, url }, { desktop: true }).primary.kind).toBe('terminal')
-    expect((terminalWorkerPill({ ...worker, sessionLink: url }) as HTMLAnchorElement).href).toBe(url)
+    expect((workerPill({ ...worker, sessionLink: url }) as HTMLAnchorElement).href).toBe(url)
   })
 
   it.each(['terminal', 'browser', 'app', 'chatgpt', 'rex'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
     saveConversationOpening(choice)
     vi.stubGlobal('matchMedia', () => ({ matches: true }))
-    expect((terminalWorkerPill(worker) as HTMLAnchorElement).href).toBe(bridge)
+    expect((workerPill(worker) as HTMLAnchorElement).href).toBe(bridge)
     expect(sessionTargets(record, link, { desktop: false }).primary).toMatchObject({ kind: 'web', href: bridge })
-    const mark = terminalWorkerPill({ ...worker, sessionLink: undefined })
+    const mark = workerPill({ ...worker, sessionLink: undefined })
     expect(mark.tagName).toBe('SPAN')
     expect(mark.title).toContain('Remote Control')
   })
 
   it('labels Rex and opens Codex app workers in ChatGPT regardless of an unavailable preference', () => {
-    const rex = terminalWorkerPill({ ...worker, terminalBackend: 'rex' }, { openWorker: vi.fn() })
+    const rex = workerPill({ ...worker, terminalBackend: 'rex' }, { openWorker: vi.fn() })
     expect(rex.getAttribute('aria-label')).toBe('Open in Rex')
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
-    expect(appWorkerLink(card({ id: 'codex', workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route })).href).toBe(route)
+    expect(workerPill(card({ id: 'codex', workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route })).getAttribute('href')).toBe(route)
     expect(conversationDestinations({ ...worker, workerSurface: 'app', sessionUuid: 'app-session' }, desktop, vi.fn()).map(d => d.id)).toEqual(['chatgpt'])
   })
 
@@ -82,7 +82,7 @@ describe('conversation opening', () => {
     vi.stubGlobal('matchMedia', () => ({ matches: true }))
     saveConversationOpening('rex')
     const rex = { ...worker, sessionUuid: 'live-session', workerAgent, terminalBackend: 'rex' as const, sessionLink: undefined }
-    const pill = terminalWorkerPill(rex, { openWorker: vi.fn() }) as HTMLAnchorElement
+    const pill = workerPill(rex, { openWorker: vi.fn() }) as HTMLAnchorElement
     expect(pill.getAttribute('aria-label')).toBe('Open in Rex')
     expect(pill.href).toBe(REX_APP_HREF)
     expect(pill.title).toContain('choose this constitution family')
@@ -94,7 +94,7 @@ describe('conversation opening', () => {
 
   it.each(['javascript:alert(1)', 'https://claude.ai.evil.example/code/session_test', `${bridge}\n`])('never opens an unsafe session link: %s', (sessionLink) => {
     saveConversationOpening('app')
-    expect(terminalWorkerPill({ ...worker, sessionLink }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
+    expect(workerPill({ ...worker, sessionLink }, { openWorker: vi.fn() }).tagName).toBe('BUTTON')
     expect(sessionTargets(record, { ...link, url: sessionLink }, { desktop: true }).primary.kind).toBe('terminal')
   })
 

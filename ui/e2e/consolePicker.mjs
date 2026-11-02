@@ -11,7 +11,18 @@ if (shots) await mkdir(shots, { recursive: true })
 const selected = p => p.locator('.ws-page.ws-selected')
 const consoleButton = p => selected(p).locator('.ws-chat-console')
 const items = p => p.getByRole('menuitemradio')
-async function shot(p, name) { if (shots) await p.screenshot({ path: resolve(shots, `${name}.png`) }) }
+async function shot(p, name) {
+  if (await items(p).count()) await pickerReadable(p, false)
+  if (shots) await p.screenshot({ path: resolve(shots, `${name}.png`) })
+}
+async function pickerReadable(p, requireFocus = true) {
+  const geometry = await items(p).evaluateAll(items => items.map(item => ({
+    checked: item.getAttribute('aria-checked') === 'true', focused: item === document.activeElement,
+    labelX: item.querySelector('.kbn-conversation-label').getBoundingClientRect().x,
+  })))
+  if (requireFocus || geometry.some(item => item.focused)) assert.ok(geometry.find(item => item.checked)?.focused, 'the checked destination owns focus')
+  assert.ok(Math.max(...geometry.map(item => item.labelX)) - Math.min(...geometry.map(item => item.labelX)) < 1, 'all destination labels share one column')
+}
 async function open(p, backend) {
   await p.goto(`${base}&console=${backend}`)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
@@ -26,11 +37,14 @@ async function headerFits(p) {
     const bounds = header.getBoundingClientRect()
     const controls = [...header.querySelectorAll('.ws-chat-console,.ws-chat-settings,.ws-chat-leave,.ws-chat-identity,.ws-chat-lead')]
       .filter(el => el.checkVisibility()).map(el => ({ name: el.className, rect: el.getBoundingClientRect().toJSON() }))
-    return { bounds: bounds.toJSON(), controls }
+    const title = header.querySelector('.ws-chat-title').getBoundingClientRect()
+    const console = header.querySelector('.ws-chat-console').getBoundingClientRect()
+    return { bounds: bounds.toJSON(), controls, titleCenter: title.top + title.height / 2, consoleCenter: console.top + console.height / 2 }
   })
   for (const { name, rect } of geometry.controls) {
     assert.ok(rect.x >= geometry.bounds.x - 1 && rect.x + rect.width <= geometry.bounds.right + 1, `${name} fits header`)
   }
+  if (p.viewportSize().width <= 700) assert.ok(Math.abs(geometry.titleCenter - geometry.consoleCenter) < 1, 'the phone title is centered on its Console icon')
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect
@@ -46,6 +60,8 @@ async function longPress(p, context, locator) {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }] })
   // The gesture being tested is a hold, not a wait for application state.
   await p.waitForTimeout(600)
+  await p.getByRole('menu').waitFor()
+  await pickerReadable(p)
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
   await cdp.detach()
   await p.getByRole('menu').waitFor()
@@ -114,7 +130,9 @@ try {
     else await consoleButton(p).click({ button: 'right' })
     assert.equal(await items(p).count(), 1)
     await shot(p, phone ? 'phone-picker-chatgpt' : 'desktop-picker-chatgpt')
-    await p.keyboard.press('Escape')
+    const remembered = await p.evaluate(() => localStorage.getItem('shuttle.claude-opening'))
+    await items(p).click()
+    assert.equal(await p.evaluate(() => localStorage.getItem('shuttle.claude-opening')), remembered, 'a sole ChatGPT destination does not overwrite the Claude preference')
     if (!phone) {
       await open(p, 'tmux')
       await consoleButton(p).click({ button: 'right' })

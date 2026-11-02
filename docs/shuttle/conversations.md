@@ -23,11 +23,12 @@ The constitution header shows **Console** whenever the worker has a destination 
 Tap Console or a worker pill to open the remembered destination.
 Long-press or right-click either control to pick from all available destinations, even when there is only one.
 The check mark identifies the destination a tap uses.
-Choosing a destination opens it and remembers the choice in this browser across your fleet.
+Choosing a destination opens it and, when there are alternatives, remembers the choice in this browser across your fleet.
+Opening a sole destination leaves your preference unchanged.
 The same preference drives keyboard opening and History.
 
 Settings opens to **Conversations**, with **Open conversations in** at the top.
-It edits that same preference: **Terminal**, **Claude browser**, **Claude app**, **ChatGPT**, or **Rex on phone**.
+It edits that same preference: **Terminal**, **Claude browser**, **Claude app**, or **Rex on phone**.
 If the remembered destination is unavailable, opening uses the best available destination without changing the preference.
 For desktop CLI workers the order is Terminal, Claude browser, then Claude app; Codex app workers use ChatGPT.
 On phones, CLI workers on Rex hosts offer Rex first, then a Claude browser link if available.

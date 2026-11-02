@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { terminalWorkerPill } from './appConversation'
+import { workerPill } from './appConversation'
 import { conversationOpening, saveConversationOpening } from './conversationOpening'
+import { attachConversationPicker } from './conversationMenu'
 import { card } from './testFixtures'
 
 const web = 'https://claude.ai/code/session_test'
@@ -17,7 +18,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 const buildPill = (openWorker = vi.fn(), sessionLink: string | undefined = web): HTMLElement => {
-  const pill = terminalWorkerPill(card({ id: 'test', tmuxSession: 'worker', shuttleHost: 'remote', sessionLink }), { openWorker })
+  const pill = workerPill(card({ id: 'test', tmuxSession: 'worker', shuttleHost: 'remote', sessionLink }), { openWorker })
   document.body.append(pill)
   return pill
 }
@@ -31,6 +32,7 @@ it('right-click offers all destinations without activating the default and marks
   expect(attach).not.toHaveBeenCalled()
   expect(items()).toHaveLength(3)
   expect(items().map(item => item.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true'])
+  expect(document.activeElement).toBe(items()[2])
   const browser = items()[1] as HTMLAnchorElement
   expect(browser.href).toBe(web)
   expect(browser.rel).toBe('noopener noreferrer')
@@ -69,16 +71,31 @@ it('keeps selection out of card click-away handling and dismisses on outside ges
   document.removeEventListener('pointerdown', cardClickAway, true)
 })
 
-it('shows a single-destination picker and saves before opening', () => {
+it('opens a single destination without changing the preference', () => {
   saveConversationOpening('app')
-  const attach = vi.fn(() => expect(conversationOpening()).toBe('terminal'))
-  const pill = terminalWorkerPill(card({ id: 'test', tmuxSession: 'worker' }), { openWorker: attach })
+  const attach = vi.fn(() => expect(conversationOpening()).toBe('app'))
+  const pill = workerPill(card({ id: 'test', tmuxSession: 'worker' }), { openWorker: attach })
   document.body.append(pill)
   rightClick(pill)
   expect(items()).toHaveLength(1)
   expect(items()[0].getAttribute('aria-checked')).toBe('true')
   items()[0].click()
   expect(attach).toHaveBeenCalledOnce()
+})
+
+it.each(['terminal', 'browser', 'app', 'chatgpt', 'rex'] as const)('choosing sole destination %s leaves the stored preference unchanged', id => {
+  saveConversationOpening(id === 'browser' ? 'app' : 'browser')
+  const remembered = conversationOpening()
+  const save = vi.spyOn(localStorage, 'setItem')
+  const open = vi.fn()
+  const anchor = document.createElement('button'); document.body.append(anchor)
+  const detach = attachConversationPicker(anchor, () => [{ id, label: id, run: open }])
+  rightClick(anchor)
+  items()[0].click()
+  expect(open).toHaveBeenCalledOnce()
+  expect(save).not.toHaveBeenCalled()
+  expect(conversationOpening()).toBe(remembered)
+  detach()
 })
 
 it('long-press owns the touch gesture and swallows its follow-up click, not the next tap', () => {

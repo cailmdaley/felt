@@ -5,7 +5,6 @@ const CHOICES: Array<{ id: ConversationOpening; label: string; note: string }> =
   { id: 'terminal', label: 'Terminal', note: 'Rex on Rex hosts; the daemon terminal opener elsewhere' },
   { id: 'browser', label: 'Claude browser', note: 'Continue through Remote Control' },
   { id: 'app', label: 'Claude app', note: 'Open the installed desktop app' },
-  { id: 'chatgpt', label: 'ChatGPT', note: 'Continue a Codex app conversation' },
   { id: 'rex', label: 'Rex on phone', note: 'Open Rex, then choose the constitution family’s session' },
 ]
 
@@ -40,7 +39,7 @@ export function ConversationsSection(): JSX.Element {
       </fieldset>
       {error && <div className="set-error" role="alert">This browser cannot save preferences. Allow site storage, then try again.</div>}
       <p className="set-opening-guidance">If your preferred destination is unavailable for a worker or device, opening uses the best available one: terminal on desktop, Rex on phone for Rex workers, Claude browser, or ChatGPT for Codex app workers.</p>
-      <div className="set-opening-tip"><strong>Tap to open. Hold to choose.</strong> Long-press or right-click Console or a worker pill to see its destinations. Choosing one opens it and remembers it.</div>
+      <div className="set-opening-tip"><strong>Tap to open. Hold to choose.</strong> Long-press or right-click Console or a worker pill to see its destinations. Choosing opens it and, when there are alternatives, remembers it. A sole destination leaves your preference unchanged.</div>
       <p className="set-row-note">Saved in this browser across your fleet. Workers keep running on their assigned hosts.</p>
       <details className="set-opening-details">
         <summary>Conversation setup</summary>

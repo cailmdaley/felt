@@ -14,13 +14,8 @@ export function turnTitle(card: TurnInput, nowMs = Date.now()): string {
 
 type TurnInput = Pick<KanbanCard, 'status' | 'ask' | 'workerState' | 'runtimePhase' | 'launchError' | 'lastActivityAt' | 'workerStartedAt' | 'dispatchedAt' | 'originStale'>
 
-/** App workers and CLI workers use the same destination model and picker. */
-export function appWorkerLink(card: KanbanCard): HTMLAnchorElement {
-  return terminalWorkerPill(card) as HTMLAnchorElement
-}
-
 /** The worker's turn, opening the remembered destination or the best usable one. */
-export function terminalWorkerPill(
+export function workerPill(
   card: TurnInput & ConversationWorker & Pick<KanbanCard, 'workerAgent' | 'shuttleAgent'>,
   options: { openWorker?: WorkerOpener } = {},
 ): HTMLElement {

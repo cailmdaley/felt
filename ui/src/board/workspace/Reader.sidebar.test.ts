@@ -4,7 +4,7 @@ import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
 import { saveConversationOpening } from '../conversationOpening.js'
-import { terminalWorkerPill } from '../appConversation.js'
+import { workerPill } from '../appConversation.js'
 import { Reader, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
 import { buildChannel, type Channel, type DocKey } from './documents.js'
@@ -127,7 +127,7 @@ describe('Reader channel sidebar', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const asking: KanbanCard = { ...alpha, tmuxSession: 'shuttle-alpha', workerState: 'running', runtimePhase: 'attention', lastActivityAt: Date.now() }
     listedCards = [asking, beta]
-    const reader = makeReader(asking, undefined, card => terminalWorkerPill(card))
+    const reader = makeReader(asking, undefined, card => workerPill(card))
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
     expect(row.querySelector<HTMLElement>('.constitution-state-dot')?.dataset.turn).toBe('question')
     asking.runtimePhase = 'working'

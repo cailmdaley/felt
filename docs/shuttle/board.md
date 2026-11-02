@@ -140,7 +140,8 @@ app put an image beside it.
 
 Worker pills on Desk cards, the reader's sidebar cards, and the fiber page open the worker's conversation.
 The constitution header also offers Console on every layout, including phones, whenever a destination is available.
-Tap to open; long-press or right-click Console or a pill to choose and remember a destination.
+Tap to open; long-press or right-click Console or a pill to choose a destination.
+A choice between alternatives is remembered; opening a sole destination leaves the preference unchanged.
 Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
@@ -265,7 +266,8 @@ three tabs are windows onto the work, and configuration is not work.
 
 Settings opens to **Conversations**, where you choose the preferred destination for Console, worker pills, keyboard opening and History.
 The conversation-opening preference belongs to this browser and saves immediately.
-Long-press or right-click Console or a worker pill to choose another supported destination and remember it.
+Long-press or right-click Console or a worker pill to choose another supported destination.
+Choosing among alternatives remembers the destination; opening a sole destination leaves your preference unchanged.
 When the preference is unavailable for a worker or device, opening uses the best available destination without changing it.
 
 Host settings sit separately under **Worker hosts**.

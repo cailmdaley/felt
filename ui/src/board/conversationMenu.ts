@@ -73,9 +73,18 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       (item as HTMLButtonElement).type = 'button'
       ;(item as HTMLButtonElement).disabled = !!action.disabled
     }
-    item.textContent = action.checked === undefined ? action.label : `${action.checked ? '✓' : '　'}  ${action.label}`
+    if (action.checked === undefined) item.textContent = action.label
+    else {
+      const mark = document.createElement('span')
+      mark.setAttribute('aria-hidden', 'true')
+      mark.textContent = action.checked ? '✓' : ''
+      const label = document.createElement('span')
+      label.className = 'kbn-conversation-label'
+      label.textContent = action.label
+      item.append(mark, label)
+      item.setAttribute('aria-checked', String(action.checked))
+    }
     item.setAttribute('role', action.checked === undefined ? 'menuitem' : 'menuitemradio')
-    if (action.checked !== undefined) item.setAttribute('aria-checked', String(action.checked))
     item.tabIndex = -1
     if (action.dress && item instanceof HTMLButtonElement) {
       action.dress(item)
@@ -96,7 +105,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       if (!action.disabled) items.push(item)
       continue
     }
-    Object.assign(item.style, { display: 'block', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: 'var(--type-row)', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
+    Object.assign(item.style, { display: action.checked === undefined ? 'block' : 'grid', gridTemplateColumns: '1em minmax(0, 1fr)', columnGap: '8px', width: '100%', boxSizing: 'border-box', textAlign: 'left', padding: '10px 12px', font: 'inherit', fontSize: 'var(--type-row)', color: 'inherit', background: 'transparent', border: '0', textDecoration: 'none', cursor: 'pointer', borderRadius: '2px' })
     item.addEventListener('focus', () => { item.style.background = 'var(--kbn-form-band)' })
     item.addEventListener('blur', () => { item.style.background = 'transparent' })
     item.addEventListener('click', e => { e.stopPropagation(); dismiss(true); action.run?.() })
@@ -115,7 +124,7 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   window.addEventListener('keydown', keyboard, true)
   window.addEventListener('resize', close)
   window.addEventListener('scroll', scrolled, true)
-  ;(items[0] ?? menu).focus({ preventScroll: true })
+  ;(items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0] ?? menu).focus({ preventScroll: true })
   return close
 }
 
@@ -132,7 +141,10 @@ export function attachConversationPicker(anchor: HTMLElement, destinations: () =
       label: `Open in ${destination.label}`,
       href: destination.href,
       checked: destination.id === selected?.id,
-      run: () => { saveConversationOpening(destination.id); destination.run?.() },
+      run: () => {
+        if (available.length >= 2) saveConversationOpening(destination.id)
+        destination.run?.()
+      },
     })), 'Open conversation in', point)
   }
   const context = (event: MouseEvent): void => {

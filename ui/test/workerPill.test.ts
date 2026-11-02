@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { terminalWorkerPill } from '../src/board/appConversation.js'
+import { workerPill } from '../src/board/appConversation.js'
 import { DESKTOP, IPAD_PORTRAIT, PHONE_PORTRAIT, matchMediaFor, type Device } from '../src/board/testDevices.js'
 
 type FakeElement = HTMLElement & { href: string }
@@ -112,7 +112,7 @@ describe('the terminal worker pill under a finger', () => {
       it.each([['working', 'working'], ['waiting', 'idle'], ['attention', 'question']])(
         `${deviceName}, ${surface}: a bridged %s worker is a tappable link to its session`,
         (phase, label) => {
-          const pill = terminalWorkerPill(worker(phase, LINK), options) as unknown as FakeElement
+          const pill = workerPill(worker(phase, LINK), options) as unknown as FakeElement
           expect(pill.tagName).toBe('A')
           expect(pill.href).toBe(LINK)
           expect(pill.textContent).toBe(label)
@@ -121,7 +121,7 @@ describe('the terminal worker pill under a finger', () => {
         },
       )
       it(`${deviceName}, ${surface}: an unbridged worker is a mark that takes no taps`, () => {
-        const pill = terminalWorkerPill(worker('waiting'), { ...options, openWorker: () => {} }) as unknown as FakeElement
+        const pill = workerPill(worker('waiting'), { ...options, openWorker: () => {} }) as unknown as FakeElement
         expect(pill.tagName).toBe('SPAN')
         expect(pill.textContent).toBe('idle')
         expect(coarseDeclarations(pill, TOUCH_CSS).get('pointer-events')).toBe('none')
@@ -135,7 +135,7 @@ describe('the terminal worker pill under a finger', () => {
       const phoneMedia = DOCK_CSS.match(
         /@media\s*\(max-width:\s*700px\),\s*\(max-height:\s*500px\)\s*and\s*\(pointer:\s*coarse\)\s*\{([\s\S]*)\n\}\s*$/,
       )?.[1] ?? ''
-      const fiberPill = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
+      const fiberPill = workerPill(worker('waiting', LINK)) as unknown as FakeElement
 
       expect(fiberPill.classList.contains('kbn-card-worker')).toBe(true)
       expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
@@ -152,7 +152,7 @@ describe('the terminal worker pill under a mouse', () => {
   for (const [surface, options] of SURFACES) {
     it(`${surface}: opens the terminal, even for a bridged session`, () => {
       const openWorker = vi.fn()
-      const pill = terminalWorkerPill(worker('waiting', LINK), { ...options, openWorker }) as unknown as FakeElement
+      const pill = workerPill(worker('waiting', LINK), { ...options, openWorker }) as unknown as FakeElement
       expect(pill.tagName).toBe('BUTTON')
       expect(pill.textContent).toBe('idle')
       pill.click()
@@ -161,7 +161,7 @@ describe('the terminal worker pill under a mouse', () => {
   }
 
   it('names the turn with no column gate', () => {
-    const pill = terminalWorkerPill(worker('waiting'), { openWorker: () => {} }) as unknown as FakeElement
+    const pill = workerPill(worker('waiting'), { openWorker: () => {} }) as unknown as FakeElement
     expect(pill.textContent).toBe('idle')
   })
 })
