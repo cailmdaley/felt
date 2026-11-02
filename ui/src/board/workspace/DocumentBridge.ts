@@ -5,6 +5,7 @@ import { installPageSwipe, SWIPE } from './PhoneGestures.js'
 import { mentionRuntime } from './bodyLinks.js'
 import { reportMentionRuntime } from '../transcript/reportMentions.js'
 import mentionStyles from '../transcript/mentions.css?inline'
+import { parseRoute } from './route.js'
 
 export const DOCUMENT_SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals allow-forms'
 const PROTOCOL = 'shuttle-document'
@@ -135,7 +136,7 @@ function installEmbeddedPdfEmbeds(send: (type: string, payload?: Record<string, 
   }, { once: true })
 }
 
-function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds): void {
+function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForwardDocumentKey, bindings: typeof surfaceBindings, allowed: readonly KeyIntent[], limits: { count: number; length: number; interval: number }, references: typeof referenceRuntime, css: string, protocol: string, version: number, swipe: typeof installPageSwipe, swipeLimits: typeof SWIPE, mentions: typeof mentionRuntime, mentionCss: string, reportMentions: typeof reportMentionRuntime, embeddedPdfs: typeof installEmbeddedPdfEmbeds, boardOrigin: string, parseBoardRoute: typeof parseRoute): void {
   // Storage belongs to this document's lifetime, never the board's origin.
   // Decks and plotting libraries can keep preferences without escaping isolation.
   for (const name of ['localStorage', 'sessionStorage'] as const) {
@@ -301,6 +302,16 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
     const link = (event.target as Element)?.closest?.('a[href]') as HTMLAnchorElement | null
     if (!link || link.dataset.wsReference || link.hasAttribute('download')) return
     const href = link.getAttribute('href') ?? ''
+    let routeHash = href.startsWith('#') ? href : ''
+    if (!routeHash) {
+      try { const url = new URL(href); if (url.origin === boardOrigin) routeHash = url.hash } catch { /* Relative files remain files. */ }
+    }
+    if (active && href.length <= 4096 && (routeHash === '#/desk' || routeHash === '#/chronicle' || parseBoardRoute(routeHash))) {
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      send('navigate', { href: routeHash })
+      return
+    }
     if (href.startsWith('#')) {
       event.preventDefault()
       event.stopImmediatePropagation()
@@ -362,7 +373,7 @@ function documentRuntime(intent: typeof keyIntent, forward: typeof shouldForward
 
 /** Inject after the doctype/base so standalone fragments keep standards mode. */
 export function withWorkspaceKeyBridge(html: string): string {
-  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()});</script>`
+  const bridge = `<script data-shuttle-workspace-bridge>(${documentRuntime.toString()})(${keyIntent.toString()},${shouldForwardDocumentKey.toString()},${JSON.stringify(surfaceBindings)},${JSON.stringify(DOCUMENT_KEY_INTENTS)},${JSON.stringify({ count: REFERENCE_LIMIT, length: REFERENCE_LENGTH, interval: Math.ceil(1000 / REFERENCE_RATE) + 10 })},${referenceRuntime.toString()},${JSON.stringify(referenceStyles)},${JSON.stringify(PROTOCOL)},${VERSION},${installPageSwipe.toString()},${JSON.stringify(SWIPE)},${mentionRuntime.toString()},${JSON.stringify(mentionStyles)},${reportMentionRuntime.toString()},${installEmbeddedPdfEmbeds.toString()},${JSON.stringify(window.location.origin)},${parseRoute.toString()});</script>`
   let insertion = 0
   const doctype = /<!doctype\b[^>]*>/i.exec(html)
   if (doctype) insertion = doctype.index + doctype[0].length

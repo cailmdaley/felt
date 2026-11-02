@@ -27,7 +27,7 @@ import { ConstitutionPicker } from './ConstitutionPicker.js'
 import { TranscriptResults } from './TranscriptResults.js'
 import type { TranscriptHit } from '../transcript/find.js'
 import { Overview } from './Overview.js'
-import { WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
+import { parseRoute, WorkspaceHistory, type WorkspaceOriginView, type WorkspaceRoute } from './route.js'
 import { ChannelThemes } from './ChannelThemes.js'
 
 export interface WorkspaceOptions {
@@ -751,7 +751,11 @@ export class Workspace {
   }
 
   private openRelative(source: WorkspaceDocument, href: string): void {
-    if (!href || href.startsWith('#')) return
+    if (!href) return
+    const route = parseRoute(href)
+    if (route?.kind === 'channel') { this.history.enter(route.uid, route.owner, route.doc); return }
+    if (route?.kind === 'overview' || href === '#/desk' || href === '#/chronicle') { this.history.view(href); return }
+    if (href.startsWith('#')) return
     let path: string, hash: string, owner = source.owner
     try {
       const url = new URL(href, window.location.href)

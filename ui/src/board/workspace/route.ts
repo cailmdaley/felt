@@ -14,9 +14,6 @@ type StateObject = Record<string, unknown>
 function encode(value: string): string {
   return encodeURIComponent(value).replace(/[@!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
 }
-function decode(value: string): string | null {
-  try { return decodeURIComponent(value) } catch { return null }
-}
 
 function isOriginView(value: unknown): value is WorkspaceOriginView {
   return value === 'desk' || value === 'chronicle' || value === 'board'
@@ -32,6 +29,8 @@ function hashFromOrigin(view: WorkspaceOriginView): string {
 }
 
 export function parseRoute(hash: string): WorkspaceRoute | null {
+  const OVERVIEW_HASH = '#/board'
+  const decode = (value: string): string | null => { try { return decodeURIComponent(value) } catch { return null } }
   if (hash === OVERVIEW_HASH) return { kind: 'overview' }
   const prefix = `${OVERVIEW_HASH}/`
   if (!hash.startsWith(prefix)) return null
