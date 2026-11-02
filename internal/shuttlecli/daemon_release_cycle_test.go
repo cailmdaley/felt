@@ -64,6 +64,9 @@ esac
 			if err := os.WriteFile(path, []byte(source), 0640); err != nil {
 				t.Fatal(err)
 			}
+			if err := os.Chmod(path, 0640); err != nil {
+				t.Fatal(err)
+			}
 			callback := `printf 'cycle:%s\n' "$(head -n 1 "$HOME/.shuttle/repo")" >> "$TEST_EVENTS"`
 			_, stderr, err := executeIn(t, env, t.TempDir(), "daemon", "activate-release", next.Dir, "--", "/bin/sh", "-c", callback)
 			if (err == nil) != owned {
