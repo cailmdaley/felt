@@ -235,7 +235,7 @@ defmodule Shuttle.SessionResumeTest do
       assert plan.command =~ "codex"
       assert plan.command =~ "resume '#{@codex}'"
       refute plan.command =~ "--remote"
-      refute plan.command =~ "TMUX"
+      assert String.starts_with?(plan.command, "env -u TMUX -u TMUX_PANE codex ")
     end
 
     test "pi with no ledgered agent resumes with the bare CLI, in its header's cwd", %{

@@ -891,7 +891,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     refute script =~ "--remote"
     assert script =~ "resume '40740310-2345-4e33-a1e4-7950db41ce10'"
     assert script =~ "Mode: resume"
-    [_, command] = Regex.run(~r/^(codex .*)$/m, script)
+    [_, command] = Regex.run(~r/^(env -u TMUX -u TMUX_PANE codex .*)$/m, script)
     refute command =~ " || "
   end
 

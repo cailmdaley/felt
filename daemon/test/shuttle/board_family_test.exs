@@ -128,7 +128,7 @@ defmodule Shuttle.BoardFamilyTest do
       |> Shuttle.SessionBinding.apply_event(successor, now)
 
     sessions = BoardFamily.session_index([child], "host", bindings)
-    assert sessions[{"host", "codex", "successor"}] == "child"
+    refute Map.has_key?(sessions, {"host", "codex", "successor"})
     assert sessions[{"host", "codex", "runtime-session"}] == "child"
     assert sessions[{"host", "pi", "ledger-session"}] == "child"
     refute Map.has_key?(sessions, {"host", "claude", "ledger-session"})

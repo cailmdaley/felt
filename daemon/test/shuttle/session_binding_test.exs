@@ -15,6 +15,10 @@ defmodule Shuttle.SessionBindingTest do
     }
   end
 
+  defp codex_event(id, type, at, pid, birth \\ "codex-server") do
+    event(id, type, at, pid, birth) |> Map.put("harness", "codex")
+  end
+
   defp fold(events),
     do: Enum.reduce(events, SessionBinding.new(), &SessionBinding.apply_event(&2, &1, @now))
 
@@ -54,6 +58,28 @@ defmodule Shuttle.SessionBindingTest do
     assert SessionBinding.current(state, "unseen") == "unseen"
     assert SessionBinding.current(state, "unknown") == nil
     assert SessionBinding.current(state, nil) == nil
+  end
+
+  test "Codex thread UUIDs never share a receiver lineage" do
+    # A shared App Server can emit lifecycle events for several distinct
+    # threads from one PID. That process identity cannot merge their UUIDs.
+    events = [
+      codex_event("root-thread", "session_start", @now, 41),
+      codex_event("barcelona-thread", "session_start", @now + 1, 41),
+      codex_event("root-thread", "session_end", @now + 2, 41),
+      codex_event("root-thread", "session_start", @now + 3, 52, "native-resume"),
+      codex_event("barcelona-thread", "session_start", @now + 4, 53, "native-resume")
+    ]
+
+    {state, accepted} =
+      Enum.reduce(events, {SessionBinding.new(), []}, fn event, {state, accepted} ->
+        state = SessionBinding.apply_event(state, event, @now)
+        {state, [SessionBinding.accept_event?(state, event) | accepted]}
+      end)
+
+    assert Enum.reverse(accepted) == List.duplicate(true, length(events))
+    assert SessionBinding.current(state, "root-thread") == "root-thread"
+    assert SessionBinding.current(state, "barcelona-thread") == "barcelona-thread"
   end
 
   test "resume transfers current UUID to a new lifetime and retires the predecessor" do

@@ -1,6 +1,6 @@
 defmodule Shuttle.SessionBinding do
   @moduledoc """
-  Receiver succession inferred from explicit session starts, never from panes.
+  Claude and Pi receiver succession inferred from explicit session starts, never from panes.
   A known UUID anchors a worker to its receiver process lifetime.
   A newer explicit session start, or the first newer hook from a receiver never
   seen before, can resume a lineage member in a new receiver and retire its
@@ -30,8 +30,11 @@ defmodule Shuttle.SessionBinding do
     harness = if event["harness"] == "claude-code", do: "claude", else: event["harness"]
     at = event["timestamp"]
 
+    # Codex conversation UUIDs remain stable across receivers, and one receiver
+    # can host distinct threads. Join Codex events by UUID alone.
     if valid_id?(id) and is_integer(pid) and pid > 0 and is_binary(birth) and birth != "" and
-         harness in ["claude", "codex", "pi"] and is_integer(at) and at >= now - @max_age_ms do
+         harness in ["claude", "pi"] and
+         is_integer(at) and at >= now - @max_age_ms do
       key = {harness, pid, birth}
       owner = Map.get(state.members, id)
       process = Map.get(state.processes, key)
@@ -104,7 +107,7 @@ defmodule Shuttle.SessionBinding do
     harness = if event["harness"] == "claude-code", do: "claude", else: event["harness"]
 
     if is_integer(pid) and pid > 0 and is_binary(birth) and birth != "" and
-         harness in ["claude", "codex", "pi"] do
+         harness in ["claude", "pi"] do
       key = {harness, pid, birth}
 
       case Map.get(state.processes, key) do
