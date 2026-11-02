@@ -12,7 +12,7 @@ import { fileBytesUrl, showToast } from '../utils.js'
 import { instantStamp } from '../civilDay.js'
 import { DocumentHost, type DocumentFrame } from './DocumentHost.js'
 import { scrollHtmlViewer } from './DocumentBridge.js'
-import { channelLead, chatDocument, proseDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
+import { channelLead, chatDocument, documentLabels, documentLabelMetadata, type Channel, type DocKey, type WorkspaceDocument } from './documents.js'
 import { DocumentSeen } from './DocumentSeen.js'
 import { declaredTitle, watchDocumentTitles } from './DocumentTitles.js'
 import { ConstitutionPicker } from './ConstitutionPicker.js'
@@ -39,7 +39,7 @@ export interface ReaderOptions {
   onNavigate?(source: WorkspaceDocument, href: string): void
   onCrossing?(travel: number): void
   onReturn(): void
-  onEscapeHome?(): void
+  onOpenDocument(key: DocKey): void
   workerPill?(card: KanbanCard): HTMLElement | null
   onVerdict?(verdict: Verdict): void
   onCompose?(): void
@@ -118,7 +118,7 @@ export class Reader {
   private readonly themeChanged = (): void => this.syncPlainToggle()
   private readonly title: HTMLButtonElement
   private readonly returnButton: HTMLButtonElement
-  private readonly parents: DocKey[] = []
+  private backDestination = 'Desk'
   private reportChip: { key: DocKey; view: ReportChip } | null = null
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
@@ -136,8 +136,6 @@ export class Reader {
   private channel: Channel | null = null
   private fresh: ReadonlySet<DocKey> = new Set()
   private currentCard: KanbanCard | null = null
-  private origin = 'Desk'
-  private returnAtOrigin = false
   /** The constitution last open in each sidebar column, for this session. */
   private readonly groupMemory = new Map<string, string>()
   private selected: DocKey | null = null
@@ -190,7 +188,7 @@ export class Reader {
     this.railToggle = button('ws-sidebar-toggle ws-rail-toggle', '', () => this.toggleRail(), 'Threads')
     this.railToggle.title = 'Threads and sent files · ⌘|'
     this.railToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="ws-toggle-line" d="M6.5 3.5h7M6.5 8h7M6.5 12.5h7"/><circle class="ws-toggle-flag" cx="3" cy="3.5" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="8" r="1"/><circle class="ws-toggle-bullet" cx="3" cy="12.5" r="1"/></svg>'
-    this.returnButton = button('ws-return', '‹', () => this.back(), 'Back one level')
+    this.returnButton = button('ws-return', '‹', () => this.back(), 'Back to Desk')
     this.title = button('ws-channel-title', '', () => this.openSwitcher())
     this.lead = element('div', 'ws-nav-lead')
     this.lead.append(this.returnButton, this.title)
@@ -293,21 +291,24 @@ export class Reader {
   get sidebarVisible(): boolean { return this.active && this.sidebarShown }
   get document(): WorkspaceDocument | undefined { return this.channel?.documents.find(d => d.key === this.selected) }
   get isActive(): boolean { return this.active }
-  get ancestry(): DocKey[] { return [...this.parents] }
-  restoreAncestry(parents: DocKey[]): void { this.parents.splice(0, this.parents.length, ...parents) }
+  setBackDestination(label: string): void {
+    this.backDestination = label
+    this.returnButton.replaceChildren(element('span', 'ws-back-chevron', '‹'), element('span', 'ws-back-label', label))
+    for (const button of this.el.querySelectorAll<HTMLElement>('.ws-return, .ws-document-back')) {
+      button.title = `Back to ${label}`
+      button.setAttribute('aria-label', button.title)
+    }
+  }
 
   /** Show the selected page; settled body and receipt reads enable the files sheet. */
-  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready, returnAtOrigin = false): void {
+  show(channel: Channel, selected: DocKey, origin = 'Desk', card?: KanbanCard, animate = true, ready = true, settled = ready): void {
     const switching = channel.uid !== this.channel?.uid || channel.owner !== this.channel?.owner || !this.active
     this.cancelSwipe()
     if (switching) { this.phoneRailPending = false; if (this.expanded) this.setExpanded(false); this.closeMenu(); this.pageSheet.hide(); this.settingsMenu.hide() }
-    if (switching) this.parents.length = 0
     const reordered = this.selected === selected && this.channel?.documents.map(d => d.key).join('\0') !== channel.documents.map(d => d.key).join('\0')
     this.channelReady = ready
     this.settleRun(settled)
     this.channel = channel
-    this.origin = origin
-    this.returnAtOrigin = returnAtOrigin
     this.currentCard = card ?? this.opts.cards().find(row => (row.uid ?? row.id) === channel.uid && row.originId === channel.owner) ?? null
     this.selected = selected
     this.feedFamily()
@@ -319,8 +320,7 @@ export class Reader {
     if (arriving) this.arrive(origin === 'Board')
     this.el.inert = false
     this.el.removeAttribute('aria-hidden')
-    this.returnButton.textContent = '‹'
-    this.returnButton.setAttribute('aria-label', 'Back one level')
+    this.setBackDestination(this.backDestination)
     this.title.textContent = channel.name
     this.title.title = channel.name
     if (!this.workerClock) this.workerClock = window.setInterval(() => this.paintWorker(), 30000)
@@ -412,21 +412,10 @@ export class Reader {
   /** Open a file over the current page, preserving its exact return point. */
   openDocument(key: DocKey): void {
     if (key === this.selected) return
-    if (this.selected) this.parents.push(this.selected)
-    this.opts.onSelect(key)
+    this.opts.onOpenDocument(key)
   }
-  /** One level up: a file's parent, the chat, the orchestrator, then the origin view. */
-  back(escape = false): void {
-    const parent = this.parents.pop()
-    const landing = this.channel && (chatDocument(this.channel) ?? proseDocument(this.channel))
-    if (parent) this.opts.onSelect(parent)
-    else if (this.returnAtOrigin && this.origin === 'Board' && this.document && this.document.kind !== 'chat' && this.document.kind !== 'fiber') this.opts.onReturn()
-    else if (landing && this.selected !== landing.key) this.opts.onSelect(landing.key)
-    else if (!this.opts.onOrchestrator?.()) {
-      if (escape && this.opts.onEscapeHome) this.opts.onEscapeHome()
-      else this.opts.onReturn()
-    }
-  }
+  /** Back, Escape and the phone swipe follow the same visited path. */
+  back(): void { this.opts.onReturn() }
   closeSettings(after: () => void): void { this.settingsMenu.close(after) }
   /** The settings dropdown under its ⚙, kept inside its chat's protected styling boundary. */
   showSettings(content: HTMLElement, opener: HTMLElement): void {
@@ -557,7 +546,8 @@ export class Reader {
     const provenance = element('span', 'ws-provenance')
     const expand = button('ws-icon-button ws-expand-button', '⤢', () => this.toggleExpand(), 'Expand document')
     const menu = button('ws-icon-button ws-menu-button', '⋯', () => this.openMenu(frame.doc, menu), 'Document menu')
-    const back = button('ws-icon-button ws-document-back', '‹', () => this.back(), 'Back one level')
+    const back = button('ws-icon-button ws-document-back', '‹', () => this.back(), `Back to ${this.backDestination}`)
+    back.title = `Back to ${this.backDestination}`
     frame.label.append(back, glyph, title, provenance, expand, menu)
     this.labels.set(frame, { glyph, title, provenance, expand })
     frame.label.addEventListener('dblclick', e => {
@@ -1017,7 +1007,8 @@ export class Reader {
       if (this.picker.isOpen) this.picker.close(true)
       else if (this.menu) { const anchor = this.menuAnchor; this.closeMenu(); anchor?.focus({ preventScroll: true }) }
       else if (this.opts.onEscapeLayer?.()) { /* An inline control popover consumed Escape. */ }
-      else this.back(escape)
+      else if (escape && this.expanded) this.toggleExpand()
+      else this.back()
       return true
     }
     if (intent === 'orchestrator') return this.opts.onOrchestrator?.() ?? false

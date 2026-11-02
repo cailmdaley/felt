@@ -13,6 +13,7 @@ const channel: Channel = { uid: 'alpha', owner: 'host-a', name: 'Alpha', documen
 
 let reader: Reader
 const onSelect = vi.fn()
+const onReturn = vi.fn()
 const swipe = (signal: SwipeSignal): void => (reader as unknown as { swipe(signal: SwipeSignal): void }).swipe(signal)
 const transform = (): string => reader.track.style.transform
 const swiping = (): boolean => reader.stage.classList.contains('ws-swiping')
@@ -24,9 +25,10 @@ beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', () => 1)
   vi.stubGlobal('cancelAnimationFrame', vi.fn())
   onSelect.mockReset()
+  onReturn.mockReset()
   reader = new Reader({
     shuttleBase: '', buildProse: () => document.createElement('div'), onRefreshProse: vi.fn(),
-    onSelect, onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [alpha], switcherCards: () => [alpha], files: () => [],
+    onSelect, onOpenDocument: vi.fn(), onReturn, onChannel: vi.fn(), cards: () => [alpha], switcherCards: () => [alpha], files: () => [],
   })
   Object.defineProperty(reader.stage, 'clientWidth', { configurable: true, value: 390 })
   Object.defineProperty(reader.stage, 'clientHeight', { configurable: true, value: 700 })
@@ -41,6 +43,12 @@ afterEach(() => {
 })
 
 describe('Reader page swipe', () => {
+  it('delegates a right swipe to the same Back action as the header, even on a non-landing page', () => {
+    swipe({ phase: 'move', dx: 180 })
+    swipe({ phase: 'end', dx: 180, velocity: 1 })
+    expect(onReturn).toHaveBeenCalledOnce()
+    expect(onSelect).not.toHaveBeenCalled()
+  })
   it('follows a move and settles on release', () => {
     const rest = transform()
     swipe({ phase: 'move', dx: -60 })

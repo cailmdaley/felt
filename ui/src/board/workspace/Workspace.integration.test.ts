@@ -68,6 +68,13 @@ const fiberReadResponse = (card: KanbanCard, contents = body): Response => {
 }
 // Microtask depth varies with the Node runtime (undici fetch/Response hops), so drain generously.
 const flush = async (): Promise<void> => { for (let i = 0; i < 200; i++) await Promise.resolve() }
+const pop = async (action: () => void): Promise<void> => {
+  await new Promise<void>(resolve => {
+    window.addEventListener('popstate', () => resolve(), { once: true })
+    action()
+  })
+  await flush()
+}
 /** The Board's receipt feed has named alpha's report before the channel opens. */
 const feedNamesReport = async (): Promise<void> => {
   const original = vi.mocked(fetch).getMockImplementation()!
@@ -170,7 +177,7 @@ it('discovers a report only after it exists, including creation on a later refre
   expect(workspace.reader.host.get(key)).toBeDefined()
 })
 
-it('restores nested reader parents from the history entry after reload, but not a fresh deep link', async () => {
+it('follows visited files after reload and returns a fresh deep link to its origin', async () => {
   workspace.open(cards[0], 'Desk'); await flush()
   const report = docKey('host-a', '/notes/alpha/report.html', 'host-a')
   const table = docKey('host-a', '/notes/alpha/table.html', 'host-a')
@@ -180,16 +187,30 @@ it('restores nested reader parents from the history entry after reload, but not 
   workspace.dispose()
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
   await flush()
-  workspace.reader.back()
+  await pop(() => workspace.reader.back())
   expect(workspace.reader.document?.key).toBe(report)
-  workspace.reader.back()
+  await pop(() => workspace.reader.back())
   expect(workspace.reader.document?.kind).toBe('fiber')
   workspace.dispose()
   window.history.replaceState(null, '', hash)
   workspace = makeWorkspace(document.body, { shuttleBase: '', cards: () => cards, origin: () => 'Desk', onVisibility: visibility, dock: new Dock('', changed) })
   await flush()
   workspace.reader.back()
-  expect(workspace.reader.document?.kind).toBe('fiber')
+  expect(workspace.isActive).toBe(false)
+  expect(window.location.hash).toBe('#/board')
+})
+
+it('visits documents and retraces them without re-reading the channel or its receipt feed', async () => {
+  workspace.open(cards[0], 'Desk'); await flush()
+  const reads = () => vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/v1\/(fibers\/|sent-files\?)/.test(String(url))).length
+  const before = reads()
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/report.html', 'host-a'))
+  await flush()
+  workspace.reader.openDocument(docKey('host-a', '/notes/alpha/table.html', 'host-a'))
+  await flush()
+  await pop(() => workspace.reader.back())
+  expect(workspace.reader.document?.name).toBe('report.html')
+  expect(reads()).toBe(before)
 })
 
 describe('bar Find transcripts', () => {
@@ -544,8 +565,9 @@ describe('workspace reader integration', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true, cancelable: true })); await flush()
     expect(document.querySelector('.ws-sidebar [aria-current="true"]')?.getAttribute('data-channel-uid')).toBe('beta')
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Beta')
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-    expect(returned).toHaveBeenCalledWith(expect.objectContaining({ uid: 'beta', originId: 'host-b' }))
+    await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
+    expect(returned).not.toHaveBeenCalled()
   })
   it('captions In flight as its Your turn and Working bands even from an interleaved feed; j/k walk one flow and J/K stop at each column', async () => {
     workspace.dispose()
@@ -837,8 +859,9 @@ describe('workspace reader integration', () => {
       release(); await flush(); await flush()
       expect(selected()).toBe(key)
       expect(workspace.reader.el.querySelector('.ws-tabs,.ws-page-ticks')).toBeNull()
-      workspace.reader.back(); await flush()
-      expect(selected()).toBe('fiber:host-a:alpha')
+      await pop(() => workspace.reader.back())
+      expect(workspace.isActive).toBe(false)
+      expect(selected()).toBe(key)
     })
   }
   it('shows the body as soon as it lands while the strip waits for the receipts, then the strip in its final order', async () => {
@@ -988,7 +1011,7 @@ describe('workspace reader integration', () => {
     expect(window.location.hash).toContain(encodeURIComponent(reportKey))
     workspace.reader.openDocument('fiber:host-a:alpha')
     expect(frame.el.classList.contains('ws-receded')).toBe(true)
-    workspace.reader.back()
+    await pop(() => workspace.reader.back())
     document.querySelector<HTMLButtonElement>('.ws-selected .ws-expand-button')!.click()
     expect(frame.el.classList.contains('ws-expanded')).toBe(true)
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -1164,9 +1187,10 @@ describe('workspace reader integration', () => {
     escape()
     expect(document.querySelector('.ws-menu')).toBeNull()
     expect(popover).toHaveBeenCalledOnce()
-    const returned = new Promise(resolve => window.addEventListener('popstate', resolve, { once: true }))
     escape()
-    await returned
+    expect(document.querySelector('.ws-selected.ws-expanded')).toBeNull()
+    expect(workspace.isActive).toBe(true)
+    await pop(escape)
     expect(workspace.isActive).toBe(false)
     expect(document.querySelector('.ws-dock-slot')).toBeNull()
     popover.mockRestore()
@@ -1279,7 +1303,7 @@ describe('workspace reader integration', () => {
     const key = docKey('host-a', '/notes/alpha/table.html', 'host-a')
     workspace.reader.openDocument(key)
     expect(workspace.reader.document?.key).toBe(key)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await pop(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     expect(workspace.reader.document?.kind).toBe('fiber')
     expect(workspace.isActive).toBe(true)
   })
@@ -1405,14 +1429,15 @@ describe('workspace reader integration', () => {
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
   })
 
-  it('keeps a fresh deep-linked file addressable even outside the document index, with chat/prose as its parent', async () => {
+  it('keeps a fresh deep-linked file addressable even outside the document index, returning directly to Board', async () => {
     const gone = docKey('host-a', '/notes/alpha/gone.html', 'host-a')
     window.history.replaceState(null, '', `#/board/alpha@host-a/${encodeURIComponent(gone)}`)
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     await flush()
     expect(workspace.reader.document?.key).toBe(gone)
     workspace.reader.back()
-    expect(workspace.reader.document?.kind).toBe('fiber')
+    expect(workspace.isActive).toBe(false)
+    expect(window.location.hash).toBe('#/board')
   })
 
   it('keeps an explicit prose selection made while the body is loading', async () => {
@@ -1504,7 +1529,7 @@ describe('workspace reader integration', () => {
   it('restores a Desk-opened channel over Desk after reload', async () => {
     workspace.open(cards[0])
     await flush()
-    expect(document.querySelector('.ws-return')?.textContent).toBe('‹')
+    expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
     expect(window.history.state).toMatchObject({ shuttleWorkspace: { originView: 'desk' } })
 
     workspace.dispose()
@@ -1517,7 +1542,7 @@ describe('workspace reader integration', () => {
     await flush()
 
     expect(onView).toHaveBeenCalledWith('desk')
-    expect(document.querySelector('.ws-return')?.textContent).toBe('‹')
+    expect(document.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Desk')
   })
 
   it('restores the Board return for a file route after reload', async () => {
@@ -1564,7 +1589,7 @@ describe('workspace reader integration', () => {
     workspace.reader.openDocument(tableKey)
     await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
-    expect(window.history.state).toMatchObject({ shuttleWorkspace: { parents: [reportKey] } })
+    expect(window.history.state).toMatchObject({ shuttleWorkspace: { backLabel: 'report.html', depth: 2 } })
 
     workspace.dispose()
     document.body.replaceChildren()
@@ -1576,8 +1601,7 @@ describe('workspace reader integration', () => {
     await flush()
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(tableKey)
 
-    workspace.reader.back()
-    await flush()
+    await pop(() => workspace.reader.back())
     expect(document.querySelector('.ws-selected')?.getAttribute('data-key')).toBe(reportKey)
     const returned = new Promise<void>(resolve => window.addEventListener('popstate', () => resolve(), { once: true }))
     workspace.reader.back()
@@ -1629,9 +1653,7 @@ describe('workspace reader integration', () => {
     expect(workspace.reader.isActive).toBe(true)
     expect(document.querySelector('.ws-channel-title')?.textContent).toBe('Alpha')
 
-    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
-    await new Promise(resolve => setTimeout(resolve, 0))
-    await flush()
+    await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     workspace.showBoard()
     await flush()
     expect(workspace.reader.isActive).toBe(false)

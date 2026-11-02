@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { getBrowser } from './browser.mjs'
 import { frames, layoutShift, unexpected } from './layoutShift.mjs'
+import { registerNavigationJourneys } from './navBack.mjs'
 import { registerLivingReportJourneys } from './livingReport.mjs'
 import { registerHeaderBarJourneys } from './headerBar.mjs'
 import { registerRailArtifactJourneys } from './railArtifact.mjs'
@@ -365,8 +366,7 @@ test('The large transcript pages earlier turns inline, retains them across files
   assert.equal(await p.locator('dialog[open], .ws-transcript-dialog').count(), 0)
   await choose(p, 'calibration-report'); await choose(p, 'Chat')
   assert.equal(await band.locator('.ws-transcript-turn').count(), 20)
-  await appFocus(p); await p.keyboard.press('Escape')
-  await poll(p, () => !document.querySelector('.kbn-reader-open'))
+  await leave(p)
 })
 
 async function choose(p, label) {
@@ -775,6 +775,7 @@ test('Hostile report keys cannot queue verdicts or open controls; trusted and po
   await p.keyboard.press('ArrowDown')
   await pollReport(p, () => document.scrollingElement.scrollTop > 0)
   await p.keyboard.press('Escape')
+  await poll(p, key => document.querySelector('.ws-selected')?.dataset.key !== key, key)
   assert.notEqual(await selected(p).getAttribute('data-key'), key)
   await choose(p, 'calibration-report')
   await inner.evaluate(() => parent.postMessage({ protocol: 'shuttle-document', version: 1, type: 'key', payload: { key: 'Escape' } }, '*'))
@@ -823,7 +824,8 @@ test('Channel references select from HTML, markdown, plain text and the fiber wi
   await reportReady(p)
   assert.equal(await selected(p).getAttribute('data-key'), key)
   await p.goBack()
-  await poll(p, () => document.querySelector('.ws-reader')?.classList.contains('ws-dormant'))
+  await poll(p, () => document.querySelector('.ws-selected .ws-label-title')?.textContent === 'Field note')
+  await leave(p)
   await open(p)
   await choose(p, 'readme.txt')
   await selected(p).getByRole('link', { name: 'tone.mp3', exact: true }).click()
@@ -1367,7 +1369,7 @@ test('The sidebar strip names the J/K stops; every jump and strip click shows th
   for (const scrollTop of [200, 400, 1e6]) for (const { caption, holds } of await stuck(scrollTop)) assert.ok(holds, `${caption} sticks only inside its own group`)
 }, { width: 1440, height: 360 }, 'true')
 
-test('Wide reader steps through Desk cards, preserves selection on Escape, and returns the current card through its origin tab', async p => {
+test('Wide reader steps through Desk cards, retraces them on Escape, and returns the current card through its origin tab', async p => {
   const column = p.locator('[data-column="awaitingReview"]')
   const cardNames = column => p.locator(`[data-column="${column}"] .kbn-card > .kbn-card-name`).allTextContents()
   const deskDrafts = await cardNames('drafts'), review = await cardNames('awaitingReview'), flight = await cardNames('inFlight')
@@ -1392,7 +1394,8 @@ test('Wide reader steps through Desk cards, preserves selection on Escape, and r
   assert.equal(await current.locator('.ws-channel-name').innerText(), next)
   assert.ok(await current.evaluate(e => { const r = e.getBoundingClientRect(), col = e.closest('.ws-sidebar').getBoundingClientRect(); return r.left >= col.left && r.right <= col.right && r.width >= col.width * .9 }), 'the selected card occupies the sidebar without obscuring the reader')
   await p.keyboard.press('Escape')
-  await poll(p, () => document.querySelectorAll('.ws-sidebar-source').length === 0)
+  await poll(p, name => document.querySelector('.ws-channel-title')?.textContent === name, name)
+  await leave(p)
   assert.equal(await p.locator('.ws-sidebar-source').count(), 0)
   assert.equal(await p.locator('.kbn-key-selected .kbn-card-name').innerText(), name, 'Escape keeps the original Desk selection')
   await open(p)
@@ -2365,6 +2368,7 @@ test('Phone back swipe nests; edges, vertical pans and sideways content keep the
   await choose(p, 'brief.md')
   const nested = await key()
   await swipe(p, 100, 420, 300, 416)
+  await poll(p, original => document.querySelector('.ws-selected')?.dataset.key === original, original)
   assert.equal(await key(), original, 'a back swipe inside a document returns to its parent report')
   await poll(p, () => !document.querySelector('.ws-stage').classList.contains('ws-swiping'))
   await swipe(p, 5, 420, 200, 420)
@@ -3337,6 +3341,7 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
   await still(p, 'summoning Find', () => p.keyboard.press('/'))
 }, viewport)
 
+registerNavigationJourneys(test)
 registerLivingReportJourneys(test)
 registerHeaderBarJourneys(test)
 registerRailArtifactJourneys(test)

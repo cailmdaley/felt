@@ -12,7 +12,10 @@ async function openRoot(page) {
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-selected .ws-chat-head')
-  for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== root; depth++) await header.locator('.ws-chat-back').click()
+  if (await header.locator('h1').innerText() !== root) {
+    await header.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+  }
   await header.getByRole('heading', { name: root, exact: true }).waitFor()
 }
 const scale = page => section(page).evaluate(el => Number(el.dataset.scale))
@@ -160,7 +163,7 @@ export function registerRailArtifactJourneys(test) {
     assert.equal(await section(page).locator('iframe').count(), 0, 'the rail does not draw the staged artifact twice')
 
     // Back on the chat, the page's own relative links open their documents in the reader, as on the full page.
-    await page.locator('.ws-page.ws-selected').getByRole('button', { name: 'Back one level', exact: true }).click()
+    await page.locator('.ws-page.ws-selected').locator('.ws-document-back').click()
     await railFrame(page).getByRole('heading', { name: 'Calibration report', exact: true }).waitFor()
     await railFrame(page).locator('body').evaluate(el => el.ownerDocument.scrollingElement.scrollTo(0, 0))
     await railFrame(page).getByRole('link', { name: 'Read the independent validation →', exact: true }).click()

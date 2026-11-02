@@ -40,6 +40,7 @@ function makeReader(current: KanbanCard = alpha, themes?: ChannelThemes, workerP
     buildProse: () => document.createElement('div'),
     onRefreshProse: vi.fn(),
     onSelect: key => reader.select(key),
+    onOpenDocument: key => reader.select(key),
     onReturn: vi.fn(),
     onChannel,
     cards: () => channels,
@@ -560,13 +561,14 @@ describe('Reader channel sidebar', () => {
       uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '',
       sent: Array.from({ length: 6 }, (_, i) => ({ path: `/sent-${i}.html`, time: 100 + i })),
     })
-    const reader = makeReader(alpha)
+    const onReturn = vi.fn()
+    const reader = makeReader(alpha, undefined, undefined, { onReturn })
     reader.show(big, big.documents[0].key, 'Board', alpha)
     expect(reader.el.querySelector('.ws-tabs,.ws-thumbbar')).toBeNull()
     const file = big.documents.at(-1)!
     reader.openDocument(file.key)
     expect(reader.document?.key).toBe(file.key)
-    reader.back()
-    expect(reader.document?.kind).toBe('fiber')
+    reader.el.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    expect(onReturn).toHaveBeenCalledOnce()
   })
 })

@@ -426,8 +426,8 @@ interface AgentRecord {
 }
 
 /**
- * Where the chat's header leads: up a thread's ancestry, the family's head
- * first, or back to the view the reader was opened from.
+ * The chat's header follows the visited path; settings separately links
+ * the thread's ancestry, with the family's head first.
  */
 export interface ChatNav {
   ancestry?: readonly Ancestor[]
@@ -588,8 +588,12 @@ export class Dock {
     if (nav.origin) {
       const { label, open } = nav.origin
       const button = ctlButton('‹', 'ws-chat-back ws-chat-origin')
-      button.title = `Return to ${label}`
-      button.setAttribute('aria-label', `Return to ${label}`)
+      const destination = document.createElement('span')
+      destination.className = 'ws-back-label'
+      destination.textContent = label
+      button.append(destination)
+      button.title = `Back to ${label}`
+      button.setAttribute('aria-label', button.title)
       button.addEventListener('click', () => open())
       back.unshift(button)
     }

@@ -13,7 +13,10 @@ async function openRoot(page) {
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-selected .ws-chat-head')
   // A family's Desk row opens its frontier; these journeys exercise the root.
-  for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== title; depth++) await header.locator('.ws-chat-back').click()
+  if (await header.locator('h1').innerText() !== title) {
+    await header.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+  }
   await header.getByRole('heading', { name: title, exact: true }).waitFor()
 }
 const visibleHeaderVerbs = header => header.locator('.kbn-ctl-verdict button').evaluateAll(buttons =>
@@ -307,7 +310,7 @@ export function registerHeaderBarJourneys(test) {
         return [box(el.querySelector('.ws-chat-back')), box(document.querySelector('.ws-sidebar-toggle:not(.ws-rail-toggle)'))]
       })
       assert.ok(Math.abs(controls[0].center - controls[1].center) < 1, `back and sidebar share a centerline: ${JSON.stringify(controls)}`)
-      assert.equal(controls[0].width, controls[1].width)
+      assert.ok(controls[0].width >= controls[1].width && controls[0].width <= 150, 'the labelled Back control stays within its text budget')
       assert.equal(controls[0].height, controls[1].height)
       await page.waitForFunction(() => {
         const title = document.querySelector('.ws-selected .ws-chat-title')

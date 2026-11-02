@@ -195,8 +195,8 @@ export class Workspace {
       onSelect: key => this.select(key),
       onNavigate: (source, href) => this.openRelative(source, href),
       onCrossing: travel => this.depth.cross(travel),
-      onReturn: () => this.returnToOrigin(),
-      onEscapeHome: opts.onEscapeHome,
+      onReturn: () => this.history.back(),
+      onOpenDocument: key => this.history.openDocument(key),
       workerPill: card => this.dock.workerPillFor(card),
       onVerdict: verdict => this.deferVerdict(verdict),
       onCompose: () => this.focusComposer(),
@@ -265,10 +265,9 @@ export class Workspace {
   returnToOrigin(): void {
     if (!this.isActive) return
     if (this.origin === 'Board') this.lastBoardRoute = null
-    if (this.current) this.opts.onReturnCard?.(this.current.card)
     this.history.leave()
   }
-  /** Escape at the Reader's root returns to Desk, regardless of its origin view. */
+  /** The header's close control returns to Desk, regardless of its origin view. */
   escapeHome(): void { this.history.view('#/desk') }
   /** Opens over the Desk without navigating or waking the reader. */
   findConstitution(): void {
@@ -526,7 +525,7 @@ export class Workspace {
   private conversation(state: Pick<ChannelState, 'card' | 'metadataKnown'>, uid: string): boolean {
     return state.metadataKnown && !uid.startsWith('other:') && isAgentCard(state.card)
   }
-  /** The header's ways back: up the ancestry inside a thread; to the origin view on the phone. */
+  /** The header separates the visited path from the thread's ancestry. */
   private seatNav(state: ChannelState, dock: Dock): void {
     const ancestry: KanbanCard[] = []
     for (let parent = this.orchestrator(state.card); parent; parent = this.orchestrator(parent)) ancestry.unshift(parent)
@@ -534,7 +533,7 @@ export class Workspace {
     dock.closeSettings = after => this.reader.closeSettings(after)
     dock.setNav({
       ancestry: ancestry.map(card => ({ name: card.name, open: () => this.reader.closeSettings(() => { if (this.isActive) this.open(card, this.origin, undefined, this.overview.hasMetadata(card)) }) })),
-      origin: { label: ancestry.at(-1)?.name ?? this.origin, open: () => this.reader.back() },
+      origin: { label: this.history.backLabel, open: () => this.reader.back() },
       desk: () => this.escapeHome(),
       constitution: () => { const page = proseDocument(state.channel); if (page) this.select(page.key) },
     })
@@ -627,6 +626,7 @@ export class Workspace {
     if (route.kind === 'overview') {
       const hash = route.hash ?? window.location.hash
       const view = VIEW_HASHES[hash] ?? this.history.originView
+      if (view === 'desk' && this.origin === 'Desk' && this.current && this.isActive) this.opts.onReturnCard?.(this.current.card)
       this.reader.hide(view !== 'board')
       if (view === 'board') this.lastBoardRoute = null
       this.origin = VIEW_LABELS[view]
@@ -649,19 +649,29 @@ export class Workspace {
         status: '', createdAt: '', effectiveHorizon: 'now', drifted: false, isCycle: false, cycleStart: null,
       }, false)
     }
+    const sameChannel = this.current === state && this.isActive
+    if (sameChannel && state.loaded && state.runFinal && route.doc && state.channel.documents.some(doc => doc.key === route.doc)) {
+      this.select(route.doc)
+      this.reader.setBackDestination(this.history.backLabel)
+      const dock = this.controls(state)
+      if (dock) this.seatNav(state, dock)
+      this.startTimer()
+      return
+    }
     this.current = state
-    const parents = this.history.parents
-    for (const key of [...parents, ...(route.doc ? [route.doc] : [])]) {
+    for (const key of route.doc ? [route.doc] : []) {
       const file = parseDocKey(key)
       if (file && !state.links.some(link => link.path === file.path && (link.owner ?? state.card.originId) === file.owner)) state.links.push(file)
     }
-    if (parents.length || route.doc) this.rebuild(state)
+    if (route.doc) this.rebuild(state)
     if (this.origin === 'Board') this.lastBoardRoute = route
-    // Reserve the body read before the receipt feed can preload this same fiber.
-    const bodyRead = this.load(state)
-    // The sidebar and switcher list the overview's rows, so a direct entry reads them too.
-    this.overview.opened(state.card, state.metadataKnown)
-    this.overview.refresh()
+    // Document navigation shares an in-flight channel read without starting another.
+    const bodyRead = sameChannel ? this.loads.get(channelId(route.uid, route.owner)) ?? Promise.resolve() : this.load(state)
+    // The sidebar and switcher list the overview's rows, so a channel entry reads them too.
+    if (!sameChannel) {
+      this.overview.opened(state.card, state.metadataKnown)
+      this.overview.refresh()
+    }
     this.overview.setVisible(false)
     // Selection resolves before the first paint; data arriving later never moves it.
     // A constitution with a conversation opens on its chat; another lands on its report.
@@ -671,7 +681,6 @@ export class Workspace {
     this.opts.onVisibility(true)
     this.depth.setActive(true)
     this.show(state)
-    this.reader.restoreAncestry(parents)
     this.landComposer(state, false)
     const prompt = this.startPrompt
     if (prompt && (prompt.card.uid ?? prompt.card.id) === state.channel.uid && prompt.card.originId === state.channel.owner) {
@@ -721,7 +730,9 @@ export class Workspace {
     this.lastRenderedFamilyRevision = threadFamilyRevision(state.card, this.opts.threadIndex?.() ?? new ThreadIndex(cards))
     const selected = this.shown(state)
     this.refreshProse(state)
-    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal, this.origin === 'Board' && this.history.returnsToBase)
+    this.namePage(state, selected)
+    this.reader.setBackDestination(this.history.backLabel)
+    this.reader.show(ch, selected, this.origin, state.card, animate, state.loaded && state.runFinal, state.runFinal)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: ch.uid, owner: ch.owner, doc: selected }
     this.dock.syncRuntime(state.card)
     const dock = chatDocument(ch) && this.controls(state)
@@ -734,13 +745,18 @@ export class Workspace {
       }
     }
   }
+  private namePage(state: ChannelState, key: DocKey): void {
+    const doc = state.channel.documents.find(doc => doc.key === key)
+    this.history.name(doc && doc.kind !== 'chat' && doc.kind !== 'fiber' ? doc.name : state.channel.name)
+  }
   private select(key: DocKey): void {
     const state = this.current
     if (!state || !state.channel.documents.some(d => d.key === key)) return
     state.selected = key
     state.routedFile = undefined
     this.reader.select(key)
-    this.history.select(key, this.reader.ancestry)
+    this.history.select(key)
+    this.namePage(state, key)
     if (this.origin === 'Board') this.lastBoardRoute = { kind: 'channel', uid: state.channel.uid, owner: state.channel.owner, doc: key }
   }
   private isBodyFile(state: ChannelState, key: DocKey): boolean {
@@ -779,7 +795,7 @@ export class Workspace {
     const key = docKey(owner ?? state.card.originId, path, state.card.originId, state.card.fiberDir)
     if (!state.links.some(link => docKey(link.owner ?? state.card.originId, link.path, state.card.originId, state.card.fiberDir) === key)) state.links.push({ path, title, owner })
     this.rebuild(state)
-    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal, this.origin === 'Board' && this.history.returnsToBase)
+    this.reader.show(state.channel, this.shown(state), this.origin, state.card, false, state.loaded, state.runFinal)
     this.reader.openDocument(key)
     if (hash) this.reader.host.navigateFragment(key, hash)
     void this.readFileMetadata(state).then(() => {

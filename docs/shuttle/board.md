@@ -194,14 +194,18 @@ The fiber page anchors its body, embedded files, opened body links and sent docu
 Repeated sends of the same owner/path are one page with multiple receipts.
 Selection, constitution changes, metadata polls and the optional Constitutions sidebar preserve retained document instances and reading position.
 The fiber page's worker pill opens the real conversation, just as on the Desk; fiber controls live inline on the fiber page rather than in a separate panel. While a fiber awaits review, a compact Temper / Discard pair sits beside its name in the navbar on every delivered page (on the phone, beside the page sheet's heading).
-A chat's header is two rows. The first holds ‹, the constitution's name, its lifecycle state, the context figure with its cache dot, and × at the end; × leaves the chat by the same way back as ‹ and Escape and never changes the fiber. The second holds the artifact's thumbnail chip, the Constitution, Console and Settings icons, and, apart behind a rule at the far end, the lifecycle verbs, each with its word: Close for review, Rest, Temper, Discard. On a phone the header is one row (‹, name, chip, Settings, ×) and the verbs live in the settings sheet. The keys `a`, `s`, `t` and `x` still reach the verbs; × is never Discard.
+A chat's header is two rows. The first holds ‹, the constitution's name, its lifecycle state, the context figure with its cache dot, and × at the end; × returns to Desk and never changes the fiber. The second holds the artifact's thumbnail chip, the Constitution, Console and Settings icons, and, apart behind a rule at the far end, the lifecycle verbs, each with its word: Close for review, Rest, Temper, Discard. On a phone the header is one row (‹, name, chip, Settings, ×) and the verbs live in the settings sheet. The keys `a`, `s`, `t` and `x` still reach the verbs; × is never Discard.
 The fiber header shows status alone. Agent, effort, cadence, host and project directory belong to the folded settings line; the band's worker line is only its conversation action.
 Document header lines show the title and arrival history, omit the agent, and name a host only for a document owned elsewhere. The fiber label shows its genuine last-change time.
 Media, PDF and unsupported viewers add no title or provenance block inside the page. Audio/video use native transport controls; retained media pauses when receded or parked.
 The Constitutions sidebar starts closed and remembers an explicit choice.
 It lists the Desk's columns in the Desk's order: Drafts, In flight (as its Your turn and Working groups), Awaiting review, Roles and Resting; each group's caption holds the top of the list while you scroll through it.
 An index strip at its top names each non-empty column with its count and marks the open constitution's; clicking an entry jumps there as J/K does.
-On phones, previous/next controls sit in a thumb bar, and browser Back returns to the originating view.
+The ‹ button, browser Back and the phone's right swipe follow the pages you visited, across constitutions and linked files.
+The back control names its destination; a direct address without a visited page behind it returns to its origin view (Desk, Chronicle or Board).
+Reloads retain this path in browser history.
+Ancestry links and `b` go up the thread tree separately.
+Selecting a channel's own page in place does not add a history stop.
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.

@@ -52,6 +52,8 @@
 /* The phone's top bar (back, name, worker dot); the desktop has no head of its own. */
 .ws-navbar { display: none; position: relative; z-index: 3; flex: none; }
 .ws-nav-lead { display: flex; min-width: 0; }
+.ws-back-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label)/var(--leading-tight) var(--font-serif); }
+.ws-chat-origin .ws-back-label { max-width: 110px; color: var(--ws-ink-muted); }
 .ws-return, .ws-channel-title { font: var(--type-label)/var(--ws-control-height) var(--font-serif); letter-spacing: 0; white-space: nowrap; }
 .ws-channel-title { color: var(--ws-ink); overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ws-nav-trail { display: flex; min-width: 0; }
@@ -317,10 +319,12 @@
   .ws-head-worker :is(.ws-worker-elapsed, .ws-worker-via) { display: none; }
   .ws-head-worker .ws-worker-dot { position: static; translate: none; width: 9px; height: 9px; }
   .ws-nav-lead { min-height: var(--ws-phone-nav-height); align-items: center; gap: 0; }
-  /* One chevron drawing for back and stepping: a drawn stroke in ink, legible at 44 px. */
-  .ws-return { line-height: var(--leading-solid); position: relative; width: var(--ws-phone-target); height: var(--ws-phone-target); overflow: hidden; text-indent: -9999px; flex: none; padding: 0; color: var(--ws-ink) !important; }
-  .ws-return::before { content: ''; position: absolute; left: 50%; top: 50%; width: 11px; height: 11px; border: solid currentColor; border-width: 0 0 1.5px 1.5px; transform: translate(-30%, -50%) rotate(45deg); }
-  .ws-channel-title { display: flex; align-items: center; justify-content: center; text-align: center; flex: 1; min-height: var(--ws-phone-target); line-height: var(--leading-tight); padding: 0; }
+  /* The back destination truncates inside a full-height touch target, leaving room for the title. */
+  .ws-return { display: inline-flex; align-items: center; gap: 5px; min-width: var(--ws-phone-target); max-width: 100px; height: var(--ws-phone-target); flex: 0 1 auto; padding: 0 6px; color: var(--ws-ink) !important; }
+  .ws-back-chevron { flex: none; font-size: var(--type-title); line-height: var(--leading-solid); }
+  .ws-return .ws-back-label { color: var(--ws-ink-muted); }
+  .ws-chat-origin .ws-back-label { max-width: 65px; }
+  .ws-channel-title { display: block; text-align: center; flex: 1; min-height: var(--ws-phone-target); line-height: var(--leading-tight); padding: 0; }
   .ws-icon-button:not(.ws-phone-document-menu), .ws-sidebar, .ws-sidebar-toggle:not(.ws-rail-toggle) { display: none !important; }
   .ws-phone-document-menu { display: flex; align-items: center; justify-content: center; width: var(--ws-phone-target); height: var(--ws-phone-target); }
   .ws-label-title { max-width: 50%; }

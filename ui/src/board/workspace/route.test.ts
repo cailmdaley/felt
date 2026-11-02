@@ -62,14 +62,77 @@ describe('workspace routes', () => {
     expect(noInitialRoute).toHaveBeenCalledWith({ kind: 'channel', uid: 'uid', owner: 'host' })
   })
 
+  it('walks the same cross-channel and file path with app Back and browser Back, including reload', async () => {
+    resetHash('#/desk')
+    let history = create()
+    history.start()
+    history.enter('nested/thread', 'host', 'chat:A', 'desk')
+    history.name('Thread A')
+    expect(history.backLabel).toBe('Desk')
+    history.enter('sibling', 'other-host', 'chat:B')
+    history.name('Thread B')
+    expect(history.backLabel).toBe('Thread A')
+    history.openDocument('other-host:/files/F.html')
+    history.name('F.html')
+    expect(history.backLabel).toBe('Thread B')
+    history.openDocument('other-host:/files/G.html')
+    expect(history.backLabel).toBe('F.html')
+    history.dispose()
+    history = create()
+    history.start()
+    expect(history.backLabel).toBe('F.html')
+    for (const [action, doc, label] of [
+      [() => history.back(), 'other-host:/files/F.html', 'Thread B'],
+      [() => window.history.back(), 'chat:B', 'Thread A'],
+      [() => history.back(), 'chat:A', 'Desk'],
+    ] as const) {
+      await nextPop(action)
+      expect(parseRoute(window.location.hash)).toMatchObject({ kind: 'channel', doc })
+      expect(history.backLabel).toBe(label)
+    }
+    await nextPop(() => history.back())
+    expect(window.location.hash).toBe('#/desk')
+  })
+
+  it('backs from a visited file to a deep link before falling back to its origin', async () => {
+    resetHash(formatRoute({ kind: 'channel', uid: 'direct', owner: 'host', doc: 'report' }))
+    const history = create()
+    history.start()
+    history.name('Report')
+    history.openDocument('attachment')
+    expect(history.backLabel).toBe('Report')
+    await nextPop(() => history.back())
+    expect(parseRoute(window.location.hash)).toMatchObject({ doc: 'report' })
+    history.back()
+    expect(window.location.hash).toBe('#/board')
+  })
+
+  it('refreshes navigation when a tab selection gives consecutive entries the same address', async () => {
+    resetHash('#/desk')
+    const onRoute = vi.fn()
+    const history = create(onRoute)
+    history.start()
+    history.enter('one', 'host', 'chat')
+    history.name('One')
+    history.openDocument('file')
+    history.select('chat')
+    expect(history.backLabel).toBe('One')
+    onRoute.mockClear()
+    await nextPop(() => history.back())
+    expect(history.backLabel).toBe('Desk')
+    expect(onRoute).toHaveBeenCalledOnce()
+    await nextPop(() => history.back())
+    expect(window.location.hash).toBe('#/desk')
+  })
+
   it('pushes channel entries and replaces the selected document in place', () => {
     resetHash('#/board')
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
-    const startingLength = window.history.length
+    const push = vi.spyOn(window.history, 'pushState')
     history.enter('one', 'host-a')
-    expect(window.history.length).toBe(startingLength + 1)
+    expect(push).toHaveBeenCalledOnce()
     const entryLength = window.history.length
     history.select('host-a:/store/report.html')
     expect(window.history.length).toBe(entryLength)
@@ -118,17 +181,18 @@ describe('workspace routes', () => {
     expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '' })
   })
 
-  it('returns a directly loaded Desk-origin channel to Desk when no managed base exists', () => {
+  it.each(['desk', 'chronicle', 'board'] as const)('returns a directly loaded channel to %s when no managed base exists', originView => {
     const hash = formatRoute({ kind: 'channel', uid: 'one', owner: 'host' })
     resetHash(hash)
-    window.history.replaceState({ shuttleWorkspace: { depth: 0, base: false, baseHash: '', originView: 'desk' } }, '', hash)
+    window.history.replaceState({ shuttleWorkspace: { depth: 0, base: false, baseHash: '', originView } }, '', hash)
     const onRoute = vi.fn()
     const history = create(onRoute)
     history.start()
-    expect(history.originView).toBe('desk')
-    history.leave()
-    expect(window.location.hash).toBe('#/desk')
-    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: '#/desk' })
+    expect(history.originView).toBe(originView)
+    expect(history.backLabel.toLowerCase()).toBe(originView)
+    history.back()
+    expect(window.location.hash).toBe(`#/${originView}`)
+    expect(onRoute).toHaveBeenLastCalledWith({ kind: 'overview', hash: `#/${originView}` })
   })
 
   it('lets browser Back return to the previous channel rather than overview', async () => {

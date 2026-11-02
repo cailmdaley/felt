@@ -29,7 +29,7 @@ beforeEach(() => {
   openWorker = vi.fn()
   dock = new Dock('https://daemon.example', vi.fn(), undefined, openWorker)
   reader = new Reader({ shuttleBase: 'https://daemon.example', buildProse: () => document.createElement('div'),
-    onRefreshProse: vi.fn(), onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(),
+    onRefreshProse: vi.fn(), onSelect: vi.fn(), onOpenDocument: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(),
     cards: () => [], workerPill: card => dock.workerPillFor(card) })
   document.body.append(reader.el)
 })

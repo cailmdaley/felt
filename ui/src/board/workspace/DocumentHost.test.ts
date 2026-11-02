@@ -63,7 +63,7 @@ describe('say it once label bars', () => {
     vi.stubGlobal('requestAnimationFrame', () => 1)
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const prose = vi.fn(() => document.createElement('div'))
-    const reader = new Reader({ shuttleBase: '', buildProse: prose, onRefreshProse: vi.fn(), onSelect: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [] })
+    const reader = new Reader({ shuttleBase: '', buildProse: prose, onRefreshProse: vi.fn(), onSelect: vi.fn(), onOpenDocument: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [] })
     document.body.append(reader.el)
     const now = Date.now()
     const input = { uid: 'task', owner: 'host-a', name: 'Task name', path: '/task.md', fiberDir: '/', body: '', isConstitution: true,
@@ -511,7 +511,7 @@ describe('report scrolling', () => {
     const report: WorkspaceDocument = { ...docs[0], kind: 'html' }
     const channel: Channel = { uid: 'task', owner: 'host-a', name: 'Task', documents: [report], labels: ['report'], body: '' }
     const reader = new Reader({
-      shuttleBase: '', buildProse, onRefreshProse: vi.fn(), onSelect, onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [],
+      shuttleBase: '', buildProse, onRefreshProse: vi.fn(), onSelect, onOpenDocument: vi.fn(), onReturn: vi.fn(), onChannel: vi.fn(), cards: () => [],
     })
     document.body.append(reader.el)
     try {

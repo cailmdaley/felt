@@ -20,7 +20,7 @@ async function shot(page, name) {
 }
 async function back(page, phone) {
   if (phone) await frame(page).locator('body').evaluate(() => window.scrollBy(0, -100)).catch(() => {})
-  const button = phone ? page.locator('.ws-navbar .ws-return') : selected(page).getByRole('button', { name: 'Back one level', exact: true })
+  const button = phone ? page.locator('.ws-navbar .ws-return') : selected(page).locator('.ws-document-back')
   if (phone) await button.focus()
   await button.click()
   await page.waitForTimeout(100)
@@ -42,9 +42,9 @@ export function registerLivingReportJourneys(test) {
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
       await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
-      // The family card opens its waiting thread; return to the report's owning constitution.
-      await selected(page).getByRole('button', { name: 'Return to Response analysis', exact: true }).click()
-      await selected(page).getByRole('button', { name: 'Return to Calibrate the shear response', exact: true }).click()
+      // The family card opens its waiting thread; ancestry opens the report's owning constitution.
+      await selected(page).getByRole('button', { name: 'Settings', exact: true }).click()
+      await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
       await selected(page).locator('textarea').waitFor()
       await page.locator('.ws-report-chip').waitFor()
       assert.equal(await page.locator('.ws-report-inset').count(), 0, 'no live report inset is mounted')
@@ -149,9 +149,11 @@ export function registerLivingReportJourneys(test) {
       await selected(page).getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(page).locator('.ws-fiber-prose').waitFor()
       assert.equal(await selected(page).locator('.ws-dock').count(), 0)
-      await back(page, phone)
+      await selected(page).click({ position: { x: 15, y: 200 } })
+      await page.keyboard.press('r')
       await selected(page).locator('textarea').waitFor()
-      // A thread's back goes to its orchestrator's chat, not the Desk.
+      await selected(page).locator('textarea').blur()
+      // A thread's back returns to the chat from which it was opened.
       if (phone) {
         await page.locator('.ws-rail-toggle').click()
         await page.locator('.ws-page-sheet [data-group="working"] .kbn-thread-row').first().click()

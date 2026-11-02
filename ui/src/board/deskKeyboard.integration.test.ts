@@ -42,6 +42,12 @@ function press(key: string, init: KeyboardEventInit = {}, target: EventTarget = 
   target.dispatchEvent(event)
   return event
 }
+async function pop(action: () => void): Promise<void> {
+  await new Promise<void>(resolve => {
+    window.addEventListener('popstate', () => resolve(), { once: true })
+    action()
+  })
+}
 function selected(): string | undefined { return document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardUid }
 
 beforeEach(() => {
@@ -309,13 +315,12 @@ describe('Desk keyboard selection', () => {
     inside.setView('desk')
     press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)
-    expect(press('Escape').defaultPrevented).toBe(true)
+    await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.activeViewId).toBe('desk')
-    await Promise.resolve()
   })
 
-  it('1 and root Escape return to Desk without replacing its selection with the Reader card', async () => {
+  it('1 returns to Desk and Escape returns to Board without replacing the Desk selection', async () => {
     press('j'); expect(selected()).toBe('review')
     inside.setView('shelf')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
@@ -330,12 +335,12 @@ describe('Desk keyboard selection', () => {
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     for (let i = 0; i < 100; i++) await Promise.resolve()
     expect(inside.workspace.isActive).toBe(true)
-    expect(press('Escape').defaultPrevented).toBe(true)
-    expect(inside.activeViewId).toBe('desk')
-    expect(selected()).toBe('review')
+    await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
+    expect(inside.activeViewId).toBe('shelf')
+    expect(inside.deskKeyboard.selection?.uid).toBe('review')
   })
 
-  it('Escape from a Reader sidebar row returns to Desk and preserves its selection', async () => {
+  it('Escape from a Reader sidebar row returns to its Board origin and preserves the Desk selection', async () => {
     press('j'); expect(selected()).toBe('review')
     inside.setView('shelf')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
@@ -344,30 +349,28 @@ describe('Desk keyboard selection', () => {
     const row = document.querySelector<HTMLElement>('.ws-sidebar .ws-channel-row')
     expect(row).not.toBeNull()
     row!.focus()
-    expect(press('Escape', {}, row!).defaultPrevented).toBe(true)
+    await pop(() => { expect(press('Escape', {}, row!).defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.activeViewId).toBe('desk')
+    expect(inside.activeViewId).toBe('shelf')
     expect(inside.deskKeyboard.selection?.uid).toBe('review')
-    expect(selected()).toBe('review')
   })
 
   it.each([
     ['h', {}], ['ArrowLeft', {}], ['‹', {}], ['ArrowLeft', { altKey: true }],
-  ] as const)('%s back keeps its non-Desk origin; only root Escape goes to Desk', async (key, init) => {
+  ] as const)('%s and Escape both return to the non-Desk origin', async (key, init) => {
     inside.setView('shelf')
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     for (let i = 0; i < 100; i++) await Promise.resolve()
     expect(inside.workspace.isActive).toBe(true)
-    expect(press(key, init).defaultPrevented).toBe(true)
-    for (let i = 0; i < 100; i++) await Promise.resolve()
+    await pop(() => { expect(press(key, init).defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.activeViewId).toBe('shelf')
 
     inside.openDocumentChannel(card({ id: 'd1', uid: 'd1' }))
     for (let i = 0; i < 100; i++) await Promise.resolve()
-    expect(press('Escape').defaultPrevented).toBe(true)
+    await pop(() => { expect(press('Escape').defaultPrevented).toBe(true) })
     expect(inside.workspace.isActive).toBe(false)
-    expect(inside.activeViewId).toBe('desk')
+    expect(inside.activeViewId).toBe('shelf')
   })
 
   it.each([['n', ''], ['Enter', 'tomorrow']])('s on the focused constitution then %s rests through lifecycle', async (k, which) => {
@@ -443,12 +446,12 @@ describe('Desk keyboard selection', () => {
     press('u'); expect(selected()).toBe('review')
     press('Escape'); expect(selected()).toBeUndefined()
   })
-  it('opens the reader on one grouped sidebar of the Desk\'s columns, and keeps the flight column for the cards that fly', () => {
+  it('opens the reader on one grouped sidebar of the Desk\'s columns, and keeps the flight column for the cards that fly', async () => {
     press('j'); press('h'); press('Enter')
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar .ws-channel-row')].map(el => el.dataset.channelUid)).toEqual(['draft-uid', 'd2', 'head-uid', 'working', 'review', 'resting'])
     expect([...document.querySelectorAll('.ws-sidebar .kbn-flight-caption')].map(el => el.textContent)).toEqual(['Drafts', 'Your turn', 'Working', 'Awaiting review', 'Resting'])
     expect([...document.querySelectorAll<HTMLElement>('.ws-sidebar-index-entry')].map(el => el.getAttribute('aria-label'))).toEqual(['Drafts, 2', 'In flight, 2', 'Awaiting review, 1', 'Resting, 1'])
-    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     expect(inside.workspace.isActive).toBe(false)
     expect(inside.workspaceColumn(head).map(entry => entry.card.uid ?? entry.card.id)).toEqual(['head-uid', 'working'])
   })
@@ -461,14 +464,14 @@ describe('Desk keyboard selection', () => {
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.fiberId).toBe('renamed')
     press('k'); expect(selected()).toBe('d2')
   })
-  it('opens with Enter and restores the opened card after reader return and a deferred refresh', () => {
+  it('opens with Enter and restores the opened card after reader return and a deferred refresh', async () => {
     press('j'); press('h'); press('h'); press('j'); press('Enter')
     expect(inside.workspace.isActive).toBe(true)
     expect(window.location.hash).toContain('d2')
     const updated = data()
     updated.now.drafts.reverse()
     inside.render(updated)
-    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     expect(inside.workspace.isActive).toBe(false)
     expect(selected()).toBe('d2')
     const restored = document.querySelector<HTMLElement>('.kbn-key-selected')!
@@ -476,12 +479,12 @@ describe('Desk keyboard selection', () => {
     expect(document.activeElement).toBe(restored)
     press('j'); expect(selected()).toBe('draft-uid')
   })
-  it('selects clicked cards and distinguishes identical uids on different origins', () => {
+  it('selects clicked cards and distinguishes identical uids on different origins', async () => {
     const updated = response({ now: { drafts: [card({ id: 'a', uid: 'same', originId: 'a' }), card({ id: 'b', uid: 'same', originId: 'b' })], inFlight: [], awaitingReview: [] } })
     draw(updated)
     document.querySelector<HTMLElement>('[data-fiber-id="b"]')!.click()
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')
-    document.querySelector<HTMLButtonElement>('.ws-return')!.click()
+    await pop(() => document.querySelector<HTMLButtonElement>('.ws-return')!.click())
     updated.now.drafts.reverse()
     draw(updated)
     expect(document.querySelector<HTMLElement>('.kbn-key-selected')?.dataset.cardOrigin).toBe('b')

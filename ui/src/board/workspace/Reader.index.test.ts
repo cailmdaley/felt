@@ -13,7 +13,7 @@ function setup(phone = false) {
   const onReturn = vi.fn(), onOrchestrator = vi.fn(() => false)
   reader = new Reader({ shuttleBase: '', buildProse: () => {
     const el = document.createElement('div'); el.innerHTML = '<header class="ws-chat-head"><div class="ws-chat-acts"></div><div class="ws-chat-refs"></div></header><div class="ws-chat-log"></div>'; return el
-  }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
+  }, onRefreshProse: vi.fn(), onSelect: key => reader.select(key), onOpenDocument: key => reader.select(key), onReturn, onOrchestrator, onChannel: vi.fn(), cards: () => [alpha] })
   document.body.append(reader.el)
   const channel = buildChannel({ uid: 'alpha', owner: 'host-a', name: 'Alpha', path: '/alpha.md', fiberDir: '/', body: '', isConstitution: true, conversation: true,
     embeds: [{ path: '/report.html' }, { path: '/detail.html' }], sent: [{ path: '/plot.png', time: 1 }] })
@@ -30,14 +30,17 @@ it('lands on chat with a persistent report chip and no inset, strip, tabs or bot
   expect(reader.el.querySelector('.ws-tabs,.ws-head-index,.ws-thumbbar,.ws-page-choice')).toBeNull()
   reader.el.querySelector<HTMLButtonElement>('.ws-report-chip')!.click()
   expect(reader.document?.name).toBe('report.html')
-  reader.back(); expect(reader.document?.kind).toBe('chat')
 })
-for (const phone of [false, true]) it(`pops nested files then chat then orchestrator/origin, phone=${phone}`, () => {
+for (const phone of [false, true]) it(`delegates Back and Escape to navigation without climbing structure, phone=${phone}`, () => {
   const { channel, onReturn, onOrchestrator } = setup(phone)
-  for (const name of ['report.html', 'detail.html', 'plot.png']) reader.openDocument(channel.documents.find(d => d.name === name)!.key)
-  for (const name of ['detail.html', 'report.html']) { reader.back(); expect(reader.document?.name).toBe(name) }
-  reader.back(); expect(reader.document?.kind).toBe('chat'); expect(onReturn).not.toHaveBeenCalled()
-  reader.back(); expect(onOrchestrator).toHaveBeenCalledOnce(); expect(onReturn).toHaveBeenCalledOnce()
+  reader.openDocument(channel.documents.find(d => d.name === 'plot.png')!.key)
+  reader.setBackDestination('Earlier constitution')
+  expect(reader.el.querySelector('.ws-return')?.getAttribute('aria-label')).toBe('Back to Earlier constitution')
+  expect(reader.el.querySelector('.ws-document-back')?.getAttribute('title')).toBe('Back to Earlier constitution')
+  reader.back()
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  expect(onReturn).toHaveBeenCalledTimes(2)
+  expect(onOrchestrator).not.toHaveBeenCalled()
 })
 
 

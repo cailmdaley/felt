@@ -20,7 +20,10 @@ async function openRoot(page) {
   const box = await name.boundingBox()
   await name.click({ position: { x: box.width - 6, y: box.height / 2 } })
   const header = page.locator('.ws-selected .ws-chat-head')
-  for (let depth = 0; depth < 3 && await header.locator('h1').innerText() !== root; depth++) await header.locator('.ws-chat-back').click()
+  if (await header.locator('h1').innerText() !== root) {
+    await header.getByRole('button', { name: 'Settings', exact: true }).click()
+    await page.locator('.ws-settings-menu:not([hidden]) .ws-ancestry-link').first().click()
+  }
   await header.getByRole('heading', { name: root, exact: true }).waitFor()
 }
 
