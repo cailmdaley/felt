@@ -193,12 +193,10 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
     setHidden(route, true)
   }
   const directionText = entry.direction === 'received'
-    ? '← From'
-    : entry.status === 'failed' ? '↯ Message failed' : entry.status === 'pending' ? '→ Messaging' : '→ Messaged'
+    ? 'From'
+    : entry.status === 'failed' ? 'Failed to' : entry.status === 'pending' ? 'Sending to' : 'To'
   if (direction.textContent !== directionText) direction.textContent = directionText
-  const toggleText = entry.direction === 'received' && !expanded
-    ? firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : 'Message received'))
-    : ''
+  const toggleText = expanded ? '' : firstMessageLine(entry.text || (entry.source ? 'Shared an attachment' : entry.direction === 'received' ? 'Message received' : ''))
   if (preview.textContent !== toggleText) preview.textContent = toggleText
   setAttr(toggle, 'data-direction', entry.direction)
   const action = entry.direction === 'received'
@@ -212,7 +210,7 @@ function paintMessageRow(row: HTMLElement, entry: ShuttleMessage): void {
   const source = row.querySelector<HTMLElement>('.ws-transcript-message-source')!
   const command = row.querySelector<HTMLElement>('.ws-transcript-message-command')!
   const outcome = row.querySelector<HTMLElement>('.ws-transcript-message-outcome')!
-  const stateText = entry.verb ? `· ${entry.verb}` : ''
+  const stateText = entry.verb ? `· ${entry.verb}${entry.verdict ? ` (${entry.verdict})` : ''}` : ''
   if (threadState.textContent !== stateText) threadState.textContent = stateText
   setHidden(threadState, !entry.verb)
   if (text.textContent !== entry.text) text.textContent = entry.text

@@ -1,7 +1,6 @@
 import './keymap.css'
 import './workspace/tokens.css'
-import { bindingKeyLabel, keyIntent, surfaceBindings, type KeySurface } from './keymap.js'
-import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
+import { helpSections, keyIntent, type KeySurface } from './keymap.js'
 import { blockingDialogOpen } from './views/ViewRegistry.js'
 
 /** One app-level overlay, available even when the reader owns the keystroke. */
@@ -38,25 +37,33 @@ export class KeymapHelp {
     close.addEventListener('click', () => this.close())
     header.append(title, close)
     const note = document.createElement('p')
-    note.textContent = `Bare keys work outside fields, without ⌘/Ctrl or IME composition. Verdict keys write after ${VERDICT_DELAY_MS / 1000} s; Undo or z cancels the latest pending verdict, even after navigation. Esc or ? closes this guide.`
+    note.textContent = 'Bare keys work outside text fields. Esc or ? closes this guide.'
     dialog.append(header, note)
     const sections = document.createElement('div')
     sections.className = 'kbn-keymap-sections'
-    for (const surface of ['desk', 'overview', 'reader'] as const) {
+    for (const { title: name, note: aside, rows } of helpSections) {
       const section = document.createElement('section')
       const heading = document.createElement('h3')
-      heading.textContent = surface === 'desk' ? 'Desk' : surface === 'overview' ? 'Overview' : 'Reader'
+      heading.textContent = name
+      section.append(heading)
+      if (aside) {
+        const text = document.createElement('p')
+        text.textContent = aside
+        section.append(text)
+      }
       const list = document.createElement('dl')
-      for (const binding of surfaceBindings[surface]) {
+      for (const row of rows) {
         const key = document.createElement('dt')
-        const kbd = document.createElement('kbd')
-        kbd.textContent = bindingKeyLabel(binding)
-        key.append(kbd)
+        for (const label of row.keys) {
+          const kbd = document.createElement('kbd')
+          kbd.textContent = label
+          key.append(kbd)
+        }
         const description = document.createElement('dd')
-        description.textContent = binding.label
+        description.textContent = row.label
         list.append(key, description)
       }
-      section.append(heading, list)
+      section.append(list)
       sections.append(section)
     }
     dialog.append(sections)

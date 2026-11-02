@@ -223,12 +223,18 @@ for (const [device, viewport] of [['desktop', { width: 1440, height: 900 }], ['p
 
   const sessionChip = sessionMessage.locator('.ws-transcript-session-chip')
   await sessionChip.waitFor()
-  const treatment = locator => locator.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderRadius, s.padding, s.fontSize, s.color] })
-  assert.deepEqual(await treatment(sessionChip), await treatment(route), 'fiber and session peers use one chip treatment')
+  // Only a sender that links somewhere is a chip; a session that links nowhere reads as plain text.
+  const plain = await sessionChip.evaluate(el => { const s = getComputedStyle(el); return [s.backgroundColor, s.borderTopWidth, s.paddingLeft] })
+  assert.deepEqual(plain, ['rgba(0, 0, 0, 0)', '0px', '0px'], 'an unlinked session sender is plain text')
+  // Every message, sent or received, is its own framed card.
+  for (const row of await transcript.locator('.ws-transcript-shuttle-message').all()) {
+    assert.equal(await row.evaluate(el => getComputedStyle(el).borderTopStyle), 'solid', 'each message sits in its own box')
+  }
   assert.ok(!(await sessionMessage.innerText()).includes('shuttle://'), 'the compact session row hides its address')
   assert.equal(await sessionChip.locator('.ws-transcript-session-id').evaluate(node => node.textContent), ' · 123456', 'the short session id remains visible')
   const sessionChipBox = await sessionChip.boundingBox()
-  assert.ok(sessionChipBox && sessionChipBox.width <= viewport.width * 0.6 + 1, 'the session chip stays within the row width')
+  const sessionTime = await sessionMessage.locator('.ws-transcript-message-time').boundingBox()
+  assert.ok(sessionChipBox && sessionTime && sessionChipBox.x + sessionChipBox.width <= sessionTime.x + 1, 'the session sender gives up width so the time stays on its line')
   assert.equal(await sessionChip.locator('.ws-transcript-session-label').evaluate(node => getComputedStyle(node).textOverflow), 'ellipsis', 'the host part clips with an ellipsis')
 
   assert.equal(await transcript.locator('.ws-transcript-steps').filter({ hasText: 'Bash 1' }).count(), 0, 'a pure send does not repeat as a tool group')
@@ -2065,7 +2071,7 @@ test('Audio waveform, transport, comparison, keep-position and keyboard guards',
   await p.keyboard.press('[')
   assert.equal(await selected(p).locator('audio').evaluate(a => a.currentTime), 0)
   await p.keyboard.press('?')
-  await p.getByText('Audio: play / pause', { exact: true }).waitFor()
+  await p.getByText('Audio: play or pause, back or forward 5 s', { exact: true }).waitFor()
   await p.keyboard.press('Escape')
 })
 

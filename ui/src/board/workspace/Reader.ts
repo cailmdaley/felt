@@ -804,6 +804,13 @@ export class Reader {
     this.renderSidebar(); this.layout(false)
     if (before) this.slideSidebar(shown, before)
   }
+  /** Either side column showing hides both; neither showing shows both. */
+  private toggleZen(): void {
+    if (this.phone.matches) return
+    const show = !this.sidebarShown && !this.railShown
+    if (this.threadRail.present && this.railOpen !== show) this.setRailVisible(show)
+    if (this.sidebarShown !== show) this.toggleSidebar()
+  }
   /** The viewer's choice persists across families, navigation and reloads. */
   private toggleRail(): void {
     if (this.phone.matches) {
@@ -1030,6 +1037,7 @@ export class Reader {
       rest: card => this.opts.onRest?.(card, this.el),
     })) return true
     if (intent === 'sidebar') this.toggleSidebar()
+    else if (intent === 'zen') this.toggleZen()
     else if (intent === 'rail') { if (this.threadRail.present) this.toggleRail() }
     else if (intent === 'find') {
       if (!this.phone.matches && this.opts.onFind?.()) { /* The board bar's Find serves the reader too. */ }

@@ -187,7 +187,7 @@ describe('TranscriptBand', () => {
     const preview = band.el.querySelector('.ws-transcript-exchange')!
     expect([...preview.children].map(row => row.textContent)).toEqual([
       expect.stringContaining('Keep going'), expect.stringContaining('I am coordinating.'),
-      expect.stringContaining('← Fromchild· closedA measured result'), expect.stringContaining('I will integrate it.'),
+      expect.stringContaining('Fromchild· closedA measured result'), expect.stringContaining('I will integrate it.'),
     ])
     expect(preview.querySelectorAll('.ws-transcript-thread-notice')).toHaveLength(1)
     const notice = preview.querySelector<HTMLElement>('.ws-transcript-thread-notice')!

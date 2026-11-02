@@ -1,12 +1,12 @@
 import { VERDICT_DELAY_MS } from './workspace/verdictDelay.js'
 
 export type KeySurface = 'desk' | 'overview' | 'reader'
-export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail'
+export type KeyIntent = 'desk' | 'chronicle' | 'board' | 'left' | 'right' | 'up' | 'down' | 'next' | 'prev' | 'nextChannel' | 'prevChannel' | 'nextGroup' | 'prevGroup' | 'open' | 'back' | 'first' | 'last' | 'scrollDown' | 'scrollUp' | 'pageDown' | 'pageUp' | 'halfDown' | 'halfUp' | 'sidebar' | 'find' | 'help' | 'audioPlay' | 'audioBack' | 'audioForward' | 'temper' | 'discard' | 'toReview' | 'undoVerdict' | 'compose' | 'conversation' | 'rest' | 'pin' | 'orchestrator' | 'rail' | 'zen'
 /** Reports can request navigation only. New intents are excluded unless named here. */
 export const DOCUMENT_KEY_INTENTS: readonly KeyIntent[] = [
   'prev', 'next', 'prevChannel', 'nextChannel', 'prevGroup', 'nextGroup', 'first', 'last',
   'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp',
-  'back', 'sidebar', 'find', 'help', 'desk', 'chronicle', 'board',
+  'back', 'sidebar', 'rail', 'zen', 'find', 'help', 'desk', 'chronicle', 'board',
 ]
 export interface KeyBinding {
   keys: readonly string[]
@@ -65,6 +65,7 @@ export const surfaceBindings: Record<KeySurface, readonly KeyBinding[]> = {
     bind([']'], 'audioForward', 'Audio: forward 5 seconds'),
     ...constitutionBindings('the open fiber'),
     bind(['/'], 'find', 'Find a constitution or transcript'),
+    bind(['\\'], 'zen', 'Show or hide both side columns'),
     { ...bind(['\\'], 'sidebar', 'Toggle constitution sidebar'), command: true },
     { ...bind(['|'], 'rail', 'Toggle the threads rail'), command: true },
     bind(['h', 'ArrowLeft', '‹'], 'back', 'Back to the previous page'),
@@ -108,11 +109,62 @@ export function keyIntent(event: KeyboardEvent, surface: KeySurface,
   const key = event.key === ' ' && event.shiftKey ? 'Shift+ ' : event.key
   const binding = bindings[surface].find(b => !!b.command === command && !!b.alt === event.altKey && b.keys.includes(key))
   if (!binding) return null
-  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation', 'rest', 'pin', 'orchestrator'].includes(binding.intent)) return null
+  if (event.repeat && ['open', 'back', 'help', 'find', 'sidebar', 'rail', 'zen', 'temper', 'discard', 'toReview', 'undoVerdict', 'compose', 'conversation', 'rest', 'pin', 'orchestrator'].includes(binding.intent)) return null
   return binding.intent
 }
 
-export function bindingKeyLabel(binding: KeyBinding): string {
+/** How one physical key of a binding reads in the help guide. */
+export function keyLabels(binding: KeyBinding): string[] {
   const names: Record<string, string> = { ArrowLeft: '←', ArrowRight: '→', ArrowDown: '↓', ArrowUp: '↑', Escape: 'Esc', ' ': 'Space', 'Shift+ ': '⇧Space', J: '⇧J', K: '⇧K' }
-  return binding.keys.map(key => `${binding.command ? '⌘' : ''}${binding.alt ? '⌥' : ''}${names[key] ?? key}`).join(' / ')
+  return binding.keys.map(key => `${binding.command ? '⌘' : ''}${binding.alt ? '⌥' : ''}${names[key] ?? key}`)
 }
+
+export interface HelpRow {
+  keys: readonly string[]
+  label: string
+  /** The bindings this row explains, as surface and intent. */
+  covers: ReadonlyArray<readonly [KeySurface, KeyIntent]>
+}
+export interface HelpSection { title: string; note?: string; rows: readonly HelpRow[] }
+
+const everywhere = (...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> =>
+  (['desk', 'overview', 'reader'] as const).flatMap(surface => intents.map(intent => [surface, intent] as const))
+const on = (surface: KeySurface, ...intents: KeyIntent[]): Array<readonly [KeySurface, KeyIntent]> => intents.map(intent => [surface, intent] as const)
+const row = (keys: string[], label: string, covers: Array<readonly [KeySurface, KeyIntent]>): HelpRow => ({ keys, label, covers })
+
+/** The guide `?` opens, by what a key is for rather than where it is pressed.
+ * A test holds it to `surfaceBindings`: every binding appears in a row that
+ * covers its surface and intent and shows each of its keys. */
+export const helpSections: readonly HelpSection[] = [
+  { title: 'Everywhere', rows: [
+    row(['1', '2', '3'], 'Desk, Chronicle, Board', everywhere('desk', 'chronicle', 'board')),
+    row(['/'], 'Find', everywhere('find')),
+    row(['Esc'], 'Close a layer, then step back', everywhere('back')),
+    row(['?'], 'This guide', everywhere('help')),
+  ] },
+  { title: 'Moving', note: 'On the Desk and the Board.', rows: [
+    row(['j', 'k', '↓', '↑'], 'Next / previous card or folio', [...on('desk', 'down', 'up'), ...on('overview', 'down', 'up')]),
+    row(['h', 'l', '←', '→'], 'Previous / next column', [...on('desk', 'left', 'right'), ...on('overview', 'left', 'right')]),
+    row(['g', 'G'], 'First / last in the column', [...on('desk', 'first', 'last'), ...on('overview', 'first', 'last')]),
+    row(['Enter', 'o'], 'Open; on a fiber page, expand it', everywhere('open')),
+  ] },
+  { title: 'A constitution', note: `The selected card, or the open fiber. Verdicts write after ${VERDICT_UNDO}; z or Undo cancels the latest.`, rows: [
+    row(['c', '.'], 'Open its conversation', everywhere('conversation')),
+    row(['r'], 'Write to it', [...on('desk', 'compose'), ...on('reader', 'compose')]),
+    row(['t'], 'Temper', [...on('desk', 'temper'), ...on('reader', 'temper')]),
+    row(['x'], 'Discard', [...on('desk', 'discard'), ...on('reader', 'discard')]),
+    row(['a'], 'Move to Awaiting review', [...on('desk', 'toReview'), ...on('reader', 'toReview')]),
+    row(['s'], 'Rest, with or without a date', [...on('desk', 'rest'), ...on('reader', 'rest')]),
+    row(['z'], 'Undo the latest pending verdict', [...on('desk', 'undoVerdict'), ...on('reader', 'undoVerdict')]),
+    row(['b'], 'Go to its orchestrator', on('reader', 'orchestrator')),
+  ] },
+  { title: 'Fiber page', rows: [
+    row(['j', 'k', '⌥↓', '⌥↑'], 'Next / previous constitution', on('reader', 'nextChannel', 'prevChannel')),
+    row(['⇧J', '⇧K'], 'Next / previous sidebar column', on('reader', 'nextGroup', 'prevGroup')),
+    row(['h', '←', '‹', '⌥←'], 'Back a page', on('reader', 'back')),
+    row(['↓', '↑', 'd', 'u', 'Space', '⇧Space'], 'Scroll: line, half page, page', on('reader', 'scrollDown', 'scrollUp', 'halfDown', 'halfUp', 'pageDown', 'pageUp')),
+    row(['\\'], 'Show or hide both side columns', on('reader', 'zen')),
+    row(['⌘\\', '⌘|'], 'Constitutions sidebar / threads rail', on('reader', 'sidebar', 'rail')),
+    row(['p', '[', ']'], 'Audio: play or pause, back or forward 5 s', on('reader', 'audioPlay', 'audioBack', 'audioForward')),
+  ] },
+]

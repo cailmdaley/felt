@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { DOCUMENT_KEY_INTENTS, keyIntent, shouldForwardDocumentKey, surfaceBindings, type KeySurface } from './keymap.js'
+import { DOCUMENT_KEY_INTENTS, helpSections, keyIntent, keyLabels, shouldForwardDocumentKey, surfaceBindings, type KeySurface } from './keymap.js'
 
 function event(key: string, init: KeyboardEventInit = {}, target?: HTMLElement): KeyboardEvent {
   const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
@@ -21,6 +21,19 @@ describe('shared keyboard table', () => {
       }
     }
     expect(misses).toEqual([])
+  })
+  it('the help guide explains every binding once per surface, showing each of its keys', () => {
+    const missing: string[] = []
+    for (const surface of ['desk', 'overview', 'reader'] as KeySurface[]) {
+      for (const binding of surfaceBindings[surface]) {
+        const rows = helpSections.flatMap(section => section.rows).filter(row => row.covers.some(([s, i]) => s === surface && i === binding.intent))
+        if (!rows.some(row => keyLabels(binding).every(label => row.keys.includes(label)))) missing.push(`${surface}: ${keyLabels(binding).join(' ')} → ${binding.intent}`)
+      }
+    }
+    const declared = new Set(Object.entries(surfaceBindings).flatMap(([surface, bindings]) => bindings.map(b => `${surface}:${b.intent}`)))
+    const phantom = helpSections.flatMap(section => section.rows).flatMap(row => row.covers.map(([s, i]) => `${s}:${i}`)).filter(cover => !declared.has(cover))
+    expect(missing).toEqual([])
+    expect(phantom).toEqual([])
   })
   it('routes 1·2·3 to the same view intents on every surface, without forwarding them into documents', () => {
     const intents = ['desk', 'chronicle', 'board'] as const

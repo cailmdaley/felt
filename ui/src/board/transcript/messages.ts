@@ -25,6 +25,8 @@ export interface ShuttleMessage {
   text: string
   source?: string
   verb?: 'closed' | 'asked' | 'handed off' | 'rested'
+  /** The human's verdict on a closed thread, as the notice states it: `tempered`, `discarded`. */
+  verdict?: string
   toolId?: string
   status?: 'pending' | 'sent' | 'failed' | 'uncertain'
   commandIndex?: number
@@ -153,7 +155,7 @@ export function shuttleMessages(source: string, at?: number, anchored = false, p
     const id = match[1]
     const metadata = match[2]
     const body = match[3].trim()
-    const result = /^thread ([^\s<>]+) (closed|asked|handed off|rested):[ \t]*([\s\S]*)$/.exec(body)
+    const result = /^thread ([^\s<>]+) (closed|asked|handed off|rested)(?: \(([^()\r\n]+)\))?:[ \t]*([\s\S]*)$/.exec(body)
     if (part.thread === true && id.startsWith('thread-') && result && THREAD_VERB.has(result[2])) {
       const fiber = result[1]
       messages.push(withTime({
@@ -163,8 +165,9 @@ export function shuttleMessages(source: string, at?: number, anchored = false, p
         peer: leaf(fiber),
         fiber,
         target: fiber,
-        text: result[3].trim(),
+        text: result[4].trim(),
         verb: result[2] as ShuttleMessage['verb'],
+        ...(result[3] ? { verdict: result[3] } : {}),
       }, at))
       continue
     }

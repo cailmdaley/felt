@@ -267,6 +267,14 @@ describe('Shuttle messages in transcripts', () => {
     })])
   })
 
+  it('reads a reviewed thread close, keeping the human verdict apart from the outcome', () => {
+    const result = `[Shuttle message thread-${'b'.repeat(64)} from shuttle]\nthread research/workspace/child closed (tempered): Status survives. (human verdict: tempered)`
+    expect(normalizeRecord({ type: 'user', timestamp: time, isMeta: true, message: { content: result } }, [provenance(result)])).toEqual([expect.objectContaining({
+      kind: 'shuttle-message', direction: 'received', peer: 'child', fiber: 'research/workspace/child',
+      verb: 'closed', verdict: 'tempered', text: 'Status survives. (human verdict: tempered)',
+    })])
+  })
+
   it('does not classify quoted messages or a shell search as deliveries', () => {
     expect(normalizeRecord({ type: 'assistant', message: { content: [{ type: 'text', text: '[Shuttle message msg-1234 from shuttle://host/pi/session]\nquoted' }] } }))
       .toEqual([expect.objectContaining({ kind: 'text' })])

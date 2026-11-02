@@ -497,17 +497,19 @@
 }
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-steplist :is(.ws-transcript-tool-detail pre, .ws-transcript-thinking-text) { max-height: 22em; }
 
+/* A message between sessions is its own small card, apart from the agent's prose. */
 :is(.ws-dock, .ws-transcript-pane) .ws-transcript-shuttle-message,
 .ws-chat .ws-transcript-inline .ws-transcript-shuttle-message {
   display: block;
-  margin: 7px 0;
-  padding: 2px 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--ws-hairline);
+  border-radius: var(--ws-radius, 6px);
+  background: var(--ws-fill, none);
   color: var(--ws-ink-muted);
   font-size: var(--type-note);
 }
+:is(.ws-dock, .ws-transcript-pane) .ws-transcript-shuttle-message[data-status='failed'] { border-style: dashed; }
 .ws-transcript-message-expander { min-width: 0; }
 .ws-transcript-message-toggle {
   display: flex;
@@ -525,10 +527,8 @@
 .ws-transcript-message-peer { flex: 0 1 auto; min-width: 0; color: var(--ws-ink-soft); }
 /* An unverified sender: a quiet mark, its claim on hover. */
 .ws-transcript-session-chip.ws-transcript-message-unverified {
-  min-width: 0;
-  border-style: dashed;
-  background: none;
   color: var(--ws-ink-faint, var(--ws-ink-muted));
+  text-decoration: underline dotted;
   cursor: help;
 }
 .ws-transcript-message-route { display: inline-flex; align-items: baseline; gap: .35em; flex: 0 1 auto; min-width: 0; white-space: nowrap; }
@@ -542,13 +542,18 @@
   white-space: nowrap;
 }
 .ws-transcript-message-peer-label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-transcript-session-chip {
+/* A sender that links nowhere is plain text, not a chip. */
+.ws-transcript-message-peer.ws-transcript-session-chip {
+  display: inline-flex;
   flex: 0 1 auto;
-  min-width: min(8em, 100%);
-  max-width: min(24em, 60vw);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ws-ink-soft);
   overflow: hidden;
   white-space: nowrap;
-  cursor: default;
+  cursor: inherit;
 }
 .ws-transcript-session-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-transcript-session-id { flex: 0 0 auto; white-space: nowrap; }
@@ -572,7 +577,7 @@
 .ws-transcript-message-head:has(> .ws-transcript-message-time)::after { display: none; }
 .ws-transcript-message-time::before { content: '⌄'; position: relative; top: -0.08em; margin-right: 5px; color: var(--ws-ink-faint, var(--ws-ink-muted)); font-family: var(--font-serif); }
 .ws-transcript-message-toggle[data-expanded='true'] .ws-transcript-message-time::before { content: '⌃'; }
-.ws-transcript-message-detail { margin: 5px 0 1px; padding-left: 9px; border-left: 1px solid var(--ws-hairline); color: var(--ws-ink-soft); }
+.ws-transcript-message-detail { margin: 6px 0 1px; color: var(--ws-ink-soft); }
 .ws-transcript-message-detail[hidden], .ws-transcript-message-thread-state[hidden], .ws-transcript-message-text[hidden], .ws-transcript-message-source[hidden], .ws-transcript-message-command[hidden], .ws-transcript-message-outcome[hidden] { display: none; }
 .ws-transcript-message-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ws-transcript-message-source { color: var(--ws-ink-muted); font-style: italic; }

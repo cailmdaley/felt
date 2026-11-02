@@ -32,11 +32,13 @@
 .kbn-keymap-dialog .kbn-keymap-close { min-width: var(--ws-phone-target); padding: 0; background: transparent; border: 0; font: var(--type-title)/var(--leading-solid) var(--font-serif); }
 .kbn-keymap-dialog .kbn-keymap-close:hover { background: var(--ws-hover); }
 .kbn-keymap-dialog button:focus-visible { outline: 2px solid var(--kbn-ink); outline-offset: 2px; }
-.kbn-keymap-sections { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
-.kbn-keymap-sections h3 { font: 500 var(--type-title)/var(--leading-tight) var(--font-serif); margin: 12px 0; }
-.kbn-keymap-sections dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: baseline; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
+.kbn-keymap-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 40px; }
+.kbn-keymap-sections h3 { font: 500 var(--type-title)/var(--leading-tight) var(--font-serif); margin: 12px 0 4px; }
+.kbn-keymap-sections p { margin: 0 0 8px; }
+.kbn-keymap-sections dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 10px 12px; align-items: baseline; font: var(--type-label)/var(--leading-ui) var(--font-serif); }
 .kbn-keymap-sections dt, .kbn-keymap-sections dd { margin: 0; }
-.kbn-keymap-sections kbd { font: var(--type-meta)/var(--leading-tight) var(--font-mono); white-space: nowrap; }
+.kbn-keymap-sections dt { display: flex; flex-wrap: wrap; gap: 3px; max-width: 13em; }
+.kbn-keymap-sections kbd { font: var(--type-meta)/var(--leading-tight) var(--font-mono); white-space: nowrap; min-width: 1.4em; text-align: center; padding: 2px 5px; border: 1px solid var(--ws-hairline); border-radius: 4px; background: var(--ws-fill); }
 .kbn-keymap-sections dd { color: var(--kbn-ink-muted); line-height: var(--leading-ui); }
 @media (max-width: 700px), (max-height: 500px) and (pointer: coarse) {
   .kbn-keymap-overlay { padding: 12px; }
