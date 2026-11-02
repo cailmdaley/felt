@@ -724,7 +724,7 @@ func (a *app) printStatusTable(rows []FiberStatus, showClosed bool) {
 			agent += " !"
 		}
 		state := r.State
-		if r.Stale {
+		if r.Stale && r.Source != "unresolvable" {
 			state += " [local copy; owner unreachable]"
 		}
 		fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n",

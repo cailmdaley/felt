@@ -54,6 +54,13 @@ func (a *app) readStatusOwner(f *felt.Felt, localFallback bool, feed *statusFeed
 	endpoint += "?" + url.Values{"origin": {block.Host}}.Encode()
 	body, err := a.getDaemon(endpoint, daemonReadTimeout)
 	if err != nil {
+		var status daemonStatusError
+		if localFallback && errors.As(err, &status) && strings.Contains(status.body, "unknown origin") {
+			result.Stale = true
+			result.Source = "unresolvable"
+			result.Error = err.Error()
+			return result, nil
+		}
 		if localFallback && ownerReadUnavailable(err, block.Host) {
 			result.Stale = true
 			result.Source = "local_fallback"
@@ -191,10 +198,13 @@ func (a *app) statusRemoteRow(entry shuttleEntry, feed *statusFeed) (FiberStatus
 		return FiberStatus{}, fmt.Errorf("owner feed does not own %s", entry.FiberID)
 	}
 	row := FiberStatus{FiberID: read.Fiber.ID, Origin: block.Host, Kind: block.Kind, Agent: block.Agent, State: computeState(block, read.Fiber.Status, read.Running), Running: read.Running, Session: read.Session, Stale: read.Stale, Source: read.Source, ReadError: read.Error}
+	if read.Source == "unresolvable" {
+		row.State = "unresolvable: " + block.Host
+	}
 	if read.Fiber.Status == felt.StatusActive && !read.RuntimeKnown && !read.Stale {
 		row.State = "active (worker unknown)"
 	}
-	if horizonStashed(read.Fiber) && !read.Running {
+	if horizonStashed(read.Fiber) && !read.Running && read.Source != "unresolvable" {
 		row.State = "resting"
 	}
 	return row, nil
@@ -238,6 +248,7 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 	}
 	rows := []FiberStatus{}
 	seen := map[string]bool{}
+	var disagreements []FiberStatus
 	for _, entry := range feed.Fibers {
 		if only != "" && entry.Origin != only {
 			continue
@@ -253,8 +264,10 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 		if !ok {
 			continue
 		}
-		if block.Host != entry.Origin {
-			return nil, fmt.Errorf("status inventory origin %q does not own %s", entry.Origin, f.ID)
+		if block.Host != entry.Origin && !(block.Host == "" && entry.Origin == own) {
+			// The owner or an archive fallback may supply this document.
+			disagreements = append(disagreements, FiberStatus{FiberID: f.ID, Origin: block.Host, Kind: block.Kind, Agent: block.Agent, State: "ownership disagreement", Stale: true, Source: "inventory", ReadError: fmt.Sprintf("inventory origin %q does not own fiber (host %q)", entry.Origin, block.Host)})
+			continue
 		}
 		key := entry.Origin + ":" + f.ID
 		origin := entry.Origin
@@ -276,12 +289,9 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 		seen[key] = true
 	}
 	stores, storeErr := a.shuttleStores()
-	if storeErr != nil {
-		return rows, nil
-	}
-	entries, storeErr := a.listShuttleFibersAcrossStores(stores)
-	if storeErr != nil {
-		return rows, nil
+	var entries []shuttleEntry
+	if storeErr == nil {
+		entries, _ = a.listShuttleFibersAcrossStores(stores)
 	}
 	for _, entry := range entries {
 		host := entry.Block.Host
@@ -297,6 +307,14 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 			return nil, err
 		}
 		rows = append(rows, row)
+		seen[host+":"+entry.FiberID] = true
+	}
+	for _, row := range disagreements {
+		key := row.Origin + ":" + row.FiberID
+		if !seen[key] && (only == "" || only == row.Origin) {
+			rows = append(rows, row)
+			seen[key] = true
+		}
 	}
 	return rows, nil
 }

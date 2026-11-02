@@ -777,10 +777,13 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 					}
 					anyBlock := func(*felt.Felt, *shuttle.Block) bool { return true }
 					if routed, err := a.routeLifecycle(cmd, "close", args[0], anyBlock, fields); routed || err != nil {
-						if routed && err == nil && a.isOwnFiber(candidate) {
-							a.endOwnTerminal()
+						var unknown unknownOwnerError
+						if !(candidate.Status == felt.StatusClosed && tempered != nil && errors.As(err, &unknown)) {
+							if routed && err == nil && a.isOwnFiber(candidate) {
+								a.endOwnTerminal()
+							}
+							return err
 						}
-						return err
 					}
 				}
 			}
@@ -792,7 +795,10 @@ fiber leaves your session running.` + workerExitIdentityHelp,
 
 			owner, err := a.routeOwnerForCommand(cmd, args, block.Host)
 			if err != nil {
-				return err
+				var unknown unknownOwnerError
+				if !(f.Status == felt.StatusClosed && tempered != nil && errors.As(err, &unknown)) {
+					return err
+				}
 			}
 			if owner != "" {
 				fields := map[string]any{}

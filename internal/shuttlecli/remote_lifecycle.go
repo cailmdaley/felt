@@ -19,6 +19,8 @@ import (
 
 const maxLaunchMessageBytes = 64 << 10
 
+type unknownOwnerError struct{ error }
+
 // routeOwnerForCommand returns a remote owner only when the fiber's explicit
 // shuttle.host differs from this host and names a remote in the resolved
 // fleet: remotes.json or a tailnet peer the local daemon discovered. An
@@ -57,9 +59,11 @@ func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost 
 	}
 	path, _ := a.shuttleRemotesPath()
 	reason := fmt.Sprintf("host %q is neither an enabled remote in %s nor a discovered tailnet peer", owner, path)
+	discoveryFailed := false
 	if doc.discoverEnabled() {
 		discovery, err := a.fetchDaemonDiscovery()
 		if err != nil {
+			discoveryFailed = true
 			reason += fmt.Sprintf(" (discovered peers unknown: %v)", err)
 		} else {
 			for _, remote := range a.admitDiscovered(doc, discovery.Peers) {
@@ -69,7 +73,11 @@ func (a *app) routeOwnerForCommand(cmd *cobra.Command, args []string, blockHost 
 			}
 		}
 	}
-	return "", ownerRouteRefusal(cmd, args, owner, reason)
+	refusal := ownerRouteRefusal(cmd, args, owner, reason)
+	if !discoveryFailed {
+		return "", unknownOwnerError{refusal}
+	}
+	return "", refusal
 }
 
 // localFlagUsage is the one description of --local on every verb that can
@@ -84,7 +92,7 @@ func localOnly(cmd *cobra.Command) bool {
 
 func ownerRouteRefusal(cmd *cobra.Command, args []string, owner, reason string) error {
 	command := directOwnerCommand(cmd, args)
-	return fmt.Errorf("cannot route to owning host %q: %s. Run `%s` on that host, or configure it with `shuttle remotes add %s --port <local-tunnel-port>`", owner, reason, command, owner)
+	return fmt.Errorf("cannot route to owning host %q: %s. Run `%s` on that host, or configure it with `shuttle remotes add %s --port <local-tunnel-port>` or edit shuttle.host in the fiber", owner, reason, command, owner)
 }
 
 // directOwnerCommand gives the operator an actionable fallback without

@@ -1451,3 +1451,17 @@ func TestResumeLegacyRestSuppressesHandoffNotice(t *testing.T) {
 		t.Fatalf("legacy rest can become a handoff: status=%s runtime=%v", got.Status, shuttleRuntimeMap(t, got))
 	}
 }
+
+func TestClosedUnknownOwnerVerdict(t *testing.T) {
+	env := testEnv(t)
+	ownHost(t, env, "hub")
+	writeRemotesIn(t, env, `{"version":1,"defaults":{"discover":false},"remotes":[]}`)
+	dir, st := newStore(t)
+	seedShuttleRole(t, st, "archive", felt.StatusClosed, map[string]any{"kind": "oneshot", "host": "retired"}, nil)
+	if out, err := runIn(t, env, dir, "close", "archive", "--tempered=true"); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if v := readTempered(mustRead(t, st, "archive")); v == nil || !*v {
+		t.Fatal("missing verdict")
+	}
+}
