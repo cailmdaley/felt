@@ -28,6 +28,14 @@ describe('constitution roll-up', () => {
 })
 
 describe('composite app runtime', () => {
+  it.each(['rex', 'tmux', null, 'other'])('carries the observed terminal backend %s into the card', terminal => {
+    const feed = parseCompositeFeed({ fibers: [{
+      origin: 'local', felt_store: '/felt', path: 'idea.md',
+      fiber: { id: 'idea', name: 'Idea', status: 'active' },
+      runtime: { state: 'running', tmux_session: 'worker', terminal },
+    }] })
+    expect(cardFromCompositeEntry(feed.entries[0]).terminalBackend).toBe(terminal === 'rex' || terminal === 'tmux' ? terminal : undefined)
+  })
   it('carries the owner-served launch instant into the board without a second runtime read', () => {
     const feed = parseCompositeFeed({ fibers: [{
       origin: 'local', felt_store: '/felt', path: 'idea.md',

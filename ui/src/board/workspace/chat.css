@@ -20,8 +20,8 @@
      first row; state and verbs have the row beneath to themselves. */
   --ws-head-pad: 8px;
   flex: none; display: grid; min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-  grid-template-areas: 'lead identity refs settings leave' 'acts acts acts acts acts';
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-areas: 'lead identity refs console settings leave' 'acts acts acts acts acts acts';
   align-items: start; gap: 2px 8px;
   padding: var(--ws-head-pad) 16px; container-type: inline-size;
   border-bottom: var(--ws-line-width) solid var(--ws-hairline-soft);
@@ -29,6 +29,7 @@
 .ws-chat-head > .ws-chat-lead { grid-area: lead; align-self: start; }
 .ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
 .ws-chat-head > .ws-chat-settings { grid-area: settings; align-self: start; }
+.ws-chat-head > .ws-chat-console { grid-area: console; align-self: center; }
 .ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
 /* The constitution and the artifact are a pair of icons, named by their titles; on the title row they sit before ⚙. */
@@ -102,13 +103,6 @@
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:hover:not(:disabled), .kbn-verb-menu .ws-header-icon:focus, .ws-reader .ws-header-icon[aria-expanded='true'] { color: var(--ws-ink); background: var(--ws-hover); }
 .ws-header-icon:focus-visible, .ws-report-chip:focus-visible { outline: 2px solid var(--ws-state-working); outline-offset: 2px; }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon:is(.kbn-ctl-temper, .kbn-ctl-discard) { color: var(--verdict-ink); }
-.ws-header-overflow { display: flex; align-items: center; gap: 8px; }
-.ws-header-overflow:empty { display: none; }
-.ws-settings-menu .ws-header-overflow { padding: 4px 8px; border-bottom: 1px solid var(--ws-hairline-soft); }
-.ws-reader .ws-header-overflow .kbn-ctl-verdict { display: flex; gap: 8px; }
-.ws-reader .ws-header-overflow .kbn-ctl-verdict[hidden] { display: none; }
-.ws-reader .ws-header-overflow .ws-header-icon { width: auto; min-height: 44px; padding: 8px; gap: 6px; grid-auto-flow: column; font-size: var(--type-label); }
-.ws-header-overflow .ws-header-icon:not(.ws-header-verb)::after { content: attr(aria-label); font-family: var(--font-serif); }
 :is(.ws-reader, .kbn-verb-menu) .ws-header-icon.ws-header-verb { width: auto; grid-auto-flow: column; gap: 6px; padding: 0 8px 0 6px; }
 .ws-header-word { font: var(--type-label)/var(--leading-solid) var(--font-serif); white-space: nowrap; }
 /* A Desk row's menu lists the same verbs, drawn as the header draws them. */
@@ -216,7 +210,7 @@
 
 /* Narrow desktop cards give the title a full row and keep the action row compact. */
 @container (max-width: 560px) {
-  .ws-chat-head { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) auto; grid-template-areas: 'lead identity identity leave' 'acts acts acts acts'; align-items: start; }
+  .ws-chat-head { grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: 'lead identity console settings leave' 'acts acts acts acts acts'; align-items: start; }
   .ws-chat-head > .ws-chat-identity { align-self: start; }
   .ws-chat-title { font-size: var(--type-prose); -webkit-line-clamp: 2; }
   .ws-chat-head > .ws-chat-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 2px; }
@@ -249,11 +243,11 @@
   /* A page without a back destination keeps the title inset. */
   .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
-  .ws-chat-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: 'lead identity settings leave' 'acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
+  .ws-chat-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: 'lead identity console settings leave' 'acts acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
   .ws-chat-acts { justify-content: flex-start; }
   .ws-chat-acts > .ws-chat-settings { width: 36px; height: var(--ws-phone-target); }
   .ws-chat-acts > .ws-chat-refs { margin-left: 0; }
-  /* The verbs never squeeze under ⚙: their overflow is what sends ⚙ to the title row. */
+  /* Console and settings stay beside the title; state and verbs have their own row. */
   .ws-chat-acts > .kbn-ctl-verdict { flex: none; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
   .ws-chat-head > .ws-chat-leave { align-self: center; }
@@ -270,11 +264,10 @@
   .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; height: 44px; }
   .ws-chat .ws-chat-head > .ws-chat-lead { align-self: center; }
   .ws-chat-standing { gap: 6px; }
-  /* Phone state, settings and references share one grouped action row. */
+  /* Phone state and references share one grouped action row. */
   .ws-chat-identity { flex-direction: column; align-items: flex-start; gap: 0; }
   .ws-chat-state { font-size: var(--type-label); }
   .ws-chat .ws-transcript-meter { font-size: var(--type-meta); }
-  .ws-header-overflow { flex-wrap: wrap; }
   /* Keep the message and its one-row footer inside the phone field. */
   .ws-chat .ws-chat-compose .kbn-ctl-composer:not(:focus-within):not(:has(.kbn-ctl-meet-on)) .kbn-detail-directive { grid-column: 1 / -1; grid-row: 1; min-height: 0; max-height: calc(var(--ctl-h) + 8px); }
   .ws-chat .ws-chat-compose .kbn-ctl-composer-foot { grid-column: 1 / -1; grid-row: 3; justify-self: stretch; }

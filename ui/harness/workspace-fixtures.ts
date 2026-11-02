@@ -140,6 +140,7 @@ export const MUSIC_TRACKS = 19
 /** `music` adds a listening channel: a report and nineteen recordings, the shape of a real album review. */
 export function workspaceExample(now: number, options: { music?: boolean; transcriptScenario?: string | null } = {}): WorkspaceExample {
   const { transcriptScenario = null } = options
+  const console = new URLSearchParams(location.search).get('console')
   const minute = 60_000
   const day = 86_400_000
   const project = '/fixture-store/workspace'
@@ -153,7 +154,7 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
       id: WORKSPACE_ID,
       uid: WORKSPACE_UID,
       name: WORKSPACE_NAME,
-      status: transcriptScenario === 'live' ? 'active' : 'closed',
+      status: transcriptScenario === 'live' || console ? 'active' : 'closed',
       age: 0.1,
       outcome: transcriptScenario === 'long-outcome' ? LONG_OUTCOME : 'The response passes the null test at every scale; the report and source products are ready for review.',
       host: WORKSPACE_HOST,
@@ -265,14 +266,17 @@ export function workspaceExample(now: number, options: { music?: boolean; transc
         },
       },
     }
-    if (fiber.id === WORKSPACE_ID && transcriptScenario === 'live') {
+    if (fiber.id === WORKSPACE_ID && (transcriptScenario === 'live' || console)) {
       entry.runtime = {
         state: 'running',
         phase: 'working',
-        surface: 'cli',
-        tmux_session: 'fixture-transcript-worker',
+        surface: console === 'chatgpt' ? 'app' : 'cli',
+        tmux_session: console === 'chatgpt' ? undefined : 'fixture-transcript-worker',
+        terminal: console?.startsWith('rex-') ? undefined : console === 'rex' ? 'rex' : 'tmux',
+        session_link: console && !console.startsWith('rex-') && console !== 'unlinked' && console !== 'chatgpt' ? 'https://claude.ai/code/session_fixture' : undefined,
+        desktop_link: console === 'chatgpt' ? 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693' : undefined,
         session_uuid: WORKSPACE_LATEST_SESSION,
-        agent: 'claude-opus',
+        agent: console === 'rex-pi' ? 'pi-sol' : console === 'chatgpt' || console === 'rex-codex' ? 'codex-sol' : 'claude-opus',
         last_activity_at: now - 5_000,
         started_at: now - 3 * minute,
       }

@@ -17,13 +17,11 @@ export function workerPlateFacts(card: KanbanCard, now = Date.now()): { turn: Tu
 
 /**
  * Decorate the real conversation target, never a second opening mechanism:
- * a dot in the turn's pigment, the turn's word, and the age. A fallback route
- * the builder named after a middot ("· browser") stays as a quiet suffix.
+ * a dot in the turn's pigment, the turn's word, and the age.
  */
 export function workerPlate(card: KanbanCard, target: HTMLElement | null): HTMLElement {
   const facts = workerPlateFacts(card, Date.now())
   const plate = target ?? document.createElement('span')
-  const via = plate.querySelector('.ws-worker-via')?.textContent ?? plate.textContent?.match(/ · (.+)$/)?.[1]
   plate.classList.add('ws-worker-control')
   plate.classList.toggle('ws-turn-active', facts.busy)
   plate.dataset.turn = facts.turn
@@ -36,6 +34,6 @@ export function workerPlate(card: KanbanCard, target: HTMLElement | null): HTMLE
   // The dot is the plate's first item, so it centres on the capitals beside it and stands alone where the words are hidden.
   const dot = part('ws-worker-dot')
   dot.setAttribute('aria-hidden', 'true')
-  plate.replaceChildren(dot, part('ws-worker-state', facts.word), part('ws-worker-elapsed', facts.elapsed ?? ''), ...(via ? [part('ws-worker-via', via)] : []))
+  plate.replaceChildren(dot, part('ws-worker-state', facts.word), part('ws-worker-elapsed', facts.elapsed ?? ''))
   return plate
 }

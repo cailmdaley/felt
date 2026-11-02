@@ -88,10 +88,32 @@ describe('header action placement', () => {
     expect(header.querySelector('.ws-chat-standing')?.parentElement).toBe(band.head)
     expect(header.querySelector('.kbn-ctl-verdict')?.parentElement).toBe(band.head)
     expect(band.el.querySelector('.ws-header-overflow .kbn-ctl-verdict')).toBeNull()
-    expect(header.querySelector('.ws-chat-settings')?.parentElement).toBe(band.head)
+    expect(header.querySelector('.ws-chat-settings')?.parentElement).toBe(header)
     expect(header.querySelector('.ws-chat-refs')?.parentElement).toBe(band.head)
     phone = false; window.dispatchEvent(new Event('resize'))
     expect(verbs()).toEqual(['Close for review', 'Rest'])
+  })
+
+  it.each([{ phone: true, width: 390 }, { phone: false, width: 420 }, { phone: false, width: 900 }])('keeps Console outside overflow at $width px (phone=$phone)', ({ phone, width }) => {
+    vi.stubGlobal('matchMedia', () => ({ matches: phone, addEventListener: vi.fn(), removeEventListener: vi.fn() }))
+    dock.reset(); dock = new Dock('', saved, undefined, vi.fn())
+    const worker = task({ status: 'active', tmuxSession: 'console-worker', sessionLink: 'https://claude.ai/code/session_console' })
+    band = dock.bandFor(worker); document.body.append(band.el)
+    const header = band.el.querySelector<HTMLElement>('.ws-chat-head')!
+    Object.defineProperty(header, 'clientWidth', { value: width })
+    window.dispatchEvent(new Event('resize'))
+    const console = header.querySelector<HTMLButtonElement>('.ws-chat-console')!
+    expect(console.parentElement).toBe(header)
+    expect(console.hidden).toBe(false)
+    expect(console.getAttribute('aria-label')).toBe(phone ? 'Open in Claude browser' : 'Open in Terminal')
+    expect(band.el.querySelector('.ws-chat-drawer .ws-chat-console')).toBeNull()
+    console.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    expect(document.querySelectorAll('[role="menuitemradio"]')).toHaveLength(phone ? 1 : 3)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    if (!phone) {
+      dock.syncRuntime({ ...worker, terminalBackend: 'rex' })
+      expect(console.getAttribute('aria-label')).toBe('Open in Rex')
+    }
   })
 
   it('draws the header verbs selected for each lifecycle state', () => {
@@ -591,7 +613,8 @@ describe('state-shaped act zone', () => {
     const buttons = [...band.el.querySelectorAll<HTMLButtonElement>('.ws-chat-head button')].filter(button => !button.hidden)
     expect(buttons.map(b => b.getAttribute('aria-label'))).toEqual(['Constitution', 'Settings', 'Close for review', 'Rest'])
     expect(band.el.querySelector('.ws-chat-refs .ws-chat-constitution')?.getAttribute('aria-label')).toBe('Constitution')
-    expect(band.el.querySelector('.ws-chat-drawer .ws-chat-console')?.getAttribute('aria-label')).toBe('Console')
+    expect(band.el.querySelector('.ws-chat-head .ws-chat-console')?.getAttribute('aria-label')).toBe('Console')
+    expect(band.el.querySelector('.ws-chat-drawer .ws-chat-console')).toBeNull()
     for (const button of buttons) {
       expect(button.title).toBe(button.getAttribute('aria-label'))
       expect(button.tabIndex).toBe(0)

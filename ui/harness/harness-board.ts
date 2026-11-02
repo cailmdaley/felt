@@ -1643,6 +1643,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.includes('/api/v1/version')) {
     return json({
       ...mockBuild('a1b2c3d', 7_200_000),
+      host: workspaceFixture?.host ?? LOCAL_HOST,
+      terminal: search.get('console')?.startsWith('rex') ? 'rex' : 'tmux',
       contract: { ok: true, expected: 2, observed: 2 },
       listen: 'unix:///home/you/.shuttle/sock/daemon.sock',
       host_class: 'single-user',

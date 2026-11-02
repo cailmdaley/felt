@@ -1447,7 +1447,7 @@ test('Verdicts live in the chat bar, with the undo line on its header; keys reac
   await leave(p); await chooseDeskColumn(p, 1)
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  assert.equal(await selected(p).locator('.ws-chat-drawer .ws-chat-console').count(), 1)
+  assert.equal(await selected(p).locator('.ws-chat-head > .ws-chat-console').count(), 1)
   assert.ok(await selected(p).getByRole('button', { name: 'Close for review', exact: true }).isVisible())
   assert.ok(await selected(p).getByRole('button', { name: 'Rest', exact: true }).isVisible())
 })
@@ -2210,10 +2210,10 @@ test('Remote worker conversation records attach handler without launching a term
   assert.match(event.session, /remote-review-01KVBR3H8DYFXNH96683RX89N0-shuttle/)
 })
 
-test("Console in Settings opens the same remote worker as c", async p => {
+test("Console in the header opens the same remote worker as c", async p => {
   await p.locator('.kbn-desk .kbn-card').filter({ hasText: 'Remote covariance review' }).click()
   await choose(p, 'Chat')
-  await headerAction(p, 'Console')
+  await selected(p).getByRole('button', { name: 'Open in Terminal', exact: true }).click()
   await poll(p, () => window.__harness.events.some(e => e.type === 'open-worker') || window.__harness.handlers.some(h => h.path === '/api/v1/attach'))
   const event = await p.evaluate(() => window.__harness.events.find(e => e.type === 'open-worker'))
   assert.equal(event.host, 'basalt-login-02')

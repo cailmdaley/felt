@@ -4,7 +4,8 @@
  * first. Claude opening follows the same browser preference as the worker pill. A
  * terminal action attaches to the live worker or resumes a past session on
  * its owning host (`POST /api/v1/attach`). Bridged Claude sessions can open
- * in the browser or installed desktop app; phones use the HTTPS link.
+ * in the browser or installed desktop app. Phones use the HTTPS link or open
+ * Rex's session list for a live CLI worker on a Rex host.
  * Sessions without a phone destination offer their id to copy.
  * {@link sessionTargets} makes that choice.
  *
@@ -16,7 +17,8 @@
  * is not asked.
  */
 import { clockTime, formatInstant, instantStamp, hostZone, isoDayLocal, type Zone } from './civilDay.js'
-import { effectiveClaudeOpening, REMOTE_CONTROL_REQUIRED, CLAUDE_APP_ROUTE_UNAVAILABLE, CONVERSATION_OPENING_CHANGED, type ClaudeOpening } from './conversationOpening.js'
+import { conversationDestinations, resolveDestination, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from './conversationOpening.js'
+export { claudeAppRoute, claudeWebLink } from './conversationLinks.js'
 import { isOriginStale, parseSessions, type SessionRecord, type TemporalOrigins } from './views/TemporalData.js'
 
 /** Rows shown before "all N" unfolds the rest. */
@@ -78,68 +80,28 @@ export type SessionTarget =
 export interface SessionTargets {
   primary: SessionTarget
   extras: SessionTarget[]
-  guidance?: string
-}
-
-/** A bridge URL naming one session: `https://claude.ai/code/session_<id>`. */
-const CLAUDE_SESSION = /^https:\/\/claude\.ai\/code\/((?:cse|session)_[A-Za-z0-9_-]+)$/
-
-/** The Claude desktop app's route for a bridged session, or undefined when the
- *  URL does not name exactly one session. */
-export function claudeAppRoute(url: string): string | undefined {
-  const match = CLAUDE_SESSION.exec(url)
-  const id = match?.[0] === url ? match[1] : undefined
-  return id ? `claude://claude.ai/code/${id}` : undefined
-}
-
-/** Only HTTPS links on Claude's exact origin can leave the board. */
-export function claudeWebLink(url: string | null | undefined): string | undefined {
-  if (!url || /\s/.test(url)) return undefined
-  try {
-    const parsed = new URL(url)
-    return parsed.origin === 'https://claude.ai' && !parsed.username && !parsed.password ? url : undefined
-  } catch { return undefined }
 }
 
 export interface TargetContext {
   /** A viewer at a desktop, where a kitty tab and the Claude app can be
    *  opened — not a phone. */
   desktop: boolean
-  opening?: ClaudeOpening
+  opening?: ConversationOpening
   /** The live worker's session and tmux, when one is running. */
   liveSession?: string
   liveTmux?: string
+  terminalBackend?: 'tmux' | 'rex'
   /** The fiber's host — where its live worker runs. */
   fiberHost?: string
 }
 
-/**
- * What a row does — the one place the choice is made.
- *
- *   · Terminal opening at a desktop attaches the live worker's row to its tmux, exactly as
- *     the worker pill does, and any other row resumes that session in a terminal on the
- *     host that ran it. Not offered: a live worker with no tmux (a Codex app
- *     conversation, which a terminal must not take from its app), and a session
- *     whose host found no transcript.
- *   · The browser's Claude preference selects the primary action for a
- *     bridged session, keeping terminal access beside it. Terminal opening
- *     keeps the desktop app beside the primary action. At a
- *     desktop `app ↗` (the Claude desktop app, `claude://claude.ai/code/…`)
- *     beside the terminal — `web ↗` only when the URL has no app route; on a
- *     phone its claude.ai page, which the Claude app there answers.
- *   · Anything else offers its id to copy.
- */
+/** History uses the worker destination order and preference, with attach/resume
+ *  in place of the live terminal opener. Rows without a destination copy their id. */
 export function sessionTargets(
   record: Pick<SessionRecord, 'session' | 'host'>,
   link: SessionLinkEntry | undefined,
   ctx: TargetContext,
 ): SessionTargets {
-  const url = claudeWebLink(link?.url)
-  const web: SessionTarget | undefined =
-    url ? { kind: 'web', href: url, label: ctx.desktop ? 'web' : 'claude.ai', title: url } : undefined
-  const route = web && ctx.desktop ? claudeAppRoute(web.href) : undefined
-  const app: SessionTarget | undefined = route ? { kind: 'app', href: route, label: 'app', title: route } : undefined
-
   let terminal: SessionTarget | undefined
   if (ctx.desktop) {
     const live = record.session === ctx.liveSession
@@ -160,29 +122,20 @@ export function sessionTargets(
     }
   }
 
-  const links: SessionTarget[] = []
-  if (app) links.push(app)
-  else if (web) links.push(web)
-  const choice = effectiveClaudeOpening(ctx.desktop, ctx.opening)
-  const preferred = choice === 'app' ? app : choice === 'browser' ? web : undefined
-  if (preferred) return { primary: preferred, extras: terminal ? [terminal] : [] }
-  if (choice === 'app' && web) return {
-    primary: { ...web, label: 'browser', title: `${CLAUDE_APP_ROUTE_UNAVAILABLE} ${web.href}` },
-    extras: terminal ? [terminal] : [], guidance: CLAUDE_APP_ROUTE_UNAVAILABLE,
+  const destinations = conversationDestinations({ sessionLink: link?.url ?? undefined,
+    tmuxSession: terminal ? record.session : record.session === ctx.liveSession ? ctx.liveTmux : undefined, terminalBackend: ctx.terminalBackend },
+    { desktop: ctx.desktop, userAgent: '', coarse: !ctx.desktop }, terminal ? () => {} : undefined)
+  const selected = resolveDestination(destinations, ctx.opening)
+  const target = (id: ConversationOpening): SessionTarget => {
+    if (id === 'terminal') return terminal!
+    const destination = destinations.find(destination => destination.id === id)!
+    return { kind: id === 'app' || id === 'rex' ? 'app' : 'web', href: destination.href!,
+      label: id === 'rex' ? 'Rex' : id === 'app' ? 'app' : ctx.desktop ? 'web' : 'claude.ai', title: destination.title ?? destination.href! }
   }
-  const claude = Boolean(web) || link?.harness === 'claude-code'
-  if (claude && choice !== 'terminal' && !preferred) {
-    if (terminal) return {
-      primary: { ...terminal, label: 'terminal', title: `${REMOTE_CONTROL_REQUIRED} Open this session in Kitty instead.` },
-      extras: [], guidance: REMOTE_CONTROL_REQUIRED,
-    }
-    return {
-      primary: { kind: 'copy', label: record.session.slice(0, 8), title: record.session, copy: record.session },
-      extras: [], guidance: REMOTE_CONTROL_REQUIRED,
-    }
+  if (selected) return {
+    primary: target(selected.id),
+    extras: destinations.filter(destination => destination.id !== selected.id).map(destination => target(destination.id)),
   }
-  if (terminal) return { primary: terminal, extras: links }
-  if (web) return ctx.desktop ? { primary: links[0], extras: links.slice(1) } : { primary: { ...web, label: 'claude.ai' }, extras: [] }
   return {
     extras: [],
     primary: {
@@ -373,7 +326,6 @@ export function buildSessionHistory(ctx: SessionHistoryContext): HTMLElement {
       li.append(read)
     }
     for (const extra of targets.extras) li.append(targetEl(extra, 'kbn-ctl-session-alt'))
-    if (targets.guidance) put('kbn-ctl-session-opening-note', targets.guidance)
     // The whole row is its primary action, as the worker pill is.
     if (targets.primary.kind === 'terminal') {
       li.classList.add('kbn-ctl-session-opens')

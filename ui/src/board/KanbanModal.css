@@ -1838,12 +1838,10 @@
   box-shadow: inset 0 0 0 1.5px var(--worker-dot);
 }
 .kbn-card-worker .ws-worker-state { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); }
-.kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed, .ws-worker-via) { text-box: trim-both cap alphabetic; }
+.kbn-card-worker > :is(.ws-worker-state, .ws-worker-elapsed) { text-box: trim-both cap alphabetic; }
 .kbn-card-worker .ws-worker-elapsed { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); font-variant-numeric: var(--worker-figures); color: var(--kbn-ink-muted); letter-spacing: 0; }
 .kbn-card-worker .ws-worker-elapsed:empty { display: none; }
 .kbn-card-worker:hover .ws-worker-elapsed { color: inherit; }
-.kbn-card-worker .ws-worker-via { font: 400 var(--type-meta)/var(--leading-solid) var(--font-mono); color: var(--kbn-ink-muted); }
-.kbn-card-worker .ws-worker-via::before { content: '· '; }
 /* A working turn breathes in its dot alone. */
 .kbn-card-worker.ws-turn-active .ws-worker-dot { animation: kbn-worker-breathe 2.4s ease-in-out infinite; }
 @keyframes kbn-worker-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }

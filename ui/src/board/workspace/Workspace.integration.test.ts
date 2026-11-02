@@ -1238,7 +1238,7 @@ describe('workspace reader integration', () => {
     expect(draft.value).toBe('Keep this draft')
     expect(document.querySelectorAll('.kbn-card-worker:not(.ws-sidebar *):not(.ws-navbar *):not(.ws-fiber-acts *)')).toHaveLength(0)
     expect(document.querySelectorAll('.ws-fiber-acts .kbn-card-worker')).toHaveLength(0)
-    expect(document.querySelector('.ws-chat-drawer .ws-chat-console')).not.toBeNull()
+    expect(document.querySelector('.ws-chat-head .ws-chat-console')).not.toBeNull()
     expect(document.querySelector('.ws-navbar .ws-head-worker .kbn-card-worker')?.textContent).toMatch(/^working/)
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     band.querySelector<HTMLButtonElement>('.kbn-ctl-sends .kbn-ctl-send:not(.kbn-ctl-resume)')!.click()
@@ -1327,9 +1327,9 @@ describe('workspace reader integration', () => {
   })
 
   it('opens the real worker conversation with c, without a panel or a pill on the fiber page', async () => {
-    const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a' }
+    const live = { ...cards[0], shuttleKind: 'oneshot' as const, shuttleAgent: 'codex-sol', tmuxSession: 'terminal-alpha', shuttleHost: 'daemon-a', terminalBackend: 'rex' as const }
     const openWorker = vi.fn()
-    bodyCards = [live]
+    bodyCards = [{ ...live, terminalBackend: undefined }]
     workspace.dispose()
     workspace = makeWorkspace(document.body, {
       shuttleBase: '', cards: () => [live], origin: () => 'Desk', onVisibility: visibility,
@@ -1339,7 +1339,9 @@ describe('workspace reader integration', () => {
     await flush()
     // The chat's Console reaches the same conversation as the navbar pill.
     expect(document.querySelectorAll('.ws-dock .kbn-card-worker')).toHaveLength(0)
-    document.querySelector<HTMLButtonElement>('.ws-chat-drawer .ws-chat-console')!.click()
+    const console = document.querySelector<HTMLButtonElement>('.ws-chat-head .ws-chat-console')!
+    expect(console.getAttribute('aria-label')).toBe('Open in Rex')
+    console.click()
     expect(openWorker).toHaveBeenLastCalledWith('terminal-alpha', 'daemon-a')
     openWorker.mockClear()
     const head = document.querySelector<HTMLButtonElement>('.ws-navbar .ws-head-worker button.kbn-card-worker')!

@@ -17,20 +17,30 @@ New Codex tasks default to the app surface.
 Choose `--surface cli` when installing a Codex task if you want a terminal worker instead.
 Changing an opening preference doesn't change a task's execution surface.
 
-## Choose where Claude opens
+## Choose where conversations open
+
+The constitution header shows **Console** whenever the worker has a destination on your device, including phones.
+Tap Console or a worker pill to open the remembered destination.
+Long-press or right-click either control to pick from all available destinations, even when there is only one.
+The check mark identifies the destination a tap uses.
+Choosing a destination opens it and remembers the choice in this browser across your fleet.
+The same preference drives keyboard opening and History.
 
 Settings opens to **Conversations**, with **Open conversations in** at the top.
-Choose the default for Claude sessions: **Terminal**, **Claude browser**, or **Claude app**.
-The choice saves immediately.
-Right-click the worker pill to use another available route for that conversation without changing the default.
-This is a preference for the browser you're using, separate from the host configuration selected in Settings.
+It edits that same preference: **Terminal**, **Claude browser**, **Claude app**, **ChatGPT**, or **Rex on phone**.
+If the remembered destination is unavailable, opening uses the best available destination without changing the preference.
+For desktop CLI workers the order is Terminal, Claude browser, then Claude app; Codex app workers use ChatGPT.
+On phones, CLI workers on Rex hosts offer Rex first, then a Claude browser link if available.
+This works for Claude, Codex CLI and Pi workers.
+The terminal destination is labelled **Rex** when the worker reports that backend.
+Terminal and the Claude app are desktop-only destinations.
+
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.
-If the link is missing on desktop, the control says **terminal** and falls back to the host's terminal opener; History explains that Remote Control is needed.
-A valid browser link without a supported desktop-app route opens in the browser and is labelled **browser**.
-
-On a phone, Shuttle uses the available conversation link because there is no local terminal to raise.
-Codex app workers keep their own native opening route.
+On a phone, a worker without Rex or a Claude Remote Control link has no destination: Console is hidden and its worker pill only marks its state.
+The Rex destination opens the installed app with `rex://`; choose the constitution family's session in the app.
+The phone client must be connected to that host's Rex server, for example over Tailscale.
+No conversation-specific Rex deep link or web route is known.
 A mobile Codex link opens ChatGPT; use **Remote**, select the host and project, then choose the conversation.
 It is not a guaranteed conversation-specific mobile deep link.
 

@@ -1,22 +1,10 @@
-import { claudeAppRoute, claudeWebLink } from './sessionHistory'
+import { attachLongPress } from './longPress.js'
+import { conversationOpening, saveConversationOpening, resolveDestination, type ConversationDestination } from './conversationOpening.js'
 
 export interface ConversationAction {
-  label: string; href?: string; run?: () => void; disabled?: boolean
+  label: string; href?: string; run?: () => void; disabled?: boolean; checked?: boolean
   /** Draws the item as a control drawn elsewhere (a header verb); the menu then styles it by that control's classes. */
   dress?: (item: HTMLButtonElement) => void
-}
-
-/** Offer only destinations that can open this recorded conversation. */
-export function conversationActions(webLink: string | null | undefined, desktop: boolean, terminal?: () => void): ConversationAction[] {
-  const actions: ConversationAction[] = []
-  if (desktop && terminal) actions.push({ label: 'Open in terminal', run: terminal })
-  const web = claudeWebLink(webLink)
-  if (web) {
-    actions.push({ label: 'Open in Claude browser', href: web })
-    const app = desktop ? claudeAppRoute(web) : undefined
-    if (app) actions.push({ label: 'Open in Claude app', href: app })
-  }
-  return actions
 }
 
 let dismissOpenMenu: (() => void) | undefined
@@ -85,8 +73,9 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
       (item as HTMLButtonElement).type = 'button'
       ;(item as HTMLButtonElement).disabled = !!action.disabled
     }
-    item.textContent = action.label
-    item.setAttribute('role', 'menuitem')
+    item.textContent = action.checked === undefined ? action.label : `${action.checked ? '✓' : '　'}  ${action.label}`
+    item.setAttribute('role', action.checked === undefined ? 'menuitem' : 'menuitemradio')
+    if (action.checked !== undefined) item.setAttribute('aria-checked', String(action.checked))
     item.tabIndex = -1
     if (action.dress && item instanceof HTMLButtonElement) {
       action.dress(item)
@@ -130,16 +119,30 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   return close
 }
 
-/** Right-click offers the other destinations for this conversation. */
-export function addConversationMenu(pill: HTMLElement, actions: ConversationAction[]): HTMLElement {
-  if (actions.length < 2) return pill
-  pill.setAttribute('aria-haspopup', 'menu')
-  pill.setAttribute('aria-expanded', 'false')
-  pill.title += '\nRight-click for other opening options.'
-  pill.addEventListener('contextmenu', event => {
+/** Touch and mouse share the same picker, including a single usable destination. */
+export function attachConversationPicker(anchor: HTMLElement, destinations: () => readonly ConversationDestination[]): () => void {
+  anchor.setAttribute('aria-haspopup', 'menu')
+  anchor.setAttribute('aria-expanded', 'false')
+  const show = (point?: { x: number; y: number }): void => {
+    const available = destinations()
+    if (!available.length) return
+    const remembered = conversationOpening()
+    const selected = resolveDestination(available, remembered)
+    openActionMenu(anchor, available.map(destination => ({
+      label: `Open in ${destination.label}`,
+      href: destination.href,
+      checked: destination.id === selected?.id,
+      run: () => { saveConversationOpening(destination.id); destination.run?.() },
+    })), 'Open conversation in', point)
+  }
+  const context = (event: MouseEvent): void => {
     event.preventDefault(); event.stopPropagation()
-    const point = event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined
-    openActionMenu(pill, actions, 'Open conversation in', point)
-  })
-  return pill
+    show(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
+  }
+  anchor.addEventListener('contextmenu', context)
+  // A pill nested in a Desk row owns the gesture, not the row's action menu.
+  const down = (event: PointerEvent): void => event.stopPropagation()
+  anchor.addEventListener('pointerdown', down)
+  const detach = attachLongPress(anchor, { onFire: () => show() })
+  return () => { detach(); anchor.removeEventListener('contextmenu', context); anchor.removeEventListener('pointerdown', down) }
 }

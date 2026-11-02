@@ -1,7 +1,7 @@
 import './settings-menu.css'
 
 /**
- * The settings dropdown: a non-modal panel under the ⚙ that opened it, holding
+ * The settings dropdown: a non-modal panel beneath the header, holding
  * only the settings content. Escape or a press outside closes it and returns
  * focus to the opener.
  */
@@ -65,7 +65,8 @@ export class SettingsMenu {
     const rect = this.opener.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight, gutter = 8
     const width = Math.min(400, vw - 2 * gutter)
     const left = Math.max(gutter, Math.min(rect.left, vw - width - gutter))
-    const top = rect.bottom + 6
+    const header = this.opener.closest('.ws-chat-head')?.getBoundingClientRect()
+    const top = (header?.bottom ?? rect.bottom) + 6
     this.el.style.setProperty('--ws-menu-left', `${left}px`)
     this.el.style.setProperty('--ws-menu-top', `${top}px`)
     this.el.style.setProperty('--ws-menu-width', `${width}px`)

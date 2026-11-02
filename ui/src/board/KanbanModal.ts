@@ -50,6 +50,7 @@ import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
 import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
+import { applyTerminalHost, terminalHostFromVersion } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
 import type {
   ColumnKind,
@@ -1750,6 +1751,7 @@ export class KanbanModal {
 
   private async fetchAndRender(): Promise<void> {
     void this.fetchMeetingStatus()
+    const terminalHost = this.readTerminalHost()
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
@@ -1772,6 +1774,7 @@ export class KanbanModal {
       // → assembles the exact `KanbanResponse` the renderer already consumes.
       this.compositeEtag = res.headers.get('ETag')
       const feed = parseCompositeFeed(await res.json())
+      applyTerminalHost(feed.entries, await terminalHost)
       const data = buildKanbanResponseFromComposite(feed)
       if (token !== this.inflightFetchToken) return
       // Skip re-render when the response is semantically unchanged —
@@ -1785,7 +1788,7 @@ export class KanbanModal {
       const sig = this.computeResponseSignature(data)
       const wasFirstRender = this.lastResponse === null
       this.lastResponse = data
-      this.ensureFleetDefaultAgents(data)
+      this.ensureFleetMetadata(data)
       if (!wasFirstRender && sig === this.lastResponseSig) {
         // The Desk skips an identical-payload re-render, but a temporal view
         // still gets its poll: its content moves with the clock (and with
@@ -1902,7 +1905,7 @@ export class KanbanModal {
     const order = deskOrder(data, undefined, this.meetingStatus.meeting)
     this.deskProjection = order
     this.deskMeetingFiber = this.meetingStatus.meeting?.fiber ?? null
-    this.ensureFleetDefaultAgents(data)
+    this.ensureFleetMetadata(data)
     this.syncWorkspaceRuntime()
     if (this.workspace?.isActive) {
       this.lastResponse = data
@@ -1978,7 +1981,18 @@ export class KanbanModal {
     this.mountOrRefreshActiveView()
   }
 
-  private ensureFleetDefaultAgents(data: KanbanResponse): void {
+  private readTerminalHost(): Promise<ReturnType<typeof terminalHostFromVersion>> {
+    this.terminalVersionRead ??= inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/version`))
+      .then(async response => response.ok ? terminalHostFromVersion(await response.json()) : undefined)
+      .catch(() => undefined)
+      .then(host => {
+        if (!host) this.terminalVersionRead = undefined
+        return host
+      })
+    return this.terminalVersionRead
+  }
+
+  private ensureFleetMetadata(data: KanbanResponse): void {
     for (const card of boardCards(data)) {
       if (!isAgentCard(card) || !card.shuttleAgent) continue
       const origin = card.originId
@@ -2042,6 +2056,7 @@ export class KanbanModal {
   private deskProjection: DeskOrder = deskOrder(null)
   /** Meeting fiber used to build the current Desk projection. */
   private deskMeetingFiber: string | null = null
+  private terminalVersionRead?: Promise<ReturnType<typeof terminalHostFromVersion>>
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
   /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */

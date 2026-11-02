@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react'
-import { claudeOpening, saveClaudeOpening, CONVERSATION_OPENING_CHANGED, type ClaudeOpening } from '../../board/conversationOpening'
+import { conversationOpening, saveConversationOpening, CONVERSATION_OPENING_CHANGED, type ConversationOpening } from '../../board/conversationOpening'
 
-const CHOICES: Array<{ id: ClaudeOpening; label: string; note: string }> = [
-  { id: 'terminal', label: 'Terminal', note: 'Attach to the worker in Kitty' },
+const CHOICES: Array<{ id: ConversationOpening; label: string; note: string }> = [
+  { id: 'terminal', label: 'Terminal', note: 'Rex on Rex hosts; the daemon terminal opener elsewhere' },
   { id: 'browser', label: 'Claude browser', note: 'Continue through Remote Control' },
   { id: 'app', label: 'Claude app', note: 'Open the installed desktop app' },
+  { id: 'chatgpt', label: 'ChatGPT', note: 'Continue a Codex app conversation' },
+  { id: 'rex', label: 'Rex on phone', note: 'Open Rex, then choose the constitution family’s session' },
 ]
 
 export function ConversationsSection(): JSX.Element {
-  const [choice, setChoice] = useState(claudeOpening)
+  const [choice, setChoice] = useState(conversationOpening)
   const [error, setError] = useState(false)
   useEffect(() => {
-    const refresh = (): void => setChoice(claudeOpening())
+    const refresh = (): void => setChoice(conversationOpening())
     window.addEventListener(CONVERSATION_OPENING_CHANGED, refresh)
     return () => window.removeEventListener(CONVERSATION_OPENING_CHANGED, refresh)
   }, [])
@@ -19,15 +21,15 @@ export function ConversationsSection(): JSX.Element {
     <>
       <header className="set-pane-heading">
         <h2>Open conversations in</h2>
-        <p>Choose what happens when you click a worker pill or open a conversation in History.</p>
+        <p>Console, worker pills, keyboard opening and History share this preference.</p>
       </header>
       <fieldset className="set-opening-options">
-        <legend className="set-section-label">Default for Claude sessions</legend>
+        <legend className="set-section-label">Preferred destination</legend>
         {CHOICES.map(({ id, label, note }) => (
           <label key={id} className={`set-opening-choice${choice === id ? ' set-opening-selected' : ''}`}>
             <input type="radio" name="claude-opening" value={id} checked={choice === id}
               onChange={() => {
-                const saved = saveClaudeOpening(id)
+                const saved = saveConversationOpening(id)
                 setError(!saved)
                 if (saved) setChoice(id)
               }} />
@@ -37,20 +39,13 @@ export function ConversationsSection(): JSX.Element {
         ))}
       </fieldset>
       {error && <div className="set-error" role="alert">This browser cannot save preferences. Allow site storage, then try again.</div>}
-      <p className="set-opening-guidance">
-        {choice === 'terminal'
-          ? 'Kitty opens on the machine serving this board. Remote workers need an SSH route.'
-          : choice === 'browser'
-            ? 'Requires Remote Control in the Claude session. If no link is available, the worker pill is labelled terminal and opens Kitty.'
-            : 'Requires the Claude desktop app and Remote Control in the session. If an app link is unavailable, the worker pill is labelled browser or terminal and opens there.'}
-      </p>
-      <div className="set-opening-tip"><strong>Choose once, or choose each time.</strong> Right-click a worker pill to open a session another way when alternatives are available.</div>
+      <p className="set-opening-guidance">If your preferred destination is unavailable for a worker or device, opening uses the best available one: terminal on desktop, Rex on phone for Rex workers, Claude browser, or ChatGPT for Codex app workers.</p>
+      <div className="set-opening-tip"><strong>Tap to open. Hold to choose.</strong> Long-press or right-click Console or a worker pill to see its destinations. Choosing one opens it and remembers it.</div>
       <p className="set-row-note">Saved in this browser across your fleet. Workers keep running on their assigned hosts.</p>
-      <p className="set-row-note">Other terminal workers open in Kitty; Codex app conversations open in ChatGPT. Phones use Claude web links.</p>
       <details className="set-opening-details">
-        <summary>Setup and other conversation types</summary>
-        <p>Enable Remote Control in Claude Code to get a browser or app link. The installed Claude app can open supported session links; other valid links open in the browser.</p>
-        <p>On phones, a Claude web link can open the mobile app.</p>
+        <summary>Conversation setup</summary>
+        <p>Enable Remote Control in Claude Code to get a browser or app link. The installed Claude desktop app can open supported session links.</p>
+        <p>Phones can open Rex for CLI workers on Rex hosts, or use Claude web links. A worker without a phone destination has no Console button.</p>
         <a href="https://cailmdaley.github.io/felt/shuttle/conversations/" target="_blank" rel="noopener noreferrer">Conversation setup guide ↗</a>
       </details>
     </>

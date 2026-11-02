@@ -31,12 +31,12 @@ it('saves a browser preference without writing host configuration and notifies t
   const changed = vi.fn()
   window.addEventListener(CONVERSATION_OPENING_CHANGED, changed)
   const app = document.querySelector<HTMLInputElement>('input[value="app"]')!
-  expect([...document.querySelectorAll('input')].map(input => input.value)).toEqual(['terminal', 'browser', 'app'])
+  expect([...document.querySelectorAll('input')].map(input => input.value)).toEqual(['terminal', 'browser', 'app', 'chatgpt', 'rex'])
   act(() => app.click())
   expect(values.get(CLAUDE_OPENING_KEY)).toBe('app')
   expect(changed).toHaveBeenCalledOnce()
   expect(fetch).not.toHaveBeenCalled()
-  expect(document.body.textContent).toContain('Requires the Claude desktop app and Remote Control')
+  expect(document.body.textContent).toContain('Long-press or right-click Console or a worker pill')
   window.removeEventListener(CONVERSATION_OPENING_CHANGED, changed)
 })
 

@@ -21,6 +21,17 @@ it('opens under its button as a non-modal dropdown holding only the settings', (
   expect(opener.getAttribute('aria-expanded')).toBe('true')
 })
 
+it('keeps both header rows clear when Settings is on the title row', () => {
+  const { menu, opener, content, host } = mount()
+  const header = document.createElement('header'); header.className = 'ws-chat-head'
+  host.append(header); header.append(opener)
+  opener.getBoundingClientRect = () => ({ bottom: 48, left: 280 } as DOMRect)
+  header.getBoundingClientRect = () => ({ bottom: 100 } as DOMRect)
+  menu.show(content, opener, host)
+  expect(menu.el.style.getPropertyValue('--ws-menu-top')).toBe('106px')
+  menu.dispose()
+})
+
 it('closes on Escape and returns focus to the button', () => {
   const { menu, opener, content, host } = mount()
   menu.show(content, opener, host)

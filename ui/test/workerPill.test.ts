@@ -1,41 +1,22 @@
+// @vitest-environment jsdom
 /**
- * Check the terminal worker pill against the touch stylesheet on a fake DOM.
+ * Check the terminal worker pill against the touch stylesheet.
  * The matcher covers the compound selectors used by coarse-pointer rules.
  * The in-browser check runs with `npm run harness:board` and
  * `node scripts/check-worker-tap.mjs`.
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { terminalWorkerPill } from '../src/board/appConversation.js'
 import { DESKTOP, IPAD_PORTRAIT, PHONE_PORTRAIT, matchMediaFor, type Device } from '../src/board/testDevices.js'
 
-class FakeElement {
-  className = ''
-  textContent = ''
-  title = ''
-  type = ''
-  href = ''
-  readonly attributes = new Map<string, string>()
-  readonly listeners = new Map<string, Array<(e: { stopPropagation(): void }) => void>>()
-  constructor(readonly tagName: string) {}
-  setAttribute(name: string, value: string): void { this.attributes.set(name, value) }
-  getAttribute(name: string): string | null {
-    if (name === 'href') return this.tagName === 'A' && this.href ? this.href : null
-    return this.attributes.get(name) ?? null
-  }
-  hasAttribute(name: string): boolean { return this.getAttribute(name) !== null }
-  addEventListener(type: string, fn: (e: { stopPropagation(): void }) => void): void {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
-  }
-  click(): void { for (const fn of this.listeners.get('click') ?? []) fn({ stopPropagation() {} }) }
-  get classes(): string[] { return this.className.split(/\s+/).filter(Boolean) }
-}
+type FakeElement = HTMLElement & { href: string }
 
 function useDevice(device: Device): void {
-  vi.stubGlobal('window', { matchMedia: matchMediaFor(device) })
-  vi.stubGlobal('document', { createElement: (tag: string) => new FakeElement(tag.toUpperCase()) })
+  vi.stubGlobal('matchMedia', matchMediaFor(device))
 }
 
 /** Does one compound selector (no combinators) match the element? */
@@ -50,7 +31,7 @@ function matchesCompound(el: FakeElement, compound: string): boolean {
   while (rest) {
     let m: RegExpExecArray | null
     if ((m = /^\.([\w-]+)/.exec(rest))) {
-      if (!el.classes.includes(m[1])) return false
+      if (!el.classList.contains(m[1])) return false
     } else if ((m = /^\[([\w-]+)\]/.exec(rest))) {
       if (!el.hasAttribute(m[1])) return false
     } else if ((m = /^:not\(([^()]*)\)/.exec(rest))) {
@@ -91,7 +72,7 @@ function coarseDeclarations(el: FakeElement, css: string): Map<string, string> {
 }
 
 function readBoardCss(file: string): string {
-  return readFileSync(fileURLToPath(new URL(`../src/board/${file}`, import.meta.url)), 'utf8')
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/board', file), 'utf8')
 }
 
 function declarationsFor(selector: string, css: string): string {
@@ -156,7 +137,7 @@ describe('the terminal worker pill under a finger', () => {
       )?.[1] ?? ''
       const fiberPill = terminalWorkerPill(worker('waiting', LINK)) as unknown as FakeElement
 
-      expect(fiberPill.classes).toContain('kbn-card-worker')
+      expect(fiberPill.classList.contains('kbn-card-worker')).toBe(true)
       expect(declarationsFor('.ws-dock', phoneMedia)).toMatch(/--ctl-h:\s*var\(--ws-phone-target\)/)
       expect(DOCK_CSS).not.toContain('.ws-dock .kbn-card-worker {')
       expect(coarseDeclarations(fiberPill, READER_CSS).get('min-height')).toBe('var(--ws-phone-target)')

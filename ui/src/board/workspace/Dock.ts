@@ -4,7 +4,8 @@ import { paintAncestry, type Ancestor } from './ancestryTrail.js'
 import { headerIcon, type HeaderIcon } from './headerIcon.js'
 import { appConversationTarget, canOpenDesktopApp, appWorkerLink, atDesktop, terminalWorkerPill } from '../appConversation.js'
 import { confirmWorkerStop, markVerdictHost, type Verdict } from './Verdicts.js'
-import { CONVERSATION_OPENING_CHANGED } from '../conversationOpening.js'
+import { CONVERSATION_OPENING_CHANGED, conversationDestinations, conversationDevice, resolveDestination, openDestination } from '../conversationOpening.js'
+import { attachConversationPicker } from '../conversationMenu.js'
 import { hasLiveWorker, hasWorkerToStop, type ColumnKind, type KanbanCard, type ShuttleKind } from '../KanbanTypes.js'
 import { agentGroups } from '../../forms/agents.js'
 import type { MeetingMode } from '../../forms/meetingApi.js'
@@ -864,14 +865,14 @@ export class Dock {
    */
   workerPillFor(card: KanbanCard): HTMLElement | null {
     if ((card.workerSurface ?? card.shuttleSurface) === 'app' && card.sessionUuid) return appWorkerLink(card)
-    return card.tmuxSession ? terminalWorkerPill(card, { openWorker: this.onOpenWorker }) : null
+    return card.tmuxSession || card.sessionLink ? terminalWorkerPill(card, { openWorker: this.onOpenWorker }) : null
   }
 
   /** Keyboard opening activates the exact destination used by the worker pill. */
   openConversation(card: KanbanCard): boolean {
-    const pill = this.workerPillFor(card)
-    if (!pill?.matches('a[href],button')) return false
-    pill.click()
+    const destination = resolveDestination(conversationDestinations(card, conversationDevice(), this.onOpenWorker))
+    if (!destination) return false
+    openDestination(destination)
     return true
   }
 
@@ -920,7 +921,7 @@ export class Dock {
       (this.card.uid ?? this.card.id) !== (card.uid ?? card.id) || this.card.originId !== card.originId) return
     const incoming = card
     if (this.card) {
-      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
+      for (const key of ['id', 'uid', 'path', 'fiberDir', 'feltStore', 'shuttleHost', 'shuttleProjectDir', 'workerSurface', 'sessionUuid', 'tmuxSession', 'terminalBackend', 'sessionLink', 'desktopLink', 'runtimePhase', 'lastActivityAt', 'launchError', 'workerState', 'workerTasks', 'workerAgent', 'dispatchedAt', 'handedOffAt', 'status', 'tempered', 'effectiveHorizon', 'outcome', 'ask', 'workerStartedAt', 'originStale', 'tags'] as const) {
         Object.assign(this.card, { [key]: card[key] })
       }
       card = this.card
@@ -1022,14 +1023,14 @@ export class Dock {
     })
     settings.append(toggle, ledger)
     let history: HTMLElement | null = null
-    const historyKey = (): string => JSON.stringify([card.uid, card.shuttleHost, hasLiveWorker(card), card.sessionUuid, card.tmuxSession])
+    const historyKey = (): string => JSON.stringify([card.uid, card.shuttleHost, hasLiveWorker(card), card.sessionUuid, card.tmuxSession, card.terminalBackend])
     let historyRevision = historyKey()
     const refreshHistory = (open: boolean): void => {
       if (!card.uid) return
       const focusToggle = document.activeElement === history?.querySelector('.kbn-ctl-history-toggle')
       const next = buildSessionHistory({
         shuttleBase: this.shuttleBase, uid: card.uid, fiberHost: card.shuttleHost,
-        liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession,
+        liveSession: hasLiveWorker(card) ? card.sessionUuid : undefined, liveTmux: card.tmuxSession, terminalBackend: card.terminalBackend,
         desktop: atDesktop(navigator.userAgent, coarsePointer()),
         onRead: this.transcriptBand ? record => {
           const transcript = this.transcriptBand
@@ -1143,6 +1144,8 @@ export class Dock {
     const constitutionItem = this.constitutionButton = item('Constitution', 'constitution', 'ws-chat-constitution', () => { this.openConstitution?.() })
     constitutionItem.hidden = !this.openConstitution
     const consoleItem = item('Console', 'console', 'ws-chat-console', () => { this.openConversation(card) })
+    const destinations = (): ReturnType<typeof conversationDestinations> => conversationDestinations(card, conversationDevice(), this.onOpenWorker)
+    this.composerDisposers.push(attachConversationPicker(consoleItem, destinations))
     const refs = document.createElement('div')
     refs.className = 'ws-chat-refs'
     refs.append(constitutionItem)
@@ -1154,16 +1157,6 @@ export class Dock {
     const cacheShare = this.transcriptBand?.cacheShare
     if (cacheShare) drawer.append(cacheShare)
     drawer.append(facts)
-    const overflow = document.createElement('div'); overflow.className = 'ws-header-overflow'
-    drawer.prepend(overflow)
-    // A phone action leaves the sheet before opening a page or a confirmation.
-    for (const button of [constitutionItem, consoleItem, ...verdict.querySelectorAll('button')]) {
-      button.addEventListener('click', event => {
-        if (!button.closest('.ws-settings-menu:not([hidden])') || !this.closeSettings) return
-        event.stopImmediatePropagation()
-        this.closeSettings(() => button.click())
-      }, { capture: true })
-    }
     const header = this.header = document.createElement('header')
     header.className = 'ws-chat-head'
     header.dataset.part = 'chat-header'
@@ -1191,7 +1184,6 @@ export class Dock {
     leave.hidden = true
     leave.innerHTML = headerIcon('leave')
     header.append(lead, identity, leave, this.head)
-    let settingsInTitleRow = false
     const placeIcons = (): void => {
       const mobile = isMobileViewport()
       const compact = !mobile && header.clientWidth > 0 && header.clientWidth <= 560
@@ -1207,28 +1199,13 @@ export class Dock {
           next = control
         }
       }
-      place(overflow, [consoleItem])
       place(identity, [title])
-      if (mobile) {
-        const settingsWidth = settingsItem.getBoundingClientRect().width
-        if (settingsInTitleRow && this.head.scrollWidth + settingsWidth + 4 <= this.head.clientWidth) settingsInTitleRow = false
-        if (settingsInTitleRow) {
-          place(header, [lead, identity, settingsItem, leave, this.head])
-          place(this.head, [status, verdict, refs])
-        } else {
-          place(this.head, [status, verdict, settingsItem, refs])
-          if (this.head.scrollWidth > this.head.clientWidth + 1) {
-            settingsInTitleRow = true
-            place(header, [lead, identity, settingsItem, leave, this.head])
-            place(this.head, [status, verdict, refs])
-          }
-        }
-      }
-      else if (compact) place(this.head, [status, verdict, refs, settingsItem])
-      else {
-        // Row 1 is ‹, the title, the references, ⚙ and ×; row 2 is the state and its verbs.
+      if (mobile || compact) {
+        place(this.head, [status, verdict, refs])
+        place(header, [lead, identity, consoleItem, settingsItem, leave, this.head])
+      } else {
         place(this.head, [status, verdict])
-        place(header, [lead, identity, refs, settingsItem, leave, this.head])
+        place(header, [lead, identity, refs, consoleItem, settingsItem, leave, this.head])
       }
       if (focused) {
         const target = focused.checkVisibility() ? focused : settingsItem
@@ -1286,7 +1263,11 @@ export class Dock {
       temper.hidden = !offered.includes('temper')
       discard.hidden = !offered.includes('discard')
       review.hidden = !offered.includes('review')
-      consoleItem.hidden = !this.workerPillFor(card)?.matches('a[href],button')
+      const destination = resolveDestination(destinations())
+      consoleItem.hidden = !destination
+      const consoleLabel = destination ? `Open in ${destination.label}` : 'Console'
+      consoleItem.title = consoleLabel
+      consoleItem.setAttribute('aria-label', consoleLabel)
       sessionsSection.hidden = !card.uid
     }
     this.actPaint()

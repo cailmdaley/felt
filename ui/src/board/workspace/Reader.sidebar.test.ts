@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
 import { MOBILE_MEDIA } from '../mobile.js'
-import { saveClaudeOpening } from '../conversationOpening.js'
+import { saveConversationOpening } from '../conversationOpening.js'
 import { terminalWorkerPill } from '../appConversation.js'
 import { Reader, type ReaderOptions } from './Reader.js'
 import { ChannelThemes } from './ChannelThemes.js'
@@ -141,7 +141,7 @@ describe('Reader channel sidebar', () => {
     storage.set('shuttle:workspace:sidebar', 'true')
     const reader = makeReader(alpha)
     const row = reader.el.querySelector<HTMLElement>('.ws-sidebar [data-channel-uid="alpha"]')!
-    saveClaudeOpening('browser')
+    saveConversationOpening('browser')
     reader.refreshChannels()
     expect(reader.el.querySelector('.ws-sidebar [data-channel-uid="alpha"]')).toBe(row)
     row.querySelector<HTMLButtonElement>('.constitution-state-dot')!.click()

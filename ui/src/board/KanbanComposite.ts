@@ -55,6 +55,7 @@ interface CompositeRuntime {
   /** Owner-served tmux session name for a CLI worker — the terminal handle.
    * App workers have none. */
   tmuxSession?: string;
+  terminalBackend?: 'tmux' | 'rex';
   surface?: 'cli' | 'app';
   agent?: string;
   sessionUuid?: string;
@@ -236,7 +237,8 @@ function parseRuntime(value: unknown): CompositeRuntime | undefined {
   const surface = value.surface === 'app' || value.surface === 'cli' ? value.surface : undefined;
   const agent = typeof value.agent === 'string' ? value.agent : undefined;
   const startedAt = typeof value.started_at === 'number' && Number.isFinite(value.started_at) ? value.started_at : undefined;
-  return { state: launchError ? 'blocked' : state, tmuxSession, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
+  const terminalBackend = value.terminal === 'rex' || value.terminal === 'tmux' ? value.terminal : undefined;
+  return { state: launchError ? 'blocked' : state, tmuxSession, terminalBackend, surface, agent, sessionUuid, phase, lastActivityAt, startedAt, sessionLink, desktopLink, launchError, tasks: parseWorkerTasks(value.tasks) };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -5,7 +5,7 @@ import { card } from './testFixtures.js'
 import { Dock } from './workspace/Dock.js'
 import { Reader } from './workspace/Reader.js'
 import type { Channel } from './workspace/documents.js'
-import { saveClaudeOpening } from './conversationOpening.js'
+import { saveConversationOpening } from './conversationOpening.js'
 
 const worker = (over: Partial<KanbanCard> = {}): KanbanCard => card({
   id: 'debug', uid: 'debug-uid', originId: 'host-a', status: 'active',
@@ -51,10 +51,22 @@ describe('the worker control lives in the reader head and the chat header, once 
   })
   it("updates the destination when Claude's opening preference changes", () => {
     const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
-    saveClaudeOpening('terminal')
+    saveConversationOpening('terminal')
     expect(show(live)?.tagName).toBe('BUTTON')
-    saveClaudeOpening('app'); dock.refreshConversationOpening()
+    saveConversationOpening('app'); dock.refreshConversationOpening()
     expect((show(live) as HTMLAnchorElement).href).toBe('claude://claude.ai/code/session_test')
+  })
+  it('opens the remembered destination through the Desk and keyboard entry point', () => {
+    const live = worker({ workerAgent: 'claude-opus', sessionLink: 'https://claude.ai/code/session_test' })
+    const opened: string[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { opened.push(this.href) })
+    saveConversationOpening('app')
+    expect(dock.openConversation(live)).toBe(true)
+    expect(opened).toEqual(['claude://claude.ai/code/session_test'])
+    expect(openWorker).not.toHaveBeenCalled()
+    saveConversationOpening('chatgpt')
+    expect(dock.openConversation(live)).toBe(true)
+    expect(openWorker).toHaveBeenCalledWith('shuttle-debug', 'host-a')
   })
   it('drops the control when the worker leaves its session', () => {
     expect(show(worker())).not.toBeNull()

@@ -725,7 +725,8 @@ export function registerHeaderBarJourneys(test) {
       assert.match(await sheet.locator('.ws-transcript-hit').innerText(), /% cached/)
       if (device === 'phone') {
         assert.ok(await header.getByRole('button', { name: 'Constitution', exact: true }).isVisible())
-        assert.equal(await sheet.locator('.ws-chat-console').count(), 1, 'Console belongs to Settings even when this card has no attach target')
+        assert.equal(await sheet.locator('.ws-chat-console').count(), 0, 'Console stays outside Settings')
+        assert.equal(await header.locator('.ws-chat-console[hidden]').count(), 1, 'A worker without a destination has no visible Console')
         assert.ok(await header.getByRole('button', { name: 'Temper', exact: true }).isVisible())
         const discard = header.getByRole('button', { name: 'Discard', exact: true })
         assert.ok(await discard.isVisible())

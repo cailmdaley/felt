@@ -288,7 +288,6 @@
 .ws-dock :is(.kbn-ctl-session-when, .kbn-ctl-session-kind, .kbn-ctl-session-host) { color: var(--ws-ink-muted); }
 .ws-dock :is(.kbn-ctl-session-link, .kbn-ctl-session-alt, .kbn-ctl-session-more) { display: inline-block; padding: 4px 0; border: none; background: transparent; color: var(--ws-ink); font: var(--type-label)/var(--leading-ui) var(--font-serif); text-decoration: underline; text-underline-offset: 3px; }
 .ws-dock :is(.kbn-ctl-session-agent, .kbn-ctl-session-live) { color: var(--ws-agent); }
-.ws-dock .kbn-ctl-session-opening-note { flex-basis: 100%; color: var(--ws-ink-muted); }
 .ws-dock .kbn-ctl-session-pending { opacity: .6; }
 .ws-dock .kbn-ctl-history-empty { margin: 0; padding: 4px 0 8px; color: var(--ws-ink-muted); font: italic var(--type-label)/var(--leading-ui) var(--font-serif); }
 

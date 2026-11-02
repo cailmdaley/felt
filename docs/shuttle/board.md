@@ -138,7 +138,10 @@ app put an image beside it.
 <a id="attach"></a>
 ### Open a worker
 
-Worker pills on Desk cards, the reader's sidebar cards, and the fiber page open the worker's conversation. Fiber controls remain inline.
+Worker pills on Desk cards, the reader's sidebar cards, and the fiber page open the worker's conversation.
+The constitution header also offers Console on every layout, including phones, whenever a destination is available.
+Tap to open; long-press or right-click Console or a pill to choose and remember a destination.
+Fiber controls remain inline.
 For terminal workers, the board can open Kitty; `shuttle attach <fiber>` works from other terminals too.
 Claude sessions with Remote Control can open in the browser or Claude app, using your browser's preference in Settings.
 Codex app workers use their native desktop link, with remote-access guidance on mobile.
@@ -260,9 +263,10 @@ same with a pointer, pinned to the right edge on a phone so it never scrolls
 out of reach. `Esc` closes it. It is an overlay rather than a fourth tab — the
 three tabs are windows onto the work, and configuration is not work.
 
-Settings opens to **Conversations**, where you choose what a worker pill opens for Claude sessions.
+Settings opens to **Conversations**, where you choose the preferred destination for Console, worker pills, keyboard opening and History.
 The conversation-opening preference belongs to this browser and saves immediately.
-Right-click a worker pill to choose another supported opening route for that session without changing your default.
+Long-press or right-click Console or a worker pill to choose another supported destination and remember it.
+When the preference is unavailable for a worker or device, opening uses the best available destination without changing it.
 
 Host settings sit separately under **Worker hosts**.
 The host picker selects which machine the remaining configuration addresses. The board is reachable from a phone and from a second hub, so the
@@ -274,7 +278,7 @@ says so.
 
 | Section | What it holds |
 |---|---|
-| **Conversations** | The default for opening Claude conversations in this browser; worker execution stays unchanged |
+| **Conversations** | The preferred conversation destination in this browser; worker execution stays unchanged |
 | **Notes & tasks** | `stores.json` — the store list this daemon is configured with, and the symlinked substores it reaches through them |
 | **Project folders** | `projects.json` — the checkouts Stash and Capture offer; adding one initializes its `.felt/` |
 | **Worker agents** | The merged registry, each record marked with the layer it came from, with a default-effort select per agent (written as an `overrides` entry), over `agents.json` |
