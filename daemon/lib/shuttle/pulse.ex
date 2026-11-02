@@ -36,10 +36,11 @@ defmodule Shuttle.Pulse do
       pending = if active and same, do: old["pending"]
 
       pending =
-        if pending && (pending["session"] != Continuation.resumable_session_id(fiber) or
-                         Continuation.clean_handoff_since_dispatch?(fiber)),
-          do: nil,
-          else: pending
+        if pending &&
+             (pending["session"] != Continuation.resumable_session_id(fiber) or
+                Continuation.clean_handoff_since_dispatch?(fiber)),
+           do: nil,
+           else: pending
 
       next =
         cond do

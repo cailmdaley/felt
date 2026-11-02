@@ -412,10 +412,13 @@ func (a *app) runStatusOneFiber(query string) error {
 		fmt.Fprintln(a.env.Stdout, "! owner document read; worker observation unavailable")
 	}
 	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
-	if read.PulseRuntime != nil {
-		fmt.Fprintf(a.env.Stdout, "  pulse:      every %s, %s", block.Pulse.Every, read.PulseRuntime.State)
-		if read.PulseRuntime.NextTick != nil {
-			fmt.Fprintf(a.env.Stdout, ", next %s", *read.PulseRuntime.NextTick)
+	if block.Pulse != nil {
+		fmt.Fprintf(a.env.Stdout, "  pulse:      every %s", block.Pulse.Every)
+		if read.PulseRuntime != nil {
+			fmt.Fprintf(a.env.Stdout, ", %s", read.PulseRuntime.State)
+			if read.PulseRuntime.NextTick != nil {
+				fmt.Fprintf(a.env.Stdout, ", next %s", *read.PulseRuntime.NextTick)
+			}
 		}
 		if block.Pulse.Window != nil {
 			fmt.Fprintf(a.env.Stdout, ", %s–%s %s", block.Pulse.Window.Start, block.Pulse.Window.End, block.Pulse.Window.TZ)

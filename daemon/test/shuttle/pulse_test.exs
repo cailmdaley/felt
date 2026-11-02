@@ -104,7 +104,11 @@ defmodule Shuttle.PulseTest do
     later = DateTime.add(@now, 7200)
     assert Pulse.reconcile(pulses, [fiber()], "test-host", later) == pulses
     refute Pulse.due?(pulses["watch-uid"], later)
-    stale = %{"conversation" => %{phase: "waiting", last_event_at: DateTime.to_unix(@now, :millisecond)}}
+
+    stale = %{
+      "conversation" => %{phase: "waiting", last_event_at: DateTime.to_unix(@now, :millisecond)}
+    }
+
     assert Pulse.observe(pulses, [fiber()], stale, [], later) == pulses
     fresh = put_in(stale, ["conversation", :last_event_at], DateTime.to_unix(later, :millisecond))
     assert Pulse.observe(pulses, [fiber()], fresh, ["watch-uid"], later) == pulses
@@ -115,7 +119,9 @@ defmodule Shuttle.PulseTest do
 
     handed = put_in(fiber(), ["shuttle", "runtime", "handed_off_at"], "2026-11-02T08:00:00Z")
     assert Pulse.reconcile(pulses, [handed], "test-host", later)["watch-uid"]["pending"] == nil
-    assert Pulse.reconcile(pulses, [fiber("open")], "test-host", later)["watch-uid"]["pending"] == nil
+
+    assert Pulse.reconcile(pulses, [fiber("open")], "test-host", later)["watch-uid"]["pending"] ==
+             nil
   end
 
   test "the feed carries timing outside frontmatter and holds hide its deadline" do
