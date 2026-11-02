@@ -111,7 +111,11 @@ defmodule Shuttle.DispatchIntegrationTest do
         {Integer.to_string(Shuttle.Contract.expected_level()), 0}
       else
         # Run as the test's scope sees it: scoped PATH and env reach the real CLIs.
-        Shuttle.Env.cmd(command, args, Keyword.delete(opts, :timeout_ms))
+        if "scan-changes" in args do
+          Shuttle.Runner.Default.cmd(command, args, opts)
+        else
+          Shuttle.Env.cmd(command, args, Keyword.delete(opts, :timeout_ms))
+        end
       end
     end
 
@@ -2088,6 +2092,171 @@ defmodule Shuttle.DispatchIntegrationTest do
   # at host/.felt/<id segments>/<basename>.md so `felt show --json` can find it.
   # Plants a fiber file. Frontmatter without an `id:` gets `FiberUid.for(id)`,
   # as every real fiber carries an intrinsic id.
+  defmodule PausedListingRunner do
+    @behaviour Shuttle.Runner
+    def cmd(command, args, opts) do
+      result = Shuttle.DispatchIntegrationTest.IntegrationRunner.cmd(command, args, opts)
+
+      if command == "shuttle" and "ls" in args do
+        {gate, owner} = Shuttle.Env.app(:discovery_listing_gate)
+
+        if Agent.get_and_update(gate, &{&1, false}) do
+          send(owner, {:listing_observed, self()})
+          receive do: (:continue_listing -> :ok)
+        end
+      end
+
+      result
+    end
+  end
+
+  @tag :change_discovery
+  test "a slow ordinary poll cannot overwrite a newer incremental edit or deletion", %{host: host} do
+    gate = start_supervised!({Agent, fn -> false end})
+    Shuttle.Test.Env.put_app_env(:discovery_listing_gate, {gate, self()})
+
+    content = fn label ->
+      "---\nname: #{label}\nstatus: open\nshuttle:\n  host: test-host\n  kind: oneshot\n---\nBody.\n"
+    end
+
+    write_fiber(host, "edited", content.("Original"))
+    write_fiber(host, "deleted", content.("Delete me"))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: PausedListingRunner,
+        own_host_id: "test-host",
+        felt_stores: [host],
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000,
+        full_scan_budget_ms: 0,
+        change_interval_ms: 20
+      )
+
+    await_boot_cycle!(poller)
+    assert eventually(fn -> Map.has_key?(:sys.get_state(poller).change_indexes, host) end)
+    cycles = :sys.get_state(poller).poll_cycles
+    Agent.update(gate, fn _ -> true end)
+    send(poller, :run_poll_cycle)
+    assert_receive {:listing_observed, reader}, 5_000
+    write_fiber(host, "edited", content.("Changed"))
+    File.rm_rf!(Path.join([host, ".felt", "deleted"]))
+
+    current? = fn ->
+      {:ok, body} = Poller.cached_fiber_documents(poller)
+      rows = Map.new(body.fibers, &{&1.fiber["slug"], &1.fiber["name"]})
+      rows == %{"edited" => "Changed"}
+    end
+
+    assert eventually(current?)
+    send(reader, :continue_listing)
+    assert eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    assert current?.()
+  end
+
+  @tag :change_discovery
+  test "a serialized document refresh supersedes an in-flight incremental read", %{host: host} do
+    gate = start_supervised!({Agent, fn -> false end})
+    Shuttle.Test.Env.put_app_env(:discovery_listing_gate, {gate, self()})
+
+    content = fn label ->
+      "---\nname: #{label}\nstatus: open\nshuttle:\n  host: test-host\n  kind: oneshot\n---\nBody.\n"
+    end
+
+    write_fiber(host, "edited", content.("Original"))
+
+    {:ok, poller} =
+      start_poller!(
+        runner: PausedListingRunner,
+        own_host_id: "test-host",
+        felt_stores: [host],
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000,
+        full_scan_budget_ms: 0,
+        change_interval_ms: 20
+      )
+
+    await_boot_cycle!(poller)
+    assert eventually(fn -> Map.has_key?(:sys.get_state(poller).change_indexes, host) end)
+    Agent.update(gate, fn _ -> true end)
+    write_fiber(host, "edited", content.("Read by task"))
+    assert_receive {:listing_observed, reader}, 5_000
+    write_fiber(host, "edited", content.("Serialized"))
+    assert :ok = Poller.refresh_document(poller, "edited")
+    send(reader, :continue_listing)
+    assert eventually(fn -> :sys.get_state(poller).change_task == nil end)
+
+    assert {:ok, %{fibers: [%{fiber: %{"name" => "Serialized"}}]}} =
+             Poller.cached_fiber_documents(poller)
+
+    assert eventually(fn ->
+             rows = :sys.get_state(poller).last_known_listings[host]
+             Enum.any?(rows, &(&1["name"] == "Serialized"))
+           end)
+  end
+
+  @tag :change_discovery
+  test "a hot store discovers out-of-band creation, block edits, moves and deletion without a poll",
+       %{host: host} do
+    write_fiber(host, "plain", "---\nname: Plain\nstatus: open\n---\nA plain fiber.\n")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: IntegrationRunner,
+        felt_stores: [host],
+        max_concurrent_workers: 0,
+        poll_interval_ms: 600_000,
+        full_scan_budget_ms: 0,
+        change_interval_ms: 20
+      )
+
+    await_boot_cycle!(poller)
+    assert eventually(fn -> Map.has_key?(:sys.get_state(poller).change_indexes, host) end)
+    own_host = :sys.get_state(poller).own_host_id
+    cycles = :sys.get_state(poller).poll_cycles
+
+    rows = fn ->
+      {:ok, body} = Poller.cached_fiber_documents(poller)
+      Map.new(body.fibers, &{&1.fiber["slug"], &1.fiber})
+    end
+
+    write_fiber(
+      host,
+      "created",
+      "---\nname: Created\nstatus: open\nshuttle:\n  host: #{own_host}\n  kind: oneshot\n---\nCreated outside Shuttle.\n"
+    )
+
+    assert eventually(fn -> rows.()["created"] != nil end)
+
+    write_fiber(
+      host,
+      "plain",
+      "---\nname: Plain\nstatus: open\noutcome: added by hand\nshuttle:\n  host: #{own_host}\n  kind: oneshot\n---\nA plain fiber.\n"
+    )
+
+    assert eventually(fn -> get_in(rows.(), ["plain", "outcome"]) == "added by hand" end)
+    # Same-size changes must reach the cache too.
+    path = Path.join([host, ".felt", "plain", "plain.md"])
+    File.write!(path, String.replace(File.read!(path), "added by hand", "edited by pen"))
+    assert eventually(fn -> get_in(rows.(), ["plain", "outcome"]) == "edited by pen" end)
+    File.rename!(Path.join([host, ".felt", "created"]), Path.join([host, ".felt", "moved"]))
+
+    File.rename!(
+      Path.join([host, ".felt", "moved", "created.md"]),
+      Path.join([host, ".felt", "moved", "moved.md"])
+    )
+
+    assert eventually(fn ->
+             Map.has_key?(rows.(), "moved") and not Map.has_key?(rows.(), "created")
+           end)
+
+    File.rm_rf!(Path.join([host, ".felt", "moved"]))
+    assert eventually(fn -> not Map.has_key?(rows.(), "moved") end)
+    File.write!(path, "---\nname: Plain\nstatus: open\n---\nBlock removed by hand.\n")
+    assert eventually(fn -> not Map.has_key?(rows.(), "plain") end)
+    assert :sys.get_state(poller).poll_cycles == cycles
+  end
+
   defp write_fiber(host, id, content) do
     parts = String.split(id, "/")
     basename = List.last(parts)

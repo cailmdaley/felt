@@ -215,7 +215,24 @@ in, in `~/.config/shuttle/host.json` (or `$SHUTTLE_HOST_CONFIG_FILE`):
 {"class": "shared-multi-user", "quarantine_auto_release": true, "full_scan_budget_ms": 0}
 ```
 
-`full_scan_budget_ms` is an optional non-negative integer read once at daemon boot. It overrides the 10,000 ms default that selects adaptive discovery: after a full listing, a scan slower than this budget puts the store in hot mode until its next scheduled full scan. Set it to `0` to keep the store hot after its first full listing; full scans still run at `full_scan_min_interval_ms` cadence. The effective value is reported in `poll_health`. This is useful on shared login nodes where repeated full scans should be paced even when a scan happens to finish quickly. A document the daemon writes or re-reads, or a local Shuttle CLI write, joins the hot set promptly. When a hot read misses a known address, the next poll runs a full scan to discover moves and deletions. A new document arriving by Git or a standalone felt write still waits for the scheduled full scan.
+`full_scan_budget_ms` is an optional non-negative integer read once at daemon boot.
+It overrides the 10,000 ms default that selects adaptive discovery: after a full listing, a scan slower than this budget puts the store in hot mode until its next scheduled full scan.
+Set it to `0` to keep the store hot after its first full listing; full scans still run at `full_scan_min_interval_ms` cadence.
+The effective value is reported in `poll_health`.
+This is useful on shared login nodes where repeated full scans should be paced even when a scan happens to finish quickly.
+
+An independent incremental pass detects local filesystem changes, including standalone felt writes, hand-edited frontmatter, and files brought in by Git.
+It checks native nanosecond timestamps, size, type and inode for known physical directories and canonical fiber files, enumerates changed directories, and reads changed addresses through Shuttle's ordinary listing.
+Eight concurrent metadata readers bound the filesystem work; symlink mounts belong to their physical store.
+Each pass starts five seconds after the preceding pass finishes, independently of the ordinary poll and its full-scan cadence.
+A slow full scan cannot overwrite newer incremental edits, moves or deletions, and serialized lifecycle writes supersede reads already in flight.
+A failed pass retains its previous index and retries; filesystem cache visibility and server load still bound how soon a change can be observed.
+Per-store durations, indexed path counts and failures appear in `poll_health.incremental_discovery`.
+The daemon never invokes Git.
+
+A document the daemon writes or re-reads, or a local Shuttle CLI write, also joins the hot set promptly.
+A hot read that misses a known address brings the next full scan forward.
+Full scans audit the store in addition to incremental discovery.
 
 On any other host a SIGKILL is an out-of-memory kill or a person's `kill -9`,
 and holding is the right answer. With the key absent or anything but `true`,

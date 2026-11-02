@@ -13,6 +13,10 @@ try do
     File.chmod!(path, 0o755)
   end
 
+  # The private terminal fixture has no workers in the host process table.
+  File.write!(bin <> "/ps", "#!/bin/sh\nexit 0\n")
+  File.chmod!(bin <> "/ps", 0o755)
+
   for {key, value} <- %{
         "HOME" => root,
         "PATH" => bin <> ":" <> System.get_env("PATH", ""),

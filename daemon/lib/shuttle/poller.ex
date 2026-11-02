@@ -176,6 +176,13 @@ defmodule Shuttle.Poller do
       # them, so an observer needs to know a cycle boundary was crossed rather
       # than infer it from wall-clock. Never reset.
       poll_cycles: 0,
+      change_interval_ms: 5_000,
+      change_timer: nil,
+      change_task: nil,
+      change_indexes: %{},
+      change_write_ids: MapSet.new(),
+      change_health: %{},
+      discovery_overrides: %{},
       # In-memory watcher registry, keyed by intrinsic UID when known; metadata
       # carries :fiber_id as the felt address used for CLI shell-outs and public
       # API payloads. NOT persisted — tmux is the
@@ -902,7 +909,14 @@ defmodule Shuttle.Poller do
         end
 
       state = write_daemon_heartbeat(%{state | daemon_boots: boots})
-      state = state |> schedule_tick(0) |> initialize_publication()
+
+      state =
+        state
+        |> Map.put(:change_interval_ms, Keyword.get(opts, :change_interval_ms, 5_000))
+        |> schedule_change_scan()
+        |> schedule_tick(0)
+        |> initialize_publication()
+
       Shuttle.Readiness.poller_boot(nil)
       {:noreply, state}
     else
@@ -1184,6 +1198,8 @@ defmodule Shuttle.Poller do
   # at once on the way out.
   def terminate(_reason, %State{} = state) do
     stop_poll_task(state.poll_task_pid)
+    if state.change_task, do: Task.shutdown(state.change_task, :brutal_kill)
+    if state.change_timer, do: Process.cancel_timer(state.change_timer)
     Enum.each(state.running, fn {_runtime_key, meta} -> stop_watcher(meta) end)
     :ok
   end
@@ -1740,6 +1756,60 @@ defmodule Shuttle.Poller do
     {:noreply, write_daemon_heartbeat(state)}
   end
 
+  defp transition_info(:scan_changes, %{change_task: nil, reconciliation_hold: nil} = state) do
+    if state.change_timer, do: Process.cancel_timer(state.change_timer)
+    inputs = Map.take(state, [:felt_stores, :runner])
+    indexes = state.change_indexes
+    owner = self()
+
+    task =
+      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+        Shuttle.Poller.ChangeDiscovery.read(inputs, indexes, owner)
+      end)
+
+    {:noreply, %{state | change_task: task, change_timer: nil, change_write_ids: MapSet.new()}}
+  end
+
+  defp transition_info(:scan_changes, %{change_task: nil} = state),
+    do: {:noreply, schedule_change_scan(state)}
+
+  defp transition_info(:scan_changes, state), do: {:noreply, state}
+
+  defp transition_info({ref, results}, %{change_task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    state = Enum.reduce(results, state, &apply_change_scan/2)
+    complete? = Enum.all?(state.felt_stores, &Map.has_key?(state.change_indexes, &1))
+    successful? = Enum.all?(results, fn {_store, result} -> match?({:ok, _}, result) end)
+
+    changed? =
+      Enum.any?(results, fn
+        {_store, {:ok, %{ids: [_ | _]}}} -> true
+        _ -> false
+      end)
+
+    state =
+      if complete? and successful? and (changed? or not state.document_cache_ready) do
+        %{
+          state
+          | document_cache_ready: true,
+            document_cache_partial: false,
+            document_cache_refreshed_at: DateTime.utc_now()
+        }
+      else
+        state
+      end
+
+    {:noreply, schedule_change_scan(%{state | change_task: nil})}
+  end
+
+  defp transition_info(
+         {:DOWN, ref, :process, _pid, reason},
+         %{change_task: %Task{ref: ref}} = state
+       ) do
+    Logger.warning("Incremental discovery failed: #{inspect(reason)}")
+    {:noreply, schedule_change_scan(%{state | change_task: nil})}
+  end
+
   defp transition_info(:run_poll_cycle, %{reconciliation_hold: hold} = state)
        when not is_nil(hold) do
     # A reconciliation hold is stronger than boot quarantine. No discovery,
@@ -1762,7 +1832,7 @@ defmodule Shuttle.Poller do
   defp transition_info(:run_poll_cycle, state) do
     parent = self()
     poll_token = make_ref()
-    state = %{state | stall_timeout_ms: state.stall_timeout_base_ms}
+    state = %{state | stall_timeout_ms: state.stall_timeout_base_ms, discovery_overrides: %{}}
 
     # The planning Task refreshes the store list and fixes one immutable
     # full/hot plan. The read Task performs the slow, READ-ONLY work and returns
@@ -2540,6 +2610,16 @@ defmodule Shuttle.Poller do
            document_cache_refresh_ms: document_cache_refresh_ms
          } = world
        ) do
+    {candidates, new_store_map, store_listings, full_listings, document_cache} =
+      overlay_discovery(
+        state,
+        candidates,
+        new_store_map,
+        store_listings,
+        full_listings,
+        document_cache
+      )
+
     log_discovery_mode_changes(state.discovery, discovery)
     log_document_cache_refresh(state, document_cache_stats, document_cache_refresh_ms)
 
@@ -2856,6 +2936,8 @@ defmodule Shuttle.Poller do
               acc
               | last_known_listings: Map.put(acc.last_known_listings, store, rows),
                 last_full_listings: Map.put(acc.last_full_listings, store, rows),
+                fiber_store_cache:
+                  Map.merge(Map.new(rows, &{&1["id"], store}), acc.fiber_store_cache),
                 discovery: Map.put(acc.discovery, store, info)
             }
 
@@ -3376,6 +3458,8 @@ defmodule Shuttle.Poller do
   end
 
   defp refresh_worker_document(state, fiber_id) do
+    state = protect_change_read(state, fiber_id)
+
     case fetch_fiber_full(fiber_id, state) do
       {:ok, fiber} ->
         {cache, found?} =
@@ -3469,6 +3553,7 @@ defmodule Shuttle.Poller do
   end
 
   defp refresh_document_entry(%State{} = state, fiber_id, stores \\ nil) do
+    state = protect_change_read(state, fiber_id)
     # A document's `id` is the fiber's uid, so a slug-addressed refresh matches
     # on the carried `slug` too.
     without_fiber =
@@ -3533,6 +3618,10 @@ defmodule Shuttle.Poller do
       list_unprotected_shuttle_fibers(store, felt_dir, state, ids_from, timeout_ms, slow_scan?)
     end
   end
+
+  @doc false
+  def list_changed_fibers(_store, _state, []), do: {:ok, %{rows: []}}
+  def list_changed_fibers(store, state, ids), do: list_shuttle_fibers(store, state, ids, nil)
 
   defp list_unprotected_shuttle_fibers(store, felt_dir, state, ids_from, timeout_ms, slow_scan?) do
     case Shuttle.FS.lstat(felt_dir) do
@@ -6245,6 +6334,168 @@ defmodule Shuttle.Poller do
   @doc false
   def list_shuttle_sessions(state), do: Shuttle.Terminal.list_workers(state.runner)
 
+  defp schedule_change_scan(%{change_interval_ms: :infinity} = state), do: state
+
+  defp schedule_change_scan(state) do
+    %{state | change_timer: Process.send_after(self(), :scan_changes, state.change_interval_ms)}
+  end
+
+  defp protect_change_read(%{change_task: nil} = state, _id), do: state
+
+  defp protect_change_read(state, id) do
+    aliases =
+      Enum.flat_map(state.document_cache, fn {_key, cached} ->
+        addresses = Map.take(cached.entry.fiber, ["id", "uid", "slug"]) |> Map.values()
+        if id in addresses, do: addresses, else: []
+      end)
+
+    %{
+      state
+      | change_write_ids: Enum.reduce([id | aliases], state.change_write_ids, &MapSet.put(&2, &1))
+    }
+  end
+
+  defp apply_change_scan({store, {:error, reason}}, state) do
+    if get_in(state.change_health, [store, :error]) != reason do
+      Logger.warning("Incremental discovery for #{store}: #{reason}")
+    end
+
+    %{state | change_health: Map.put(state.change_health, store, %{ok: false, error: reason})}
+  end
+
+  defp apply_change_scan({store, {:ok, result}}, state) do
+    if store not in state.felt_stores do
+      state
+    else
+      state = %{
+        state
+        | change_health:
+            Map.put(state.change_health, store, %{
+              ok: true,
+              duration_ms: result.duration_ms,
+              indexed_paths: map_size(result.index),
+              changed_addresses: length(result.ids),
+              completed_at: DateTime.to_iso8601(DateTime.utc_now())
+            })
+      }
+
+      protected = state.change_write_ids
+
+      protected =
+        Enum.reduce(result.rows, protected, fn row, ids ->
+          if MapSet.member?(ids, row["uid"]), do: MapSet.put(ids, row["id"]), else: ids
+        end)
+
+      ids = Enum.reject(result.ids, &MapSet.member?(protected, &1))
+      rows = Enum.reject(result.rows, &MapSet.member?(protected, &1["id"]))
+      # A serialized write supersedes this task's read. Keep its old index so
+      # the next pass retries that store rather than accepting a stale stamp.
+      state =
+        if ids == result.ids do
+          %{state | change_indexes: Map.put(state.change_indexes, store, result.index)}
+        else
+          state
+        end
+
+      result = %{result | ids: ids, rows: rows}
+
+      if result.ids == [] do
+        state
+      else
+        changes =
+          Map.new(result.ids, &{&1, nil}) |> Map.merge(Map.new(result.rows, &{&1["id"], &1}))
+
+        retained = Map.get(state.last_known_listings, store, [])
+        rows = overlay_rows(retained, changes)
+        listings = Map.put(state.last_known_listings, store, rows)
+        {candidates, stores} = listing_candidates(listings, state.felt_stores)
+        # Rebuild touched entries even if a filesystem timestamp was restored.
+        prior =
+          Map.reject(state.document_cache, fn {_key, cached} ->
+            cached.entry[:felt_store] == store and
+              Map.has_key?(changes, cached.entry.fiber["slug"])
+          end)
+
+        {cache, stats} =
+          Shuttle.Poller.DocumentCache.refresh(
+            %{state | document_cache: prior},
+            candidates,
+            stores
+          )
+
+        state =
+          Enum.reduce(result.rows, state, fn row, acc -> announce_id(acc, store, row["id"]) end)
+
+        overrides =
+          if state.poll_check_in_progress do
+            Map.update(state.discovery_overrides, store, changes, &Map.merge(&1, changes))
+          else
+            state.discovery_overrides
+          end
+
+        Shuttle.FiberAddresses.put_polled(polled_addresses(candidates, stores))
+
+        state
+        |> install_document_cache(cache)
+        |> Map.put(:last_known_listings, listings)
+        |> Map.put(:uid_slug_index, build_uid_slug_index(candidates))
+        |> Map.put(:fiber_store_cache, Map.merge(stores, state.fiber_store_cache))
+        |> Map.put(:document_cache_stats, stats)
+        |> Map.put(:discovery_overrides, overrides)
+      end
+    end
+  end
+
+  defp overlay_rows(rows, changes) do
+    Enum.reject(rows, &Map.has_key?(changes, &1["id"])) ++
+      Enum.reject(Map.values(changes), &is_nil/1)
+  end
+
+  defp listing_candidates(listings, stores) do
+    Enum.reduce(stores, {[], %{}}, fn store, {all, map} ->
+      rows = Map.get(listings, store, [])
+      {all ++ rows, Map.merge(Map.new(rows, &{&1["id"], store}), map)}
+    end)
+  end
+
+  # Incremental reads can finish while an older full/hot read is in flight.
+  # Overlay every address they touched, including tombstones, before installing
+  # that world's candidates and cache. A slow scan cannot resurrect old paths.
+  defp overlay_discovery(state, candidates, stores, listings, fulls, cache) do
+    if map_size(state.discovery_overrides) == 0 do
+      {candidates, stores, listings, fulls, cache}
+    else
+      successful_stores = Map.keys(listings)
+      combined = Map.merge(state.last_known_listings, listings)
+
+      combined =
+        Enum.reduce(state.discovery_overrides, combined, fn {store, changes}, acc ->
+          Map.update(
+            acc,
+            store,
+            overlay_rows(Map.get(state.last_known_listings, store, []), changes),
+            &overlay_rows(&1, changes)
+          )
+        end)
+
+      listings = Map.take(combined, successful_stores)
+
+      fulls =
+        Enum.reduce(state.discovery_overrides, fulls, fn {store, changes}, acc ->
+          if Map.has_key?(acc, store),
+            do: Map.update!(acc, store, &overlay_rows(&1, changes)),
+            else: acc
+        end)
+
+      {candidates, stores} = listing_candidates(combined, state.felt_stores)
+
+      {cache, _stats} =
+        Shuttle.Poller.DocumentCache.refresh(%{state | document_cache: %{}}, candidates, stores)
+
+      {candidates, stores, listings, fulls, cache}
+    end
+  end
+
   defp schedule_tick(%State{} = state, delay_ms) when is_integer(delay_ms) and delay_ms >= 0 do
     if is_reference(state.tick_timer_ref) do
       Process.cancel_timer(state.tick_timer_ref)
@@ -6356,6 +6607,10 @@ defmodule Shuttle.Poller do
       stall_timeout_ms: state.stall_timeout_ms,
       full_scan_budget_ms: state.full_scan_budget_ms,
       discovery: discovery_snapshot(state),
+      incremental_discovery: %{
+        interval_ms: state.change_interval_ms,
+        stores: state.change_health
+      },
       stalls: state.poll_stalls,
       last_stalled_at: iso8601_or_nil(state.last_poll_stalled_at)
     })

@@ -20,10 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Office writes use `shuttle role <fiber> <slug>|--clear` and
-  # `shuttle seat <fiber> [--clear]`; resolved Shuttle JSON carries a role
-  # string and a boolean seat.
-  @expected_level 28
+  # Metadata discovery uses `shuttle scan-changes` with JSON index frames.
+  @expected_level 29
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -47,7 +45,8 @@ defmodule Shuttle.Contract do
     25 => "context-mailbox sender proof on stdin and process-checked daemon sender attribution",
     26 => "mark-runtime --thread-exit-verb (durable lifecycle signal supersession)",
     27 => "context-mailbox put --retained-at (bounded thread notice retention)",
-    28 => "message --request-json attested_sender (cross-host verified senders)"
+    28 => "message --request-json attested_sender (cross-host verified senders)",
+    29 => "scan-changes (incremental physical-store metadata index)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."
