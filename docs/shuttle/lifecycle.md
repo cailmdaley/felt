@@ -164,6 +164,19 @@ in this order (`eligible?/2` and `dispatch_gates_pass?/3` in
 Configured stores come from `SHUTTLE_STORES` (comma-separated) or the persisted
 registry at `~/.config/shuttle/stores.json`. shuttle assumes no default store.
 
+### Pulsed oneshot constitutions
+
+A oneshot constitution may carry `shuttle.pulse: 59m` to wake its own conversation at that interval.
+The interval ranges from one minute to 24 hours.
+An optional `window` with `start`, `end` and an IANA `tz` limits ticks to local wall time; the start is included, the end excluded, and overnight windows are allowed.
+Pulses apply to any oneshot constitution, including but not limited to seats.
+The daemon resumes the same session after an exit, even when its transcript is cold, unless the session handed off; a handoff starts the successor from the fiber.
+A busy session skips the tick and tries at the next interval, without interrupting or stacking turns.
+Pause, rest and close stop pulses.
+Pulse timing persists in daemon operational state across restarts, outside the fiber lifecycle.
+Ticks do not create board events or review cards unless the worker chooses to write or post.
+Claude and Codex support pulse; Pi has no idle-safe wake path.
+
 **The circuit breaker** (7) exists because a worker that dies on startup would
 otherwise be relaunched forever. Five consecutive worker deaths, each under 90
 seconds, pause autonomous dispatch for that fiber for ten minutes and surface it

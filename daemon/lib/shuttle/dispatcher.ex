@@ -306,6 +306,9 @@ defmodule Shuttle.Dispatcher do
           other -> other
         end
 
+      "pulse" ->
+        continuation(fiber, session_id, opts, :resume_always)
+
       "continue" ->
         continuation(fiber, session_id, opts, :resume_if_warm)
 
@@ -322,6 +325,7 @@ defmodule Shuttle.Dispatcher do
     cond do
       is_nil(session_id) -> :fresh
       Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) -> :fresh
+      want == :resume_always -> {:previous, session_id}
       managed_codex?(fiber) -> {:previous, session_id}
       true -> continue_or_cold(fiber, session_id, opts, want)
     end

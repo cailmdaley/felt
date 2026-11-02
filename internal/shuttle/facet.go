@@ -127,7 +127,7 @@ func SetRuntimeField(f *felt.Felt, key, value string) error {
 
 var configKeys = map[string]bool{
 	"kind": true, "host": true, "project_dir": true, "agent": true,
-	"effort": true, "chrome": true, "surface": true, "schedule": true,
+	"effort": true, "chrome": true, "surface": true, "schedule": true, "pulse": true,
 	"role": true, "seat": true, "thread_parent": true,
 }
 

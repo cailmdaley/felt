@@ -15,6 +15,7 @@ import (
 type statusOwnerRead struct {
 	Running      bool
 	Session      string
+	PulseRuntime *PulseEntry
 	RuntimeKnown bool
 	Fiber        *felt.Felt
 	Stale        bool
@@ -37,6 +38,12 @@ func (a *app) readStatusOwner(f *felt.Felt, localFallback bool, feed *statusFeed
 		return result, err
 	}
 	if block.Host == "" || block.Host == own {
+		if block.Pulse != nil {
+			if feed == nil {
+				feed, _ = a.fetchStatusFeed()
+			}
+			result.PulseRuntime = pulseRuntimeForFiber(feed, own, f.UID, f.ID, block.Pulse)
+		}
 		return result, nil
 	}
 	id := f.UID
@@ -104,6 +111,7 @@ func (a *app) readStatusOwner(f *felt.Felt, localFallback bool, feed *statusFeed
 				if row.Origin == block.Host && (row.Fiber["uid"] == remote.UID || row.Fiber["id"] == remote.UID || row.Fiber["slug"] == remote.ID) {
 					result.Running = len(row.Runtime) > 0
 					result.Session, _ = row.Runtime["tmux_session"].(string)
+					result.PulseRuntime = pulseRuntime(row.Pulse, remoteBlock.Pulse)
 					break
 				}
 			}
@@ -174,7 +182,7 @@ func (a *app) statusRemoteRow(entry shuttleEntry, feed *statusFeed) (FiberStatus
 				if err != nil {
 					return FiberStatus{}, err
 				}
-				read = statusOwnerRead{Fiber: remote, Source: "owner", RuntimeKnown: true, Running: len(row.Runtime) > 0}
+				read = statusOwnerRead{Fiber: remote, Source: "owner", RuntimeKnown: true, Running: len(row.Runtime) > 0, PulseRuntime: pulseRuntime(row.Pulse, entry.Block.Pulse)}
 				read.Session, _ = row.Runtime["tmux_session"].(string)
 				break
 			}
@@ -197,7 +205,7 @@ func (a *app) statusRemoteRow(entry shuttleEntry, feed *statusFeed) (FiberStatus
 	if !ok || block.Host != entry.Block.Host {
 		return FiberStatus{}, fmt.Errorf("owner feed does not own %s", entry.FiberID)
 	}
-	row := FiberStatus{FiberID: read.Fiber.ID, Origin: block.Host, Kind: block.Kind, Agent: block.Agent, State: computeState(block, read.Fiber.Status, read.Running), Running: read.Running, Session: read.Session, Stale: read.Stale, Source: read.Source, ReadError: read.Error}
+	row := FiberStatus{FiberID: read.Fiber.ID, Origin: block.Host, Kind: block.Kind, Agent: block.Agent, State: computeState(block, read.Fiber.Status, read.Running), Running: read.Running, Session: read.Session, Pulse: block.Pulse, PulseRuntime: read.PulseRuntime, Stale: read.Stale, Source: read.Source, ReadError: read.Error}
 	if read.Source == "unresolvable" {
 		row.State = "unresolvable: " + block.Host
 	}
@@ -216,6 +224,7 @@ type statusFeed struct {
 		Origin  string         `json:"origin"`
 		Fiber   map[string]any `json:"fiber"`
 		Runtime map[string]any `json:"runtime"`
+		Pulse   map[string]any `json:"pulse"`
 	} `json:"fibers"`
 	Origins map[string]struct {
 		Stale     bool `json:"stale"`
@@ -224,6 +233,36 @@ type statusFeed struct {
 			State string `json:"state"`
 		} `json:"cache"`
 	} `json:"origins"`
+}
+
+func pulseRuntimeForFiber(feed *statusFeed, origin, uid, slug string, config *shuttle.Pulse) *PulseEntry {
+	if feed == nil {
+		return nil
+	}
+	for _, row := range feed.Fibers {
+		if row.Origin == origin && (row.Fiber["uid"] == uid || row.Fiber["id"] == uid || row.Fiber["slug"] == slug) {
+			return pulseRuntime(row.Pulse, config)
+		}
+	}
+	return nil
+}
+
+func pulseRuntime(raw map[string]any, config *shuttle.Pulse) *PulseEntry {
+	state, _ := raw["state"].(string)
+	if state == "" {
+		return nil
+	}
+	entry := &PulseEntry{State: state}
+	if config != nil {
+		entry.Every, entry.Window = config.Every, config.Window
+	}
+	if value, ok := raw["next_tick"].(string); ok && value != "" {
+		entry.NextTick = &value
+	}
+	if value, ok := raw["last_tick"].(string); ok && value != "" {
+		entry.LastTick = &value
+	}
+	return entry
 }
 
 func (a *app) fetchStatusFeed() (*statusFeed, error) {
@@ -277,7 +316,7 @@ func (a *app) ownerInventoryRows(only string) ([]FiberStatus, error) {
 		originInfo, known := feed.Origins[entry.Origin]
 		stale := !known || originInfo.Stale || (originInfo.Cache.State != "" && originInfo.Cache.State != "fresh")
 		running := len(entry.Runtime) > 0 && !stale
-		row := FiberStatus{FiberID: f.ID, Origin: origin, Kind: block.Kind, Agent: block.Agent, Running: running, State: computeState(block, f.Status, running), Stale: stale, Source: "owner"}
+		row := FiberStatus{FiberID: f.ID, Origin: origin, Kind: block.Kind, Agent: block.Agent, Pulse: block.Pulse, PulseRuntime: pulseRuntime(entry.Pulse, block.Pulse), Running: running, State: computeState(block, f.Status, running), Stale: stale, Source: "owner"}
 		row.Session, _ = entry.Runtime["tmux_session"].(string)
 		if horizonStashed(f) && !running {
 			row.State = "resting"

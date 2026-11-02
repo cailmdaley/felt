@@ -205,7 +205,24 @@ export interface StripFacts {
 export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripFacts {
   const agent = isAgentCard(card)
   let cadence: StripFacts['cadence']
-  if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
+  if (card.shuttlePulse) {
+    const window = card.shuttlePulse.window
+      ? ` · ${card.shuttlePulse.window.start}–${card.shuttlePulse.window.end} ${card.shuttlePulse.window.tz}`
+      : ''
+    const pulse = card.shuttlePulseRuntime
+    const next = pulse?.nextTick ? pulseTime(pulse.nextTick) : undefined
+    const state = pulse?.state === 'scheduled' && next
+      ? ` · next ${next}`
+      : pulse?.state && pulse.state !== 'scheduled'
+        ? ` · ${pulse.state}`
+        : ''
+    cadence = {
+      text: `every ${card.shuttlePulse.every}${window}${state}`,
+      title: pulse?.lastTick
+        ? `Seat pulse; last tick ${pulseTime(pulse.lastTick)}${pulse.state ? `; ${pulse.state}` : ''}`
+        : `Seat pulse${pulse?.state ? `; ${pulse.state}` : ''}`,
+    }
+  } else if (card.shuttleKind === 'standing' && card.shuttleSchedule) {
     const spoken = humanizeCron(card.shuttleSchedule)
     cadence = spoken
       ? { text: spoken, title: `cron: ${card.shuttleSchedule}${card.shuttleTz ? ` (${card.shuttleTz})` : ''}` }
@@ -230,12 +247,18 @@ export function stripFacts(card: KanbanCard, nowMs: number = Date.now()): StripF
   }
 }
 
+function pulseTime(value: string): string {
+  const instant = instantMs(value)
+  return instant === undefined ? value : dayClock(instant)
+}
+
 /** {@link stripFacts} drawn: the facts on the left, the run window on the
  *  right — or on a line of its own where the dock is too narrow for both. */
 function buildStrip(card: KanbanCard): HTMLElement {
   const facts = stripFacts(card)
   const strip = document.createElement('span')
   strip.className = 'kbn-ctl-strip'
+  if (card.shuttlePulse) strip.classList.add('kbn-ctl-strip-pulse')
   const line = document.createElement('span')
   line.className = 'kbn-ctl-facts'
   strip.append(line)
@@ -262,7 +285,7 @@ function buildStrip(card: KanbanCard): HTMLElement {
   }
   line.append(who)
   if (facts.seat) put('kbn-ctl-cadence kbn-ctl-seat', facts.seat.text, facts.seat.title)
-  if (facts.cadence) put('kbn-ctl-cadence', facts.cadence.text, facts.cadence.title)
+  if (facts.cadence) put(`kbn-ctl-cadence${card.shuttlePulse ? ' kbn-ctl-pulse' : ''}`, facts.cadence.text, facts.cadence.title)
   if (facts.place) put('kbn-ctl-place', facts.place.text, facts.place.title)
   if (facts.due) put('kbn-ctl-due', `due ${facts.due}`)
   if (facts.run) {
@@ -949,6 +972,7 @@ export class Dock {
     const toggle = document.createElement('button')
     toggle.type = 'button'
     toggle.className = 'kbn-detail-controls-toggle'
+    if (card.shuttlePulse) toggle.classList.add('kbn-detail-controls-toggle-pulse')
     toggle.setAttribute('aria-expanded', 'false')
     const name = document.createElement('span')
     name.className = 'kbn-ctl-sr'

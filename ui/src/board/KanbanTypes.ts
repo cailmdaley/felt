@@ -196,6 +196,14 @@ export interface KanbanCard {
    * Absent when `shuttleSchedule` is absent.
    */
   shuttleTz?: string
+  /** `shuttle.pulse` interval and optional active window. */
+  shuttlePulse?: { every: string; window?: { start: string; end: string; tz: string } }
+  /** Clock supplied by the owning daemon; timestamps are never inferred locally. */
+  shuttlePulseRuntime?: {
+    nextTick?: string | null
+    lastTick?: string | null
+    state: 'scheduled' | 'held' | 'paused' | 'unsupported' | 'sending'
+  }
   /**
    * `shuttle.project_dir` — the worker's cwd on the owning host. Echoed back
    * on kind/schedule reshapes (uninstall + reinstall via `:4000/lifecycle`)

@@ -78,6 +78,8 @@ export interface Fiber {
   shuttleSurface?: 'cli' | 'app';
   /** `shuttle.schedule` — cron expression + IANA timezone for standing constitutions. */
   shuttleSchedule?: { expr: string; tz: string };
+  /** `shuttle.pulse` cadence and optional local-time window for a oneshot seat. */
+  shuttlePulse?: { every: string; window?: { start: string; end: string; tz: string } };
   /** `shuttle.project_dir` — the worker's cwd on the owning host. Echoed back
    * on kind/schedule reshapes (uninstall + reinstall) so the block survives
    * the round trip. */
@@ -157,6 +159,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
   let shuttleAgent: string | undefined;
   let shuttleEffort: string | undefined;
   let shuttleSchedule: { expr: string; tz: string } | undefined;
+  let shuttlePulse: Fiber['shuttlePulse'];
   let shuttleProjectDir: string | undefined;
   let shuttleChrome: boolean | undefined;
   let shuttleSurface: 'cli' | 'app' | undefined;
@@ -217,6 +220,21 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
       const tz = tzRaw.trim() || 'UTC';
       if (expr) shuttleSchedule = { expr, tz };
     }
+
+    const pulse = s.pulse;
+    if (typeof pulse === 'string' && pulse.trim()) {
+      shuttlePulse = { every: pulse.trim() };
+    } else if (pulse && typeof pulse === 'object' && !Array.isArray(pulse)) {
+      const p = pulse as Record<string, unknown>;
+      const every = typeof p.every === 'string' ? p.every.trim() : '';
+      const rawWindow = p.window;
+      if (every && rawWindow && typeof rawWindow === 'object' && !Array.isArray(rawWindow)) {
+        const w = rawWindow as Record<string, unknown>;
+        if (typeof w.start === 'string' && typeof w.end === 'string' && typeof w.tz === 'string') {
+          shuttlePulse = { every, window: { start: w.start, end: w.end, tz: w.tz } };
+        }
+      } else if (every) shuttlePulse = { every };
+    }
   }
 
   // entry_point (felt) → isRoot (this client's Fiber type). Felt only emits
@@ -257,6 +275,7 @@ export function mapFeltJsonToFiber(item: unknown): Fiber | null {
     shuttleAgent,
     shuttleEffort,
     shuttleSchedule,
+    shuttlePulse,
     shuttleProjectDir,
     shuttleChrome,
     shuttleSurface,

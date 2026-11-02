@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -49,8 +50,7 @@ func (a *app) runStatusCrossHost(o statusOptions) error {
 		if seen[row.Origin+":"+row.FiberID] {
 			for i := range rows {
 				if rows[i].Origin == row.Origin && rows[i].FiberID == row.FiberID {
-					rows[i].NextDueAt = row.NextDueAt
-					rows[i].LastRunAt = row.LastRunAt
+					mergePulseAndSchedule(&rows[i], row)
 				}
 			}
 		} else if row.FiberID == "" || row.Running {
@@ -151,8 +151,37 @@ func snapshotToRows(origin string, snap *Snapshot, stale bool) []FiberStatus {
 		}
 		rows = append(rows, row)
 	}
+	for i := range snap.Pulses {
+		p := snap.Pulses[i]
+		row := FiberStatus{FiberID: p.FiberID, Origin: origin, Kind: "oneshot", State: p.State, Running: p.State == "running", PulseRuntime: &p, Stale: stale}
+		if index := slices.IndexFunc(rows, func(existing FiberStatus) bool {
+			return existing.FiberID == row.FiberID && existing.Origin == row.Origin
+		}); index >= 0 {
+			mergePulseAndSchedule(&rows[index], row)
+		} else {
+			rows = append(rows, row)
+		}
+	}
 
 	return rows
+}
+
+func mergePulseAndSchedule(dst *FiberStatus, src FiberStatus) {
+	if src.NextDueAt != "" {
+		dst.NextDueAt = src.NextDueAt
+	}
+	if src.LastRunAt != "" {
+		dst.LastRunAt = src.LastRunAt
+	}
+	if src.Pulse != nil {
+		dst.Pulse = src.Pulse
+	}
+	if src.PulseRuntime != nil {
+		dst.PulseRuntime = src.PulseRuntime
+	}
+	if src.Running {
+		dst.Running = true
+	}
 }
 
 func remoteSummaryRow(name string, rs *RemoteSnapshot) *FiberStatus {
@@ -258,6 +287,29 @@ func (a *app) printCrossHostTable(rows []FiberStatus, c *CompositeState, only st
 		"ORIGIN", "FIBER", "KIND", "STATE", "NEXT_DUE_AT", "AGENT")
 	fmt.Fprintln(a.env.Stdout, strings.Repeat("─", 122))
 
+	for _, r := range rows {
+		if r.Pulse != nil || r.PulseRuntime != nil {
+			every := ""
+			if r.Pulse != nil {
+				every = r.Pulse.Every
+			}
+			if r.PulseRuntime != nil {
+				every = r.PulseRuntime.Every
+			}
+			fmt.Fprintf(a.env.Stdout, "  pulse %s: every %s", r.FiberID, every)
+			if r.Pulse != nil && r.Pulse.Window != nil {
+				fmt.Fprintf(a.env.Stdout, ", %s–%s %s", r.Pulse.Window.Start, r.Pulse.Window.End, r.Pulse.Window.TZ)
+			}
+			if r.PulseRuntime != nil {
+				next := "-"
+				if r.PulseRuntime.NextTick != nil {
+					next = *r.PulseRuntime.NextTick
+				}
+				fmt.Fprintf(a.env.Stdout, ", next %s", next)
+			}
+			fmt.Fprintln(a.env.Stdout)
+		}
+	}
 	for _, r := range rows {
 		origin := shuttleNonEmpty(r.Origin, "(local)")
 		agent := shuttleNonEmpty(r.Agent, "(default)")

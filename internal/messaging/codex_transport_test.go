@@ -325,3 +325,32 @@ func TestCodexLostAcknowledgmentIsDeduplicated(t *testing.T) {
 		t.Fatalf("same-ID retry sent %d mutations, want 1", got)
 	}
 }
+
+func TestCodexPulseNeverSteersAnActiveTurn(t *testing.T) {
+	t.Parallel()
+	for _, state := range []string{"active", "idle"} {
+		t.Run(state, func(t *testing.T) {
+			env := testEnv(t)
+			fake := &fakeCodex{t: t, state: state, mutation: "turn/start", mutationReply: map[string]any{"turn": map[string]any{"id": "pulse-turn", "status": "inProgress"}}}
+			env.Set("SHUTTLE_CODEX_SOCKET", startFakeCodex(t, fake))
+			req := Request{Address: "shuttle://h/codex/thread-1", Text: "pulse", MessageID: "pulse", Wake: true, IdleOnly: true}
+			receipt, err := Send(context.Background(), env, "h", req)
+			if state == "active" {
+				if receipt.Status != StatusRejected || ErrorCode(err) != "busy" {
+					t.Fatalf("busy pulse = %#v, %v", receipt, err)
+				}
+			} else if err != nil || receipt.Status != StatusAccepted || fake.methodCount("turn/start") != 1 {
+				t.Fatalf("idle pulse = %#v, %v", receipt, err)
+			}
+			if fake.methodCount("turn/steer") != 0 {
+				t.Fatal("pulse steered a human turn")
+			}
+		})
+	}
+	req := Request{Address: "shuttle://h/codex/thread-1", MessageID: "same", Text: "pulse", Wake: true}
+	same := req
+	same.IdleOnly = true
+	if requestHash(req) == requestHash(same) {
+		t.Fatal("idle-only policy omitted from dedup identity")
+	}
+}

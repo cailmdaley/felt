@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Dock } from './Dock.js'
+import { stripFacts } from './Dock.js'
 import { TranscriptBand } from '../transcript/TranscriptBand.js'
 import { card } from '../testFixtures.js'
 import type { KanbanCard } from '../KanbanTypes.js'
@@ -1088,5 +1089,25 @@ describe('Settings says who and where once', () => {
     const { chatFacts } = await import('./Dock.js')
     expect(chatFacts(card({ id: 'x', name: 'cmbx chair', shuttleRole: 'cmbx-chair', shuttleAgent: 'claude-opus', shuttleHost: 'cineca' }))).toBe('claude-opus · cineca')
     expect(chatFacts(card({ id: 'x', name: 'Noise closure', shuttleRole: 'data-expert', shuttleAgent: 'codex-sol', shuttleHost: 'cineca' }))).toBe('codex-sol · data-expert · cineca')
+  })
+})
+
+describe('pulse cadence in the workspace strip', () => {
+  it('shows the configured window and owner-computed next tick', () => {
+    const facts = stripFacts(card({
+      id: 'x',
+      shuttlePulse: { every: '59m', window: { start: '08:00', end: '20:00', tz: 'Europe/Paris' } },
+      shuttlePulseRuntime: { nextTick: '2026-11-02T12:31:00Z', lastTick: '2026-11-02T11:32:00Z', state: 'scheduled' },
+    }))
+    expect(facts.cadence?.text).toContain('every 59m · 08:00–20:00 Europe/Paris · next')
+    expect(facts.cadence?.title).toContain('last tick')
+  })
+
+  it('shows paused state without inventing a next tick', () => {
+    const facts = stripFacts(card({
+      id: 'x', shuttlePulse: { every: '59m' },
+      shuttlePulseRuntime: { state: 'paused' },
+    }))
+    expect(facts.cadence?.text).toBe('every 59m · paused')
   })
 })

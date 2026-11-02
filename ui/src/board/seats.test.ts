@@ -63,6 +63,15 @@ describe('mapFeltJsonToFiber reads shuttle.seat', () => {
     expect(f?.shuttleRole).toBe('cmbx-chair')
     expect(f?.shuttleSeat).toBe(true)
   })
+
+  it('reads scalar and windowed pulse configuration without deriving a clock', () => {
+    expect(mapFeltJsonToFiber({ id: 'a', shuttle: { pulse: '59m' } })?.shuttlePulse).toEqual({ every: '59m' })
+    expect(mapFeltJsonToFiber({ id: 'a', shuttle: { pulse: {
+      every: '59m', window: { start: '08:00', end: '20:00', tz: 'Europe/Paris' },
+    } } })?.shuttlePulse).toEqual({
+      every: '59m', window: { start: '08:00', end: '20:00', tz: 'Europe/Paris' },
+    })
+  })
 })
 
 function board(fibers: Record<string, unknown>[]): KanbanResponse {
@@ -106,6 +115,25 @@ describe('the read model files seats on the roles surface', () => {
     expect(resp.stash).toEqual([])
     expect(resp.timeline.futureDated).toEqual([])
     expect(resp.totals.roles).toBe(2)
+  })
+
+  it('carries the owner pulse clock onto the card unchanged', () => {
+    const feed = parseCompositeFeed({
+      host: 'desk',
+      fibers: [{
+        origin: 'desk', felt_store: '/store', path: 'life/vizier.md',
+        fiber: seat('life/vizier', 'Vizier', { status: 'active', shuttle: {
+          kind: 'oneshot', host: 'desk', pulse: '59m',
+        } }),
+        pulse: { next_tick: '2026-10-08T13:00:00Z', last_tick: '2026-10-08T12:01:00Z', state: 'scheduled' },
+      }],
+      origins: { desk: { kind: 'local', stale: false, fiber_count: 1 } },
+    })
+    const card = buildKanbanResponseFromComposite(feed, { nowMs: Date.parse('2026-10-08T12:00:00Z') }).now.inFlight[0]
+    expect(card.shuttlePulse).toEqual({ every: '59m' })
+    expect(card.shuttlePulseRuntime).toEqual({
+      nextTick: '2026-10-08T13:00:00Z', lastTick: '2026-10-08T12:01:00Z', state: 'scheduled',
+    })
   })
 })
 

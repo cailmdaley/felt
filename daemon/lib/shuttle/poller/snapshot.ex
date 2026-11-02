@@ -126,6 +126,7 @@ defmodule Shuttle.Poller.Snapshot do
         state.standing_roles
         |> StandingRoles.standing_role_snapshots(now, state)
         |> with_office(state),
+      pulses: Poller.pulse_rows(state),
       claimed_count: map_size(state.running),
       max_concurrent:
         if(state.max_concurrent_workers == :infinity, do: nil, else: state.max_concurrent_workers),

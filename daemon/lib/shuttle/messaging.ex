@@ -730,6 +730,7 @@ defmodule Shuttle.Messaging do
             "reply_to",
             "notify_address",
             "wake",
+            "idle_only",
             "message_id",
             "notify_when_idle",
             "notify_wake"

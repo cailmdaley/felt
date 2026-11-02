@@ -65,6 +65,13 @@
 .ws-dock .kbn-ctl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ws-dock .kbn-ctl-strip { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; }
 .ws-dock .kbn-detail-controls-toggle { min-width: 0; overflow: hidden; }
+/* Pulse facts carry a window and owner-supplied next tick, so let that
+   settings summary take another line instead of clipping its cadence. */
+.ws-dock .kbn-detail-controls-toggle-pulse { align-items: flex-start; overflow: visible; }
+.ws-dock .kbn-detail-controls-toggle-pulse .kbn-detail-controls-chevron { margin-top: 5px; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip-pulse { overflow: visible; white-space: normal; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip-pulse .kbn-ctl-facts { flex-wrap: wrap; overflow: visible; white-space: normal; }
+.ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip-pulse .kbn-ctl-facts > .kbn-ctl-pulse { flex: 1 1 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 /* Folded, the facts hold one line: each keeps its width but the place (a
    host:path), which yields and ends in an ellipsis. */
 .ws-dock .kbn-detail-controls:not(.kbn-detail-controls-open) .kbn-ctl-strip { display: flex; overflow: hidden; white-space: nowrap; }

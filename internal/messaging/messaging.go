@@ -140,6 +140,9 @@ func validateRequest(host string, r Request) error {
 	if r.NotifyWake && !r.NotifyWhenIdle {
 		return errCode("invalid_request", "notify_wake requires notify_when_idle")
 	}
+	if r.IdleOnly && (!r.Wake || (a.Harness != "claude" && a.Harness != "codex")) {
+		return errCode("invalid_request", "idle_only requires a Claude or Codex wake")
+	}
 	if len(r.NotifyAddress) > 1024 || hasControl(r.NotifyAddress) {
 		return errCode("invalid_request", "notify_address is too long or contains control characters")
 	}

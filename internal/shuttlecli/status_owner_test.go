@@ -105,6 +105,65 @@ func TestStatusAllIncludesOwnerOnlyClosedAndRestedInventory(t *testing.T) {
 	}
 }
 
+func TestStatusShowsOwnerPulseRuntimeForLocalFiber(t *testing.T) {
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
+	dir, storage := newStore(t)
+	block := map[string]any{"kind": "oneshot", "host": "hub", "pulse": map[string]any{"every": "59m", "window": map[string]any{"start": "08:00", "end": "20:00", "tz": "Europe/Paris"}}}
+	seedShuttleRole(t, storage, "life/vizier", felt.StatusActive, block, nil)
+	fiber := mustRead(t, storage, "life/vizier")
+	next := "2026-11-02T08:59:00Z"
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/state/composite" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"local": map[string]any{"host": "hub", "eligible": []any{}, "pulses": []any{map[string]any{"fiber_id": fiber.UID, "uid": fiber.UID, "every": "59m", "window": map[string]any{"start": "08:00", "end": "20:00", "tz": "Europe/Paris"}, "state": "scheduled", "next_tick": next}}}, "remotes": map[string]any{}})
+			return
+		}
+		if r.URL.Path != "/api/v1/fibers/composite" {
+			t.Errorf("unexpected request %s", r.URL.String())
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"host":    "hub",
+			"origins": map[string]any{"hub": map[string]any{"stale": false, "cache": map[string]any{"state": "fresh"}}},
+			"fibers": []any{map[string]any{
+				"origin": "hub",
+				"fiber":  map[string]any{"id": fiber.UID, "uid": fiber.UID, "slug": fiber.ID},
+				"pulse":  map[string]any{"state": "scheduled", "next_tick": next, "last_tick": nil},
+			}},
+		})
+	}))
+	a := withStubbedLiveSessions(t, env, map[string]bool{})
+	text, _, err := executeApp(t, a, dir, "status")
+	if err != nil || strings.Count(text, "  pulse ") != 1 || !strings.Contains(text, "next "+next) {
+		t.Fatalf("pulse must be printed once with its next tick: %v\n%s", err, text)
+	}
+	for _, args := range [][]string{{"status", "--json"}, {"status", "life/vizier", "--json"}} {
+		out, _, err := executeApp(t, a, dir, args...)
+		if err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+		if args[1] == "--json" {
+			var rows []FiberStatus
+			if err := json.Unmarshal([]byte(out), &rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].PulseRuntime == nil || rows[0].PulseRuntime.State != "scheduled" || rows[0].PulseRuntime.NextTick == nil || *rows[0].PulseRuntime.NextTick != next {
+				t.Fatalf("table pulse runtime = %#v (%s)", rows, out)
+			}
+		} else {
+			var row map[string]any
+			if err := json.Unmarshal([]byte(out), &row); err != nil {
+				t.Fatal(err)
+			}
+			runtime, ok := row["pulse_runtime"].(map[string]any)
+			if !ok || runtime["state"] != "scheduled" || runtime["next_tick"] != next {
+				t.Fatalf("single-fiber pulse runtime = %#v", row)
+			}
+		}
+	}
+}
+
 func TestThreadStaleLabelPreservesEveryState(t *testing.T) {
 	for _, state := range []string{"Archived", "Resting", "Working", "To review", "Armed", "Draft"} {
 		row := threadRow{State: state, Stale: true, HostUnreachable: true}

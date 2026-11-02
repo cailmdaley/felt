@@ -79,6 +79,13 @@ interface CompositeRuntime {
   launchError?: string;
 }
 
+/** Owner-served operational pulse clock, separate from worker liveness. */
+export interface PulseRuntime {
+  next_tick?: string | null;
+  last_tick?: string | null;
+  state: 'scheduled' | 'held' | 'paused' | 'unsupported' | 'sending';
+}
+
 export interface CompositeEntry {
   /** Owning host/remote name (the feed row's `origin`). Routes worker focus and
    * transition writes; this is the value to pass back as the `/transition`
@@ -97,6 +104,8 @@ export interface CompositeEntry {
   /** Owner-served liveness — present iff the owning daemon holds a worker for
    * this fiber. The single reconciled liveness observation per fiber. */
   runtime?: CompositeRuntime;
+  /** Owner-computed pulse clock; the board never schedules ticks itself. */
+  pulse?: PulseRuntime;
   /** Owner-served failure before a worker could be registered. */
   dispatchError?: string;
   /** Owner-served boot-quarantine hold — true iff the owning daemon is
@@ -164,6 +173,7 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
 
     const origin = typeof item.origin === 'string' && item.origin ? item.origin : host;
     const runtime = parseRuntime(item.runtime);
+    const pulse = parsePulseRuntime(item.pulse);
     const held = item.held === true;
     const heldSince = typeof item.held_since === 'number' ? item.held_since : undefined;
     const dir = typeof item.dir === 'string' ? item.dir : undefined;
@@ -172,7 +182,7 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
     const orchestrator = typeof item.orchestrator === 'string' && item.orchestrator ? item.orchestrator : null;
     const pendingResults = typeof item.pending_results === 'number' && item.pending_results > 0 ? item.pending_results : undefined;
     const dispatchError = typeof item.dispatch_error === 'string' && item.dispatch_error ? item.dispatch_error : undefined;
-    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, dispatchError, held, heldSince, dir, reportPath });
+    entries.push({ origin, orchestrator, pendingResults, feltStore, path, fiber, runtime, pulse, dispatchError, held, heldSince, dir, reportPath });
   }
 
   const origins: Record<string, CompositeOrigin> = {};
@@ -190,6 +200,17 @@ export function parseCompositeFeed(body: unknown): CompositeFeed {
   }
 
   return { host, generatedAt, entries, origins };
+}
+
+function parsePulseRuntime(value: unknown): PulseRuntime | undefined {
+  if (!isRecord(value) || !['scheduled', 'held', 'paused', 'unsupported', 'sending'].includes(String(value.state))) return undefined;
+  const iso = (v: unknown): string | null | undefined =>
+    v === null ? null : typeof v === 'string' && v ? v : undefined;
+  return {
+    state: value.state as PulseRuntime['state'],
+    next_tick: iso(value.next_tick),
+    last_tick: iso(value.last_tick),
+  };
 }
 
 function parseRuntime(value: unknown): CompositeRuntime | undefined {

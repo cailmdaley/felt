@@ -330,6 +330,9 @@ func (codexAdapter) send(ctx context.Context, env *sysenv.Env, a Address, req Re
 	text := labeled(req)
 	switch t.Status.Type {
 	case "active":
+		if req.IdleOnly {
+			return rejected(req, "codex-app-server", "pulse skipped: conversation is busy"), errCode("busy", "conversation is busy")
+		}
 		if req.Wake {
 			for _, flag := range t.Status.ActiveFlags {
 				if flag == "waitingOnApproval" || flag == "waitingOnUserInput" {

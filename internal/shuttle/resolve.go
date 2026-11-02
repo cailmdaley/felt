@@ -33,7 +33,8 @@ type ResolvedAgent struct {
 // this instead of re-resolving the agent name and re-parsing cron itself; the
 // flat config/runtime fields beside it stay the source of truth.
 type Resolved struct {
-	Agent *ResolvedAgent `json:"agent,omitempty"`
+	Agent           *ResolvedAgent `json:"agent,omitempty"`
+	PulseIntervalMS int64          `json:"pulse_interval_ms,omitempty"`
 	// NextDue is the next occurrence strictly after now; PrevDue is the most
 	// recent occurrence at or before now. The daemon reads both for standing
 	// roles: NextDue for the display "upcoming tick" and the parseable-schedule
@@ -47,7 +48,7 @@ type Resolved struct {
 // IsEmpty reports whether nothing resolved (no agent, no schedule) — callers
 // skip attaching an empty resolved object.
 func (r *Resolved) IsEmpty() bool {
-	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil)
+	return r == nil || (r.Agent == nil && r.NextDue == nil && r.PrevDue == nil && r.PulseIntervalMS == 0)
 }
 
 // NewResolvedAgent folds a resolved harness record and the effective axes into the
@@ -119,6 +120,12 @@ func ResolveBlock(b *Block, reg *AgentRegistry, now time.Time) (*Resolved, error
 			if prev, err := PrevOccurrence(b.Schedule, now); err == nil && !prev.IsZero() {
 				res.PrevDue = &prev
 			}
+		}
+	}
+	pulseAgentAllowed := res.Agent == nil || res.Agent.CLI == "claude" || res.Agent.CLI == "codex"
+	if b.Pulse != nil && len(validatePulse(b.Pulse)) == 0 && b.Kind == "oneshot" && pulseAgentAllowed {
+		if interval, err := b.Pulse.Interval(); err == nil {
+			res.PulseIntervalMS = interval.Milliseconds()
 		}
 	}
 

@@ -310,3 +310,26 @@ func TestFetchComposite_ErrorOnNon200(t *testing.T) {
 		t.Fatal("expected error on 500, got nil")
 	}
 }
+
+func TestCompositeRows_PulseRuntime(t *testing.T) {
+	next := "2026-11-02T08:59:00Z"
+	c := &CompositeState{Local: &Snapshot{Pulses: []PulseEntry{{FiberID: "life/vizier", UID: "u1", Every: "59m", NextTick: &next, State: "idle"}}}}
+	rows := compositeRows(c, "")
+	if len(rows) != 1 || rows[0].PulseRuntime == nil || rows[0].PulseRuntime.Every != "59m" || rows[0].PulseRuntime.NextTick == nil || *rows[0].PulseRuntime.NextTick != next {
+		t.Fatalf("pulse rows = %#v", rows)
+	}
+}
+
+func TestCompositeRows_MergesPulseWithRunningWorker(t *testing.T) {
+	next := "2026-11-02T08:59:00Z"
+	rows := snapshotToRows("", &Snapshot{
+		Eligible: []SnapshotEntry{{FiberID: "life/vizier", State: "running"}},
+		Pulses:   []PulseEntry{{FiberID: "life/vizier", Every: "59m", NextTick: &next, State: "sending"}},
+	}, false)
+	if len(rows) != 1 {
+		t.Fatalf("duplicate fiber rows: %#v", rows)
+	}
+	if !rows[0].Running || rows[0].State != "running" || rows[0].PulseRuntime == nil || rows[0].PulseRuntime.State != "sending" || rows[0].PulseRuntime.NextTick == nil || *rows[0].PulseRuntime.NextTick != next {
+		t.Fatalf("merged runtime = %#v", rows[0])
+	}
+}

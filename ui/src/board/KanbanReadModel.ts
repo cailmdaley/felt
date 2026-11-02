@@ -558,6 +558,12 @@ function toCard(
     shuttleBlockedOn: f.shuttleBlockedOn,
     shuttleSchedule: f.shuttleSchedule?.expr,
     shuttleTz: f.shuttleSchedule?.tz,
+    shuttlePulse: f.shuttlePulse,
+    shuttlePulseRuntime: entry.pulse ? {
+      nextTick: entry.pulse.next_tick,
+      lastTick: entry.pulse.last_tick,
+      state: entry.pulse.state,
+    } : undefined,
     shuttleProjectDir: f.shuttleProjectDir,
     inheritedProjectDir: inheritedProjectDir(entry, dirs),
     nextLaunchAt: nextStandingLaunch(f, nowMs),

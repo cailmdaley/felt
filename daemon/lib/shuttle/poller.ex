@@ -191,6 +191,8 @@ defmodule Shuttle.Poller do
       # reconciles entries whose tmux session has died.
       running: %{},
       standing_roles: [],
+      pulses: %{},
+      pulse_jobs: %{},
       orphans: [],
       # %{fiber_id => felt_store} — populated by discover_candidates/1 on each
       # poll cycle. Entries are never evicted.
@@ -419,10 +421,12 @@ defmodule Shuttle.Poller do
         running: running,
         task_reads: tasks,
         dispatch_failures: failures,
-        pending_results: pending
+        pending_results: pending,
+        pulses: pulses
       } ->
         entries =
           base_entries
+          |> Shuttle.Pulse.stamp(pulses)
           |> stamp_runtime(running, tasks)
           |> Snapshot.put_dispatch_errors(failures)
           |> stamp_pending_results(%State{pending_results: pending, running: running})
@@ -1017,6 +1021,7 @@ defmodule Shuttle.Poller do
       own_host_id: own_host_id,
       auto_discover_felt_stores: auto_discover,
       runner: runner,
+      pulses: Shuttle.Pulse.load(),
       full_scan_budget_ms:
         Keyword.get_lazy(opts, :full_scan_budget_ms, fn ->
           Shuttle.Env.app(:full_scan_budget_ms, @default_full_scan_budget_ms)
@@ -1338,6 +1343,8 @@ defmodule Shuttle.Poller do
     Map.take(state, [
       :running,
       :standing_roles,
+      :pulses,
+      :pulse_jobs,
       :orphans,
       :fiber_store_cache,
       :document_cache,
@@ -1456,7 +1463,8 @@ defmodule Shuttle.Poller do
       running: state.running,
       task_reads: state.task_reads,
       dispatch_failures: state.dispatch_failures,
-      pending_results: state.pending_results
+      pending_results: state.pending_results,
+      pulses: pulse_rows(state)
     }
 
     worker_entries =
@@ -1553,6 +1561,7 @@ defmodule Shuttle.Poller do
       Enum.map(state.document_cache, fn {_key, cached} ->
         pending_entry(cached.entry, state.pending_results)
       end)
+      |> Shuttle.Pulse.stamp(pulse_rows(state))
       |> stamp_runtime(state.running, state.task_reads)
       |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 
@@ -1596,6 +1605,8 @@ defmodule Shuttle.Poller do
       :document_cache_stats,
       :task_reads,
       :pending_results,
+      :pulses,
+      :pulse_jobs,
       :fleet,
       :parked_launches,
       :felt_stores,
@@ -2041,6 +2052,27 @@ defmodule Shuttle.Poller do
   defp transition_info({:fleet, fleet}, state) when is_map(fleet),
     do: {:noreply, %{state | fleet: fleet}}
 
+  defp transition_info({ref, result}, state) when is_map_key(state.pulse_jobs, ref) do
+    Process.demonitor(ref, [:flush])
+    {{key, at}, jobs} = Map.pop(state.pulse_jobs, ref)
+
+    pulses =
+      if pulse_delivered?(result),
+        do: Shuttle.Pulse.delivered(state.pulses, key, at),
+        else:
+          if(pulse_rejected?(result),
+            do: Shuttle.Pulse.release(state.pulses, key),
+            else: state.pulses
+          )
+
+    {:noreply, persist_pulses(%{state | pulse_jobs: jobs}, pulses)}
+  end
+
+  defp transition_info({:DOWN, ref, :process, _pid, _reason}, state)
+       when is_map_key(state.pulse_jobs, ref) do
+    {:noreply, %{state | pulse_jobs: Map.delete(state.pulse_jobs, ref)}}
+  end
+
   defp transition_info(msg, state) do
     Logger.debug("Poller ignored message: #{inspect(msg)}")
     {:noreply, state}
@@ -2144,6 +2176,7 @@ defmodule Shuttle.Poller do
         {base, state} = owner_feed_base(state)
 
         {base
+         |> Shuttle.Pulse.stamp(pulse_rows(state))
          |> stamp_runtime(state.running, state.task_reads)
          |> Snapshot.put_dispatch_errors(state.dispatch_failures)
          |> stamp_pending_results(state), state}
@@ -2684,6 +2717,7 @@ defmodule Shuttle.Poller do
         resume_loop: evict_stale_by_candidates(state.resume_loop, candidates)
     }
 
+    state = reconcile_pulses(state, candidates)
     state = deliver_thread_results(state)
 
     # Downtime recovery: a standing constitution whose tmux session is gone but whose
@@ -2738,11 +2772,188 @@ defmodule Shuttle.Poller do
       if available_slots(state_acc) <= 0 do
         state_acc
       else
-        {new_state, _result} = do_dispatch_fiber(state_acc, fiber)
-        new_state
+        dispatch_pulse_or_work(state_acc, fiber)
       end
     end)
+    |> deliver_pulses(candidates)
   end
+
+  @doc false
+  def pulse_rows(state),
+    do:
+      Shuttle.Pulse.rows(
+        state.pulses,
+        state.boot_quarantine or not state.contract_check.ok or
+          not is_nil(state.reconciliation_hold)
+      )
+
+  defp persist_pulses(state, pulses) when state.pulses == pulses, do: state
+
+  defp persist_pulses(state, pulses) do
+    case Shuttle.Pulse.save(pulses) do
+      :ok -> %{state | pulses: pulses}
+      _ -> state
+    end
+  end
+
+  defp reconcile_pulses(state, candidates) do
+    now = DateTime.utc_now()
+    sending_keys = Enum.map(state.pulse_jobs, fn {_, {key, _}} -> key end)
+
+    pulses =
+      state.pulses
+      |> Shuttle.Pulse.reconcile(candidates, state.own_host_id, now)
+      |> Shuttle.Pulse.observe(candidates, session_activity(), sending_keys, now)
+
+    persist_pulses(state, pulses)
+  end
+
+  defp dispatch_pulse_or_work(state, fiber) do
+    now = DateTime.utc_now()
+    row = state.pulses[runtime_key_for_fiber(fiber)]
+
+    held? =
+      state.boot_quarantine or not state.contract_check.ok or
+        not is_nil(state.reconciliation_hold)
+
+    cond do
+      is_map(row) and row["pending"] ->
+        # Restore the conversation containing an already delivered or queued tick quietly.
+        {next, _} = do_dispatch_fiber(state, fiber, resume_mode: "pulse")
+        next
+
+      held? ->
+        # The eligibility/quarantine gates have authorized this quiet restoration.
+        {next, _} = do_dispatch_fiber(state, fiber)
+        next
+
+      Shuttle.Pulse.due?(row, now) and
+          not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber) ->
+        pulses = Shuttle.Pulse.advance(state.pulses, fiber, now)
+        next = persist_pulses(state, pulses)
+
+        if next.pulses == pulses and
+             Shuttle.Pulse.in_window?(Shuttle.Pulse.config(fiber).window, now) do
+          {next, result} =
+            do_dispatch_fiber(next, fiber,
+              resume_mode: "pulse",
+              user_message: Shuttle.Pulse.message(row, now)
+            )
+
+          if match?({:ok, _}, result),
+            do:
+              persist_pulses(
+                next,
+                Shuttle.Pulse.delivered(next.pulses, runtime_key_for_fiber(fiber), now)
+              ),
+            else: next
+        else
+          next
+        end
+
+      true ->
+        {next, _} = do_dispatch_fiber(state, fiber)
+        next
+    end
+  end
+
+  defp deliver_pulses(state, candidates) do
+    now = DateTime.utc_now()
+
+    if state.boot_quarantine or not state.contract_check.ok or state.reconciliation_hold do
+      state
+    else
+      Enum.reduce(candidates, state, fn fiber, acc ->
+        key = runtime_key_for_fiber(fiber)
+        row = acc.pulses[key]
+        worker = running_worker(acc, fiber_address(fiber))
+        sending? = Enum.any?(acc.pulse_jobs, fn {_, {job_key, _}} -> key == job_key end)
+
+        if worker && not sending? && Shuttle.Pulse.due?(row, now) do
+          pulses = Shuttle.Pulse.advance(acc.pulses, fiber, now)
+          next = persist_pulses(acc, pulses)
+
+          if next.pulses == pulses and pulse_idle?(next, worker, fiber) and
+               Shuttle.Pulse.in_window?(Shuttle.Pulse.config(fiber).window, now) do
+            uuid = worker_session_uuid(worker, fiber)
+            cli = worker_cli(worker, fiber)
+
+            payload = %{
+              "address" => Shuttle.Messaging.address("local", cli, uuid),
+              "text" => Shuttle.Pulse.message(row, now),
+              "from" => "shuttle",
+              "wake" => true,
+              "idle_only" => true,
+              "message_id" => "pulse-#{key}-#{DateTime.to_unix(now, :millisecond)}"
+            }
+
+            # Claude's native inbox defers a race with a new turn. Keep one durable
+            # reservation until a later idle event, including across daemon restarts.
+            reserved =
+              if cli == "claude",
+                do: Shuttle.Pulse.reserve(next.pulses, key, uuid, uuid, now),
+                else: next.pulses
+
+            reserved_state = persist_pulses(next, reserved)
+
+            if reserved_state.pulses == reserved do
+              callers = [self() | Process.get(:"$callers", [])]
+
+              task =
+                Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+                  Shuttle.Env.adopt_callers(callers)
+
+                  case Shuttle.Env.app(:pulse_sender) do
+                    sender when is_function(sender, 1) -> sender.(payload)
+                    _ -> Shuttle.Messaging.send_daemon_message(payload)
+                  end
+                end)
+
+              %{
+                reserved_state
+                | pulse_jobs: Map.put(reserved_state.pulse_jobs, task.ref, {key, now})
+              }
+            else
+              reserved_state
+            end
+          else
+            next
+          end
+        else
+          acc
+        end
+      end)
+    end
+  end
+
+  defp pulse_idle?(state, worker, fiber) do
+    uuid = worker_session_uuid(worker, fiber)
+    cli = worker_cli(worker, fiber)
+
+    activity_uuid =
+      if Shuttle.AppWorkers.app?(worker.session),
+        do: Shuttle.AppWorkers.transcript_id(uuid),
+        else: uuid
+
+    phase = get_in(session_activity(), [activity_uuid, :phase])
+    tasks = get_in(state.task_reads, [activity_uuid, :tasks]) || []
+
+    is_binary(uuid) and cli in ["claude", "codex"] and
+      (phase == "waiting" or (cli == "codex" and is_nil(phase))) and
+      not Enum.any?(
+        tasks,
+        &(&1["status"] in ["pending", "in_progress"] or &1[:status] in ["pending", "in_progress"])
+      )
+  end
+
+  defp pulse_delivered?({:ok, status, receipt}),
+    do: status < 300 and receipt["status"] in ["accepted", "submitted", "queued"]
+
+  defp pulse_delivered?(_), do: false
+
+  defp pulse_rejected?({:ok, _status, %{"status" => "rejected"}}), do: true
+  defp pulse_rejected?({:error, _status, _reason}), do: true
+  defp pulse_rejected?(_), do: false
 
   # ── Orphan Resurrection ──
 
@@ -3793,6 +4004,13 @@ defmodule Shuttle.Poller do
       tracked?(state, fiber_id, runtime_key_for_fiber(fiber)) ->
         false
 
+      Shuttle.Pulse.dormant_wait?(
+        fiber,
+        state.pulses[runtime_key_for_fiber(fiber)],
+        DateTime.utc_now()
+      ) ->
+        false
+
       # Resume-loop circuit breaker is open: this fiber's workers keep dying
       # almost immediately, so autonomous re-dispatch is paused for a cooldown
       # (it surfaces as `blocked`). A human force-dispatch bypasses eligible?
@@ -4596,6 +4814,7 @@ defmodule Shuttle.Poller do
       Enum.map(state.document_cache, fn {_key, cached} ->
         pending_entry(cached.entry, state.pending_results)
       end)
+      |> Shuttle.Pulse.stamp(pulse_rows(state))
       |> stamp_runtime(state.running, state.task_reads)
       |> Snapshot.put_dispatch_errors(state.dispatch_failures)
 

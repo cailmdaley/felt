@@ -33,18 +33,20 @@ type statusOptions struct {
 // FiberStatus is one row of the status output. Origin is reserved for the
 // cross-host rows the 3.3 daemon-HTTP arm adds; it is empty for every local row.
 type FiberStatus struct {
-	FiberID   string `json:"fiber_id"`
-	Origin    string `json:"origin,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Agent     string `json:"agent,omitempty"`
-	State     string `json:"state"`
-	Running   bool   `json:"running"`
-	Session   string `json:"session,omitempty"`
-	NextDueAt string `json:"next_due_at,omitempty"`
-	LastRunAt string `json:"last_run_at,omitempty"`
-	Stale     bool   `json:"stale,omitempty"`
-	Source    string `json:"source,omitempty"`
-	ReadError string `json:"read_error,omitempty"`
+	FiberID      string         `json:"fiber_id"`
+	Origin       string         `json:"origin,omitempty"`
+	Kind         string         `json:"kind,omitempty"`
+	Agent        string         `json:"agent,omitempty"`
+	State        string         `json:"state"`
+	Running      bool           `json:"running"`
+	Session      string         `json:"session,omitempty"`
+	NextDueAt    string         `json:"next_due_at,omitempty"`
+	Pulse        *shuttle.Pulse `json:"pulse,omitempty"`
+	PulseRuntime *PulseEntry    `json:"pulse_runtime,omitempty"`
+	LastRunAt    string         `json:"last_run_at,omitempty"`
+	Stale        bool           `json:"stale,omitempty"`
+	Source       string         `json:"source,omitempty"`
+	ReadError    string         `json:"read_error,omitempty"`
 	// AgentProblem says why the block's agent cannot launch: it names an id
 	// the registry does not know. Empty when the agent resolves.
 	AgentProblem string `json:"agent_problem,omitempty"`
@@ -133,6 +135,17 @@ The daemon's boot quarantine can still hold an eligible fiber until
 					break
 				}
 			}
+			if ownerFeed == nil {
+				for _, entry := range entries {
+					if entry.Block.Host == own && entry.Block.Pulse != nil {
+						ownerFeed, _ = a.fetchStatusFeed()
+						if ownerFeed == nil {
+							ownerFeed = &statusFeed{}
+						}
+						break
+					}
+				}
+			}
 			rows := make([]FiberStatus, 0, len(entries))
 			seenSessions := map[string]bool{}
 			for _, entry := range entries {
@@ -158,6 +171,8 @@ The daemon's boot quarantine can still hold an eligible fiber until
 					State:        computeState(entry.Block, entry.Status, running),
 					Running:      running,
 					Session:      session,
+					Pulse:        entry.Block.Pulse,
+					PulseRuntime: pulseRuntimeForFiber(ownerFeed, own, entry.UID, entry.FiberID, entry.Block.Pulse),
 					AgentProblem: agentProblem(reg, entry.Block),
 				})
 			}
@@ -374,6 +389,12 @@ func (a *app) runStatusOneFiber(query string) error {
 		if block.Schedule != nil {
 			out["schedule"] = map[string]string{"expr": block.Schedule.Expr, "tz": block.Schedule.TZ}
 		}
+		if block.Pulse != nil {
+			out["pulse"] = block.Pulse
+		}
+		if read.PulseRuntime != nil {
+			out["pulse_runtime"] = read.PulseRuntime
+		}
 		if running {
 			out["session"] = session
 		}
@@ -391,6 +412,16 @@ func (a *app) runStatusOneFiber(query string) error {
 		fmt.Fprintln(a.env.Stdout, "! owner document read; worker observation unavailable")
 	}
 	writeBlockSummary(a.env.Stdout, block, statusNow, armed, column)
+	if read.PulseRuntime != nil {
+		fmt.Fprintf(a.env.Stdout, "  pulse:      every %s, %s", block.Pulse.Every, read.PulseRuntime.State)
+		if read.PulseRuntime.NextTick != nil {
+			fmt.Fprintf(a.env.Stdout, ", next %s", *read.PulseRuntime.NextTick)
+		}
+		if block.Pulse.Window != nil {
+			fmt.Fprintf(a.env.Stdout, ", %s–%s %s", block.Pulse.Window.Start, block.Pulse.Window.End, block.Pulse.Window.TZ)
+		}
+		fmt.Fprintln(a.env.Stdout)
+	}
 	if problem != "" {
 		fmt.Fprintf(a.env.Stdout, "  ! agent:     %s (shuttle set-agent %s <agent>)\n", problem, f.ID)
 	}
@@ -729,6 +760,21 @@ func (a *app) printStatusTable(rows []FiberStatus, showClosed bool) {
 		}
 		fmt.Fprintf(a.env.Stdout, "%-50s  %-9s  %-14s  %-18s  %s\n",
 			shuttleTruncateID(r.FiberID, 50), r.Kind, state, next, agent)
+	}
+	for _, r := range rows {
+		if r.Pulse != nil {
+			fmt.Fprintf(a.env.Stdout, "  pulse %s: every %s", r.FiberID, r.Pulse.Every)
+			if r.Pulse.Window != nil {
+				fmt.Fprintf(a.env.Stdout, ", %s–%s %s", r.Pulse.Window.Start, r.Pulse.Window.End, r.Pulse.Window.TZ)
+			}
+			if r.PulseRuntime != nil {
+				fmt.Fprintf(a.env.Stdout, ", %s", r.PulseRuntime.State)
+				if r.PulseRuntime.NextTick != nil {
+					fmt.Fprintf(a.env.Stdout, ", next %s", *r.PulseRuntime.NextTick)
+				}
+			}
+			fmt.Fprintln(a.env.Stdout)
+		}
 	}
 	for _, r := range rows {
 		if r.AgentProblem != "" {

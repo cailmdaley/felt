@@ -249,6 +249,7 @@ interface MockFiber {
     role?: string
     seat?: boolean
     schedule?: { expr: string; tz: string }
+    pulse?: { every: string; window?: { start: string; end: string; tz: string } }
   }
 }
 
@@ -450,7 +451,10 @@ const ROLE_SEATS: MockFiber[] = [
   name,
   status: 'open',
   outcome: `${name}: at rest.`,
-  shuttle: { ...shuttleBlock('oneshot'), role, seat: true },
+  shuttle: {
+    ...shuttleBlock('oneshot'), role, seat: true,
+    ...(id === 'life/vizier' ? { pulse: { every: '59m', window: { start: '08:00', end: '20:00', tz: 'Europe/Paris' } } } : {}),
+  },
 }))
 ROLE_SEATS.push({
   id: 'loom/morning-post',
@@ -737,7 +741,9 @@ const MOCK_FEED = {
     },
     ...RESTING.map(fiber),
     ...STANDING.map(fiber),
-    ...ROLE_SEATS.map(fiber),
+    ...ROLE_SEATS.map(f => f.id === 'life/vizier'
+      ? { ...fiber(f), pulse: { next_tick: iso(31 * 60_000), last_tick: iso(-28 * 60_000), state: 'scheduled' } }
+      : fiber(f)),
     ...SEATS.map(fiber),
     // An older seat with a live Codex app worker that raised its hand. A
     // question leads Your turn, so it sits ABOVE the newer reimbursement idle

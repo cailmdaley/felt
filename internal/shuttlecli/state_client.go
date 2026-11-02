@@ -3,6 +3,8 @@ package shuttlecli
 import (
 	"fmt"
 	"time"
+
+	"github.com/cailmdaley/felt/internal/shuttle"
 )
 
 // The decoded shapes of the daemon's state endpoints — the structured half of the
@@ -35,6 +37,16 @@ type StandingRoleEntry struct {
 	LastRunAt *int64 `json:"last_run_at,omitempty"`
 }
 
+type PulseEntry struct {
+	FiberID  string               `json:"fiber_id"`
+	UID      string               `json:"uid"`
+	Every    string               `json:"every"`
+	Window   *shuttle.PulseWindow `json:"window,omitempty"`
+	NextTick *string              `json:"next_tick"`
+	LastTick *string              `json:"last_tick"`
+	State    string               `json:"state"`
+}
+
 // PendingLaunch is a fiber parked by the owning daemon.
 type PendingLaunch struct {
 	FiberID  string `json:"fiber_id"`
@@ -56,6 +68,7 @@ type Snapshot struct {
 	PendingLaunch  []PendingLaunch     `json:"pending_launch"`
 	Eligible       []SnapshotEntry     `json:"eligible,omitempty"`
 	StandingRoles  []StandingRoleEntry `json:"standing_roles,omitempty"`
+	Pulses         []PulseEntry        `json:"pulses,omitempty"`
 }
 
 // RemoteRecovery is the laptop daemon's per-origin self-healing state. Healthy is

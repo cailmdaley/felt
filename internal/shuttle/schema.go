@@ -49,6 +49,7 @@ type Block struct {
 	Effort   string    `json:"effort,omitempty" yaml:"effort,omitempty"`
 	Chrome   bool      `json:"chrome,omitempty" yaml:"chrome,omitempty"`
 	Schedule *Schedule `json:"schedule,omitempty" yaml:"schedule,omitempty"`
+	Pulse    *Pulse    `json:"pulse,omitempty" yaml:"pulse,omitempty"`
 	Ask      *Ask      `json:"ask,omitempty" yaml:"ask,omitempty"`
 	// Role names this constitution's office by its charter slug under roles/.
 	Role string `json:"role,omitempty" yaml:"role,omitempty"`
@@ -200,6 +201,9 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 	}
 
 	if b.Kind == "standing" {
+		if b.Pulse != nil {
+			add("pulse", "only valid for kind=oneshot")
+		}
 		if b.Schedule == nil {
 			add("schedule", "required for kind=standing")
 		} else {
@@ -213,7 +217,45 @@ func Validate(b *Block, agents *AgentRegistry) ValidationErrors {
 			}
 		}
 	}
+	if b.Pulse != nil {
+		for _, e := range validatePulse(b.Pulse) {
+			add(e.Field, e.Message)
+		}
+		if agents != nil {
+			name := b.Agent
+			if name == "" {
+				if def, err := agents.Default(); err == nil {
+					name = def.ID
+				}
+			}
+			if name != "" {
+				rec, _, err := agents.Resolve(name, b.Effort, b.Chrome)
+				if err == nil && rec.CLI == "pi" {
+					add("pulse", "requires a Claude or Codex agent with idle-only wake support")
+				}
+			}
+		}
+	}
 
+	return errs
+}
+
+func validatePulse(p *Pulse) ValidationErrors {
+	var errs ValidationErrors
+	add := func(field, message string) { errs = append(errs, ValidationError{Field: field, Message: message}) }
+	if _, err := p.Interval(); err != nil {
+		add("pulse.every", err.Error())
+	}
+	if w := p.Window; w != nil {
+		if !clockPattern.MatchString(w.Start) || !clockPattern.MatchString(w.End) {
+			add("pulse.window", "start and end must use HH:MM")
+		} else if w.Start == w.End {
+			add("pulse.window", "start and end must differ")
+		}
+		if _, err := time.LoadLocation(w.TZ); w.TZ == "" || err != nil {
+			add("pulse.window.tz", fmt.Sprintf("unknown or missing timezone %q", w.TZ))
+		}
+	}
 	return errs
 }
 

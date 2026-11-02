@@ -33,6 +33,7 @@ The Desk derives each card's column from `status`, `tempered`, `shuttle.kind` an
 - **Drafts** — `status: open`, on the desk.
 - **Resting** — `status: open` with `horizon: stashed`: put down, with no verdict owed. Hubs and seats a human starts by hand rest here between sessions; `shuttle rest` and a drag into Resting put a card here.
 - **Scheduled** — an armed standing constitution between runs, drawn in Resting with its next launch.
+- **Pulsed** — a oneshot constitution can wake its own conversation on an interval, without a review run per tick.
 - **In flight** — a live worker or owned app conversation, or an armed oneshot.
 - **Awaiting review** — `status: closed` with no `tempered`, parked for review.
 - **Tempered** — `closed`, `tempered: true`: accepted by the human or a thread's orchestrator.
@@ -61,6 +62,38 @@ In `shuttle threads`, *Armed* means no worker is running yet; *Armed · host unr
 `shuttle thread <parent> "<ask>" --take` moves your live session into a new thread and sends a fresh worker to the source; `shuttle migrate <orchestrator>` carries a thread's session up to its orchestrator.
 
 ## Verbs
+
+### Seat pulses
+
+A oneshot constitution may set `shuttle.pulse` to an interval such as `59m`.
+The interval must be between one minute and 24 hours.
+An optional window limits ticks to local wall time:
+
+```yaml
+pulse:
+  every: 59m
+  window:
+    start: "08:00"
+    end: "20:00"
+    tz: Europe/Paris
+```
+
+The window includes its start and excludes its end; it may cross midnight.
+The named IANA timezone sets the wall clock.
+Pulse applies to any oneshot constitution, whether or not it is a seat.
+Standing constitutions keep their cron schedule and review lifecycle.
+
+The daemon sends each pulse to the constitution's own conversation.
+If its session exited, Shuttle resumes that session even when its transcript is cold.
+A clean handoff starts the successor from the fiber.
+A busy conversation skips that tick and waits for the next interval.
+If a Claude turn starts during delivery, its native inbox defers the tick; Shuttle keeps one durable pending tick until a later idle event and starts the next interval there.
+Shuttle never interrupts a turn or stacks pulse turns.
+Pausing, resting or closing the constitution stops its pulse.
+The daemon persists pulse timing in its operational state across restarts.
+A tick creates no review card or board event by itself; the worker can still write or post what it finds.
+Claude and Codex support pulses.
+Pi does not expose the idle-safe wake needed to guarantee a pulse won't steer work already in progress.
 
 ```bash
 shuttle install <fiber> [--disabled]   # add a oneshot block, armed (or a draft)
