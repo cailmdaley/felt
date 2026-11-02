@@ -6632,7 +6632,7 @@ defmodule Shuttle.Poller do
         prior =
           Map.reject(state.document_cache, fn {_key, cached} ->
             cached.entry[:felt_store] == store and
-              Map.has_key?(changes, cached.entry.fiber["slug"])
+              Map.has_key?(changes, cached.entry.fiber["slug"] || cached.entry.fiber["id"])
           end)
 
         {cache, stats} =

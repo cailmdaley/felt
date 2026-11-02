@@ -35,6 +35,12 @@ defmodule Shuttle.OperatorFilesGuardTest do
     assert under_home == [], "operator files under the real home: #{inspect(under_home)}"
   end
 
+  test "real CLI writes default to an isolated daemon endpoint" do
+    parent = self()
+    spawn(fn -> send(parent, {:endpoint, Shuttle.Env.get("SHUTTLE_DAEMON_URL")}) end)
+    assert_receive {:endpoint, "http://127.0.0.1:1"}
+  end
+
   @tag skip: is_nil(System.find_executable("tmux"))
   test "a real named tmux server lives in the suite namespace" do
     server = "namespace-#{System.unique_integer([:positive])}"

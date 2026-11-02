@@ -2223,7 +2223,7 @@ defmodule Shuttle.DispatchIntegrationTest do
     write_fiber(
       host,
       "created",
-      "---\nname: Created\nstatus: open\nshuttle:\n  host: #{own_host}\n  kind: oneshot\n---\nCreated outside Shuttle.\n"
+      "---\nid: 01JZ0000000000000000000000\nname: Created\nstatus: open\nshuttle:\n  host: #{own_host}\n  kind: oneshot\n---\nCreated outside Shuttle.\n"
     )
 
     assert eventually(fn -> rows.()["created"] != nil end)

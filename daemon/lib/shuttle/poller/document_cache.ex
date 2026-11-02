@@ -4,7 +4,7 @@ defmodule Shuttle.Poller.DocumentCache do
 
   It owns how the fiber-document feed is rebuilt each tick (`refresh/3`), how an
   entry is keyed (`cache_key/1`, uid when present else id), and whether a prior
-  entry can be reused without rebuilding (`reusable_entry?/3`, mtime plus
+  entry can be reused without rebuilding (`reusable_entry?/3`, mtime, path and
   resolved-agent equality).
 
   ## One walk, not N shell-outs
@@ -195,11 +195,12 @@ defmodule Shuttle.Poller.DocumentCache do
 
   def reusable_entry?(_, _), do: false
 
-  @doc "A cache hit requires matching mtimes and resolved agent records."
+  @doc "A cache hit requires matching mtimes, paths and resolved agent records."
   def reusable_entry?(%{modified_at: modified_at, entry: entry}, modified_at, candidate)
       when is_map(entry) and is_map(candidate) do
-    get_in(entry, [:fiber, "shuttle", "resolved", "agent"]) ==
-      get_in(candidate, ["shuttle", "resolved", "agent"])
+    get_in(entry, [:fiber, "path"]) == candidate["path"] and
+      get_in(entry, [:fiber, "shuttle", "resolved", "agent"]) ==
+        get_in(candidate, ["shuttle", "resolved", "agent"])
   end
 
   def reusable_entry?(_, _, _), do: false

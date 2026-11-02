@@ -17,6 +17,23 @@ defmodule Shuttle.Poller.DocumentCacheTest do
              cache["hub"]
   end
 
+  test "a rename with stable identity and unchanged mtime rebuilds its address" do
+    original = candidate("claude") |> Map.put("uid", "01JZ0000000000000000000000")
+
+    moved =
+      original
+      |> Map.put("id", "moved")
+      |> Map.put("slug", "moved")
+      |> Map.put("path", "/store/.felt/moved/moved.md")
+
+    {cache, _} = DocumentCache.refresh(%{document_cache: %{}}, [original], %{"hub" => "/store"})
+
+    {cache, %{hits: 0, misses: 1}} =
+      DocumentCache.refresh(%{document_cache: cache}, [moved], %{"moved" => "/store"})
+
+    assert cache[original["uid"]].entry.fiber["slug"] == "moved"
+  end
+
   defp candidate(cli) do
     resolved_agent = if cli == "unresolved", do: nil, else: %{"id" => "receiver", "cli" => cli}
 

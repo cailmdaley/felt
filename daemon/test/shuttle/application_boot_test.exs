@@ -8,7 +8,7 @@ defmodule Shuttle.ApplicationBootTest do
         __DIR__
       )
 
-    on_exit(fn -> File.rm_rf(build) end)
+    on_exit(fn -> {_, 0} = System.cmd("rm", ["-rf", "--", build]) end)
 
     {output, status} =
       Shuttle.Runner.Default.cmd("mix", ["compile", "--warnings-as-errors"],
@@ -66,7 +66,7 @@ defmodule Shuttle.ApplicationBootTest do
           end
         end
 
-        File.rm_rf(root)
+        {_, 0} = System.cmd("rm", ["-rf", "--", root])
       end)
 
       paths = Path.wildcard(Path.join(build, "lib/*/ebin"))
