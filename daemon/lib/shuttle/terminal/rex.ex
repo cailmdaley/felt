@@ -211,7 +211,7 @@ defmodule Shuttle.Terminal.Rex do
   @doc "Resolve a live address once for both backend lookup and reveal."
   def locate(runner, name) do
     before = current_binding(name)
-    result = resolve(runner, name)
+    result = resolve(runner, name, live_window: true)
 
     if match?({:error, reason} when reason in [:not_found, :server_absent], result) and
          before != current_binding(name),
@@ -778,14 +778,16 @@ defmodule Shuttle.Terminal.Rex do
   @impl true
   def unreachable_hint(_, _), do: "the Rex server cannot see it; check `rex server status`"
 
-  defp resolve(runner, "block:" <> _ = bid) do
+  defp resolve(runner, name, opts \\ [])
+
+  defp resolve(runner, "block:" <> _ = bid, opts) do
     with {:ok,
           %{
             "results" => [
               %{"status" => "resolved", "target" => %{"session_id" => sid, "block_id" => ^bid}}
             ]
           }} <- Rex.call(runner, "target.resolve", %{"kinds" => ["block"], "queries" => [bid]}) do
-      with {:ok, b} <- native_binding(runner, sid, bid), do: live_block(runner, nil, b)
+      with {:ok, b} <- native_binding(runner, sid, bid), do: live_block(runner, nil, b, opts)
     else
       {:ok, %{"results" => [%{"status" => "not_found"}]}} -> {:error, :not_found}
       {:ok, _} -> {:error, :unknown}
@@ -793,21 +795,21 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp resolve(runner, "session:" <> _ = sid) do
+  defp resolve(runner, "session:" <> _ = sid, opts) do
     with {:ok, doc} <- Bindings.read() do
       case Enum.filter(doc["bindings"], fn {_, b} -> b["session_id"] == sid end) do
-        [{name, b}] -> live_block(runner, name, b)
+        [{name, b}] -> live_block(runner, name, b, opts)
         [] -> recover_block(runner, nil, sid)
         _ -> {:error, :unknown}
       end
     end
   end
 
-  defp resolve(runner, name) do
+  defp resolve(runner, name, opts) do
     with {:ok, doc} <- Bindings.read() do
       case doc["bindings"][name] do
         nil -> recover_name(runner, name)
-        b -> resolve_bound(runner, name, b)
+        b -> resolve_bound(runner, name, b, opts)
       end
     end
   end
@@ -818,8 +820,8 @@ defmodule Shuttle.Terminal.Rex do
 
   # A successful block inventory proves the session exists too. Only a missing
   # session needs a fleet-wide label scan; transport uncertainty keeps its binding.
-  defp resolve_bound(runner, name, b) do
-    case live_block(runner, name, b) do
+  defp resolve_bound(runner, name, b, opts) do
+    case live_block(runner, name, b, opts) do
       {:error, :not_found} = absent ->
         if current_binding(name) == b do
           with :ok <- Bindings.delete(name, b), do: recover_name(runner, name)
@@ -919,10 +921,14 @@ defmodule Shuttle.Terminal.Rex do
     end
   end
 
-  defp live_block(runner, name, b) do
+  defp live_block(runner, name, b, opts \\ []) do
     with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
-      if Enum.any?(blocks, &(&1["block_id"] == b["block_id"])) do
-        {:ok, b}
+      if block = Enum.find(blocks, &(&1["block_id"] == b["block_id"])) do
+        {:ok,
+         if(opts[:live_window],
+           do: Map.put(b, "window_id", block["window_id"] || b["window_id"]),
+           else: b
+         )}
       else
         if is_binary(b["family"]) and is_binary(b["window_id"]) and name != nil do
           with :ok <- retire_worker_window(runner, b),

@@ -60,6 +60,23 @@ defmodule Shuttle.OpenerTest do
     assert Enum.any?(FakeRex.calls(), &match?({"open", ["-b", "com.superlogical.rex"], _}, &1))
   end
 
+  test "reveal follows a block's live window rather than a stale saved window" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+    sid = FakeRex.fixture("session_create")["session_id"]
+
+    FakeRex.sessions(
+      Map.update!(FakeRex.state().sessions, sid, fn session ->
+        %{session | blocks: Enum.map(session.blocks, &Map.put(&1, "window_id", "window:moved"))}
+      end)
+    )
+
+    blocks_before = length(requests("session.list_blocks"))
+    assert :ok = Opener.open(@name)
+    assert [selection] = requests("client.perform")
+    assert selection["args"]["window_id"] == "window:moved"
+    assert length(requests("session.list_blocks")) == blocks_before + 1
+  end
+
   test "a binding without a saved window still reveals the exact window and closes cleanly" do
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
     assert {:ok, doc} = RexBindings.read()
