@@ -1,19 +1,20 @@
 defmodule Shuttle.Test.FiberUid do
   @moduledoc """
-  Deterministic intrinsic ids for test fibers.
+  Stable per-VM intrinsic ids for test fibers.
 
   Every dispatchable fiber carries a ULID `uid`, and its worker's tmux session
   is `<leaf>-<uid>-shuttle`. Fixtures that do not care which uid a fiber has
   take `for/1` of its id, so a test can name the worker session with
-  `session/1` without threading the uid through.
+  `session/1` without threading the uid through. Separate test VMs have disjoint worker
+  identities, including when their native process scans overlap.
   """
 
   @crockford ~c"0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
-  @doc "A stable ULID-shaped uid derived from `fiber_id`."
+  @doc "A stable ULID-shaped uid derived from this VM and `fiber_id`."
   @spec for(String.t()) :: String.t()
   def for(fiber_id) when is_binary(fiber_id) do
-    <<bits::binary-size(15), _::binary>> = :crypto.hash(:sha256, fiber_id)
+    <<bits::binary-size(15), _::binary>> = :crypto.hash(:sha256, System.pid() <> ":" <> fiber_id)
 
     tail =
       for <<chunk::5 <- bits>>, into: "" do
