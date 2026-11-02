@@ -124,7 +124,8 @@ defmodule Shuttle.Agents do
     session_id = Keyword.get(opts, :session_id)
     flags = render_flags(agent)
 
-    # The wrapper is a shell function sourced via bash -l.
+    # Claude and Pi may use shell functions sourced by bash -l. Codex is
+    # executed by env so Bash functions cannot shadow the PATH executable.
     # For claude: stdin via here-string; --session-id can be pre-specified.
     # For codex/pi: positional arg.
     command =
@@ -134,6 +135,9 @@ defmodule Shuttle.Agents do
             if session_id, do: "--session-id #{shell_escape(session_id)} ", else: ""
 
           "#{agent.wrapper} #{session_flag}#{flags} <<< #{shell_escape(prompt)}"
+
+        "codex" ->
+          codex_invocation(agent.wrapper, "#{flags} #{shell_escape(prompt)}")
 
         _ ->
           "#{agent.wrapper} #{flags} #{shell_escape(prompt)}"
@@ -185,8 +189,9 @@ defmodule Shuttle.Agents do
         "codex" ->
           # codex resume <uuid> [prompt] — resume subcommand, UUID positional,
           # optional prompt as trailing positional.
-          base = "#{agent.wrapper} #{flags} resume #{shell_escape(session_id)}"
-          if has_prompt, do: "#{base} #{shell_escape(prompt)}", else: base
+          args = "#{flags} resume #{shell_escape(session_id)}"
+          args = if has_prompt, do: "#{args} #{shell_escape(prompt)}", else: args
+          codex_invocation(agent.wrapper, args)
 
         "pi" ->
           # pi --session <path|partial-uuid> [messages...] — UUID prefix is
@@ -201,6 +206,12 @@ defmodule Shuttle.Agents do
 
     with_env(command, agent)
   end
+
+  # Codex's terminal startup probes tmux. Clearing the pane variables prevents
+  # those optional probes from waiting on the parent terminal's tmux server.
+  # `env` also executes the PATH program directly, without a login-shell function.
+  defp codex_invocation(wrapper, args),
+    do: "env -u TMUX -u TMUX_PANE #{wrapper} #{args}"
 
   # Assignment prefixes work for both executables and login-shell functions.
   # Values remain literal shell words, including quotes, newlines and expansions.

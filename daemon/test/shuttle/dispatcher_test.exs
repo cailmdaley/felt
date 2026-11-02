@@ -1478,7 +1478,11 @@ defmodule Shuttle.DispatcherTest do
 
       row = "#{agent.id}, prompt #{inspect(prompt)}: #{cmd}"
 
-      assert String.starts_with?(cmd, agent.wrapper <> " "), row
+      if agent.cli == "codex" do
+        assert String.starts_with?(cmd, "env -u TMUX -u TMUX_PANE #{agent.wrapper} "), row
+      else
+        assert String.starts_with?(cmd, agent.wrapper <> " "), row
+      end
 
       if sent do
         assert String.ends_with?(cmd, "#{handle} #{channel}#{sent}"), row

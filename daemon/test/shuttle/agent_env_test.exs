@@ -4,10 +4,74 @@ defmodule Shuttle.AgentEnvTest do
   alias Shuttle.Agents
   import ExUnit.CaptureLog
 
-  test "fresh and resume commands pass literal environment to shell-function workers" do
+  @tag :tmp_dir
+  test "Codex bypasses a sourced function and drops tmux variables on fresh and resumed starts",
+       %{tmp_dir: dir} do
+    bin = Path.join(dir, "bin")
+    File.mkdir_p!(bin)
+
+    codex = Path.join(bin, "codex")
+    args_file = Path.join(dir, "args")
+    env_file = Path.join(dir, "env")
+    function_marker = Path.join(dir, "function-ran")
+    profile = Path.join(dir, "login-functions.sh")
+
+    File.write!(
+      codex,
+      "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$CODEX_ARGS_FILE\"\n" <>
+        "printf '%s\\n' \"${TMUX-unset}\" \"${TMUX_PANE-unset}\" > \"$CODEX_ENV_FILE\"\n"
+    )
+
+    File.chmod!(codex, 0o755)
+    File.write!(profile, "codex() { printf function > \"$CODEX_FUNCTION_MARKER\"; }\n")
+
+    agent =
+      Agents.from_resolved(%{
+        "id" => "codex-test",
+        "cli" => "codex",
+        "wrapper" => "codex",
+        "model" => "gpt-6.1-sol",
+        "developer_instructions" => "Use only the requested checkout."
+      })
+
+    commands = [
+      {Agents.build_command(agent, "fresh prompt"), ["fresh prompt"]},
+      {Agents.build_resume_command(agent, "exact-session", "resume prompt"),
+       ["resume", "exact-session", "resume prompt"]}
+    ]
+
+    for {command, expected_args} <- commands do
+      assert String.starts_with?(command, "env -u TMUX -u TMUX_PANE codex ")
+
+      script = "source #{profile}\n" <> command
+
+      assert {_, 0} =
+               System.cmd("bash", ["-c", script],
+                 env: [
+                   {"PATH", bin <> ":" <> System.get_env("PATH")},
+                   {"TMUX", "/tmp/stale-tmux,123,0"},
+                   {"TMUX_PANE", "%42"},
+                   {"CODEX_ARGS_FILE", args_file},
+                   {"CODEX_ENV_FILE", env_file},
+                   {"CODEX_FUNCTION_MARKER", function_marker}
+                 ]
+               )
+
+      args = File.read!(args_file) |> String.split("\n", trim: true)
+      assert "--model" in args
+      assert "gpt-6.1-sol" in args
+      assert "-c" in args
+      assert ~s(developer_instructions="Use only the requested checkout.") in args
+      assert Enum.all?(expected_args, &(&1 in args))
+      assert File.read!(env_file) == "unset\nunset\n"
+      refute File.exists?(function_marker)
+    end
+  end
+
+  test "fresh and resume commands pass literal environment to Claude and Pi shell functions" do
     value = "spaces ' quotes \" $HOME $(printf injected);\nnext line"
 
-    for cli <- ["claude", "codex", "pi"] do
+    for cli <- ["claude", "pi"] do
       agent =
         Agents.from_resolved(%{
           "id" => "custom",
