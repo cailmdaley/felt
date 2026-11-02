@@ -201,19 +201,23 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def probe(runner, name) do
-    before = current_binding(name)
-
-    case resolve(runner, name) do
-      {:ok, _} ->
-        :present
-
-      {:error, reason} when reason in [:not_found, :server_absent] ->
-        if before != current_binding(name), do: Shuttle.Terminal.RexTree.refresh(runner)
-        :absent
-
-      {:error, _} ->
-        :unknown
+    case locate(runner, name) do
+      {:ok, _} -> :present
+      {:error, reason} when reason in [:not_found, :server_absent] -> :absent
+      {:error, _} -> :unknown
     end
+  end
+
+  @doc "Resolve a live address once for both backend lookup and reveal."
+  def locate(runner, name) do
+    before = current_binding(name)
+    result = resolve(runner, name)
+
+    if match?({:error, reason} when reason in [:not_found, :server_absent], result) and
+         before != current_binding(name),
+       do: Shuttle.Terminal.RexTree.refresh(runner)
+
+    result
   end
 
   defp current_binding(name) do
@@ -565,23 +569,38 @@ defmodule Shuttle.Terminal.Rex do
   # The runner-taking form keeps app activation testable without selecting a
   # session in the operator's app.
   defp reveal_with(runner, name) do
-    with {:ok, b} <- resolve(runner, name) do
-      with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
-        block = Enum.find(blocks, &(&1["block_id"] == b["block_id"]))
-        reveal_session(runner, b["session_id"], b["window_id"] || (block && block["window_id"]))
-      end
+    with {:ok, b} <- locate(runner, name) do
+      reveal_binding(runner, b)
     else
-      error -> {:error, "Cannot open Rex terminal: #{inspect(error)}"}
+      error -> open_error(error)
+    end
+  end
+
+  @doc "Reveal the exact address returned by locate/2 without another inventory scan."
+  def reveal_binding(runner, %{"window_id" => wid} = b) when is_binary(wid),
+    do: reveal_session(runner, b["session_id"], wid)
+
+  def reveal_binding(runner, b) do
+    with {:ok, blocks} <- Rex.blocks(runner, b["session_id"]) do
+      block = Enum.find(blocks, &(&1["block_id"] == b["block_id"]))
+      reveal_session(runner, b["session_id"], block && block["window_id"])
+    else
+      error -> open_error(error)
     end
   end
 
   defp reveal_session(runner, sid, wid) do
-    with {:ok, client} <- ensure_app_client(runner),
-         {:ok, _} <- Rex.select(runner, client, sid, wid),
-         {_, 0} <- runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true) do
+    alias Shuttle.OpenTrace
+
+    with {:ok, client} <- OpenTrace.step(:app_client, fn -> ensure_app_client(runner) end),
+         {:ok, _} <- OpenTrace.step(:select, fn -> Rex.select(runner, client, sid, wid) end),
+         {_, 0} <-
+           OpenTrace.step(:activate, fn ->
+             runner.cmd("open", ["-b", "com.superlogical.rex"], stderr_to_stdout: true)
+           end) do
       :ok
     else
-      error -> {:error, "Cannot open Rex terminal: #{inspect(error)}"}
+      error -> open_error(error)
     end
   end
 
@@ -597,9 +616,26 @@ defmodule Shuttle.Terminal.Rex do
            do: reveal_session(runner, sid, get_in(doc, ["viewers", label, "window_id"]))
     else
       {:error, message} when is_binary(message) -> {:error, message}
-      error -> {:error, "Cannot open Rex viewer: #{inspect(error)}"}
+      error -> open_error(error)
     end
   end
+
+  defp open_error(reason) do
+    Logger.warning("Rex terminal open failed: #{inspect(reason)}")
+    {:error, "Cannot open Rex terminal. " <> open_reason(reason)}
+  end
+
+  defp open_reason({:error, reason}), do: open_reason(reason)
+  defp open_reason({:unknown, message}) when is_binary(message), do: String.trim(message)
+  defp open_reason({:rex_server_unavailable, message}), do: message
+  defp open_reason(:server_absent), do: "Open Rex and grant Rex Server access."
+  defp open_reason(:not_found), do: "The terminal is no longer available."
+
+  defp open_reason({message, _status}) when is_binary(message) and message != "",
+    do: String.trim(message)
+
+  defp open_reason(_),
+    do: "Rex did not confirm the requested terminal. Check its daemon log for details."
 
   defp viewer_command(name, nil) do
     case Env.find_executable("tmux") do
@@ -768,25 +804,31 @@ defmodule Shuttle.Terminal.Rex do
   end
 
   defp resolve(runner, name) do
-    with {:ok, doc} <- Bindings.read(),
-         {:ok, sessions} <- Rex.sessions(runner) do
+    with {:ok, doc} <- Bindings.read() do
       case doc["bindings"][name] do
-        nil ->
-          recover_label(runner, name, sessions)
-
-        b ->
-          if Enum.any?(sessions, &(&1["session_id"] == b["session_id"])) do
-            live_block(runner, name, b)
-          else
-            case Bindings.delete(name, b) do
-              :ok -> recover_label(runner, name, sessions)
-              error -> error
-            end
-          end
+        nil -> recover_name(runner, name)
+        b -> resolve_bound(runner, name, b)
       end
-    else
-      {:error, :not_found} -> {:error, :unknown}
-      error -> error
+    end
+  end
+
+  defp recover_name(runner, name) do
+    with {:ok, sessions} <- Rex.sessions(runner), do: recover_label(runner, name, sessions)
+  end
+
+  # A successful block inventory proves the session exists too. Only a missing
+  # session needs a fleet-wide label scan; transport uncertainty keeps its binding.
+  defp resolve_bound(runner, name, b) do
+    case live_block(runner, name, b) do
+      {:error, :not_found} = absent ->
+        if current_binding(name) == b do
+          with :ok <- Bindings.delete(name, b), do: recover_name(runner, name)
+        else
+          absent
+        end
+
+      result ->
+        result
     end
   end
 

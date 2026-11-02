@@ -47,13 +47,48 @@ defmodule Shuttle.OpenerTest do
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
     sid = FakeRex.fixture("session_create")["session_id"]
     FakeRex.sessions(Map.update!(FakeRex.state().sessions, sid, &%{&1 | label: "human label"}))
+    lists_before = length(requests("session.list"))
+    blocks_before = length(requests("session.list_blocks"))
     assert :ok = Opener.open(@name)
+    assert length(requests("session.list")) == lists_before
+    assert length(requests("session.list_blocks")) == blocks_before + 1
     assert [select] = requests("client.perform")
     [window] = FakeRex.fixture("session_create")["initial_windows"]
     assert select["args"] == %{"session_id" => sid, "window_id" => window["window_id"]}
     assert length(requests("session.create")) == 1
     refute_received {:kitty, _, _}
     assert Enum.any?(FakeRex.calls(), &match?({"open", ["-b", "com.superlogical.rex"], _}, &1))
+  end
+
+  test "a binding without a saved window still reveals the exact window and closes cleanly" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+    assert {:ok, doc} = RexBindings.read()
+    old = Map.delete(doc["bindings"][@name], "window_id")
+    assert :ok = RexBindings.put(@name, old, doc["server"])
+    assert :ok = Opener.open(@name)
+    assert [selection] = requests("client.perform")
+    [window] = FakeRex.fixture("session_create")["initial_windows"]
+    assert selection["args"]["window_id"] == window["window_id"]
+    assert :ok = Rex.close(FakeRex, @name)
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    assert bindings == %{}
+  end
+
+  test "one open logs lookup, client, selection and activation timings" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "worker.sh", [])
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        Shuttle.OpenTrace.run(@name, nil, fn -> assert :ok = Opener.open(@name) end)
+      end)
+
+    assert [line] =
+             log
+             |> String.split("\n", trim: true)
+             |> Enum.filter(&String.contains?(&1, "Terminal open name=#{inspect(@name)}"))
+
+    assert line =~ "Terminal open name=#{inspect(@name)}"
+    for step <- ~w(total route locate app_client select activate), do: assert(line =~ step <> "=")
   end
 
   test "local tmux workers get one unbound viewer and repeated opens select it", %{tmux: tmux} do
@@ -204,6 +239,7 @@ defmodule Shuttle.OpenerTest do
     FakeRex.reply("client.perform", {"Remote Control is disabled", 1})
     assert {:error, reason} = Opener.open(@name, "remote-a")
     assert reason =~ "Remote Control is disabled"
+    refute reason =~ "{:"
     assert [_] = requests("session.create")
     refute Enum.any?(FakeRex.calls(), &match?({"open", _, _}, &1))
   end

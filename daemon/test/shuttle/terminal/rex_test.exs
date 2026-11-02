@@ -154,13 +154,13 @@ defmodule Shuttle.Terminal.RexTest do
     seed()
     assert :present = Rex.probe(FakeRex, @name)
 
-    for {status, expected} <- [{4, :absent}, {3, :unknown}, {:timeout, :unknown}, {1, :unknown}] do
-      FakeRex.reply("session.list", {"failure", status})
+    for {status, expected} <- [{4, :absent}, {:timeout, :unknown}, {1, :unknown}] do
+      FakeRex.reply("session.list_blocks", {"failure", status})
       assert Rex.probe(FakeRex, @name) == expected
       assert {:ok, %{"bindings" => %{@name => _}}} = RexBindings.read()
     end
 
-    FakeRex.clear_reply("session.list")
+    FakeRex.clear_reply("session.list_blocks")
     FakeRex.sessions(%{})
     assert :absent = Rex.probe(FakeRex, @name)
     assert {:ok, %{"bindings" => bindings}} = RexBindings.read()

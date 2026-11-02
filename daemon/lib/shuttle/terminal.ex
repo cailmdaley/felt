@@ -111,11 +111,28 @@ defmodule Shuttle.Terminal do
   def present?(runner, name), do: status(runner, name) != :gone
 
   def locate(runner, name) do
-    backend =
-      Enum.find(observation_order(backends(), name), &(&1.probe(runner, name) == :present))
+    case locate_target(runner, name) do
+      {backend, _target} -> backend
+      nil -> nil
+    end
+  end
 
-    remember_holder(name, backend)
-    backend
+  @doc "Locate a terminal and retain its resolved address for immediate reveal."
+  def locate_target(runner, name) do
+    target =
+      Enum.find_value(observation_order(backends(), name), fn
+        Shuttle.Terminal.Rex = backend ->
+          case backend.locate(runner, name) do
+            {:ok, binding} -> {backend, binding}
+            {:error, _} -> nil
+          end
+
+        backend ->
+          if backend.probe(runner, name) == :present, do: {backend, name}
+      end)
+
+    remember_holder(name, if(target, do: elem(target, 0)))
+    target
   end
 
   def observed_id(name) do

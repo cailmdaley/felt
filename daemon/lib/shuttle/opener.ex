@@ -1,14 +1,20 @@
 defmodule Shuttle.Opener do
   @moduledoc "Open a conversation on this host's display, wherever its terminal runs."
 
-  alias Shuttle.{Env, Kitty, OriginRouter, Remote, Terminal}
+  alias Shuttle.{Env, Kitty, OpenTrace, OriginRouter, Remote, Terminal}
   alias Shuttle.Terminal.Rex
 
   @spec open(String.t(), String.t() | nil) :: :ok | {:error, String.t()}
   def open(name, host \\ nil)
 
   def open(name, host) when is_binary(name) and name != "" do
-    case OriginRouter.route_host(host) do
+    OpenTrace.run(name, host, fn -> open_routed(name, host) end)
+  end
+
+  def open(_, _), do: {:error, "tmux_session is required"}
+
+  defp open_routed(name, host) do
+    case OpenTrace.step(:route, fn -> OriginRouter.route_host(host) end) do
       :local ->
         open_local(name)
 
@@ -20,35 +26,35 @@ defmodule Shuttle.Opener do
     end
   end
 
-  def open(_, _), do: {:error, "tmux_session is required"}
-
   defp open_local(name) do
     if Terminal.primary() == Rex do
       runner = Env.app(:rex_runner, Shuttle.Runner.Default)
 
-      case Terminal.locate(runner, name) do
-        Rex ->
-          Rex.reveal(name, nil)
+      case OpenTrace.step(:locate, fn -> Terminal.locate_target(runner, name) end) do
+        {Rex, binding} ->
+          Rex.reveal_binding(runner, binding)
 
-        Terminal.Tmux ->
+        {Terminal.Tmux, _} ->
           Rex.reveal_tmux(name, nil, nil, fiber: Shuttle.Terminal.RexTree.fiber_for(name))
 
         nil ->
           {:error, "Cannot locate terminal #{name}; it is absent or unobservable"}
       end
     else
-      kitty().open(name, nil)
+      OpenTrace.step(:kitty, fn -> kitty().open(name, nil) end)
     end
   end
 
   defp open_remote(name, host, remote) do
     if Terminal.primary() == Rex do
-      with :ok <- remote_tmux(remote),
-           {:ok, destination} <- Kitty.ssh_destination(host) do
-        Rex.reveal_tmux(name, host, destination, fiber: remote_fiber(name, remote))
+      with :ok <- OpenTrace.step(:remote_backend, fn -> remote_tmux(remote) end),
+           {:ok, destination} <-
+             OpenTrace.step(:ssh_destination, fn -> Kitty.ssh_destination(host) end) do
+        fiber = OpenTrace.step(:remote_fiber, fn -> remote_fiber(name, remote) end)
+        OpenTrace.step(:viewer, fn -> Rex.reveal_tmux(name, host, destination, fiber: fiber) end)
       end
     else
-      kitty().open(name, host)
+      OpenTrace.step(:kitty, fn -> kitty().open(name, host) end)
     end
   end
 
