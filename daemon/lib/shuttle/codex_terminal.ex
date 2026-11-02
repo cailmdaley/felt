@@ -5,6 +5,9 @@ defmodule Shuttle.CodexTerminal do
 
   def tmux_name(id), do: "codex-terminal-" <> id
 
+  @doc "Shared exclusion for preparing, stopping and retiring a conversation's viewer."
+  def lock_id(id), do: {{__MODULE__, AppWorkers.root(), id}, self()}
+
   @doc """
   Close leftover viewers of conversations Shuttle no longer owns.
 
@@ -34,7 +37,7 @@ defmodule Shuttle.CodexTerminal do
   # stopped elsewhere is left for the next sweep.
   defp retire_leftover(runner, id, tmux) do
     :global.trans(
-      {{__MODULE__, AppWorkers.root(), id}, self()},
+      lock_id(id),
       fn ->
         with {:ok, %{"active" => false} = record} <- AppWorkers.get(id),
              true <- (record["terminal_tmux"] || tmux_name(id)) == tmux,
@@ -70,7 +73,7 @@ defmodule Shuttle.CodexTerminal do
 
     result =
       :global.trans(
-        {{__MODULE__, AppWorkers.root(), id}, self()},
+        lock_id(id),
         fn ->
           with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
                true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},

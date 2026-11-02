@@ -82,7 +82,7 @@ defmodule Shuttle.WorkerBackend do
   # the lock so a turn started meanwhile keeps its assignment.
   defp retire(runner, session, id, fiber) do
     :global.trans(
-      {{Shuttle.CodexTerminal, id}, self()},
+      Shuttle.CodexTerminal.lock_id(id),
       fn ->
         with {:ok, record} <- AppWorkers.get(id),
              true <- completed?(AppWorkers.state(id), fiber, assignment_start(record)),
@@ -152,7 +152,7 @@ defmodule Shuttle.WorkerBackend do
         Shuttle.Terminal.stop(runner, session)
 
       id ->
-        :global.trans({{Shuttle.CodexTerminal, id}, self()}, fn ->
+        :global.trans(Shuttle.CodexTerminal.lock_id(id), fn ->
           stop_app(runner, session, id)
         end)
     end

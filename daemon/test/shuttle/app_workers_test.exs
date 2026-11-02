@@ -134,6 +134,7 @@ defmodule Shuttle.AppWorkersTest do
     end
 
     def interrupt(id) do
+      if hook = Agent.get(__MODULE__, &Map.get(&1, :interrupt_hook)), do: hook.(id)
       record({:interrupt, id})
       Agent.get(__MODULE__, &Map.get(&1, :interrupt_result, :ok))
     end
@@ -553,11 +554,10 @@ defmodule Shuttle.AppWorkersTest do
     terminal_fiber("tests/terminal")
     assert {:ok, _} = dispatch("tests/terminal")
     parent = self()
-    root = AppWorkers.root()
 
     holder =
       Task.async(fn ->
-        :global.trans({{Shuttle.CodexTerminal, root, "app-session-1"}, self()}, fn ->
+        :global.trans(Shuttle.CodexTerminal.lock_id("app-session-1"), fn ->
           send(parent, :viewer_locked)
           receive do: (:release -> :ok)
         end)
@@ -572,6 +572,35 @@ defmodule Shuttle.AppWorkersTest do
     assert App.calls() == calls
     send(holder.pid, :release)
     assert :ok = Task.await(holder)
+  end
+
+  test "stop holds the same exclusion as prepare, retirement and leftover sweeping" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    parent = self()
+
+    App.set(:interrupt_hook, fn _ ->
+      send(parent, :stop_locked)
+      receive do: (:release -> :ok)
+    end)
+
+    stopping = Task.async(fn -> WorkerBackend.stop(Runner, ref) end)
+    assert_receive :stop_locked
+    calls = App.calls()
+
+    assert {:error, :terminal_busy} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert :retained = WorkerBackend.retire_assignment(Runner, ref, %{"status" => "closed"})
+    assert Shuttle.CodexTerminal.sweep(Runner) == []
+    assert App.calls() == calls
+    send(stopping.pid, :release)
+    assert {"", 0} = Task.await(stopping)
+
+    assert {:error, :not_a_terminal_worker} =
+             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+
+    assert Shuttle.Terminal.status(Runner, WorkerBackend.tmux(ref)) == :gone
   end
 
   @tag :timing
