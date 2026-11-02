@@ -196,4 +196,12 @@ defmodule Shuttle.FSTest do
 
     assert violations == []
   end
+
+  # procfs answers ENOENT for a new directory under /proc, a parent that exists;
+  # mkdir_p must return that answer rather than recreate the parent forever.
+  @tag :linux
+  @tag timeout: 5_000
+  test "mkdir_p returns ENOENT from a filesystem that refuses the directory" do
+    assert FS.mkdir_p("/proc/nonexistent") == {:error, :enoent}
+  end
 end

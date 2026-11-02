@@ -117,12 +117,20 @@ defmodule Shuttle.FS do
   def rename(source, target), do: :prim_file.rename(source, target)
   def chmod(path, mode), do: :prim_file.write_file_info(path, file_info(mode: mode))
 
+  # A missing parent is created once, then the directory itself is tried once
+  # more: some filesystems (Linux procfs) answer ENOENT under a parent that
+  # exists, and that answer is final.
   def mkdir_p(path) do
+    case mkdir_here(path) do
+      {:error, :enoent} -> with :ok <- mkdir_p(Path.dirname(path)), do: mkdir_here(path)
+      result -> result
+    end
+  end
+
+  defp mkdir_here(path) do
     case mkdir(path) do
-      :ok -> :ok
       {:error, :eexist} -> if dir?(path), do: :ok, else: {:error, :eexist}
-      {:error, :enoent} -> with :ok <- mkdir_p(Path.dirname(path)), do: mkdir_p(path)
-      error -> error
+      result -> result
     end
   end
 
