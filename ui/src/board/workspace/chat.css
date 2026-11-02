@@ -235,7 +235,9 @@
   /* The chat is the whole screen: its header line is the top bar, and the run's bars step aside. */
   .ws-reader[data-page='chat'] .ws-navbar { display: none; }
   .ws-chat-head { gap: 4px; min-height: calc(var(--ws-phone-nav-height, 52px) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; }
-  .ws-chat .ws-chat-back { max-width: calc(100vw / 3); min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; padding-inline: 6px; justify-content: center; }
+  /* Back takes up to a third of the bar, yielding to the title's two-line floor before the icons beside it. */
+  .ws-chat-head > .ws-chat-lead { min-width: var(--ws-phone-target); }
+  .ws-chat .ws-chat-back { flex: 0 1 auto; max-width: calc(100vw / 3); min-height: var(--ws-phone-target); min-width: var(--ws-phone-target); margin: 0; padding-inline: 6px; justify-content: center; }
   .ws-chat-head > .ws-chat-identity { align-self: center; }
   .ws-chat-head { align-items: flex-start; }
   .ws-chat-lead:not([hidden]) { display: inline-flex; }
@@ -243,7 +245,7 @@
   /* A page without a back destination keeps the title inset. */
   .ws-chat-lead[hidden] + .ws-chat-identity { padding-left: 12px; }
   .ws-chat-acts { gap: 6px; }
-  .ws-chat-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; grid-template-areas: 'lead identity console settings leave' 'acts acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
+  .ws-chat-head { display: grid; grid-template-columns: auto minmax(128px, 1fr) auto auto auto; grid-template-areas: 'lead identity console settings leave' 'acts acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
   .ws-chat-acts { justify-content: flex-start; }
   .ws-chat-acts > .ws-chat-settings { width: 36px; height: var(--ws-phone-target); }
   .ws-chat-acts > .ws-chat-refs { margin-left: 0; }

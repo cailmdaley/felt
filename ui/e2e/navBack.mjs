@@ -54,7 +54,10 @@ export function registerNavigationJourneys(test) {
       return control
     }
     await page.goto(url + '#/desk')
-    await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+    // The card's own name opens its lead; the family's other askers sit on rows beneath it.
+    const name = page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).locator('.kbn-card-name')
+    const nameBox = await name.boundingBox()
+    await name.click({ position: { x: nameBox.width - 6, y: nameBox.height / 2 } })
     await heading(page, 'Choose the response cut').waitFor()
     await checkBack('Desk', true)
     await shot('01-nested-from-desk')
