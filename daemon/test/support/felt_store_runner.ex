@@ -648,7 +648,11 @@ defmodule Shuttle.Test.FeltStoreRunner do
         fiber_id = extract_fiber_id(args)
         fibers = Agent.get(server(), & &1.fibers)
 
-        case Map.get(fibers, fiber_id) do
+        fiber =
+          Map.get(fibers, fiber_id) ||
+            Enum.find_value(fibers, fn {_id, fiber} -> if fiber["uid"] == fiber_id, do: fiber end)
+
+        case fiber do
           nil -> {"fiber not found", 1}
           fiber -> {Jason.encode!(for_cli(command, fiber)), 0}
         end

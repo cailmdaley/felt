@@ -242,15 +242,28 @@ defmodule Shuttle.Poller.SessionReconciliation do
             {:ok, fiber} ->
               if Poller.host_owned?(fiber["shuttle"] || %{}, acc.own_host_id) and
                    Shuttle.AppWorkers.same_fiber?(record, fiber["id"], fiber["uid"]) do
-                state =
-                  adopt_session(
-                    acc,
-                    fiber["id"],
-                    Shuttle.AppWorkers.ref(record["session_uuid"])
-                  )
+                case refresh_app_fiber(record, fiber["id"]) do
+                  :ok ->
+                    state =
+                      if app_session_tracked?(acc, fiber["id"], record["session_uuid"]),
+                        do: acc,
+                        else:
+                          adopt_session(
+                            acc,
+                            fiber["id"],
+                            Shuttle.AppWorkers.ref(record["session_uuid"])
+                          )
 
-                restore_terminal_viewer(record, acc.runner)
-                state
+                    restore_terminal_viewer(record, acc.runner)
+                    state
+
+                  {:error, reason} ->
+                    Logger.warning(
+                      "Cannot update app worker #{record["session_uuid"]}'s fiber address: #{inspect(reason)}"
+                    )
+
+                    acc
+                end
               else
                 acc
               end
@@ -261,6 +274,11 @@ defmodule Shuttle.Poller.SessionReconciliation do
       end
     end)
   end
+
+  defp refresh_app_fiber(%{"fiber_id" => id}, id), do: :ok
+
+  defp refresh_app_fiber(record, id),
+    do: Shuttle.AppWorkers.update(record["session_uuid"], %{"fiber_id" => id})
 
   defp app_session_tracked?(state, fiber_id, session_uuid) do
     case Poller.running_key(state, fiber_id) do

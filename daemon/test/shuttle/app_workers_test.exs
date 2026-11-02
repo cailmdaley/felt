@@ -2176,6 +2176,39 @@ defmodule Shuttle.AppWorkersTest do
     assert WorkerBackend.session_status(Runner, session) == :gone
   end
 
+  test "a moved fiber repairs its app ownership address and is adopted only once" do
+    current = "tests/moved/app"
+    fiber(current)
+    assert {:ok, session} = dispatch(current)
+    assert :ok = AppWorkers.update("app-session-1", %{"fiber_id" => "tests/old/app"})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, poller} =
+          start_poller!(
+            runner: Runner,
+            name: nil,
+            felt_stores: [Runner.felt_root()],
+            poll_interval_ms: 60_000
+          )
+
+        await_boot_cycle!(poller)
+        assert %{session: ^session, pid: pid} = Poller.worker_status(poller, current)
+        assert {:ok, %{"fiber_id" => ^current}} = AppWorkers.get("app-session-1")
+
+        for _ <- 1..2 do
+          cycles = :sys.get_state(poller).poll_cycles
+          send(poller, :run_poll_cycle)
+          eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+          assert %{session: ^session, pid: ^pid} = Poller.worker_status(poller, current)
+        end
+      end)
+
+    assert length(Regex.scan(~r/Adopted orphan session: codex-app:/, log)) == 1
+    assert 1 == Enum.count(App.calls(), &match?({:start, _}, &1))
+    assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+  end
+
   test "next-launch configuration does not replace or relabel an owned app conversation" do
     fiber("tests/app")
     assert {:ok, session} = dispatch("tests/app")
