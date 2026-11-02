@@ -28,13 +28,14 @@ Opening a sole destination leaves your preference unchanged.
 The same preference drives keyboard opening and History.
 
 Settings opens to **Conversations**, with **Open conversations in** at the top.
-It edits that same preference: **Terminal**, **Claude browser**, **Claude app**, or **Rex on phone**.
+It edits that same preference and offers what this device can open: **Terminal**, **Claude browser** or **Claude app** on a desktop; **Rex** or **Claude browser** on a phone.
 If the remembered destination is unavailable, opening uses the best available destination without changing the preference.
 For desktop CLI workers the order is Terminal, Claude browser, then Claude app; Codex app workers use ChatGPT.
 On phones, CLI workers on Rex hosts offer Rex first, then a Claude browser link if available.
 This works for Claude, Codex CLI and Pi workers.
 The terminal destination is labelled **Rex** when the worker reports that backend.
 Terminal and the Claude app are desktop-only destinations.
+On a desktop, Claude browser links open in a new tab; on a phone they open in place, so iOS can hand them to the Claude app.
 
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.

@@ -15,6 +15,7 @@ beforeEach(() => {
     setItem: (key: string, value: string) => values.set(key, value),
   })
   vi.stubGlobal('fetch', vi.fn())
+  vi.stubGlobal('matchMedia', () => ({ matches: false }))
   const container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
@@ -31,7 +32,7 @@ it('saves a browser preference without writing host configuration and notifies t
   const changed = vi.fn()
   window.addEventListener(CONVERSATION_OPENING_CHANGED, changed)
   const app = document.querySelector<HTMLInputElement>('input[value="app"]')!
-  expect([...document.querySelectorAll('input')].map(input => input.value)).toEqual(['terminal', 'browser', 'app', 'rex'])
+  expect([...document.querySelectorAll('input')].map(input => input.value)).toEqual(['terminal', 'browser', 'app'])
   act(() => app.click())
   expect(values.get(CLAUDE_OPENING_KEY)).toBe('app')
   expect(changed).toHaveBeenCalledOnce()
@@ -46,4 +47,15 @@ it('reports blocked site storage without pretending the choice was saved', () =>
   act(() => document.querySelector<HTMLInputElement>('input[value="browser"]')!.click())
   expect(document.querySelector<HTMLInputElement>('input[value="terminal"]')!.checked).toBe(true)
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('cannot save preferences')
+})
+
+it.each([
+  [false, ['terminal', 'browser', 'app'], 'terminal'],
+  [true, ['rex', 'browser'], 'rex'],
+])('offers only what this device opens and marks what opening falls back to (phone: %s)', (phone, offered, selected) => {
+  vi.stubGlobal('matchMedia', () => ({ matches: phone }))
+  act(() => root.render(<></>))
+  act(() => root.render(<ConversationsSection />))
+  expect([...document.querySelectorAll<HTMLInputElement>('input')].map(input => input.value)).toEqual(offered)
+  expect(document.querySelector<HTMLInputElement>('input:checked')?.value).toBe(selected)
 })

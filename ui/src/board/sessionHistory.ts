@@ -134,7 +134,7 @@ export function sessionTargets(
   }
   if (selected) return {
     primary: target(selected.id),
-    extras: destinations.filter(destination => destination.id !== selected.id).map(destination => target(destination.id)),
+    extras: rowExtras(destinations.map(destination => destination.id), selected.id).map(target),
   }
   return {
     extras: [],
@@ -145,6 +145,13 @@ export function sessionTargets(
       copy: record.session,
     },
   }
+}
+
+/** A row's alternatives show its conversation's Claude link once: none beside a Claude primary, else the app before the web page. */
+function rowExtras(ids: readonly ConversationOpening[], primary: ConversationOpening): ConversationOpening[] {
+  const claude = (id: ConversationOpening): boolean => id === 'browser' || id === 'app'
+  const link = claude(primary) ? undefined : ids.includes('app') ? 'app' : ids.find(claude)
+  return ids.filter(id => id !== primary && (!claude(id) || id === link))
 }
 
 /** `14:02` today, `Sep 26 14:02` otherwise — the strip's clock, 24-hour. */

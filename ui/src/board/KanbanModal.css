@@ -1536,6 +1536,13 @@
 .kbn-card {
   -webkit-touch-callout: none;
 }
+/* Console and worker pills hold for their conversation picker. As links they
+   would otherwise raise iOS's link preview over it. */
+.kbn-picker-anchor {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
 /* Under a finger the Desk is a surface of handles, not a page of text: iPadOS
    in particular answers a held finger by selecting the nearest selectable
    run — the card refuses, so it takes the column behind it, paints the page

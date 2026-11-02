@@ -45,7 +45,7 @@ describe('conversation opening', () => {
     const attach = vi.fn()
     const pill = workerPill({ ...worker, sessionLink: undefined }, { openWorker: attach })
     expect(pill.textContent).toBe('working')
-    expect(pill.getAttribute('aria-label')).toBe('Open in Terminal')
+    expect(pill.getAttribute('aria-label')).toBe('working. Open in Terminal')
     pill.click()
     expect(attach).toHaveBeenCalledOnce()
     expect(conversationOpening()).toBe('app')
@@ -72,7 +72,7 @@ describe('conversation opening', () => {
 
   it('labels Rex and opens Codex app workers in ChatGPT regardless of an unavailable preference', () => {
     const rex = workerPill({ ...worker, terminalBackend: 'rex' }, { openWorker: vi.fn() })
-    expect(rex.getAttribute('aria-label')).toBe('Open in Rex')
+    expect(rex.getAttribute('aria-label')).toBe('working. Open in Rex')
     const route = 'codex://threads/01a0be38-6c36-7cd1-aec9-53a680d1f693'
     expect(workerPill(card({ id: 'codex', workerSurface: 'app', sessionUuid: 'app-session', desktopLink: route })).getAttribute('href')).toBe(route)
     expect(conversationDestinations({ ...worker, workerSurface: 'app', sessionUuid: 'app-session' }, desktop, vi.fn()).map(d => d.id)).toEqual(['chatgpt'])
@@ -83,7 +83,7 @@ describe('conversation opening', () => {
     saveConversationOpening('rex')
     const rex = { ...worker, sessionUuid: 'live-session', workerAgent, terminalBackend: 'rex' as const, sessionLink: undefined }
     const pill = workerPill(rex, { openWorker: vi.fn() }) as HTMLAnchorElement
-    expect(pill.getAttribute('aria-label')).toBe('Open in Rex')
+    expect(pill.getAttribute('aria-label')).toBe('working. Open in Rex')
     expect(pill.href).toBe(REX_APP_HREF)
     expect(pill.title).toContain('choose this constitution family')
     expect(conversationOpening()).toBe('rex')

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { workerPill } from './appConversation'
-import { conversationOpening, saveConversationOpening } from './conversationOpening'
+import { conversationOpening, openDestination, saveConversationOpening } from './conversationOpening'
 import { attachConversationPicker } from './conversationMenu'
 import { card } from './testFixtures'
 
@@ -117,4 +117,42 @@ it('long-press owns the touch gesture and swallows its follow-up click, not the 
   expect(attach).not.toHaveBeenCalled()
   items()[0].click()
   expect(attach).toHaveBeenCalledOnce()
+})
+
+it('Android’s contextmenu after a fired long-press leaves the picker under its anchor', () => {
+  vi.useFakeTimers()
+  const pill = buildPill()
+  const down = new Event('pointerdown', { bubbles: true })
+  Object.assign(down, { pointerId: 1, pointerType: 'touch', button: 0, clientX: 20, clientY: 20 })
+  pill.dispatchEvent(down)
+  vi.advanceTimersByTime(600)
+  const menu = document.querySelector<HTMLElement>('[role="menu"]')!
+  const late = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 300, clientY: 400 })
+  pill.dispatchEvent(late)
+  expect(late.defaultPrevented).toBe(true)
+  expect(document.querySelectorAll('[role="menu"]')).toHaveLength(1)
+  expect(document.querySelector('[role="menu"]')).toBe(menu)
+})
+
+it('a picker anchor refuses the platform link callout and announces no popup, since activating it opens', () => {
+  saveConversationOpening('browser')
+  const pill = buildPill()
+  expect(pill.tagName).toBe('A')
+  expect(pill.classList.contains('kbn-picker-anchor')).toBe(true)
+  expect(pill.hasAttribute('aria-haspopup')).toBe(false)
+})
+
+it.each([[false, '_blank'], [true, '']])('web destinations open in a new tab only on desktop (phone: %s)', (phone, target) => {
+  saveConversationOpening('browser')
+  vi.stubGlobal('matchMedia', () => ({ matches: phone }))
+  const pill = buildPill(undefined) as HTMLAnchorElement
+  expect(pill.href).toBe(web)
+  expect(pill.target).toBe(target)
+  rightClick(pill)
+  const link = items().find(item => item instanceof HTMLAnchorElement && item.href === web) as HTMLAnchorElement
+  expect(link.target).toBe(target)
+  const clicked: HTMLAnchorElement[] = []
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this) })
+  openDestination({ id: 'browser', label: 'Claude browser', href: web })
+  expect(clicked.at(-1)?.target).toBe(target)
 })

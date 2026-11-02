@@ -50,7 +50,7 @@ import { KeymapHelp } from './KeymapHelp.js'
 import { keyIntent } from './keymap.js'
 import type { SidebarEntry } from './workspace/SidebarFlight.js'
 import { daemonFetch, isDaemonBooting } from './daemonApi.js'
-import { applyTerminalHost, terminalHostFromVersion } from './hostTerminal.js'
+import { applyTerminalHost, TerminalHostReader } from './hostTerminal.js'
 import { inLane } from './requestLanes.js'
 import type {
   ColumnKind,
@@ -1751,7 +1751,7 @@ export class KanbanModal {
 
   private async fetchAndRender(): Promise<void> {
     void this.fetchMeetingStatus()
-    const terminalHost = this.readTerminalHost()
+    this.terminalHost.refresh()
     this.lastFetchStartedAt = Date.now()
     const token = ++this.inflightFetchToken
     try {
@@ -1774,7 +1774,7 @@ export class KanbanModal {
       // → assembles the exact `KanbanResponse` the renderer already consumes.
       this.compositeEtag = res.headers.get('ETag')
       const feed = parseCompositeFeed(await res.json())
-      applyTerminalHost(feed.entries, await terminalHost)
+      applyTerminalHost(feed.entries, this.terminalHost.current)
       const data = buildKanbanResponseFromComposite(feed)
       if (token !== this.inflightFetchToken) return
       // Skip re-render when the response is semantically unchanged —
@@ -1981,17 +1981,6 @@ export class KanbanModal {
     this.mountOrRefreshActiveView()
   }
 
-  private readTerminalHost(): Promise<ReturnType<typeof terminalHostFromVersion>> {
-    this.terminalVersionRead ??= inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/version`))
-      .then(async response => response.ok ? terminalHostFromVersion(await response.json()) : undefined)
-      .catch(() => undefined)
-      .then(host => {
-        if (!host) this.terminalVersionRead = undefined
-        return host
-      })
-    return this.terminalVersionRead
-  }
-
   private ensureFleetMetadata(data: KanbanResponse): void {
     for (const card of boardCards(data)) {
       if (!isAgentCard(card) || !card.shuttleAgent) continue
@@ -2056,7 +2045,11 @@ export class KanbanModal {
   private deskProjection: DeskOrder = deskOrder(null)
   /** Meeting fiber used to build the current Desk projection. */
   private deskMeetingFiber: string | null = null
-  private terminalVersionRead?: Promise<ReturnType<typeof terminalHostFromVersion>>
+  /** The hub's terminal backs runtimes that report none; learning it refetches the full feed. */
+  private readonly terminalHost = new TerminalHostReader(
+    () => inLane('quiet', () => daemonFetch(`${this.shuttleBase}/api/v1/version`)),
+    () => { this.compositeEtag = null; void this.fetchAndRender() },
+  )
   private readonly fleetDefaultAgents = new Map<string, string>()
   private readonly fleetDefaultAgentLoads = new Set<string>()
   /** When each unreachable host last refused its registry; renders retry it after AGENT_RETRY_MS. */

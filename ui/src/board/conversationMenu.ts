@@ -1,5 +1,5 @@
 import { attachLongPress } from './longPress.js'
-import { conversationOpening, saveConversationOpening, resolveDestination, type ConversationDestination } from './conversationOpening.js'
+import { conversationOpening, linkDestination, saveConversationOpening, resolveDestination, type ConversationDestination } from './conversationOpening.js'
 
 export interface ConversationAction {
   label: string; href?: string; run?: () => void; disabled?: boolean; checked?: boolean
@@ -66,10 +66,8 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   }
   for (const action of actions.length ? actions : [{ label: 'No actions available', disabled: true }]) {
     const item = document.createElement(action.href ? 'a' : 'button')
-    if (item instanceof HTMLAnchorElement) {
-      item.href = action.href!
-      if (action.href!.startsWith('https:')) { item.target = '_blank'; item.rel = 'noopener noreferrer' }
-    } else {
+    if (item instanceof HTMLAnchorElement) linkDestination(item, action.href!)
+    else {
       (item as HTMLButtonElement).type = 'button'
       ;(item as HTMLButtonElement).disabled = !!action.disabled
     }
@@ -128,10 +126,11 @@ export function openActionMenu(anchor: HTMLElement, actions: readonly Conversati
   return close
 }
 
-/** Touch and mouse share the same picker, including a single usable destination. */
+/** Touch and mouse share the same picker, including a single usable destination.
+ *  Activating the anchor opens its destination, so it announces no popup; the picker
+ *  is its context menu. The anchor refuses the platform's own link callout and selection. */
 export function attachConversationPicker(anchor: HTMLElement, destinations: () => readonly ConversationDestination[]): () => void {
-  anchor.setAttribute('aria-haspopup', 'menu')
-  anchor.setAttribute('aria-expanded', 'false')
+  anchor.classList.add('kbn-picker-anchor')
   const show = (point?: { x: number; y: number }): void => {
     const available = destinations()
     if (!available.length) return
@@ -149,6 +148,8 @@ export function attachConversationPicker(anchor: HTMLElement, destinations: () =
   }
   const context = (event: MouseEvent): void => {
     event.preventDefault(); event.stopPropagation()
+    // Android follows a long-press with its own contextmenu while the picker is up.
+    if (anchor.getAttribute('aria-expanded') === 'true') return
     show(event.clientX || event.clientY ? { x: event.clientX, y: event.clientY } : undefined)
   }
   anchor.addEventListener('contextmenu', context)

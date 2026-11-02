@@ -70,12 +70,18 @@ export function resolveDestination<T extends { id: ConversationOpening }>(destin
   return destinations.find(destination => destination.id === remembered) ?? destinations[0]
 }
 
+/** Point an anchor at a destination. Desktop opens web pages in a new tab; a phone keeps
+ *  them in place, where iOS hands a universal link such as claude.ai to its app. */
+export function linkDestination(link: HTMLAnchorElement, href: string, desktop = conversationDevice().desktop): void {
+  link.href = href
+  if (desktop && href.startsWith('https:')) { link.target = '_blank'; link.rel = 'noopener noreferrer' }
+}
+
 /** Use a native anchor so app schemes and browser links retain their normal gesture semantics. */
 export function openDestination(destination: ConversationDestination): void {
   if (destination.run) { destination.run(); return }
   const link = document.createElement('a')
-  link.href = destination.href
-  if (destination.href.startsWith('https:')) { link.target = '_blank'; link.rel = 'noopener noreferrer' }
+  linkDestination(link, destination.href)
   link.click()
 }
 

@@ -111,10 +111,19 @@ try {
       await selected(p).getByRole('button', { name: 'Constitution', exact: true }).click()
       await selected(p).getByRole('heading', { name: 'Validation notes', exact: true }).waitFor()
       const pill = p.locator('.ws-navbar .ws-head-worker .kbn-card-worker')
+      assert.match(await pill.getAttribute('aria-label'), /^\w+\. Open in Claude browser$/, 'the pill names its turn')
+      assert.equal(await pill.getAttribute('target'), null, 'a phone opens Claude in place so iOS can hand it to the app')
+      assert.equal(await pill.evaluate(el => getComputedStyle(el).userSelect), 'none', 'the held pill is a picker anchor, not text')
       await shot(p, 'phone-reader-pill')
       await longPress(p, context, pill)
       assert.equal(await items(p).count(), 1)
       await shot(p, 'phone-reader-pill-picker')
+      await p.keyboard.press('Escape')
+      await p.goto(base)
+      await p.locator('.kbn-viewtabs-settings').click()
+      await p.getByRole('heading', { name: 'Open conversations in', exact: true }).waitFor()
+      assert.deepEqual(await p.locator('.set-opening-options input').evaluateAll(inputs => inputs.map(input => input.value)), ['rex', 'browser'])
+      await shot(p, 'phone-settings')
       await p.keyboard.press('Escape')
     } else {
       await p.locator('.kbn-viewtabs-settings').click()
@@ -150,7 +159,7 @@ try {
       // These fixtures omit runtime.terminal: the local version supplies the backend.
       for (const harness of ['pi', 'codex']) {
         await open(p, `rex-${harness}`)
-        assert.equal(await consoleButton(p).getAttribute('aria-label'), 'Open in Rex')
+        await selected(p).locator('.ws-chat-console[aria-label="Open in Rex"]').waitFor()
         await consoleButton(p).click()
         assert.equal(await p.evaluate(() => window.__conversationLinks.at(-1)), 'rex://')
         await longPress(p, context, consoleButton(p))

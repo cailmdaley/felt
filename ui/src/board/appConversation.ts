@@ -1,6 +1,6 @@
 import { attachConversationPicker } from './conversationMenu.js'
 import { humanizeIdleAge } from './utils.js'
-import { conversationDestinations, conversationDevice, resolveDestination, REMOTE_CONTROL_REQUIRED, type ConversationWorker, type WorkerOpener } from './conversationOpening.js'
+import { conversationDestinations, conversationDevice, linkDestination, resolveDestination, REMOTE_CONTROL_REQUIRED, type ConversationWorker, type WorkerOpener } from './conversationOpening.js'
 import type { KanbanCard } from './KanbanTypes.js'
 import { turnOf } from './turn.js'
 
@@ -32,11 +32,9 @@ export function workerPill(
   }
   const label = `Open in ${destination.label}`
   pill.title = `${state} — ${destination.title ?? label}\nLong-press or right-click to choose where to open.`
-  pill.setAttribute('aria-label', label)
-  if (pill instanceof HTMLAnchorElement) {
-    pill.href = destination.href!
-    if (destination.href!.startsWith('https:')) { pill.target = '_blank'; pill.rel = 'noopener noreferrer' }
-  } else if (pill instanceof HTMLButtonElement) pill.type = 'button'
+  pill.setAttribute('aria-label', `${pill.textContent}. ${label}`)
+  if (pill instanceof HTMLAnchorElement) linkDestination(pill, destination.href!)
+  else if (pill instanceof HTMLButtonElement) pill.type = 'button'
   pill.addEventListener('click', event => { event.stopPropagation(); destination.run?.() })
   attachConversationPicker(pill, destinations)
   return pill
