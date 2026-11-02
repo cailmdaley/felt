@@ -3,16 +3,14 @@ import { appConversationTarget, canOpenDesktopApp, claudeAppRoute, claudeWebLink
 import { coarsePointer } from './mobile.js'
 
 /** Opening belongs to this browser; execution belongs to the worker's host. */
-export type ConversationOpening = 'terminal' | 'browser' | 'app' | 'chatgpt' | 'rex'
-/** Rex opens its session list; the client has no known conversation-specific route. */
-export const REX_APP_HREF = 'rex://'
+export type ConversationOpening = 'terminal' | 'browser' | 'app' | 'chatgpt'
 export const CLAUDE_OPENING_KEY = 'shuttle.claude-opening'
 export const CONVERSATION_OPENING_CHANGED = 'shuttle-conversation-opening-changed'
 
 export function conversationOpening(): ConversationOpening {
   try {
     const value = globalThis.localStorage?.getItem(CLAUDE_OPENING_KEY)
-    if (value === 'browser' || value === 'app' || value === 'chatgpt' || value === 'rex') return value
+    if (value === 'browser' || value === 'app' || value === 'chatgpt') return value
   } catch { /* Site storage may be disabled. */ }
   return 'terminal'
 }
@@ -53,9 +51,6 @@ export function conversationDestinations(card: ConversationWorker, device: Conve
   if (device.desktop && card.tmuxSession && openWorker) {
     const session = card.tmuxSession
     destinations.push({ id: 'terminal', label: card.terminalBackend === 'rex' ? 'Rex' : 'Terminal', run: () => openWorker(session, card.shuttleHost) })
-  }
-  if (!device.desktop && card.tmuxSession && card.terminalBackend === 'rex') {
-    destinations.push({ id: 'rex', label: 'Rex', href: REX_APP_HREF, title: 'Open Rex, then choose this constitution family’s session.' })
   }
   const web = claudeWebLink(card.sessionLink)
   if (web) {

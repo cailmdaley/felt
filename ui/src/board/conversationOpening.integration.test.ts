@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { workerPill } from './appConversation'
-import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, REX_APP_HREF, type ConversationOpening } from './conversationOpening'
+import { conversationOpening, CLAUDE_OPENING_KEY, saveConversationOpening, conversationDestinations, resolveDestination, type ConversationOpening } from './conversationOpening'
 import { sessionTargets } from './sessionHistory'
 import { card } from './testFixtures'
 
@@ -60,7 +60,7 @@ describe('conversation opening', () => {
     expect((workerPill({ ...worker, sessionLink: url }) as HTMLAnchorElement).href).toBe(url)
   })
 
-  it.each(['terminal', 'browser', 'app', 'chatgpt', 'rex'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
+  it.each(['terminal', 'browser', 'app', 'chatgpt'] as const)('uses phone HTTPS opening with %s remembered', (choice) => {
     saveConversationOpening(choice)
     vi.stubGlobal('matchMedia', () => ({ matches: true }))
     expect((workerPill(worker) as HTMLAnchorElement).href).toBe(bridge)
@@ -78,18 +78,9 @@ describe('conversation opening', () => {
     expect(conversationDestinations({ ...worker, workerSurface: 'app', sessionUuid: 'app-session' }, desktop, vi.fn()).map(d => d.id)).toEqual(['chatgpt'])
   })
 
-  it.each(['claude-opus', 'codex-sol', 'pi-sol'])('opens the Rex session list for %s CLI workers on a phone', workerAgent => {
-    vi.stubGlobal('matchMedia', () => ({ matches: true }))
-    saveConversationOpening('rex')
-    const rex = { ...worker, sessionUuid: 'live-session', workerAgent, terminalBackend: 'rex' as const, sessionLink: undefined }
-    const pill = workerPill(rex, { openWorker: vi.fn() }) as HTMLAnchorElement
-    expect(pill.getAttribute('aria-label')).toBe('working. Open in Rex')
-    expect(pill.href).toBe(REX_APP_HREF)
-    expect(pill.title).toContain('choose this constitution family')
-    expect(conversationOpening()).toBe('rex')
-    expect(sessionTargets({ session: 'live-session', host: 'host' }, undefined, {
-      desktop: false, liveSession: 'live-session', liveTmux: worker.tmuxSession, terminalBackend: 'rex',
-    }).primary).toMatchObject({ kind: 'app', href: REX_APP_HREF, label: 'Rex' })
+  it('treats a stored Rex preference as no preference', () => {
+    localStorage.setItem(CLAUDE_OPENING_KEY, 'rex')
+    expect(conversationOpening()).toBe('terminal')
   })
 
   it.each(['javascript:alert(1)', 'https://claude.ai.evil.example/code/session_test', `${bridge}\n`])('never opens an unsafe session link: %s', (sessionLink) => {
@@ -107,7 +98,7 @@ describe('conversation opening', () => {
   })
 
   it('resolves remembered-if-available-else-first, never duplicates ids or offers phone terminals', () => {
-    const id = fc.constantFrom<ConversationOpening>('terminal', 'browser', 'app', 'chatgpt', 'rex')
+    const id = fc.constantFrom<ConversationOpening>('terminal', 'browser', 'app', 'chatgpt')
     fc.assert(fc.property(fc.uniqueArray(id), id, fc.boolean(), fc.boolean(), fc.boolean(), (ids, remembered, phone, hasLink, hasOpener) => {
       const entries = ids.map(id => ({ id }))
       expect(resolveDestination(entries, remembered)).toBe(entries.find(entry => entry.id === remembered) ?? entries[0])

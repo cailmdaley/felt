@@ -186,7 +186,7 @@ describe('sessionTargets', () => {
 
   it('every desktop row shows its Claude conversation link at most once, whatever the preference', () => {
     const link = entry({ session: CLAUDE, harness: 'claude-code', url: BRIDGE })
-    for (const opening of ['terminal', 'browser', 'app', 'rex', 'chatgpt'] as const) {
+    for (const opening of ['terminal', 'browser', 'app', 'chatgpt'] as const) {
       for (const ctx of [desk, { ...desk, liveSession: CLAUDE }]) {
         const { primary, extras } = sessionTargets(rec({}), link, { ...ctx, opening })
         expect([primary, ...extras].filter(t => t.kind === 'web' || t.kind === 'app')).toHaveLength(1)

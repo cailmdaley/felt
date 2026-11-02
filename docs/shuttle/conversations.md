@@ -28,21 +28,17 @@ Opening a sole destination leaves your preference unchanged.
 The same preference drives keyboard opening and History.
 
 Settings opens to **Conversations**, with **Open conversations in** at the top.
-It edits that same preference and offers what this device can open: **Terminal**, **Claude browser** or **Claude app** on a desktop; **Rex** or **Claude browser** on a phone.
+It edits that same preference and offers what this device can open: **Terminal**, **Claude browser** or **Claude app** on a desktop; **Claude browser** on a phone.
 If the remembered destination is unavailable, opening uses the best available destination without changing the preference.
 For desktop CLI workers the order is Terminal, Claude browser, then Claude app; Codex app workers use ChatGPT.
-On phones, CLI workers on Rex hosts offer Rex first, then a Claude browser link if available.
-This works for Claude, Codex CLI and Pi workers.
+On phones, CLI workers offer a Claude browser link if available.
 The terminal destination is labelled **Rex** when the worker reports that backend.
 Terminal and the Claude app are desktop-only destinations.
 On a desktop, Claude browser links open in a new tab; on a phone they open in place, so iOS can hand them to the Claude app.
 
 Claude browser/app routes require a recorded Remote Control link for that session.
 The preference doesn't enable Remote Control by itself.
-On a phone, a worker without Rex or a Claude Remote Control link has no destination: Console is hidden and its worker pill only marks its state.
-The Rex destination opens the installed app with `rex://`; choose the constitution family's session in the app.
-The phone client must be connected to that host's Rex server, for example over Tailscale.
-No conversation-specific Rex deep link or web route is known.
+On a phone, a CLI worker without a Claude Remote Control link has no destination: Console is hidden and its worker pill only marks its state.
 A mobile Codex link opens ChatGPT; use **Remote**, select the host and project, then choose the conversation.
 It is not a guaranteed conversation-specific mobile deep link.
 

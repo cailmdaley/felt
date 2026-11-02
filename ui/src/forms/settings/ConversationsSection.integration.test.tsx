@@ -51,7 +51,7 @@ it('reports blocked site storage without pretending the choice was saved', () =>
 
 it.each([
   [false, ['terminal', 'browser', 'app'], 'terminal'],
-  [true, ['rex', 'browser'], 'rex'],
+  [true, ['browser'], 'browser'],
 ])('offers only what this device opens and marks what opening falls back to (phone: %s)', (phone, offered, selected) => {
   vi.stubGlobal('matchMedia', () => ({ matches: phone }))
   act(() => root.render(<></>))

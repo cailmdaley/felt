@@ -129,8 +129,8 @@ export function sessionTargets(
   const target = (id: ConversationOpening): SessionTarget => {
     if (id === 'terminal') return terminal!
     const destination = destinations.find(destination => destination.id === id)!
-    return { kind: id === 'app' || id === 'rex' ? 'app' : 'web', href: destination.href!,
-      label: id === 'rex' ? 'Rex' : id === 'app' ? 'app' : ctx.desktop ? 'web' : 'claude.ai', title: destination.title ?? destination.href! }
+    return { kind: id === 'app' ? 'app' : 'web', href: destination.href!,
+      label: id === 'app' ? 'app' : ctx.desktop ? 'web' : 'claude.ai', title: destination.title ?? destination.href! }
   }
   if (selected) return {
     primary: target(selected.id),
