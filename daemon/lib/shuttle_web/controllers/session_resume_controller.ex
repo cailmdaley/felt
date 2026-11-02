@@ -41,6 +41,7 @@ defmodule ShuttleWeb.SessionResumeController do
   def prepare_opts do
     [
       runner: Shuttle.Env.app(:session_resume_runner, Shuttle.Runner.Default),
+      wait_timeout_ms: CodexTerminal.prepare_timeout_ms(),
       live_sessions: Shuttle.Env.app(:session_resume_live, &SessionResume.live_sessions/0)
     ]
   end

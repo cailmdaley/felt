@@ -2,6 +2,7 @@ defmodule Shuttle.CodexTerminal do
   @moduledoc "Replaceable terminal viewers of durably owned App Server threads."
 
   alias Shuttle.{AppWorkers, Dispatcher, Terminal}
+  require Logger
 
   def tmux_name(id), do: "codex-terminal-" <> id
 
@@ -54,60 +55,96 @@ defmodule Shuttle.CodexTerminal do
     ) == true
   end
 
-  @doc "The whole viewer preparation budget, including backend I/O and terminal launch."
+  @doc "Interactive wait budget; a viewer launch owns its completion after the caller leaves."
   def prepare_timeout_ms, do: Shuttle.Env.app(:terminal_prepare_timeout_ms, 10_000)
   def forward_timeout_ms, do: prepare_timeout_ms() + 2_000
+  def rpc_timeout_ms, do: Shuttle.Env.app(:terminal_rpc_timeout_ms, 5_000)
 
   def prepare(id, opts \\ []) do
-    task = Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn -> prepare_owned(id, opts) end)
+    token = Integer.to_string(System.unique_integer([:positive, :monotonic]))
 
-    case Task.yield(task, prepare_timeout_ms()) || Task.shutdown(task, :brutal_kill) do
-      {:ok, result} -> result
-      {:exit, _reason} -> {:error, :terminal_prepare_failed}
-      nil -> {:error, :terminal_prepare_timeout}
+    task =
+      Task.Supervisor.async_nolink(Shuttle.TaskSupervisor, fn ->
+        prepare_owned(id, opts, token)
+      end)
+
+    case Task.yield(task, Keyword.get(opts, :wait_timeout_ms, :infinity)) do
+      {:ok, result} ->
+        result
+
+      {:exit, reason} ->
+        Logger.warning("Codex terminal preparation exited for #{id}: #{inspect(reason)}")
+        record_result(id, token, {:error, :terminal_prepare_failed}, true)
+        {:error, :terminal_prepare_failed}
+
+      nil ->
+        record_result(id, token, {:error, :terminal_prepare_timeout}, false)
+        Task.ignore(task)
+        {:error, :terminal_prepare_timeout}
     end
   end
 
-  defp prepare_owned(id, opts) do
+  defp prepare_owned(id, opts, token) do
+    case :global.trans(lock_id(id), fn -> prepare_locked(id, opts, token) end, [node()], 0) do
+      :aborted -> {:error, :terminal_busy}
+      result -> result
+    end
+  end
+
+  defp prepare_locked(id, opts, token) do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
 
-    result =
-      :global.trans(
-        lock_id(id),
-        fn ->
-          with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
-               true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
-               :ok <- AppWorkers.check_endpoint(record),
-               :ok <- verified_thread(id, 10) do
-            tmux = record["terminal_tmux"] || tmux_name(id)
+    with {:ok, %{"active" => true, "surface" => "cli"} = record} <- AppWorkers.get(id),
+         :ok <- AppWorkers.update(id, %{"terminal_prepare_token" => token}) do
+      result =
+        with true <- record["launch_state"] == "running" || {:error, :initial_turn_unconfirmed},
+             :ok <- AppWorkers.check_endpoint(record),
+             :ok <- verified_thread(id, 10) do
+          tmux = record["terminal_tmux"] || tmux_name(id)
 
-            case Terminal.status(runner, tmux) do
-              :alive -> {:ok, %{tmux_session: tmux, created: false}}
-              :unknown -> {:error, :terminal_visibility_unknown}
-              :gone -> start(id, record, tmux, runner, opts)
-            end
-          else
-            {:ok, _} -> {:error, :not_a_terminal_worker}
-            error -> error
+          case Terminal.status(runner, tmux) do
+            :alive -> {:ok, %{tmux_session: tmux, created: false}}
+            :unknown -> {:error, :terminal_visibility_unknown}
+            :gone -> start(id, record, tmux, runner, opts)
           end
-        end,
-        [node()],
-        0
-      )
+        end
+
+      record_result(id, token, result, true)
+      result
+    else
+      {:ok, _} -> {:error, :not_a_terminal_worker}
+      error -> error
+    end
+  end
+
+  # The operation token keeps a caller's timeout from overwriting a task that
+  # has already completed. Completion clears both the error and retry deadline.
+  defp record_result(id, token, result, finished) do
+    values =
+      case result do
+        {:ok, _} ->
+          %{"terminal_error" => nil, "terminal_retry_at" => nil}
+
+        {:error, reason} ->
+          retry_at =
+            if reason != :backend_not_ready, do: System.system_time(:millisecond) + 300_000
+
+          %{"terminal_error" => inspect(reason), "terminal_retry_at" => retry_at}
+      end
+
+    values = if finished, do: Map.put(values, "terminal_prepare_token", nil), else: values
+
+    AppWorkers.update(id, fn record ->
+      {:ok,
+       if(record["terminal_prepare_token"] == token, do: Map.merge(record, values), else: record)}
+    end)
 
     case result do
-      :aborted ->
-        {:error, :terminal_busy}
+      {:error, reason} when reason != :backend_not_ready ->
+        Logger.warning("Codex terminal preparation failed for #{id}: #{inspect(reason)}")
 
-      result ->
-        error =
-          case result do
-            {:ok, _} -> nil
-            {:error, reason} -> inspect(reason)
-          end
-
-        AppWorkers.update(id, %{"terminal_error" => error})
-        result
+      _ ->
+        :ok
     end
   end
 
@@ -146,15 +183,16 @@ defmodule Shuttle.CodexTerminal do
   def error_message(:backend_not_ready),
     do: "The Codex App Server is not ready. Try again shortly."
 
-  def error_message(_reason),
-    do:
-      "The host could not prepare this conversation's terminal. Check its daemon log for details."
+  def error_message(reason) do
+    Logger.warning("Terminal open failed: #{inspect(reason)}")
+    "The host could not prepare this conversation's terminal. Check its daemon log for details."
+  end
 
   defp verified_thread(id, retries) do
     # A systemError describes a failed turn in a loaded conversation. Native
     # resume and a new turn still use this exact thread, even while that status
     # remains visible.
-    case AppWorkers.call(id, :read_thread) do
+    case AppWorkers.call(id, :read_thread, [[timeout_ms: rpc_timeout_ms()]]) do
       {:ok, %{"id" => ^id, "status" => %{"type" => type}}}
       when type in ["active", "idle", "notLoaded", "systemError"] ->
         :ok
@@ -196,7 +234,6 @@ defmodule Shuttle.CodexTerminal do
              felt_store: record["felt_store"],
              preflighted: true
            ) do
-      AppWorkers.update(id, %{"terminal_error" => nil})
       {:ok, %{tmux_session: tmux, created: true}}
     end
   end
@@ -205,7 +242,7 @@ defmodule Shuttle.CodexTerminal do
   # Confirm the exact resume before spawning the TUI; an empty or lost initial
   # turn must never turn into a viewer of a fresh conversation.
   defp resume_exact(id, retries) do
-    case AppWorkers.call(id, :resume_thread, [[]]) do
+    case AppWorkers.call(id, :resume_thread, [[timeout_ms: rpc_timeout_ms()]]) do
       {:ok, %{"id" => ^id}} ->
         :ok
 

@@ -80,7 +80,8 @@ defmodule ShuttleWeb.AttachController do
     case OriginRouter.route_host(host) do
       :local ->
         case Shuttle.CodexTerminal.prepare(id,
-               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
+               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default),
+               wait_timeout_ms: CodexTerminal.prepare_timeout_ms()
              ) do
           {:ok, %{tmux_session: ^tmux}} -> :ok
           {:error, _} = error -> error
@@ -106,9 +107,13 @@ defmodule ShuttleWeb.AttachController do
                  "#{remote.name} answered with a different or missing terminal; nothing was opened."}
             end
 
-          {:forwarded, 404, _} ->
+          {:forwarded, 404, body} ->
             {:error,
-             "#{remote.name}'s daemon cannot prepare Codex terminals. Deploy the current build there."}
+             remote_error(
+               body,
+               remote,
+               "prepare Codex terminals; deploy the current build there if the route is unavailable"
+             )}
 
           {:forwarded, _status, body} ->
             {:error, remote_error(body, remote, "prepare the terminal")}

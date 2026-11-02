@@ -731,6 +731,30 @@ defmodule Shuttle.CodexApp.TransportTest do
     await_peer(peer)
   end
 
+  @tag :timing
+  test "read and resume honor their RPC budgets against a peer that never answers" do
+    {path, peer} =
+      initialized_peer(fn socket ->
+        assert %{"method" => "thread/read"} = recv_json(socket)
+        assert %{"method" => "thread/resume"} = recv_json(socket)
+        receive do: (:done -> :ok)
+      end)
+
+    configure_adapter(path)
+
+    request =
+      Task.async(fn ->
+        assert {:error, :timeout} = CodexApp.read_thread("wedged-thread", timeout_ms: 20)
+        assert {:error, :timeout} = CodexApp.resume_thread("wedged-thread", timeout_ms: 20)
+        :ok
+      end)
+
+    assert :ok = Task.await(request, 5000)
+    assert :sys.get_state(Process.whereis(@client)).pending == %{}
+    send(peer.pid, :done)
+    await_peer(peer)
+  end
+
   test "adapter reconnects on the next call after the shared transport disconnects" do
     {first_path, first_peer} =
       initialized_peer(fn socket ->

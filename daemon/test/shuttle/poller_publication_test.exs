@@ -12,7 +12,7 @@ defmodule Shuttle.PollerPublicationTest do
   @endpoint ShuttleWeb.Endpoint
 
   defmodule App do
-    def read_thread(id), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
+    def read_thread(id, _opts \\ []), do: {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
 
     def status(_id),
       do: %{state: :idle, phase: Shuttle.Env.app(:publication_app_phase, "waiting")}

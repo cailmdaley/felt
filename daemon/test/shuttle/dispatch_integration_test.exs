@@ -28,7 +28,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       {:ok, %{"id" => id, "status" => %{"type" => "idle"}}}
     end
 
-    def read_thread(id) do
+    def read_thread(id, _opts \\ []) do
       status =
         if Shuttle.DispatchIntegrationTest.IntegrationRunner.native_loaded?(id),
           do: "idle",

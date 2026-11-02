@@ -23,7 +23,13 @@ defmodule Shuttle.CodexApp do
 
   def resume_thread(id, opts \\ []) do
     params = opts |> thread_options() |> Map.put("threadId", id)
-    with_rpc("thread/resume", params, fn result -> thread_from(result, id) end)
+
+    with_rpc(
+      "thread/resume",
+      params,
+      fn result -> thread_from(result, id) end,
+      Keyword.get(opts, :timeout_ms, 25_000)
+    )
   end
 
   def name_thread(id, name) when is_binary(id) and is_binary(name) do
@@ -42,7 +48,8 @@ defmodule Shuttle.CodexApp do
     with_rpc(
       "thread/read",
       %{"threadId" => id, "includeTurns" => Keyword.get(opts, :include_turns, false)},
-      &thread_from(&1, id)
+      &thread_from(&1, id),
+      Keyword.get(opts, :timeout_ms, 25_000)
     )
   end
 
@@ -214,9 +221,9 @@ defmodule Shuttle.CodexApp do
 
   defp descends_from?(_parent, _id, _parents, _seen), do: false
 
-  defp with_rpc(method, params, mapper) do
+  defp with_rpc(method, params, mapper, timeout \\ 25_000) do
     with {:ok, client} <- client(),
-         {:ok, result} <- Transport.request(client, method, params),
+         {:ok, result} <- Transport.request(client, method, params, timeout),
          do: mapper.(result)
   end
 

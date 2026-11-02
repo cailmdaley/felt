@@ -20,7 +20,7 @@ defmodule Shuttle.SessionResumeTest do
   @nocwd "fef866ba-b397-4277-a01b-16fcecc2b256"
 
   defmodule App do
-    def read_thread(id) do
+    def read_thread(id, _opts \\ []) do
       status = Shuttle.SessionResumeTest.Runner.native_status()
       {:ok, %{"id" => id, "status" => %{"type" => status}}}
     end

@@ -107,7 +107,8 @@ defmodule Shuttle.AppWorkersTest do
       end)
     end
 
-    def read_thread(id) do
+    def read_thread(id, opts \\ []) do
+      if owner = Shuttle.Env.app(:terminal_rpc_observer), do: send(owner, {:read_options, opts})
       if hook = Agent.get(__MODULE__, &Map.get(&1, :read_hook)), do: hook.(id)
       record({:read, id})
 
@@ -222,6 +223,20 @@ defmodule Shuttle.AppWorkersTest do
 
   defmodule RexRunner do
     def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
+    def cmd(command, args, opts), do: Runner.cmd(command, args, opts)
+  end
+
+  defmodule PausedPreflightRunner do
+    def cmd("bash", ["-lc" | _] = args, opts) do
+      send(
+        Shuttle.Env.app(:terminal_prepare_test_owner),
+        {:preflight_waiting, self(), opts[:timeout_ms]}
+      )
+
+      receive do: (:release -> :ok)
+      Runner.cmd("bash", args, opts)
+    end
+
     def cmd(command, args, opts), do: Runner.cmd(command, args, opts)
   end
 
@@ -603,37 +618,103 @@ defmodule Shuttle.AppWorkersTest do
     assert Shuttle.Terminal.status(Runner, WorkerBackend.tmux(ref)) == :gone
   end
 
-  @tag :timing
-  test "a wedged thread read times out, releases its lock and retains the conversation" do
+  test "a timed-out RPC records its error and backs off across polls" do
     terminal_fiber("tests/terminal")
     assert {:ok, ref} = dispatch("tests/terminal")
-    parent = self()
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    App.set(:read_result, {:error, :timeout})
+    Env.put_app_env(:terminal_rpc_observer, self())
+    assert {:error, :timeout} = Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+    assert_received {:read_options, [timeout_ms: 5000]}
 
-    App.set(:read_hook, fn _ ->
-      send(parent, {:read_waiting, self()})
-      receive do: (:release -> :ok)
-    end)
-
-    Env.put_app_env(:terminal_prepare_timeout_ms, 1000)
-
-    prepare = Task.async(fn -> Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner) end)
-    assert_receive {:read_waiting, reader}
-    on_exit(fn -> if Process.alive?(reader), do: Process.exit(reader, :kill) end)
-    monitor = Process.monitor(reader)
-    assert {:error, :terminal_prepare_timeout} = Task.await(prepare)
-    assert_receive {:DOWN, ^monitor, :process, ^reader, _}
-
-    assert {:ok, %{"active" => true, "launch_state" => "running"}} =
+    assert {:ok, %{"terminal_error" => ":timeout", "terminal_retry_at" => retry_at}} =
              AppWorkers.get("app-session-1")
 
-    assert :alive = WorkerBackend.session_status(Runner, ref)
-    App.set(:read_hook, nil)
-    Env.put_app_env(:terminal_prepare_timeout_ms, 10_000)
+    assert retry_at > System.system_time(:millisecond)
+    calls = App.calls()
 
-    assert {:ok, %{created: false}} =
+    {:ok, poller} =
+      start_poller!(
+        runner: Runner,
+        name: nil,
+        felt_stores: [Runner.felt_root()],
+        poll_interval_ms: 60_000
+      )
+
+    await_boot_cycle!(poller)
+
+    for _ <- 1..2 do
+      cycles = :sys.get_state(poller).poll_cycles
+      send(poller, :run_poll_cycle)
+      eventually(fn -> :sys.get_state(poller).poll_cycles > cycles end)
+    end
+
+    assert App.calls() == calls
+  end
+
+  @tag :timing
+  test "interactive timeout records an error while a cold launch finishes under its own budget" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    Env.put_app_env(:terminal_prepare_test_owner, self())
+
+    request =
+      Task.async(fn ->
+        Shuttle.CodexTerminal.prepare("app-session-1",
+          runner: PausedPreflightRunner,
+          wait_timeout_ms: 1000
+        )
+      end)
+
+    assert_receive {:preflight_waiting, launching, 15_000}
+    on_exit(fn -> if Process.alive?(launching), do: Process.exit(launching, :kill) end)
+    monitor = Process.monitor(launching)
+    assert {:error, :terminal_prepare_timeout} = Task.await(request)
+    assert Process.alive?(launching)
+
+    assert {:ok,
+            %{"terminal_error" => ":terminal_prepare_timeout", "terminal_retry_at" => retry_at}} =
+             AppWorkers.get("app-session-1")
+
+    assert retry_at > System.system_time(:millisecond)
+
+    assert {:error, :terminal_busy} =
              Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
 
+    send(launching, :release)
+    assert_receive {:DOWN, ^monitor, :process, ^launching, :normal}
+
+    assert {:ok,
+            %{
+              "terminal_error" => nil,
+              "terminal_retry_at" => nil,
+              "terminal_prepare_token" => nil
+            }} = AppWorkers.get("app-session-1")
+
+    assert Shuttle.Terminal.status(Runner, WorkerBackend.tmux(ref)) == :alive
     assert 1 == Enum.count(App.calls(), &match?({:turn, _, _, _}, &1))
+  end
+
+  @tag :timing
+  test "background preparation is not cancelled by the interactive budget" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    Env.put_app_env(:terminal_prepare_timeout_ms, 20)
+    Env.put_app_env(:terminal_prepare_test_owner, self())
+
+    request =
+      Task.async(fn ->
+        Shuttle.CodexTerminal.prepare("app-session-1", runner: PausedPreflightRunner)
+      end)
+
+    assert_receive {:preflight_waiting, launching, 15_000}
+    on_exit(fn -> if Process.alive?(launching), do: Process.exit(launching, :kill) end)
+    assert Task.yield(request, 100) == nil
+    send(launching, :release)
+    assert {:ok, %{created: true}} = Task.await(request)
+    assert Shuttle.Terminal.status(Runner, WorkerBackend.tmux(ref)) == :alive
   end
 
   test "a viewer preparation process failure returns an error instead of killing the caller" do
@@ -641,8 +722,86 @@ defmodule Shuttle.AppWorkersTest do
     assert {:ok, _} = dispatch("tests/terminal")
     App.set(:read_hook, fn _ -> exit(:probe_failure) end)
 
-    assert {:error, :terminal_prepare_failed} =
-             Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :terminal_prepare_failed} =
+                 Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner)
+      end)
+
+    assert log =~ "probe_failure"
+
+    assert {:ok,
+            %{"terminal_error" => ":terminal_prepare_failed", "terminal_retry_at" => retry_at}} =
+             AppWorkers.get("app-session-1")
+
+    assert retry_at > System.system_time(:millisecond)
+  end
+
+  test "background restoration leaves an in-flight interactive prepare alone without a warning or backoff" do
+    terminal_fiber("tests/terminal")
+    assert {:ok, ref} = dispatch("tests/terminal")
+    Runner.remove_tmux_session(WorkerBackend.tmux(ref))
+    parent = self()
+
+    App.set(:read_hook, fn _ ->
+      send(parent, {:interactive_read, self()})
+      receive do: (:release -> :ok)
+    end)
+
+    preparing =
+      Task.async(fn -> Shuttle.CodexTerminal.prepare("app-session-1", runner: Runner) end)
+
+    assert_receive {:interactive_read, reader}
+    on_exit(fn -> if Process.alive?(reader), do: Process.exit(reader, :kill) end)
+    monitor = Process.monitor(reader)
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        {:ok, poller} =
+          start_poller!(
+            runner: Runner,
+            name: nil,
+            felt_stores: [Runner.felt_root()],
+            poll_interval_ms: 60_000
+          )
+
+        await_boot_cycle!(poller)
+
+        for pid <- Task.Supervisor.children(Shuttle.TaskSupervisor), pid != reader do
+          case Process.info(pid, :dictionary) do
+            {:dictionary, dictionary} ->
+              if parent in Keyword.get(dictionary, :"$callers", []) do
+                ref = Process.monitor(pid)
+                assert_receive {:DOWN, ^ref, :process, ^pid, _}
+              end
+
+            nil ->
+              :ok
+          end
+        end
+
+        assert {:ok, %{"terminal_error" => nil} = record} = AppWorkers.get("app-session-1")
+        assert record["terminal_retry_at"] == nil
+      end)
+
+    refute log =~ "Failed to restore"
+    refute log =~ "terminal_busy"
+    App.set(:read_hook, nil)
+    send(reader, :release)
+    assert_receive {:DOWN, ^monitor, :process, ^reader, :normal}
+    assert {:ok, %{created: true}} = Task.await(preparing)
+  end
+
+  test "unknown terminal failures log the original cause rather than losing it" do
+    reason = {:peer, %{"code" => -32003, "message" => "fixture permission denied"}}
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert Shuttle.CodexTerminal.error_message(reason) =~ "Check its daemon log"
+      end)
+
+    assert log =~ "fixture permission denied"
+    assert log =~ "-32003"
   end
 
   test "a failed initial turn retains identity and never creates a viewer or replacement" do
@@ -868,7 +1027,7 @@ defmodule Shuttle.AppWorkersTest do
     assert Shuttle.Terminal.locate(RexRunner, terminal) == Shuttle.Terminal.Rex
     restored_calls = Enum.drop(App.calls(), length(calls_before_restart))
 
-    assert {:resume, "app-session-1", [sender_capability: ^capability]} =
+    assert {:resume, "app-session-1", [sender_capability: ^capability, timeout_ms: 5000]} =
              Enum.find(restored_calls, &match?({:resume, "app-session-1", _}, &1))
 
     assert {:ok, ^capability} = AppWorkers.sender_capability("app-session-1")
@@ -1024,12 +1183,19 @@ defmodule Shuttle.AppWorkersTest do
     Env.put_app_env(:terminal_runner, Runner)
     Env.put_app_env(:opener_impl, Kitty)
     Env.put_app_env(:terminal_prepare_timeout_ms, 1000)
+    Env.put_app_env(:terminal_rpc_timeout_ms, 100)
     Env.put_app_env(:write_forward_client, Shuttle.RemoteRegistry.Client.Default)
+    App.set(:read_result, {:error, :timeout})
     parent = self()
 
     App.set(:read_hook, fn _ ->
       send(parent, {:owner_read, self()})
-      receive do: (:release -> :ok)
+
+      receive do
+        :release -> :ok
+      after
+        100 -> :ok
+      end
     end)
 
     server = start_supervised!({Bandit, plug: TerminalOwner, port: 0, ip: {127, 0, 0, 1}})
@@ -1045,7 +1211,7 @@ defmodule Shuttle.AppWorkersTest do
              )
              |> json_response(422)
 
-    assert message =~ "prepare-owner: Preparing this conversation's terminal timed out"
+    assert message == "prepare-owner: The Codex App Server did not answer for this conversation."
     refute message =~ "{:"
     assert_received {:owner_read, reader}
     refute Process.alive?(reader)

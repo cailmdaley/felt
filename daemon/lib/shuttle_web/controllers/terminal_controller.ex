@@ -41,7 +41,8 @@ defmodule ShuttleWeb.TerminalController do
     case record do
       %{"surface" => "cli", "session_uuid" => id} ->
         case CodexTerminal.prepare(id,
-               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default)
+               runner: Shuttle.Env.app(:terminal_runner, Shuttle.Runner.Default),
+               wait_timeout_ms: CodexTerminal.prepare_timeout_ms()
              ) do
           {:ok, result} ->
             json(conn, result)
