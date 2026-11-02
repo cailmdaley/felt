@@ -11,6 +11,13 @@ The command builds both bundles, runs every suite even when one fails, and exits
 It reuses the shared headless browser when available; `SHARED_BROWSER=1` starts or reuses it explicitly.
 The `*-live.mjs` probes require a live daemon and are opt-in, separate from this harness gate.
 
+`scripts/check-codex-tui.sh` is an opt-in native Codex launch check for a host
+with Codex, tmux, and an existing Codex auth file. It launches the executable
+directly in a private tmux server and temporary `CODEX_HOME`, waits for both
+the TUI banner, workspace path and input composer, then closes its private
+terminal and stops Codex's private managed daemon. It copies the host's own
+`auth.json` into that temporary home and sends no model prompt.
+
 ## Production boot gate
 
 `daemon/test/shuttle/application_boot_test.exs` compiles production BEAMs once per suite in a private `MIX_BUILD_PATH`, with `REBAR_BASE_DIR` isolating dependency compiler state too, independent of release builds.
