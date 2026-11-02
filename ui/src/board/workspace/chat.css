@@ -248,7 +248,8 @@
   .ws-chat-head { display: grid; grid-template-columns: auto minmax(128px, 1fr) auto auto auto; grid-template-areas: 'lead identity console settings leave' 'acts acts acts acts acts'; align-items: center; gap: 4px; min-height: 56px; padding: 4px 6px; }
   .ws-chat-acts { justify-content: flex-start; }
   .ws-chat-acts > .ws-chat-settings { width: 36px; height: var(--ws-phone-target); }
-  .ws-chat-acts > .ws-chat-refs { margin-left: 0; }
+  /* The references close the action row, under ⚙ and × on the row above. */
+  .ws-chat-acts > .ws-chat-refs { margin-left: auto; gap: 4px; }
   /* Console and settings stay beside the title; state and verbs have their own row. */
   .ws-chat-acts > .kbn-ctl-verdict { flex: none; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
@@ -262,8 +263,8 @@
   .ws-chat .ws-transcript-meter { gap: 4px; white-space: nowrap; }
   .ws-chat-acts { gap: 4px; }
   .ws-reader .ws-header-icon { width: 36px; height: var(--ws-phone-target); }
-  /* On the phone the pair are icons beside ⚙, named by their labels to assistive tech. */
-  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 44px; height: 44px; }
+  /* On the phone the pair take the header icons' column width, named by their labels to assistive tech. */
+  .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { width: 36px; height: var(--ws-phone-target); }
   .ws-chat .ws-chat-head > .ws-chat-lead { align-self: center; }
   .ws-chat-standing { gap: 6px; }
   /* Phone state and references share one grouped action row. */

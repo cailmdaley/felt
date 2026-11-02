@@ -45,6 +45,14 @@ async function headerFits(p) {
     assert.ok(rect.x >= geometry.bounds.x - 1 && rect.x + rect.width <= geometry.bounds.right + 1, `${name} fits header`)
   }
   if (p.viewportSize().width <= 700) assert.ok(Math.abs(geometry.titleCenter - geometry.consoleCenter) < 1, 'the phone title is centered on its Console icon')
+  if (p.viewportSize().width <= 700) {
+    const columns = await selected(p).locator('.ws-chat-head').evaluate(header => {
+      const center = selector => { const el = header.querySelector(selector); if (!el?.checkVisibility()) return null; const b = el.getBoundingClientRect(); return b.x + b.width / 2 }
+      return { settings: center('.ws-chat-settings'), leave: center('.ws-chat-leave'), constitution: center('.ws-chat-refs > .ws-chat-constitution'), report: center('.ws-chat-refs > .ws-report-chip') }
+    })
+    if (columns.constitution !== null) assert.ok(Math.abs(columns.constitution - columns.settings) < 1, 'the phone Constitution icon sits under Settings')
+    if (columns.report !== null) assert.ok(Math.abs(columns.report - columns.leave) < 1, 'the phone report icon sits under Close')
+  }
   const controls = geometry.controls
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
     const a = controls[i].rect, b = controls[j].rect

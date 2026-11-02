@@ -680,7 +680,9 @@ export function registerHeaderBarJourneys(test) {
       if (device === 'phone') {
         assert.ok(geometry.titleWidth >= 125, 'the constitution name gets the width recovered from the report title: ' + JSON.stringify(geometry))
         const target = await report.boundingBox()
-        assert.ok(target.width >= 44 && target.height >= 44, 'the artifact icon remains a 44px touch target')
+        const leave = await header.locator('.ws-chat-leave').boundingBox()
+        assert.ok(target.width >= leave.width && target.height >= 44, 'the artifact icon is a touch target the size of the header icons')
+        assert.ok(Math.abs(target.x + target.width / 2 - (leave.x + leave.width / 2)) < 1, 'the artifact icon sits under Close')
       }
       assert.equal(await chat.locator('.ws-report-inset, .ws-chat-outcome, .ws-transcript-find, .ws-header-sheet').count(), 0)
       assert.equal(await header.locator('.ws-transcript-share, .ws-transcript-hit').count(), 0)
