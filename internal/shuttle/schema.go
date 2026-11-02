@@ -252,8 +252,8 @@ func validatePulse(p *Pulse) ValidationErrors {
 		} else if w.Start == w.End {
 			add("pulse.window", "start and end must differ")
 		}
-		if _, err := time.LoadLocation(w.TZ); w.TZ == "" || err != nil {
-			add("pulse.window.tz", fmt.Sprintf("unknown or missing timezone %q", w.TZ))
+		if _, err := time.LoadLocation(w.TZ); w.TZ == "" || w.TZ == "Local" || err != nil {
+			add("pulse.window.tz", fmt.Sprintf("must name an IANA timezone, got %q", w.TZ))
 		}
 	}
 	return errs

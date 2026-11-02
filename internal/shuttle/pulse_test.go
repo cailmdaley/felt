@@ -29,6 +29,7 @@ func TestPulseRejectsInvalidDurationsAndWindows(t *testing.T) {
 		{Every: "1m", Window: &PulseWindow{Start: "8:00", End: "20:00", TZ: "UTC"}},
 		{Every: "1m", Window: &PulseWindow{Start: "08:00", End: "08:00", TZ: "UTC"}},
 		{Every: "1m", Window: &PulseWindow{Start: "08:00", End: "20:00", TZ: "Atlantis/Bermuda"}},
+		{Every: "1m", Window: &PulseWindow{Start: "08:00", End: "20:00", TZ: "Local"}},
 	} {
 		if errs := Validate(&Block{Kind: "oneshot", Pulse: pulse}, nil); len(errs) == 0 {
 			t.Errorf("accepted invalid pulse %+v", pulse)
