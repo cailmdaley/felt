@@ -28,12 +28,14 @@
 }
 .ws-chat-head > .ws-chat-lead { grid-area: lead; align-self: start; }
 .ws-chat-head > .ws-chat-identity { grid-area: identity; align-self: center; }
-.ws-chat-head > .ws-chat-settings { grid-area: settings; align-self: start; }
-.ws-chat-head > .ws-chat-console { grid-area: console; align-self: center; }
-.ws-chat-head > .ws-chat-leave { grid-area: leave; align-self: start; min-height: 28px; display: inline-flex; align-items: center; }
+/* The title row's icons hang from its top together, however many lines the title takes. */
+.ws-chat-head > :is(.ws-chat-refs, .ws-chat-console, .ws-chat-settings, .ws-chat-leave) { align-self: start; }
+.ws-chat-head > .ws-chat-settings { grid-area: settings; }
+.ws-chat-head > .ws-chat-console { grid-area: console; }
+.ws-chat-head > .ws-chat-leave { grid-area: leave; min-height: 28px; display: inline-flex; align-items: center; }
 .ws-chat-head > .ws-chat-acts { grid-area: acts; }
 /* The constitution and the artifact are a pair of icons, named by their titles; on the title row they sit before ⚙. */
-.ws-chat-head > .ws-chat-refs { grid-area: refs; align-self: start; margin-right: 6px; }
+.ws-chat-head > .ws-chat-refs { grid-area: refs; margin-right: 6px; }
 .ws-chat-refs { display: flex; flex: none; align-items: center; gap: 2px; min-width: 0; }
 .ws-chat-acts > .ws-chat-refs { margin-left: auto; }
 .ws-chat-head .ws-chat-refs > :is(.ws-chat-constitution, .ws-report-chip) { display: inline-grid; place-items: center; width: 32px; height: 36px; padding: 0; margin: 0; border: 0; border-radius: var(--ws-control-radius); background: transparent; color: var(--ws-ink-muted); cursor: pointer; }
@@ -253,7 +255,7 @@
   /* Console and settings stay beside the title; state and verbs have their own row. */
   .ws-chat-acts > .kbn-ctl-verdict { flex: none; }
   .ws-chat-head > .ws-chat-lead { margin-left: 0; align-self: center; }
-  .ws-chat-head > .ws-chat-leave { align-self: center; }
+  .ws-chat-head > :is(.ws-chat-console, .ws-chat-settings, .ws-chat-leave) { align-self: center; }
   .ws-chat-title { width: 100%; text-align: center; -webkit-line-clamp: 2; }
   .ws-chat-head > .ws-chat-acts { flex-wrap: nowrap; }
   .ws-chat-acts > .kbn-ctl-verdict { flex-wrap: nowrap; white-space: nowrap; }
