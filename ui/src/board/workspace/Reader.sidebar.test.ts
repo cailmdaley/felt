@@ -272,7 +272,7 @@ describe('Reader channel sidebar', () => {
     expect(fresh.el.classList.contains('ws-with-sidebar')).toBe(false)
     expect(toggle.textContent).toBe('')
     expect(toggle.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true')
-    expect(toggle.title).toBe('Constitutions · s')
+    expect(toggle.title).toBe('Constitutions · ⌘[')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     toggle.click()
     expect(storage.get('shuttle:workspace:sidebar')).toBe('true')
@@ -283,14 +283,14 @@ describe('Reader channel sidebar', () => {
     expect(remembered.el.querySelector('.ws-sidebar-toggle')?.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('toggles by click and Cmd+\\, persists the choice, and applies stored choices at any desktop width', () => {
+  it('toggles by click and Cmd+[, persists the choice, and applies stored choices at any desktop width', () => {
     const reader = makeReader()
     const toggle = reader.el.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     toggle.click()
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
     expect(storage.get('shuttle:workspace:sidebar')).toBe('true')
 
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
     expect(storage.get('shuttle:workspace:sidebar')).toBe('false')
     disposeReader(reader)
@@ -307,9 +307,9 @@ describe('Reader channel sidebar', () => {
 
   it('toggles with the command alias', () => {
     const reader = makeReader()
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true, bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', ctrlKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true, cancelable: true }))
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true, bubbles: true, cancelable: true }))
     expect(reader.el.classList.contains('ws-with-sidebar')).toBe(false)
   })
 

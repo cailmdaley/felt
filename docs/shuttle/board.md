@@ -218,7 +218,7 @@ One Back or root Escape returns from a sidebar scan to its predecessor; returnin
 
 Bare reader keys work outside editable fields: h/l or left/right step pages; j/k step constitutions through the sidebar as one flow, across groups and columns, and J/K jump between its columns, landing on the constitution last open in each; down/up scroll about three lines, repeating while held; d/u scroll half a viewport; Space/Shift-Space scroll a full viewport.
 g/G or Home/End select first/last pages, Enter/o toggle expand, and Escape unwinds popovers, expand, then returns.
-The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does; t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back); r opens the fiber page with its composer focused. ⌘\\ toggles the Constitutions sidebar.
+The same constitution keys act on the open fiber in the reader and on the selected card on the Desk: c (or .) opens the worker's conversation exactly as its pill does; t tempers, x discards and a moves work in progress to Awaiting review, each after the same undo window (z takes the latest back); r opens the fiber page with its composer focused. ⌘[ and ⌘] toggle the Constitutions sidebar and the threads rail; \\ hides both.
 s on a focused Desk card or constitution page opens a small date popover: Enter with no date rests undated, and a chosen date rests until that day.
 Rest works in any state and stops a live worker through the owning daemon's lifecycle path.
 In flight shows **Your turn** then **Working**; a question card (an ask or a harness prompt) leads Your turn and opens its report when present.

@@ -124,7 +124,9 @@ describe('shared keyboard table', () => {
     expect(keyIntent(event('s'), 'reader')).toBe('rest')
     expect(keyIntent(event('s'), 'desk')).toBe('rest')
     expect(DOCUMENT_KEY_INTENTS).not.toContain('rest')
-    expect(keyIntent(event('\\', { metaKey: true }), 'reader')).toBe('sidebar')
+    expect(keyIntent(event('[', { metaKey: true }), 'reader')).toBe('sidebar')
+    expect(keyIntent(event(']', { metaKey: true }), 'reader')).toBe('rail')
+    expect(keyIntent(event('[', { ctrlKey: true }), 'reader')).toBe('sidebar')
     expect(DOCUMENT_KEY_INTENTS).not.toContain('conversation')
   })
   it('reserves u for half-page up and dot for conversation on every reader page', () => {

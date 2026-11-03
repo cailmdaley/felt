@@ -200,7 +200,7 @@ describe('minified production document keyboard bridge', () => {
       ['j', {}, 'nextChannel'], ['k', {}, 'prevChannel'],
       ['J', { shiftKey: true }, 'nextGroup'], ['K', { shiftKey: true }, 'prevGroup'],
       ['ArrowDown', { repeat: true }, 'scrollDown'], ['?', { shiftKey: true }, 'help'],
-      ['\\', { metaKey: true }, 'sidebar'], ['\\', { ctrlKey: true }, 'sidebar'],
+      ['[', { metaKey: true }, 'sidebar'], ['[', { ctrlKey: true }, 'sidebar'],
     ]
     for (const [key, init, intent] of keys) {
       expect(press(frame, key, init).defaultPrevented).toBe(true)
@@ -328,7 +328,7 @@ describe('minified production document keyboard bridge', () => {
     </body></html>`
     const frame = await report()
     for (const id of ['input', 'textarea', 'select', 'textbox', 'editable', 'empty-editable']) {
-      for (const [key, init] of [['j', {}], ['\\', { metaKey: true }], ['ArrowRight', { altKey: true }]] as const) {
+      for (const [key, init] of [['j', {}], ['[', { metaKey: true }], ['ArrowRight', { altKey: true }]] as const) {
         expect(press(frame, key, init, '#' + id).defaultPrevented).toBe(false)
       }
     }

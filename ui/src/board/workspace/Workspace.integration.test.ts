@@ -1162,7 +1162,7 @@ describe('workspace reader integration', () => {
     const innerWindow = iframe.contentWindow
     const toggle = document.querySelector<HTMLButtonElement>('.ws-sidebar-toggle')!
     expect(toggle.querySelector('svg')).not.toBeNull()
-    expect(toggle.title).toBe('Constitutions · s')
+    expect(toggle.title).toBe('Constitutions · ⌘[')
     expect(toggle.getAttribute('aria-expanded')).toBe('false')
     expect(workspace.reader.el.classList.contains('ws-with-sidebar')).toBe(false)
     toggle.click()
