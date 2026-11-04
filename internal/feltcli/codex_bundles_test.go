@@ -166,6 +166,27 @@ func TestCodexReceiptVerifiesBothBundles(t *testing.T) {
 	}
 }
 
+func TestCodexDisabledBundleDoesNotOptHarnessIntoDeploy(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	if err := f.a.installCodexPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	bundles, found := f.a.codexBundlesFromList([]receiptInstalledPlugin{{PluginID: codexPluginRef, Enabled: false}})
+	if !found || len(bundles) != 0 {
+		t.Fatalf("disabled Codex synthesized deployment work: found=%v bundles=%+v", found, bundles)
+	}
+	root := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName, "claude-plugin")
+	claude := f.a.bundleFromManifest("claude", filepath.Join(root, ".claude-plugin", "plugin.json"), root)
+	bundles = append(bundles, claude)
+	hooks := f.a.collectHookReceipt(bundles)
+	generation := f.a.collectGenerationReceipt(bundles, ReceiptComponent{})
+	status, _ := combineReceiptStatus(receiptHealthy, bundles, hooks.Status, generation.Status)
+	if status != receiptHealthy {
+		t.Fatalf("disabled Codex broke healthy Claude: bundles=%+v hooks=%+v generation=%+v", bundles, hooks, generation)
+	}
+}
+
 func TestCodexRollbackVerifiesSkillsCache(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "codex")
