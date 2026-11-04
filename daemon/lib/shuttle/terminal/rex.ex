@@ -292,6 +292,8 @@ defmodule Shuttle.Terminal.Rex do
               result
           end
         end
+      else
+        error -> {:error, "Rex launch preparation failed: #{inspect(error)}"}
       end
     end)
   end

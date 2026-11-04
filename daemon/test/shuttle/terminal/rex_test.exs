@@ -16,6 +16,33 @@ defmodule Shuttle.Terminal.RexTest do
     :ok
   end
 
+  @tag :reservation_preflight
+  test "a read-only session-list timeout cannot reserve a never-launched name" do
+    Env.put_app_env(:terminal_backend, Rex)
+    FakeRex.reply("session.list", {"request timed out", :timeout})
+
+    assert {:error, _} =
+             Shuttle.Terminal.launch(FakeRex, "mint-b", "/tmp", "sleep 30\n",
+               launch_evidence: false
+             )
+
+    refute Shuttle.Terminal.LaunchAttempts.pending?("mint-b")
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+    FakeRex.clear_reply("session.list")
+    FakeRex.sessions(%{"session:human" => %{label: "human", blocks: []}})
+    FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
+
+    assert :ok =
+             Shuttle.Terminal.launch(FakeRex, "mint-b", "/tmp", "sleep 30\n",
+               launch_evidence: false
+             )
+
+    on_exit(fn ->
+      for path <- Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-mint-b.*.sh")),
+          do: File.rm(path)
+    end)
+  end
+
   @tag :phantom
   test "a family session alone does not prove its bound worker block exists" do
     assert :ok = Rex.launch(FakeRex, @name, "/tmp", "/tmp/worker.sh", [])
