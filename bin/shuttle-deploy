@@ -372,13 +372,20 @@ commit=$(shell_quote "$TARGET_COMMIT")
 root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")"))
 target="\$root/\$commit"
 git -C "\$source" cat-file -e "\$commit^{commit}" 2>/dev/null || git -C "\$source" fetch origin "\$commit"
-if [ ! -d "\$target" ]; then
+valid_target() {
+  [ -f "\$target/.git" ] &&
+    [ "\$(git -C "\$target" rev-parse HEAD 2>/dev/null)" = "\$commit" ] &&
+    edits=\$(git -C "\$target" status --porcelain --untracked-files=no 2>/dev/null) && [ -z "\$edits" ]
+}
+if ! valid_target; then
+  git -C "\$source" worktree unlock "\$target" 2>/dev/null || true
+  git -C "\$source" worktree remove --force "\$target" 2>/dev/null || rm -rf "\$target"
+  git -C "\$source" worktree prune
   mkdir -p "\$root"
   git -C "\$source" worktree add --detach "\$target" "\$commit"
   $(seed_deploy_cache_cmd "$previous")
 fi
-[ "\$(git -C "\$target" rev-parse HEAD)" = "\$commit" ]
-[ -z "\$(git -C "\$target" status --porcelain --untracked-files=no)" ]
+valid_target
 SH
 }
 
