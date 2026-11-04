@@ -254,6 +254,33 @@ warn_target_ci() {
 
 warn_target_ci
 
+preflight_remote_revision() {
+  local host upstream advertised oid ref available
+  for host in $HOSTS; do
+    [ "$host" != local ] || continue
+    git -C "$REPO" fetch -q origin || { bad 'preflight: origin fetch failed'; return 1; }
+    advertised="$(git -C "$REPO" ls-remote origin)" || { bad 'preflight: cannot inspect origin'; return 1; }
+    available=0
+    while read -r oid ref; do
+      [ -n "$oid" ] || continue
+      git -C "$REPO" cat-file -e "$oid" 2>/dev/null || git -C "$REPO" fetch -q origin "$oid" || continue
+      if git -C "$REPO" merge-base --is-ancestor "$TARGET_COMMIT" "$oid" 2>/dev/null; then available=1; break; fi
+    done <<EOF
+$advertised
+EOF
+    [ "$available" = 1 ] || { bad "preflight: origin does not provide target $TARGET_COMMIT"; return 1; }
+    if [ -z "$DEPLOY_REF" ]; then
+      upstream="$(git -C "$REPO" rev-parse --verify '@{u}^{commit}')" \
+        || { bad 'preflight: no upstream; use --ref for an explicit revision'; return 1; }
+      git -C "$REPO" merge-base --is-ancestor "$upstream" "$TARGET_COMMIT" \
+        || { bad 'preflight: target is not a descendant of upstream; use --ref for an explicit rollback'; return 1; }
+    fi
+    return 0
+  done
+}
+
+preflight_remote_revision || exit 1
+
 # Every host fetches this object, never a moving branch. Harness packages use
 # the same exact-ref path even when the caller omitted --ref.
 DEPLOY_REF="${DEPLOY_REF:-HEAD}"

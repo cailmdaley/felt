@@ -78,6 +78,8 @@ fi
 	}
 	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
+echo ssh >> "$EVENTS"
+if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
 shift
 exec bash -c "$*"
 `)
@@ -178,12 +180,17 @@ func (f *deployFleet) start(t *testing.T, name string, extra ...string) (*exec.C
 
 func (f *deployFleet) startHost(t *testing.T, name, host string, extra ...string) (*exec.Cmd, string) {
 	t.Helper()
+	return f.startArgs(t, name, host, nil, extra...)
+}
+
+func (f *deployFleet) startArgs(t *testing.T, name, host string, args []string, extra ...string) (*exec.Cmd, string) {
+	t.Helper()
 	logPath := filepath.Join(f.root, name+".log")
 	log, err := os.Create(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", host, "--no-push")
+	cmd := exec.Command("bash", append([]string{filepath.Join(f.repo, "bin/shuttle-deploy"), "--hosts", host, "--no-push"}, args...)...)
 	cmd.Env = append(append([]string{}, f.env...), extra...)
 	cmd.Stdout, cmd.Stderr = log, log
 	// A private process group lets failure cleanup include the fake remote build.
@@ -269,19 +276,50 @@ func TestDeployConcurrentRunsCoalesceUnderHostLock(t *testing.T) {
 	}
 }
 
+func TestDeployRemotePreflightRejectsUnpublishedAndImplicitRollback(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"unpublished", "behind"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newDeployFleet(t)
+			fleetTouch(t, f.gate)
+			if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("newer"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			f.git(t, f.repo, "commit", "-am", "newer")
+			if kind == "behind" {
+				f.git(t, f.repo, "push")
+				f.git(t, f.repo, "reset", "--hard", f.sha)
+			}
+			cmd, log := f.startHost(t, kind, "local,fake")
+			if err := cmd.Wait(); err == nil {
+				t.Fatalf("unsafe default deploy accepted: %s", fleetRead(log))
+			}
+			if got := fleetRead(f.events); got != "" {
+				t.Fatalf("preflight touched a host: %s\n%s", got, fleetRead(log))
+			}
+			if kind == "behind" {
+				cmd, log = f.startArgs(t, "explicit-rollback", "fake", []string{"--ref", f.sha})
+				if err := cmd.Wait(); err != nil {
+					t.Fatalf("explicit rollback refused: %v %s", err, fleetRead(log))
+				}
+			}
+		})
+	}
+}
+
 func TestDeployPinsDefaultRevisionWhenMainMoves(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
 	fleetTouch(t, f.gate)
-	cmd, log := f.start(t, "moving-main", "CI_GATE=1")
-	deployAwait(t, "target resolved", func() bool { _, err := os.Stat(filepath.Join(f.root, "ci-entered")); return err == nil })
+	cmd, log := f.start(t, "moving-main", "SSH_GATE=1")
+	deployAwait(t, "target resolved", func() bool { _, err := os.Stat(filepath.Join(f.root, "ssh-entered")); return err == nil })
 	if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new main\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	f.git(t, f.repo, "commit", "-am", "main moved")
 	newer := f.git(t, f.repo, "rev-parse", "HEAD")
 	f.git(t, f.repo, "push")
-	fleetTouch(t, filepath.Join(f.root, "ci-go"))
+	fleetTouch(t, filepath.Join(f.root, "ssh-go"))
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("deploy: %v %s", err, fleetRead(log))
 	}
