@@ -70,13 +70,13 @@ type codexInstallationState struct {
 	SkillsInstalled bool
 }
 
-func (a *app) captureClaudeInstallation() claudeInstallationState {
+func (a *app) captureClaudeInstallation() (claudeInstallationState, error) {
 	// Native capture must describe the filesystem generation that will remain
 	// active. Recovery is intentionally first: a kill during native activation
 	// can leave the candidate in current while the journal still points at the
 	// last known-good previous copy.
-	if !a.recoverPluginRuntimeBeforeNativeCapture() {
-		return claudeInstallationState{}
+	if err := a.recoverPluginRuntimeBeforeNativeCapture(); err != nil {
+		return claudeInstallationState{}, err
 	}
 	return a.captureClaudeInstallationRaw()
 }
@@ -131,33 +131,43 @@ func (a *app) restoreClaudeInstallation(state claudeInstallationState) error {
 	return nil
 }
 
-func (a *app) captureCodexInstallation() codexInstallationState {
-	if !a.recoverPluginRuntimeBeforeNativeCapture() {
-		return codexInstallationState{}
+func (a *app) captureCodexInstallation() (codexInstallationState, error) {
+	if err := a.recoverPluginRuntimeBeforeNativeCapture(); err != nil {
+		return codexInstallationState{}, err
 	}
-	if _, err := a.env.LookPath("codex"); err != nil {
-		return codexInstallationState{}
-	}
-	source, configured := a.codexMarketplaceState()
-	return codexInstallationState{Source: source, Configured: configured, Installed: a.codexPluginInstalled(), SkillsInstalled: a.codexPluginRefInstalled(codexSkillsPluginRef)}
+	return a.captureCodexInstallationRaw()
 }
 
-func (a *app) recoverPluginRuntimeBeforeNativeCapture() bool {
+func (a *app) captureCodexInstallationRaw() (codexInstallationState, error) {
+	source, configured, err := a.inspectCodexMarketplace()
+	if err != nil {
+		return codexInstallationState{}, err
+	}
+	installed, err := a.inspectCodexPluginRef(codexPluginRef)
+	if err != nil {
+		return codexInstallationState{}, err
+	}
+	skillsInstalled, err := a.inspectCodexPluginRef(codexSkillsPluginRef)
+	return codexInstallationState{Source: source, Configured: configured, Installed: installed, SkillsInstalled: skillsInstalled}, err
+}
+
+func (a *app) recoverPluginRuntimeBeforeNativeCapture() error {
 	runtimeDir, err := a.pluginRuntimeDir()
 	if err != nil {
-		return false
+		return err
 	}
-	// The caller with a full setup operation will surface this error when it
-	// reaches staging. Capture functions cannot return an error without
-	// changing their long-standing API, so they only provide the ordering
-	// guarantee here.
-	return a.recoverPluginPromotion(runtimeDir) == nil
+	return a.recoverPluginPromotion(runtimeDir)
 }
 
 func (a *app) codexMarketplaceState() (string, bool) {
+	source, configured, _ := a.inspectCodexMarketplace()
+	return source, configured
+}
+
+func (a *app) inspectCodexMarketplace() (string, bool, error) {
 	out, err := a.runCodexCLIQuiet("plugin", "marketplace", "list", "--json")
 	if err != nil {
-		return "", false
+		return "", false, fmt.Errorf("inspecting Codex marketplaces: %w", err)
 	}
 	var document struct {
 		Marketplaces []struct {
@@ -173,21 +183,27 @@ func (a *app) codexMarketplaceState() (string, bool) {
 		for _, entry := range document.Marketplaces {
 			if entry.Name == marketplaceName {
 				if entry.MarketplaceSource.SourceType == "directory" && entry.Root != "" {
-					return entry.Root, true
+					return entry.Root, true, nil
 				}
-				return entry.MarketplaceSource.Source, true
+				return entry.MarketplaceSource.Source, true, nil
 			}
 		}
+		return "", false, nil
 	}
-	return "", false
+	return "", false, fmt.Errorf("inspecting Codex marketplaces: expected JSON marketplaces array, got %q", out)
 }
 
 func (a *app) codexPluginInstalled() bool { return a.codexPluginRefInstalled(codexPluginRef) }
 
 func (a *app) codexPluginRefInstalled(ref string) bool {
+	installed, _ := a.inspectCodexPluginRef(ref)
+	return installed
+}
+
+func (a *app) inspectCodexPluginRef(ref string) (bool, error) {
 	out, err := a.runCodexCLIQuiet("plugin", "list", "--json")
 	if err != nil {
-		return false
+		return false, fmt.Errorf("inspecting Codex plugins: %w", err)
 	}
 	var document struct {
 		Installed []receiptInstalledPlugin `json:"installed"`
@@ -195,11 +211,12 @@ func (a *app) codexPluginRefInstalled(ref string) bool {
 	if json.Unmarshal([]byte(out), &document) == nil && document.Installed != nil {
 		for _, entry := range document.Installed {
 			if entry.PluginID == ref || entry.ID == ref {
-				return true
+				return true, nil
 			}
 		}
+		return false, nil
 	}
-	return false
+	return false, fmt.Errorf("inspecting Codex plugins: expected JSON installed array, got %q", out)
 }
 
 func (a *app) restoreCodexInstallation(state codexInstallationState) error {
@@ -564,17 +581,23 @@ func (a *app) promotePluginCandidate(candidate string, install func(string) erro
 	return nil
 }
 
-func (a *app) capturePluginNativeIntent() *pluginNativeIntent {
+func (a *app) capturePluginNativeIntent() (*pluginNativeIntent, error) {
 	intent := &pluginNativeIntent{}
 	if _, err := a.env.LookPath("claude"); err == nil {
-		state := a.captureClaudeInstallation()
+		state, err := a.captureClaudeInstallation()
+		if err != nil {
+			return nil, err
+		}
 		intent.Claude = &state
 	}
 	if _, err := a.env.LookPath("codex"); err == nil {
-		state := a.captureCodexInstallation()
+		state, err := a.captureCodexInstallation()
+		if err != nil {
+			return nil, err
+		}
 		intent.Codex = &state
 	}
-	return intent
+	return intent, nil
 }
 
 func rollbackPluginPromotion(runtimeDir, candidate string, hadOld bool, cause error) error {
@@ -693,7 +716,11 @@ func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, curren
 	// native CLI changed anything, the desired absent state is already true;
 	// do not turn an idempotent recovery into a permanent pending journal by
 	// asking Claude to remove a marketplace which does not exist.
-	if state := a.captureClaudeInstallationRaw(); a.claudeInstallationMatches(state, intent, current) {
+	state, err := a.captureClaudeInstallationRaw()
+	if err != nil {
+		return err
+	}
+	if a.claudeInstallationMatches(state, intent, current) {
 		return nil
 	}
 	pluginRef := "felt@" + marketplaceName
@@ -712,7 +739,10 @@ func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, curren
 			}
 		}
 	}
-	state := a.captureClaudeInstallationRaw()
+	state, err = a.captureClaudeInstallationRaw()
+	if err != nil {
+		return err
+	}
 	if state.Configured != intent.Configured || state.Installed != intent.Installed {
 		return fmt.Errorf("Claude native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", state.Configured, state.Installed, intent.Configured, intent.Installed)
 	}
@@ -732,6 +762,13 @@ func (a *app) claudeInstallationMatches(state, intent claudeInstallationState, c
 func (a *app) reconcileCodexInstallation(intent codexInstallationState, current string) error {
 	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI unavailable: %w", err)
+	}
+	observed, err := a.captureCodexInstallationRaw()
+	if err != nil {
+		return err
+	}
+	if observed.Configured == intent.Configured && observed.Installed == intent.Installed && !intent.Configured {
+		return nil
 	}
 	if !intent.Configured {
 		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexSkillsPluginRef)
@@ -753,9 +790,12 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 	if !intent.SkillsInstalled {
 		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexSkillsPluginRef)
 	}
-	source, configured := a.codexMarketplaceState()
-	installed := a.codexPluginInstalled()
-	if configured != intent.Configured || installed != intent.Installed || a.codexPluginRefInstalled(codexSkillsPluginRef) != intent.SkillsInstalled {
+	state, err := a.captureCodexInstallationRaw()
+	if err != nil {
+		return err
+	}
+	source, configured, installed := state.Source, state.Configured, state.Installed
+	if configured != intent.Configured || installed != intent.Installed || state.SkillsInstalled != intent.SkillsInstalled {
 		return fmt.Errorf("Codex native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", configured, installed, intent.Configured, intent.Installed)
 	}
 	if intent.Configured && !a.samePluginSource(source, current) {
@@ -764,9 +804,13 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 	return nil
 }
 
-func (a *app) captureClaudeInstallationRaw() claudeInstallationState {
-	entry, configured := a.marketplaceEntry(marketplaceName)
-	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: a.isPluginInstalled("felt@" + marketplaceName)}
+func (a *app) captureClaudeInstallationRaw() (claudeInstallationState, error) {
+	entry, configured, err := a.inspectClaudeMarketplace(marketplaceName)
+	if err != nil {
+		return claudeInstallationState{}, err
+	}
+	installed, err := a.inspectClaudePlugin("felt@" + marketplaceName)
+	return claudeInstallationState{Marketplace: entry, Configured: configured, Installed: installed}, err
 }
 
 func (a *app) samePluginSource(x, y string) bool {
@@ -926,7 +970,12 @@ func (a *app) sealAndPromote(candidate string, identity pluginGenerationIdentity
 		_ = os.RemoveAll(candidate)
 		return err
 	}
-	return a.promotePluginCandidate(candidate, install, restore, a.capturePluginNativeIntent())
+	intent, err := a.capturePluginNativeIntent()
+	if err != nil {
+		_ = os.RemoveAll(candidate)
+		return err
+	}
+	return a.promotePluginCandidate(candidate, install, restore, intent)
 }
 
 // remoteMarketplaceRef is the small subset of GitHub's ref syntax accepted by

@@ -379,7 +379,10 @@ func (a *app) installPluginViaCLI(repoRoot string) error {
 		return fmt.Errorf("claude CLI not found in PATH; install Claude Code first: %w", err)
 	}
 	return a.withPluginPromotionLock(func() error {
-		previous := a.captureClaudeInstallation()
+		previous, err := a.captureClaudeInstallation()
+		if err != nil {
+			return err
+		}
 		return a.withStagedPluginCandidateWithRestore(repoRoot, a.installClaudePluginAtSource, func() error {
 			return a.restoreClaudeInstallation(previous)
 		})
@@ -447,20 +450,25 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 // fails — install is the safe guess, since installing an installed plugin is
 // a no-op while updating a missing one is an error.
 func (a *app) isPluginInstalled(ref string) bool {
+	installed, _ := a.inspectClaudePlugin(ref)
+	return installed
+}
+
+func (a *app) inspectClaudePlugin(ref string) (bool, error) {
 	out, err := a.claudePluginCommand("list", "--json").Output()
 	if err != nil {
-		return false
+		return false, fmt.Errorf("inspecting Claude plugins: %w", err)
 	}
 	var entries []receiptInstalledPlugin
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return false
+	if err := json.Unmarshal(out, &entries); err != nil || entries == nil {
+		return false, fmt.Errorf("inspecting Claude plugins: expected JSON array, got %q", out)
 	}
 	for _, e := range entries {
 		if e.ID == ref {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 // claudeMarketplaceEntry mirrors the structured `claude plugin marketplace
@@ -477,20 +485,25 @@ type claudeMarketplaceEntry struct {
 // marketplaces. Returns the entry and true on success; false if the CLI is
 // missing, the call fails, or the name isn't found.
 func (a *app) marketplaceEntry(name string) (claudeMarketplaceEntry, bool) {
+	entry, configured, _ := a.inspectClaudeMarketplace(name)
+	return entry, configured
+}
+
+func (a *app) inspectClaudeMarketplace(name string) (claudeMarketplaceEntry, bool, error) {
 	out, err := a.claudePluginCommand("marketplace", "list", "--json").Output()
 	if err != nil {
-		return claudeMarketplaceEntry{}, false
+		return claudeMarketplaceEntry{}, false, fmt.Errorf("inspecting Claude marketplaces: %w", err)
 	}
 	var entries []claudeMarketplaceEntry
-	if err := json.Unmarshal(out, &entries); err != nil {
-		return claudeMarketplaceEntry{}, false
+	if err := json.Unmarshal(out, &entries); err != nil || entries == nil {
+		return claudeMarketplaceEntry{}, false, fmt.Errorf("inspecting Claude marketplaces: expected JSON array, got %q", out)
 	}
 	for _, e := range entries {
 		if e.Name == name {
-			return e, true
+			return e, true, nil
 		}
 	}
-	return claudeMarketplaceEntry{}, false
+	return claudeMarketplaceEntry{}, false, nil
 }
 
 // uninstallPlugin removes the felt plugin AND its marketplace registration via
@@ -863,7 +876,10 @@ func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
 	}
 	return a.withPluginPromotionLock(func() error {
-		previous := a.captureCodexInstallation()
+		previous, err := a.captureCodexInstallation()
+		if err != nil {
+			return err
+		}
 		return a.withStagedPluginCandidateWithRestore(marketplaceSource, a.installCodexPluginAtSource, func() error {
 			return a.restoreCodexInstallation(previous)
 		})

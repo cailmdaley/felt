@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cailmdaley/felt/internal/sysenv"
+	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
 func TestPluginPromotionLockSerializesTransactions(t *testing.T) {
@@ -128,7 +129,10 @@ else
   exit 1
 fi
 `)
-	state := testApp(t, env).captureCodexInstallation()
+	state, err := testApp(t, env).captureCodexInstallation()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !state.Configured || state.Source != "cailmdaley/felt" || !state.Installed {
 		t.Fatalf("Codex state = %#v, want github source + installed plugin", state)
 	}
@@ -543,6 +547,7 @@ func TestRemoteMarketplaceAcquisitionStagesAndPromotesRepeatably(t *testing.T) {
 	a := testApp(t, env)
 	root := repoRoot(t)
 	gitLog := installFakeGitForPluginAcquisition(t, env, root)
+	sysenvtest.OnlyPath(env)
 	env.Set("FELT_BIN", testFeltExecutable(t))
 
 	var seen []string
@@ -652,5 +657,40 @@ func TestFailedPromotionRetainsJournalThroughNativeRollback(t *testing.T) {
 	journal, err := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
 	if err != nil || journal.Native == nil {
 		t.Fatalf("interruption lost native intent: %#v, %v", journal, err)
+	}
+}
+
+func TestPromotionRefusesUnknownNativeInspection(t *testing.T) {
+	t.Parallel()
+	for _, harness := range []string{"claude", "codex"} {
+		for _, output := range []string{"exit 1", "printf 'invalid json'", "printf 'null'"} {
+			t.Run(harness+"/"+output, func(t *testing.T) {
+				f := newRemoteSetupFixture(t, harness)
+				fakeCommand(t, f.env, harness, output+"\n")
+				called := false
+				err := f.a.withStagedPluginCandidateWithRestore(f.source, func(string) error { called = true; return nil }, nil)
+				if err == nil || called {
+					t.Fatalf("unknown inspection permitted promotion: called=%t err=%v", called, err)
+				}
+				if _, statErr := os.Stat(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)); !os.IsNotExist(statErr) {
+					t.Fatalf("inspection failure changed current: %v", statErr)
+				}
+			})
+		}
+	}
+}
+
+func TestNativeCodexInspectionRealIsolatedHome(t *testing.T) {
+	t.Parallel()
+	env, _ := testEnv(t)
+	if _, err := env.LookPath("codex"); err != nil {
+		t.Skip("codex is not installed")
+	}
+	state, err := testApp(t, env).captureCodexInstallationRaw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Configured || state.Installed {
+		t.Fatalf("isolated native installation = %#v, want absent", state)
 	}
 }
