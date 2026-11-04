@@ -193,7 +193,7 @@ func (a *app) resolveDaemonEndpointOwner(settings hostSettings) (daemonOwner, er
 	}
 	args := []string{"-nP", "-t"}
 	if settings.listen.Network == "unix" {
-		args = append(args, "-U", "--", settings.listen.Address)
+		args = append(args, "--", settings.listen.Address)
 	} else {
 		_, port, err := net.SplitHostPort(settings.listen.Address)
 		if err != nil {
