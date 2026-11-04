@@ -7156,6 +7156,43 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  @tag :unobserved_cut
+  test "a forced fresh request cannot mark an unobserved worker as handed off" do
+    id = "tests/fresh-held"
+    MockRunner.set_fiber(id, make_fiber(id))
+
+    MockRunner.set_shuttle(
+      id,
+      "kind: oneshot\nagent: claude-sonnet\nruntime:\n  dispatched_at: 2026-11-04T00:00:00Z\n  session_uuid: held-uuid\n",
+      "active"
+    )
+
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+    original = get_in(MockRunner.fiber(id), ["shuttle", "runtime"])
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      )
+
+    await_boot_cycle!(poller)
+
+    assert {:error, :already_running} =
+             Poller.dispatch_fiber(poller, id, force: true, resume_mode: "fresh")
+
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime"]) == original
+    assert Poller.worker_status(poller, id) == nil
+    assert new_session_scripts() == []
+
+    refute Enum.any?(MockRunner.commands(), fn {cmd, args} ->
+             (cmd == "shuttle" and "mark-runtime" in args) or
+               (cmd == "tmux" and hd(args) == "kill-session")
+           end)
+  end
+
   @tag :claim_evidence
   test "claim cannot replace an untracked worker whose prior launch is currently unobservable" do
     id = "tests/claim-held"

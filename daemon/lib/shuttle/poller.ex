@@ -5790,19 +5790,25 @@ defmodule Shuttle.Poller do
     meta = if key, do: Map.get(state.running, key)
     session = if meta, do: meta.session, else: live_session_for_fiber(state, fiber_id, uid)
 
-    :ok =
-      Shuttle.Continuation.mark_handed_off(state.runner, owning_store(fiber_id, state), fiber_id)
+    if session do
+      :ok =
+        Shuttle.Continuation.mark_handed_off(
+          state.runner,
+          owning_store(fiber_id, state),
+          fiber_id
+        )
 
-    result = if session, do: Shuttle.WorkerBackend.stop(state.runner, session), else: {"", 0}
+      case Shuttle.WorkerBackend.stop(state.runner, session) do
+        {_, 0} ->
+          if meta, do: stop_watcher(meta)
+          if key, do: remove_running(state, key), else: state
 
-    case result do
-      {_, 0} ->
-        if meta, do: stop_watcher(meta)
-        if key, do: remove_running(state, key), else: state
-
-      {output, _} ->
-        Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
-        state
+        {output, _} ->
+          Logger.warning("Could not stop #{fiber_id} for a fresh dispatch: #{output}")
+          state
+      end
+    else
+      state
     end
   end
 
