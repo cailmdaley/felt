@@ -246,6 +246,51 @@ func fleetTouch(t *testing.T, path string) {
 	}
 }
 
+func TestDeployRevisionPreparationRepairsInterruptedTrees(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	script, err := os.ReadFile("../../bin/shuttle-deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree := filepath.Join(f.repo+".deploy", f.sha)
+	if err := os.MkdirAll(tree, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "partial"), []byte("interrupted"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "deploy_root_cmd") + shellFunction(t, string(script), "seed_deploy_cache_cmd") + shellFunction(t, string(script), "revision_checkout_cmd") + `revision_checkout_cmd "$SOURCE" | bash -eu`
+	run := func() {
+		t.Helper()
+		cmd := exec.Command("bash", "-c", harness)
+		cmd.Env = append(f.env, "SOURCE="+f.repo, "TARGET_COMMIT="+f.sha)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("repair partial tree: %v %s", err, out)
+		}
+		if got := f.git(t, tree, "rev-parse", "HEAD"); got != f.sha {
+			t.Fatalf("wrong repaired tree: %s", got)
+		}
+	}
+	run()
+	if err := os.Remove(filepath.Join(tree, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if err := os.WriteFile(filepath.Join(tree, "tracked"), []byte("partial checkout"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	run()
+	if got := fleetRead(filepath.Join(tree, "tracked")); got != "target\n" {
+		t.Fatalf("partial tracked contents survived: %q", got)
+	}
+	f.git(t, f.repo, "worktree", "lock", tree)
+	if err := os.RemoveAll(tree); err != nil {
+		t.Fatal(err)
+	}
+	run()
+}
+
 func TestDeployCoalescingRetainsActualRollbackTree(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
