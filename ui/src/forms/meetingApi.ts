@@ -133,6 +133,7 @@ export async function joinMeeting(
     })
     payload = await response.json() as Record<string, unknown>
   } catch (error: unknown) {
+    holdRecordingStart(shuttleBase, input.recorder ?? null)
     return { kind: 'error', uncertain: true, recorder: input.recorder,
       message: `Recording start couldn't be confirmed: ${(error as Error)?.message ?? String(error)}. Inspect the recorder before starting another meeting.` }
   }

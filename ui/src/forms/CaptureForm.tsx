@@ -292,6 +292,7 @@ export function CaptureForm({
       pendingAudio.current = null
       submittingRef.current = false
       const uncertain = requestedMeetingMode !== null && startSent && !startAnswered
+      if (uncertain) holdRecordingStart(shuttleBase, meetingCapabilities.recorder)
       setError(uncertain
         ? 'Recording start is unconfirmed. Inspect the recorder before starting another meeting; this form will not retry.'
         : daemonErrorMessage(err))

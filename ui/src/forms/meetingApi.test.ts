@@ -120,6 +120,19 @@ describe('joinMeeting', () => {
       .resolves.toMatchObject({ kind: 'recording', error: 'receiver native inbox denied this message; no turn started', meeting: { state: 'live' } })
   })
 
+  it('restores the hold if an in-flight Join is released before its answer is lost', async () => {
+    const { recordingStartHold, resolveRecordingStart } = await import('./recordingStart')
+    const base = 'https://inflight-join.example'
+    let reject!: (error: Error) => void
+    const pending = joinMeeting(base, { fiberId: 'task', mode: 'call', recorder: 'owner' },
+      vi.fn(() => new Promise<Response>((_resolve, fail) => { reject = fail })))
+    resolveRecordingStart(base)
+    reject(new Error('answer lost'))
+    await expect(pending).resolves.toMatchObject({ uncertain: true })
+    expect(recordingStartHold(base)).toBe('owner')
+    resolveRecordingStart(base)
+  })
+
   it('holds Join when the start response body is lost', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue({
       ok: true, status: 200, json: async () => { throw new Error('lost body') },

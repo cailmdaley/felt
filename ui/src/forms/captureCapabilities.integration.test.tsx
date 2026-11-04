@@ -179,6 +179,22 @@ describe('rendered Capture capabilities', () => {
     expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
   })
 
+  it('restores the hold if an in-flight Capture is released before its answer is lost', async () => {
+    const { recordingStartHold, resolveRecordingStart } = await import('./recordingStart')
+    await mount()
+    click('.capture-meeting-toggle')
+    let reject!: (error: Error) => void
+    fetcher.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail }))
+    click('.form-submit')
+    await act(async () => {
+      resolveRecordingStart(base)
+      reject(new Error('answer lost'))
+    })
+    await tick()
+    expect(recordingStartHold(base)).toBe('local')
+    expect(query<HTMLButtonElement>('.form-submit').disabled).toBe(true)
+  })
+
   it('allows a plain note while a recording start is held', async () => {
     const { holdRecordingStart } = await import('./recordingStart')
     holdRecordingStart(base, 'local')
