@@ -246,7 +246,7 @@ describe('anchored pickers', () => {
     vi.mocked(fetch).mockClear()
     field.value = 'agenda'
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function))
+    expect(join).toHaveBeenCalledWith(expect.objectContaining({ uid: 'task-uid' }), 'call', expect.any(Function), true)
     expect(writes()).toEqual([])
     await flush()
     expect(toggle.getAttribute('aria-pressed')).toBe('false')

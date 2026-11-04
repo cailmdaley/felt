@@ -46,12 +46,29 @@ export async function stopMeeting(
   if (!response.ok) throw new Error(responseError(payload, response.status))
 }
 
+export async function setMeetingSystemAudio(
+  shuttleBase: string,
+  meeting: MeetingRecord,
+  enabled: boolean,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  if (!meeting.launch) throw new Error('The meeting has no launch id. Refresh before changing system audio.')
+  const response = await fetcher(`${shuttleBase}/api/v1/meeting/system-audio`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...(meeting.recorder ? { recorder: meeting.recorder } : {}), launch: meeting.launch, enabled }),
+  })
+  const payload: unknown = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(responseError(payload, response.status))
+}
+
 export interface JoinMeetingInput {
   fiberId: string
   origin?: string
   recorder?: string | null
   mode: MeetingMode
   note?: string
+  systemAudio?: boolean
 }
 
 /**
@@ -88,7 +105,7 @@ export function joinMeetingBody(input: JoinMeetingInput): Record<string, unknown
     fiber_id: input.fiberId,
     ...(input.origin ? { origin: input.origin } : {}),
     ...(input.recorder && input.mode !== 'phone' ? { recorder: input.recorder } : {}),
-    meeting: { mode: input.mode },
+    meeting: { mode: input.mode, ...(input.mode === 'call' && input.systemAudio === false ? { system_audio: false } : {}) },
     ...(note ? { note } : {}),
   }
 }

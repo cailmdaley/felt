@@ -26,6 +26,7 @@ const meeting = (overrides: Partial<MeetingRecord> = {}): MeetingRecord => ({
   fiber: null,
   joined: false,
   phone: false,
+  system_audio: true,
   launch: null,
   tmux_session: 'hark-meeting',
   error: null,

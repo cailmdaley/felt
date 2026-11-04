@@ -80,7 +80,7 @@ import { sameCivilDue } from './civilDay.js'
 import { coarsePointer, isMobileViewport, onMobileChange } from './mobile.js'
 import { shouldRunVisiblePoll } from '../runtime/PageAttention'
 import { joinDeliveryPhrase, meetingStatusUrl, supportedMeetingModes, meetingJoinable, meetingPollDelay, MeetingStopGuard, parseMeetingStatus, type MeetingRecord, type MeetingStatus } from './meeting.js'
-import { joinMeeting as requestMeetingJoin, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
+import { joinMeeting as requestMeetingJoin, setMeetingSystemAudio as requestMeetingSystemAudio, stopMeeting as requestMeetingStop, type MeetingMode } from '../forms/meetingApi'
 import { PhoneMeeting, type PhoneCaptureAttempt } from './phoneMeeting'
 import {
   collectCards,
@@ -382,7 +382,7 @@ export class KanbanModal {
           canJoin: () => !this.meetingStartUncertain && meetingJoinable(this.meetingStatus) && supportedMeetingModes(this.meetingStatus, isMobileViewport()).length > 0,
           modes: () => supportedMeetingModes(this.meetingStatus, isMobileViewport()),
           recorder: () => this.meetingStatus.recorder ?? null,
-          join: (card, mode, note) => this.joinCardMeeting(card, mode, note),
+          join: (card, mode, note, systemAudio) => this.joinCardMeeting(card, mode, note, systemAudio),
           current: () => this.meetingStatus.meeting,
           stop: (meeting) => this.stopCurrentMeeting(meeting),
           stopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
@@ -418,6 +418,7 @@ export class KanbanModal {
       isMeetingStopRequested: (meeting) => this.meetingStopGuard.isRequested(meeting),
       onMeetingTerminal: (session) => this.openMeetingTerminalAfterGesture?.(session),
       onMeetingStop: (meeting) => this.stopCurrentMeeting(meeting),
+      onMeetingSystemAudio: (meeting, enabled) => this.setCurrentMeetingSystemAudio(meeting, enabled),
     })
     this.phoneAudio = new PhoneMeeting(this.shuttleBase, () => this.presentMeeting(), () => this.surfaces.updatePhoneLevel())
   }
@@ -453,6 +454,7 @@ export class KanbanModal {
     card: KanbanCard,
     mode: MeetingMode,
     composeNote: () => Promise<string>,
+    systemAudio = true,
   ): Promise<MeetingJoinResult> {
     if (this.meetingStartUncertain) return { error: 'Recording start is unconfirmed. Inspect the recorder before starting another meeting.', delivered: false }
     const recorder = this.meetingStatus.recorder
@@ -483,6 +485,7 @@ export class KanbanModal {
       origin: card.originId,
       recorder,
       mode,
+      systemAudio,
       note,
     })
     if (outcome.kind === 'error') {
@@ -522,6 +525,15 @@ export class KanbanModal {
       if (meeting.phone) this.phoneAudio.cancel()
     } catch (error) {
       this.showBanner(`Couldn't stop the meeting: ${errText(error)}`, 'error')
+    }
+    await this.refreshMeeting()
+  }
+
+  private async setCurrentMeetingSystemAudio(meeting: MeetingRecord, enabled: boolean): Promise<void> {
+    try {
+      await requestMeetingSystemAudio(this.shuttleBase, meeting, enabled)
+    } catch (error) {
+      this.showBanner(`Couldn't ${enabled ? 'turn on' : 'turn off'} system audio: ${errText(error)}`, 'error')
     }
     await this.refreshMeeting()
   }
@@ -885,8 +897,7 @@ export class KanbanModal {
       const gear = document.createElement('button')
       gear.type = 'button'
       gear.className = 'kbn-viewtabs-settings'
-      // U+2699 + U+FE0E: the text variation selector, as the manicule uses, so
-      // this renders as a serif mark rather than a colour emoji.
+      // U+2699 + U+FE0E keeps the gear as a text glyph rather than a colour emoji.
       gear.textContent = '⚙︎'
       gear.title = 'Settings (⌘, or ,)'
       gear.setAttribute('aria-label', 'Settings')

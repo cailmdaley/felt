@@ -111,6 +111,7 @@ export function CaptureForm({
   const [mobileMeeting] = useState(() => isMobileViewport())
   const [meetingIntent, setMeetingIntent] = useState(false)
   const [meetingLanguage, setMeetingLanguage] = useState<MeetingLanguage>('auto')
+  const [systemAudio, setSystemAudio] = useState(true)
   const [meetingCapabilities, setMeetingCapabilities] = useState({
     loading: true,
     available: false,
@@ -244,6 +245,7 @@ export function CaptureForm({
           chrome: chrome && chromeCapable,
           meetingMode: requestedMeetingMode,
           meetingLanguage,
+          systemAudio,
           recorder: meetingCapabilities.recorder,
         })),
       })
@@ -366,6 +368,13 @@ export function CaptureForm({
               </select>
             </Field>
           )}
+          {meetingEnabled && !mobileMeeting && (
+            <label className="capture-system-audio">
+              <input type="checkbox" checked={systemAudio} disabled={submitting}
+                onChange={(event) => setSystemAudio(event.target.checked)} />
+              System audio
+            </label>
+          )}
         </div>
         {addProject.pathOpen && onProjectAdded && (
           <AddProjectPath
@@ -470,6 +479,14 @@ export function injectCaptureFormStyles(): void {
       font-size: var(--type-meta);
       line-height: var(--leading-tight);
       overflow-wrap: anywhere;
+    }
+    .capture-system-audio {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      color: var(--kbn-graphite);
+      font-size: var(--type-note);
     }
     .capture-meeting-row {
       display: flex;

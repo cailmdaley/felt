@@ -100,6 +100,7 @@ if (docsExample || workspaceFixture) document.querySelectorAll('.sim-corner').fo
 const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
 const meetingScenario = search.get('meeting')
 const recorderHost = search.get('recorder') ?? 'local'
+const systemAudioEnabled = search.get('system_audio') !== 'off'
 const MOCK_TAIL = [
   '14:02:51 me  okay, I think everyone is here, let us start with the null tests',
   '14:03:12 S1  so the chi-squared for the B-modes came back at forty-one for thirty-six bins',
@@ -119,6 +120,7 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
       recorder: recorderHost,
       launch: 'harness-meeting',
       phone: search.get('audio') === 'phone',
+      system_audio: systemAudioEnabled,
       mirror_host: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST) : 'project-host',
       fiber: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_ID : 'work/spt3g_papers/bmodes-2d/run') : null,
       scribe_session_uuid: meetingScenario === 'scribe' ? '6bc045dc-92e0-473a-bf9e-e1cc263223bc' : null,
@@ -1507,6 +1509,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     mockMeeting = mockMeeting.state === 'failed' ? null : { ...mockMeeting, state: 'stopping' }
     return json({ meeting: mockMeeting }, 202)
   }
+  if (url.endsWith('/api/v1/meeting/system-audio') && init?.method === 'POST') {
+    const request = body()
+    if (!mockMeeting) return json({ error: 'No meeting to control' }, 404)
+    mockMeeting = { ...mockMeeting, system_audio: request.enabled === true }
+    return json({ meeting: mockMeeting }, 202)
+  }
   if (url.split('?')[0].endsWith('/api/v1/meeting')) return json({
     available: true, modes: ['call', 'phone'], recorder: recorderHost, meeting: mockMeeting,
   })
@@ -1518,6 +1526,7 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       recorder: recorderHost,
       launch: 'harness-join',
       phone: (request.meeting as Record<string, unknown>)?.mode === 'phone',
+      system_audio: (request.meeting as Record<string, unknown>)?.system_audio !== false,
       state: 'live',
       title: String(request.note ?? '').split('\n')[0] || fiber.split('/').pop() || 'Meeting',
       started_at: iso(0),
@@ -1541,6 +1550,8 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         started_at: null,
         tail: [],
         scribe_session_uuid: null,
+        phone: (request.meeting as Record<string, unknown>).mode === 'phone',
+        system_audio: (request.meeting as Record<string, unknown>).system_audio !== false,
         transcript: null,
         mirror_host: request.origin === 'local' ? null : 'project-host',
         fiber: null,

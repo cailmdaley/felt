@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { joinMeeting, joinMeetingBody, parseCaptureMeetingCapabilities, stopMeeting } from './meetingApi'
+import { joinMeeting, joinMeetingBody, parseCaptureMeetingCapabilities, setMeetingSystemAudio, stopMeeting } from './meetingApi'
+import type { MeetingRecord } from '../board/meeting'
 
 const reply = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -61,6 +62,12 @@ describe('joinMeeting', () => {
       fiber_id: 'loom/shear',
       meeting: { mode: 'call' },
       note: 'B-mode telecon',
+    })
+  })
+
+  it('starts a call with only the mic when system audio is unchecked', () => {
+    expect(joinMeetingBody({ fiberId: 'loom/shear', mode: 'call', systemAudio: false })).toMatchObject({
+      meeting: { mode: 'call', system_audio: false },
     })
   })
 
@@ -128,5 +135,16 @@ describe('joinMeeting', () => {
     const offline = vi.fn<typeof fetch>().mockRejectedValue(new Error('connection refused'))
     await expect(joinMeeting('http://daemon', { fiberId: 'loom/shear', mode: 'call' }, offline))
       .resolves.toMatchObject({ kind: 'error', uncertain: true, message: expect.stringContaining('Inspect the recorder before starting another meeting') })
+  })
+})
+
+describe('live system audio control', () => {
+  it('addresses the meeting launch and requested state', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply({ meeting: {} }, 202))
+    await setMeetingSystemAudio('http://daemon', { launch: 'launch-1', recorder: 'host-a' } as MeetingRecord, false, fetcher)
+    expect(fetcher).toHaveBeenCalledWith('http://daemon/api/v1/meeting/system-audio', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ recorder: 'host-a', launch: 'launch-1', enabled: false }),
+    }))
   })
 })

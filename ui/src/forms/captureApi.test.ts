@@ -36,6 +36,13 @@ describe('meeting capture request', () => {
       expect(captureRequestBody({ ...common, meetingLanguage })).not.toHaveProperty('meeting')
     }
   })
+
+  it('requests mic-only audio for a desktop call', () => {
+    expect(captureRequestBody({ ...common, meetingMode: 'call', systemAudio: false }))
+      .toMatchObject({ meeting: { mode: 'call', system_audio: false } })
+    expect(captureRequestBody({ ...common, meetingMode: 'phone', systemAudio: false }))
+      .not.toHaveProperty('meeting.system_audio')
+  })
 })
 
 describe('meeting capture response', () => {

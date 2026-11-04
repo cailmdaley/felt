@@ -207,6 +207,8 @@
 .ws-dock .kbn-ctl-meet-arm svg { display: block; flex: none; width: 16px; height: 16px; }
 .ws-dock .kbn-ctl-composer .kbn-ctl-meet-arm.kbn-ctl-meet-on { border-color: var(--ws-ink) !important; background: var(--ws-fill); color: var(--ws-ink); }
 .ws-dock .kbn-ctl-meet-arm:disabled { opacity: .6; cursor: default; }
+.ws-dock .kbn-ctl-system-audio { display: inline-flex; align-items: center; gap: 5px; color: var(--ws-ink-muted); font: var(--type-meta)/var(--leading-ui) var(--font-serif); white-space: nowrap; }
+.ws-dock .kbn-ctl-system-audio[hidden] { display: none; }
 @container (max-width: 360px) {
   .ws-chat .kbn-ctl-meet-arm { width: var(--ctl-h); padding-inline: 0; }
   .ws-chat .kbn-ctl-meet-arm .kbn-ctl-meet-label { display: none; }

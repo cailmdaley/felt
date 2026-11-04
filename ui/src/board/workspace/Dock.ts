@@ -79,7 +79,7 @@ export interface MeetingJoinControl {
    *  failure. Called inside the pick's gesture; Phone opens audio before
    *  awaiting `note`. Resolves to the error to show (null once recording
    *  began) and whether the worker received the meeting. */
-  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>): Promise<MeetingJoinResult>
+  join(card: KanbanCard, mode: MeetingMode, note: () => Promise<string>, systemAudio?: boolean): Promise<MeetingJoinResult>
   /** The meeting the board last observed, if any. */
   current(): MeetingRecord | null
   /** Stop (or dismiss, once failed) the recording: the board's one stop path. */
@@ -467,6 +467,7 @@ export interface DockOptions {
  * drawer only, inside its fiber page.
  */
 export class Dock {
+  meetingSystemAudioEnabled(): boolean { return this.meetingSystemAudio() }
   private readonly bands = new Map<string, Dock>()
   private root: HTMLElement | null = null
   private headRoot: HTMLElement | null = null
@@ -499,6 +500,7 @@ export class Dock {
   private workerPillCard: KanbanCard | null = null
   private meetingArmed: () => boolean = () => false
   private meetingStart: (() => void) | null = null
+  private meetingSystemAudio: () => boolean = () => true
   private dismissParent: (() => boolean) | null = null
   private dismissConversation: (() => boolean) | null = null
   private composerSend: ComposerSend | null = null
@@ -688,6 +690,7 @@ export class Dock {
     this.dismissConversation = this.dismissParent = null
     this.meetingArmed = () => false
     this.meetingStart = null
+    this.meetingSystemAudio = () => true
     for (const dispose of this.composerDisposers.splice(0)) dispose()
     if (this.searchDebounce !== null) window.clearTimeout(this.searchDebounce)
     this.searchDebounce = null
@@ -1605,11 +1608,21 @@ export class Dock {
     startButton.setAttribute('aria-label', 'Start meeting')
     let starting = false
     let armed = false
+    const systemAudio = document.createElement('label')
+    systemAudio.className = 'kbn-ctl-system-audio'
+    const systemAudioInput = document.createElement('input')
+    systemAudioInput.type = 'checkbox'
+    systemAudioInput.checked = true
+    systemAudioInput.setAttribute('aria-label', 'System audio')
+    const systemAudioText = document.createElement('span')
+    systemAudioText.textContent = 'System audio'
+    systemAudio.append(systemAudioInput, systemAudioText)
     const arm = (on: boolean): void => {
       armed = on
       armButton.setAttribute('aria-pressed', String(on))
       armButton.classList.toggle('kbn-ctl-meet-on', on)
       startButton.hidden = !on
+      systemAudio.hidden = !on || requiredMode() !== 'call'
       onArm(on, wrap)
     }
     arm(false)
@@ -1645,7 +1658,7 @@ export class Dock {
       // mic; it resolves the note (uploading any images) after that.
       const epoch = this.epoch
       let joined: Promise<MeetingJoinResult>
-      try { joined = this.meeting!.join(card, requiredMode(), send.compose) }
+      try { joined = this.meeting!.join(card, requiredMode(), send.compose, this.meetingSystemAudio()) }
       catch (error) { joined = Promise.reject(error) }
       let began = false
       void joined.then(({ error, delivered }) => {
@@ -1672,7 +1685,10 @@ export class Dock {
     }
     this.meetingStart = start
     startButton.addEventListener('click', e => { e.stopPropagation(); start() })
-    wrap.append(armButton, startButton)
+    systemAudio.hidden = true
+    wrap.append(armButton, systemAudio, startButton)
+    systemAudioInput.addEventListener('change', () => { this.meetingPaint?.() })
+    this.meetingSystemAudio = () => systemAudioInput.checked
     paint()
     return wrap
   }

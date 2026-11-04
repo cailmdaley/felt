@@ -169,6 +169,7 @@ interface KanbanSurfaceRendererOptions {
   isMeetingStopRequested?: (meeting: MeetingRecord) => boolean
   onMeetingTerminal?: (session: string) => void
   onMeetingStop?: (meeting: MeetingRecord) => void | Promise<void>
+  onMeetingSystemAudio?: (meeting: MeetingRecord, enabled: boolean) => void | Promise<void>
 }
 
 export class KanbanSurfaceRenderer {
@@ -1458,7 +1459,7 @@ export class KanbanSurfaceRenderer {
     const phone = this.o.getPhoneMeeting?.()
     if (phone) paintPhoneMeetingControls(block, meeting, phone)
     const actionGroup = block.querySelector<HTMLElement>('.kbn-meeting-actions')!
-    const actionSignature = [meeting.state, meeting.phone, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
+    const actionSignature = [meeting.state, meeting.phone, meeting.system_audio, actions.terminal, actions.stop, actions.stopDisabled, actions.dismiss].join(':')
     if (actionGroup.dataset.signature === actionSignature) return
     actionGroup.dataset.signature = actionSignature
     actionGroup.replaceChildren()
@@ -1480,6 +1481,13 @@ export class KanbanSurfaceRenderer {
         const current = this.o.getMeeting?.()
         if (!current || this.o.isMeetingStopRequested?.(current)) return
         void this.o.onMeetingStop?.(current)
+      })
+    }
+    if (meeting.state === 'live' && !meeting.phone && typeof meeting.system_audio === 'boolean' && this.o.onMeetingSystemAudio) {
+      const enabled = !meeting.system_audio
+      addAction(`System audio: ${meeting.system_audio ? 'on' : 'off'}`, 'kbn-meeting-system-audio', false, () => {
+        const current = this.o.getMeeting?.()
+        if (current?.launch === meeting.launch) void this.o.onMeetingSystemAudio?.(current, enabled)
       })
     }
     if (actions.terminal && !meeting.phone && this.o.onMeetingTerminal) {

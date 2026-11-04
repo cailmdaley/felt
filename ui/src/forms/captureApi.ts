@@ -16,6 +16,7 @@ export interface CaptureRequestInput {
   chrome?: boolean
   meetingMode?: MeetingMode | null
   meetingLanguage?: MeetingLanguage
+  systemAudio?: boolean
   recorder?: string | null
 }
 
@@ -46,7 +47,7 @@ export function captureRequestBody(input: CaptureRequestInput): Record<string, u
     ...(input.effort ? { effort: input.effort } : {}),
     ...(input.chrome ? { chrome: true } : {}),
     ...(input.meetingMode
-      ? { meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto' }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
+      ? { meeting: { mode: input.meetingMode, language: input.meetingLanguage ?? 'auto', ...(input.meetingMode === 'call' && input.systemAudio === false ? { system_audio: false } : {}) }, ...(input.recorder && input.meetingMode !== 'phone' ? { recorder: input.recorder } : {}) }
       : {}),
   }
 }
