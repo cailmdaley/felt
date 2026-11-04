@@ -120,6 +120,70 @@ defmodule Shuttle.RetainedTerminalTest do
 
     assert File.exists?(Path.join(opts[:state_dir], "capture.json"))
   end
+
+  test "Linux proves the receipt child belongs to its wrapper without querying Rex processes", %{
+    tmp_dir: dir,
+    opts: opts
+  } do
+    record = live_child_fixture(dir, opts)
+    calls = length(FakeRex.calls())
+    assert {:ok, %{dead: false, pid: 123}} = RetainedTerminal.observe("capture", FakeRex, opts)
+    assert [{_, args, _}] = Enum.drop(FakeRex.calls(), calls)
+    assert "whoami" in args
+
+    FakeRex.reply("whoami", {Jason.encode!(%{"instance_id" => "two"}), 0})
+    assert {:ok, %{dead: true, pid: nil}} = RetainedTerminal.observe("capture", FakeRex, opts)
+    assert File.exists?(Path.join(record["dir"], "receipt"))
+  end
+
+  test "uncertain Linux receipts and unrelated or dead children use the Rex fallback", %{
+    tmp_dir: dir,
+    opts: opts
+  } do
+    record = live_child_fixture(dir, opts)
+    proc = Path.join(dir, "proc")
+    receipt = Path.join(record["dir"], "receipt")
+    child_cmdline = Path.join([proc, "123", "cmdline"])
+    parent_cmdline = Path.join([proc, "456", "cmdline"])
+    valid_parent = "-bash\0-l\0#{record["dir"]}/run.sh\0"
+
+    for {path, invalid, valid} <- [
+          {receipt, "running|invalid|100\n", "running|123|100\n"},
+          {receipt, "ended|123|100|101|0\n", "running|123|100\n"},
+          {child_cmdline, "", "sleep\0" <> "30\0"},
+          {Path.join([proc, "123", "status"]), "PPid:\t999\n", "PPid:\t456\n"},
+          {parent_cmdline, "bash\0-l\0/other/run.sh\0", valid_parent}
+        ] do
+      File.write!(path, invalid)
+      before = length(FakeRex.calls())
+      assert {:ok, _} = RetainedTerminal.observe("capture", FakeRex, opts)
+
+      assert Enum.any?(Enum.drop(FakeRex.calls(), before), fn {_, args, _} ->
+               "com.superlogical.terminal.process" in args
+             end)
+
+      File.write!(path, valid)
+    end
+
+    FakeRex.reply("whoami", {"unavailable", :timeout})
+
+    assert {:error, {:unknown, "unavailable"}} =
+             RetainedTerminal.observe("capture", FakeRex, opts)
+  end
+
+  defp live_child_fixture(dir, opts) do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    proc = Path.join(dir, "proc")
+    Env.put_app_env(:proc_root, proc)
+    assert :ok = RetainedTerminal.start("capture", dir, ["sleep", "30"], %{}, FakeRex, opts)
+    record = Path.join(opts[:state_dir], "capture.json") |> File.read!() |> Jason.decode!()
+    File.write!(Path.join(record["dir"], "receipt"), "running|123|100\n")
+    Enum.each(["123", "456"], &File.mkdir_p!(Path.join(proc, &1)))
+    File.write!(Path.join([proc, "123", "cmdline"]), "sleep\0" <> "30\0")
+    File.write!(Path.join([proc, "123", "status"]), "PPid:\t456\n")
+    File.write!(Path.join([proc, "456", "cmdline"]), "-bash\0-l\0#{record["dir"]}/run.sh\0")
+    record
+  end
 end
 
 defmodule Shuttle.RetainedTerminalRealTest do

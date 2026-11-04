@@ -341,7 +341,7 @@ defmodule Shuttle.SessionLink do
            Map.put(cursors, key, %{missing: true, checked_at: now, first_miss_at: first_miss_at}),
            0}
 
-        {:ok, path} ->
+        {:ok, path, stat} ->
           harness =
             if prior && prior.path == path,
               do: prior.harness,
@@ -352,7 +352,7 @@ defmodule Shuttle.SessionLink do
             :ets.insert(table, {key, link})
             {:done, Map.put(cursors, key, %{path: path, harness: harness}), 0}
           else
-            advance_claude(key, session, path, cursors, table, chunk_bytes)
+            advance_claude(key, session, path, stat, cursors, table, chunk_bytes)
           end
       end
     end
@@ -364,21 +364,28 @@ defmodule Shuttle.SessionLink do
 
   defp transcript_path(%{path: path}, session, roots) do
     case Shuttle.FS.stat(path) do
-      {:ok, %{type: :regular}} ->
-        {:ok, path}
+      {:ok, %{type: :regular} = stat} ->
+        {:ok, path, stat}
 
       {:ok, _other} ->
-        {:ok, Transcript.path(session, roots)}
+        discovered_path(session, roots)
 
       {:error, reason} when reason in [:enoent, :enotdir] ->
-        {:ok, Transcript.path(session, roots)}
+        discovered_path(session, roots)
 
       {:error, reason} ->
         {:retry, {:stat_path, reason}}
     end
   end
 
-  defp transcript_path(_prior, session, roots), do: {:ok, Transcript.path(session, roots)}
+  defp transcript_path(_prior, session, roots), do: discovered_path(session, roots)
+
+  defp discovered_path(session, roots) do
+    case Transcript.path(session, roots) do
+      nil -> {:ok, nil}
+      path -> {:ok, path, nil}
+    end
+  end
 
   defp missing_retry_ms(%{missing: true, first_miss_at: first_miss_at}, now)
        when now - first_miss_at >= @young_window_ms,
@@ -386,7 +393,18 @@ defmodule Shuttle.SessionLink do
 
   defp missing_retry_ms(_, _now), do: @young_retry_ms
 
-  defp advance_claude(key, session, path, cursors, table, chunk_bytes) do
+  defp advance_claude(key, session, path, stat, cursors, table, chunk_bytes) do
+    case {Map.get(cursors, key), stat} do
+      {%{path: ^path, inode: inode, offset: size, observed_size: size, mtime: mtime},
+       %{inode: inode, size: size, mtime: mtime}} ->
+        {:done, cursors, 0}
+
+      _ ->
+        read_claude(key, session, path, cursors, table, chunk_bytes)
+    end
+  end
+
+  defp read_claude(key, session, path, cursors, table, chunk_bytes) do
     case Shuttle.FS.open(path, [:read, :binary, :raw]) do
       {:ok, file} ->
         try do
