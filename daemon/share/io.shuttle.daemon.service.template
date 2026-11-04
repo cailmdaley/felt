@@ -3,7 +3,7 @@
 # to ~/.config/systemd/user/shuttle-daemon.service. Placeholders:
 # __SHUTTLE_BIN__, __WORKING_DIRECTORY__, __LOG__, __SHUTTLE_STORES__,
 # __SHUTTLE_STORES_FILE__, __PATH__, __PORT__, __SSH_AUTH_SOCK__, and
-# __TMUX_TMPDIR__ and __CODEX_HOME__.
+# __TMUX_TMPDIR__, __CODEX_HOME__, and __LD_LIBRARY_PATH__.
 # The unrendered template is not a valid unit.
 #
 # __SHUTTLE_BIN__ is the installed Go CLI path. It reads ~/.shuttle/repo on
@@ -20,10 +20,10 @@
 # prints the command; enabling linger for another user's account needs
 # privileges this install does not assume.
 #
-# PATH and TMUX_TMPDIR are captured at install time because the systemd user
+# PATH, TMUX_TMPDIR and LD_LIBRARY_PATH are captured at install time because the systemd user
 # manager inherits almost nothing. The daemon needs both CLIs on PATH at
 # runtime, and it must reach the same tmux server your login shells use. One
-# login shell, run in a scrubbed environment, reports both, so the installing
+# login shell, run in a scrubbed environment, reports them, so the installing
 # session's own values can't leak in; `--path` and `--tmux-tmpdir` override
 # them.
 
@@ -65,6 +65,8 @@ Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
 # finds them only if both agree — a cluster rc file that moves it off /tmp
 # must reach the daemon too. Dropped when empty: tmux's default applies.
 Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
+# Dynamic library paths needed by the login environment, omitted when empty.
+Environment="LD_LIBRARY_PATH=__LD_LIBRARY_PATH__"
 # Codex's persistent user configuration directory.
 Environment="CODEX_HOME=__CODEX_HOME__"
 # SHUTTLE_LOG names the same file StandardOutput/StandardError append to below

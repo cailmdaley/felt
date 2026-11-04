@@ -124,7 +124,7 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 	options := supervisorOptions{
 		Label: "io.shuttle.test", ShuttleBin: "/opt/shuttle", StoresFile: "/tmp/stores.json",
 		Path: "/usr/bin:/home/test/.local/bin", Log: "/tmp/shuttle.log", Port: "4401",
-		SSHSocket: "/tmp/ssh-agent.sock", TmuxTmpdir: "/scratch/tmux",
+		SSHSocket: "/tmp/ssh-agent.sock", TmuxTmpdir: "/scratch/tmux", LDLibraryPath: `/lib path/"quoted"%lib`,
 	}
 	for _, tc := range []struct {
 		osName string
@@ -157,12 +157,19 @@ func TestTrackedSupervisorTemplatesRenderFromFakeRelease(t *testing.T) {
 			}
 			bare := options
 			bare.TmuxTmpdir = ""
+			bare.LDLibraryPath = ""
+			if tc.osName == "Linux" && !strings.Contains(rendered, `Environment="LD_LIBRARY_PATH=/lib path/\"quoted\"%%lib"`) {
+				t.Fatalf("rendered unit lacks escaped LD_LIBRARY_PATH:\n%s", rendered)
+			}
 			without, err := a.renderSupervisorTemplate(tc.osName, string(source), bare, release)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if strings.Contains(without, "<key>TMUX_TMPDIR</key>") || strings.Contains(without, `Environment="TMUX_TMPDIR=`) {
 				t.Fatalf("empty TMUX_TMPDIR was rendered:\n%s", without)
+			}
+			if strings.Contains(without, `Environment="LD_LIBRARY_PATH=`) {
+				t.Fatalf("empty LD_LIBRARY_PATH was rendered:\n%s", without)
 			}
 			if tc.osName == "Darwin" {
 				decoder := xml.NewDecoder(strings.NewReader(rendered))
@@ -440,11 +447,11 @@ func TestCaptureLoginEnvRunsOneLoginShellForEveryValue(t *testing.T) {
 	env, home := envWithHome(t)
 	// The rc file exports TMUX_TMPDIR the way a cluster ~/.bashrc does; the
 	// capture must evaluate the real script, not echo canned markers.
-	writeLoginRC(t, home, "PATH=/rc/bin:/usr/bin\nTMUX_TMPDIR=/scratch/me/tmp\nexport PATH TMUX_TMPDIR\n")
+	writeLoginRC(t, home, "PATH=/rc/bin:/usr/bin\nTMUX_TMPDIR=/scratch/me/tmp\nLD_LIBRARY_PATH=/rc/lib\nexport PATH TMUX_TMPDIR LD_LIBRARY_PATH\n")
 	env.Set("SHELL", fakeLoginShell(t))
 	env.Set("TMUX_TMPDIR", "/leaked/from/installer")
 	got := newApp(env).captureLoginEnv()
-	if got != (loginEnv{Path: "/rc/bin:/usr/bin", TmuxTmpdir: "/scratch/me/tmp"}) {
+	if got != (loginEnv{Path: "/rc/bin:/usr/bin", TmuxTmpdir: "/scratch/me/tmp", LDLibraryPath: "/rc/lib"}) {
 		t.Fatalf("captured %+v", got)
 	}
 	invocations, err := os.ReadFile(filepath.Join(home, loginShellCalls))
@@ -556,7 +563,7 @@ func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
 			a := newApp(env)
 			a.loginEnvCapture = func() loginEnv {
 				calls++
-				return loginEnv{Path: "/captured", TmuxTmpdir: "/scratch/captured"}
+				return loginEnv{Path: "/captured", TmuxTmpdir: "/scratch/captured", LDLibraryPath: "/captured/lib"}
 			}
 			for _, osName := range []string{"Linux", "Darwin"} {
 				calls = 0
@@ -565,8 +572,15 @@ func TestDaemonInstallTmuxTmpdirPrecedence(t *testing.T) {
 				if err != nil {
 					t.Fatalf("%s: daemon install --print: %v\n%s", osName, err, stderr)
 				}
-				if calls != tc.calls {
-					t.Errorf("%s: login shell captured %d times; want %d", osName, calls, tc.calls)
+				wantCalls := tc.calls
+				if osName == "Linux" {
+					wantCalls = 1
+				}
+				if calls != wantCalls {
+					t.Errorf("%s: login shell captured %d times; want %d", osName, calls, wantCalls)
+				}
+				if osName == "Linux" && !strings.Contains(out, `Environment="LD_LIBRARY_PATH=/captured/lib"`) {
+					t.Errorf("Linux: captured LD_LIBRARY_PATH missing:\n%s", out)
 				}
 				wantPath := tc.path
 				if wantPath == "" {
@@ -668,6 +682,7 @@ Environment="SHUTTLE_STORES=__SHUTTLE_STORES__"
 Environment="SHUTTLE_STORES_FILE=__SHUTTLE_STORES_FILE__"
 Environment="SSH_AUTH_SOCK=__SSH_AUTH_SOCK__"
 Environment="TMUX_TMPDIR=__TMUX_TMPDIR__"
+Environment="LD_LIBRARY_PATH=__LD_LIBRARY_PATH__"
 Environment="CODEX_HOME=__CODEX_HOME__"
 Environment="SHUTTLE_LOG=__LOG__"
 StandardOutput=append:__LOG__

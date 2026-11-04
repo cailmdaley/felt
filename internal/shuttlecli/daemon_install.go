@@ -120,6 +120,7 @@ type supervisorOptions struct {
 	TmuxTmpdir    string
 	TmuxTmpdirSet bool
 	CodexHome     string
+	LDLibraryPath string
 	Print         bool
 }
 
@@ -204,13 +205,16 @@ func (a *app) installDaemonSupervisor(options supervisorOptions) error {
 		options.Log = a.defaultDaemonLog(options.OS)
 	}
 	options.Log = a.env.Resolve(options.Log)
-	if options.Path == "" || !options.TmuxTmpdirSet {
+	if options.Path == "" || !options.TmuxTmpdirSet || options.OS == "Linux" {
 		login := a.loginEnvCapture()
 		if options.Path == "" {
 			options.Path = login.Path
 		}
 		if !options.TmuxTmpdirSet {
 			options.TmuxTmpdir = login.TmuxTmpdir
+		}
+		if options.OS == "Linux" {
+			options.LDLibraryPath = login.LDLibraryPath
 		}
 	}
 	options.Path = a.pathForDaemonSupervisor(options.Path)
@@ -521,10 +525,14 @@ func (a *app) renderSupervisorTemplate(osName, source string, options supervisor
 		"__SSH_AUTH_SOCK__":       options.SSHSocket,
 		"__TMUX_TMPDIR__":         options.TmuxTmpdir,
 		"__CODEX_HOME__":          options.CodexHome,
+		"__LD_LIBRARY_PATH__":     options.LDLibraryPath,
 	}
-	for _, placeholder := range []string{"__CODEX_HOME__"} {
+	for _, placeholder := range []string{"__CODEX_HOME__", "__LD_LIBRARY_PATH__"} {
+		if osName == "Darwin" && placeholder == "__LD_LIBRARY_PATH__" {
+			continue
+		}
 		if values[placeholder] != "" && !strings.Contains(source, placeholder) {
-			return "", errors.New("supervisor template does not support CODEX_HOME; update the daemon release before installing")
+			return "", fmt.Errorf("supervisor template does not support %s; update the daemon release before installing", strings.Trim(placeholder, "_"))
 		}
 	}
 	if osName == "Darwin" {
@@ -562,11 +570,12 @@ var optionalSupervisorEnv = []struct{ key, placeholder string }{
 	{"SSH_AUTH_SOCK", "__SSH_AUTH_SOCK__"},
 	{"TMUX_TMPDIR", "__TMUX_TMPDIR__"},
 	{"CODEX_HOME", "__CODEX_HOME__"},
+	{"LD_LIBRARY_PATH", "__LD_LIBRARY_PATH__"},
 }
 
 func validateTemplatePlaceholderSet(osName, source string) error {
 	want := []string{"__SHUTTLE_BIN__", "__WORKING_DIRECTORY__", "__LOG__", "__SHUTTLE_STORES__", "__SHUTTLE_STORES_FILE__", "__PATH__", "__PORT__", "__SSH_AUTH_SOCK__", "__TMUX_TMPDIR__"}
-	for _, optional := range []string{"__CODEX_HOME__"} {
+	for _, optional := range []string{"__CODEX_HOME__", "__LD_LIBRARY_PATH__"} {
 		if strings.Contains(source, optional) {
 			want = append(want, optional)
 		}
@@ -722,8 +731,9 @@ func cleanPathEntries(value string) []string {
 // PATH that finds both CLIs, and the TMUX_TMPDIR that places the daemon's
 // workers on the same tmux server the user attaches to.
 type loginEnv struct {
-	Path       string
-	TmuxTmpdir string
+	Path          string
+	TmuxTmpdir    string
+	LDLibraryPath string
 }
 
 // captureLoginEnv runs one login shell in a scrubbed environment and reads
@@ -749,14 +759,16 @@ func (a *app) captureLoginEnv() loginEnv {
 		}
 	}
 	return loginEnv{
-		Path:       strings.Join(cleanPathEntries(a.env.Getenv("PATH")), string(os.PathListSeparator)),
-		TmuxTmpdir: a.env.Getenv("TMUX_TMPDIR"),
+		Path:          strings.Join(cleanPathEntries(a.env.Getenv("PATH")), string(os.PathListSeparator)),
+		TmuxTmpdir:    a.env.Getenv("TMUX_TMPDIR"),
+		LDLibraryPath: a.env.Getenv("LD_LIBRARY_PATH"),
 	}
 }
 
 const (
-	loginPathMarker       = "__SHUTTLE_PATH__"
-	loginTmuxTmpdirMarker = "__SHUTTLE_TMUX_TMPDIR__"
+	loginPathMarker          = "__SHUTTLE_PATH__"
+	loginTmuxTmpdirMarker    = "__SHUTTLE_TMUX_TMPDIR__"
+	loginLDLibraryPathMarker = "__SHUTTLE_LD_LIBRARY_PATH__"
 )
 
 // captureLoginEnvWith runs one shell invocation and parses its fenced output.
@@ -780,7 +792,7 @@ func (a *app) captureLoginEnvWith(shell, flags string) (loginEnv, bool) {
 	defer os.Remove(path)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	script := `printf '\n` + loginPathMarker + `%s\n` + loginTmuxTmpdirMarker + `%s\n' "${PATH-}" "${TMUX_TMPDIR-}"`
+	script := `printf '\n` + loginPathMarker + `%s\n` + loginTmuxTmpdirMarker + `%s\n` + loginLDLibraryPathMarker + `%s\n' "${PATH-}" "${TMUX_TMPDIR-}" "${LD_LIBRARY_PATH-}"`
 	cmd := a.env.CommandContext(ctx, shell, flags, script)
 	cmd.Env = []string{
 		"HOME=" + home, "USER=" + user, "SHELL=" + shell, "TERM=xterm-256color", "TMUX=shuttle-capture",
@@ -815,6 +827,8 @@ func parseLoginEnv(output string) (loginEnv, bool) {
 			env.Path = strings.TrimPrefix(line, loginPathMarker)
 		case strings.HasPrefix(line, loginTmuxTmpdirMarker):
 			env.TmuxTmpdir = strings.TrimPrefix(line, loginTmuxTmpdirMarker)
+		case strings.HasPrefix(line, loginLDLibraryPathMarker):
+			env.LDLibraryPath = strings.TrimPrefix(line, loginLDLibraryPathMarker)
 		}
 	}
 	if !strings.Contains(env.Path, "/") {
