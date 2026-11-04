@@ -261,9 +261,6 @@ func (a *app) findDaemonReleaseAt(configured, executable, home string) (daemonRe
 			if release, err := a.validateDaemonRelease(dir); err == nil {
 				return release, nil
 			}
-			if release, err := a.validateDaemonRelease(filepath.Join(dir, "bin", "rel")); err == nil {
-				return release, nil
-			}
 			return daemonRelease{}, fmt.Errorf("selected daemon release is missing or unbuilt at %q (pointer %s); fix: bin/shuttle-deploy --hosts local, or make restart in the main checkout", dir, filepath.Join(home, ".shuttle", "repo"))
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {

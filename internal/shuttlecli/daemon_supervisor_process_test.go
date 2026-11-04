@@ -207,8 +207,8 @@ func TestRespawnLoopRealTmuxProcess(t *testing.T) {
 	root := shortPrivateTempDir(t)
 	home := filepath.Join(root, "home")
 	bin := filepath.Join(home, ".local", "bin")
-	release := filepath.Join(root, "release")
-	for _, dir := range []string{bin, filepath.Join(release, "bin")} {
+	release := filepath.Join(root, "checkout", "bin", "rel.generation-fixture")
+	for _, dir := range []string{bin, filepath.Join(release, "bin"), filepath.Join(home, ".shuttle")} {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -229,8 +229,9 @@ func TestRespawnLoopRealTmuxProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher := filepath.Join(bin, "shuttle-launch")
+	launcher := filepath.Join(root, "checkout", "bin", "shuttle-launch")
 	write(launcher, string(source))
+	write(filepath.Join(home, ".shuttle", "repo"), release+"\n")
 	env := testEnv(t)
 	env.Set("HOME", home)
 	env.Set("SHUTTLE_DIR", release)

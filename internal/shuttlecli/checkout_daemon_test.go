@@ -12,6 +12,31 @@ import (
 	"github.com/cailmdaley/felt/internal/sysenv/sysenvtest"
 )
 
+func TestSelectedCheckoutRootIsRefusedByBothReaders(t *testing.T) {
+	env := testEnv(t)
+	home, _ := env.UserHomeDir()
+	root := t.TempDir()
+	writeTestDaemonRelease(t, filepath.Join(root, "bin", "rel"))
+	if err := os.MkdirAll(filepath.Join(home, ".shuttle"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".shuttle", "repo"), []byte(root+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newApp(env).findDaemonReleaseAt("", "/missing/shuttle", home); err == nil {
+		t.Error("Go reader accepted a moving checkout pointer")
+	}
+	source, err := os.ReadFile("../../bin/shuttle-launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := strings.Split(strings.Split(string(source), "release_dir() {")[1], "\nif [ \"${1:-}\" = \"--loop\"")[0]
+	command := env.Command("sh", "-c", "release_dir() {"+functions+"\nresolve_repo")
+	if out, err := command.CombinedOutput(); err == nil {
+		t.Errorf("shell reader accepted a moving checkout pointer: %s", out)
+	}
+}
+
 func TestPruneCheckoutGenerationsRetainsReferencesAndAssembly(t *testing.T) {
 	env := testEnv(t)
 	root := t.TempDir()

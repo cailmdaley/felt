@@ -76,6 +76,10 @@ resolve_repo() {
   if [ -r "$HOME/.shuttle/repo" ]; then
     state_repo=$(head -n 1 "$HOME/.shuttle/repo")
     if [ -n "$state_repo" ]; then
+      if [ ! -x "$state_repo/bin/shuttled" ]; then
+        echo "shuttle-launch: selected release must name an assembled release, not a checkout; select bin/rel-built with shuttle daemon select-release" >&2
+        return 1
+      fi
       printf '%s\n' "$state_repo"
       return
     fi
