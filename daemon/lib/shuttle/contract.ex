@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Metadata discovery uses `shuttle scan-changes` with opaque index frames.
-  @expected_level 30
+  # Fiber reads and creation use exact enclosing-store namespace paths.
+  @expected_level 31
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -47,7 +47,8 @@ defmodule Shuttle.Contract do
     27 => "context-mailbox put --retained-at (bounded thread notice retention)",
     28 => "message --request-json attested_sender (cross-host verified senders)",
     29 => "scan-changes (incremental physical-store metadata index)",
-    30 => "scan-changes (newline-framed opaque metadata index)"
+    30 => "scan-changes (newline-framed opaque metadata index)",
+    31 => "felt show --exact and felt add --namespace (cross-host fiber identity)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

@@ -39,6 +39,18 @@ defmodule Shuttle.ContractTest do
     assert result.reason =~ "process-identity PID"
   end
 
+  defmodule Level29Runner do
+    @behaviour Shuttle.Runner
+    def cmd("shuttle", ["contract"], _opts), do: {"29\n", 0}
+  end
+
+  test "an install without exact namespace verbs is refused before dispatch" do
+    result = Shuttle.Contract.check(Level29Runner)
+    refute result.ok
+    assert result.reason =~ "felt show --exact"
+    assert result.reason =~ "felt add --namespace"
+  end
+
   test "the expected level covers the receiver-authority verbs" do
     assert Shuttle.Contract.expected_level() >= 15
   end
