@@ -3943,6 +3943,36 @@ defmodule Shuttle.PollerTest do
     assert_held!(second, fiber_id)
   end
 
+  test "a Poller heartbeat round trips into release evidence for its listener" do
+    {:ok, poller} = start_quarantined_poller!(:test_poller_hb_round_trip)
+
+    assert_eventually(fn ->
+      assert {:ok, _} = DaemonHeartbeat.read(heartbeat_file())
+    end)
+
+    state =
+      :sys.replace_state(poller, fn state ->
+        %{state | daemon_booted_at: System.system_time(:millisecond) - 1_800_000}
+      end)
+
+    assert :ok = Poller.release_boot_quarantine(poller)
+
+    writer = :sys.get_state(poller).daemon_heartbeat_writer
+    ref = Process.monitor(writer)
+    assert_receive {:DOWN, ^ref, :process, ^writer, _}, 30_000
+
+    evidence = DaemonHeartbeat.read(heartbeat_file())
+
+    assert {:release, _} =
+             DaemonHeartbeat.verdict(evidence, %{
+               now_ms: System.system_time(:millisecond),
+               listen: Shuttle.listen(),
+               host: state.own_host_id,
+               node: DaemonHeartbeat.node_name(),
+               os_pid: "next-vm"
+             })
+  end
+
   test "a human release is recorded in the heartbeat at once" do
     {:ok, poller} =
       start_poller!(
