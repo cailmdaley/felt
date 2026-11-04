@@ -86,6 +86,32 @@ func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 // dev-loop case is not bricked: `claude plugin update` on an unchanged
 // version legitimately keeps the old versioned cache, and setup converges by
 // falling back to uninstall+install — which re-copies — before verifying.
+func TestClaudeUnchangedCacheStillPrunesDirectHooks(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "claude")
+	if err := f.a.installPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(f.home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/loom/hooks/shuttle-hook.sh"},{"type":"command","command":"keep-me"}]}]}}`
+	if err := os.WriteFile(path, []byte(settings), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.installPluginViaCLI(f.remote); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "/hooks/shuttle-hook.sh") || !strings.Contains(string(data), "keep-me") {
+		t.Fatalf("unchanged plugin skipped hook migration: %s", data)
+	}
+}
+
 func TestClaudeSetupRecoversStaleUpdateCacheViaReinstall(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
