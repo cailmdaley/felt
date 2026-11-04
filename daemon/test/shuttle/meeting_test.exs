@@ -27,15 +27,15 @@ defmodule Shuttle.Test.MeetingRunner do
 end
 
 defmodule Shuttle.MeetingRexTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   alias Shuttle.RetainedTerminal
+  alias Shuttle.Rex, as: RexCLI
   alias Shuttle.Terminal.Rex
-  alias Shuttle.Test.IsolatedRex
   @moduletag :tmp_dir
-  @moduletag skip: IsolatedRex.skip?()
+  @moduletag skip: is_nil(Shuttle.Rex.bin())
 
   test "a Hark block exit is shown as failed with its transcript intact", %{tmp_dir: root} do
-    IsolatedRex.start(root)
+    start_rex_server(root)
     hark_dir = Path.join(root, "hark")
     File.mkdir_p!(Path.join(hark_dir, "meetings"))
     transcript = Path.join(hark_dir, "meetings/capture.txt")
@@ -90,6 +90,167 @@ defmodule Shuttle.MeetingRexTest do
 
     assert meeting.tail == ["The lensing result is stable."]
   end
+
+  @tag :rex_meeting
+  test "a Rex server loss turns the live capture into a failed row with its transcript", %{
+    tmp_dir: root
+  } do
+    server_pid = start_rex_server(root)
+    {hark_dir, transcript, script, launch} = live_hark_fixture(root)
+    state_dir = Path.join(root, "retained")
+    opts = meeting_opts(state_dir, hark_dir)
+
+    assert :ok = start_retained(script, launch, root, hark_dir, opts)
+    wait_for(fn -> File.exists?(Path.join(hark_dir, "meeting.json")) end)
+
+    wait_for(fn ->
+      match?({:ok, %{dead: false, pid: pid}} when is_integer(pid), observe(opts))
+    end)
+
+    assert {:ok, %{meeting: %{state: "live", launch: ^launch}}} = Shuttle.Meeting.show(opts)
+
+    assert {_, 0} = System.cmd("kill", ["-9", to_string(server_pid)])
+
+    wait_for(fn ->
+      match?({:ok, %{meeting: %{state: "failed", launch: ^launch}}}, Shuttle.Meeting.show(opts))
+    end)
+
+    assert {:ok, %{meeting: meeting}} = Shuttle.Meeting.show(opts)
+    assert meeting.transcript == transcript
+    assert meeting.tail == ["The lensing result is stable."]
+  end
+
+  @tag :rex_meeting
+  test "Meeting.start and Meeting.stop restart Hark through clean Rex blocks", %{tmp_dir: root} do
+    start_rex_server(root)
+    {hark_dir, _transcript, script, _launch} = live_hark_fixture(root)
+    state_dir = Path.join(root, "retained")
+
+    opts =
+      meeting_opts(state_dir, hark_dir) ++
+        [
+          hark_path: script,
+          home_dir: root,
+          os_type: {:unix, :darwin},
+          now: ~N[2026-11-04 12:00:00]
+        ]
+
+    assert {:ok, %{meeting: %{state: "live", launch: first_launch}}} =
+             Shuttle.Meeting.start(%{"mode" => "call"}, :record, "test", nil, opts)
+
+    assert {:ok, %{meeting: %{state: "live", launch: ^first_launch}}} = Shuttle.Meeting.show(opts)
+    assert {:ok, _} = Shuttle.Meeting.stop(Keyword.put(opts, :launch, first_launch))
+
+    wait_for(fn -> match?({:ok, %{meeting: nil}}, Shuttle.Meeting.show(opts)) end)
+
+    assert {:ok, %{meeting: %{state: "live", launch: second_launch}}} =
+             Shuttle.Meeting.start(%{"mode" => "call"}, :record, "test", nil, opts)
+
+    refute second_launch == first_launch
+
+    assert {:ok, %{meeting: %{state: "live", launch: ^second_launch}}} =
+             Shuttle.Meeting.show(opts)
+
+    assert {:ok, _} = Shuttle.Meeting.stop(Keyword.put(opts, :launch, second_launch))
+    wait_for(fn -> match?({:ok, %{meeting: nil}}, Shuttle.Meeting.show(opts)) end)
+  end
+
+  defp start_rex_server(data_dir) do
+    rex_root = Path.join(System.tmp_dir!(), "meeting-rex-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(rex_root)
+    endpoint = "unix://#{rex_root}/rex.sock"
+    Shuttle.Test.Env.put_app_env(:rex_server, endpoint)
+    Shuttle.Test.Env.put_env("SHUTTLE_REX_SERVER", endpoint)
+    Shuttle.Test.Env.put_env("SHUTTLE_DATA_DIR", data_dir)
+
+    port =
+      Port.open({:spawn_executable, RexCLI.bin()}, [
+        :binary,
+        :exit_status,
+        :stderr_to_stdout,
+        args: ["server", "run", "--listen", endpoint, "--state-dir", Path.join(rex_root, "state")]
+      ])
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+
+    on_exit(fn ->
+      System.cmd("kill", ["-TERM", to_string(pid)], stderr_to_stdout: true)
+      File.rm_rf!(rex_root)
+    end)
+
+    wait_for(fn -> match?({:ok, _}, RexCLI.whoami(Shuttle.Runner.Default)) end)
+    pid
+  end
+
+  defp live_hark_fixture(root) do
+    hark_dir = Path.join(root, "hark")
+    File.mkdir_p!(Path.join(hark_dir, "meetings"))
+    transcript = Path.join(hark_dir, "meetings/capture.txt")
+    File.write!(transcript, "The lensing result is stable.\n")
+    script = Path.join(root, "hark-bin")
+    launch = "rex-meeting-#{System.unique_integer([:positive])}"
+
+    File.write!(script, """
+    #!/usr/bin/env python3
+    import json
+    import os
+    import signal
+    import sys
+    import time
+    from pathlib import Path
+
+    args = sys.argv[1:]
+    transcript = args[args.index("-o") + 1]
+    launch = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--launch="))
+    title = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--title="))
+    meeting_file = Path(os.environ["HARK_DIR"]) / "meeting.json"
+
+    def write(phase):
+        meeting_file.write_text(json.dumps({
+            "launch": launch,
+            "phase": phase,
+            "pid": os.getpid(),
+            "title": title,
+            "transcript": transcript,
+            "started": "2026-11-04T12:00:00Z",
+        }))
+
+    def stop(_signal, _frame):
+        write("ended")
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, stop)
+    write("live")
+    while True:
+        time.sleep(0.1)
+    """)
+
+    File.chmod!(script, 0o755)
+    {hark_dir, transcript, script, launch}
+  end
+
+  defp meeting_opts(state_dir, hark_dir),
+    do: [terminal: Rex, runner: Shuttle.Runner.Default, state_dir: state_dir, hark_dir: hark_dir]
+
+  defp start_retained(script, launch, cwd, hark_dir, opts) do
+    RetainedTerminal.start(
+      "hark-meeting",
+      cwd,
+      [
+        script,
+        "-o",
+        Path.join(hark_dir, "meetings/capture.txt"),
+        "--launch=" <> launch,
+        "--title=Test"
+      ],
+      %{"launch" => launch, "fiber" => nil},
+      Shuttle.Runner.Default,
+      Keyword.put(opts, :env, %{"HARK_DIR" => hark_dir})
+    )
+  end
+
+  defp observe(opts),
+    do: RetainedTerminal.observe("hark-meeting", Shuttle.Runner.Default, opts)
 
   defp wait_for(fun, attempts \\ 100)
   defp wait_for(fun, 0), do: assert(fun.(), "Rex meeting observation did not arrive")
