@@ -63,13 +63,13 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
          :ok <- unused_uid(uid),
-         {:ok, root} <- create_root(frontmatter),
-         {:ok, path, generated_uid} <- felt_add(root, fiber_id, name, body, frontmatter),
+         {:ok, root, local_id} <- create_target(fiber_id, frontmatter),
+         {:ok, path, generated_uid} <- felt_add(root, local_id, name, body, frontmatter),
          {:ok, store} <- polled_store(path),
          :ok <- inject_create_frontmatter(path, frontmatter, uid),
          uid = if(uid == "", do: generated_uid, else: uid),
          :ok <-
-           confirm_created(root, fiber_id, path, uid, status_of(frontmatter)) do
+           confirm_created(root, local_id, path, uid, status_of(frontmatter)) do
       # Announce the new document to the Poller: an armed constitution
       # dispatches on the next tick, and the owner's feed lists it now, even
       # on a store whose discovery stays hot between full scans.
@@ -329,8 +329,38 @@ defmodule ShuttleWeb.FiberController do
     end
   end
 
-  # A worker cwd is not a fiber store. Prefer its namespace only when that
-  # namespace is polled here; otherwise creation belongs to the primary store.
+  # The nearest existing ancestor fixes both the physical namespace and its
+  # local address. Carry the remaining suffix across linked-store aliases.
+  defp create_target(fiber_id, frontmatter) do
+    case ancestor_target(Path.dirname(fiber_id), Path.basename(fiber_id)) do
+      :none ->
+        with {:ok, root} <- create_root(frontmatter), do: {:ok, root, fiber_id}
+
+      result ->
+        result
+    end
+  end
+
+  defp ancestor_target(".", _suffix), do: :none
+
+  defp ancestor_target(parent, suffix) do
+    case FeltStores.resolve_request(parent) do
+      {:ok, %{store: store, fiber_id: local_parent}} ->
+        {:ok, store, Path.join(local_parent, suffix)}
+
+      {:error, :not_found, _} ->
+        ancestor_target(Path.dirname(parent), Path.join(Path.basename(parent), suffix))
+
+      {:error, :timeout, reason} ->
+        {:error, reason}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # A new root uses the worker's namespace only when that namespace is polled;
+  # otherwise it belongs to the primary store. A worker cwd is not a new store.
   defp create_root(frontmatter) do
     stores = polled_stores()
     project = get_in(frontmatter, ["shuttle", "project_dir"])

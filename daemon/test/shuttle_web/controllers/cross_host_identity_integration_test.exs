@@ -13,6 +13,68 @@ defmodule ShuttleWeb.CrossHostIdentityIntegrationTest do
   end
 
   @tag :tmp_dir
+  test "a real sender transfers beside the owner's linked ancestor", %{tmp_dir: tmp} do
+    sender = Path.join(tmp, "sender")
+    owner = Path.join(tmp, "owner")
+    project = Path.join(tmp, "project")
+    id = "ai-futures/lightcone/hub/measure"
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+    source = Path.join([sender, ".felt", id, "measure.md"])
+    parent = Path.join(project, ".felt/hub/hub.md")
+    File.mkdir_p!(Path.dirname(source))
+    File.mkdir_p!(Path.dirname(parent))
+    File.mkdir_p!(Path.join(owner, ".felt/ai-futures"))
+    File.ln_s!(Path.join(project, ".felt"), Path.join(owner, ".felt/ai-futures/lightcone"))
+    File.write!(parent, "---\nname: Hub\nstatus: open\n---\nParent\n")
+
+    File.write!(
+      source,
+      "---\nid: #{uid}\nname: Measure\nstatus: open\nshuttle:\n  kind: oneshot\n  host: test-host\n  agent: claude-opus\n  project_dir: #{project}\n---\nOriginal body\n"
+    )
+
+    Env.put_env("SHUTTLE_STORES", owner)
+
+    api =
+      start_supervised!(
+        {Bandit, plug: {ScopedAPI, self()}, port: 0, ip: {127, 0, 0, 1}, startup_log: false}
+      )
+
+    {:ok, {_, port}} = ThousandIsland.listener_info(api)
+    remotes = Path.join(tmp, "remotes.json")
+
+    File.write!(
+      remotes,
+      Jason.encode!(%{
+        version: 1,
+        defaults: %{discover: false},
+        remotes: [%{name: "test-host", port: port}]
+      })
+    )
+
+    assert {output, 0} =
+             Shuttle.Env.cmd("shuttle", ["-C", sender, "resume", id],
+               stderr_to_stdout: true,
+               env: [
+                 {"SHUTTLE_HOST", "sender"},
+                 {"SHUTTLE_DAEMON_URL", "http://127.0.0.1:#{port}"},
+                 {"SHUTTLE_REMOTES_FILE", remotes},
+                 {"SHUTTLE_STORES", sender}
+               ]
+             )
+
+    assert output =~ "armed"
+    refute File.exists?(source)
+    {:ok, expected} = Shuttle.Realpath.resolve(Path.join(project, ".felt/hub/measure/measure.md"))
+
+    assert {:ok, %{fiber_id: "hub/measure", path: ^expected, uid: ^uid}} =
+             Shuttle.FeltStores.resolve_request(uid)
+
+    assert File.read!(expected) =~ "Original body"
+    assert File.read!(expected) =~ "status: active"
+    refute File.exists?(Path.join(project, ".felt/ai-futures"))
+  end
+
+  @tag :tmp_dir
   test "a real sender transfers drafts into the real owner's polled namespace across both views",
        %{tmp_dir: tmp} do
     api =
