@@ -639,7 +639,7 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	if !qualifies(f, block) {
 		return false, nil
 	}
-	output, err := a.postLifecycle(verb, f.ID, fields...)
+	output, err := a.postLifecycle(verb, fiberAddress(f), fields...)
 	if err == nil {
 		fmt.Fprint(a.env.Stdout, output)
 		if verb == "resume" && a.ownerBootQuarantine(block.Host) {

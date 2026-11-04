@@ -62,7 +62,9 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 			if messageSet {
 				fields["user_message"] = message
 			}
+			address := args[0]
 			if fiber, _, _, resolveErr := a.shuttleResolveFiberRef(args[0], true); resolveErr == nil {
+				address = fiberAddress(fiber)
 				if block, ok, blockErr := shuttle.BlockOf(fiber); blockErr != nil {
 					return blockErr
 				} else if ok && block != nil {
@@ -75,7 +77,7 @@ Use --message or --message-file to add a launch directive (the From User prompt 
 					}
 				}
 			}
-			request := map[string]any{"fiber_id": args[0]}
+			request := map[string]any{"fiber_id": address}
 			for key, value := range fields {
 				request[key] = value
 			}
