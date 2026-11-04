@@ -157,7 +157,10 @@ fleet_dir() { # host → checkout dir (empty = unknown host)
   fleet_row "$1" | awk -F'\t' '{print $3}'
 }
 fleet_ssh()   { fleet_row "$1" | awk -F'\t' '{print $2}'; }   # ssh destination
-fleet_flags() { fleet_row "$1" | awk -F'\t' '{print $5}'; }   # extra ssh flags
+fleet_flags() { # Dead-link bounds apply to probes and transfers as well as work.
+  printf '%s ' '-o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3'
+  fleet_row "$1" | awk -F'\t' '{print $5}'
+}
 fleet_auth()  { fleet_row "$1" | awk -F'\t' '{print $4}'; }   # pubkey | interactive
 fleet_build_wrap() { fleet_row "$1" | awk -F'\t' '{print $7}'; }
 builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
@@ -175,17 +178,18 @@ builds_ui()   { [ "$(fleet_row "$1" | awk -F'\t' '{print $6}')" != 0 ]; }
 # typed at the prompt. Only worth firing when the human is reachable — hence
 # opt-in via --handshake, never part of an unattended run.
 try_handshake() { # $1 = host; returns 0 with a live master, 1 otherwise
-  local host="$1" dest sess="shuttle-handshake-$1"
+  local host="$1" dest flags sess="shuttle-handshake-$1"
   [ "$(fleet_auth "$host")" = "interactive" ] || return 1
   [ "$HANDSHAKE" = 1 ] || { bad "no live ControlMaster; rerun with --handshake (a human must approve the prompt)"; return 1; }
   dest="$(fleet_ssh "$host")"
+  flags="$(fleet_flags "$host")"
   tmux kill-session -t "$sess" 2>/dev/null
-  tmux new-session -d -s "$sess" "ssh $dest" || { bad "could not open tmux for handshake"; return 1; }
+  tmux new-session -d -s "$sess" "ssh $flags $dest" || { bad "could not open tmux for handshake"; return 1; }
   sleep 5
   tmux send-keys -t "$sess" "${SHUTTLE_HANDSHAKE_REPLY:-1}" Enter
   printf '  %s…%s auth prompt answered — approve the push if one was sent (times out in ~60s)\n' "$BOLD" "$RESET"
   for _ in $(seq 1 25); do
-    ssh -O check "$dest" 2>/dev/null && { ok "ControlMaster live"; tmux kill-session -t "$sess" 2>/dev/null; return 0; }
+    ssh $flags -O check "$dest" 2>/dev/null && { ok "ControlMaster live"; tmux kill-session -t "$sess" 2>/dev/null; return 0; }
     sleep 3
   done
   bad "handshake timed out (prompt not approved?)"
@@ -482,7 +486,7 @@ run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CL
 
 run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
   if [ -z "$1" ]; then bash -lc "$2" </dev/null
-  else ssh -n -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2") </dev/null"; fi
+  else ssh -n $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2") </dev/null"; fi
 }
 
 run_value() { # Profile stdout is not command output; require both frame ends.
@@ -1047,7 +1051,6 @@ exit \"\$status\""
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$RUN_DIR/lifetime" 6>&- &
   else
     env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" ssh \
-      -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
       $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$RUN_DIR/lifetime" 6>&- &
   fi
   active=$!
@@ -1063,8 +1066,8 @@ deploy_remote() {
   local host="$1" dir dest flags stage
   dir="$(fleet_dir "$host")"; dest="$(fleet_ssh "$host")"; flags="$(fleet_flags "$host")"
   say "$host ($dest:$dir)"
-  ssh $flags "$dest" true 2>/dev/null || try_handshake "$host" \
-    || { bad 'ssh: unreachable; authenticate first'; return 1; }
+  ssh $flags "$dest" true || try_handshake "$host" \
+    || { bad 'ssh: could not establish a connection'; return 1; }
   stage="$(run_value "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
   if ! builds_ui "$host"; then
     ship_ui "$host" "$dest" "$stage" "$flags" || return 1
