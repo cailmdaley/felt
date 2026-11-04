@@ -4889,6 +4889,7 @@ defmodule Shuttle.Poller do
            fiber_id,
            poller: state.self_ref,
            identity_token: identity_token,
+           own_host_id: state.own_host_id,
            runner: state.runner,
            work_dir: work_dir,
            prompt_context: prompt_context,
@@ -5066,6 +5067,9 @@ defmodule Shuttle.Poller do
 
           {:ok, fiber} ->
             cond do
+              not host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
+                {state, {:error, :foreign_host}}
+
               Map.get(fiber, "status") == "closed" ->
                 {state, {:error, :closed}}
 

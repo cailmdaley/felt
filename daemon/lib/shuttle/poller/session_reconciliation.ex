@@ -101,6 +101,9 @@ defmodule Shuttle.Poller.SessionReconciliation do
         session = session || Poller.live_session_for_fiber(state, fiber_id, uid)
 
         cond do
+          not Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
+            state
+
           session == nil ->
             Logger.debug("Skipping adoption for #{fiber_id}: no positive worker evidence")
             state
@@ -146,6 +149,7 @@ defmodule Shuttle.Poller.SessionReconciliation do
       session: session,
       agent_id: agent_id,
       role: get_in(fiber, ["shuttle", "role"]),
+      run_observation: fiber,
       uid: uid,
       felt_store: Poller.owning_store(fiber_id, state),
       started_at: started_at,
@@ -264,9 +268,13 @@ defmodule Shuttle.Poller.SessionReconciliation do
   # implies handoff), so stamp the clean-exit marker (when the fiber could be
   # read) before killing the stale session.
   defp kill_closed_session(%State{} = state, fiber_id, fiber, session) do
-    if fiber, do: Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
-    Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
-    _ = Shuttle.Terminal.close(state.runner, session)
+    if is_map(fiber) and Map.get(fiber, "status") == "closed" and
+         Poller.host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) do
+      Poller.stamp_handoff_if_stale(state, fiber_id, fiber)
+      Logger.info("Killing stale session for closed fiber: #{fiber_id} session=#{session}")
+      _ = Shuttle.Terminal.close(state.runner, session)
+    end
+
     state
   end
 end

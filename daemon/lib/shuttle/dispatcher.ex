@@ -102,6 +102,7 @@ defmodule Shuttle.Dispatcher do
     force = Keyword.get(opts, :force, false)
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
+         :ok <- check_host_owner(fiber, Keyword.get(opts, :own_host_id)),
          :ok <- validate_restoration_request(opts, fiber, prompt_context, force),
          :ok <- check_dispatchable(fiber, force),
          {:ok, fiber} <- maybe_reopen_on_force(fiber_id, fiber, force, runner, felt_store),
@@ -161,6 +162,16 @@ defmodule Shuttle.Dispatcher do
           )
       end
     end
+  end
+
+  # Poller launches carry its frozen identity. Standalone dispatch callers can
+  # supply the same constraint without resolving a second host identity here.
+  defp check_host_owner(_fiber, nil), do: :ok
+
+  defp check_host_owner(fiber, own_host_id) do
+    if Shuttle.Poller.host_owned?(Map.get(fiber, "shuttle", %{}), own_host_id),
+      do: :ok,
+      else: dispatch_refused(:foreign_host, "the current document is not owned by #{own_host_id}")
   end
 
   # A restoration flag authorizes only the same dirty continuation observed in
