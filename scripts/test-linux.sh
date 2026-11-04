@@ -32,7 +32,8 @@ fi
 
 go_version=$(awk '$1 == "toolchain" { t = substr($2, 3) } $1 == "go" { g = $2 } END { print t ? t : g }' "$repo/go.mod")
 uid=$(id -u)
-image="felt-test-linux:go${go_version}-u${uid}"
+codex_pin=$(cksum < "$repo/scripts/install-test-codex.sh" | awk '{print $1}')
+image="felt-test-linux:go${go_version}-u${uid}-codex${codex_pin}"
 
 if ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
   echo "test-linux: building $image with $runtime" >&2
@@ -40,6 +41,9 @@ if ! "$runtime" image inspect "$image" >/dev/null 2>&1; then
 FROM golang:${go_version}
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tmux procps git >/dev/null \
  && rm -rf /var/lib/apt/lists/*
+COPY install-test-codex.sh /tmp/install-test-codex.sh
+RUN bash /tmp/install-test-codex.sh /opt/test-codex
+ENV PATH=/opt/test-codex:\$PATH FELT_REQUIRE_REAL_CODEX=1
 RUN useradd -m -u ${uid} -s /bin/bash tester
 USER tester
 ENV GOFLAGS=-buildvcs=false GOTOOLCHAIN=local

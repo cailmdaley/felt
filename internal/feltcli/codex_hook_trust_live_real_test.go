@@ -18,9 +18,7 @@ import (
 func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
-	if _, err := env.LookPath("codex"); err != nil {
-		t.Skip("codex is not installed")
-	}
+	requireRealCodex(t, env)
 	root, err := os.MkdirTemp("/tmp", "felt-live-hooktrust-")
 	if err != nil {
 		t.Fatal(err)
@@ -32,9 +30,6 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	var output bytes.Buffer
 	env.Stdout = &output
 	a := testApp(t, env)
-	if version, old := a.codexVersionTooOld(); old {
-		t.Skipf("Codex %s predates plugin content trust", version)
-	}
 	// Failed hooks must not accidentally send a prompt to a public provider.
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -77,6 +72,7 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 		if r := a.codexHookTrust(false); r.State != codexTrustTrusted {
 			t.Fatalf("persisted trust: %+v", r)
 		}
+		assertPrivateCodexSkills(t, a, root)
 	}
 	open := func() *codexTrustRPC {
 		t.Helper()

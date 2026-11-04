@@ -13,6 +13,8 @@ jobs:
   go:
     name: Go (felt + shuttle CLIs — build + test)
     runs-on: ubuntu-latest
+    env:
+      FELT_REQUIRE_REAL_CODEX: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -26,6 +28,11 @@ jobs:
 
       - name: Validate complete plugin candidate
         run: go run ./cmd/felt setup validate --source .
+
+      - name: Install pinned Codex for isolated real-runtime tests
+        run: |
+          bash scripts/install-test-codex.sh "$RUNNER_TEMP/test-codex"
+          echo "$RUNNER_TEMP/test-codex" >> "$GITHUB_PATH"
 
       - name: Test
         run: go test -v ./...
