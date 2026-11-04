@@ -1684,10 +1684,11 @@ defmodule Shuttle.MeetingTest do
 
     assert {:error, {:operation, _}} = Meeting.stop()
     assert {:ok, _} = Meeting.stop()
+
     assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn
-      {"kill", ["-INT", "321"], _} -> true
-      _ -> false
-    end) == 2
+             {"kill", ["-INT", "321"], _} -> true
+             _ -> false
+           end) == 2
   end
 
   test "concurrent and repeated stop requests signal a live pid only once", %{hark_dir: hark_dir} do
@@ -1812,6 +1813,23 @@ defmodule Shuttle.MeetingTest do
     end
   end
 
+  test "stop preserves the recording when process observation times out", %{hark_dir: hark_dir} do
+    write_meeting(hark_dir, %{"launch" => "unknown", "pid" => 321, "phase" => "live"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _, state -> {{"0|0|1234|unknown|\n", 0}, state}
+      "ps", _, _, state -> {{"timed out", :timeout}, state}
+      _, _, _, state -> {{"", 0}, state}
+    end)
+
+    assert {:error, {:operation, _}} = Meeting.stop(launch: "unknown")
+
+    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn
+             {"tmux", ["kill-session" | _], _} -> true
+             _ -> false
+           end)
+  end
+
   test "stop clears a starting row when its tmux launch disappears and no hark pid lives", %{
     hark_dir: hark_dir
   } do
@@ -1825,7 +1843,7 @@ defmodule Shuttle.MeetingTest do
         {{"can't find session: hark-meeting", 1}, :gone}
 
       "ps", ["-p", "321", "-o", "command="], _opts, state ->
-        {{"", 1}, state}
+        {{"other process", 0}, state}
 
       _command, _args, _opts, state ->
         {{"", 0}, state}

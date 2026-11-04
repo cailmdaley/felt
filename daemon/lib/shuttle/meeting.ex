@@ -788,10 +788,15 @@ defmodule Shuttle.Meeting do
         with :ok <- kill_launch(context.tmux, opts), do: show(opts)
       end
     else
-      if pid_mentions_hark?(context.meeting_json, opts) do
-        signal_stop(context, opts)
-      else
-        with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+      case pid_observation(context.meeting_json, opts) do
+        :hark ->
+          signal_stop(context, opts)
+
+        :not_hark ->
+          with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+
+        :unknown ->
+          {:error, {:operation, "could not determine whether the meeting process is hark"}}
       end
     end
   end
@@ -833,12 +838,21 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  defp pid_mentions_hark?(meeting_json, opts) do
-    with pid when not is_nil(pid) <- valid_pid(meeting_json),
-         {command, 0} <- run(opts, "ps", ["-p", pid, "-o", "command="]) do
-      command |> String.downcase() |> String.contains?("hark")
-    else
-      _ -> false
+  defp pid_mentions_hark?(meeting_json, opts), do: pid_observation(meeting_json, opts) == :hark
+
+  defp pid_observation(meeting_json, opts) do
+    case valid_pid(meeting_json) do
+      nil ->
+        :not_hark
+
+      pid ->
+        case run(opts, "ps", ["-p", pid, "-o", "command="]) do
+          {command, 0} ->
+            if String.contains?(String.downcase(command), "hark"), do: :hark, else: :not_hark
+
+          _ ->
+            :unknown
+        end
     end
   end
 
