@@ -88,11 +88,11 @@ func TestHookCommandsSurviveRemovedPluginRoot(t *testing.T) {
 	}
 }
 
-func TestReminderShellGate(t *testing.T) {
+func TestReminderShimDelegatesPayloadDecoding(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "must-not-run")
 	calls := filepath.Join(dir, "calls")
-	if err := os.WriteFile(binary, []byte("#!/bin/bash\nprintf x >> \"$CALLS\"\n"), 0700); err != nil {
+	if err := os.WriteFile(binary, []byte("#!/bin/bash\nprintf x >> \"$CALLS\"\nIFS= read -r input || true\nprintf '%s' \"$input\" > \"$PAYLOAD\"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "felt-reminded-activated"), preToolActivationMarker("/transcript/current.jsonl"), 0600); err != nil {
@@ -105,9 +105,9 @@ func TestReminderShellGate(t *testing.T) {
 		payload string
 		skipped bool
 	}{
-		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","tool_name":"Read"}`, true},
-		{`{ "session_id" : "activated", "transcript_path" : "/transcript/current.jsonl", "tool_name":"Read" }`, true},
-		{`{"SESSION_ID":"activated","TRANSCRIPT_PATH":"/transcript/current.jsonl"}`, true},
+		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","tool_name":"Read"}`, false},
+		{`{ "session_id" : "activated", "transcript_path" : "/transcript/current.jsonl", "tool_name":"Read" }`, false},
+		{`{"SESSION_ID":"activated","TRANSCRIPT_PATH":"/transcript/current.jsonl"}`, false},
 		{`{"session_id":"activated","transcript_path":"/transcript/fresh.jsonl"}`, false},
 		{`{"session_id":"activated","transcript_path":"/transcript/CURRENT.jsonl"}`, false},
 		{`{"session_id":"activated","transcript_path":"/transcript/current.jsonl","session_id":"not-activated"}`, false},
@@ -125,12 +125,16 @@ func TestReminderShellGate(t *testing.T) {
 	} {
 		_ = os.Remove(calls)
 		cmd := exec.Command("bash", filepath.Join("..", "..", "claude-plugin", "hooks", "remind.sh"))
-		cmd.Env = append(os.Environ(), "FELT_BIN="+binary, "TMPDIR="+dir, "CALLS="+calls, "PATH=/nonexistent")
+		cmd.Env = append(os.Environ(), "FELT_BIN="+binary, "TMPDIR="+dir, "CALLS="+calls, "PAYLOAD="+filepath.Join(dir, "payload"), "PATH=/nonexistent")
 		cmd.Stdin = strings.NewReader(tc.payload)
 		if out, err := cmd.CombinedOutput(); err != nil || len(out) > 0 {
 			t.Fatalf("%s: %v", out, err)
 		}
-		_, err := os.Stat(calls)
+		payload, err := os.ReadFile(filepath.Join(dir, "payload"))
+		if err != nil || string(payload) != tc.payload {
+			t.Fatalf("payload was not delegated intact: %q (%v)", payload, err)
+		}
+		_, err = os.Stat(calls)
 		if os.IsNotExist(err) != tc.skipped {
 			t.Fatalf("payload %s: skipped=%v, stat=%v", tc.payload, tc.skipped, err)
 		}

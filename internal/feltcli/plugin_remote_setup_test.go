@@ -104,6 +104,16 @@ func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) stri
 	if err := os.WriteFile(filepath.Join(root, "claude-plugin", "hooks", "generation.txt"), []byte(generation), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	script := filepath.Join(root, "claude-plugin", "hooks", "event.sh")
+	fscript, err := os.OpenFile(script, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = fscript.WriteString("\n# Fixture generation: " + generation + "\n")
+	fscript.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if remotePayloads.roots == nil {
 		remotePayloads.roots = map[string]string{}
 	}

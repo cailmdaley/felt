@@ -37,7 +37,16 @@ func materializeCodexBundles(current string) error {
 		} else {
 			manifest.Skills = "./skills"
 		}
-		if err := copyTree(filepath.Join(current, "claude-plugin", directory), filepath.Join(root, directory)); err != nil {
+		if name == "felt" {
+			if err := os.MkdirAll(filepath.Join(root, "hooks"), 0755); err != nil {
+				return err
+			}
+			for _, basename := range append([]string{"hooks.json"}, pluginHookBasenames...) {
+				if err := copyTree(filepath.Join(current, "claude-plugin", "hooks", basename), filepath.Join(root, "hooks", basename)); err != nil {
+					return err
+				}
+			}
+		} else if err := copyTree(filepath.Join(current, "claude-plugin", directory), filepath.Join(root, directory)); err != nil {
 			return err
 		}
 		if err := writeCodexBundleJSON(filepath.Join(root, ".codex-plugin", "plugin.json"), manifest); err != nil {

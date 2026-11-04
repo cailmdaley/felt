@@ -408,8 +408,8 @@ func (a *app) runPreToolHook(stdin io.Reader, stdout io.Writer) error {
 }
 
 // preToolActivationMarker binds activation to a transcript generation, not
-// only a reusable session id. The versioned JSON string is also read by
-// remind.sh using shell builtins. Empty legacy markers never match.
+// only a reusable session id. The versioned JSON encoding remains compatible
+// with installed adapters. Empty markers never match.
 func preToolActivationMarker(transcriptPath string) []byte {
 	encoded, _ := json.Marshal(transcriptPath)
 	return []byte("v1:" + string(encoded) + "\n")
