@@ -7877,7 +7877,7 @@ defmodule Shuttle.PollerTest do
 
     assert Shuttle.SessionLedger.read_since(0) == []
 
-    MockRunner.set_shuttle(id, "enabled: true\nkind: oneshot\nhost: other-host\n", "open")
+    MockRunner.set_shuttle(id, "enabled: true\nkind: oneshot\nhost: test-host\n", "open")
 
     assert {:ok, _} =
              Poller.claim_session(poller, id, "capture-uninstalled1", session_uuid: "uuid-early")

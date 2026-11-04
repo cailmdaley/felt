@@ -257,7 +257,14 @@ defmodule Shuttle.DispatchIntegrationTest do
     {_output, 0} =
       IntegrationRunner.cmd(
         "shuttle",
-        ["mark-runtime", id, "--handed-off-at", DateTime.to_iso8601(at)],
+        [
+          "mark-runtime",
+          id,
+          "--handed-off-at",
+          DateTime.to_iso8601(at),
+          "--thread-exit-verb",
+          "handed off"
+        ],
         []
       )
 
@@ -1443,15 +1450,9 @@ defmodule Shuttle.DispatchIntegrationTest do
            "expected blocked entry to evict after fiber closed"
   end
 
-  # Standing dead-orphan reconciler on the tmux-scan substrate. A standing worker
-  # that exits while the daemon is DOWN never fires handle_worker_exit, so the
-  # armed document would re-fire. On poll, the daemon scans tmux: an armed
-  # standing role with no live session whose dispatch marker has NO handoff (and
-  # no re-arm) after it (the daemon-down-across-exit case) is marked awaiting
-  # (status:closed). The marker discriminator replaces the felt-history one. A
-  # role whose last run already handed off (the daily-practice "armed,
-  # not-yet-due" shape) is left armed, proven by the sibling.
-  test "a standing role with an un-exited dispatch is marked awaiting; one whose run handed off is left armed",
+  # Scheduled worker absence owes review whether its exit was dirty or it
+  # durably handed off. Only a human rearm concludes that review obligation.
+  test "both dirty and handed-off scheduled runs await review during downtime recovery",
        %{host: host} do
     # The dead worker's role — armed, no live session, with a dispatch marker and
     # NO handoff after it (the daemon-down case).
@@ -1475,9 +1476,7 @@ defmodule Shuttle.DispatchIntegrationTest do
 
     write_dispatch_marker(host, "tests/standing-dead", "dead-session-uuid")
 
-    # The control — armed, whose last run already handed off cleanly (a handoff
-    # marker after its dispatch). Must be left untouched: the run completed, this
-    # is the next cycle's armed-and-waiting shape.
+    # A clean worker handoff concludes the work, not the human review.
     write_fiber(host, "tests/standing-armed", """
     ---
     name: Standing armed (last run handed off)
@@ -1529,9 +1528,7 @@ defmodule Shuttle.DispatchIntegrationTest do
       refute Map.has_key?(dead_fm, "tempered")
       assert is_binary(dead_fm["closed-at"])
 
-      # The control role, whose last run exited, stays armed — the reconciler does
-      # not regress a role whose run already completed.
-      assert read_frontmatter(host, "tests/standing-armed")["status"] == "active"
+      assert read_frontmatter(host, "tests/standing-armed")["status"] == "closed"
     after
       # The scoped SHUTTLE_STORES is cleared when the test exits.
       :ok
@@ -1584,7 +1581,10 @@ defmodule Shuttle.DispatchIntegrationTest do
 
       # Only the fix-target role gets the human accept (which stamps a handoff
       # marker, newer than the dispatch) after the death.
-      if accept?, do: write_handoff_marker(host, "tests/#{slug}")
+      if accept? do
+        assert {_, 0} =
+                 IntegrationRunner.cmd("shuttle", ["accept", "tests/#{slug}", "--local"], [])
+      end
     end
 
     Shuttle.Test.Env.put_env("SHUTTLE_STORES", host)

@@ -102,6 +102,35 @@ defmodule Shuttle.StandingExitRegressionTest do
     assert File.read!(c.path) =~ "status: closed"
   end
 
+  test "accept followed by a later real dispatch does not manufacture a conclusion", c do
+    assert {:ok, _} = Shuttle.CLI.run(["-C", c.root, "accept", "role", "--local"])
+    assert {:ok, output} = Shuttle.CLI.run(["-C", c.root, "show", "role", "--json"])
+    accepted = Jason.decode!(output)
+    prior_handoff = get_in(accepted, ["shuttle", "runtime", "handed_off_at"])
+    {:ok, at, _} = DateTime.from_iso8601(prior_handoff)
+    next_dispatch = DateTime.add(at, 2, :second) |> DateTime.to_iso8601()
+
+    assert {:ok, _} =
+             Shuttle.CLI.run([
+               "-C",
+               c.root,
+               "mark-runtime",
+               "role",
+               "--dispatched-at",
+               next_dispatch,
+               "--run-id",
+               "scheduled-3"
+             ])
+
+    assert {:ok, output} = Shuttle.CLI.run(["-C", c.root, "show", "role", "--json"])
+    candidate = Jason.decode!(output)
+    assert get_in(candidate, ["shuttle", "runtime", "handed_off_at"]) == prior_handoff
+    StandingRoles.reconcile_dead_standing_roles(c.state, [candidate], {:ok, []})
+    assert File.read!(c.path) =~ "status: closed"
+    assert {:ok, _, _, fm, _} = Shuttle.FiberDoc.read_path(c.path)
+    assert get_in(fm, ["shuttle", "runtime", "handed_off_at"]) == prior_handoff
+  end
+
   test "a failed close is retried by the next healthy absence observation", c do
     # An unavailable writer cannot conclude the run; the document remains the
     # input for the next poll, independent of the lost watcher notification.

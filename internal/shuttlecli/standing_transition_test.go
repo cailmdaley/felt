@@ -131,6 +131,25 @@ func TestStandingRunDispositionAndRecoveryPolicy(t *testing.T) {
 	}
 }
 
+func TestUnrecordedLaunchRequiresAnObservedExit(t *testing.T) {
+	t.Parallel()
+	for _, recovery := range []bool{true, false} {
+		st, req := seedStandingTransition(t)
+		req.DispatchedAt = ""
+		req.Recovery = recovery
+		_, err := st.Update("role", func(f *felt.Felt) error {
+			return shuttle.SetRuntimeField(f, "dispatched_at", "")
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := applyStandingTransition(req)
+		if err != nil || result.Changed == recovery {
+			t.Fatalf("unrecorded launch (recovery=%t): %+v, %v", recovery, result, err)
+		}
+	}
+}
+
 func TestWorkerHandoffCannotEraseCurrentHumanRearm(t *testing.T) {
 	t.Parallel()
 	st, req := seedStandingTransition(t)
