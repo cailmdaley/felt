@@ -776,12 +776,6 @@ func (a *app) saveRemotes(doc remotesFile) error {
 	if err != nil {
 		return err
 	}
-	if len(doc.Remotes) == 0 {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("removing %s: %w", path, err)
-		}
-		return nil
-	}
 	if doc.Version == 0 {
 		doc.Version = 1
 	}

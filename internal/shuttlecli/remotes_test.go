@@ -265,8 +265,7 @@ func TestNormalizeRemotes_Validation(t *testing.T) {
 	}
 }
 
-// TestSaveRemotes_RoundTrip — atomic write, and an empty fleet deletes the file
-// (matching the stores/projects writers).
+// TestSaveRemotes_RoundTrip checks atomic writes including an empty fleet.
 func TestSaveRemotes_RoundTrip(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
@@ -291,8 +290,8 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 	if err := newApp(env).saveRemotes(remotesFile{}); err != nil {
 		t.Fatalf("saveRemotes(empty): %v", err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("empty save should delete the file, stat err = %v", err)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("empty save should retain the file: %v", err)
 	}
 }
 
@@ -303,6 +302,30 @@ func TestSaveRemotes_RoundTrip(t *testing.T) {
 // is exactly why they are declared: an operator who marks a cluster login node
 // `"build_ui": false` and later runs `remotes add` on an unrelated host must not
 // silently get a six-minute `npm ci` back.
+func TestSaveRemotes_EmptyFleetPreservesPolicy(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	path := writeRemotesIn(t, env, `{"version":1,"defaults":{"discover":false,"tailscale_socket":"/tmp/private.sock"},"remotes":[{"name":"a","port":4001}]}`)
+	a := newApp(env)
+	doc, err := a.loadRemotesFileRaw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Remotes = doc.Remotes[:0]
+	if err := a.saveRemotes(doc); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"discover": false`, `"tailscale_socket": "/tmp/private.sock"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("lost %s: %s", want, raw)
+		}
+	}
+}
+
 func TestSaveRemotes_KeepsDeployOnlyKeys(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
