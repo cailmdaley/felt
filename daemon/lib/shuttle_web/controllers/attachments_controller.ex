@@ -73,6 +73,7 @@ defmodule ShuttleWeb.AttachmentsController do
     case FeltStores.resolve_fiber_or_error(fiber) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :timeout, message} -> {:error, 504, message}
+      {:error, :unavailable, message} -> {:error, 503, message}
       {:error, message} -> {:error, 404, message}
     end
   end

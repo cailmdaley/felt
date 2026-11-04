@@ -59,7 +59,18 @@ defmodule Shuttle.FeltStores do
   until a poll refresh.
   """
   @spec configured_stores() :: store_list()
-  def configured_stores, do: cached_expansion(:infinity)
+  def configured_stores, do: tolerant_expansion(:infinity)
+
+  @doc "Expanded stores, retaining the last good list or reporting a cold registry failure."
+  @spec read_configured_stores() :: {:ok, store_list()} | {:error, :unavailable}
+  def read_configured_stores, do: cached_expansion(:infinity)
+
+  defp tolerant_expansion(max_age_ms) do
+    case cached_expansion(max_age_ms) do
+      {:ok, stores} -> stores
+      {:error, :unavailable} -> []
+    end
+  end
 
   @doc """
   Re-walk the stores for symlinked substores and publish the result for
@@ -70,7 +81,7 @@ defmodule Shuttle.FeltStores do
   itself just a cache read.
   """
   @spec refresh_expanded_stores() :: store_list()
-  def refresh_expanded_stores, do: cached_expansion(@expansion_refresh_ms)
+  def refresh_expanded_stores, do: tolerant_expansion(@expansion_refresh_ms)
 
   # Cached by base list, so a config change attempts discovery immediately.
   # `:infinity` sorts above every integer, so the read path takes the cached
@@ -86,13 +97,13 @@ defmodule Shuttle.FeltStores do
     case {PathListConfig.read_configured(@spec_),
           :persistent_term.get(Shuttle.Env.scope_key(@expanded_cache_key), :none)} do
       {{:ok, base}, {base, expanded, walked_at}} when now - walked_at < max_age_ms ->
-        expanded
+        {:ok, expanded}
 
       {{:error, _reason}, {_base, expanded, _walked_at}} ->
-        expanded
+        {:ok, expanded}
 
       {{:error, _reason}, :none} ->
-        []
+        {:error, :unavailable}
 
       {{:ok, base}, cached} ->
         expanded =
@@ -109,7 +120,7 @@ defmodule Shuttle.FeltStores do
         # Cache the attempt too: failed discovery retains the same base's list,
         # and only the poller's next refresh retries, never a request read.
         :persistent_term.put(Shuttle.Env.scope_key(@expanded_cache_key), {base, expanded, now})
-        expanded
+        {:ok, expanded}
     end
   end
 
@@ -299,7 +310,7 @@ defmodule Shuttle.FeltStores do
 
   @doc """
   Resolve which configured felt store owns `fiber_id`, as `{:ok, store}`,
-  `{:error, :not_found}`, or `{:error, :timeout}`. Thin wrapper over
+  `{:error, :not_found}`, `{:error, :timeout}`, or `{:error, :unavailable}`. Thin wrapper over
   `resolve_fiber/1` returning just the owning store root.
   """
   @type resolved_fiber :: %{
@@ -309,8 +320,11 @@ defmodule Shuttle.FeltStores do
           uid: String.t() | nil
         }
 
-  @spec store_for_fiber(String.t()) :: {:ok, String.t()} | {:error, :not_found | :timeout}
-  def store_for_fiber(fiber_id), do: store_for_fiber(fiber_id, configured_stores())
+  @spec store_for_fiber(String.t()) ::
+          {:ok, String.t()} | {:error, :not_found | :timeout | :unavailable}
+  def store_for_fiber(fiber_id) do
+    with {:ok, stores} <- read_configured_stores(), do: store_for_fiber(fiber_id, stores)
+  end
 
   @spec store_for_fiber(String.t(), store_list()) ::
           {:ok, String.t()} | {:error, :not_found | :timeout}
@@ -343,27 +357,32 @@ defmodule Shuttle.FeltStores do
   kanban's Resume falling back to a default store, a lifecycle verb 404ing a
   fiber that exists). A timeout on one store never masks a positive resolution
   from another: the scan finishes, and only an otherwise-empty result reports
-  `:timeout`.
+  `:timeout`. A cold registry read failure reports `{:error, :unavailable}`
+  because no trusted store list is available to establish absence.
   """
-  @spec resolve_fiber(String.t()) :: {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
-  def resolve_fiber(identifier) when is_binary(identifier),
-    do: resolve_fiber(identifier, configured_stores())
+  @spec resolve_fiber(String.t()) ::
+          {:ok, resolved_fiber()} | {:error, :not_found | :timeout | :unavailable}
+  def resolve_fiber(identifier) when is_binary(identifier) do
+    with {:ok, stores} <- read_configured_stores(), do: resolve_fiber(identifier, stores)
+  end
 
   @doc """
   `resolve_fiber/1` with its failures mapped into the CLI-result error
   vocabulary the lifecycle and felt-edit surfaces render.
 
-  One definition of those two sentences: the daemon renders the same
-  "fiber not found" / "felt timed out resolving" pair everywhere it resolves a
-  fiber for a caller, and `:timeout` keeps its distinct three-tuple shape so a
-  wedged store is never reported as absence.
+  Missing fibers, timed-out lookups, and an unavailable store registry remain
+  distinct. Transient failures carry a three-tuple so callers can report
+  unavailability without claiming that a fiber is absent.
   """
   @spec resolve_fiber_or_error(String.t()) ::
-          {:ok, resolved_fiber()} | {:error, String.t()} | {:error, :timeout, String.t()}
+          {:ok, resolved_fiber()}
+          | {:error, String.t()}
+          | {:error, :timeout | :unavailable, String.t()}
   def resolve_fiber_or_error(identifier) when is_binary(identifier) do
     case resolve_fiber(identifier) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, "fiber not found: #{identifier}"}
+      {:error, :unavailable} -> {:error, :unavailable, "felt store registry unavailable"}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
       {:error, reason} -> {:error, "felt failed resolving #{identifier}: #{inspect(reason)}"}
     end
@@ -388,6 +407,7 @@ defmodule Shuttle.FeltStores do
     case hinted || resolve_with(identifier, stores, true) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, :not_found, missing_on_host(identifier)}
+      {:error, :unavailable} -> {:error, :unavailable, "felt store registry unavailable"}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
       {:error, reason} -> {:error, "felt failed resolving #{identifier}: #{inspect(reason)}"}
     end

@@ -122,7 +122,7 @@ defmodule ShuttleWeb.RelayHelpers do
     * `{:ok, output}` → 200 with the output verbatim.
     * `{:error, binary}` → 400 with the message (a validation refusal).
     * `{:command_error, status, output}` → 422 `"<tool> exited <status>: <output>"`.
-    * `{:error, :timeout, reason}` → 503 with the reason.
+    * `{:error, kind, reason}` for `:timeout` or `:unavailable` → 503 with the reason.
 
   `tool` labels the 422 line (`"felt"` for the felt CLI, `"shuttle"` for the
   `shuttle` verbs). A caller that needs a side effect on success (a document
@@ -146,7 +146,8 @@ defmodule ShuttleWeb.RelayHelpers do
     |> send_resp(422, "#{tool} exited #{status}: #{output}")
   end
 
-  def send_cli_result(conn, _tool, {:error, :timeout, reason}) do
+  def send_cli_result(conn, _tool, {:error, kind, reason})
+      when kind in [:timeout, :unavailable] do
     conn |> put_resp_content_type("text/plain") |> send_resp(503, reason)
   end
 
@@ -159,7 +160,7 @@ defmodule ShuttleWeb.RelayHelpers do
   @spec store_for_fiber(String.t()) ::
           {:ok, String.t(), String.t()}
           | {:error, String.t()}
-          | {:error, :timeout, String.t()}
+          | {:error, :timeout | :unavailable, String.t()}
   def store_for_fiber(fiber_id) do
     with {:ok, %{store: store, fiber_id: address}} <- FeltStores.resolve_fiber_or_error(fiber_id),
          do: {:ok, store, address}

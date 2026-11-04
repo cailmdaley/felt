@@ -76,6 +76,9 @@ defmodule ShuttleWeb.FeltNestController do
 
       {:error, :timeout} ->
         {:error, :timeout, "felt timed out resolving #{parent}"}
+
+      {:error, :unavailable} ->
+        {:error, :unavailable, "felt store registry unavailable"}
     end
   end
 

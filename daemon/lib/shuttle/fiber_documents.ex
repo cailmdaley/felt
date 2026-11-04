@@ -93,9 +93,24 @@ defmodule Shuttle.FiberDocuments do
     end
   end
 
-  defp collect(opts, with_body?, mode) do
-    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
+  defp configured_stores(opts) do
+    case Keyword.fetch(opts, :felt_stores) do
+      {:ok, stores} ->
+        {:ok, stores}
 
+      :error ->
+        case FeltStores.read_configured_stores() do
+          {:ok, stores} -> {:ok, stores}
+          {:error, :unavailable} -> {:error, [%{error: "felt store registry unavailable"}]}
+        end
+    end
+  end
+
+  defp collect(opts, with_body?, mode) do
+    with {:ok, stores} <- configured_stores(opts), do: collect_stores(stores, with_body?, mode)
+  end
+
+  defp collect_stores(stores, with_body?, mode) do
     results = Enum.map(stores, &list_store(&1, with_body?, mode))
     errors = Enum.flat_map(results, &store_errors/1)
 
@@ -177,7 +192,10 @@ defmodule Shuttle.FiberDocuments do
     do: get_with_cli(id, "shuttle", Keyword.delete(opts, :with_body))
 
   defp get_with_cli(id, cli, opts) do
-    stores = Keyword.get_lazy(opts, :felt_stores, &FeltStores.configured_stores/0)
+    with {:ok, stores} <- configured_stores(opts), do: get_from_stores(id, cli, opts, stores)
+  end
+
+  defp get_from_stores(id, cli, opts, stores) do
     with_body? = cli == "felt" and Keyword.get(opts, :with_body, false)
 
     if Keyword.get(opts, :all_matches, false) do

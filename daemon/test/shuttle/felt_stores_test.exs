@@ -44,6 +44,68 @@ defmodule Shuttle.FeltStoresTest do
     end
   end
 
+  describe "cold registry failures" do
+    for surface <- [:resolve, :list, :index, :get, :cached_index] do
+      @tag surface: surface
+      test "#{surface} reports unavailability instead of absence", %{surface: surface} do
+        Shuttle.Test.Env.delete_env("SHUTTLE_STORES")
+        registry = Path.join(tmp_dir(), "stores.json")
+        File.ln_s!(registry, registry)
+        Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", registry)
+
+        result =
+          case surface do
+            :resolve ->
+              FeltStores.resolve_fiber("existing")
+
+            :list ->
+              Shuttle.FiberDocuments.list()
+
+            :index ->
+              Shuttle.FiberDocuments.index()
+
+            :get ->
+              Shuttle.FiberDocuments.get("existing")
+
+            :cached_index ->
+              Shuttle.Test.Env.start_scoped!({Shuttle.FiberIndex, name: nil})
+              Shuttle.FiberIndex.fetch()
+          end
+
+        if surface == :resolve do
+          assert {:error, :unavailable} = result
+        else
+          assert {:error, [%{error: "felt store registry unavailable"}]} = result
+        end
+      end
+    end
+  end
+
+  test "strict registry reads recover and retain a last-good list" do
+    Shuttle.Test.Env.delete_env("SHUTTLE_STORES")
+    registry = Path.join(tmp_dir(), "stores.json")
+    File.ln_s!(registry, registry)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES_FILE", registry)
+    assert {:error, :unavailable} = FeltStores.read_configured_stores()
+    assert FeltStores.configured_stores() == []
+
+    store = tmp_dir()
+
+    Shuttle.RuntimeDocuments.change(registry, fn ->
+      File.rm!(registry)
+      File.write!(registry, Jason.encode!(%{"felt_stores" => [store]}))
+    end)
+
+    assert {:ok, [^store]} = FeltStores.read_configured_stores()
+
+    Shuttle.RuntimeDocuments.change(registry, fn ->
+      File.rm!(registry)
+      File.ln_s!(registry, registry)
+    end)
+
+    assert {:ok, [^store]} = FeltStores.read_configured_stores()
+  end
+
   describe "store_for_fiber/1" do
     test "resolves a loom-resident fiber by its full store-relative slug" do
       loom = tmp_dir()
