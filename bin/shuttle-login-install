@@ -58,8 +58,11 @@ if [ -s "$HOME/.shuttle/owner-node" ] \
 fi
 
 mkdir -p "$HOME/.local/bin" "$HOME/.shuttle"
-# Shared-home first installs must not overwrite a concurrent node's claim.
-if ! (set -o noclobber; printf '%s\n' "$owner" > "$HOME/.shuttle/owner-node") 2>/dev/null; then
+# Publish a complete value without replacing a concurrent node's claim.
+claim=$(mktemp "$HOME/.shuttle/.owner-node.XXXXXXXX")
+trap 'rm -f "$claim"' EXIT
+printf '%s\n' "$owner" > "$claim"
+if ! ln "$claim" "$HOME/.shuttle/owner-node" 2>/dev/null; then
   if [ "$(head -n 1 "$HOME/.shuttle/owner-node")" != "$node" ]; then
     echo 'another node claimed ownership; leaving its login recovery unchanged' >&2
     exit 1

@@ -55,6 +55,16 @@ if RACE=1 run_install; then echo 'installer overwrote a concurrent owner claim' 
 [ "$(cat "$WORK/home/.shuttle/owner-node")" = other ]
 [ ! -e "$WORK/home/.local/bin/shuttle-ensure" ]
 rm "$WORK/home/.shuttle/owner-node"
+# Interrupt the installer at its owner-value write. Publication must not expose
+# the empty redirection target, and a fresh invocation must still claim it.
+cat > "$WORK/interrupt" <<'STUB'
+printf() {
+  if [ "${2:-}" = owner ]; then kill -KILL $$; fi
+  builtin printf "$@"
+}
+STUB
+if BASH_ENV="$WORK/interrupt" run_install; then echo 'installer was not interrupted' >&2; exit 1; fi
+[ ! -e "$WORK/home/.shuttle/owner-node" ] || { echo 'interrupted install published an empty owner claim' >&2; exit 1; }
 run_install
 run_install
 [ "$(cat "$WORK/home/.shuttle/owner-node")" = owner ]
