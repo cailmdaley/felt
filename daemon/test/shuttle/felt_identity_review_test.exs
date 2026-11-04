@@ -1,6 +1,15 @@
 defmodule Shuttle.FeltIdentityReviewTest do
   use ExUnit.Case, async: true
   alias Shuttle.Test.Env
+  import Shuttle.Test.PollerHelpers
+
+  defmodule ContentRunner do
+    def cmd(command, args, opts) when command in ["felt", "shuttle"],
+      do: Shuttle.Runner.Default.cmd(command, args, opts)
+
+    def cmd("tmux", args, _opts), do: {"", if("has-session" in args, do: 1, else: 0)}
+    def cmd(_command, _args, _opts), do: {"", 0}
+  end
 
   defp write_fiber(root, id, uid \\ nil) do
     path = Path.join([root, ".felt", id, Path.basename(id) <> ".md"])
@@ -13,6 +22,24 @@ defmodule Shuttle.FeltIdentityReviewTest do
     )
 
     path
+  end
+
+  @tag :tmp_dir
+  test "serialized lifecycle keeps the exactly resolved store and UID", %{tmp_dir: tmp} do
+    loom = Path.join(tmp, "loom")
+    project = Path.join(tmp, "project")
+    wrong = write_fiber(loom, "x/y/analysis", "01ARZ3NDEKTSV4RRFFQ69G5FAW")
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+    wanted = write_fiber(project, "analysis", uid)
+    stores = [loom, project]
+    Env.put_env("SHUTTLE_STORES", Enum.join(stores, ","))
+
+    {:ok, _poller} =
+      start_poller!(runner: ContentRunner, felt_stores: stores, interval_ms: 60_000)
+
+    assert {:ok, _} = Shuttle.LifecycleService.transition(:pause, uid, ["--no-kill"])
+    assert File.read!(wanted) =~ "status: open"
+    assert File.read!(wrong) =~ "status: active"
   end
 
   @tag :tmp_dir

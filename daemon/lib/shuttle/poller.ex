@@ -723,9 +723,14 @@ defmodule Shuttle.Poller do
   `dispatch_call_timeout_ms/0` or a Poller exit leaves the outcome unknown.
   A queued write can be lost if the Poller stops.
   """
-  @spec lifecycle_transition(GenServer.server(), Shuttle.LifecycleService.verb(), String.t(), [
-          String.t()
-        ]) ::
+  @spec lifecycle_transition(
+          GenServer.server(),
+          Shuttle.LifecycleService.verb(),
+          Shuttle.FeltStores.resolved_fiber() | String.t(),
+          [
+            String.t()
+          ]
+        ) ::
           Shuttle.Felt.result() | {:error, :timeout, String.t()}
   def lifecycle_transition(server \\ Shuttle.Env.server(__MODULE__), verb, fiber_id, args \\ []) do
     GenServer.call(
@@ -737,6 +742,8 @@ defmodule Shuttle.Poller do
     :exit, _reason ->
       lifecycle_uncertain(verb, fiber_id)
   end
+
+  defp lifecycle_uncertain(verb, %{fiber_id: id}), do: lifecycle_uncertain(verb, id)
 
   defp lifecycle_uncertain(verb, fiber_id) do
     {:error, :timeout,
@@ -2329,13 +2336,25 @@ defmodule Shuttle.Poller do
     end
   end
 
-  defp transition_call({:lifecycle_transition, verb, fiber_id, args}, _from, state) do
-    {_runtime_key, slug} = resolve_identity(state, fiber_id)
+  defp transition_call({:lifecycle_transition, verb, target, args}, _from, state) do
+    {store, slug, uid} =
+      case target do
+        %{store: store, fiber_id: slug, uid: uid} ->
+          {store, slug, uid}
+
+        # Internal runtime callers can address a tracked worker. HTTP requests
+        # carry the resolved target and never re-enter interactive resolution.
+        identifier when is_binary(identifier) ->
+          {key, slug} = resolve_identity(state, identifier)
+          {owning_store(slug, state), slug, if(Shuttle.ULID.valid?(key), do: key)}
+      end
+
+    address = uid || slug
 
     result =
-      LifecycleService.write(verb, slug,
+      LifecycleService.write(verb, address,
         runner: state.runner,
-        felt_store: owning_store(slug, state),
+        felt_store: store,
         args: args
       )
 
@@ -2345,7 +2364,7 @@ defmodule Shuttle.Poller do
     {result, state} =
       case {verb == :rest or (verb == :pause and "--no-kill" not in args), result} do
         {true, {:ok, output}} ->
-          case stop_tracked_worker(state, slug) do
+          case stop_tracked_worker(state, address) do
             {{:ok, :no_session}, state} -> {{:ok, output}, state}
             {{:ok, session}, state} -> {{:ok, output <> "  worker: stopped #{session}\n"}, state}
             {{:error, reason}, state} -> {{:error, reason}, state}
@@ -2357,8 +2376,11 @@ defmodule Shuttle.Poller do
 
     state =
       case result do
-        {:ok, _} when state.document_cache_ready -> refresh_document_entry(state, slug)
-        _ -> state
+        {:ok, _} when state.document_cache_ready ->
+          refresh_document_entry(state, address, [store])
+
+        _ ->
+          state
       end
 
     {:reply, result, state}
