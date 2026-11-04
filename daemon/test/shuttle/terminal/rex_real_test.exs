@@ -17,6 +17,14 @@ defmodule Shuttle.Terminal.RexRealTest do
     def cmd(command, args, opts), do: Shuttle.Runner.Default.cmd(command, args, opts)
   end
 
+  defmodule RexMustNotRun do
+    def cmd(command, args, _opts),
+      do:
+        raise(
+          "unexpected Rex command while checking a live Linux worker: #{command} #{inspect(args)}"
+        )
+  end
+
   setup %{tmp_dir: dir} do
     root = Shuttle.Test.IsolatedRex.start(dir)
     Env.put_env("SHUTTLE_HOST", "probe-isolated-sentinel")
@@ -25,7 +33,7 @@ defmodule Shuttle.Terminal.RexRealTest do
   end
 
   @tag skip: not Shuttle.Test.IsolatedRex.restore_supported?()
-  test "non-macOS readiness starts the default endpoint and preserves the server across calls", %{
+  test "poll listing starts the default endpoint and preserves the server across ticks", %{
     root: root
   } do
     Env.put_app_env(:os_type, {:unix, :linux})
@@ -44,12 +52,26 @@ defmodule Shuttle.Terminal.RexRealTest do
       )
     end)
 
-    assert ExUnit.CaptureLog.capture_log(fn -> assert :ok = Backend.ensure_ready(@runner) end) =~
+    assert ExUnit.CaptureLog.capture_log(fn -> assert {:ok, []} = Backend.list(@runner) end) =~
              "local-only"
 
     assert {:ok, %{"instance_id" => instance}} = Rex.call(@runner, "server.status", %{})
-    assert :ok = Backend.ensure_ready(@runner)
+    assert {:ok, []} = Backend.list(@runner)
     assert {:ok, %{"instance_id" => ^instance}} = Rex.call(@runner, "server.status", %{})
+  end
+
+  @tag skip: Shuttle.Test.IsolatedRex.skip?() or :os.type() != {:unix, :linux}
+  @tag :linux
+  test "a live worker receipt answers watcher probes without Rex CLI calls", %{root: root} do
+    name = "receipt-01JABCDEFGHJKMNPQRSTVWXYZ-shuttle"
+    Env.put_app_env(:terminal_backend, Backend)
+    assert :ok = Terminal.launch(@runner, name, root, Backend.script(name).env <> "sleep 300\n")
+    {:ok, binding} = RexBindings.read()
+    bid = binding["bindings"][name]["block_id"]
+    await(fn -> File.exists?(RexBindings.pid_path(bid)) end)
+
+    assert :present = Backend.probe(RexMustNotRun, name)
+    assert :present = Backend.probe(RexMustNotRun, name)
   end
 
   @tag skip: not Shuttle.Test.IsolatedRex.restore_supported?()

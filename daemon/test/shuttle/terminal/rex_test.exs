@@ -72,6 +72,55 @@ defmodule Shuttle.Terminal.RexTest do
     refute Enum.any?(FakeRex.calls(), fn {bin, args, _} -> bin == "open" or "stop" in args end)
   end
 
+  test "Linux watcher accepts only a receipt whose live process runs that worker script", %{
+    tmp_dir: dir
+  } do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    proc_root = Path.join(dir, "proc")
+    Env.put_app_env(:proc_root, proc_root)
+    whoami = FakeRex.fixture("whoami")
+    sid = "session:receipt-probe"
+    bid = "block:receipt-probe"
+    binding = %{"session_id" => sid, "block_id" => bid, "created_at" => "now"}
+    assert :ok = RexBindings.put(@name, binding, whoami["host_id"])
+
+    pid = 12345
+    script_path = Path.join(dir, "shuttle-run-#{@name}.123.sh")
+    File.mkdir_p!(Path.join([proc_root, to_string(pid)]))
+
+    File.write!(
+      Path.join([proc_root, to_string(pid), "cmdline"]),
+      "/bin/bash\0-l\0#{script_path}\0"
+    )
+
+    receipt = RexBindings.pid_path(bid)
+    File.mkdir_p!(Path.dirname(receipt))
+    File.write!(receipt, "#{pid}\n#{sid}\n#{bid}\n")
+
+    for _ <- 1..60, do: assert(:present = Rex.probe(FakeRex, @name))
+    assert FakeRex.calls() == []
+
+    File.write!(receipt, "#{pid}\n#{sid}\nblock:replaced\n")
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert FakeRex.calls() != []
+
+    assert :ok = RexBindings.put(@name, binding, whoami["host_id"])
+    File.write!(receipt, "not-a-pid\n#{sid}\n#{bid}\n")
+    Agent.update(Shuttle.Env.app(:fake_rex), fn state -> %{state | calls: []} end)
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert FakeRex.calls() != []
+
+    assert :ok = RexBindings.put(@name, binding, whoami["host_id"])
+    reused_pid = String.to_integer(System.pid())
+    reused_cmdline = Path.join([proc_root, to_string(reused_pid), "cmdline"])
+    File.mkdir_p!(Path.dirname(reused_cmdline))
+    File.write!(reused_cmdline, "beam.smp\0")
+    File.write!(receipt, "#{reused_pid}\n#{sid}\n#{bid}\n")
+    Agent.update(Shuttle.Env.app(:fake_rex), fn state -> %{state | calls: []} end)
+    assert :absent = Rex.probe(FakeRex, @name)
+    assert FakeRex.calls() != []
+  end
+
   test "Linux falls back to local-only without tailscaled and logs the missing listener" do
     Env.put_app_env(:os_type, {:unix, :linux})
     Env.put_app_env(:tailscale_socket, "system")
@@ -98,6 +147,9 @@ defmodule Shuttle.Terminal.RexTest do
   test "Linux startup failure propagates, and uncertain liveness never starts a server" do
     Env.put_app_env(:os_type, {:unix, :linux})
     FakeRex.reply("whoami", {"request timed out", :timeout})
+    assert :ok = Rex.ensure_ready(FakeRex)
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
+    FakeRex.reply("whoami", {"not found", 3})
     assert :ok = Rex.ensure_ready(FakeRex)
     refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
     FakeRex.reply("whoami", {"server is not running", 4})
@@ -317,6 +369,35 @@ defmodule Shuttle.Terminal.RexTest do
     assert {:error, :unknown} = Rex.list(FakeRex)
     FakeRex.reply("session.list", {"server gone", 4})
     assert {:ok, []} = Rex.list(FakeRex)
+  end
+
+  test "a poll list restarts a server that was absent at the start of the tick" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    FakeRex.reply("whoami", {"server is not running", 4})
+
+    assert {:ok, []} = Rex.list(FakeRex)
+    assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "start" in args end) == 1
+    assert Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.list" in args end)
+  end
+
+  test "a poll list preserves uncertainty when the server cannot start" do
+    Env.put_app_env(:os_type, {:unix, :linux})
+    FakeRex.reply("whoami", {"server is not running", 4})
+    FakeRex.reply("server.start", {"permission denied", 1})
+
+    assert {:error, :unknown} = Rex.list(FakeRex)
+    refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "session.list" in args end)
+  end
+
+  test "a poll list never starts Rex when whoami is uncertain or not found" do
+    for failure <- [{"request timed out", :timeout}, {"not found", 3}] do
+      FakeRex.reply("whoami", failure)
+
+      assert {:error, :unknown} = Rex.list(FakeRex)
+      refute Enum.any?(FakeRex.calls(), fn {_, args, _} -> "start" in args end)
+
+      FakeRex.clear_reply("whoami")
+    end
   end
 
   test "native rename is idempotent, refuses a conflicting live label, and owns native blocks" do

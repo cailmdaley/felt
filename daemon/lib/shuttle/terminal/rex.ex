@@ -39,24 +39,32 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def ensure_ready(runner) do
+    case maintain_server(runner) do
+      {:ok, _identity} -> :ok
+      {:error, {:rex_server_unavailable, _message}} = error -> error
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp maintain_server(runner) do
     with :ok <- require_config(), do: ensure_server(runner)
   end
 
   defp ensure_server(runner) do
     case Rex.whoami(runner) do
       {:ok, identity} ->
-        reconcile(runner, identity)
+        with :ok <- reconcile(runner, identity), do: {:ok, identity}
 
       {:error, :server_absent} ->
         with :ok <- start_server(runner),
              {:ok, identity} <- await(fn -> Rex.whoami(runner) end, 10_000) do
-          reconcile(runner, identity)
+          with :ok <- reconcile(runner, identity), do: {:ok, identity}
         else
           error -> unavailable("Rex server is unavailable: #{inspect(error)}")
         end
 
-      {:error, _} ->
-        :ok
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -287,10 +295,39 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def probe(runner, name) do
-    case locate(runner, name) do
-      {:ok, _} -> :present
-      {:error, reason} when reason in [:not_found, :server_absent] -> :absent
-      {:error, _} -> :unknown
+    if linux_worker_script_alive?(name) do
+      :present
+    else
+      case locate(runner, name) do
+        {:ok, _} -> :present
+        {:error, reason} when reason in [:not_found, :server_absent] -> :absent
+        {:error, _} -> :unknown
+      end
+    end
+  end
+
+  # A worker's run script stays alive while its foreground harness command
+  # runs. On Linux, its receipt and /proc command line give a positive local
+  # liveness answer without starting rex for every watcher heartbeat.
+  defp linux_worker_script_alive?(name) do
+    with {:unix, :linux} <- Env.app(:os_type) || :os.type(),
+         false <- Shuttle.Terminal.native_ref?(name),
+         {:ok, doc} <- Bindings.read(),
+         %{"session_id" => sid, "block_id" => bid} <- doc["bindings"][name],
+         {:ok, receipt} <- Shuttle.FS.read(pid_path(bid)),
+         [pid, ^sid, ^bid] <- String.split(String.trim(receipt), "\n"),
+         {pid, ""} <- Integer.parse(pid),
+         true <- pid > 0,
+         {:ok, cmdline} <-
+           Shuttle.FS.read(
+             Path.join([Env.app(:proc_root, "/proc"), Integer.to_string(pid), "cmdline"])
+           ),
+         args when args != "" <- String.replace(cmdline, <<0>>, " "),
+         proc = %{pid: pid, ppid: 0, args: args},
+         %{} <- WorkerProcess.session_process([proc], name) do
+      true
+    else
+      _ -> false
     end
   end
 
@@ -315,8 +352,7 @@ defmodule Shuttle.Terminal.Rex do
 
   @impl true
   def list(runner) do
-    with {:ok, identity} <- Rex.whoami(runner),
-         :ok <- reconcile(runner, identity),
+    with {:ok, _identity} <- maintain_server(runner),
          {:ok, doc} <- Bindings.read(),
          :ok <- sweep(runner),
          {:ok, sessions} <- Rex.sessions(runner),
