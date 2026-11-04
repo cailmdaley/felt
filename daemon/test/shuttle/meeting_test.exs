@@ -1559,16 +1559,18 @@ defmodule Shuttle.MeetingTest do
                )
     end
 
-    write_meeting(dir, %{
-      "launch" => "phone",
-      "pid" => 321,
-      "phase" => "live",
-      "phone" => "/tmp/phone.sock"
-    })
+    for {phase, phone} <- [{"live", "/tmp/phone.sock"}, {"loading", nil}, {"stopping", nil}] do
+      write_meeting(dir, %{
+        "launch" => "current",
+        "pid" => 321,
+        "phase" => phase,
+        "phone" => phone
+      })
 
-    set_current_meeting_handler("phone", 321)
-    assert {:error, {:validation, _}} = Meeting.system_audio(false, launch: "phone")
-    refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "env" end)
+      set_current_meeting_handler("current", 321)
+      assert {:error, {:validation, _}} = Meeting.system_audio(false, launch: "current")
+      refute Enum.any?(Shuttle.Test.MeetingRunner.calls(), fn {cmd, _, _} -> cmd == "env" end)
+    end
   end
 
   test "system audio control is launch-bound and preserves the mic", %{hark_dir: dir} do
