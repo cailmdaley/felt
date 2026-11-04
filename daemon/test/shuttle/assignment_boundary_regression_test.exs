@@ -86,14 +86,26 @@ defmodule Shuttle.AssignmentBoundaryRegressionTest do
       state = %State{
         own_host_id: "test-host",
         runner: PrivateTmuxRunner,
-        felt_stores: [FeltStoreRunner.felt_root()]
+        felt_stores: [FeltStoreRunner.felt_root()],
+        adopted?: true,
+        last_known_listings: %{FeltStoreRunner.felt_root() => [FeltStoreRunner.fiber("foreign")]}
       }
 
-      assert SessionReconciliation.adopt_session(state, "foreign", session).running == %{}
+      assert SessionReconciliation.reconcile_orphaned_sessions(state, {:ok, [session]}, true).running == %{}
       assert {_, 0} = System.cmd("tmux", ["-S", socket, "has-session", "-t", "=" <> session])
     after
       System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true)
     end
+  end
+
+  test "a closed listing cannot tear down a freshly reopened local terminal" do
+    FeltStoreRunner.set_shuttle("reopened", "kind: standing\nhost: test-host\nagent: claude-sonnet", "active")
+    session = FiberUid.session("reopened")
+    FeltStoreRunner.add_tmux_session(session)
+    candidate = Map.put(FeltStoreRunner.fiber("reopened"), "status", "closed")
+    state = %State{own_host_id: "test-host", runner: FeltStoreRunner, adopted?: true, felt_stores: [FeltStoreRunner.felt_root()], last_known_listings: %{FeltStoreRunner.felt_root() => [candidate]}}
+    assert SessionReconciliation.reconcile_orphaned_sessions(state, {:ok, [session]}, true).running == %{}
+    refute Enum.any?(FeltStoreRunner.commands(), fn {cmd, args} -> cmd == "tmux" and "kill-session" in args end)
   end
 
   test "a genuine launch can survive failure to record its dispatch marker" do

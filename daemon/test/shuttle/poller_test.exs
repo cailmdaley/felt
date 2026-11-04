@@ -7464,6 +7464,23 @@ defmodule Shuttle.PollerTest do
     assert MockRunner.fiber(id)["status"] == "closed"
   end
 
+  test "watcher exit cannot conclude a newer dispatch than its observation" do
+    id = "tests/superseded-standing"
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  run_id: adhoc-123\n", "active")
+    MockRunner.add_tmux_session("capture-superseded")
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+    await_boot_cycle!(poller)
+    assert {:ok, _} = Poller.claim_session(poller, id, "capture-superseded", session_uuid: "old-run")
+    assert {:ok, _} = Shuttle.CLI.run(["-C", MockRunner.felt_root(), "mark-runtime", id, "--dispatched-at", "2099-01-01T00:00:00Z", "--run-id", "scheduled-new"])
+    path = MockRunner.fiber(id)["path"]
+    before = File.read!(path)
+    notify_worker_exit(poller, id)
+    :sys.get_state(poller, @state_timeout)
+    assert File.read!(path) == before
+    assert MockRunner.fiber(id)["status"] == "active"
+  end
+
   # ── Claim (write-and-claim) ──
 
   defmodule CrashAfterCreateRunner do

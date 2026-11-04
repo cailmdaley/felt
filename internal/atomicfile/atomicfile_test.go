@@ -8,6 +8,27 @@ import (
 	"testing"
 )
 
+func TestWriteNewUnsyncedRefusesExistingPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fiber.md")
+	if err := os.WriteFile(path, []byte("winner"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteNewUnsynced(path, []byte("loser"), 0644); !os.IsExist(err) {
+		t.Fatalf("expected existing-path refusal, got %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "winner" {
+		t.Fatalf("winner replaced: %s", got)
+	}
+	if mode(t, path) != 0600 {
+		t.Fatal("winner mode changed")
+	}
+	if left := leftovers(t, dir); len(left) != 0 {
+		t.Fatalf("temporary files remain: %v", left)
+	}
+}
+
 func mode(t *testing.T, path string) os.FileMode {
 	t.Helper()
 	info, err := os.Stat(path)
