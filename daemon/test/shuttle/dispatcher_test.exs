@@ -491,6 +491,15 @@ defmodule Shuttle.DispatcherTest do
 
   # ── Tests ──
 
+  test "dispatch with an explicit store does not resolve the default store" do
+    key = Shuttle.Env.scope_key({Shuttle.FeltStores, :expanded_stores})
+    :persistent_term.erase(key)
+    on_exit(fn -> :persistent_term.erase(key) end)
+
+    Dispatcher.dispatch("tests/missing", runner: MockRunner, felt_store: "/tmp/store")
+    assert :persistent_term.get(key, :not_looked_up) == :not_looked_up
+  end
+
   test "worker entrypoint carries only dispatch facts the skill cannot know" do
     prompt = Dispatcher.render_prompt("tests/haiku", felt_store: "/tmp/store")
 

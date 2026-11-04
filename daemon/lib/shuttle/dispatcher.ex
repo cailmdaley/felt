@@ -98,7 +98,7 @@ defmodule Shuttle.Dispatcher do
     runner = Keyword.get(opts, :runner, Shuttle.Runner.Default)
     work_dir = Keyword.get(opts, :work_dir, Shuttle.FS.cwd!())
     prompt_context = Keyword.get(opts, :prompt_context, :constitution)
-    felt_store = Keyword.get(opts, :felt_store, default_felt_store())
+    felt_store = Keyword.get_lazy(opts, :felt_store, &default_felt_store/0)
     force = Keyword.get(opts, :force, false)
 
     with {:ok, fiber} <- fetch_fiber(fiber_id, runner, felt_store),
