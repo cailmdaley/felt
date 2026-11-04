@@ -19,8 +19,8 @@ import (
 //     access data from other apps" prompts that approving does not fix. A
 //     receipt mismatch: the daemon refuses to fork the server
 //     (Shuttle.TmuxServer), so only a server it should not have made gets here.
-//   - kitty itself (`application.net.kovidgoyal.kitty.<n>.<n>`) or Rex Server
-//     (`com.superlogical.rex.server.<hash>`): intended roots, granted by the human.
+//   - kitty itself (`application.net.kovidgoyal.kitty.<n>.<n>`): intended root,
+//     granted by the human.
 //   - any other app: a kitty started by another app's child process sits in
 //     that app's coalition — the Quick Access panel toggled by an Alfred or
 //     skhd hotkey is charged to the launcher — and so does a server forked
@@ -36,7 +36,6 @@ import (
 const (
 	tmuxOriginDaemonBorn = "daemon_born"
 	tmuxOriginKittyBorn  = "kitty_born"
-	tmuxOriginRexBorn    = "rex_born"
 	tmuxOriginAppBorn    = "app_born"
 	tmuxOriginUnknown    = "unknown"
 	tmuxOriginAbsent     = "absent"
@@ -134,8 +133,6 @@ func classifyCoalition(name string) string {
 		return tmuxOriginDaemonBorn
 	case strings.HasPrefix(name, "application.") && coalitionRoot(name) == kittyBundleID:
 		return tmuxOriginKittyBorn
-	case strings.HasPrefix(name, "com.superlogical.rex.server."):
-		return tmuxOriginRexBorn
 	default:
 		return tmuxOriginAppBorn
 	}

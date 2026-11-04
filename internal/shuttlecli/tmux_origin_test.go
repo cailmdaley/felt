@@ -109,17 +109,6 @@ const launchctlPrintSkhdRooted = `pid/85804 = {
 	}
 `
 
-// Captured resource-coalition block from the Rex-launched detached tmux
-// anchor after its Rex block exited (backend probe (i)).
-const launchctlPrintRexBorn = `resource coalition = {
-    ID = 215818
-    type = resource
-    state = active
-    active count = 1
-    name = com.superlogical.rex.server.331a356daf28bce29125180a5cfcd10d9fccaa3262cb4d41ebd47b1392e678ae
-}
-`
-
 func TestParseResourceCoalitionName(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -129,7 +118,6 @@ func TestParseResourceCoalitionName(t *testing.T) {
 	}{
 		{"daemon-born server", launchctlPrintDaemonBorn, "io.shuttle.daemon"},
 		{"skhd-rooted server", launchctlPrintSkhdRooted, "com.koekeishiya.skhd"},
-		{"Rex-rooted anchor", launchctlPrintRexBorn, "com.superlogical.rex.server.331a356daf28bce29125180a5cfcd10d9fccaa3262cb4d41ebd47b1392e678ae"},
 		// The jetsam coalition carries the same key and is printed right after
 		// the resource one; picking the wrong block would attribute a process
 		// to the jetsam grouping, which is not what TCC follows.
@@ -174,9 +162,7 @@ func TestClassifyCoalition(t *testing.T) {
 		{"application.net.kovidgoyal.kitty-quick-access.1.2", tmuxOriginAppBorn},
 		{"com.koekeishiya.skhd", tmuxOriginAppBorn},
 		{"net.kovidgoyal.kitty", tmuxOriginAppBorn},
-		{"com.superlogical.rex.server.abc123", tmuxOriginRexBorn},
-		{"com.superlogical.rex.server-other.abc123", tmuxOriginAppBorn},
-		{"application.com.superlogical.rex.1.2", tmuxOriginAppBorn},
+		{"com.superlogical.rex.server.abc123", tmuxOriginAppBorn},
 		{"", tmuxOriginUnknown},
 	} {
 		if got := classifyCoalition(tc.name); got != tc.want {
@@ -194,9 +180,6 @@ func TestTmuxOriginFixturesClassify(t *testing.T) {
 	}
 	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintSkhdRooted)); got != tmuxOriginAppBorn {
 		t.Fatalf("captured skhd-rooted output classified %q", got)
-	}
-	if got := classifyCoalition(parseResourceCoalitionName(launchctlPrintRexBorn)); got != tmuxOriginRexBorn {
-		t.Fatalf("captured Rex-rooted output classified %q", got)
 	}
 }
 
@@ -227,7 +210,7 @@ func TestTmuxOriginWarningNamesTheRootingApp(t *testing.T) {
 			t.Fatalf("warning %q lacks %q", warning, want)
 		}
 	}
-	for _, origin := range []string{tmuxOriginKittyBorn, tmuxOriginRexBorn, tmuxOriginDaemonBorn, tmuxOriginUnknown, tmuxOriginAbsent} {
+	for _, origin := range []string{tmuxOriginKittyBorn, tmuxOriginDaemonBorn, tmuxOriginUnknown, tmuxOriginAbsent} {
 		if got := tmuxOriginWarning(tmuxOriginReport{Origin: origin}); got != "" {
 			t.Fatalf("origin %s warned %q", origin, got)
 		}
@@ -249,7 +232,6 @@ func TestCollectTmuxServerReceiptFailsOnlyOnDaemonBorn(t *testing.T) {
 	}{
 		{tmuxOriginDaemonBorn, receiptMismatch},
 		{tmuxOriginKittyBorn, receiptHealthy},
-		{tmuxOriginRexBorn, receiptHealthy},
 		{tmuxOriginAppBorn, receiptHealthy},
 		{tmuxOriginUnknown, receiptHealthy},
 		{tmuxOriginAbsent, receiptHealthy},
