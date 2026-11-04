@@ -4926,13 +4926,11 @@ defmodule Shuttle.Poller do
           _ -> {state, {:error, :already_running}}
         end
 
-      # Idempotent retry: the fiber's running worker is this very session —
-      # either by name, or the requested name no longer exists because the
-      # first (successful) claim already renamed it. A lost claim response
-      # must be retryable with the same body.
+      # A renamed-away source is retryable only with the recorded execution
+      # and UUID. Absence of a source name does not identify its successor.
       running != nil and
           (running.session == tmux_session or
-             not already_running_session?(state, tmux_session)) ->
+             claim_retry?(state.runner, running, tmux_session, opts)) ->
         repair_claim_identity(state, fiber_id, running, opts)
 
       running != nil ->
@@ -4977,6 +4975,18 @@ defmodule Shuttle.Poller do
                 register_claimed_session(state, fiber_id, fiber, tmux_session, opts)
             end
         end
+    end
+  end
+
+  defp claim_retry?(runner, worker, source, opts) do
+    with %{source: ^source, identity: identity, uuid: uuid} when not is_nil(identity) <-
+           Map.get(worker, :claim),
+         true <- uuid == present_string(opts[:session_uuid]),
+         false <- Shuttle.Terminal.present?(runner, source, launch_evidence: false),
+         {:ok, ^identity} <- Shuttle.Terminal.identity(runner, worker.session) do
+      true
+    else
+      _ -> false
     end
   end
 
@@ -5039,6 +5049,14 @@ defmodule Shuttle.Poller do
     # treats the claimed session exactly like a dispatched one.
     canonical = Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))
 
+    identity =
+      with {:ok, source} <- claim_terminal_source(state.runner, tmux_session, opts),
+           {:ok, identity} <- Shuttle.Terminal.identity(state.runner, source) do
+        identity
+      else
+        _ -> nil
+      end
+
     rename_result =
       case rename_claim_terminal(
              state.runner,
@@ -5060,7 +5078,20 @@ defmodule Shuttle.Poller do
         {state, error}
 
       {:ok, session} ->
-        register_renamed_session(state, fiber_id, fiber, session, agent_id, opts)
+        claim = %{
+          source: tmux_session,
+          identity: identity,
+          uuid: present_string(opts[:session_uuid])
+        }
+
+        register_renamed_session(
+          state,
+          fiber_id,
+          fiber,
+          session,
+          agent_id,
+          Keyword.put(opts, :claim, claim)
+        )
     end
   end
 
@@ -5107,6 +5138,7 @@ defmodule Shuttle.Poller do
       # The claim's conversation is authoritative before registration, not
       # the predecessor's runtime stamp that log_worker_claim replaces.
       |> Map.put(:session_uuid, present_string(Keyword.get(opts, :session_uuid)))
+      |> Map.put(:claim, opts[:claim])
 
     case register_running(state, fiber_id, runtime_key_for_fiber(fiber), running_meta) do
       {:ok, state} ->

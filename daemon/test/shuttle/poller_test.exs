@@ -7391,6 +7391,42 @@ defmodule Shuttle.PollerTest do
 
   # ── Claim (write-and-claim) ──
 
+  @tag :claim_execution
+  test "a predecessor claim retry cannot fill a successor's pending identity" do
+    id = "tests/stale-claim"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nhost: other-host\n", "open")
+    MockRunner.add_tmux_session("capture-predecessor")
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()])
+    await_boot_cycle!(poller)
+
+    assert {:ok, %{session: canonical}} =
+             Poller.claim_session(poller, id, "capture-predecessor", session_uuid: "old-uuid")
+
+    assert {:ok, _} =
+             Poller.claim_session(poller, id, "capture-predecessor", session_uuid: "old-uuid")
+
+    MockRunner.remove_tmux_session(canonical)
+    sync_poll_cycle!(poller)
+    MockRunner.add_tmux_session("capture-successor")
+    assert {:ok, _} = Poller.claim_session(poller, id, "capture-successor", [])
+    assert Poller.session_uuid(poller, id) == nil
+
+    assert {:error, :already_running} =
+             Poller.claim_session(poller, id, "capture-predecessor", session_uuid: "old-uuid")
+
+    assert Poller.session_uuid(poller, id) == nil
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) != "old-uuid"
+
+    assert {:error, :already_running} =
+             Poller.claim_session(poller, id, "capture-successor", session_uuid: "unproved-uuid")
+
+    assert {:ok, _} = Poller.claim_session(poller, id, "capture-successor", [])
+    MockRunner.remove_tmux_session(canonical)
+    MockRunner.add_tmux_session(canonical)
+    assert {:error, :already_running} = Poller.claim_session(poller, id, "capture-successor", [])
+  end
+
   @tag :terminal_identity
   test "claim binds the immutable capture script for liveness" do
     id = "tests/claim-process-alias"
@@ -7406,7 +7442,10 @@ defmodule Shuttle.PollerTest do
     assert Shuttle.Terminal.status(MockRunner, canonical) == :alive
     assert {:ok, names} = Shuttle.Terminal.list_workers(MockRunner)
     assert canonical in names
-    successor = Shuttle.WorkerProcess.parse("813 1 bash -l /tmp/shuttle-run-capture-alias.43.sh\n")
+
+    successor =
+      Shuttle.WorkerProcess.parse("813 1 bash -l /tmp/shuttle-run-capture-alias.43.sh\n")
+
     assert Shuttle.WorkerProcess.session_process(successor, canonical) == nil
   end
 
