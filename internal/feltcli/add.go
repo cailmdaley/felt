@@ -48,6 +48,9 @@ resolution and uses <slug> as spelled.`,
 			if err != nil {
 				return err
 			}
+			if addNamespace && f.ID != args[0] {
+				return fmt.Errorf("--namespace requires a canonical path (got %q, canonical %q)", args[0], f.ID)
+			}
 			if !addTopLevel && !addNamespace {
 				felts, err := storage.ListMetadata()
 				if err != nil {

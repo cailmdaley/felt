@@ -59,6 +59,7 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_uid(uid),
          {:ok, frontmatter} <- normalize_frontmatter(params, name),
          {:ok, frontmatter} <- normalize_shuttle_host(frontmatter),
+         :ok <- validate_status(frontmatter["status"]),
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
@@ -264,6 +265,9 @@ defmodule ShuttleWeb.FiberController do
       _ -> {:error, "created fiber has unexpected frontmatter layout"}
     end
   end
+
+  defp validate_status(status) when status in ["open", "active", "closed"], do: :ok
+  defp validate_status(_), do: {:error, "status must be open, active or closed"}
 
   defp status_of(frontmatter), do: Map.get(frontmatter, "status", "active")
 
