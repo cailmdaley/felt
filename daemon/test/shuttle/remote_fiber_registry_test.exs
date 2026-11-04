@@ -591,6 +591,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
         {:ok, feed_body([sample_fiber("b")])}
       )
 
+      Process.sleep(1_010)
       :ok = RemoteFiberRegistry.refresh_now(pid)
 
       feeds = RemoteFiberRegistry.feeds(pid)
@@ -601,6 +602,7 @@ defmodule Shuttle.RemoteFiberRegistryTest do
       assert [%{"fiber" => %{"id" => "a"}}] = feeds["candide"].fibers
 
       write_fleet(path, [%{"name" => "cineca", "port" => 4002}])
+      Process.sleep(1_010)
       :ok = RemoteFiberRegistry.refresh_now(pid)
       assert Map.keys(RemoteFiberRegistry.feeds(pid)) == ["cineca"]
     end

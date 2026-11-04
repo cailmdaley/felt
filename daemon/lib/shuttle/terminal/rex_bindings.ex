@@ -3,8 +3,12 @@ defmodule Shuttle.Terminal.RexBindings do
 
   def path, do: Path.join([Shuttle.data_dir(), "terminals", "rex.json"])
 
-  def read do
-    case Shuttle.FS.read(path()) do
+  def read, do: load(Shuttle.RuntimeDocuments.read(path()))
+
+  defp read_fresh, do: load(Shuttle.FS.read(path()))
+
+  defp load(result) do
+    case result do
       {:ok, json} -> decode(json)
       {:error, :enoent} -> {:ok, %{"version" => 1, "server" => nil, "bindings" => %{}}}
       {:error, reason} -> {:error, reason}
@@ -37,6 +41,9 @@ defmodule Shuttle.Terminal.RexBindings do
   end
 
   def put_fiber(name, fiber, observed \\ nil)
+
+  def put_fiber(_name, fiber, %{"fiber" => fiber}) when is_binary(fiber) and fiber != "",
+    do: :ok
 
   def put_fiber(name, fiber, observed) when is_binary(fiber) and fiber != "" do
     update(fn doc ->
@@ -119,18 +126,20 @@ defmodule Shuttle.Terminal.RexBindings do
 
   defp update(fun) do
     Shuttle.Terminal.with_lock({__MODULE__, path()}, fn ->
-      with {:ok, doc} <- read() do
-        updated = fun.(doc)
+      Shuttle.RuntimeDocuments.change(path(), fn ->
+        with {:ok, doc} <- read_fresh() do
+          updated = fun.(doc)
 
-        if updated == doc do
-          :ok
-        else
-          with :ok <- write(updated) do
-            remove_receipts(doc, updated)
+          if updated == doc do
             :ok
+          else
+            with :ok <- write(updated) do
+              remove_receipts(doc, updated)
+              :ok
+            end
           end
         end
-      end
+      end)
     end)
   end
 

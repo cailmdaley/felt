@@ -73,7 +73,7 @@ defmodule Shuttle.PathListConfig do
   def read_registered(spec) do
     key = spec.json_key
 
-    case Shuttle.FS.read(config_path(spec)) do
+    case Shuttle.RuntimeDocuments.read(config_path(spec)) do
       {:ok, content} ->
         case Jason.decode(content) do
           {:ok, %{^key => paths}} when is_list(paths) -> {:ok, normalize(paths)}
@@ -98,31 +98,33 @@ defmodule Shuttle.PathListConfig do
     normalized = normalize(paths)
     path = config_path(spec)
 
-    try do
-      case normalized do
-        [] ->
-          case Shuttle.FS.rm(path) do
-            :ok -> {:ok, normalized}
-            {:error, :enoent} -> {:ok, normalized}
-            {:error, reason} -> {:error, {:file_error, reason}}
-          end
+    Shuttle.RuntimeDocuments.change(path, fn ->
+      try do
+        case normalized do
+          [] ->
+            case Shuttle.FS.rm(path) do
+              :ok -> {:ok, normalized}
+              {:error, :enoent} -> {:ok, normalized}
+              {:error, reason} -> {:error, {:file_error, reason}}
+            end
 
-        _ ->
-          Shuttle.FS.mkdir_p!(Path.dirname(path))
-          # Unique per write, not `<path>.tmp`. A fixed staging name is atomic
-          # against a reader and actively unsafe against a second writer: two
-          # concurrent saves share the file, and the first to rename publishes
-          # whichever bytes were staged last. Both of these lists are now
-          # owner-routed, so two hubs really can save the same host's file at
-          # once.
-          tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
-          Shuttle.FS.write!(tmp, encode(spec, normalized))
-          Shuttle.FS.rename!(tmp, path)
-          {:ok, normalized}
+          _ ->
+            Shuttle.FS.mkdir_p!(Path.dirname(path))
+            # Unique per write, not `<path>.tmp`. A fixed staging name is atomic
+            # against a reader and actively unsafe against a second writer: two
+            # concurrent saves share the file, and the first to rename publishes
+            # whichever bytes were staged last. Both of these lists are now
+            # owner-routed, so two hubs really can save the same host's file at
+            # once.
+            tmp = "#{path}.tmp.#{System.unique_integer([:positive])}"
+            Shuttle.FS.write!(tmp, encode(spec, normalized))
+            Shuttle.FS.rename!(tmp, path)
+            {:ok, normalized}
+        end
+      rescue
+        error -> {:error, error}
       end
-    rescue
-      error -> {:error, error}
-    end
+    end)
   end
 
   @doc """

@@ -13,7 +13,16 @@ defmodule Shuttle.RuntimeCache do
   @impl true
   def init(_opts) do
     :ets.new(@table, [:named_table, :public, read_concurrency: true])
+    Process.send_after(self(), :prune, 60_000)
     {:ok, nil}
+  end
+
+  @impl true
+  def handle_info(:prune, state) do
+    now = System.monotonic_time(:millisecond)
+    :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:"=<", :"$1", now}], [true]}])
+    Process.send_after(self(), :prune, 60_000)
+    {:noreply, state}
   end
 
   def fetch(key, ttl_ms, load) do
@@ -23,6 +32,16 @@ defmodule Shuttle.RuntimeCache do
     case lookup(key) do
       [{^key, value, expires}] when expires > now -> value
       _ -> put_scoped(key, load.(), now + ttl_ms)
+    end
+  end
+
+  def peek(key) do
+    key = Shuttle.Env.scope_key(key)
+    now = System.monotonic_time(:millisecond)
+
+    case lookup(key) do
+      [{^key, value, expires}] when expires > now -> {:ok, value}
+      _ -> :miss
     end
   end
 

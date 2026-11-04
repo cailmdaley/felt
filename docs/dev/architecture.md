@@ -255,6 +255,14 @@ mirror of the Elixir resolver. `daemon/test/fixtures/tailnet_peers/` holds the
 shared cases. When Tailscale is absent, stopped, or failing, the daemon uses
 the file alone and records why, and `shuttle doctor` reports the reason.
 
+The daemon shares one-second snapshots of small local documents: fleet config,
+Rex bindings, worker migration aliases, and store/project path lists.
+`Shuttle.RuntimeDocuments` serializes cache fills and writes per path;
+daemon writers invalidate the snapshot before returning. External edits enter
+within one second. Binding mutations read the current file under their write
+lock. Kernel process evidence and socket authorization bypass these snapshots.
+Expired runtime cache entries are reclaimed every minute.
+
 ## Meeting recorder routing
 
 A meeting has two independent host addresses: the **recorder** runs hark, and the agent's **origin** owns the scribe or joined constitution.

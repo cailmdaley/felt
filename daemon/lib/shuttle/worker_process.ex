@@ -338,7 +338,7 @@ defmodule Shuttle.WorkerProcess do
   defp script_session_in(args) do
     case script_token(args) do
       {token, session} ->
-        case Shuttle.FS.read(alias_path(token)) do
+        case Shuttle.RuntimeDocuments.read(alias_path(token)) do
           {:ok, name} when name != "" -> name
           _ -> session
         end
@@ -385,10 +385,12 @@ defmodule Shuttle.WorkerProcess do
             write_alias(path, old)
 
           {:error, :enoent} ->
-            case Shuttle.FS.rm(path) do
-              {:error, :enoent} -> :ok
-              result -> result
-            end
+            Shuttle.RuntimeDocuments.change(path, fn ->
+              case Shuttle.FS.rm(path) do
+                {:error, :enoent} -> :ok
+                result -> result
+              end
+            end)
 
           error ->
             error
@@ -406,17 +408,19 @@ defmodule Shuttle.WorkerProcess do
   end
 
   defp write_alias(path, value) do
-    tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
+    Shuttle.RuntimeDocuments.change(path, fn ->
+      tmp = path <> ".#{System.unique_integer([:positive])}.tmp"
 
-    with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
-         :ok <- Shuttle.FS.write(tmp, value),
-         :ok <- Shuttle.FS.rename(tmp, path) do
-      :ok
-    else
-      error ->
-        Shuttle.FS.rm(tmp)
-        error
-    end
+      with :ok <- Shuttle.FS.mkdir_p(Path.dirname(path)),
+           :ok <- Shuttle.FS.write(tmp, value),
+           :ok <- Shuttle.FS.rename(tmp, path) do
+        :ok
+      else
+        error ->
+          Shuttle.FS.rm(tmp)
+          error
+      end
+    end)
   end
 
   defp own_uid do
