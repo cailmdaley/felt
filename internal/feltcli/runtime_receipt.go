@@ -596,10 +596,8 @@ func hookValueContains(value any, suffix string) bool {
 	return false
 }
 
-// collectGenerationReceipt compares the marker in the active promoted
-// source with every enabled harness cache. An install without markers is
-// reported as partial and repaired by rerunning setup; once either side has a
-// marker, both sides must be present, internally valid, and agree.
+// collectGenerationReceipt reads external provenance and verifies every
+// enabled harness cache directly against the promoted payload digest.
 func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComponent) ReceiptGenerationReceipt {
 	receipt := ReceiptGenerationReceipt{Status: receiptHealthy}
 	runtimeDir, err := a.pluginRuntimeDir()
@@ -634,48 +632,26 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 		}
 	}
 
-	anyMarker := activePresent
 	harnessCount := 0
 	for _, bundle := range bundles {
 		if !bundle.Enabled || bundle.Path == "" {
 			continue
 		}
 		harnessCount++
-		loaded, loadedPresent, loadedErr := readPluginGenerationMarker(bundle.Path)
 		check := ReceiptHarnessGeneration{Harness: bundle.Harness, Path: bundle.Path, Status: receiptHealthy}
-		if loadedErr != nil {
-			check.Status, check.Repair = receiptPartial, loadedErr.Error()
-			receipt.Harnesses = append(receipt.Harnesses, check)
-			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(check.Repair, buildSkew))
-		}
-		if loadedPresent {
-			check.Generation = &loaded
-			anyMarker = true
+		if activePresent {
+			if err := verifyLoadedGeneration(bundle.Harness, active, bundle.Path); err != nil {
+				check.Status, check.Repair = receiptMismatch, err.Error()+"; rerun the matching felt setup command"
+				receipt.Harnesses = append(receipt.Harnesses, check)
+				return generationReceiptWithHarnesses(receipt, receiptMismatch, joinReceiptRepairs(check.Repair, buildSkew))
+			}
+			check.Generation = &active
 		}
 		receipt.Harnesses = append(receipt.Harnesses, check)
 
-		if activePresent && !loadedPresent {
-			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(
-				fmt.Sprintf("%s's loaded plugin at %s has no %s marker; rerun `felt setup %s`", bundle.Harness, bundle.Path, pluginGenerationMarkerName, bundle.Harness), buildSkew))
-		}
-		if !activePresent && loadedPresent {
-			return generationReceiptWithHarnesses(receipt, receiptPartial, joinReceiptRepairs(
-				fmt.Sprintf("the promoted source at %s has no %s marker while %s is loaded; rerun `felt setup %s`", activeRoot, pluginGenerationMarkerName, bundle.Harness, bundle.Harness), buildSkew))
-		}
-		if activePresent && loadedPresent {
-			if status, repair := comparePluginGenerations(active, loaded); status != receiptHealthy {
-				check.Status, check.Repair = status, repair
-				receipt.Harnesses[len(receipt.Harnesses)-1] = check
-				return generationReceiptWithHarnesses(receipt, status, joinReceiptRepairs(repair, buildSkew))
-			}
-		}
 	}
 	if buildSkew != "" {
 		return generationReceiptWithHarnesses(receipt, receiptMismatch, buildSkew)
-	}
-	if anyMarker && !activePresent {
-		return generationReceiptWithHarnesses(receipt, receiptPartial,
-			fmt.Sprintf("a harness cache carries %s but the promoted source does not; rerun the matching felt setup command", pluginGenerationMarkerName))
 	}
 	if !activePresent && (harnessCount > 0 || directoryExists(filepath.Join(runtimeDir, pluginCurrentName))) {
 		return generationReceiptWithHarnesses(receipt, receiptPartial,
@@ -717,7 +693,7 @@ func generationReceiptWithHarnesses(receipt ReceiptGenerationReceipt, status rec
 }
 
 func readPluginGenerationMarker(pluginRoot string) (pluginGenerationIdentity, bool, error) {
-	path := filepath.Join(pluginRoot, pluginGenerationMarkerName)
+	path := filepath.Join(filepath.Dir(pluginRoot), pluginGenerationMarkerName)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return pluginGenerationIdentity{}, false, nil
 	} else if err != nil {
@@ -733,28 +709,6 @@ func readPluginGenerationMarker(pluginRoot string) (pluginGenerationIdentity, bo
 func directoryExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func comparePluginGenerations(active, loaded pluginGenerationIdentity) (receiptStatus, string) {
-	fields := []struct {
-		name string
-		want string
-		got  string
-	}{
-		{"source kind", active.SourceKind, loaded.SourceKind},
-		{"source", active.Source, loaded.Source},
-		{"requested ref", active.RequestedRef, loaded.RequestedRef},
-		{"resolved commit", active.ResolvedCommit, loaded.ResolvedCommit},
-		{"plugin version", active.PluginVersion, loaded.PluginVersion},
-		{"felt build", active.FeltBuild, loaded.FeltBuild},
-		{"payload digest", active.PayloadSHA256, loaded.PayloadSHA256},
-	}
-	for _, field := range fields {
-		if field.want != field.got {
-			return receiptMismatch, fmt.Sprintf("active promoted source and loaded harness cache disagree on %s (%q vs %q); rerun the matching felt setup command", field.name, field.want, field.got)
-		}
-	}
-	return receiptHealthy, ""
 }
 
 func combineReceiptStatus(felt receiptStatus, bundles []ReceiptBundle, hooks receiptStatus, extra ...receiptStatus) (receiptStatus, string) {

@@ -8,12 +8,12 @@ import (
 )
 
 // These tests prove the trust boundary the promotion commit rests on: a
-// native CLI's zero exit status is not evidence, only a cache that carries
-// the promoted generation marker and digest is. The fakes behave like the
+// native CLI's zero exit status is not evidence, only directly verified
+// payload bytes are. The fakes behave like the
 // real CLIs — they copy the registered source's payload into a private cache;
 // Codex reports the source while Claude reports its cache — and the tamper modes
 // make them lie the specific ways a real harness can: serving a stale cache,
-// altering the payload, or never materializing the marker.
+// altering the payload, or adding release metadata to the hashed root.
 
 func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, wantGeneration string) {
 	t.Helper()
@@ -38,7 +38,7 @@ func assertRefusedBeforeCommit(t *testing.T, f *remoteSetupFixture, err error, w
 func TestSetupRefusesCommitOnUnverifiedNativeCache(t *testing.T) {
 	t.Parallel()
 	for _, h := range nativeHarnesses {
-		for _, tamper := range []string{"stale", "alter", "missing-marker"} {
+		for _, tamper := range []string{"stale", "alter", "release-metadata"} {
 			t.Run(h.name+"/"+tamper, func(t *testing.T) {
 				t.Parallel()
 				f := newRemoteSetupFixture(t, h.name)

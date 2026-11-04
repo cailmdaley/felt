@@ -97,11 +97,49 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 		return response.Thread.ID
 	}
 	writeManifest("A")
+	syncTestGit(t, source, "init")
+	syncTestGit(t, source, "add", ".")
+	syncTestGit(t, source, "-c", "user.name=Private probe", "-c", "user.email=probe@example.invalid", "commit", "-m", "plugin baseline")
 	setup()
 	live := open()
 	id := thread(live)
 	first := privateCodexHookTurn(t, live, id)
 	requirePrivateHookStatus(t, first, "completed", "")
+	// A real successive source revision changes only Go code. Setup advances
+	// external provenance, leaves every installed file untouched, and the
+	// same live thread executes its next hook without a runtime reload.
+	cache, err := a.verifiedCodexCacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]os.FileInfo{}
+	if err := filepath.Walk(cache, func(path string, info os.FileInfo, err error) error {
+		if err == nil {
+			files[path] = info
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	beforeDigest, err := pluginPayloadDigest(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSyncFile(t, source, "cmd/felt/main.go", "package main // Go-only revision\n")
+	syncTestGit(t, source, "add", ".")
+	syncTestGit(t, source, "-c", "user.name=Private probe", "-c", "user.email=probe@example.invalid", "commit", "-m", "Go-only revision")
+	setup()
+	afterDigest, err := pluginPayloadDigest(cache)
+	if err != nil || beforeDigest != afterDigest {
+		t.Fatalf("Go-only release changed hashed bytes: %s -> %s (%v)", beforeDigest, afterDigest, err)
+	}
+	for path, before := range files {
+		after, err := os.Stat(path)
+		if err != nil || !after.ModTime().Equal(before.ModTime()) {
+			t.Fatalf("unchanged plugin was reinstalled: %s (%v)", path, err)
+		}
+	}
+	requirePrivateHookStatus(t, privateCodexHookTurn(t, live, id), "completed", "")
 	writeManifest("B")
 	setup()
 	// The receipt is trusted, but both existing and new threads on the old
@@ -142,7 +180,7 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(fired) != "A\nA\nB\nB\nB\n" {
+	if string(fired) != "A\nA\nA\nB\nB\nB\n" {
 		t.Fatalf("unexpected hook executions: %q", fired)
 	}
 }

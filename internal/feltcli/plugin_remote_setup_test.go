@@ -156,7 +156,7 @@ materialize_cache() {
       cp -R "$src/claude-plugin/." "$cache/"
       case "${FAKE_NATIVE_TAMPER:-}" in
         alter) printf 'tampered\n' >> "$cache/skills/felt/SKILL.md";;
-        missing-marker) rm -f "$cache/.felt-generation.json";;
+        release-metadata) printf '{"resolved_commit":"unexpected"}\n' > "$cache/.felt-generation.json";;
       esac
       ;;
   esac

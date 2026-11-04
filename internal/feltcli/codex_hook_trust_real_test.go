@@ -140,7 +140,7 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 		t.Fatalf("private write was not visible: %v", err)
 	}
 
-	// Reinstalling identical bytes, including the marker, preserves both hashes.
+	// Reinstalling identical payload bytes preserves both hashes.
 	unchanged := list()
 	reinstall()
 	for i, h := range list() {
@@ -148,18 +148,23 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 			t.Fatalf("identical reinstall invalidates trust: %#v", h)
 		}
 	}
-	// Each change goes through the promoted source and a reinstall, as setup
-	// delivers it.
+	// Release provenance is outside the plugin: advancing it cannot invalidate
+	// either approval hash, even when the native cache is recopied.
+	identity.ResolvedCommit = strings.Repeat("f", 40)
+	if err := writePluginGeneration(candidate, identity); err != nil {
+		t.Fatal(err)
+	}
+	reinstall()
+	for i, h := range list() {
+		if h.CurrentHash != unchanged[i].CurrentHash || h.TrustStatus != "trusted" {
+			t.Fatalf("external provenance invalidates trust: %#v", h)
+		}
+	}
+	// Payload changes go through the promoted source and a reinstall.
 	mutations := []struct {
 		name   string
 		mutate func()
 	}{
-		{"generation marker", func() {
-			identity.ResolvedCommit = strings.Repeat("f", 40)
-			if err := writePluginGeneration(candidate, identity); err != nil {
-				t.Fatal(err)
-			}
-		}},
 		{"unrelated file", func() {
 			if err := os.WriteFile(filepath.Join(plugin, "unused.txt"), []byte("content"), 0o644); err != nil {
 				t.Fatal(err)
