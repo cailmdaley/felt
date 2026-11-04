@@ -1160,6 +1160,8 @@ class ChronicleView implements TemporalView {
    *  stays where it was dropped instead of snapping back for the seconds
    *  until the daemon's answer comes round; see `applyDueEdits`. */
   private dueEdits = new Map<string, string>()
+  /** A fiber's due mark and both cycle edges share one write gate. */
+  private dateWrites = new Set<string>()
   private teardownDraw: (() => void) | null = null
   /** The day columns of the current render, so a gesture handler can convert a
    *  cursor position into a civil day without threading them through. */
@@ -2629,7 +2631,7 @@ class ChronicleView implements TemporalView {
     ctx: ViewContext,
   ): void {
     grip.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return
+      if (e.button !== 0 || this.dateWrites.has(band.id)) return
       e.preventDefault()
       e.stopPropagation() // not a click on the band, and not a new draw
 
@@ -2685,6 +2687,8 @@ class ChronicleView implements TemporalView {
     ctx: ViewContext,
   ): Promise<void> {
     const id = band.id
+    if (this.dateWrites.has(id)) return
+    this.dateWrites.add(id)
     const previous = this.cycleEdits.get(id)
     this.cycleEdits.set(id, { ...previous, [edge]: day })
     this.repaintNow()
@@ -2705,6 +2709,8 @@ class ChronicleView implements TemporalView {
       else this.cycleEdits.delete(id)
       this.repaintNow()
       window.console.error('[chronicle] could not move cycle edge', err)
+    } finally {
+      this.dateWrites.delete(id)
     }
   }
 
@@ -2731,7 +2737,7 @@ class ChronicleView implements TemporalView {
     const cardId = row.cardId
     if (!cardId) return
     mark.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return
+      if (e.button !== 0 || this.dateWrites.has(cardId)) return
       e.preventDefault()
       e.stopPropagation() // not a click on the row, and not a new cycle draw
 
@@ -2809,6 +2815,8 @@ class ChronicleView implements TemporalView {
     day: string,
     ctx: ViewContext,
   ): Promise<void> {
+    if (this.dateWrites.has(cardId)) return
+    this.dateWrites.add(cardId)
     const previous = this.dueEdits.get(cardId)
     this.dueEdits.set(cardId, day)
     this.repaintNow()
@@ -2823,6 +2831,8 @@ class ChronicleView implements TemporalView {
       else this.dueEdits.delete(cardId)
       this.repaintNow()
       window.console.error('[chronicle] could not move due date', err)
+    } finally {
+      this.dateWrites.delete(cardId)
     }
   }
 
