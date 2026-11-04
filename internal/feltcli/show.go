@@ -16,7 +16,7 @@ import (
 // It reads the store through env and writes to the output stream its root
 // command was given (the felt root sets it from env).
 func NewShowCmd(env *sysenv.Env, view ViewOptions) *cobra.Command {
-	var showBodyOnly bool
+	var showBodyOnly, showExact bool
 	var showDetail string
 	var showCitations bool
 	var showConsumers bool
@@ -75,9 +75,19 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 			// an id naming a fiber in the enclosing store is shown from there,
 			// and a UID is read directly instead of walked for a second time.
 			read := func(find func(*felt.Storage, string, string) (*felt.Felt, error)) (*felt.Felt, error) {
-				target, f, err := felt.ReadResolved(storage, scopeID, args[0], func(r felt.Ref) (*felt.Felt, error) {
-					return find(r.Storage, "", r.ID)
-				})
+				var target felt.Ref
+				var f *felt.Felt
+				var err error
+				if showExact {
+					target, err = felt.ResolveAddressRef(storage, args[0])
+					if err == nil {
+						f, err = find(target.Storage, "", target.ID)
+					}
+				} else {
+					target, f, err = felt.ReadResolved(storage, scopeID, args[0], func(r felt.Ref) (*felt.Felt, error) {
+						return find(r.Storage, "", r.ID)
+					})
+				}
 				if err == nil {
 					storage = target.Storage
 				}
@@ -164,6 +174,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 	}
 
 	command.GroupID = groupFibers
+	command.Flags().BoolVar(&showExact, "exact", false, "Resolve only an intrinsic UID or an exact path in the enclosing store namespace")
 	command.Flags().BoolVarP(&showBodyOnly, "body", "b", false, "Print the body and the line it starts on")
 	command.Flags().StringVarP(&showDetail, "detail", "d", "", "Detail level (name, compact, summary, full)")
 	command.Flags().BoolVar(&showCitations, "citations", false, "Print the fibers that wikilink here")

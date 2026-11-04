@@ -13,12 +13,14 @@ defmodule ShuttleWeb.FiberController do
   its own `shuttle.host`, so a remote stash is born owned by the right daemon.
 
   Placement and identity belong to felt, not to this controller. The local write
-  shells out to `felt add ... --top-level`, which mints an intrinsic ULID, owns
+  shells out to `felt add ... --namespace`, which mints an intrinsic ULID, owns
   the on-disk layout, and rejects duplicates. The controller reads felt's
   carried path and UID through `felt show -j`, then applies custom frontmatter
   and any transferred identity and native metadata in one atomic write.
   The Shuttle block becomes visible with that document's final identity.
-  There is no hand-built path and no reverse-derivation of layout.
+  Creation paths are relative to the enclosing store namespace, including when
+  `project_dir/.felt` is a symlink into a subtree of that store.
+  The final document is read back before the owner confirms its host and status.
   """
 
   use Phoenix.Controller, formats: [:json]
@@ -54,18 +56,28 @@ defmodule ShuttleWeb.FiberController do
          {:ok, name} <- required_string(params, "name"),
          {:ok, body} <- optional_string(params, "body", ""),
          {:ok, uid} <- optional_string(params, "uid", ""),
+         :ok <- validate_uid(uid),
          {:ok, frontmatter} <- normalize_frontmatter(params, name),
          {:ok, frontmatter} <- normalize_shuttle_host(frontmatter),
          :ok <- validate_shuttle(frontmatter["shuttle"], frontmatter["status"]),
          :ok <- validate_fiber_id(fiber_id),
          {:ok, path, generated_uid} <- felt_add(fiber_id, name, body, frontmatter),
-         :ok <- inject_create_frontmatter(path, frontmatter, uid) do
-      uid = if uid == "", do: generated_uid, else: uid
+         :ok <- inject_create_frontmatter(path, frontmatter, uid),
+         uid = if(uid == "", do: generated_uid, else: uid),
+         :ok <-
+           confirm_created(felt_root(frontmatter), fiber_id, path, uid, status_of(frontmatter)) do
       # Announce the new document to the Poller: an armed constitution
       # dispatches on the next tick, and the owner's feed lists it now, even
       # on a store whose discovery stays hot between full scans.
       announce_created(path, uid)
-      json(conn, %{id: fiber_id, path: path, uid: uid})
+
+      json(conn, %{
+        id: fiber_id,
+        path: path,
+        uid: uid,
+        host: Shuttle.Poller.own_host_id(),
+        status: status_of(frontmatter)
+      })
     else
       {:error, reason} ->
         conn
@@ -152,24 +164,20 @@ defmodule ShuttleWeb.FiberController do
 
   defp validate_shuttle(_, _), do: {:error, "shuttle must be an object"}
 
-  # Let felt own placement, identity, and duplicate-rejection. `--top-level`
-  # disables felt's leading-segment slug resolution so the fiber lands at the
-  # exact id the caller asked for instead of being relocated under a matching
-  # parent — preserving the daemon-local create contract (id in, id out).
-  # felt mints the ULID into frontmatter (`id:`), so POST-created fibers are
-  # born with a real intrinsic identity. We read the carried `path` straight
-  # back from felt rather than reconstructing it.
+  # felt owns placement, identity and duplicate rejection. `--namespace`
+  # addresses the enclosing store rather than a project-rooted subtree, without
+  # name inference. The returned path is felt's carried physical path.
   defp felt_add(fiber_id, name, body, frontmatter) do
     root = felt_root(frontmatter)
 
     args =
-      ["-C", root, "add", fiber_id, name, "--top-level", "-s", status_of(frontmatter)] ++
+      ["-C", root, "add", fiber_id, name, "--namespace", "-s", status_of(frontmatter)] ++
         body_args(body) ++ tag_args(frontmatter) ++ native_field_args(frontmatter)
 
     with :ok <- ensure_felt_repo(root),
          {:ok, _output} <- Shuttle.Felt.run(args) do
       case felt_metadata(root, fiber_id) do
-        {:ok, path, uid} -> {:ok, path, uid}
+        {:ok, path, uid, _status} -> {:ok, path, uid}
         error -> error
       end
     else
@@ -194,12 +202,12 @@ defmodule ShuttleWeb.FiberController do
   end
 
   defp felt_metadata(root, fiber_id) do
-    case Shuttle.Felt.run(["-C", root, "show", fiber_id, "-j"]) do
+    case Shuttle.Felt.run(["-C", root, "show", fiber_id, "-j", "--exact"]) do
       {:ok, output} ->
         case Jason.decode(output) do
-          {:ok, %{"path" => path, "uid" => uid}}
+          {:ok, %{"id" => ^fiber_id, "path" => path, "uid" => uid, "status" => status}}
           when is_binary(path) and path != "" and is_binary(uid) and uid != "" ->
-            {:ok, path, uid}
+            {:ok, path, uid, status}
 
           _ ->
             {:error, "felt show returned no path or uid for #{fiber_id}"}
@@ -210,6 +218,19 @@ defmodule ShuttleWeb.FiberController do
 
       {:error, reason} ->
         {:error, "felt show failed: #{reason}"}
+    end
+  end
+
+  defp confirm_created(root, id, path, uid, status) do
+    case felt_metadata(root, id) do
+      {:ok, ^path, ^uid, ^status} ->
+        :ok
+
+      {:ok, _, _, _} ->
+        {:error, "created fiber #{id} did not retain its requested identity and status"}
+
+      error ->
+        error
     end
   end
 
@@ -270,6 +291,12 @@ defmodule ShuttleWeb.FiberController do
         _ -> []
       end
     end)
+  end
+
+  defp validate_uid(""), do: :ok
+
+  defp validate_uid(uid) do
+    if Shuttle.ULID.valid?(uid), do: :ok, else: {:error, "uid must be a canonical ULID"}
   end
 
   defp validate_fiber_id(fiber_id) do

@@ -324,14 +324,12 @@ defmodule Shuttle.FeltStores do
   @doc """
   Resolve a public fiber identifier to the felt address Shuttle can shell out to.
 
-  Resolution asks felt for the answer — it never reconstructs the path from the
-  id. For a slug address (the common case, including the symlinked "prefix-drop"
-  topology) `felt show -j <addr>` resolves the fiber and carries its physical
-  `path`, addressable `id`, and intrinsic `uid` directly. For a bare intrinsic
-  ULID — which `felt show` cannot address — we scan each store's `felt ls -j`
-  for the matching `uid` and read the carried `path` from that row. Either way
-  the values come from felt's read chokepoint, not from guessing filesystem
-  layouts.
+  Resolution asks `felt show -j` for the physical `path`, namespace-relative
+  `id`, and intrinsic `uid`.
+  Paths and ULIDs use `--exact`, so an absent path cannot resolve to a same-leaf
+  fiber elsewhere in the store.
+  Bare names on the read surface retain felt's interactive name resolution.
+  Lifecycle requests use `resolve_request/1`, which is exact for every identifier.
 
   Returns `%{store, fiber_id, path, uid}` where `store` is the owning store root
   (for shelling subsequent felt commands), `fiber_id` is felt's addressable
@@ -370,9 +368,9 @@ defmodule Shuttle.FeltStores do
     end
   end
 
-  @doc "Resolve an interactive lifecycle request from the local store."
+  @doc "Resolve an exact namespace path or intrinsic UID for a lifecycle write."
   def resolve_request(identifier) do
-    case resolve_fiber(identifier) do
+    case resolve_with(identifier, configured_stores(), true) do
       {:ok, resolved} -> {:ok, resolved}
       {:error, :not_found} -> {:error, :not_found, missing_on_host(identifier)}
       {:error, :timeout} -> {:error, :timeout, "felt timed out resolving #{identifier}"}
@@ -392,18 +390,12 @@ defmodule Shuttle.FeltStores do
   @spec resolve_fiber(String.t(), store_list()) ::
           {:ok, resolved_fiber()} | {:error, :not_found | :timeout}
   def resolve_fiber(identifier, stores) when is_binary(identifier) and is_list(stores) do
-    # `:timeout` is sticky-but-weak: it survives a miss (the world stayed
-    # unknown) but loses to any positive resolution — so a wedged store never
-    # masks an answer another store, or the uid scan, can still give.
-    show = show_resolution(stores, identifier)
+    exact = String.contains?(identifier, "/") or Shuttle.ULID.valid?(identifier)
+    resolve_with(identifier, stores, exact)
+  end
 
-    result =
-      case show do
-        %{} -> show
-        _ -> uid_resolution(stores, identifier) || show
-      end
-
-    case result do
+  defp resolve_with(identifier, stores, exact) do
+    case show_resolution(stores, identifier, exact) do
       nil -> {:error, :not_found}
       :timeout -> {:error, :timeout}
       resolved -> {:ok, resolved}
@@ -420,18 +412,18 @@ defmodule Shuttle.FeltStores do
   # Returns the resolved map, `:timeout` (some store never answered and none
   # resolved — absence is not established), or nil (every store answered "not
   # mine").
-  defp show_resolution(stores, identifier) do
+  defp show_resolution(stores, identifier, exact) do
     Enum.reduce(stores, nil, fn
       _host, %{} = resolved ->
         resolved
 
       store, acc ->
-        case felt_show_json(store, identifier) do
+        case felt_show_json(store, identifier, exact) do
           {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
             owner = owning_store(stores, path) || store
 
             owner_fiber =
-              if owner == store, do: fiber, else: felt_for_path(owner, identifier, fiber)
+              if owner == store, do: fiber, else: felt_for_path(owner, fiber)
 
             resolved_from(owner, owner_fiber) || acc
 
@@ -442,39 +434,6 @@ defmodule Shuttle.FeltStores do
             acc
         end
     end)
-  end
-
-  # `felt show` addresses fibers by slug, not by intrinsic ULID, so a bare UID
-  # falls through to scanning each store's `felt ls -j` for a matching `uid`,
-  # reading the carried `path`, and assigning ownership by that path. Skipped
-  # entirely for non-ULID identifiers (those resolve via `show_resolution`).
-  # Same nil / `:timeout` / resolved-map contract as `show_resolution/2`.
-  defp uid_resolution(stores, uid) do
-    if Shuttle.ULID.valid?(uid) do
-      Enum.reduce(stores, nil, fn
-        _host, %{} = resolved ->
-          resolved
-
-        store, acc ->
-          case felt_ls_json(store) do
-            {:ok, rows} when is_list(rows) ->
-              Enum.find_value(rows, acc, fn
-                %{"uid" => ^uid, "path" => path} = fiber when is_binary(path) and path != "" ->
-                  owner = owning_store(stores, path) || store
-                  resolved_from(owner, fiber)
-
-                _ ->
-                  nil
-              end)
-
-            {:error, :timeout} ->
-              :timeout
-
-            _ ->
-              acc
-          end
-      end)
-    end
   end
 
   defp resolved_from(store, %{"id" => id, "path" => path} = fiber)
@@ -493,35 +452,26 @@ defmodule Shuttle.FeltStores do
     end)
   end
 
-  # Re-query the owner store so the returned `id` is owner-relative. Falls back
-  # to the original fiber JSON if the owner can't address the identifier (it
-  # always can for a physically-rooted fiber, but we degrade safely).
-  defp felt_for_path(owner, identifier, fallback) do
-    case felt_show_json(owner, identifier) do
-      {:ok, %{"path" => _} = fiber} -> fiber
-      _ -> fallback
+  # Re-query by intrinsic identity when switching stores, so a view's alias
+  # cannot select a different same-named fiber in the owning store.
+  defp felt_for_path(owner, fiber) do
+    identifier = fiber["uid"] || fiber["id"]
+
+    case felt_show_json(owner, identifier, true) do
+      {:ok, %{"path" => _} = resolved} -> resolved
+      _ -> fiber
     end
   end
 
-  defp felt_show_json(store, identifier) do
+  defp felt_show_json(store, identifier, exact) do
     # Never fold stderr into stdout: felt prints "no fiber found matching …" to
     # stderr and JSON to stdout. A miss exits non-zero with empty stdout.
     # A `:timeout` from the bounded runner is kept distinct from a miss: the
     # store never answered, so "not found" is not established.
-    case runner().cmd("felt", ["-C", store, "show", identifier, "-j"], stderr_to_stdout: false) do
-      {output, 0} -> Jason.decode(output)
-      {_output, :timeout} -> {:error, :timeout}
-      {_output, _status} -> {:error, :not_found}
-    end
-  rescue
-    _ -> {:error, :not_found}
-  end
+    args = ["-C", store, "show", identifier, "-j"]
+    args = if exact, do: args ++ ["--exact"], else: args
 
-  # `-s all` so a UID pointing at a closed/composted fiber still resolves; the
-  # default `ls` filters to open/active. felt walks the tree and carries `uid`
-  # and `path` per row, so no index build is required.
-  defp felt_ls_json(store) do
-    case runner().cmd("felt", ["-C", store, "ls", "-j", "-s", "all"], stderr_to_stdout: false) do
+    case runner().cmd("felt", args, stderr_to_stdout: false) do
       {output, 0} -> Jason.decode(output)
       {_output, :timeout} -> {:error, :timeout}
       {_output, _status} -> {:error, :not_found}

@@ -88,7 +88,9 @@ defmodule ShuttleWeb.LifecycleController do
   # Lifecycle transitions go through `Shuttle.LifecycleService`, which runs
   # Shuttle's writer inside the Poller, serialized with its state changes.
   defp execute("accept", %{"fiber" => fiber}), do: lifecycle(:accept, fiber)
-  defp execute("resume", %{"fiber" => fiber}), do: lifecycle(:resume, fiber)
+
+  defp execute("resume", %{"fiber" => fiber} = params),
+    do: lifecycle_with_args(:resume, fiber, params)
 
   defp execute("close", %{"fiber" => fiber} = params),
     do: lifecycle_with_args(:close, fiber, params)
@@ -159,6 +161,9 @@ defmodule ShuttleWeb.LifecycleController do
     args = add_bool_flag(args, "--disabled", params["disabled"])
     {:ok, args}
   end
+
+  defp args_for("resume", %{"fiber" => fiber} = params),
+    do: {:ok, add_string_flag(["resume", fiber], "--project-dir", params["project_dir"])}
 
   defp args_for("pause", %{"fiber" => fiber} = params) do
     {:ok, ["pause", fiber] |> add_bool_flag("--no-kill", params["no_kill"])}

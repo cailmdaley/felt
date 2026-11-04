@@ -97,22 +97,38 @@ func (a *app) createRemoteFiber(owner string, f *felt.Felt, block *shuttle.Block
 }
 
 func (a *app) createRemoteFiberWithPath(owner string, f *felt.Felt, block *shuttle.Block) (string, error) {
-	response, err := a.postOwnerFiberCreate(owner, remoteFiberCreatePayload(f, block))
+	payload := remoteFiberCreatePayload(f, block)
+	id := f.ID
+	if f.Path != "" {
+		canonical, err := a.canonicalFiberID(f.Path)
+		if err != nil {
+			return "", err
+		}
+		id = canonical
+	}
+	payload["id"] = id
+	response, err := a.postOwnerFiberCreate(owner, payload)
 	if err != nil {
 		return "", err
 	}
 	var created struct {
-		ID   string `json:"id"`
-		UID  string `json:"uid"`
-		Path string `json:"path"`
+		ID     string `json:"id"`
+		UID    string `json:"uid"`
+		Path   string `json:"path"`
+		Host   string `json:"host"`
+		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(response, &created); err != nil {
 		return "", ownerCreateResponseError{owner: owner, fiber: f.ID, err: fmt.Errorf("invalid create response: %w", err)}
 	}
-	if created.ID != f.ID || (f.UID != "" && created.UID != f.UID) {
+	if created.Host != owner || created.Status != f.Status {
+		return "", ownerCreateResponseError{owner: owner, fiber: id,
+			err: fmt.Errorf("owner did not confirm the write on host %q with status %q (got host %q, status %q)", owner, f.Status, created.Host, created.Status)}
+	}
+	if created.ID != id || (f.UID != "" && created.UID != f.UID) {
 		return "", ownerCreateResponseError{
 			owner: owner, fiber: f.ID,
-			err: fmt.Errorf("owner returned id %q and uid %q; expected id %q and uid %q", created.ID, created.UID, f.ID, f.UID),
+			err: fmt.Errorf("owner returned id %q and uid %q; expected id %q and uid %q", created.ID, created.UID, id, f.UID),
 		}
 	}
 	if f.UID == "" {
@@ -124,5 +140,6 @@ func (a *app) createRemoteFiberWithPath(owner string, f *felt.Felt, block *shutt
 		}
 		f.UID = created.UID
 	}
+	f.ID = id
 	return created.Path, nil
 }

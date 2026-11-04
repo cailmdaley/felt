@@ -78,6 +78,16 @@ remote draft made with --disabled stays in this store while you write it;
 					unlock()
 				}
 			}()
+			// New paths and thread-parent references use the enclosing namespace,
+			// never the sender's project-relative view.
+			if !remoteParent {
+				canonical, canonicalErr := a.canonicalFiberID(parent.Path)
+				if canonicalErr != nil {
+					return canonicalErr
+				}
+				parent.ID = canonical
+				st = felt.NamespaceStorage(st)
+			}
 			inherited, ok, err := shuttle.BlockOf(parent)
 			if err != nil {
 				return err

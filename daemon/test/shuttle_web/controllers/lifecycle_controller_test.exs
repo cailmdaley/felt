@@ -15,6 +15,58 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     def handle_call(_, _, state), do: {:stop, :shutdown, state}
   end
 
+  @tag :tmp_dir
+  test "owner refuses an absent path instead of mutating a same-leaf constitution", %{
+    tmp_dir: tmp
+  } do
+    store = Path.join(tmp, "loom")
+    project = Path.join(tmp, "project")
+    path = Path.join([store, ".felt", "science", "team", "worker", "worker.md"])
+    File.mkdir_p!(Path.dirname(path))
+    File.mkdir_p!(project)
+    File.ln_s!(Path.join([store, ".felt", "science", "team"]), Path.join(project, ".felt"))
+    uid = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+
+    content =
+      "---\nid: #{uid}\nname: Worker\nstatus: active\nshuttle:\n  kind: oneshot\n  host: test-host\n  project_dir: #{project}\n---\nBody\n"
+
+    File.write!(path, content)
+    Shuttle.Test.Env.put_env("SHUTTLE_STORES", store <> "," <> project)
+    Shuttle.Test.Env.put_env("SHUTTLE_HOST", "test-host")
+
+    for action <- ["resume", "rest", "role"] do
+      id = "missing/worker"
+
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/lifecycle",
+          Jason.encode!(%{
+            action: action,
+            fiber: id,
+            role: "editor"
+          })
+        )
+
+      assert conn.status == 404
+      assert conn.resp_body =~ "fiber not found on test-host: #{id}"
+      assert File.read!(path) == content
+    end
+
+    # The sender's path can lag a move; the owner's intrinsic identity cannot.
+    conn = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(%{action: "rest", fiber: uid}))
+    assert conn.status == 200
+    assert conn.resp_body =~ "status: open, horizon: stashed"
+
+    assert {:ok, parsed} =
+             File.read!(path)
+             |> String.split("---\n", parts: 3)
+             |> Enum.at(1)
+             |> YamlElixir.read_from_string()
+
+    assert %{"id" => ^uid, "status" => "open", "horizon" => "stashed"} = parsed
+  end
+
   test "a poller stopping during a lifecycle request returns a structured uncertainty" do
     fixture_store!("shuttle-lifecycle-stop", "tests/operator", "Operator")
     {:ok, poller} = StoppingPoller.start_link()
@@ -218,7 +270,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
         "/api/v1/lifecycle",
         Jason.encode!(%{
           "action" => "reshape",
-          "fiber" => "lightcone/desk",
+          "fiber" => "ai-futures/lightcone/lightcone/desk",
           "kind" => "oneshot"
         })
       )

@@ -1,0 +1,18 @@
+{
+  "prefix": "science/team",
+  "fibers": [
+    {"id": "science/team/hub", "uid": "01ARZ3NDEKTSV4RRFFQ69G5FAW"},
+    {"id": "science/team/hub/worker", "uid": "01ARZ3NDEKTSV4RRFFQ69G5FAX"},
+    {"id": "elsewhere/worker", "uid": "01ARZ3NDEKTSV4RRFFQ69G5FAY"}
+  ],
+  "lookups": [
+    {"query": "science/team/hub/worker", "id": "science/team/hub/worker"},
+    {"query": "elsewhere/worker", "id": "elsewhere/worker"},
+    {"query": "missing/worker", "id": null},
+    {"query": "missing/hub", "id": null},
+    {"query": "science/team/hub/work", "id": null},
+    {"query": "01ARZ3NDEKTSV4RRFFQ69G5FAX", "id": "science/team/hub/worker"},
+    {"query": "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "id": null}
+  ],
+  "creates": ["science/team/hub/new-thread", "other/project/new-thread"]
+}

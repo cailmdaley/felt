@@ -74,7 +74,8 @@ func (a *app) remoteFiber(query string, full bool) (*felt.Felt, felt.Ref, error)
 	for _, candidate := range index.Fibers {
 		id, _ := candidate.Fiber["id"].(string)
 		slug, _ := candidate.Fiber["slug"].(string)
-		if candidate.Origin != "" && (candidate.Path == query || id == query || slug == query) {
+		uid, _ := candidate.Fiber["uid"].(string)
+		if candidate.Origin != "" && (candidate.Path == query || id == query || slug == query || uid == query) {
 			if row != nil {
 				return nil, felt.Ref{}, fmt.Errorf("fiber %q is ambiguous across owners %q and %q; use its intrinsic UID", query, row.Origin, candidate.Origin)
 			}

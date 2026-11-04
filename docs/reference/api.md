@@ -83,9 +83,12 @@ time.
 ### Fiber creation
 
 `POST /fiber/create` takes `{id, name, body?, frontmatter?, origin?, uid?}`.
-The owning daemon creates the exact store-relative `id`, without requiring its parent document to exist.
+The owning daemon creates the exact enclosing-store-relative `id`, without requiring its parent document to exist.
+A project whose `.felt` points into a subtree uses the enclosing store's namespace, so the project prefix is not added again.
 It validates an armed constitution's `project_dir` on that host and stamps its `shuttle.host`.
-The response is `{id, path, uid}`; `path` is the owner's Markdown filename, and `uid` is the intrinsic fiber identity.
+The response is `{id, path, uid, host, status}` after the owner reads back the written document.
+`path` is the owner's Markdown filename, `uid` is the intrinsic fiber identity, and `host` and `status` confirm the owning host and persisted status.
+A resumed local draft is retained unless the response confirms the requested identity and armed status.
 A supplied `uid` preserves an existing document's identity during transfer.
 Transferred native metadata and custom frontmatter are written with the Shuttle block before that constitution becomes eligible for dispatch.
 An unavailable owner fails the request, and a duplicate document is refused rather than overwritten.
@@ -112,6 +115,9 @@ unknown action or a missing field is 400.
 
 Lifecycle requests, dispatch requests (including remote `reopen`), and `GET /fibers/*id` return 404 when the owning daemon lacks the document.
 The error names the host and fiber identifier.
+Lifecycle identifiers are intrinsic ULIDs or exact enclosing-store-relative paths; an absent path never falls back to its last segment.
+The CLI forwards the ULID when the fiber has one.
+`resume` accepts `project_dir` in the same serialized write that arms the constitution.
 No request runs Git or `felt sync`; remote creation writes the document through `POST /fiber/create`.
 
 `GET /api/v1/version` includes `terminal`, the local host's configured `tmux` or `rex` backend.
