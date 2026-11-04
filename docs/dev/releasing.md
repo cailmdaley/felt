@@ -1,11 +1,11 @@
 # Plugin integration and releasing
 
-felt ships one shared plugin payload (`claude-plugin/`) for **Claude Code** and
-**Codex**, plus a native package for **pi**. The same hook scripts and skills
-directory work for Claude and Codex; only the manifest at the plugin root
-differs (`.claude-plugin/` and `.codex-plugin/` siblings, same content). A
-single marketplace manifest at `.claude-plugin/marketplace.json` registers the
-shared plugin for both.
+felt keeps shared hook and skill sources in `claude-plugin/`. **Claude Code**
+installs that combined payload. **Codex** installs two independently refreshed
+plugins from a generated `.agents/plugins/marketplace.json`: `felt` contains
+only hooks and its manifest; `felt-skills` contains only skills and its manifest.
+Their adapter-format version is independent of the CLI release. **pi** uses
+its native package and the same skill sources.
 
 - `felt setup claude` registers the `cailmdaley/felt` marketplace and installs
   the plugin through Claude's native CLI; `felt setup codex` does the same
@@ -21,9 +21,14 @@ shared plugin for both.
   **Updating the binaries updates binary-owned hook behavior**; refresh the plugin when its skills or adapter scripts change.
 - Handoff nudges run in felt's Pi extension and the shared Claude Code/Codex `PostToolUse` and `UserPromptSubmit` hooks (which stay silent for Claude Code sessions), independent of a store or running daemon.
   Refresh the package/plugin after changing this integration, not just the binaries.
-- **Binaries and plugin update in lockstep.** `felt update` replaces both Go
-  CLIs as a pair, then refreshes each installed integration; the Homebrew
-  formula's `post_install` does the same on `brew upgrade felt`.
+- `felt update` replaces both Go CLIs as a pair, then reconciles each installed
+  integration; Homebrew's `post_install` does the same. Matching payload digests
+  skip native plugin installation. A Go-only release changes provenance, not
+  Codex plugin bytes; a skills-only release refreshes only `felt-skills`.
+- Hook wrappers resolve the separately upgraded binaries through their existing
+  environment/PATH/home lookup. CLI hook interfaces must remain backward
+  compatible with installed wrappers. This is a trusted-updater boundary,
+  not transitive pinning of every executable a hook can invoke.
 
 ## Context handoff nudges
 
@@ -73,7 +78,15 @@ Exit the affected session, then resume the conversation with `codex --no-daemon 
 If Codex reports an active writer, wait for the previous session to unload before resuming; do not run two writers against the same conversation.
 Repeating `--trust-hooks` alone cannot refresh another process's in-memory approval.
 Felt neither restarts that process nor bypasses Codex's checks, and a shell guard cannot intercept a refusal that happens before the shell runs.
-Codex's native plugin commands own the cache and can remove old version roots; felt cannot guarantee uninterrupted live hooks during a refresh.
+Codex's native plugin commands own the cache and can remove old version roots.
+Setup installs genuine hook-bundle changes normally and prints one cutover warning with the resume command; it does not pin workers or retain generations.
+Go-only and skills-only releases leave the installed hook root untouched and do not require that cutover.
+
+**The combined-to-split migration is a hook-bundle change.** The first setup removes skills and release provenance from the hook approval boundary and installs the separate skills bundle.
+On Codex 0.166.0, an already-live combined-plugin runtime refuses its next hook with `plugin contents changed; hook approval required`, even when the hook commands themselves are identical and setup has persisted the new approval.
+The conversation and process remain alive, but refused hooks do not deliver context, mailbox messages, activity records, or handoff nudges.
+A fresh runtime loads the approved split bundles; recover an existing conversation with the exit-and-resume procedure above.
+A healthy receipt describes installed bytes and persisted approval, not the stale live process.
 
 Other plugins' definition-only approvals can also fail after their contents change.
 Codex migrates such approvals to a private `.hook-trust` baseline; a missing `trusted_content_hash` alone does not prove failure.
@@ -99,8 +112,9 @@ failure, setup restores both the last known-good staged generation and the
 harness's previous marketplace/plugin state. A zero exit status alone never
 commits a promotion: before the journal records `committed` and `previous` is
 discarded, setup reads the cache path each native CLI reports as loaded
-(`plugin list --json`), recomputes its payload digest, and requires it to
-carry the promoted generation marker. A failed verify first gets one forced
+(`plugin list --json`), and verifies its bytes directly against the promoted
+payload digest. Codex's source path is not its loaded cache: both versioned
+native caches are located and verified independently. A failed verify first gets one forced
 reinstall (uninstall+install / remove+add), because `plugin update` on an
 unchanged manifest version legitimately keeps the old versioned cache; a
 cache that still cannot prove the promoted generation after that is a
@@ -110,16 +124,21 @@ activation intent: after an interruption, the next setup restores `current`
 first, reinstalls each affected harness from that path, verifies the restored
 state, and retains the journal until reconciliation succeeds.
 
-Every promoted plugin carries `.felt-generation.json` inside the payload the
-harness copies. It binds the canonical local or GitHub source, requested ref,
-resolved commit, plugin version, both Go CLI build identities, and a
-deterministic payload digest. A same-version payload change is therefore a
-different generation. The receipt recomputes the digest in `current` and the
-loaded harness cache and reports pending journals, missing markers, or identity
-disagreement as unhealthy with a setup command to repair it. It also checks
-that the generation records the installed felt and shuttle builds. Marker and
-journal writes are fsynced and renamed with a parent-directory sync, so the
-recovery guarantees hold across power loss, not only process death.
+`~/.felt/plugin-runtime/current/.felt-generation.json` holds provenance outside
+all plugin roots. It records the canonical source, requested ref, resolved
+commit, source plugin version, Felt build identity, the combined Claude digest,
+and each Codex bundle's digest. Native caches contain no copy of this file.
+The receipt checks the installed Felt build against that external identity and
+recomputes every enabled cache's digest. Same-version payload edits are detected
+without requiring release metadata inside a hashed root. Pending journals,
+missing provenance, or source/cache disagreement are unhealthy, with a setup
+command to repair them. Marker and journal writes are fsynced and renamed with
+a parent-directory sync, preserving crash recovery.
+
+`TestCodexPluginPayloadClassificationGate` classifies every source plugin file
+as hook-bundle or skills-bundle and rejects release metadata in generated roots.
+Real-Codex tests exercise successive Go-only revisions, skills-only refreshes,
+combined-to-split migration, and genuine hook changes against a live thread.
 
 Use `felt setup validate --source <checkout>` as the non-mutating candidate
 gate. Use `felt setup receipt --json` to report the bundle the harness CLIs

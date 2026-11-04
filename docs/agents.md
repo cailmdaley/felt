@@ -28,17 +28,22 @@ felt setup codex     # Codex
 felt setup pi        # pi (@earendil-works/pi-coding-agent)
 ```
 
-The first two wrap the official plugin-marketplace flow:
+Claude setup wraps the official plugin-marketplace flow:
 
 ```bash
 # Claude Code
 claude plugin marketplace add cailmdaley/felt[#v<tag>]
 claude plugin install felt@cailmdaley-felt
 
-# Codex
-codex plugin marketplace add cailmdaley/felt[@v<tag>]
-codex plugin add felt@cailmdaley-felt
 ```
+
+Codex setup acquires and validates the source, generates a marketplace at
+`~/.felt/plugin-runtime/current`, and uses Codex's native commands to install
+both `felt@cailmdaley-felt` (hooks) and `felt-skills@cailmdaley-felt` (skills).
+Use `felt setup codex` rather than installing the combined source directly.
+Both caches are verified independently, and unchanged payloads are not
+reinstalled. A Go-only release changes no hashed plugin bytes; a skills update
+leaves the hook cache untouched.
 
 `felt setup pi` wraps pi's package manager:
 
@@ -50,7 +55,9 @@ None of them need a local checkout. Felt acquires GitHub sources into a
 disposable checkout, validates the complete plugin payload, promotes one local
 generation, and then asks the harness CLI to install it. A tagged `felt` binary
 pins acquisition to the matching tag; a `dev` build tracks the default branch,
-and every promoted payload records its resolved commit and content digest. An
+and external provenance at `~/.felt/plugin-runtime/current/.felt-generation.json`
+records its resolved commit, Felt build, and per-bundle content digests without
+copying release-specific metadata into any plugin root. An
 interrupted native activation is reconciled from the last known-good promoted
 generation before setup continues; `felt setup receipt --json` rejects pending
 or mismatched source/cache generations.
@@ -63,14 +70,32 @@ serves as the general inverse.
 
     `felt setup codex` records trust for exactly `felt@cailmdaley-felt`'s plugin hooks after installing or refreshing them.
     It uses Codex's own hook hashes and App Server config API, which need Codex 0.166.0 or newer, and leaves other plugins, user hooks, and project hooks untouched.
-    Trust is recorded only for the bytes of the promoted generation: felt first checks that Codex's plugin cache carries the promoted generation's sealed marker and payload digest, and that every felt hook Codex lists loads from that cache.
+    Trust is recorded only for verified bytes: felt checks each native plugin cache directly against its digest in external provenance, and checks that every felt hook Codex lists loads from the verified hook cache.
     Setup uses a temporary private Codex App Server config API to write and verify trust; this transient operation does not connect to Shuttle worker conversations.
-    Codex hashes the plugin's contents, including its generation marker, so a changed payload needs fresh trust.
-    An identical reinstall preserves trust.
+    Codex hashes the entire hook plugin, so genuine hook-bundle changes need fresh trust. Skills live in a separate approval boundary and have no command hooks to approve.
+    Setup leaves an unchanged installed hook bundle alone.
 
     A failed trust step prints a warning and `felt setup receipt` reports the hooks as unhealthy with the repair:
     `felt setup codex --trust-hooks` when trust is missing or stale, `felt setup codex` when the cached plugin is not the promoted generation.
     An older Codex without the trust API is a note on a healthy receipt; Codex then asks to review felt's hooks interactively.
+
+### Live Codex sessions during a hook change
+
+A genuine hook-bundle change installs normally and prints a one-line cutover
+warning. Already-running Codex processes retain their old approvals and refuse
+hooks with `plugin contents changed; hook approval required`; persisted trust
+and a healthy receipt do not refresh those processes. Exit the affected session,
+then run `codex --no-daemon resume <session-id>`. Wait for the previous writer
+to unload if Codex reports it is still active. New threads on the same stale
+App Server can fail too; opening a new terminal alone is not sufficient.
+
+The first migration from the combined plugin to separate hooks and skills is
+such a change, even with identical hook commands. The conversation stays alive,
+but refused hooks stop context injection, mailbox delivery, event recording,
+and automatic handoff nudges until the runtime is refreshed. Fresh runtimes
+load the newly approved bundles. Go-only and skills-only updates do not change
+the hook bundle and require no hook cutover. No worker pinning or old-generation
+retention is involved.
 
 `install.sh` (the curl installer) runs both commands automatically for whichever
 CLI it finds on `PATH`, with no opt-out flag — see
@@ -88,10 +113,10 @@ content without the hooks.
 
 ## Plugin contents
 
-One plugin directory serves Claude Code and Codex; one package manifest serves
-pi (the repo-root `package.json`, whose `pi` key points at the same skill tree
-and at `extensions/pi/`). Both bundle the same two skills; hooks on Claude/Codex
-correspond to extension events on pi.
+`claude-plugin/` supplies the combined Claude plugin and the independently
+projected Codex hook and skills plugins. Pi's repo-root `package.json` points
+at the same skill tree and `extensions/pi/`. All three harnesses receive the
+same two skills; hooks on Claude/Codex correspond to extension events on pi.
 
 ### Skills
 
@@ -154,9 +179,11 @@ stream simply carries fewer line types from pi sessions.
 !!! note
     **Updating the CLIs updates hook behavior.** `felt update` (and
     Homebrew's post-install) refresh both Go binaries and the plugin wiring
-    together, so hooks always run against matching binaries. You only need to
-    re-run `felt setup claude`/`codex` when the *skill content* changes, not
-    when hook logic changes.
+    together, skipping native cache changes when payloads match. The wrappers
+    resolve independently upgraded binaries, so CLI hook interfaces must stay
+    backward compatible. This trusts the updater; it does not pin all code
+    transitively invoked by a hook. Re-run setup when skills or wrapper bytes
+    change; a binary-only hook behavior change needs no plugin cache refresh.
 
 ## Full CLI surface
 
