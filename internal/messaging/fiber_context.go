@@ -375,6 +375,20 @@ func deliverFiberContextItemWith(ctx context.Context, env *sysenv.Env, fiber, ho
 	if err != nil {
 		return err
 	}
+	selected, err := ParseAddress(selectedAddress)
+	if err != nil {
+		return err
+	}
+	// Quiet Codex context is consumed only by the fiber hook, never a
+	// session queue whose lifetime can end before its next offer.
+	if selected.Harness == "codex" && !request.Wake {
+		if MailboxAvailable(env, selected.Harness, selected.ID, host) && entry.AttemptAddress != "" {
+			if err := writeFiberMailboxAttempt(path, entry, ""); err != nil {
+				return err
+			}
+		}
+		return errCode("unconfirmed", "quiet Codex context awaits its fiber hook")
+	}
 	address := entry.AttemptAddress
 	if address == "" {
 		address = selectedAddress
