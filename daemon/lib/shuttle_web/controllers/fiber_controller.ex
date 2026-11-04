@@ -64,6 +64,7 @@ defmodule ShuttleWeb.FiberController do
          :ok <- validate_fiber_id(fiber_id),
          :ok <- unused_uid(uid),
          {:ok, root, local_id} <- create_target(fiber_id, frontmatter),
+         {:ok, _} <- polled_destination(root, local_id),
          {:ok, path, generated_uid} <- felt_add(root, local_id, name, body, frontmatter),
          {:ok, store} <- polled_store(path),
          :ok <- inject_create_frontmatter(path, frontmatter, uid),
@@ -96,12 +97,17 @@ defmodule ShuttleWeb.FiberController do
     end)
   end
 
+  defp polled_destination(root, id) do
+    destination = Path.join([root, ".felt", id, Path.basename(id) <> ".md"])
+    with {:ok, path} <- Shuttle.Realpath.resolve(destination), do: polled_store(path)
+  end
+
   defp polled_store(path) do
     case Enum.find(
            polled_stores(),
            &String.starts_with?(path, FeltStores.store_felt_realpath(&1) <> "/")
          ) do
-      nil -> {:error, "created path is outside every polled store"}
+      nil -> {:error, "path is outside every polled store"}
       store -> {:ok, store}
     end
   end

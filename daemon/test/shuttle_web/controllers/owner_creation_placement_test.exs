@@ -32,6 +32,28 @@ defmodule ShuttleWeb.OwnerCreationPlacementTest do
   end
 
   @tag :tmp_dir
+  test "an unpolled symlink destination is refused before writing anything", %{tmp_dir: tmp} do
+    loom = Path.join(tmp, "loom")
+    notes = Path.join(tmp, "notes")
+    File.mkdir_p!(Path.join(loom, ".felt"))
+    File.mkdir_p!(notes)
+    File.ln_s!(notes, Path.join(loom, ".felt/linked"))
+    Env.put_env("SHUTTLE_STORES", loom)
+
+    result =
+      post(
+        api_conn(),
+        "/api/v1/fiber/create",
+        Jason.encode!(%{id: "linked/hole/child", name: "Child", frontmatter: %{status: "open"}})
+      )
+
+    assert result.status == 400
+    assert result.resp_body =~ "outside every polled store"
+    assert File.ls!(notes) == []
+    assert File.ls!(Path.join(loom, ".felt")) == ["linked"]
+  end
+
+  @tag :tmp_dir
   test "linked project ancestors own their children independent of the worker cwd", %{
     tmp_dir: tmp
   } do
