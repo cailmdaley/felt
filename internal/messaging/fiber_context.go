@@ -27,9 +27,6 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 	if fiber == "" || r.MessageID == "" || r.Text == "" || len(r.Text) > 64<<10 {
 		return errCode("invalid_request", "fiber context requires a key, message id and text (at most 64 KiB)")
 	}
-	if requestExpired(r, time.Now()) {
-		return nil
-	}
 	root := mailboxDir(env, "fiber", fiber)
 	if err := ensureDir(root, 0700); err != nil {
 		return err
@@ -44,16 +41,30 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
 	for _, state := range []string{"pending", "offered"} {
-		if _, err := os.Stat(filepath.Join(root, state, mailboxKey(r.MessageID)+".json")); err == nil {
+		if entry, err := readFiberMailboxEntry(filepath.Join(root, state, mailboxKey(r.MessageID)+".json")); err == nil {
+			if fiberRequestIdentity(entry.Request) != fiberRequestIdentity(r) {
+				return errCode("message_id_conflict", "message id already names different fiber context")
+			}
 			return nil
 		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
+	if requestExpired(r, time.Now()) {
+		return nil
+	}
 	if r.ThreadSignal != nil && (r.ThreadSignal.UID == "" || r.ThreadSignal.Verb == "" || r.ThreadSignal.Stamp == "" || r.ThreadSignal.Owner == "") {
 		return errCode("invalid_request", "thread signal requires uid, verb, stamp and owner")
 	}
 	return enqueueMailbox(root, r)
+}
+
+// The fiber key supplies the destination; session aliases and refreshed
+// retention/proof metadata do not change a retry's semantic identity.
+func fiberRequestIdentity(r Request) string {
+	r.Address = ""
+	signal, _ := json.Marshal(r.ThreadSignal)
+	return requestHash(r) + string(signal)
 }
 
 func requestExpired(request Request, now time.Time) bool {

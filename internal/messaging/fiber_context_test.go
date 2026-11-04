@@ -83,6 +83,47 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 	}
 }
 
+func TestFiberContextRejectsConflictingRetry(t *testing.T) {
+	for _, state := range []string{"pending", "offered"} {
+		for _, change := range []string{"text", "wake", "sender", "signal"} {
+			t.Run(state+"/"+change, func(t *testing.T) {
+				env := testEnv(t)
+				request := Request{MessageID: "retry", Text: "original", From: "sender"}
+				if err := QueueFiberContext(env, "fiber", request); err != nil {
+					t.Fatal(err)
+				}
+				root := mailboxDir(env, "fiber", "fiber")
+				if state == "offered" {
+					if err := offerMailboxEachValidated(root, func(Request) bool { return true }, nil, func(Request) error { return nil }); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := QueueFiberContext(env, "fiber", request); err != nil {
+					t.Fatalf("identical retry: %v", err)
+				}
+				changed := request
+				switch change {
+				case "text":
+					changed.Text = "different"
+				case "wake":
+					changed.Wake = true
+				case "sender":
+					changed.From = "other"
+				case "signal":
+					changed.ThreadSignal = &ThreadSignal{UID: "child", Verb: "closed", Stamp: time.Now().UTC().Format(time.RFC3339Nano), Owner: "host"}
+				}
+				if err := QueueFiberContext(env, "fiber", changed); ErrorCode(err) != "message_id_conflict" {
+					t.Fatalf("conflicting retry = %v", err)
+				}
+				entry, err := readFiberMailboxEntry(filepath.Join(root, state, mailboxKey(request.MessageID)+".json"))
+				if err != nil || entry.Request.Text != request.Text {
+					t.Fatalf("retained entry = %+v, %v", entry, err)
+				}
+			})
+		}
+	}
+}
+
 func transition(t *testing.T, env *sysenv.Env, identity, address string) uint64 {
 	t.Helper()
 	n, err := TransitionFiberReceiver(env, "fiber", "host", identity, address)
