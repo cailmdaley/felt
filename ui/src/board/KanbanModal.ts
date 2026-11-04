@@ -1432,18 +1432,16 @@ export class KanbanModal {
   }
 
   /**
-   * POST a surface edit. Computes the horizon/cold/due frontmatter diff
-   * client-side and posts it through the daemon's `/api/v1/felt-edit`
-   * (owner-routed by `origin`) so the drag is one atomic write.
+   * Apply a planning gesture through the owner-routed write APIs.
    *
    *   • Drag a scheduled/in-flight card onto a date column →
-   *     setSurface(card, 'now', { due }); the edit persists due, clears horizon,
-   *     and the card keeps its lifecycle column while wearing the date.
+   *     setSurface(card, 'now', { due }); only due changes, preserving its
+   *     lifecycle and worker.
    *   • SNOOZE — drag a desk card (Drafts / Awaiting review) or a resting card
-   *     onto a date column → setSurface(card, 'stashed', { due }); ONE felt-edit
-   *     writes `horizon: stashed` AND `due:` together, so no poll can ever
-   *     observe half of it. Which of the two a day-drop means is decided by
-   *     `dayDropHorizon` at the drop site, from where the card currently sits.
+   *     onto a date column → setSurface(card, 'stashed', { due }); lifecycle
+   *     rest writes the wake date and resting state atomically. Cold styling
+   *     is a separate edit. `dayDropHorizon` chooses between these gestures
+   *     from the card's current column.
    *   • Drag into Resting                 → setSurface(card, 'stashed', { cold? }).
    *   • Drag back up to now               → setSurface(card, 'now') clears horizon.
    *
@@ -1527,6 +1525,7 @@ export class KanbanModal {
     horizon: HorizonKind,
     opts: { cold?: boolean; due?: string | null; dropsStaleDue?: boolean },
   ): Promise<void> {
+    let rested = false
     try {
       // Into Resting is `shuttle rest`, the worker's own exit said by hand: the
       // owning daemon writes `status: open` + `horizon: stashed` inside its
@@ -1541,7 +1540,9 @@ export class KanbanModal {
       if (horizon === 'stashed' && !hasVerdict) {
         await this.postJson('/api/v1/lifecycle', {
           action: 'rest', fiber: card.id, origin: card.originId,
+          ...(typeof opts.due === 'string' ? { until: opts.due } : {}),
         }, 'Rest failed')
+        rested = true
       } else {
         // Any other planning surface (a future date, or back onto the desk)
         // holds DRAFTS. Parking a running card there stops its worker — alive
@@ -1555,8 +1556,8 @@ export class KanbanModal {
           await this.postTransition(card, 'drafts', 'Park-as-draft failed')
         }
       }
-      // What rest does not write — `cold`, and a date the drop names — rides
-      // the horizon edit below; the horizon itself is restated, harmlessly.
+      // Rest owns the wake date; cold presentation and explicit date clearing
+      // ride the independent frontmatter edit below.
       // The horizon "surface" is not stored verbatim — Now is absence (clear
       // `horizon`+`cold`), future placement is `due:`, and only `stashed`
       // writes a stored horizon. The daemon `/api/v1/felt-edit` is a raw
@@ -1575,13 +1576,16 @@ export class KanbanModal {
       const payload: Record<string, unknown> = { fiber_id: card.id, origin: card.originId }
       if (Object.keys(set).length > 0) payload.set = set
       if (unset.length > 0) payload.unset = unset
-      if (opts.due !== undefined) payload.due = opts.due
+      if (opts.due !== undefined && !(rested && typeof opts.due === 'string')) payload.due = opts.due
       await this.postFeltEdit(payload, 'Surface edit failed')
       this.announceSurfaceLanding(card, horizon, opts)
     } catch (err: unknown) {
       const msg = errText(err)
-      this.showBanner(`Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${msg}`, 'error')
-      this.announce(`Surface move failed: ${msg}`)
+      const message = rested
+        ? `“${card.name}” is resting${typeof opts.due === 'string' ? ` until ${formatDue(opts.due)}` : ''}, but its presentation edit failed: ${msg}`
+        : `Couldn't move “${card.name}” to ${SURFACE_TITLE[horizon]}: ${msg}`
+      this.showBanner(message, 'error')
+      this.announce(message)
     }
     await this.fetchAndRender()
   }

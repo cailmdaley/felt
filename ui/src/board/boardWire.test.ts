@@ -275,8 +275,8 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
       origin: 'local',
       set: { horizon: 'stashed' },
       unset: ['cold'],
-      due: target,
     })
+    expect(wire.bodiesTo('/api/v1/lifecycle')[0]).toMatchObject({ until: target })
   })
 
   it('sends an explicit null when the caller means "clear it"', async () => {
@@ -297,6 +297,20 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
 
     await new Promise((r) => setTimeout(r, 20))
     expect(wire.calls).toEqual([])
+  })
+
+  it('snoozes with until on the lifecycle write even if the cold presentation edit fails', async () => {
+    const board = asPrivate(makeBoard())
+    const banner = vi.spyOn(board, 'showBanner')
+    const due = dayFromNow(7)
+    wire.fail('/api/v1/felt-edit')
+    board.setSurface(card({ status: 'closed' }), 'stashed', { due, cold: true })
+    await wire.settled()
+    expect(wire.bodiesTo('/api/v1/lifecycle')).toEqual([
+      { action: 'rest', fiber: 'fiber-1', origin: 'local', until: due },
+    ])
+    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).not.toHaveProperty('due')
+    expect(banner).toHaveBeenCalledWith(expect.stringMatching(/resting.*presentation/i), 'error')
   })
 
   it('rests a non-open card BEFORE the horizon edit — the clean-exit marker rides rest', async () => {
