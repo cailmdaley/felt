@@ -2,6 +2,7 @@ package shuttlecli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,8 +76,8 @@ fi
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.home, ".bash_profile"), "export LOGIN_PROFILE_LOADED=yes\n")
-	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\ncase \"$1\" in\n-lc) shift; exec '"+realBash+"' -c '. \"$HOME/.bash_profile\"; eval \"$1\"' login \"$1\";;\n-l) shift; exec '"+realBash+"' -c '. \"$HOME/.bash_profile\"; source /dev/stdin' login;;\nesac\nexec '"+realBash+"' \"$@\"\n")
+	write(filepath.Join(f.home, ".bash_profile"), "umask 027\nexport LOGIN_PROFILE_LOADED=yes\n")
+	write(filepath.Join(f.bin, "bash"), "#!/bin/sh\ncase \"$1\" in\n-lc) shift; LOGIN_CODE=$1; export LOGIN_CODE; shift; exec '"+realBash+"' --noprofile -l -c '. \"$HOME/.bash_profile\"; eval \"$LOGIN_CODE\"' \"$@\";;\nesac\nexec '"+realBash+"' \"$@\"\n")
 	realRm, err := exec.LookPath("rm")
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +95,7 @@ exec `+shellQuote(realRm)+` "$@"
 	if err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
+	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${FAIL_LOCK_BUILD:-0}\" = 1 ] && [ \"${TEST_REMOTE:-0}\" = 1 ]; then echo 'bootstrap-stderr-token' >&2; exit 42; fi\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
 	realSleep, err := exec.LookPath("sleep")
 	if err != nil {
 		t.Fatal(err)
@@ -105,21 +106,27 @@ exec `+shellQuote(realRm)+` "$@"
 		t.Fatal(err)
 	}
 	f.env = append(f.env, "GOCACHE="+strings.TrimSpace(string(cache)))
+	testBinary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 echo ssh >> "$EVENTS"
 echo $$ > "$FLEET_ROOT/ssh.pid"
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
+while [ "${1:-}" = -o ]; do shift 2; done
 shift
 # Real SSH joins arguments, then the remote shell parses that command. The
 # isolated login shim sources this fixture's profile and preserves stderr.
-exec /usr/bin/env -i HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
+exec /usr/bin/env -i TEST_REMOTE=1 SHUTTLE_TEST_SSH_HELPER=1 SHUTTLE_TEST_GO_CACHES_PINNED=1 HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
  CHECK_CLEANUP_ORDER="${CHECK_CLEANUP_ORDER:-0}" FAIL_LOCK_BUILD="${FAIL_LOCK_BUILD:-0}" FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
- CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" bash -c "$*"
+ CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" `+shellQuote(testBinary)+` -test.run=^TestDeploySSHHelperProcess$ -- "$*"
 `)
 	write(filepath.Join(f.bin, "make"), `#!/bin/sh
 case "$1" in
  build)
+  echo "umask $(umask)" >> "$EVENTS"
   echo "build $(git rev-parse HEAD) $*" >> "$EVENTS"
   touch "$FLEET_ROOT/build-entered"
   while [ ! -f "$BUILD_GATE" ]; do sleep .02; done
@@ -322,60 +329,137 @@ func TestDeployBootstrapCleanupWaitsForHelperExit(t *testing.T) {
 	}
 }
 
-func TestDeployDisconnectedObserverLeavesLockedRunWithDurableResult(t *testing.T) {
+// The remote shell has its own group and a socket-like stdin pipe. Killing the
+// fake SSH client closes that pipe without also signalling the remote machine.
+func TestDeploySSHHelperProcess(t *testing.T) {
+	if os.Getenv("SHUTTLE_TEST_SSH_HELPER") != "1" {
+		return
+	}
+	finish := func(code int) { os.RemoveAll(testFenceDir); os.Exit(code) }
+	r, w, e := os.Pipe()
+	if e != nil {
+		finish(90)
+	}
+	remote := exec.Command("bash", "-c", os.Args[len(os.Args)-1])
+	remote.Env = append(os.Environ(), "HOME="+filepath.Join(os.Getenv("FLEET_ROOT"), "home"))
+	remote.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	remote.Stdin, remote.Stdout, remote.Stderr = r, os.Stdout, os.Stderr
+	if e = remote.Start(); e != nil {
+		finish(91)
+	}
+	r.Close()
+	os.WriteFile(filepath.Join(os.Getenv("FLEET_ROOT"), "remote.pid"), []byte(strconv.Itoa(remote.Process.Pid)), 0600)
+	go func() { io.Copy(w, os.Stdin); w.Close() }()
+	if e = remote.Wait(); e != nil {
+		if exit, ok := e.(*exec.ExitError); ok && exit.ExitCode() > 0 {
+			finish(exit.ExitCode())
+		}
+		finish(1)
+	}
+	finish(0)
+}
+
+func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
+	t.Parallel()
+	for _, how := range []string{"ssh", "runner-term", "helper-term", "helper-kill", "deployer-int", "deployer-kill", "deadline", "local"} {
+		t.Run(how, func(t *testing.T) {
+			t.Parallel()
+			f := newDeployFleet(t)
+			host := "fake"
+			if how == "local" {
+				host = "local"
+			}
+			var extra []string
+			if how == "deadline" {
+				extra = []string{"SHUTTLE_DEPLOY_TIMEOUT_SECONDS=30"}
+			}
+			cmd, log := f.startHost(t, "cancel-"+how, host, extra...)
+			deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+			switch how {
+			case "ssh", "runner-term":
+				pidFile := "ssh.pid"
+				if how == "runner-term" {
+					pidFile = "remote.pid"
+				}
+				pid, _ := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, pidFile))))
+				sig := syscall.SIGKILL
+				if how == "runner-term" {
+					sig = syscall.SIGTERM
+				}
+				syscall.Kill(pid, sig)
+			case "deployer-kill":
+				cmd.Process.Kill()
+			case "helper-term", "helper-kill":
+				info := fleetRead(filepath.Join(f.home, ".shuttle/deploy.lock"))
+				if !strings.Contains(info, "; pid=") {
+					t.Fatalf("missing holder in %s: %q; events=%s log=%s", f.home, info, fleetRead(f.events), fleetRead(log))
+				}
+				start := strings.Index(info, "; pid=") + 6
+				end := strings.Index(info[start:], ";")
+				pid, _ := strconv.Atoi(info[start : start+end])
+				sig := syscall.SIGTERM
+				if how == "helper-kill" {
+					sig = syscall.SIGKILL
+				}
+				syscall.Kill(pid, sig)
+			case "deployer-int", "local":
+				cmd.Process.Signal(syscall.SIGINT)
+			}
+			if e := cmd.Wait(); e == nil {
+				t.Fatalf("cancel reported success: %s", fleetRead(log))
+			}
+			deployAwait(t, "lock free: "+log, func() bool {
+				file, e := os.OpenFile(filepath.Join(f.home, ".shuttle/deploy.lock"), os.O_RDWR, 0600)
+				if e != nil {
+					return false
+				}
+				defer file.Close()
+				return syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == nil
+			})
+			fleetTouch(t, f.gate)
+			next, nextlog := f.startHost(t, "after-"+how, host)
+			if e := next.Wait(); e != nil {
+				t.Fatalf("next deploy: %v %s", e, fleetRead(nextlog))
+			}
+			if n := strings.Count(fleetRead(f.events), "cycle\n"); n != 1 {
+				t.Fatalf("cancelled deployment later cycled: %d %s", n, fleetRead(f.events))
+			}
+			if !strings.Contains(fleetRead(f.events), "umask 0027") {
+				t.Fatalf("login umask changed: %s", fleetRead(f.events))
+			}
+			if _, e := os.Stat(filepath.Join(f.home, ".shuttle/deploy/runs")); !os.IsNotExist(e) {
+				t.Fatalf("run records retained: %v", e)
+			}
+		})
+	}
+}
+
+func TestDeployKilledWaiterNeverAcquiresAfterHolder(t *testing.T) {
 	t.Parallel()
 	f := newDeployFleet(t)
-	first, log := f.start(t, "disconnected")
-	deployAwait(t, "build: "+log, func() bool { _, err := os.Stat(filepath.Join(f.root, "build-entered")); return err == nil })
-	dirs, err := filepath.Glob(filepath.Join(f.home, ".shuttle/deploy/runs/*"))
-	if err != nil || len(dirs) != 1 {
-		t.Fatalf("run directories: %v %v", dirs, err)
+	holder, log := f.start(t, "holder")
+	deployAwait(t, "holder build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+	if e := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("second target"), 0600); e != nil {
+		t.Fatal(e)
 	}
-	run := dirs[0]
-	pid, err := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "ssh.pid"))))
-	if err != nil {
-		t.Fatal(err)
+	f.git(t, f.repo, "add", "tracked")
+	f.git(t, f.repo, "commit", "-m", "second target")
+	f.git(t, f.repo, "push", "origin", "main")
+	waiter, waitlog := f.start(t, "waiter")
+	deployAwait(t, "waiter: "+waitlog, func() bool { return strings.Contains(fleetRead(waitlog), "waiting for") })
+	waiter.Process.Kill()
+	if e := waiter.Wait(); e == nil {
+		t.Fatal("killed waiter succeeded")
 	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	if err := first.Wait(); err == nil {
-		t.Fatal("lost observer reported success")
-	}
-	if !strings.Contains(fleetRead(log), "SSH disconnect does not cancel") {
-		t.Fatalf("disconnect policy missing: %s", fleetRead(log))
-	}
-	lock, err := os.OpenFile(filepath.Join(f.home, ".shuttle/deploy.lock"), os.O_RDWR, 0600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-	lock.Close()
-	if err != syscall.EWOULDBLOCK {
-		t.Fatalf("disconnected run lost host lock: %v", err)
-	}
-	second, secondLog := f.start(t, "bounded-wait", "SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=0")
-	if err := second.Wait(); err == nil {
-		t.Fatal("second deployer ignored held lock")
-	}
-	if out := fleetRead(secondLog); !strings.Contains(out, "timed out waiting") || !strings.Contains(out, "run="+run) {
-		t.Fatalf("holder diagnostic: %s", out)
-	}
+	deployAwait(t, "cancelled waiter: "+waitlog, func() bool {
+		return strings.Contains(fleetRead(waitlog), "observer EOF")
+	})
 	fleetTouch(t, f.gate)
-	deployAwait(t, "durable result: "+run, func() bool { _, err := os.Stat(filepath.Join(run, "result")); return err == nil })
-	if result := strings.TrimSpace(fleetRead(filepath.Join(run, "result"))); result != "0" {
-		t.Fatalf("disconnected result %s: %s", result, fleetRead(filepath.Join(run, "log")))
+	if e := holder.Wait(); e != nil {
+		t.Fatalf("holder %v: %s", e, fleetRead(log))
 	}
-	entries, err := os.ReadDir(filepath.Join(f.home, ".shuttle/deploy/tools"))
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("bootstrap workspace leaked: %v %v", entries, err)
-	}
-	third, thirdLog := f.start(t, "coalesced-after-disconnect")
-	if err := third.Wait(); err != nil {
-		t.Fatalf("coalesce: %v %s", err, fleetRead(thirdLog))
-	}
-	if cycles := strings.Count(fleetRead(f.events), "cycle\n"); cycles != 1 {
-		t.Fatalf("want one cycle, got %d: %s", cycles, fleetRead(f.events))
+	if builds := strings.Count(fleetRead(f.events), "build "); builds != 1 {
+		t.Fatalf("forgotten waiter ran later: %s", fleetRead(f.events))
 	}
 }
 

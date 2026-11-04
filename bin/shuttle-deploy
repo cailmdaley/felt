@@ -876,9 +876,7 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
 
 deploy_step() {
   printf '  %s: %s\n' "${HOST:-local}" "$1" >&2
-  if [ -n "${SHUTTLE_DEPLOY_RUN_DIR:-}" ]; then
-    printf '%s\n' "$1" > "$SHUTTLE_DEPLOY_RUN_DIR/step"
-  fi
+  DEPLOY_STEP=$1
 }
 
 host_transaction() { # Runs entirely on the target, under host and tree locks.
@@ -962,54 +960,68 @@ transaction_script() {
 }
 
 run_transaction() { # host, source, mode, staged files, build wrapper, UI snapshot
-  local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap driver status
+  local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap token status until
+  until=$(( $(date +%s) + ${SHUTTLE_DEPLOY_TIMEOUT_SECONDS:-7200} ))
+  token="SHUTTLE_DEPLOY_DONE_${RUN_DIR##*/}-${host:-local}-$mode"
   builds_ui "${host:-local}" || skip_ui=1
   script="$(transaction_script "$host" "$source" "$mode" "$stage" "$skip_ui" "$wrap" "$snapshot")"
   bootstrap="set -eu
 HOST=$(shell_quote "${host:-local}")
-tmp=''
+export SHUTTLE_DEPLOY_DEADLINE=$until
+DEPLOY_STEP=bootstrap
+child=''
 $(declare -f deploy_step)
 finish() {
   status=\$?
   trap - EXIT
-  step=\$(cat \"\$SHUTTLE_DEPLOY_RUN_DIR/step\" 2>/dev/null || printf bootstrap)
-  if ! rm -rf \"\$tmp\" $(shell_quote "$stage"); then
-    printf '  %s: cleanup bootstrap workspace: failed\\n' \"\$HOST\" >&2
-    if [ \"\$status\" = 0 ]; then status=1; step='cleanup bootstrap workspace'; fi
+  trap '' TERM INT HUP
+  if [ -n \"\$child\" ]; then
+    kill -TERM \"\$child\" 2>/dev/null || true
+    wait \"\$child\" || true
+    kill -KILL -- \"-\$child\" 2>/dev/null || true
   fi
-  printf '\\n  %s: %s: ' \"\$HOST\" \"\$step\"
+  rm -rf $(shell_quote "$stage") || status=1
+  printf '\\n  %s: %s: ' \"\$HOST\" \"\$DEPLOY_STEP\"
   if [ \"\$status\" = 0 ]; then printf 'completed\\n'; else printf 'failed (exit %s)\\n' \"\$status\"; fi
-  printf '%s\\n' \"\$status\" > \"\$SHUTTLE_DEPLOY_RUN_DIR/result.next\"
-  mv \"\$SHUTTLE_DEPLOY_RUN_DIR/result.next\" \"\$SHUTTLE_DEPLOY_RUN_DIR/result\"
+  printf '%s %s\\n' \"\$SHUTTLE_DEPLOY_TOKEN\" \"\$status\"
   exit \"\$status\"
 }
 trap finish EXIT
-deploy_step 'create helper workspace'
-mkdir -p \"\$HOME/.shuttle/deploy/tools\"
-tmp=\$(mktemp -d \"\$HOME/.shuttle/deploy/tools/lock.XXXXXX\")
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+tmp=\$SHUTTLE_DEPLOY_TMP
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
 deploy_step 'compile lock helper'
-GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\"
+GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\" &
+child=\$!
+wait \"\$child\"
+child=''
 deploy_step 'acquire host and tree locks'
 SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS:-3600}") \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
-  \"host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER run=\$SHUTTLE_DEPLOY_RUN_DIR\" bash -c $(shell_quote "$script")"
-  driver="RUN_ID=$(shell_quote "${RUN_DIR##*/}-${host:-local}-$mode")
-HOST=$(shell_quote "${host:-local}")
-BOOTSTRAP=$(shell_quote "$bootstrap")
-$RUN_SOURCE"
-  # Script bytes travel on stdin, not through SSH's joined command arguments.
-  # The detached runner owns execution; this connection only observes its log.
-  printf '  %s: starting login shell and host-owned transaction\n' "${host:-local}" >&2
+  \"host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER\" bash -c $(shell_quote "$script") <&7 7<&- &
+child=\$!
+wait \"\$child\"
+status=\$?
+kill -KILL -- \"-\$child\" 2>/dev/null || true
+child=''
+exit \"\$status\""
+  printf '%s' "$bootstrap" > "$RUN_DIR/bootstrap"
+  printf '  %s: attached transaction; cancellation follows its observer\n' "${host:-local}" >&2
+  exec 6<> "$RUN_DIR/lifetime"
   if [ -z "$host" ]; then
-    bash -l -s <<< "$driver"
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" bash -c "$RUN_SOURCE" -- "$token" < "$RUN_DIR/lifetime" 6>&- &
   else
-    ssh $(fleet_flags "$host") "$(fleet_ssh "$host")" 'bash -l -s' <<< "$driver"
+    env SHUTTLE_DEPLOY_DEADLINE="$until" "$LOCAL_TOOL/lock" --observe "$RUN_DIR/bootstrap" "$token" ssh \
+      -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+      $(fleet_flags "$host") "$(fleet_ssh "$host")" "bash -c $(shell_quote "$RUN_SOURCE") -- $(shell_quote "$token")" < "$RUN_DIR/lifetime" 6>&- &
   fi
+  active=$!
+  wait "$active"
   status=$?
-  if [ "$status" != 0 ]; then
-    bad "transaction/observer exited $status; SSH disconnect does not cancel the host-owned run; inspect ~/.shuttle/deploy/runs/${RUN_DIR##*/}-${host:-local}-$mode"
-    return 1
-  fi
+  exec 6>&-
+  kill -KILL -- "-$active" 2>/dev/null || true
+  active=''
+  [ "$status" = 0 ] || { bad "attached transaction failed (exit $status); see ~/.shuttle/deploy/last-run.log"; return 1; }
 }
 
 deploy_remote() {
@@ -1033,7 +1045,22 @@ LOCK_SOURCE="$(<"$REPO/scripts/deploy-lock/main.go")"
 RUN_SOURCE="$(<"$REPO/scripts/deploy-run.sh")"
 DEPLOYER="$(hostname):$$"
 RUN_DIR="$(mktemp -d)" || exit 1
-trap 'rm -rf "$RUN_DIR"' EXIT
+mkfifo "$RUN_DIR/lifetime" || exit 1
+LOCAL_TOOL= active=
+cleanup() { rm -rf "$RUN_DIR" "$LOCAL_TOOL"; }
+cancel_deploy() {
+  trap '' TERM INT HUP
+  exec 6>&-
+  if [ -n "$active" ]; then kill -TERM "$active" 2>/dev/null || true; wait "$active" || true; kill -KILL -- "-$active" 2>/dev/null || true; fi
+  exit "$1"
+}
+trap cleanup EXIT
+trap 'cancel_deploy 143' TERM HUP
+trap 'cancel_deploy 130' INT
+mkdir -p "$HOME/.shuttle/deploy/tools" || exit 1
+LOCAL_TOOL=$(mktemp -d "$HOME/.shuttle/deploy/tools/lock.XXXXXX") || exit 1
+printf '%s' "$LOCK_SOURCE" > "$LOCAL_TOOL/main.go"
+GOMAXPROCS=2 GOFLAGS=-p=2 go build -o "$LOCAL_TOOL/lock" "$LOCAL_TOOL/main.go" || exit 1
 UI_SNAPSHOT="$RUN_DIR/ui"
 mkdir -p "$UI_SNAPSHOT"
 
