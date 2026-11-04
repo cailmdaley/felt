@@ -840,6 +840,8 @@ defmodule Shuttle.DispatcherTest do
     script = File.read!(List.last(args))
     assert script =~ "Mode: resume"
     assert script =~ "before that turn finished"
+    name = Enum.at(args, 2)
+    assert {:ok, %{"conversation_uuid" => ^session}} = Shuttle.Terminal.LaunchAttempts.get(name)
     assert script =~ "--resume '#{session}'"
     refute String.replace(script, Dispatcher.passthrough_block(), "") =~ " || "
   end

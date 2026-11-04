@@ -179,23 +179,65 @@ defmodule Shuttle.Terminal do
 
   @doc "Serialize launches using the assignment's evidence; keep the script in the worker's argv."
   def launch(runner, name, cwd, script_text, opts \\ []) do
-    with_lock(name, fn ->
-      with :ok <- require_config() do
-        launch_ready(runner, name, cwd, script_text, opts)
-      end
-    end)
+    acquire = fn ->
+      with_lock(name, fn ->
+        with :ok <- require_config() do
+          launch_ready(runner, name, cwd, script_text, opts)
+        end
+      end)
+    end
+
+    case opts[:conversation_uuid] do
+      uuid when is_binary(uuid) and uuid != "" -> with_lock({:conversation, uuid}, acquire)
+      _ -> acquire.()
+    end
+  end
+
+  defp check_conversation(_runner, nil), do: :ok
+
+  defp check_conversation(runner, uuid) do
+    with :ok <- WorkerProcess.check_free(runner, uuid),
+         {:ok, attempts} <- LaunchAttempts.for_conversation(uuid),
+         {:ok, procs} <- WorkerProcess.scan(runner) do
+      Enum.reduce_while(attempts, :ok, fn attempt, :ok ->
+        evidence =
+          cond do
+            WorkerProcess.script_process(procs, attempt["script"]) -> :alive
+            WorkerProcess.session_process(procs, attempt["worker"]) -> :gone
+            true -> status(runner, attempt["worker"])
+          end
+
+        case evidence do
+          :gone ->
+            {:cont, :ok}
+
+          _ ->
+            {:halt,
+             {:error,
+              {:transcript_held,
+               "session #{uuid} is being opened or held by #{attempt["worker"]}"}}}
+        end
+      end)
+    else
+      {:error, {_, message}} ->
+        {:error, {:transcript_held, message}}
+
+      {:error, :unknown} ->
+        {:error, {:transcript_held, "Cannot read conversation launch reservations"}}
+    end
   end
 
   defp launch_ready(runner, name, cwd, script_text, opts) do
     backend = primary()
 
     with :ok <- check_available(runner, name, opts),
+         :ok <- check_conversation(runner, opts[:conversation_uuid]),
          :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
          :ok <- LaunchAttempts.clear(name) do
       path = WorkerProcess.script_path(name)
       Shuttle.FS.write_private!(path, script_text, 0o700)
 
-      case LaunchAttempts.record(name, path) do
+      case LaunchAttempts.record(name, path, %{"conversation_uuid" => opts[:conversation_uuid]}) do
         :ok ->
           launch_backend(runner, backend, name, cwd, path, opts)
 

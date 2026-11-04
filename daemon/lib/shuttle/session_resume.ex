@@ -177,7 +177,10 @@ defmodule Shuttle.SessionResume do
   def running?(name, runner), do: Terminal.present?(runner, name)
 
   defp start(plan, runner) do
-    case Terminal.launch(runner, plan.tmux, plan.cwd, run_script(plan), fiber: plan[:fiber]) do
+    case Terminal.launch(runner, plan.tmux, plan.cwd, run_script(plan),
+           fiber: plan[:fiber],
+           conversation_uuid: plan.session
+         ) do
       :ok ->
         Logger.info("Resume of #{plan.session} (#{plan.agent}) → #{plan.tmux}")
         {:ok, %{tmux_session: plan.tmux, created: true}}

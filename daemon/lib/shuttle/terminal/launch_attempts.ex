@@ -35,15 +35,45 @@ defmodule Shuttle.Terminal.LaunchAttempts do
   end
 
   # This lands before the backend mutation; a lost reply or daemon crash keeps it.
-  def record(name, script) do
+  def record(name, script, facts \\ %{}) do
     locked(name, fn ->
-      write(name, %{
-        "worker" => name,
-        "script" => script,
-        "recorded_at" => DateTime.to_iso8601(DateTime.utc_now()),
-        "reason" => "A launch was attempted; its worker may still be running."
-      })
+      write(
+        name,
+        Map.merge(facts, %{
+          "worker" => name,
+          "script" => script,
+          "recorded_at" => DateTime.to_iso8601(DateTime.utc_now()),
+          "reason" => "A launch was attempted; its worker may still be running."
+        })
+      )
     end)
+  end
+
+  @doc "Reservations that can hold a conversation before its harness appears."
+  def for_conversation(uuid) do
+    directory = Path.dirname(path(""))
+
+    case FS.ls(directory) do
+      {:ok, files} ->
+        Enum.reduce_while(files, {:ok, []}, fn file, {:ok, found} ->
+          with {:ok, raw} <- FS.read(Path.join(directory, file)),
+               {:ok, %{"worker" => worker, "script" => script} = info} <- Jason.decode(raw),
+               true <- is_binary(worker) and is_binary(script) do
+            if info["conversation_uuid"] == uuid and FS.stat(script) != {:error, :enoent},
+              do: {:cont, {:ok, [info | found]}},
+              else: {:cont, {:ok, found}}
+          else
+            {:error, :enoent} -> {:cont, {:ok, found}}
+            _ -> {:halt, {:error, :unknown}}
+          end
+        end)
+
+      {:error, :enoent} ->
+        {:ok, []}
+
+      {:error, _} ->
+        {:error, :unknown}
+    end
   end
 
   def note(name, reason) do

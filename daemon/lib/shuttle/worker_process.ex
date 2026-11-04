@@ -97,6 +97,15 @@ defmodule Shuttle.WorkerProcess do
     end)
   end
 
+  @doc "Find a launch's exact script token, independent of its current assignment."
+  def script_process(procs, script) when is_binary(script) do
+    token = Path.basename(script)
+
+    Enum.find(procs, fn proc ->
+      not tmux?(proc) and match?({^token, _}, script_token(proc.args))
+    end)
+  end
+
   @doc "The live process running tmux session `session`'s run script, or nil."
   @spec session_process([proc()], String.t()) :: proc() | nil
   def session_process(procs, session) do

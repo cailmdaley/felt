@@ -44,7 +44,7 @@ defmodule Shuttle.TerminalTest do
   end
 
   defmodule ConcurrentRunner do
-    def cmd("ps", _args, _opts), do: {"", 0}
+    def cmd("ps", _args, _opts), do: Shuttle.Env.app(:terminal_test_ps, {"", 0})
 
     def cmd("tmux", ["has-session", "-t", "=" <> name], _opts) do
       {state, _owner} = Shuttle.Env.app(:terminal_test_state)
@@ -55,10 +55,13 @@ defmodule Shuttle.TerminalTest do
       {state, owner} = Shuttle.Env.app(:terminal_test_state)
       send(owner, {:launching, self(), name, List.last(rest)})
 
-      receive do
-        :finish_launch -> Agent.update(state, &MapSet.put(&1, name))
+      if Shuttle.Env.app(:terminal_pause_name) in [nil, name] do
+        receive do
+          :finish_launch -> :ok
+        end
       end
 
+      Agent.update(state, &MapSet.put(&1, name))
       {"", 0}
     end
   end
@@ -522,6 +525,100 @@ defmodule Shuttle.TerminalTest do
     end
   end
 
+  @tag :tmp_dir
+  test "worker and History terminal names atomically acquire one conversation", %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    state = start_supervised!({Agent, fn -> MapSet.new() end})
+    Env.put_app_env(:terminal_test_state, {state, self()})
+    Env.put_app_env(:terminal_pause_name, "worker-race-shuttle")
+    uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    first =
+      Task.async(fn ->
+        Terminal.launch(ConcurrentRunner, "worker-race-shuttle", dir, "true",
+          preflighted: true,
+          conversation_uuid: uuid
+        )
+      end)
+
+    assert_receive {:launching, pid, "worker-race-shuttle", _}
+
+    second =
+      Task.async(fn ->
+        Terminal.launch(ConcurrentRunner, "resume-" <> uuid, dir, "true",
+          preflighted: true,
+          conversation_uuid: uuid
+        )
+      end)
+
+    send(pid, :finish_launch)
+    assert :ok = Task.await(first)
+    assert {:error, {:transcript_held, _}} = Task.await(second)
+    refute_receive {:launching, _, "resume-" <> _, _}
+
+    Agent.update(state, fn _ -> MapSet.new() end)
+
+    assert :ok =
+             Terminal.launch(ConcurrentRunner, "resume-" <> uuid, dir, "true",
+               preflighted: true,
+               conversation_uuid: uuid
+             )
+  end
+
+  @tag :tmp_dir
+  test "an exited script releases its conversation even if its terminal name is reused", %{
+    tmp_dir: dir
+  } do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    state = start_supervised!({Agent, fn -> MapSet.new() end})
+    Env.put_app_env(:terminal_test_state, {state, self()})
+    Env.put_app_env(:terminal_pause_name, "no-paused-launch")
+    uuid = "released-conversation"
+
+    assert :ok =
+             Terminal.launch(ConcurrentRunner, "reused-worker", dir, "true",
+               preflighted: true,
+               conversation_uuid: uuid
+             )
+
+    assert {:ok, %{"script" => path}} = Shuttle.Terminal.LaunchAttempts.get("reused-worker")
+    File.rm!(path)
+
+    assert :ok =
+             Terminal.launch(ConcurrentRunner, "resume-released", dir, "true",
+               preflighted: true,
+               conversation_uuid: uuid
+             )
+  end
+
+  @tag :tmp_dir
+  test "a successor script cannot retain its predecessor's conversation reservation", %{
+    tmp_dir: dir
+  } do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    state = start_supervised!({Agent, fn -> MapSet.new() end})
+    Env.put_app_env(:terminal_test_state, {state, self()})
+    Env.put_app_env(:terminal_pause_name, "no-paused-launch")
+    uuid = "successor-free-conversation"
+
+    assert :ok =
+             Terminal.launch(ConcurrentRunner, "successor-worker", dir, "true",
+               preflighted: true,
+               conversation_uuid: uuid
+             )
+
+    Env.put_app_env(
+      :terminal_test_ps,
+      {"812 1 bash -l /tmp/shuttle-run-successor-worker.999.sh\n", 0}
+    )
+
+    assert :ok =
+             Terminal.launch(ConcurrentRunner, "resume-successor", dir, "true",
+               preflighted: true,
+               conversation_uuid: uuid
+             )
+  end
+
   test "worker listing holds on uncertainty and retains a positive list if ps fails" do
     Process.put(:list_result, {"no server running", 1})
     stub(@absent)
@@ -642,11 +739,21 @@ defmodule Shuttle.TerminalTest do
                ClaimedTmuxRunner,
                source,
                dir,
-               "trap 'rm -f \"$0\"' EXIT\nsleep 300\n", preflighted: true)
+               "trap 'rm -f \"$0\"' EXIT\nsleep 300\n",
+               preflighted: true,
+               conversation_uuid: "reserved-conversation"
+             )
 
     aliases = Shuttle.WorkerProcess.claim_aliases(ClaimedTmuxRunner, source, canonical)
     assert :ok = Shuttle.WorkerProcess.write_migration_aliases(aliases)
     assert :ok = Terminal.rename(ClaimedTmuxRunner, source, canonical)
+
+    assert {:error, {:transcript_held, _}} =
+             Terminal.launch(ClaimedTmuxRunner, "resume-reserved", dir, "true",
+               preflighted: true,
+               conversation_uuid: "reserved-conversation"
+             )
+
     Env.put_app_env(:claim_hidden, true)
     assert :alive = Terminal.status(ClaimedTmuxRunner, canonical)
     assert {"", 0} = Terminal.stop(ClaimedTmuxRunner, canonical)

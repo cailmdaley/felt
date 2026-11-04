@@ -1273,7 +1273,7 @@ defmodule Shuttle.Dispatcher do
                 work_dir,
                 run_script,
                 runner,
-                opts,
+                Keyword.put(opts, :conversation_uuid, session_id),
                 fn ->
                   record_dispatch_session(
                     fiber_id,
@@ -1342,7 +1342,14 @@ defmodule Shuttle.Dispatcher do
           work_dir,
           run_script,
           runner,
-          opts,
+          Keyword.put(
+            opts,
+            :conversation_uuid,
+            case session_uuid do
+              {:claude, uuid} -> uuid
+              _ -> nil
+            end
+          ),
           fn ->
             store_session_id(
               fiber_id,
@@ -1367,7 +1374,7 @@ defmodule Shuttle.Dispatcher do
   defp spawn_and_record(session, work_dir, run_script, runner, opts, record_fun) do
     launch_opts =
       opts
-      |> Keyword.take([:fiber, :felt_store, :launch_evidence])
+      |> Keyword.take([:fiber, :felt_store, :launch_evidence, :conversation_uuid])
       |> Keyword.put(:preflighted, true)
 
     case Shuttle.Terminal.launch(runner, session, work_dir, run_script, launch_opts) do

@@ -271,6 +271,7 @@ defmodule Shuttle.SessionResumeTest do
                SessionResume.prepare(@claude, runner: Runner)
 
       assert tmux == "resume-" <> @claude
+      assert {:ok, %{"conversation_uuid" => @claude}} = Shuttle.Terminal.LaunchAttempts.get(tmux)
 
       assert [{"tmux", args}] =
                Enum.filter(Runner.calls(), &match?({"tmux", ["new-session" | _]}, &1))
