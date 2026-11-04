@@ -209,6 +209,37 @@ describe('TranscriptBand', () => {
     expect(band.el.querySelector('.ws-transcript-pane .ws-transcript-thread-notice a')?.getAttribute('data-fiber')).toBe('work/child')
     expect(band.el.querySelector('.ws-transcript-steps')).toBeNull()
   })
+  it('ignores delayed provenance from a disposed feed after selecting another session', async () => {
+    const envelope = '[Shuttle message trusted from shuttle://peer/pi/abc; reply to work/real]\nA delivered message.'
+    const newer = '[Shuttle message other from shuttle]\nNEW SESSION CONTENT'
+    let release!: (response: Response) => void
+    const fetcher = vi.fn<typeof fetch>(async input => {
+      const url = new URL(String(input))
+      const old = url.searchParams.get('session') === latestId
+      if (url.pathname.endsWith('/messages')) return old
+        ? new Promise<Response>(resolve => { release = resolve })
+        : Response.json({ messages: [], cursor: '0' })
+      return new Response(new TextDecoder().decode(encoded([{
+        type: 'attachment', attachment: { type: 'hook_additional_context', content: old ? envelope : newer },
+      }])), { headers: { 'x-transcript-offset': '0' } })
+    })
+    const band = new TranscriptBand({ shuttleBase: 'https://board.example', inline: true, fetch: fetcher })
+    bands.push(band)
+    document.body.append(band.el)
+    band.read(target(latestId))
+    await (band as unknown as { readNow(): Promise<boolean> }).readNow()
+    await settle()
+    band.read(target(earlierId))
+    await (band as unknown as { readNow(): Promise<boolean> }).readNow()
+    await settle()
+    band.el.querySelector<HTMLButtonElement>('.ws-transcript-steps')!.click()
+    expect(band.el.textContent).toContain('NEW SESSION CONTENT')
+    release(Response.json({ messages: [{ id: 'trusted', envelope }], cursor: '1' }))
+    await settle()
+    expect(band.el.textContent).toContain('NEW SESSION CONTENT')
+    expect(band.el.textContent).not.toContain('A delivered message.')
+  })
+
   it('scopes pending sends to the selected session and host without confirming them elsewhere', async () => {
     const text = 'A pending message'
     const other = records(text, 'Another session answer')
@@ -1021,7 +1052,7 @@ describe('TranscriptBand', () => {
     const fresh = makeBand(vi.fn<typeof fetch>(async () => new Response('boom', { status: 500 })))
     fresh.follow(target(earlierId))
     await vi.advanceTimersByTimeAsync(50)
-    expect(fresh.el.querySelector('.ws-transcript-note')?.textContent).toBe('The transcript could not be read.')
+    expect(fresh.el.querySelector('.ws-transcript-note')?.textContent).toBe('The transcript could not be read. Retry')
   })
 
   it('opens a run onto its thinking text', async () => {

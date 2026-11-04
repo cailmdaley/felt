@@ -392,6 +392,7 @@ export class TranscriptFeed {
             record = { record: ++this.nextCandidateRecord, value, entries: [], emitted: false }
             this.candidateRecords.set(record.record, record)
             if (now() < (evidence.deadlineAt ?? 0)) await Promise.race([evidence.value, evidence.deadline])
+            if (!this.active(epoch)) return
           }
           const entries = normalizeRecord(value, [...this.provenance.values()])
             .map(entry => record ? { ...entry, sourceRecord: record.record } : entry)
@@ -415,11 +416,14 @@ export class TranscriptFeed {
   }
 
   private ensureProvenance(force = false): Promise<void> {
+    const epoch = this.epoch
+    if (!this.active(epoch)) return Promise.resolve()
     if (!force && !this.provenanceNeeded) return Promise.resolve()
     if (this.provenanceRequest) return this.provenanceRequest
     if (this.provenanceRetryTimer !== null) return Promise.resolve()
     const requestGeneration = this.provenanceGeneration
     this.provenanceRequest = this.loadProvenance().then(added => {
+      if (!this.active(epoch)) return
       this.provenanceRequest = null
       if (added !== null) {
         this.provenanceNeeded = false
@@ -451,6 +455,7 @@ export class TranscriptFeed {
         void this.ensureProvenance(true)
       }
     }).catch(() => {
+      if (!this.active(epoch)) return
       this.provenanceRequest = null
       this.provenanceNeeded = this.provenanceCandidates.size > 0
       this.provenanceRetryDelay = Math.min(30_000, this.provenanceRetryDelay * 2)
