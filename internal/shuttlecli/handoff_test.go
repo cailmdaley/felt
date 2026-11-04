@@ -115,7 +115,7 @@ func TestShuttleHandoff_RenamedFiber(t *testing.T) {
 		t.Fatalf("document at exit lacks handoff: %s (%v)", data, err)
 	}
 	data, err = os.ReadFile(kills)
-	if err != nil || string(data) != fmt.Sprintf("kill-session -t %s\n", session) {
+	if err != nil || string(data) != fmt.Sprintf("kill-session -t =%s\n", session) {
 		t.Fatalf("kills = %q (%v)", data, err)
 	}
 }

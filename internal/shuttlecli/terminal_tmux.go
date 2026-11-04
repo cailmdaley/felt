@@ -12,11 +12,36 @@ type tmuxTerminal struct{ a *app }
 func (*tmuxTerminal) ID() string { return "tmux" }
 
 func (t *tmuxTerminal) Has(name string) (bool, error) {
-	return t.a.env.Command("tmux", "has-session", "-t", "="+name).Run() == nil, nil
+	target, err := t.nameTarget(name)
+	if err != nil {
+		return false, err
+	}
+	return t.a.env.Command("tmux", "has-session", "-t", target).Run() == nil, nil
 }
 
 func (t *tmuxTerminal) Kill(name string) error {
-	return t.a.env.Command("tmux", "kill-session", "-t", name).Run()
+	target, err := t.nameTarget(name)
+	if err != nil {
+		return err
+	}
+	return t.a.env.Command("tmux", "kill-session", "-t", target).Run()
+}
+
+func (t *tmuxTerminal) nameTarget(name string) (string, error) {
+	if !strings.HasPrefix(name, "$") {
+		return "=" + name, nil
+	}
+	out, err := t.a.env.Command("tmux", "ls", "-F", "#{session_id}\t#{session_name}").Output()
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		id, literal, ok := strings.Cut(line, "\t")
+		if ok && literal == name {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("tmux session %q not found", name)
 }
 
 func (t *tmuxTerminal) LiveWorkers() (map[string]bool, error) {

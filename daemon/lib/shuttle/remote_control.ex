@@ -295,7 +295,7 @@ defmodule Shuttle.RemoteControl do
           :ok
 
         :present ->
-          case Tmux.close(runner, "=" <> @session) do
+          case Tmux.close(runner, @session) do
             result when result in [:ok, :absent] ->
               :ok
 

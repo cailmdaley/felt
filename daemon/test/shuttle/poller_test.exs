@@ -2259,7 +2259,7 @@ defmodule Shuttle.PollerTest do
 
     assert {:ok, output} = Poller.lifecycle_transition(poller, :rest, fiber_id)
     assert output =~ "worker: stopped #{session}"
-    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+    assert {"tmux", ["kill-session", "-t", "=" <> session]} in MockRunner.commands()
   end
 
   # /kill may name a fiber by its uid. The untracked lookup resolves the
@@ -2286,7 +2286,7 @@ defmodule Shuttle.PollerTest do
     MockRunner.add_tmux_session(session)
 
     assert {:ok, ^session} = Poller.kill_session(poller, uid)
-    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+    assert {"tmux", ["kill-session", "-t", "=" <> session]} in MockRunner.commands()
   end
 
   # Fail closed: a fiber the Poller cannot read has no verified identity, so the
@@ -2344,7 +2344,7 @@ defmodule Shuttle.PollerTest do
 
     assert {:error, reason} = Poller.kill_session(poller, fiber_id)
     assert reason =~ "stopping the worker failed"
-    assert {"tmux", ["kill-session", "-t", session]} in MockRunner.commands()
+    assert {"tmux", ["kill-session", "-t", "=" <> session]} in MockRunner.commands()
   end
 
   # The three tmux "already gone" phrasings session_already_gone? must treat as
@@ -2515,7 +2515,7 @@ defmodule Shuttle.PollerTest do
 
     kill_idx =
       Enum.find_index(cut_commands, fn
-        {"tmux", ["kill-session", "-t", ^first_session]} -> true
+        {"tmux", ["kill-session", "-t", target]} -> target == "=" <> first_session
         _ -> false
       end)
 
@@ -2719,10 +2719,10 @@ defmodule Shuttle.PollerTest do
     commands = MockRunner.commands() |> Enum.drop(before)
 
     assert Enum.any?(commands, &match?({"tmux", ["load-buffer" | _]}, &1))
-    assert {"tmux", ["send-keys", "-t", session, "Enter"]} in commands
+    assert {"tmux", ["send-keys", "-t", "=" <> session, "Enter"]} in commands
 
     assert Enum.any?(commands, fn
-             {"tmux", ["paste-buffer", "-p", "-d", "-b", _, "-t", ^session]} -> true
+             {"tmux", ["paste-buffer", "-p", "-d", "-b", _, "-t", target]} -> target == "=" <> session
              _ -> false
            end)
 

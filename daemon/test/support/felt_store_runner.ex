@@ -701,7 +701,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
         {"", 0}
 
       command == "tmux" and hd(args) == "kill-session" ->
-        session = Enum.at(args, 2)
+        session = args |> Enum.at(2) |> String.trim_leading("=")
 
         case Agent.get(server(), &Map.get(&1, :kill_session_failure, false)) do
           {output, status} ->

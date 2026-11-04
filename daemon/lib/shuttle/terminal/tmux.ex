@@ -41,9 +41,14 @@ defmodule Shuttle.Terminal.Tmux do
 
   @impl true
   def probe(runner, name) do
-    case runner.cmd("tmux", ["has-session", "-t", "=" <> name], stderr_to_stdout: true) do
-      {_, 0} -> :present
-      {output, _} -> if absence_message?(output), do: :absent, else: :unknown
+    with {:ok, target} <- name_target(runner, name) do
+      case runner.cmd("tmux", ["has-session", "-t", target], stderr_to_stdout: true) do
+        {_, 0} -> :present
+        {output, _} -> if absence_message?(output), do: :absent, else: :unknown
+      end
+    else
+      :absent -> :absent
+      {:error, _} -> :unknown
     end
   end
 
@@ -63,31 +68,42 @@ defmodule Shuttle.Terminal.Tmux do
 
   @impl true
   def close(runner, name) do
-    case runner.cmd("tmux", ["kill-session", "-t", name], stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {output, _} -> if absence_message?(output), do: :absent, else: {:error, output}
+    with {:ok, target} <- name_target(runner, name) do
+      case runner.cmd("tmux", ["kill-session", "-t", target], stderr_to_stdout: true) do
+        {_, 0} -> :ok
+        {output, _} -> if absence_message?(output), do: :absent, else: {:error, output}
+      end
     end
   end
 
   @doc "Paste one multiline message with bracketed paste, then submit after the harness takes it."
   @impl true
   def paste(runner, session, text) when is_binary(text) do
+    with {:ok, target} <- name_target(runner, session) do
+      paste_target(runner, target, text)
+    else
+      :absent -> {:error, "tmux: session not found"}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp paste_target(runner, target, text) do
     buffer = "shuttle-paste-" <> Base.encode16(:crypto.strong_rand_bytes(12), case: :lower)
     path = Path.join(System.tmp_dir!(), buffer)
     Shuttle.FS.write_private!(path, text)
 
     try do
-      runner.cmd("tmux", ["send-keys", "-t", session, "-X", "cancel"], stderr_to_stdout: true)
+      runner.cmd("tmux", ["send-keys", "-t", target, "-X", "cancel"], stderr_to_stdout: true)
 
       with {_, 0} <-
              runner.cmd("tmux", ["load-buffer", "-b", buffer, path], stderr_to_stdout: true),
            {_, 0} <-
-             runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", session],
+             runner.cmd("tmux", ["paste-buffer", "-p", "-d", "-b", buffer, "-t", target],
                stderr_to_stdout: true
              ),
            :ok <- Process.sleep(Shuttle.Env.app(:paste_submit_delay_ms, 400)),
            {_, 0} <-
-             runner.cmd("tmux", ["send-keys", "-t", session, "Enter"], stderr_to_stdout: true) do
+             runner.cmd("tmux", ["send-keys", "-t", target, "Enter"], stderr_to_stdout: true) do
         :ok
       else
         {output, _status} -> {:error, "tmux: " <> String.trim(to_string(output))}
@@ -100,33 +116,35 @@ defmodule Shuttle.Terminal.Tmux do
   @impl true
   def rename(_runner, name, name), do: :ok
 
-  def rename(runner, "$" <> _ = from, to) do
-    # tmux resolves $N as an ID even with an exact-name prefix. Resolve the
-    # literal name through the session table, then address its immutable ID.
+  def rename(runner, from, to) do
+    with {:ok, target} <- name_target(runner, from) do
+      rename_target(runner, target, to)
+    else
+      _ -> {:error, :rename_failed}
+    end
+  end
+
+  # tmux resolves $N as an ID even with an exact-name prefix. A literal
+  # dollar-prefixed name must first resolve through the session table.
+  defp name_target(runner, "$" <> _ = name) do
     case runner.cmd("tmux", ["ls", "-F", "\#{session_id}\t\#{session_name}"],
            stderr_to_stdout: true
          ) do
       {output, 0} ->
-        session =
-          output
-          |> String.split("\n", trim: true)
-          |> Enum.map(&String.split(&1, "\t", parts: 2))
-          |> Enum.find(fn
-            [_id, ^from] -> true
-            _ -> false
-          end)
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.map(&String.split(&1, "\t", parts: 2))
+        |> Enum.find_value(:absent, fn
+          [id, ^name] -> {:ok, id}
+          _ -> nil
+        end)
 
-        case session do
-          [id, ^from] -> rename_session_id(runner, id, to)
-          nil -> {:error, :rename_failed}
-        end
-
-      _ ->
-        {:error, :rename_failed}
+      {output, _} ->
+        if absence_message?(output), do: :absent, else: {:error, output}
     end
   end
 
-  def rename(runner, from, to), do: rename_target(runner, "=" <> from, to)
+  defp name_target(_runner, name), do: {:ok, "=" <> name}
 
   @doc "Rename by a captured immutable session ID, independent of its current name."
   def rename_session_id(runner, session_id, to), do: rename_target(runner, session_id, to)
@@ -152,19 +170,23 @@ defmodule Shuttle.Terminal.Tmux do
   def identity(runner, name) do
     format = "\#{session_id}\t\#{session_created}\t\#{pane_id}\t\#{pane_pid}"
 
-    case runner.cmd("tmux", ["list-panes", "-s", "-t", "=" <> name, "-F", format],
-           stderr_to_stdout: true
-         ) do
-      {output, 0} ->
-        lines = String.split(String.trim(output), "\n", trim: true)
+    with {:ok, target} <- name_target(runner, name) do
+      case runner.cmd("tmux", ["list-panes", "-s", "-t", target, "-F", format],
+             stderr_to_stdout: true
+           ) do
+        {output, 0} ->
+          lines = String.split(String.trim(output), "\n", trim: true)
 
-        if lines != [] and
-             Enum.all?(lines, &Regex.match?(~r/^\$[0-9]+\t[0-9]+\t%[0-9]+\t[1-9][0-9]*$/, &1)),
-           do: {:ok, %{"panes" => Enum.sort(lines)}},
-           else: {:error, :backend_unobservable}
+          if lines != [] and
+               Enum.all?(lines, &Regex.match?(~r/^\$[0-9]+\t[0-9]+\t%[0-9]+\t[1-9][0-9]*$/, &1)),
+             do: {:ok, %{"panes" => Enum.sort(lines)}},
+             else: {:error, :backend_unobservable}
 
-      _ ->
-        {:error, :backend_unobservable}
+        _ ->
+          {:error, :backend_unobservable}
+      end
+    else
+      _ -> {:error, :backend_unobservable}
     end
   end
 
@@ -175,7 +197,7 @@ defmodule Shuttle.Terminal.Tmux do
     wait = ~s"""
     WAIT_DEADLINE=$(( $(date +%s) + 10 ))
     while [ "$(date +%s)" -lt "$WAIT_DEADLINE" ]; do
-      if tmux list-clients -t '#{name}' -F '\#{client_control_mode}' 2>/dev/null | grep -qx '0'; then
+      if tmux list-clients -t '=#{name}' -F '\#{client_control_mode}' 2>/dev/null | grep -qx '0'; then
         break
       fi
       sleep 0.2
@@ -184,7 +206,7 @@ defmodule Shuttle.Terminal.Tmux do
 
     %{
       wait_for_viewer: wait,
-      submit_key: ~s|( sleep 2; tmux send-keys -t '#{name}' Enter ) &\n    |,
+      submit_key: ~s|( sleep 2; tmux send-keys -t '=#{name}' Enter ) &\n    |,
       env: "",
       passthrough: Shuttle.Dispatcher.passthrough_block()
     }

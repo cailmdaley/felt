@@ -288,7 +288,7 @@ defmodule Shuttle.SessionResumeTest do
                ~S([ -n "${TMUX_PANE:-}" ] && tmux set-option -p -t "$TMUX_PANE" allow-passthrough on 2>/dev/null || true)
 
       assert {"", 0} = System.cmd("bash", ["-n", "-c", body])
-      assert body =~ "tmux list-clients -t '#{tmux}'"
+      assert body =~ "tmux list-clients -t '=#{tmux}'"
       assert body =~ "--resume '#{@claude}' || {"
       File.rm(script)
     end

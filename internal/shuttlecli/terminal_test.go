@@ -80,6 +80,38 @@ esac
 	return log
 }
 
+func TestTmuxKillUsesExactName(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bin := t.TempDir()
+	sysenvtest.LinkScript(t, filepath.Join(bin, "tmux"), "#!/bin/sh\n[ \"$1 $2 $3\" = 'kill-session -t =missing' ]\n")
+	env.Set("PATH", bin)
+	if err := (&tmuxTerminal{a: newApp(env)}).Kill("missing"); err != nil {
+		t.Fatalf("kill must use an exact name: %v", err)
+	}
+}
+
+func TestTmuxDollarNamesDoNotAddressNativeIDs(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	bin := t.TempDir()
+	sysenvtest.LinkScript(t, filepath.Join(bin, "tmux"), "#!/bin/sh\ncase \"$1\" in\nls) printf '$0\\tvictim\\n$1\\t$0\\n';;\nhas-session|kill-session) [ \"$3\" = '$1' ];;\n*) exit 99;;\nesac\n")
+	env.Set("PATH", bin)
+	terminal := &tmuxTerminal{a: newApp(env)}
+	if present, err := terminal.Has("$0"); !present || err != nil {
+		t.Fatalf("literal name was not resolved: %v %v", present, err)
+	}
+	if err := terminal.Kill("$0"); err != nil {
+		t.Fatalf("literal name was not closed by its ID: %v", err)
+	}
+	if present, _ := terminal.Has("$1"); present {
+		t.Fatal("a native ID was mistaken for a name")
+	}
+	if err := terminal.Kill("$1"); err == nil {
+		t.Fatal("an absent literal name was killed as a native ID")
+	}
+}
+
 func TestTerminalBackendsAndMixedHolders(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)

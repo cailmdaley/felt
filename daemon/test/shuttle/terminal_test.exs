@@ -222,7 +222,7 @@ defmodule Shuttle.TerminalTest do
       assert Terminal.locate(MixedRunner, "pre-flip") == Tmux
       assert %{terminal: "tmux"} = Shuttle.WorkerBackend.wire("pre-flip")
       assert {"", 0} = Shuttle.WorkerBackend.stop(MixedRunner, "pre-flip")
-      assert_received {:tmux_args, ["kill-session", "-t", "pre-flip"]}
+      assert_received {:tmux_args, ["kill-session", "-t", "=pre-flip"]}
       assert Terminal.status(MixedRunner, "pre-flip") == :gone
 
       refute Enum.any?(Shuttle.Test.FakeRex.calls(), fn {_, argv, _} ->
@@ -294,7 +294,7 @@ defmodule Shuttle.TerminalTest do
       runner = stub({"can't find session: leaf-01ABC-shuttle", 1}, {@worker_ps, 0})
 
       assert Terminal.stop(runner, "leaf-01ABC-shuttle") == {"", 0}
-      assert_received {:tmux_args, ["kill-session", "-t", "leaf-01ABC-shuttle"]}
+      assert_received {:tmux_args, ["kill-session", "-t", "=leaf-01ABC-shuttle"]}
       assert_received {:kill_args, ["-TERM", "--", "-812", "812"]}
     end
 
@@ -587,6 +587,32 @@ defmodule Shuttle.TerminalTest do
     assert Enum.sort(String.split(names, "\n", trim: true)) == ["$0 victim", "$1 migrated-worker"]
   end
 
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "close and probe treat dollar-prefixed tmux names literally" do
+    socket = Path.join(System.tmp_dir!(), "literal-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+
+    assert {"$0\n", 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "victim", "-P", "-F", "\#{session_id}", "sleep 300"],
+               []
+             )
+
+    assert {"$1\n", 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "$0", "-P", "-F", "\#{session_id}", "sleep 300"],
+               []
+             )
+
+    assert :absent = Tmux.probe(IsolatedTmuxRunner, "$1")
+    assert :ok = Tmux.close(IsolatedTmuxRunner, "$0")
+    assert :present = Tmux.probe(IsolatedTmuxRunner, "victim")
+    assert :absent = Tmux.close(IsolatedTmuxRunner, "$0")
+  end
+
   @tag :phantom
   @tag skip: is_nil(System.find_executable("tmux"))
   test "a real private tmux server launches an unlaunched name despite ps timeout, but never duplicates it" do
@@ -636,6 +662,40 @@ defmodule Shuttle.TerminalTest do
     assert :present = Tmux.probe(IsolatedTmuxRunner, name)
     assert {listing, 0} = IsolatedTmuxRunner.cmd("tmux", ["ls", "-F", "\#{session_name}"], [])
     assert Enum.sort(String.split(listing, "\n", trim: true)) == Enum.sort(["sentinel", name])
+  end
+
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "absent tmux targets cannot close or paste into a prefix sibling" do
+    socket = Path.join(System.tmp_dir!(), "exact-#{System.unique_integer([:positive])}.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    Env.put_app_env(:paste_submit_delay_ms, 0)
+
+    on_exit(fn ->
+      System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true)
+    end)
+
+    assert {_, 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "worker-other", "sleep 300"],
+               []
+             )
+
+    assert :absent = Tmux.close(IsolatedTmuxRunner, "worker")
+    assert {:error, _} = Tmux.paste(IsolatedTmuxRunner, "worker", "unrelated input")
+    assert :present = Tmux.probe(IsolatedTmuxRunner, "worker-other")
+
+    assert {_, 0} =
+             IsolatedTmuxRunner.cmd(
+               "tmux",
+               ["new-session", "-d", "-s", "worker", "sleep 300"],
+               []
+             )
+
+    assert :present = Tmux.probe(IsolatedTmuxRunner, "worker")
+    assert :ok = Tmux.close(IsolatedTmuxRunner, "worker")
+    assert :absent = Tmux.close(IsolatedTmuxRunner, "worker")
+    assert :present = Tmux.probe(IsolatedTmuxRunner, "worker-other")
   end
 
   test "native references do not overlap tmux names or pane IDs" do

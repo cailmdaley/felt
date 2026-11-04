@@ -1894,7 +1894,7 @@ defmodule Shuttle.DispatcherTest do
       )
 
     assert script =~ "sleep 2"
-    assert script =~ "tmux send-keys -t 'haiku-shuttle' Enter"
+    assert script =~ "tmux send-keys -t '=haiku-shuttle' Enter"
     # The dismiss block runs in the background (suffixed with `&`) so it
     # doesn't block the harness command itself.
     assert script =~ ") &"
@@ -1995,7 +1995,7 @@ defmodule Shuttle.DispatcherTest do
         session: "haiku-shuttle"
       )
 
-    assert script =~ "tmux list-clients -t 'haiku-shuttle'"
+    assert script =~ "tmux list-clients -t '=haiku-shuttle'"
     # Filter out tmux's control-mode clients (Portolan's wterm preview
     # used `tmux -C attach -r` and would otherwise have satisfied the wait
     # without a real human terminal attached).
