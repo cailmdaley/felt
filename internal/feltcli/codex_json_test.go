@@ -2,8 +2,25 @@ package feltcli
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestCodexAddFailureReportsActualCause(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	f.env.Set("FAKE_NATIVE_FAIL_ONCE", "1")
+	err := f.a.installCodexPluginViaCLI(f.remote)
+	if err == nil {
+		t.Fatal("native failure accepted")
+	}
+	if strings.Contains(err.Error(), "is required") {
+		t.Fatalf("unrelated install error became a version diagnosis: %v", err)
+	}
+	if !strings.Contains(err.Error(), "reported Codex plugin failure") {
+		t.Fatalf("native error lost: %v", err)
+	}
+}
 
 func TestCodexStructuredOutputIgnoresStderrWarnings(t *testing.T) {
 	t.Parallel()
