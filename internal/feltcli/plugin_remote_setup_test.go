@@ -161,6 +161,7 @@ materialize_cache() {
       cp -R "$payload/." "$cache/"
       case "${FAKE_NATIVE_TAMPER:-}" in
         alter) printf 'tampered\n' >> "$cache/.tampered";;
+        alter-skills) if [ "${name:-}" = felt-skills ]; then printf 'tampered\n' >> "$cache/.tampered"; fi;;
         release-metadata) printf '{"resolved_commit":"unexpected"}\n' > "$cache/.felt-generation.json";;
       esac
       ;;
