@@ -27,6 +27,11 @@ defmodule Shuttle.ProfileTest do
                  row.count > 0
              end)
 
+      assert Enum.any?(calls.by_caller, fn row ->
+               row.caller == "Shuttle.ProfileTest.stat_loop/0" and
+                 row.function == "Shuttle.FS.stat/1" and row.count > 0
+             end)
+
       assert Enum.any?(
                calls.by_caller,
                &String.starts_with?(&1.function, ":prim_file.read_file_info/")
@@ -51,6 +56,7 @@ defmodule Shuttle.ProfileTest do
   # The call is not in tail position, so the trace's caller is this function.
   def stat_loop do
     File.stat(System.tmp_dir!())
+    Shuttle.FS.stat(System.tmp_dir!())
 
     receive do
       :stop -> :ok
