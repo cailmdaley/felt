@@ -2719,11 +2719,14 @@ defmodule Shuttle.PollerTest do
     commands = MockRunner.commands() |> Enum.drop(before)
 
     assert Enum.any?(commands, &match?({"tmux", ["load-buffer" | _]}, &1))
-    assert {"tmux", ["send-keys", "-t", "=" <> session, "Enter"]} in commands
+    assert {"tmux", ["send-keys", "-t", "=" <> session <> ":", "Enter"]} in commands
 
     assert Enum.any?(commands, fn
-             {"tmux", ["paste-buffer", "-p", "-d", "-b", _, "-t", target]} -> target == "=" <> session
-             _ -> false
+             {"tmux", ["paste-buffer", "-p", "-d", "-b", _, "-t", target]} ->
+               target == "=" <> session <> ":"
+
+             _ ->
+               false
            end)
 
     refute Enum.any?(commands, &match?({"tmux", ["kill-session" | _]}, &1))

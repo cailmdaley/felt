@@ -79,7 +79,7 @@ defmodule Shuttle.Terminal.Tmux do
   @doc "Paste one multiline message with bracketed paste, then submit after the harness takes it."
   @impl true
   def paste(runner, session, text) when is_binary(text) do
-    with {:ok, target} <- name_target(runner, session) do
+    with {:ok, target} <- pane_target(runner, session) do
       paste_target(runner, target, text)
     else
       :absent -> {:error, "tmux: session not found"}
@@ -146,6 +146,9 @@ defmodule Shuttle.Terminal.Tmux do
 
   defp name_target(_runner, name), do: {:ok, "=" <> name}
 
+  defp pane_target(runner, "$" <> _ = name), do: name_target(runner, name)
+  defp pane_target(_runner, name), do: {:ok, "=" <> name <> ":"}
+
   @doc "Rename by a captured immutable session ID, independent of its current name."
   def rename_session_id(runner, session_id, to), do: rename_target(runner, session_id, to)
 
@@ -206,7 +209,7 @@ defmodule Shuttle.Terminal.Tmux do
 
     %{
       wait_for_viewer: wait,
-      submit_key: ~s|( sleep 2; tmux send-keys -t '=#{name}' Enter ) &\n    |,
+      submit_key: ~s|( sleep 2; tmux send-keys -t '=#{name}:' Enter ) &\n    |,
       env: "",
       passthrough: Shuttle.Dispatcher.passthrough_block()
     }

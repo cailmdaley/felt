@@ -845,6 +845,32 @@ defmodule Shuttle.TerminalTest do
     assert :present = Tmux.probe(IsolatedTmuxRunner, "worker-other")
   end
 
+  @tag :tmp_dir
+  @tag skip: is_nil(System.find_executable("tmux"))
+  test "live tmux panes accept exact-name paste and rendered resume submit", %{tmp_dir: _dir} do
+    {scratch, 0} = System.cmd("mktemp", ["-d"])
+    scratch = String.trim(scratch)
+    on_exit(fn -> File.rm_rf!(scratch) end)
+    socket = Path.join(scratch, "tmux.sock")
+    Env.put_app_env(:terminal_test_socket, socket)
+    Env.put_app_env(:paste_submit_delay_ms, 0)
+    on_exit(fn -> System.cmd("tmux", ["-S", socket, "kill-server"], stderr_to_stdout: true) end)
+
+    for name <- ["worker-shuttle", "$literal"] do
+      assert {pane, 0} = IsolatedTmuxRunner.cmd("tmux",
+        ["new-session", "-d", "-s", name, "-P", "-F", "\#{pane_id}", "cat"], [])
+      assert :ok = Tmux.paste(IsolatedTmuxRunner, name, "hello exact worker")
+      assert {output, 0} = IsolatedTmuxRunner.cmd("tmux",
+        ["capture-pane", "-p", "-t", String.trim(pane)], [])
+      assert output =~ "hello exact worker"
+    end
+
+    snippet = Tmux.script("worker-shuttle").submit_key
+    snippet = String.replace(snippet, "tmux ", "tmux -S '#{socket}' ")
+    assert {output, 0} = System.cmd("bash", ["-c", snippet <> "wait"], stderr_to_stdout: true)
+    assert output == ""
+  end
+
   test "native references do not overlap tmux names or pane IDs" do
     assert Terminal.native_ref?("session:uuid")
     assert Terminal.native_ref?("block:uuid")

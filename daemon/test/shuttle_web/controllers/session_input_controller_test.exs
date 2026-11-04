@@ -63,8 +63,8 @@ defmodule ShuttleWeb.SessionInputControllerTest do
              |> json_response(200)
 
     assert_received {:tmux, ["load-buffer", "-b", _, _]}
-    assert_received {:tmux, ["paste-buffer", "-p", "-d", "-b", _, "-t", "=worker-shuttle"]}
-    assert_received {:tmux, ["send-keys", "-t", "=worker-shuttle", "Enter"]}
+    assert_received {:tmux, ["paste-buffer", "-p", "-d", "-b", _, "-t", "=worker-shuttle:"]}
+    assert_received {:tmux, ["send-keys", "-t", "=worker-shuttle:", "Enter"]}
 
     assert %{"tmux_session" => "worker-shuttle"} =
              post(

@@ -1896,7 +1896,7 @@ defmodule Shuttle.DispatcherTest do
       )
 
     assert script =~ "sleep 2"
-    assert script =~ "tmux send-keys -t '=haiku-shuttle' Enter"
+    assert script =~ "tmux send-keys -t '=haiku-shuttle:' Enter"
     # The dismiss block runs in the background (suffixed with `&`) so it
     # doesn't block the harness command itself.
     assert script =~ ") &"
