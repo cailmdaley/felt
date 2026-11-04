@@ -282,12 +282,55 @@ else
   # Either way a host that never touched Tailscale has no such file, so the
   # daemon never invokes this script there, regardless of whether it happens
   # to be installed.
+  rm -f "$HOME/.local/bin/tailscaled-launch"
   cp "$REPO/bin/tailscaled-launch" "$HOME/.local/bin/tailscaled-launch" \
     && chmod +x "$HOME/.local/bin/tailscaled-launch" \
     || die "failed to install tailscaled-launch to ~/.local/bin."
   ok "tailscaled-launch installed to ~/.local/bin."
 
-  if have_systemd_user; then
+  rm -f "$HOME/.local/bin/shuttle-ensure"
+  cp "$REPO/bin/shuttle-ensure" "$HOME/.local/bin/shuttle-ensure" \
+    && chmod +x "$HOME/.local/bin/shuttle-ensure" \
+    || die "failed to install shuttle-ensure to ~/.local/bin."
+  ok "shuttle-ensure installed to ~/.local/bin."
+
+  # Cluster homes are shared across login nodes. Pin the node that runs
+  # bootstrap so a later login to a different node cannot start another host.
+  mkdir -p "$HOME/.shuttle"
+  if [ -n "${SHUTTLE_OWNER_NODE:-}" ] || [ ! -s "$HOME/.shuttle/owner-node" ]; then
+    OWNER_NODE="${SHUTTLE_OWNER_NODE:-$(hostname -s 2>/dev/null || hostname 2>/dev/null)}"
+    OWNER_NODE=${OWNER_NODE%%.*}
+    [ -n "$OWNER_NODE" ] || die "could not identify the owner login node."
+    printf '%s\n' "$OWNER_NODE" > "$HOME/.shuttle/owner-node"
+  fi
+  OWNER_NODE=$(head -n 1 "$HOME/.shuttle/owner-node")
+  CURRENT_NODE=$(hostname -s 2>/dev/null || hostname 2>/dev/null)
+  CURRENT_NODE=${CURRENT_NODE%%.*}
+
+  LOGIN_SHELL=${SHELL:-}
+  LOGIN_SHELL=${LOGIN_SHELL##*/}
+  case "$LOGIN_SHELL" in
+    zsh) LOGIN_PROFILE="$HOME/.zprofile" ;;
+    bash)
+      if [ -e "$HOME/.bash_profile" ]; then LOGIN_PROFILE="$HOME/.bash_profile"
+      elif [ -e "$HOME/.bash_login" ]; then LOGIN_PROFILE="$HOME/.bash_login"
+      else LOGIN_PROFILE="$HOME/.profile"; fi
+      ;;
+    *) LOGIN_PROFILE="" ;;
+  esac
+  if [ -n "$LOGIN_PROFILE" ] && ! grep -Fq '# shuttle-ensure' "$LOGIN_PROFILE" 2>/dev/null; then
+    cat >> "$LOGIN_PROFILE" <<'PROFILE'
+
+# shuttle-ensure
+if [ -x "$HOME/.local/bin/shuttle-ensure" ]; then
+  "$HOME/.local/bin/shuttle-ensure"
+fi
+PROFILE
+  fi
+
+  if [ "$CURRENT_NODE" != "$OWNER_NODE" ]; then
+    note "supervisor start skipped on $CURRENT_NODE; $OWNER_NODE owns this host."
+  elif have_systemd_user; then
     # Same Makefile target as macOS, systemd arm: it captures the login PATH
     # and renders daemon/share/io.shuttle.daemon.service.template. Stores come
     # from the editable registry. The respawn loop remains the fallback when

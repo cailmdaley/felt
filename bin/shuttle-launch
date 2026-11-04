@@ -31,6 +31,20 @@
 
 set -u
 
+# Cluster homes are shared across login nodes. Bootstrap pins the owner node;
+# honor that pin for login starts and hub recovery alike. Without a pin,
+# launches are unrestricted.
+owner_file=${SHUTTLE_OWNER_NODE_FILE:-$HOME/.shuttle/owner-node}
+if [ -s "$owner_file" ]; then
+  owner=$(head -n 1 "$owner_file")
+  node=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
+  node=${node%%.*}
+  if [ -n "$owner" ] && [ "$owner" != "$node" ]; then
+    echo "shuttle-launch: this host belongs to login node '$owner'; leaving it alone"
+    exit 0
+  fi
+fi
+
 case "${1:-}" in
   ""|--loop|--tmux|--recover) ;;
   *) echo "shuttle-launch: unknown mode '$1'" >&2; exit 2 ;;

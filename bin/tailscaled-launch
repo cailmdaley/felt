@@ -78,6 +78,19 @@
 
 set -u
 
+# A shared home may be visible from several cluster login nodes. Only the
+# node selected during bootstrap may start this host's userspace daemon.
+owner_file=${SHUTTLE_OWNER_NODE_FILE:-$HOME/.shuttle/owner-node}
+if [ -s "$owner_file" ]; then
+  owner=$(head -n 1 "$owner_file")
+  node=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
+  node=${node%%.*}
+  if [ -n "$owner" ] && [ "$owner" != "$node" ]; then
+    echo "tailscaled-launch: this host belongs to login node '$owner'; leaving it alone"
+    exit 0
+  fi
+fi
+
 ST="${TAILSCALED_STATE:-$HOME/.local/state/tailscale}"
 SESSION=tailscaled
 

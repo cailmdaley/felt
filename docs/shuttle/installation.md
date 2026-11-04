@@ -516,6 +516,44 @@ the other platform's file for inspection, and it is accepted *only* alongside
 `shuttle daemon uninstall` reverses the install on either platform, and
 `make uninstall-agent` calls the same command.
 
+### Cluster login recovery and Rex
+
+On Linux, `scripts/bootstrap.sh` installs `shuttle-ensure` and adds it to the
+Bash or Zsh login profile. It records the short hostname that ran bootstrap in
+`~/.shuttle/owner-node`; set `SHUTTLE_OWNER_NODE` during bootstrap to choose a
+different owner node. Each login prints the node that owns the daemon. The
+ensure returns immediately after starting a detached check, and only the owner
+node may start the userspace `tailscaled` loop or the daemon's configured
+supervisor. The daemon and tailscaled launchers enforce the same owner pin,
+including when the hub asks a host to recover over SSH. This prevents a shared
+cluster home from starting the same host on a second login node. Move ownership
+only after stopping the daemon and tailscaled supervisors on the old node; then
+edit `~/.shuttle/owner-node` to the new node's short hostname and log in there.
+Changing the pin does not stop already-running processes. The login ensure and
+SSH recovery launchers honor the pin. A directly managed systemd unit starts
+the Go CLI without this shell guard, so install that unit only on the owner
+node when homes are shared.
+
+The systemd unit or tmux respawn loop restarts a failed daemon. On a cluster,
+the login ensure recreates a missing loop after an SSH login; hub SSH recovery
+can do the same if the hub is reachable and its credentials are valid. The
+login ensure and SSH recovery launchers honor the owner-node pin.
+
+On a Rex host, the dispatcher checks for the Rex server on its poll tick and
+starts it when absent, even when no worker is waiting to launch. Rex keeps
+sessions outside the daemon, so ordinary daemon restarts leave them running.
+Stopping the Rex server ends all its sessions; the live daemon detects the
+missing workers and restores them from Shuttle's durable worker and turn
+evidence. This does not restart the daemon or release its boot quarantine.
+
+`bin/rex-install` replaces the Linux Rex executable without touching the
+running server. To activate an upgrade, run `rex server stop` as a planned
+restart. That ends all sessions; on its next poll tick, the daemon starts the
+new Rex binary and restores assigned workers. If the tailnet listener failed
+when Rex started, Shuttle falls back to a local-only server. The live server
+keeps that configuration, so bringing tailscaled back does not add the
+listener; stop Rex in a planned restart to have Shuttle try again.
+
 ### macOS (launchd)
 
 `shuttle daemon install` renders `daemon/share/io.shuttle.daemon.plist.template`
@@ -677,9 +715,9 @@ SHUTTLE_DIR=~/.local/share/shuttle ~/.local/bin/shuttle-launch   # fetched
 SHUTTLE_DIR=~/dev/felt ~/.local/bin/shuttle-launch               # checkout
 ```
 
-Run the same command after an upgrade to pick up a new `shuttle-launch`: it
-kills the tmux session and recreates it from the refreshed script.
-The default launcher preserves a verified live tmux loop.
+On a host using the tmux loop, run `shuttle-launch --tmux` after upgrading to
+replace that loop with the refreshed script. The default launcher preserves a
+verified live tmux loop.
 Without one, if a reachable service manager owns an enabled or active service, the launcher restarts through that service instead.
 `shuttle-launch --tmux` explicitly selects tmux, disabling the competing systemd unit or unloading the loaded launchd agent before creating the loop.
 Deployment uses that mode when it has verified a live tmux loop, so owner selection cannot silently change during the restart.
@@ -724,12 +762,12 @@ It supports amd64 and arm64, verifies the release API's SHA-256 checksum, and re
 Keep `~/.local/bin` on the daemon's PATH, or set `SHUTTLE_REX_BIN` to the executable's absolute path.
 The installer never starts, stops or upgrades a running server.
 
-When a worker needs Rex and its server is absent, Shuttle starts a detached server on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`.
+On Linux, each dispatcher poll checks whether the Rex server is present and starts a detached server when it is absent, whether or not a worker is waiting. It listens on `unix://<data dir>/rex/server.sock` with state in `<data dir>/rex/state`.
 The data directory is `$SHUTTLE_DATA_DIR`, defaulting to `~/.shuttle`; its `rex` directory has mode 0700.
 This socket does not depend on `$XDG_RUNTIME_DIR` surviving logout.
 Shuttle requests `--extra-listen tailnet://:7297` and passes the private tailscaled socket resolved from the remotes configuration, or uses the system tailscaled.
 The listener admits Tailscale-identified callers; an ordinary loopback caller is refused, including another user on a shared host.
-If that start fails, Shuttle logs the failure and retries without the tailnet listener so local workers don't depend on Tailscale.
+If that start fails, Shuttle logs the failure and tries once without the tailnet listener so local workers don't depend on Tailscale.
 A running server retains its configuration; Shuttle never restarts it to add a listener.
 
 Run `shuttle doctor` to inspect server reachability, the running server's version, and the port 7297 listener.

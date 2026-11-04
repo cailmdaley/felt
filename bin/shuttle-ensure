@@ -1,0 +1,34 @@
+#!/bin/sh
+# Keep this user's Shuttle host alive when its owner node receives a login.
+set -u
+
+owner_file=${SHUTTLE_OWNER_NODE_FILE:-$HOME/.shuttle/owner-node}
+owner=$(head -n 1 "$owner_file" 2>/dev/null || true)
+[ -n "$owner" ] || exit 0
+node=$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)
+node=${node%%.*}
+[ "$node" = "$owner" ] || {
+  [ "${1:-}" = "--start" ] || printf 'shuttle: daemon lives on %s\n' "$owner"
+  exit 0
+}
+
+if [ "${1:-}" != "--start" ]; then
+  printf 'shuttle: daemon lives on %s\n' "$owner"
+  nohup "$HOME/.local/bin/shuttle-ensure" --start </dev/null >/dev/null 2>&1 &
+  exit 0
+fi
+
+if [ -s "$HOME/.local/state/tailscale/tailscaled.state" ] \
+  && ! tmux has-session -t tailscaled 2>/dev/null; then
+  "$HOME/.local/bin/tailscaled-launch" >/dev/null 2>&1 || true
+fi
+
+if command -v systemctl >/dev/null 2>&1 \
+  && systemctl --user is-active --quiet shuttle-daemon.service 2>/dev/null; then
+  exit 0
+fi
+if command -v shuttle >/dev/null 2>&1 \
+  && shuttle daemon loop-present >/dev/null 2>&1; then
+  exit 0
+fi
+"$HOME/.local/bin/shuttle-launch" --recover >/dev/null 2>&1 || true

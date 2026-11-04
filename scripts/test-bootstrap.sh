@@ -12,13 +12,17 @@ mkdir -p "$WORK/bin" "$WORK/node-bin" "$WORK/home"
 
 # The inherited PATH deliberately has no node/npm. The actual login shell
 # reads our disposable .bash_profile and gains them only in the first case.
-for tool in dirname mkdir; do
+for tool in dirname mkdir cat grep id; do
   ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
 done
 ln -s "$BASH_BIN" "$WORK/bin/bash"
 cat > "$WORK/bin/uname" <<'STUB'
 #!/bin/bash
 printf 'Darwin\n'
+STUB
+cat > "$WORK/bin/hostname" <<'STUB'
+#!/bin/bash
+printf 'login-a\n'
 STUB
 for tool in mix tmux felt shuttle node npm; do
   cat > "$WORK/bin/$tool" <<'STUB'
@@ -34,7 +38,7 @@ if [[ " $* " == *' ui '* && "${BOOTSTRAP_TEST_FAIL_UI:-0}" == 1 ]]; then
   exit 42
 fi
 STUB
-chmod +x "$WORK/bin/uname" "$WORK/bin/mix" "$WORK/bin/tmux" \
+chmod +x "$WORK/bin/uname" "$WORK/bin/hostname" "$WORK/bin/mix" "$WORK/bin/tmux" \
   "$WORK/bin/felt" "$WORK/bin/shuttle" "$WORK/bin/make" "$WORK/node-bin/"*
 
 login_path() {
@@ -42,6 +46,8 @@ login_path() {
 }
 run_bootstrap() {
   "$ENV_BIN" -i HOME="$WORK/home" PATH="$WORK/bin" \
+    SHELL=/bin/bash \
+    SHUTTLE_OWNER_NODE="${SHUTTLE_OWNER_NODE:-}" \
     BOOTSTRAP_TEST_CALLS="$WORK/calls" BOOTSTRAP_TEST_FAIL_UI="${FAIL_UI:-0}" \
     "$BASH_BIN" "$REPO/scripts/bootstrap.sh" --skip-cli --skip-hook "$@" \
     > "$WORK/output" 2>&1
@@ -89,7 +95,19 @@ printf '#!/bin/bash\nexit 0\n' > "$WORK/bin/systemctl"
 chmod +x "$WORK/bin/systemctl"
 mkdir -p "$WORK/home/.local/bin"
 ln -s "$REPO/bin/shuttle-launch" "$WORK/home/.local/bin/shuttle-launch"
+ln -s "$REPO/bin/tailscaled-launch" "$WORK/home/.local/bin/tailscaled-launch"
+ln -s "$REPO/bin/shuttle-ensure" "$WORK/home/.local/bin/shuttle-ensure"
+rm -f "$WORK/home/.bash_profile"
+printf 'export PATH=%q\n' "$WORK/bin:$WORK/node-bin" > "$WORK/home/.profile"
 run_bootstrap || fail 'Linux bootstrap could not replace a link to shuttle-launch'
 [ ! -L "$WORK/home/.local/bin/shuttle-launch" ] || fail 'launcher remains a symlink'
+[ ! -L "$WORK/home/.local/bin/tailscaled-launch" ] || fail 'tailscaled launcher remains a symlink'
+[ ! -L "$WORK/home/.local/bin/shuttle-ensure" ] || fail 'ensure remains a symlink'
 cmp "$REPO/bin/shuttle-launch" "$WORK/home/.local/bin/shuttle-launch" || fail 'launcher differs from source'
+cmp "$REPO/bin/shuttle-ensure" "$WORK/home/.local/bin/shuttle-ensure" || fail 'ensure differs from source'
+[ "$(cat "$WORK/home/.shuttle/owner-node")" = login-a ] || fail 'owner login node was not recorded'
+grep -F '# shuttle-ensure' "$WORK/home/.profile" >/dev/null || fail 'existing login profile does not invoke ensure'
+SHUTTLE_OWNER_NODE=login-b run_bootstrap || fail 'bootstrap could not update owner-node override'
+[ "$(cat "$WORK/home/.shuttle/owner-node")" = login-b ] || fail 'owner-node override did not replace recorded node'
+! grep -F 'install-agent' "$WORK/calls" >/dev/null || fail 'bootstrap started a supervisor from the non-owner node'
 printf 'PASS: Linux bootstrap replaces a launcher symlink to its source\n'
