@@ -96,7 +96,7 @@ shift
 exec /usr/bin/env -i HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
  FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
  FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
- CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" bash -c "$*"
+ CHECK_REAL_PRUNE="${CHECK_REAL_PRUNE:-0}" CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" bash -c "$*"
 `)
 	write(filepath.Join(f.bin, "make"), `#!/bin/sh
 case "$1" in
@@ -142,6 +142,14 @@ case "$1 $2" in
  'daemon activate-release') shift 2; TEST_RELEASE="$1"; export TEST_RELEASE; shift 2; exec "$@";;
  'daemon prune-releases')
   if [ "${CHECK_OLD_PRUNE:-0}" = 1 ] && [ -d "$4/.leases" ]; then git -C "$3" worktree remove --force "$4/.leases" || exit 19; fi
+  if [ "${CHECK_REAL_PRUNE:-0}" = 1 ]; then
+   source="$3"; root="$4"; shift 4
+   for tree in "$root"/*; do
+    [ -d "$tree" ] || continue
+    keep=0; for arg do [ "$arg" != "$tree" ] || keep=1; done
+    [ "$keep" = 1 ] || git -C "$source" worktree remove --force "$tree" || exit 21
+   done
+  fi
   echo prune >> "$EVENTS";;
  'daemon release') echo release >> "$EVENTS";;
  *) echo "unexpected shuttle $*" >&2; exit 20;;
@@ -235,6 +243,33 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployCoalescingRetainsActualRollbackTree(t *testing.T) {
+	t.Parallel()
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	f.env = append(f.env, "CHECK_REAL_PRUNE=1")
+	run := func(name string) {
+		t.Helper()
+		cmd, log := f.start(t, name)
+		if err := cmd.Wait(); err != nil {
+			t.Fatalf("deploy: %v %s", err, fleetRead(log))
+		}
+	}
+	run("first-target")
+	previous := f.sha
+	if err := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("next"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f.git(t, f.repo, "commit", "-am", "next")
+	f.git(t, f.repo, "push")
+	f.sha = f.git(t, f.repo, "rev-parse", "HEAD")
+	run("next-target")
+	run("coalesced-target")
+	if _, err := os.Stat(filepath.Join(f.remote+".deploy", previous)); err != nil {
+		t.Fatalf("coalesced deploy pruned true rollback tree: %v", err)
 	}
 }
 
