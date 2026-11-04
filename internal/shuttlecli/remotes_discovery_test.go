@@ -356,20 +356,43 @@ func TestRouteOwnerForCommand_AcceptsDiscoveredPeer(t *testing.T) {
 
 func TestDoctor_WarnsWhenDiscoveryIsUnavailable(t *testing.T) {
 	t.Parallel()
-	env := testEnv(t)
-	serveDiscovery(t, env, `{"enabled":true,"state":"unavailable","via":"cli","error":"tailscale CLI not found","peers":[]}`)
+	for _, tc := range []struct {
+		name, peers, want string
+	}{
+		{"empty", `[]`, "remotes.json alone"},
+		{"retained", `[{"name":"hub-a","url":"https://hub-a.example.ts.net"}]`, "retaining 1 recent peer(s)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			env := testEnv(t)
+			writeRemotesIn(t, env, `{"version":1,"remotes":[]}`)
+			serveDiscovery(t, env, `{"enabled":true,"state":"unavailable","via":"cli","error":"tailscale CLI not found","peers":`+tc.peers+`}`)
 
-	a := newApp(env)
-	daemon := a.collectDaemonReceipt()
-	if daemon.Discovery == nil || daemon.Discovery.State != "unavailable" {
-		t.Fatalf("receipt discovery = %+v", daemon.Discovery)
-	}
-	streams := sysenvtest.Capture(env)
-	a.printDiscoveryReceipt(daemon.Discovery)
-	out := streams.Stdout.String()
-	if !strings.Contains(out, "warning: tailnet discovery unavailable (tailscale CLI not found)") ||
-		!strings.Contains(out, "running on remotes.json alone") {
-		t.Fatalf("doctor line = %q", out)
+			a := newApp(env)
+			daemon := a.collectDaemonReceipt()
+			if daemon.Discovery == nil || daemon.Discovery.State != "unavailable" {
+				t.Fatalf("receipt discovery = %+v", daemon.Discovery)
+			}
+			streams := sysenvtest.Capture(env)
+			a.printDiscoveryReceipt(daemon.Discovery)
+			out := streams.Stdout.String()
+			if !strings.Contains(out, "warning: tailnet discovery unavailable (tailscale CLI not found)") ||
+				!strings.Contains(out, tc.want) {
+				t.Errorf("doctor line = %q, want %q", out, tc.want)
+			}
+			fleet, err := a.loadResolvedFleet()
+			if err != nil {
+				t.Fatal(err)
+			}
+			summary := fleet.discoverySummary()
+			if !strings.Contains(summary, "tailnet discovery unavailable (tailscale CLI not found)") ||
+				!strings.Contains(summary, tc.want) {
+				t.Errorf("remotes list summary = %q, want %q", summary, tc.want)
+			}
+			if tc.name == "retained" && (strings.Contains(out, "remotes.json alone") || strings.Contains(summary, "remotes.json alone")) {
+				t.Error("retained peers must not be described as remotes.json alone")
+			}
+		})
 	}
 }
 

@@ -325,7 +325,11 @@ func (a *app) printDiscoveryReceipt(discovery *daemonDiscovery) {
 	case "disabled":
 		fmt.Fprintf(a.env.Stdout, "tailnet discovery: off (%s)\n", discovery.Error)
 	default:
-		fmt.Fprintf(a.env.Stdout, "warning: tailnet discovery unavailable (%s); this host is running on remotes.json alone\n", discovery.Error)
+		if len(discovery.Peers) > 0 {
+			fmt.Fprintf(a.env.Stdout, "warning: tailnet discovery unavailable (%s); retaining %d recent peer(s)\n", discovery.Error, len(discovery.Peers))
+		} else {
+			fmt.Fprintf(a.env.Stdout, "warning: tailnet discovery unavailable (%s); this host is running on remotes.json alone\n", discovery.Error)
+		}
 	}
 }
 

@@ -194,6 +194,9 @@ func (f resolvedFleet) discoverySummary() string {
 	case "disabled":
 		return "tailnet discovery is disabled: " + d.Error
 	default:
+		if len(d.Peers) > 0 {
+			return fmt.Sprintf("tailnet discovery unavailable (%s): retaining %d recent peer(s)", d.Error, len(d.Peers))
+		}
 		return fmt.Sprintf("tailnet discovery unavailable (%s): this host runs on remotes.json alone", d.Error)
 	}
 }
