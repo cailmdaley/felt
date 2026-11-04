@@ -156,21 +156,31 @@ func (a *app) normalizeFeltStores(stores []string) []string {
 // EvalSymlinks again here is idempotent and keeps the function correct for any
 // caller.
 func (a *app) canonicalFiberID(mdPath string) (string, error) {
+	ref, err := a.canonicalFiberRef(mdPath)
+	return ref.ID, err
+}
+
+func (a *app) canonicalFiberRef(mdPath string) (felt.Ref, error) {
 	if mdPath == "" {
-		return "", fmt.Errorf("empty fiber path")
+		return felt.Ref{}, fmt.Errorf("empty fiber path")
 	}
 	abs, err := a.env.Abs(mdPath)
 	if err != nil {
-		return "", err
+		return felt.Ref{}, err
 	}
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
 	}
 	rel, err := feltStoreRelativePath(abs)
 	if err != nil {
-		return "", err
+		return felt.Ref{}, err
 	}
-	return fiberIDFromStorePath(rel)
+	id, err := fiberIDFromStorePath(rel)
+	if err != nil {
+		return felt.Ref{}, err
+	}
+	feltDir := strings.TrimSuffix(abs, filepath.FromSlash(rel))
+	return felt.Ref{ID: id, Storage: felt.NewStorage(filepath.Dir(filepath.Clean(feltDir)))}, nil
 }
 
 // feltStoreRelativePath walks up from a markdown path to the nearest enclosing
