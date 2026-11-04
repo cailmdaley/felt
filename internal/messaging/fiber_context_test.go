@@ -85,7 +85,7 @@ func TestFiberContextReachesCodexQuietResumeWithEndedHook(t *testing.T) {
 
 func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 	for _, state := range []string{"pending", "offered"} {
-		for _, change := range []string{"text", "wake", "sender", "signal"} {
+		for _, change := range []string{"text", "sender", "signal"} {
 			t.Run(state+"/"+change, func(t *testing.T) {
 				env := testEnv(t)
 				request := Request{MessageID: "retry", Text: "original", From: "sender"}
@@ -101,12 +101,15 @@ func TestFiberContextRejectsConflictingRetry(t *testing.T) {
 				if err := QueueFiberContext(env, "fiber", request); err != nil {
 					t.Fatalf("identical retry: %v", err)
 				}
+				wakeRetry := request
+				wakeRetry.Wake = true
+				if err := QueueFiberContext(env, "fiber", wakeRetry); err != nil {
+					t.Fatalf("effective-wake retry: %v", err)
+				}
 				changed := request
 				switch change {
 				case "text":
 					changed.Text = "different"
-				case "wake":
-					changed.Wake = true
 				case "sender":
 					changed.From = "other"
 				case "signal":

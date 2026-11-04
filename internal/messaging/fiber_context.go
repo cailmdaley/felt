@@ -61,8 +61,10 @@ func QueueFiberContext(env *sysenv.Env, fiber string, r Request) error {
 
 // The fiber key supplies the destination; session aliases and refreshed
 // retention/proof metadata do not change a retry's semantic identity.
+// Wake is owner-derived routing, dependent on worker liveness.
 func fiberRequestIdentity(r Request) string {
 	r.Address = ""
+	r.Wake = false
 	signal, _ := json.Marshal(r.ThreadSignal)
 	return requestHash(r) + string(signal)
 }
