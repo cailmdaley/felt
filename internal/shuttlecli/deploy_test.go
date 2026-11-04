@@ -796,7 +796,9 @@ func TestDeployFinishDoesNotPruneOnHarnessOrReleaseFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "prune")
 			harness := `release_quarantine() { [ "$RELEASE_OK" = 1 ]; }
-run_on_visible() { printf '%s\\n' "$2" >> "$MARKER"; }
+run_on_visible() { [ "$2" != prune ] || printf '%s\\n' "$2" >> "$MARKER"; }
+refresh_checkout_cmd() { :; }
+refresh_harnesses() { [ "$HARNESS_FAILED" = 0 ]; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
@@ -830,7 +832,9 @@ func TestDeployPrunesAfterRelease(t *testing.T) {
 	}
 	events := filepath.Join(t.TempDir(), "events")
 	harness := `release_quarantine() { printf 'release\n' >> "$EVENTS"; }
-run_on_visible() { printf '%s\n' "$2" >> "$EVENTS"; }
+run_on_visible() { [ -z "$2" ] || printf '%s\n' "$2" >> "$EVENTS"; }
+refresh_checkout_cmd() { :; }
+refresh_harnesses() { :; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
