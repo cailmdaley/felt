@@ -291,10 +291,10 @@ func TestDeployRefreshHarnessFailureRetainsFullDiagnostics(t *testing.T) {
 	}
 	script := shellFunction(t, string(source), "refresh_harnesses") + `
 harness_setup_cmd() { :; }
-run_on_visible() { printf 'native-trust-warning-token\n'; printf 'harness-fail receipt is broken\n'; return 1; }
+run_local() { printf 'native-trust-warning-token\n'; printf 'harness-fail receipt is broken\n'; return 1; }
 bad() { printf '%s\n' "$1" >&2; }
 ok() { :; }
-refresh_harnesses fake /checkout
+refresh_harnesses /checkout
 `
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "HOME="+t.TempDir())

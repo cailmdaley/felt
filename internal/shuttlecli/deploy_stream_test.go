@@ -51,7 +51,7 @@ func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
 	first, firstLog := f.start(t, "heartbeat-holder")
 	defer fleetTouch(t, f.gate)
 	deployAwait(t, "holder build: "+firstLog, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
-	waiter, log := f.startArgs(t, "stopped-rollback", "fake", []string{"--ref", f.sha}, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=180")
+	waiter, log := f.startArgs(t, "stopped-rollback", "fake", []string{"--ref", f.sha}, fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(180*time.Second).Unix()))
 	deployAwait(t, "rollback waiter: "+log, func() bool { return strings.Contains(fleetRead(log), "waiting for") })
 	var observer int
 	for _, line := range strings.Split(fleetRead(log), "\n") {

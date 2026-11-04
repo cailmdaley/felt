@@ -467,7 +467,7 @@ SH
 }
 
 # Kill the daemon's listener; the host's supervisor restarts it.
-# The snippet runs on the target host (run_on), and touches the daemon's stop
+# The snippet runs on the target host, and touches the daemon's stop
 # marker there before the SIGTERM, so the rebuilt daemon's boot quarantine holds
 # (Shuttle.DaemonHeartbeat). The marker lives in the data directory that host's
 # `shuttle host --json` reports, else the plain $SHUTTLE_DATA_DIR expansion.
@@ -480,22 +480,18 @@ daemon_kill() {
   printf '%s' 'for pid in $pids; do for original in ${cycle_listener_pids-$pids}; do if [ "$pid" = "$original" ]; then kill "$pid"; break; fi; done; done'
 }
 
-run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CLIs are on PATH)
-  run_value "$@" 2>/dev/null
-}
-
-run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
-  if [ -z "$1" ]; then bash -lc "$2" </dev/null
-  else ssh -n $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2") </dev/null"; fi
+run_local() { # Target-side children do not retain transaction descriptors.
+  bash -c "$1" 3>&- 4>&- 5>&- </dev/null
 }
 
 run_value() { # Profile stdout is not command output; require both frame ends.
   local marker="SHUTTLE_DEPLOY_VALUE_$$" out status
-  out=$(run_on_visible "$1" "printf '\\n%s BEGIN\\n' '$marker'
+  local command="printf '\\n%s BEGIN\\n' '$marker'
 bash -c $(shell_quote "$2")
 status=\$?
 printf '\\n%s END %s\\n' '$marker' \"\$status\"
-exit \"\$status\"")
+exit \"\$status\""
+  out=$(ssh -n $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$command") </dev/null")
   status=$?
   [ "$status" = 0 ] || return "$status"
   case "$out" in
@@ -506,27 +502,27 @@ exit \"\$status\"")
   printf '%s' "${out%$'\n'"$marker END 0"}"
 }
 
-version_json() { # $1 = "" (local) | host
-  run_on "$1" "$(daemon_call "" /api/v1/version)"
+version_json() {
+  run_local "$(daemon_call "" /api/v1/version)"
 }
 
 previous_deploy() { # Capture the live commit before retargeting the host's launcher.
-  local host="$1" checkout="$2" sha
-  sha="$(version_json "$host" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  local checkout="$1" sha
+  sha="$(version_json | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   [ -n "$sha" ] || return 0
-  run_on "$host" "root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")")); commit=\$(git -C $(shell_quote "$checkout") rev-parse --verify $(shell_quote "$sha^{commit}")) && printf '%s/%s\\n' \"\$root\" \"\$commit\""
+  run_local "root=\$(bash -c $(shell_quote "$(deploy_root_cmd "$checkout")")); commit=\$(git -C $(shell_quote "$checkout") rev-parse --verify $(shell_quote "$sha^{commit}")) && printf '%s/%s\\n' \"\$root\" \"\$commit\""
 }
 
 version_ready() { # JSON response -> true only for an explicit ready:true
   printf '%s\n' "$1" | grep -Eq '"ready"[[:space:]]*:[[:space:]]*true([,}])'
 }
 
-release_quarantine() { # $1 = "" | host
-  run_on_visible "$1" 'shuttle daemon release'
+release_quarantine() {
+  run_local 'shuttle daemon release'
 }
 
-wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also ready
-  local host="$1" expected="${2:-${EXPECTED_RELEASE:-}}" version="" sha="" booted="" ready="" mix_vsn="" release_path="" started="" now="" elapsed="" next_notice=""
+wait_for_sha() { # Poll for a fresh, ready boot at the selected release path.
+  local host="${HOST:-local}" expected="${1:-${EXPECTED_RELEASE:-}}" version="" sha="" booted="" ready="" mix_vsn="" release_path="" started="" now="" elapsed="" next_notice=""
   [ -n "$expected" ] || { echo "deploy verification requires an expected release_path" >&2; return 1; }
   local timeout="${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}"
   local interval="${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}"
@@ -537,7 +533,7 @@ wait_for_sha() { # $1 = "" | host — poll until the target's fresh boot is also
   next_notice=0
 
   while :; do
-    version="$(version_json "$host" 2>/dev/null || true)"
+    version="$(version_json 2>/dev/null || true)"
     sha="$(printf '%s\n' "$version" | sed -n 's/.*"git_short_sha"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     booted="$(printf '%s\n' "$version" | sed -n 's/.*"booted_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
     mix_vsn="$(printf '%s\n' "$version" | sed -n 's/.*"mix_vsn"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
@@ -616,36 +612,33 @@ SH
 }
 
 release_verified_deploy() {
-  release_quarantine "$1" || { bad "quarantine release failed"; return 1; }
-  run_on_visible "$1" "$(remember_previous_cmd "${2:-}" "${EXPECTED_RELEASE%/bin/rel}")" >/dev/null \
+  release_quarantine || { bad "quarantine release failed"; return 1; }
+  run_local "$(remember_previous_cmd "${1:-}" "${EXPECTED_RELEASE%/bin/rel}")" >/dev/null \
     || { bad 'rollback receipt: could not retain previous release'; return 1; }
   ok "live on $TARGET_SHA, quarantine released"
 }
 
-finish_verified_deploy() { # host, regular checkout, previous live tree
-  local host="$1" checkout="$2" previous="${3:-}"
-  previous="$(run_value "$host" 'if [ -f "$HOME/.shuttle/deploy/previous" ]; then cat "$HOME/.shuttle/deploy/previous"; fi')" \
+finish_verified_deploy() { # Regular checkout; rollback provenance is already retained.
+  local checkout="$1" previous
+  previous="$(run_local 'if [ -f "$HOME/.shuttle/deploy/previous" ]; then cat "$HOME/.shuttle/deploy/previous"; fi')" \
     || { bad 'rollback receipt: could not read previous release'; return 1; }
-  run_on_visible "$host" "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
-  refresh_harnesses "$host" "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
-  run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
-    bad "could not prune deploy worktrees on ${host:-local}"
+  run_local "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
+  refresh_harnesses "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
+  run_local "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
+    bad "could not prune deploy worktrees on ${HOST:-local}"
     return 1
   }
 }
 
 verify_and_release() {
-  wait_for_sha "$1" || return 1
-  release_verified_deploy "$1" "${2:-}"
+  wait_for_sha || return 1
+  release_verified_deploy "${1:-}"
 }
 
-activation_window() { # host, prepared activation command
-  local host="$1" command="$2" previous="$3" status=0 ack
+activation_window() { # Prepared activation command, previous release root.
+  local command="$1" previous="$2" status=0 ack
   printf B >&5 && IFS= read -r ack <&5 || return 1
-  trap ':' TERM INT HUP
-  run_on_visible "$host" "$command" && verify_and_release "$host" "$previous" || status=$?
-  trap 'exit 143' TERM HUP
-  trap 'exit 130' INT
+  run_local "$command" && verify_and_release "$previous" || status=$?
   printf E >&5 && IFS= read -r ack <&5 || return 1
   return "$status"
 }
@@ -663,11 +656,11 @@ ensure_local_ui() {
 # Ship ui/dist into a non-building host's checkout. --delete because ui/dist is
 # wholly generated: a file left from an older bundle is never referenced by the
 # new index.html and only accumulates.
-ship_ui() { # $1 = host, $2 = ssh destination, $3 = checkout dir, $4 = ssh flags
+ship_ui() { # SSH destination, checkout directory, SSH flags.
   ensure_local_ui || return 1
-  ssh $4 "$2" "mkdir -p $(shell_quote "$3/ui")" \
-    || { bad "could not prepare $3/ui"; return 1; }
-  rsync -az --delete -e "ssh $4" "$UI_SNAPSHOT/" "$2:$3/ui/dist/" \
+  ssh $3 "$1" "mkdir -p $(shell_quote "$2/ui")" \
+    || { bad "could not prepare $2/ui"; return 1; }
+  rsync -az --delete -e "ssh $3" "$UI_SNAPSHOT/" "$1:$2/ui/dist/" \
     || { bad "could not ship the UI bundle"; return 1; }
   ok "shipped ui/dist (this host does not build it)"
 }
@@ -864,9 +857,9 @@ report ok "harness plugins: ${summary:-none carry felt}"
 SH
 }
 
-refresh_harnesses() { # $1 = "" (local) | host, $2 = checkout dir
+refresh_harnesses() { # Pinned checkout to install from.
   local out line
-  out=$(run_on_visible "$1" "$(harness_setup_cmd "$2")" 2>&1)
+  out=$(run_local "$(harness_setup_cmd "$1")" 2>&1)
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-ok //p' | tail -n 1)
   [ -n "$line" ] && { ok "$line"; return 0; }
   line=$(printf '%s\n' "$out" | sed -n 's/^harness-fail //p' | tail -n 1)
@@ -881,10 +874,10 @@ deploy_local() {
   LOCAL_UI_BUILT=1
 }
 
-remote_host_cycle() { # $1 = host, $2 = deployed checkout
-  local host="$1" checkout="$2" previous="$3" supervisor=""
-  supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
-  EXPECTED_RELEASE="$(run_value "$host" "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
+remote_host_cycle() { # Deployed checkout, previous release root; runs on its owner.
+  local checkout="$1" previous="$2" supervisor=""
+  supervisor="$(run_local "$(supervisor_probe_cmd)")" || { bad "could not inspect the host's supervisor"; return 1; }
+  EXPECTED_RELEASE="$(run_local "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
   local cycle
   if [ "$supervisor" = tmux ]; then
     # Keep the live loop; only its listener needs a graceful cycle. Recreating
@@ -906,8 +899,8 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
   fi
   cycle='[ "${SHUTTLE_ACTIVATION_CYCLED:-0}" != 1 ] || exit 0
 '"$cycle"
-  activation_window "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" "$previous" \
-    || { bad "could not activate, verify and release on ${host:-local}"; return 1; }
+  activation_window "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" "$previous" \
+    || { bad "could not activate, verify and release on ${HOST:-local}"; return 1; }
 }
 
 deploy_step() {
@@ -919,7 +912,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   local previous tree cmd before
   deploy_step 'observe previous release'
   DEPLOY_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%S)"
-  previous="$(previous_deploy "" "$SOURCE")"
+  previous="$(previous_deploy "$SOURCE")"
   deploy_step 'prepare pinned revision'
   bash -c "$(revision_checkout_cmd "$SOURCE" "$previous")" 3>&- 4>&- 5>&- \
     || { bad 'prepare: could not prepare the pinned revision'; return 1; }
@@ -933,7 +926,7 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   fi
   EXPECTED_RELEASE="$tree/bin/rel"
   deploy_step 'inspect current release'
-  before="$(version_json "" || true)"
+  before="$(version_json || true)"
   if target_is_live "$before"; then
     ok "already ready on $TARGET_SHA at $EXPECTED_RELEASE; coalescing without a daemon cycle"
   else
@@ -961,13 +954,13 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   bash -c "$(config_migration_cmd)" 3>&- 4>&- 5>&- || { bad 'config migration: failed'; return 1; }
   if ! target_is_live "$before"; then
     deploy_step 'activate/verify/release'
-    remote_host_cycle "" "$tree" "$previous" || { bad 'activate/verify/release: failed'; return 1; }
+    remote_host_cycle "$tree" "$previous" || { bad 'activate/verify/release: failed'; return 1; }
   else
     deploy_step 'release coalesced daemon'
-    release_verified_deploy "" "$previous" || return 1
+    release_verified_deploy "$previous" || return 1
   fi
   deploy_step 'checkout/harness/prune'
-  finish_verified_deploy "" "$SOURCE" "$previous"
+  finish_verified_deploy "$SOURCE"
 }
 
 target_is_live() {
@@ -988,20 +981,19 @@ transaction_script() {
   printf 'HOST=%s\nSOURCE=%s\nMODE=%s\nSTAGE=%s\nSKIP_UI=%s\nBUILD_WRAP=%s\nSNAPSHOT=%s\n' \
     "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
-  declare -f shell_quote ok bad run_value deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
+  declare -f shell_quote ok bad run_local deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready target_is_live wait_for_sha release_quarantine release_verified_deploy finish_verified_deploy verify_and_release activation_window prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
     remote_host_cycle host_transaction
   # All subsequent commands are host-local and inherit this login shell's PATH.
-  printf '%s\n' 'run_on() { bash -c "$2" 3>&- 4>&- 5>&-; }' 'run_on_visible() { bash -c "$2" 3>&- 4>&- 5>&-; }' \
-    'deploy_step "resolve worktree root"' \
+  printf '%s\n' 'deploy_step "resolve worktree root"' \
     'ROOT=$(bash -c "$(deploy_root_cmd "$SOURCE")") || exit 1' 'host_transaction'
 }
 
 run_transaction() { # host, source, mode, staged files, build wrapper, UI snapshot
   local host="$1" source="$2" mode="$3" stage="$4" wrap="$5" snapshot="$6" skip_ui=0 script bootstrap token status until
-  until=$(( $(date +%s) + ${SHUTTLE_DEPLOY_TIMEOUT_SECONDS:-7200} ))
+  until="${SHUTTLE_DEPLOY_DEADLINE:-$(($(date +%s) + 7200))}"
   token="SHUTTLE_DEPLOY_DONE_${RUN_DIR##*/}-${host:-local}-$mode"
   builds_ui "${host:-local}" || skip_ui=1
   script="$(transaction_script "$host" "$source" "$mode" "$stage" "$skip_ui" "$wrap" "$snapshot")"
@@ -1074,7 +1066,7 @@ deploy_remote() {
     || { bad 'ssh: could not establish a connection'; return 1; }
   stage="$(run_value "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
   if ! builds_ui "$host"; then
-    ship_ui "$host" "$dest" "$stage" "$flags" || return 1
+    ship_ui "$dest" "$stage" "$flags" || return 1
   fi
   if [ -f "$AGENTS_FILE" ]; then
     rsync -az -e "ssh $flags" "$AGENTS_FILE" "$dest:$stage/agents.json" \

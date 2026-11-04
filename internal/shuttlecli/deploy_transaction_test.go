@@ -385,7 +385,7 @@ func TestDeployCancellationStopsWorkAndPreservesLoginUmask(t *testing.T) {
 			}
 			var extra []string
 			if how == "deadline" {
-				extra = []string{"SHUTTLE_DEPLOY_TIMEOUT_SECONDS=30"}
+				extra = []string{fmt.Sprintf("SHUTTLE_DEPLOY_DEADLINE=%d", time.Now().Add(45*time.Second).Unix())}
 			}
 			cmd, log := f.startHost(t, "cancel-"+how, host, extra...)
 			deployAwait(t, "build: "+log, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
@@ -917,12 +917,10 @@ daemon_listener_cmd() { printf ':'; }
 disable_competing_supervisors_cmd() { :; }
 daemon_kill() { printf 'echo listener-kill'; }
 respawn_launcher_restart_cmd() { printf 'echo restart'; }
-run_on() { bash -c "$2"; }
-run_on_visible() { bash -c "$2"; }
-run_value() { run_on_visible "$@"; }
-activation_window() { run_on_visible "$@"; }
+run_local() { bash -c "$1"; }
+activation_window() { run_local "$1"; }
 bad() { echo "$*" >&2; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle "$ROOT" ''`
 			cmd := exec.Command("bash", "-c", harness)
 			cmd.Env = append(os.Environ(), "ROOT="+root, "HOME="+filepath.Join(root, "home"), "OWNER="+owner)
 			if owner == "migrated" {

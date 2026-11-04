@@ -796,15 +796,14 @@ func TestDeployFinishDoesNotPruneOnHarnessOrReleaseFailure(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "prune")
 			harness := `release_quarantine() { [ "$RELEASE_OK" = 1 ]; }
-run_on_visible() { [ "$2" != prune ] || printf '%s\\n' "$2" >> "$MARKER"; }
-run_value() { run_on_visible "$@"; }
+run_local() { [ "$1" != prune ] || printf '%s\\n' "$1" >> "$MARKER"; }
 remember_previous_cmd() { :; }
 refresh_checkout_cmd() { :; }
 refresh_harnesses() { [ "$HARNESS_FAILED" = 0 ]; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy local && finish_verified_deploy local /repo "$HARNESS_FAILED"
+` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy && finish_verified_deploy /repo
 `
 			cmd := exec.Command("bash", "-c", harness)
 			release := "0"
@@ -834,15 +833,14 @@ func TestDeployPrunesAfterRelease(t *testing.T) {
 	}
 	events := filepath.Join(t.TempDir(), "events")
 	harness := `release_quarantine() { printf 'release\n' >> "$EVENTS"; }
-run_on_visible() { [ -z "$2" ] || printf '%s\n' "$2" >> "$EVENTS"; }
-run_value() { run_on_visible "$@"; }
+run_local() { [ "$1" != prune ] || printf '%s\n' "$1" >> "$EVENTS"; }
 remember_previous_cmd() { :; }
 refresh_checkout_cmd() { :; }
 refresh_harnesses() { :; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy local && finish_verified_deploy local /repo 0`
+` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy && finish_verified_deploy /repo`
 	cmd := exec.Command("bash", "-c", harness)
 	cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "EVENTS="+events)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -934,10 +932,10 @@ func TestDeployPreviousTreeUsesLiveVersion(t *testing.T) {
 	}
 	harness := `version_json() { printf '{"git_short_sha":"abc1234"}'; }
 deploy_root_cmd() { printf 'printf /repo.deploy'; }
-run_on() { bash -c "$2"; }
+run_local() { bash -c "$1"; }
 git() { [ "$*" = '-C /repo rev-parse --verify abc1234^{commit}' ] || exit 2; printf abc123456789; }
 export -f git
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "previous_deploy") + `previous_deploy remote /repo`
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "previous_deploy") + `previous_deploy /repo`
 	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "/repo.deploy/abc123456789" {
 		t.Fatalf("previous live tree = %q, %v", out, err)
@@ -965,7 +963,7 @@ func TestDeployVisibleRunnerPreservesStderr(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command("bash", "-c", shellFunction(t, string(script), "run_on_visible")+`run_on_visible '' 'echo operator-diagnostic >&2'`)
+	cmd := exec.Command("bash", "-c", shellFunction(t, string(script), "run_local")+`run_local 'echo operator-diagnostic >&2'`)
 	out, err := cmd.CombinedOutput()
 	if err != nil || !strings.Contains(string(out), "operator-diagnostic") {
 		t.Fatalf("stderr was hidden: %v\n%s", err, out)

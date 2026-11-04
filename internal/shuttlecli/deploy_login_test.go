@@ -37,7 +37,13 @@ read -r ignored || :
 			}
 			// Exercise real -l startup, never the operator's /etc or home profiles.
 			harness := shellFunction(t, string(source), "shell_quote") + shellFunction(t, string(source), "run_value") + `
-run_on_visible() { ` + shellQuote(bash) + ` --noprofile -l -c '. "$PROFILE"; eval "$1"' fixture "$2" </dev/null; }
+fleet_flags() { :; }
+fleet_ssh() { printf fake; }
+ssh() {
+ local invocation="${@: -1}"; invocation="${invocation#bash -lc }"; invocation="${invocation% </dev/null}"
+ eval "set -- $invocation"
+ ` + shellQuote(bash) + ` --noprofile -l -c '. "$PROFILE"; eval "$1"' fixture "$1" </dev/null
+}
 run_value '' "printf '%s\\n' \"/a b's/c\""
 `
 			cmd := exec.Command(bash, "-c", harness)
