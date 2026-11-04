@@ -221,8 +221,21 @@ func requestCouldHaveReachedDaemon(err error) bool {
 	return strings.Contains(err.Error(), "reaching daemon") || strings.Contains(err.Error(), "reading daemon response")
 }
 
+// fiberAddress carries intrinsic identity across hosts, independent of store views.
+func fiberAddress(f *felt.Felt) string {
+	if f.UID != "" {
+		return f.UID
+	}
+	if rel, err := feltStoreRelativePath(f.Path); err == nil {
+		if id, err := fiberIDFromStorePath(rel); err == nil {
+			return id
+		}
+	}
+	return f.ID
+}
+
 func (a *app) postOwnerLifecycle(action, owner string, fiber *felt.Felt, fields map[string]any) (string, error) {
-	payload := map[string]any{"action": action, "fiber": fiber.ID, "origin": owner}
+	payload := map[string]any{"action": action, "fiber": fiberAddress(fiber), "origin": owner}
 	for key, value := range fields {
 		payload[key] = value
 	}
@@ -258,7 +271,7 @@ func (a *app) postOwnerFiberCreate(owner string, payload map[string]any) ([]byte
 }
 
 func (a *app) postOwnerDispatch(owner string, fiber *felt.Felt, fields map[string]any) ([]byte, error) {
-	payload := map[string]any{"fiber_id": fiber.ID, "origin": owner}
+	payload := map[string]any{"fiber_id": fiberAddress(fiber), "origin": owner}
 	for key, value := range fields {
 		payload[key] = value
 	}

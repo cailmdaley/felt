@@ -431,25 +431,36 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				if f.Status == felt.StatusClosed && !standingAwaiting(f, block) {
 					return fmt.Errorf("fiber %s has status: closed; use 'shuttle reopen %s' to clear verdict fields and arm it", args[0], args[0])
 				}
+				fields := map[string]any{}
 				if cmd.Flags().Changed("project-dir") {
-					if _, err := a.postOwnerLifecycle("set-agent", owner, f, map[string]any{"project_dir": block.ProjectDir}); err != nil {
-						return remoteRouteError(cmd, args, owner, err)
-					}
+					fields["project_dir"] = block.ProjectDir
 				}
-				output, err := a.postOwnerLifecycle("resume", owner, f, nil)
+				output, err := a.postOwnerLifecycle("resume", owner, f, fields)
 				if err != nil {
 					var missing daemonStatusError
-					if st != nil && errors.As(err, &missing) && missing.status == 404 {
-						f.Status = felt.StatusActive
-						if setErr := shuttle.SetConfig(f, block); setErr == nil {
-							if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
-								return remoteRouteError(cmd, args, owner, createErr)
-							}
-							if a.ownerBootQuarantine(owner) {
-								a.printResumeHold(owner, f.ID)
-							}
-							return nil
+					if st != nil && f.Status == felt.StatusOpen && errors.As(err, &missing) && missing.status == 404 {
+						if err := unclose(f, felt.StatusActive); err != nil {
+							return err
 						}
+						if err := clearBlockedOn(f); err != nil {
+							return err
+						}
+						if err := f.SetExtraField("horizon", nil); err != nil {
+							return err
+						}
+						if err := shuttle.SetNodeField(f, "ask", nil); err != nil {
+							return err
+						}
+						if err := shuttle.SetConfig(f, block); err != nil {
+							return err
+						}
+						if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
+							return remoteRouteError(cmd, args, owner, createErr)
+						}
+						if a.ownerBootQuarantine(owner) {
+							a.printResumeHold(owner, f.ID)
+						}
+						return nil
 					}
 					return remoteRouteError(cmd, args, owner, err)
 				}
@@ -594,7 +605,7 @@ func (a *app) routeLocalReopen(cmd *cobra.Command, query string, asDraft bool, r
 // failure, or a request the daemon received but did not answer is routed, with
 // its error — the last because the transition may still apply there.
 func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies func(*felt.Felt, *shuttle.Block) bool, fields ...map[string]any) (routed bool, err error) {
-	f, storage, _, err := a.shuttleResolveFiberRef(query, true)
+	f, _, _, err := a.shuttleResolveFiberRef(query, true)
 	if err != nil {
 		return false, nil
 	}
@@ -609,6 +620,10 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 	// Resolve ownership before the local fast path's qualification. A remote
 	// request always carries origin and never consults the hub's snapshot.
 	if owner != "" {
+		// Resume validates and transfers drafts in its locked command path.
+		if verb == "resume" {
+			return false, nil
+		}
 		payload := map[string]any{}
 		for _, extra := range fields {
 			for key, value := range extra {
@@ -616,23 +631,6 @@ func (a *app) routeLifecycle(cmd *cobra.Command, verb, query string, qualifies f
 			}
 		}
 		routed, err := a.forwardLifecycleAction(cmd, []string{query}, owner, verb, f, payload)
-		if err != nil && storage != nil && verb == "resume" {
-			var missing daemonStatusError
-			if errors.As(err, &missing) && missing.status == 404 {
-				if block, ok, blockErr := shuttle.BlockOf(f); blockErr == nil && ok {
-					f.Status = felt.StatusActive
-					if setErr := shuttle.SetConfig(f, block); setErr == nil {
-						if createErr := a.moveRemoteDraft(owner, f, block); createErr != nil {
-							return true, remoteRouteError(cmd, []string{query}, owner, createErr)
-						}
-						if a.ownerBootQuarantine(owner) {
-							a.printResumeHold(owner, f.ID)
-						}
-						return true, nil
-					}
-				}
-			}
-		}
 		if err == nil && verb == "resume" && a.ownerBootQuarantine(owner) {
 			a.printResumeHold(owner, f.ID)
 		}

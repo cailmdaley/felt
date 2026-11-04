@@ -29,6 +29,67 @@ defmodule ShuttleWeb.FiberControllerTest do
     {:ok, tmp: tmp}
   end
 
+  test "namespace identity agrees with felt across global and subtree-rooted stores", %{tmp: tmp} do
+    fixture =
+      Path.join([__DIR__, "..", "..", "fixtures", "fiber_identity", "cases.json"])
+      |> File.read!()
+      |> Jason.decode!()
+
+    loom = Path.join(tmp, "loom")
+    project = Path.join(tmp, "project")
+    File.mkdir_p!(project)
+
+    for fiber <- fixture["fibers"] do
+      path = Path.join([loom, ".felt", fiber["id"], Path.basename(fiber["id"]) <> ".md"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "---\nid: #{fiber["uid"]}\nname: Fixture\nstatus: open\n---\n")
+    end
+
+    File.ln_s!(Path.join([loom, ".felt", fixture["prefix"]]), Path.join(project, ".felt"))
+
+    for store <- [loom, project] do
+      Env.put_env("SHUTTLE_STORES", store)
+
+      for lookup <- fixture["lookups"] do
+        case lookup["id"] do
+          nil ->
+            assert {:error, :not_found} = Shuttle.FeltStores.resolve_fiber(lookup["query"])
+
+          id ->
+            assert {:ok, %{fiber_id: ^id}} = Shuttle.FeltStores.resolve_fiber(lookup["query"])
+        end
+      end
+
+      for id <- fixture["creates"] do
+        conn =
+          post(
+            api_conn(),
+            "/api/v1/fiber/create",
+            Jason.encode!(%{
+              id: id,
+              name: "Thread",
+              frontmatter: %{status: "open", shuttle: %{kind: "oneshot", project_dir: project}}
+            })
+          )
+
+        assert %{
+                 "id" => ^id,
+                 "uid" => uid,
+                 "path" => path,
+                 "host" => "test-host",
+                 "status" => "open"
+               } = json_response(conn, 200)
+
+        assert_felt_path(path, loom, String.split(id, "/") ++ [Path.basename(id) <> ".md"])
+
+        assert {:ok, %{"id" => ^uid}} =
+                 path |> File.read!() |> frontmatter() |> YamlElixir.read_from_string()
+
+        File.rm_rf!(Path.dirname(path))
+      end
+    end
+  end
+
   test "POST /api/v1/fiber/create writes a daemon-local fiber with host default", %{tmp: tmp} do
     conn =
       api_conn()

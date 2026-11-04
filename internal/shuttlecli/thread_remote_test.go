@@ -4,10 +4,47 @@ import (
 	"fmt"
 	"github.com/cailmdaley/felt/internal/felt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestThreadFromSubtreeViewSendsNamespacePath(t *testing.T) {
+	t.Parallel()
+	env := remoteLifecycleEnv(t)
+	loom, st := newStore(t)
+	seedShuttleRole(t, st, "science/team/hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "hub", "project_dir": t.TempDir()}, nil)
+	project := t.TempDir()
+	if err := os.Symlink(filepath.Join(loom, ".felt", "science", "team"), filepath.Join(project, ".felt")); err != nil {
+		t.Fatal(err)
+	}
+	var bodies requestBodies
+	serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/fiber/create":
+			bodies.record(t, r)
+			fmt.Fprintf(w, `{"id":%q,"uid":"01JARZ3NDEKTSV4RRFFQ69G5FA"}`, bodies.last()["id"])
+		case "/api/v1/project-dir/resolve":
+			fmt.Fprint(w, `{"path":"/remote/project"}`)
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	out, _, err := executeIn(t, env, project, "thread", "hub", "Measure", "--host", "worker", "--project-dir", "/remote/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "science/team/hub/measure" {
+		t.Fatalf("thread id = %q", out)
+	}
+	payload := bodies.last()
+	frontmatter := payload["frontmatter"].(map[string]any)
+	parent := frontmatter["shuttle"].(map[string]any)["thread_parent"].(map[string]any)
+	if payload["id"] != "science/team/hub/measure" || parent["slug"] != "science/team/hub" || parent["uid"] != mustRead(t, st, "science/team/hub").UID {
+		t.Fatalf("view-relative identity crossed hosts: %#v", payload)
+	}
+}
 
 func TestThreadRemoteDirectoryValidation(t *testing.T) {
 	t.Parallel()
@@ -77,7 +114,7 @@ func TestResumingRemoteThreadDraftTransfersItToOwner(t *testing.T) {
 		case "/api/v1/fiber/create":
 			create.record(t, r)
 			payload := create.last()
-			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"path":%q}`, payload["id"], payload["uid"], ownerPath)
+			_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"path":%q,"host":"worker","status":"active"}`, payload["id"], payload["uid"], ownerPath)
 		default:
 			t.Errorf("unexpected request %s", r.URL.String())
 			http.NotFound(w, r)
@@ -176,7 +213,7 @@ func TestRemoteThreadCreatesOnOwnerAndCanBeControlledWithoutMirror(t *testing.T)
 	if _, _, err := executeIn(t, env, dir, "resume", "parent/measure"); err != nil {
 		t.Fatal(err)
 	}
-	if got := lifecycle.last(); got["fiber"] != "parent/measure" || got["origin"] != "worker" || got["action"] != "resume" {
+	if got := lifecycle.last(); got["fiber"] != "01JARZ3NDEKTSV4RRFFQ69G5FA" || got["origin"] != "worker" || got["action"] != "resume" {
 		t.Fatalf("owner lifecycle payload = %#v", got)
 	}
 	if _, _, err := executeIn(t, env, dir, "resume", "parent/measure", "--local"); err == nil {
@@ -250,7 +287,7 @@ func TestRemoteEarlyLifecycleNeverUsesLocalSnapshot(t *testing.T) {
 			if _, _, err := executeIn(t, env, dir, tc.verb, "new/task"); err != nil {
 				t.Fatal(err)
 			}
-			if got := bodies.last(); got["action"] != tc.verb || got["fiber"] != "new/task" || got["origin"] != "worker" {
+			if got := bodies.last(); got["action"] != tc.verb || got["fiber"] != mustRead(t, st, "new/task").UID || got["origin"] != "worker" {
 				t.Fatalf("payload %#v", got)
 			}
 			if mustRead(t, st, "new/task").Status != tc.status {

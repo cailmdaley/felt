@@ -47,7 +47,7 @@ func TestRemoteInstallAndRepeatTransferMissingSourceWithIdentityAndMetadata(t *t
 				case "/api/v1/fiber/create":
 					create.record(t, r)
 					got := create.last()
-					_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q}`, got["id"], got["uid"])
+					_, _ = fmt.Fprintf(w, `{"id":%q,"uid":%q,"host":"worker","status":"active"}`, got["id"], got["uid"])
 				default:
 					t.Errorf("unexpected request %s", r.URL.String())
 					http.NotFound(w, r)
@@ -159,7 +159,7 @@ func TestShuttleReopenRemoteDispatchesFreshWithMessage(t *testing.T) {
 		t.Fatalf("remote reopen: %v", err)
 	}
 	got := bodies.last()
-	if got["fiber_id"] != "work/task" || got["origin"] != "worker" || got["force"] != true || got["ad_hoc"] != true || got["resume_mode"] != "fresh" || got["user_message"] != "Start with the latest measurements" {
+	if got["fiber_id"] != mustRead(t, storage, "work/task").UID || got["origin"] != "worker" || got["force"] != true || got["ad_hoc"] != true || got["resume_mode"] != "fresh" || got["user_message"] != "Start with the latest measurements" {
 		t.Fatalf("dispatch payload = %#v", got)
 	}
 	if f := mustRead(t, storage, "work/task"); f.Status != felt.StatusClosed {
@@ -223,7 +223,7 @@ func TestShuttleRemoteSetAgentRoutesProjectDir(t *testing.T) {
 		t.Fatalf("remote set-agent project_dir: %v", err)
 	}
 	got := bodies.last()
-	if got["action"] != "set-agent" || got["fiber"] != "fiber" || got["origin"] != "worker" || got["project_dir"] != projectDir {
+	if got["action"] != "set-agent" || got["fiber"] != mustRead(t, storage, "fiber").UID || got["origin"] != "worker" || got["project_dir"] != projectDir {
 		t.Fatalf("lifecycle payload = %#v", got)
 	}
 	if mustRead(t, storage, "fiber").Status != felt.StatusClosed {
@@ -260,10 +260,10 @@ func TestShuttleRemoteReopenSetsProjectDirBeforeFreshDispatch(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("requests = %#v, want project-dir write followed by dispatch", calls)
 	}
-	if calls[0]["action"] != "set-agent" || calls[0]["fiber"] != "closed" || calls[0]["origin"] != "worker" || calls[0]["project_dir"] != projectDir {
+	if calls[0]["action"] != "set-agent" || calls[0]["fiber"] != mustRead(t, storage, "closed").UID || calls[0]["origin"] != "worker" || calls[0]["project_dir"] != projectDir {
 		t.Fatalf("project_dir request = %#v", calls[0])
 	}
-	if calls[1]["fiber_id"] != "closed" || calls[1]["origin"] != "worker" || calls[1]["force"] != true || calls[1]["ad_hoc"] != true || calls[1]["resume_mode"] != "fresh" {
+	if calls[1]["fiber_id"] != mustRead(t, storage, "closed").UID || calls[1]["origin"] != "worker" || calls[1]["force"] != true || calls[1]["ad_hoc"] != true || calls[1]["resume_mode"] != "fresh" {
 		t.Fatalf("dispatch request = %#v", calls[1])
 	}
 	if mustRead(t, storage, "closed").Status != felt.StatusClosed {
@@ -291,7 +291,7 @@ func TestShuttleRemoteDraftReopenUsesLifecycleAction(t *testing.T) {
 		t.Fatalf("remote draft reopen: %v", err)
 	}
 	got := bodies.last()
-	if got["action"] != "reopen" || got["fiber"] != "draft" || got["origin"] != "worker" || got["as_draft"] != true || got["project_dir"] != projectDir {
+	if got["action"] != "reopen" || got["fiber"] != mustRead(t, storage, "draft").UID || got["origin"] != "worker" || got["as_draft"] != true || got["project_dir"] != projectDir {
 		t.Fatalf("lifecycle payload = %#v", got)
 	}
 	if mustRead(t, storage, "draft").Status != felt.StatusClosed {
@@ -364,7 +364,7 @@ func TestShuttleRemoteDispatchRoutesAndCarriesMessageFile(t *testing.T) {
 		t.Fatalf("remote dispatch: %v", err)
 	}
 	got := bodies.last()
-	if got["fiber_id"] != "active" || got["origin"] != "worker" || got["ad_hoc"] != true || got["user_message"] != "Run the focused check" {
+	if got["fiber_id"] != mustRead(t, storage, "active").UID || got["origin"] != "worker" || got["ad_hoc"] != true || got["user_message"] != "Run the focused check" {
 		t.Fatalf("dispatch payload = %#v", got)
 	}
 	if mustRead(t, storage, "active").Status != felt.StatusActive {
@@ -469,7 +469,7 @@ func TestRemoteLifecycleVerbsUseBoardOwnerRoute(t *testing.T) {
 				t.Fatalf("%s: %v", tc.id, err)
 			}
 			got := bodies.last()
-			if got["action"] != tc.action || got["fiber"] != tc.id || got["origin"] != "worker" {
+			if got["action"] != tc.action || got["fiber"] != mustRead(t, storage, tc.id).UID || got["origin"] != "worker" {
 				t.Fatalf("lifecycle payload = %#v", got)
 			}
 			if tc.check != nil {
@@ -698,7 +698,7 @@ func TestRemoteInstallSourceWithoutUIDUsesOwnerIdentity(t *testing.T) {
 					http.Error(w, `{"error":"fiber not found on worker"}`, http.StatusNotFound)
 				case "/api/v1/fiber/create":
 					creates.record(t, r)
-					_, _ = fmt.Fprintf(w, `{"id":"handwritten","uid":%q}`, tc.uid)
+					_, _ = fmt.Fprintf(w, `{"id":"handwritten","uid":%q,"host":"worker","status":"active"}`, tc.uid)
 				default:
 					t.Errorf("unexpected request %s", r.URL.String())
 					http.NotFound(w, r)

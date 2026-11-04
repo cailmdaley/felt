@@ -138,6 +138,50 @@ func resolveRefWith(storage *Storage, scopeID, query string, find func(scopeID, 
 	return Ref{Storage: outer, ID: outerFelt.ID, Elsewhere: true, EnclosingRoot: external.Root}, nil
 }
 
+// NamespaceStorage is the enclosing store when storage is a project view.
+// Paths exchanged outside a view are relative to this namespace.
+func NamespaceStorage(storage *Storage) *Storage {
+	root, err := filepath.EvalSymlinks(storage.Root())
+	if err != nil || filepath.Base(root) == DirName {
+		return storage
+	}
+	for dir := filepath.Dir(root); ; dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == DirName {
+			return NewStorage(filepath.Dir(dir))
+		}
+		if filepath.Dir(dir) == dir {
+			return storage
+		}
+	}
+}
+
+// ResolveAddressRef resolves an intrinsic UID or an exact namespace-relative
+// path. It never completes a prefix, suffix, or basename.
+func ResolveAddressRef(storage *Storage, query string) (Ref, error) {
+	storage = NamespaceStorage(storage)
+	if LooksLikeUID(query) {
+		ref, err := resolveUIDRef(storage, query)
+		if err == nil {
+			return ref, nil
+		}
+		if !errors.Is(err, errNoFiberUID) {
+			return Ref{}, err
+		}
+		return Ref{}, &NoFiberMatchError{Query: query}
+	}
+	if query == "" || path.Clean(query) != query || !validLookupID(query) {
+		return Ref{}, &NoFiberMatchError{Query: query}
+	}
+	f, found, err := storage.readExistingPathWithMode(query, ParseMetadataOnly)
+	if err != nil {
+		return Ref{}, err
+	}
+	if !found {
+		return Ref{}, &NoFiberMatchError{Query: query}
+	}
+	return Ref{Storage: storage, ID: f.ID, UID: f.UID}, nil
+}
+
 // ReadResolved resolves query and reads the fiber it names with read. A UID
 // resolves to an id first, and the fiber can move before the read: when the
 // fiber read there is missing or carries another UID, the UID is resolved and

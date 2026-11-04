@@ -168,7 +168,7 @@ func TestShuttleClose_RoutedOwnSession(t *testing.T) {
 				if (err == nil) != tc.succeeds {
 					t.Fatalf("close error = %v, success=%v", err, tc.succeeds)
 				}
-				if body := bodies.last(); body["action"] != "close" || body["fiber"] != "own" {
+				if body := bodies.last(); body["action"] != "close" || body["fiber"] != f.UID {
 					t.Fatalf("routed body = %#v", body)
 				}
 				if mustRead(t, storage, "own").Status != felt.StatusActive {

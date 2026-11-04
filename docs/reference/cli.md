@@ -22,9 +22,9 @@ running daemon's version when reachable, otherwise the local Mix release version
 | Command | Purpose |
 |---|---|
 | `felt init` | Create or repair the local `.felt/` directory and support files |
-| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name) |
+| `felt add <slug> <name>` | Create a fiber (`-b` body, `-o` outcome, `-s` status, `-t` tag, `-D` due, `--top-level` to skip placing `<slug>` under an existing fiber of the same leading name; `--namespace` to create an exact path in the enclosing store, independent of the project view) |
 | `felt edit <id>` | Modify a fiber's native metadata (`--name`, `-o`, `-s`, `-t`/`--untag`, `-b` body, `-D`, `--set`/`--unset` for opaque scalars) |
-| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store) |
+| `felt show <id>` | Show a fiber at a given detail level (`-d name\|compact\|summary\|full`; compact and summary report the body's line count; `--body`, `--citations`, `--consumers`, `--field <name>`; `--citations` and `--consumers` search the whole store; `--exact` accepts only a ULID or an exact enclosing-store path) |
 | `felt rm <id>` | Delete a fiber's file; nested fibers stay where they are. Refuses a guessed id (one resolving only by its last segment or as a prefix completion) and names the fiber it would have reached |
 | `felt sync [--push]` | Fetch and merge the actual store repository's upstream; optionally publish committed work to that tracking branch. Leaves conflicts for contextual resolution and never stages, stashes, or force-pushes; a diverged upstream makes a merge commit. `--fetch-timeout <duration>` bounds the network fetch (default: 2m); local merge has no hard deadline |
 

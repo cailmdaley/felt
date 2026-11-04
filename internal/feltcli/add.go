@@ -14,7 +14,7 @@ func (a *app) addCmd() *cobra.Command {
 	var addDue string
 	var addTags []string
 	var addOutcome string
-	var addTopLevel bool
+	var addTopLevel, addNamespace bool
 	command := &cobra.Command{
 		Use:   "add <slug> <name>",
 		Short: "Create a fiber",
@@ -37,6 +37,9 @@ resolution and uses <slug> as spelled.`,
 			}
 
 			storage := felt.NewStorage(root)
+			if addNamespace {
+				storage = felt.NamespaceStorage(storage)
+			}
 
 			// Pull [bracketed] tags out of the slug so `felt add "[tag]name"` works
 			extractedTags, cleanSlug := felt.ExtractTags(args[0])
@@ -45,7 +48,7 @@ resolution and uses <slug> as spelled.`,
 			if err != nil {
 				return err
 			}
-			if !addTopLevel {
+			if !addTopLevel && !addNamespace {
 				felts, err := storage.ListMetadata()
 				if err != nil {
 					return err
@@ -110,6 +113,7 @@ resolution and uses <slug> as spelled.`,
 	command.Flags().StringVarP(&addDue, "due", "D", "", "Due date (YYYY-MM-DD)")
 	command.Flags().StringArrayVarP(&addTags, "tag", "t", nil, "Tag (repeatable or comma-separated)")
 	command.Flags().StringVarP(&addOutcome, "outcome", "o", "", "Outcome: what was decided or learned")
+	command.Flags().BoolVar(&addNamespace, "namespace", false, "Use the exact path relative to the enclosing store, independent of this project view")
 	command.Flags().BoolVar(&addTopLevel, "top-level", false, "Use <slug> as spelled; don't resolve it against existing fibers")
 	return command
 }
