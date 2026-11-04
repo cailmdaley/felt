@@ -86,6 +86,17 @@ func mutationBytes(raw, before, after []byte, oldBody, newBody string) ([]byte, 
 					}
 				}
 			}
+			// Comments and separators preceding the next key aren't part of
+			// this value. Keep them outside its replacement span.
+			for finish > begin+1 {
+				line := lines[finish-1]
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "" || (strings.HasPrefix(trimmed, "#") && len(line)-len(strings.TrimLeft(line, " ")) <= indent) {
+					finish--
+				} else {
+					break
+				}
+			}
 			if rawValue != nil && prior != nil && value != nil && rawValue.Kind == yaml.MappingNode && rawValue.Style&yaml.FlowStyle == 0 && prior.Kind == yaml.MappingNode && value.Kind == yaml.MappingNode {
 				childIndent := indent + 2
 				if len(rawValue.Content) > 0 {
