@@ -5,11 +5,61 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 )
+
+func TestDeployStoppedObserverCannotLeaveRollbackWaiter(t *testing.T) {
+	f := newDeployFleet(t)
+	if e := os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("new target\n"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	f.git(t, f.repo, "add", "tracked")
+	f.git(t, f.repo, "commit", "-m", "new target")
+	newSHA := f.git(t, f.repo, "rev-parse", "HEAD")
+	f.git(t, f.repo, "push", "origin", "main")
+	first, firstLog := f.start(t, "heartbeat-holder")
+	defer fleetTouch(t, f.gate)
+	deployAwait(t, "holder build: "+firstLog, func() bool { return strings.Contains(fleetRead(f.events), "build ") })
+	waiter, log := f.startArgs(t, "stopped-rollback", "fake", []string{"--ref", f.sha}, "SHUTTLE_DEPLOY_TIMEOUT_SECONDS=180")
+	deployAwait(t, "rollback waiter: "+log, func() bool { return strings.Contains(fleetRead(log), "waiting for") })
+	var observer int
+	for _, line := range strings.Split(fleetRead(log), "\n") {
+		if strings.HasPrefix(line, "deploy-lock: transaction pgid=") {
+			fmt.Sscanf(line, "deploy-lock: transaction pgid=%d", &observer)
+			break
+		}
+	}
+	remote, _ := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "remote.pid"))))
+	if observer <= 0 || remote <= 0 {
+		t.Fatal("missing observer/remote identity")
+	}
+	if e := syscall.Kill(observer, syscall.SIGSTOP); e != nil {
+		t.Fatal(e)
+	}
+	defer func() { syscall.Kill(observer, syscall.SIGCONT); waiter.Process.Kill() }()
+	until := time.Now().Add(75 * time.Second)
+	for syscall.Kill(remote, 0) == nil && time.Now().Before(until) {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if syscall.Kill(remote, 0) == nil {
+		t.Fatal("stopped observer left a live rollback waiter despite silent transport")
+	}
+	syscall.Kill(observer, syscall.SIGCONT)
+	if e := waiter.Wait(); e == nil {
+		t.Fatalf("stopped observer reported success: %s", fleetRead(log))
+	}
+	fleetTouch(t, f.gate)
+	if e := first.Wait(); e != nil {
+		t.Fatalf("holder: %v %s", e, fleetRead(firstLog))
+	}
+	if !strings.Contains(fleetRead(f.state), newSHA) || strings.Count(fleetRead(f.events), "cycle\n") != 1 {
+		t.Fatalf("abandoned waiter rolled back: %s %s", fleetRead(f.state), fleetRead(f.events))
+	}
+}
 
 func TestDeployLoggerDoesNotWaitForEscapedWriters(t *testing.T) {
 	for _, kind := range []string{"background-profile", "real-tmux"} {
