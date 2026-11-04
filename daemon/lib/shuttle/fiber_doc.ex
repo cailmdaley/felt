@@ -75,19 +75,23 @@ defmodule Shuttle.FiberDoc do
     original = "---\n" <> ensure_single_trailing_newline(raw_fm) <> "---" <> original_body
     new_fm = raw_fm |> FrontmatterEdit.apply(ops) |> ensure_single_trailing_newline()
 
+    updated = "---\n" <> new_fm <> "---" <> body <> ensure_trailing_newline(body)
+    case replace(path, original, updated) do
+      :ok -> :ok
+      {:error, reason} -> raise reason
+    end
+  end
+
+  @doc "Replace an exact source image under the canonical lock, refusing concurrent edits."
+  def replace(path, original, updated) do
     request = %{
       "path" => path,
       "before_sha256" => :crypto.hash(:sha256, original) |> Base.encode16(case: :lower),
-      "after" => "---\n" <> new_fm <> "---" <> body <> ensure_trailing_newline(body)
+      "after" => IO.iodata_to_binary(updated)
     }
-
-    case Shuttle.CLI.run(["patch-document"],
-           input: Jason.encode!(request) <> "\n",
-           timeout_ms: :infinity,
-           runner: Shuttle.Runner.Default
-         ) do
+    case Shuttle.CLI.run(["patch-document"], input: Jason.encode!(request) <> "\n", timeout_ms: :infinity) do
       {:ok, _} -> :ok
-      failure -> raise "conditional document patch failed: #{inspect(failure)}"
+      failure -> {:error, "conditional document patch failed: #{inspect(failure)}"}
     end
   end
 

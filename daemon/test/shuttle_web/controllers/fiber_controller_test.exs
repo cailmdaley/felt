@@ -8,6 +8,43 @@ defmodule ShuttleWeb.FiberControllerTest do
 
   alias Shuttle.Test.{Env, StubPostClient}
 
+  defmodule CreateBoundaryRunner do
+    def cmd(command, args, opts) do
+      result = Shuttle.Runner.Default.cmd(command, args, opts)
+      if command == "felt" and "show" in args do
+        {output, 0} = result
+        path = Jason.decode!(output)["path"]
+        send(Shuttle.Env.app(:create_boundary_test), {:created, path, self()})
+        receive do :continue -> :ok after 30_000 -> raise "create boundary timed out" end
+      end
+      result
+    end
+  end
+
+  test "create metadata patch respects the document lock and refuses a stale image", %{tmp: tmp} do
+    helper = Path.join(tmp, "fiber-lock")
+    fixture = Path.expand("../../fixtures/fiber_lock/main.go", __DIR__)
+    assert {_, 0} = System.cmd("nice", ["-n", "10", "go", "build", "-p", "2", "-o", helper, fixture], stderr_to_stdout: true)
+    Env.put_app_env(:felt_runner, CreateBoundaryRunner)
+    Env.put_app_env(:create_boundary_test, self())
+    task = Task.async(fn -> api_conn() |> post("/api/v1/fiber/create", Jason.encode!(%{id: "race", name: "Race", frontmatter: %{custom: "value"}})) end)
+    assert_receive {:created, path, creator}, 30_000
+    port = Port.open({:spawn_executable, helper}, [:binary, :exit_status, args: [path]])
+    assert_receive {^port, {:data, "locked\n"}}, 30_000
+    try do
+      send(creator, :continue)
+      assert Task.yield(task, 200) == nil, "create patch bypassed document lock"
+      concurrent = File.read!(path) <> "Concurrent result.\n"
+      File.write!(path, concurrent)
+      Port.command(port, "\n")
+      conn = Task.await(task, 30_000)
+      assert conn.status >= 400
+      assert File.read!(path) == concurrent
+    after
+      if Port.info(port), do: Port.command(port, "\n")
+    end
+  end
+
   setup do
     tmp =
       Path.join(

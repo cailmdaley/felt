@@ -254,7 +254,7 @@ defmodule ShuttleWeb.FiberController do
       frontmatter =
         if operations == [], do: frontmatter, else: FrontmatterEdit.apply(frontmatter, operations)
 
-      atomic_write(path, ["---\n", frontmatter, "---\n", body])
+      Shuttle.FiberDoc.replace(path, content, ["---\n", frontmatter, "---\n", body])
     else
       {:error, reason} -> {:error, "reading created fiber: #{Shuttle.FS.format_error(reason)}"}
       _ -> {:error, "created fiber has unexpected frontmatter layout"}
@@ -321,17 +321,6 @@ defmodule ShuttleWeb.FiberController do
 
       true ->
         :ok
-    end
-  end
-
-  defp atomic_write(path, payload) do
-    tmp = path <> ".tmp"
-
-    with :ok <- Shuttle.FS.write(tmp, payload),
-         :ok <- Shuttle.FS.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} -> {:error, "writing fiber: #{Shuttle.FS.format_error(reason)}"}
     end
   end
 
