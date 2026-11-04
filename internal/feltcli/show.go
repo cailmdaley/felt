@@ -1,6 +1,7 @@
 package feltcli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,6 +91,15 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				}
 				if err == nil {
 					storage = target.Storage
+				} else if view.jsonOutput() {
+					code := "resolution_failed"
+					var missing *felt.NoFiberMatchError
+					if errors.As(err, &missing) {
+						code = "not_found"
+					}
+					if outputErr := writeJSON(out, map[string]string{"error_code": code, "error": err.Error()}); outputErr != nil {
+						return nil, outputErr
+					}
 				}
 				return f, err
 			}

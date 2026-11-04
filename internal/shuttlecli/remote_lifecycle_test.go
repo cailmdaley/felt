@@ -98,6 +98,11 @@ func remoteLifecycleEnv(t *testing.T) *sysenv.Env {
 	return env
 }
 
+func workerFiberMissing(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusNotFound)
+	fmt.Fprint(w, `{"error_code":"fiber_not_found","host":"worker"}`)
+}
+
 // requestBodies records the JSON body of each request a fake daemon receives;
 // handler goroutines write it while the test reads it.
 type requestBodies struct {

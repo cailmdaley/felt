@@ -431,8 +431,7 @@ project_dir. A draft installed without one is refused; --project-dir sets it
 				}
 				output, err := a.postOwnerLifecycle("resume", owner, f, fields)
 				if err != nil {
-					var missing daemonStatusError
-					if st != nil && f.Status == felt.StatusOpen && errors.As(err, &missing) && missing.status == 404 {
+					if st != nil && f.Status == felt.StatusOpen && ownerFiberMissing(err, owner) {
 						if err := a.checkArmable(args[0], "resume", block); err != nil {
 							return err
 						}

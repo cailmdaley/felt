@@ -20,6 +20,37 @@ func subtreeView(t *testing.T, loom, prefix string) string {
 	return project
 }
 
+func TestRemoteResumeTransfersOnlyOnAuthoritativeOwnerMiss(t *testing.T) {
+	for _, body := range []string{`not found`, `{"error_code":"fiber_not_found","host":"someone-else"}`, `{"error_code":"resolution_failed","host":"worker"}`} {
+		t.Run(body, func(t *testing.T) {
+			env := remoteLifecycleEnv(t)
+			dir, st := newStore(t)
+			seedShuttleRole(t, st, "draft", felt.StatusOpen, remoteShuttleBlock("/remote/project"), nil)
+			creates := 0
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/lifecycle" {
+					w.WriteHeader(404)
+					fmt.Fprint(w, body)
+					return
+				}
+				if r.URL.Path == "/api/v1/fiber/create" {
+					creates++
+				}
+				fmt.Fprint(w, `{}`)
+			}))
+			if _, _, err := executeIn(t, env, dir, "resume", "draft"); err == nil {
+				t.Fatal("unproven miss succeeded")
+			}
+			if creates != 0 {
+				t.Fatalf("attempted %d transfers on unproven absence", creates)
+			}
+			if _, err := st.Read("draft"); err != nil {
+				t.Fatal("lost draft", err)
+			}
+		})
+	}
+}
+
 func TestCrossHostWritesRequireOwnerNamespaceContract(t *testing.T) {
 	for _, operation := range []string{"create", "resume-project"} {
 		t.Run(operation, func(t *testing.T) {
