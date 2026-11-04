@@ -165,8 +165,13 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 		name   string
 		mutate func()
 	}{
-		{"unrelated file", func() {
-			if err := os.WriteFile(filepath.Join(plugin, "hooks", "unused.txt"), []byte("content"), 0o644); err != nil {
+		{"hook dependency", func() {
+			path := filepath.Join(plugin, "hooks", "felt-bin.sh")
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, append(data, []byte("\n# dependency change\n")...), 0o755); err != nil {
 				t.Fatal(err)
 			}
 			reseal()

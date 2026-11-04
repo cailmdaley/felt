@@ -187,6 +187,43 @@ func TestCodexDisabledBundleDoesNotOptHarnessIntoDeploy(t *testing.T) {
 	}
 }
 
+func TestCodexProjectionIgnoresPiOnlyHookSources(t *testing.T) {
+	t.Parallel()
+	candidate := t.TempDir()
+	if err := copyTree(filepath.Join(repoRoot(t), "claude-plugin"), filepath.Join(candidate, "claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+	if err := materializeCodexBundles(candidate); err != nil {
+		t.Fatal(err)
+	}
+	before, err := pluginPayloadDigest(codexBundleSource(candidate, "felt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"handoff.mjs", "lib/handoff.mjs"} {
+		path := filepath.Join(candidate, "claude-plugin", "hooks", name)
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.WriteString("\n// Pi-only change\n")
+		f.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := materializeCodexBundles(candidate); err != nil {
+		t.Fatal(err)
+	}
+	after, err := pluginPayloadDigest(codexBundleSource(candidate, "felt"))
+	if err != nil || before != after {
+		t.Fatalf("Pi-only change invalidated Codex hooks: %s -> %s (%v)", before, after, err)
+	}
+	if !hookFilesCompatible(codexBundleSource(candidate, "felt")) {
+		t.Fatal("minimal hook projection is incomplete")
+	}
+}
+
 func TestCodexRollbackVerifiesSkillsCache(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "codex")
