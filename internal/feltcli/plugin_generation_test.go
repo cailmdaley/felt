@@ -38,6 +38,36 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 	}
 }
 
+func TestSetupMigratesOldLayoutSourceProvenance(t *testing.T) {
+	t.Parallel()
+	f := newRemoteSetupFixture(t, "codex")
+	source := t.TempDir()
+	if err := copyTree(f.source, source); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(source, "claude-plugin", pluginGenerationMarkerName)
+	old := []byte(`{"resolved_commit":"stale-source-marker"}`)
+	if err := os.WriteFile(marker, old, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.a.installCodexPluginViaCLI(source); err != nil {
+		t.Fatalf("old-layout source marker prevented setup: %v", err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil || string(data) != string(old) {
+		t.Fatalf("setup modified the source marker: %q (%v)", data, err)
+	}
+	current := filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	if _, err := os.Stat(filepath.Join(current, "claude-plugin", pluginGenerationMarkerName)); !os.IsNotExist(err) {
+		t.Fatalf("old source marker entered payload: %v", err)
+	}
+	for _, name := range codexBundleNames {
+		if err := f.a.verifyCodexLoadedBundle(current, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestPluginPayloadDigestIncludesEmptyDirectories(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

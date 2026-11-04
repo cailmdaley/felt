@@ -469,6 +469,12 @@ func (a *app) stagePluginCandidate(source, executable string) (string, error) {
 			return "", fmt.Errorf("staging %s: %w", name, err)
 		}
 	}
+	// Source acquisition can contain an in-payload provenance marker. The
+	// candidate gets freshly sealed outside its roots; never edit the source.
+	if err := os.Remove(filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)); err != nil && !os.IsNotExist(err) {
+		os.RemoveAll(candidate)
+		return "", fmt.Errorf("removing source provenance from staged payload: %w", err)
+	}
 	if err := syncTreeDirs(candidate); err != nil {
 		os.RemoveAll(candidate)
 		return "", fmt.Errorf("syncing staged plugin: %w", err)
