@@ -83,13 +83,14 @@ time.
 ### Fiber creation
 
 `POST /fiber/create` takes `{id, name, body?, frontmatter?, origin?, uid?}`.
-The owning daemon creates the exact enclosing-store-relative `id`, without requiring its parent document to exist.
+The owning daemon addresses `id` in its configured namespaces, without requiring the immediate parent document to exist.
+The nearest existing ancestor determines the physical namespace and local address, including through linked project stores.
 A project whose `.felt` points into a subtree uses the enclosing store's namespace, so the project prefix is not added again.
 It validates an armed constitution's `project_dir` on that host and stamps its `shuttle.host`.
-The worker cwd does not create or register a store: creation uses a configured physical store, preferring the cwd's namespace only when that namespace is polled.
-The owner refuses confirmation when the resulting path is outside every polled store.
-Transferred UIDs already present on the owner are refused.
-The response is `{id, path, uid, host, status}` after the owner reads back the written document.
+Without an existing ancestor, creation prefers the cwd's namespace when that namespace is polled, then the primary store. The worker cwd does not create or register a store.
+The owner resolves and checks the intended physical destination before writing and checks the resulting path before confirming; a path outside every polled store is refused.
+Transferred UIDs already present on the owner are refused; unreadable matching UID candidates are resolution failures, not permission to transfer.
+The response is `{id, path, uid, host, status}` after an exact read-back; `id` echoes the requested namespace address and `path` identifies the physical destination.
 Before cross-host creation or `resume --project-dir`, the CLI reads the owner's live `/version?origin=<owner>` and requires `contract_level >= 31`.
 `GET /version` publishes `contract_level` even while the daemon is booting; with `origin`, it forwards to that owner.
 `path` is the owner's Markdown filename, `uid` is the intrinsic fiber identity, and `host` and `status` confirm the owning host and persisted status.
@@ -106,7 +107,7 @@ fields, and runs the matching `shuttle <action>` on the owning host:
 `set-model`, `set-agent`, `role`, `seat`, `set-outcome` or
 `uninstall`.
 Lifecycle requests can carry `fiber_path`, an exact namespace path verified against the requested UID before a full UID search.
-A stale or mismatched hint falls back to UID resolution; it never changes the requested identity.
+A stale or mismatched hint falls back to UID resolution; it never changes the requested identity. Hint read errors and timeouts are resolution failures, not stale hints.
 The writer reads the resolved address directly, without convenient lookup or remote fallback. UID-less documents retain exact path addressing even if the file disappears between resolution and the write.
 An authoritative miss returns 404 with `{error_code: "fiber_not_found", host, fiber, error}`.
 Ambiguous identities and resolution failures are not misses and never authorize a draft transfer.
