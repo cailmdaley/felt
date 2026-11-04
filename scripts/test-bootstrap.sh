@@ -80,3 +80,16 @@ grep -F 'UI bundle build failed.' "$WORK/output" >/dev/null || fail 'UI failure 
 grep -F ' daemon SKIP_CLI=1' "$WORK/calls" >/dev/null || fail 'daemon build not exercised'
 grep -F ' ui' "$WORK/calls" >/dev/null || fail 'UI build not exercised'
 printf 'PASS: failed UI build aborts before harness/service installation\n'
+
+# Exercise the Linux installation with an existing link to the source itself.
+unset FAIL_UI
+for tool in cp chmod rm; do ln -s "$(command -v "$tool")" "$WORK/bin/$tool"; done
+printf '#!/bin/bash\nprintf "Linux\\n"\n' > "$WORK/bin/uname"
+printf '#!/bin/bash\nexit 0\n' > "$WORK/bin/systemctl"
+chmod +x "$WORK/bin/systemctl"
+mkdir -p "$WORK/home/.local/bin"
+ln -s "$REPO/bin/shuttle-launch" "$WORK/home/.local/bin/shuttle-launch"
+run_bootstrap || fail 'Linux bootstrap could not replace a link to shuttle-launch'
+[ ! -L "$WORK/home/.local/bin/shuttle-launch" ] || fail 'launcher remains a symlink'
+cmp "$REPO/bin/shuttle-launch" "$WORK/home/.local/bin/shuttle-launch" || fail 'launcher differs from source'
+printf 'PASS: Linux bootstrap replaces a launcher symlink to its source\n'

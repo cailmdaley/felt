@@ -263,7 +263,8 @@ else
   # which supervisor wins: remote revival (remote_registry.ex invokes
   # ~/.local/bin/shuttle-launch over SSH) must always find a current copy.
   mkdir -p "$HOME/.local/bin"
-  cp "$REPO/bin/shuttle-launch" "$HOME/.local/bin/shuttle-launch" \
+  rm -f "$HOME/.local/bin/shuttle-launch" \
+    && cp "$REPO/bin/shuttle-launch" "$HOME/.local/bin/shuttle-launch" \
     && chmod +x "$HOME/.local/bin/shuttle-launch" \
     || die "failed to install shuttle-launch to ~/.local/bin."
   ok "shuttle-launch installed to ~/.local/bin."
