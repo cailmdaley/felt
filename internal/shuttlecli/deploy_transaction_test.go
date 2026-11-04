@@ -20,8 +20,14 @@ type deployFleet struct {
 	env                                                             []string
 }
 
+// Fleet fixtures compile helpers and launch whole shell trees. Bound their
+// process fanout alongside the package's parallel, short-deadline hook tests.
+var deployFleetSlots = make(chan struct{}, 2)
+
 func newDeployFleet(t *testing.T) *deployFleet {
 	t.Helper()
+	deployFleetSlots <- struct{}{}
+	t.Cleanup(func() { <-deployFleetSlots })
 	f := &deployFleet{root: filepath.Join(t.TempDir(), "fleet's space")}
 	f.repo = filepath.Join(f.root, "repo")
 	f.remote = filepath.Join(f.root, "remote")
@@ -609,7 +615,7 @@ func TestDeployForwardsRemoteReadinessOverrides(t *testing.T) {
 			cmd, log := f.start(t, "remote-ready", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS="+timeout, "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1")
 			err := cmd.Wait()
 			if timeout == "0" {
-				if err == nil || !strings.Contains(fleetRead(log), "after 0s") {
+				if err == nil || !strings.Contains(fleetRead(log), "is still booting after") || strings.Contains(fleetRead(f.events), "poll-interval") {
 					t.Fatalf("remote timeout override lost: %v %s", err, fleetRead(log))
 				}
 			} else if err != nil || !strings.Contains(fleetRead(f.events), "poll-interval 1\n") {
@@ -886,6 +892,7 @@ respawn_launcher_restart_cmd() { printf 'echo restart'; }
 run_on() { bash -c "$2"; }
 run_on_visible() { bash -c "$2"; }
 run_value() { run_on_visible "$@"; }
+activation_window() { run_on_visible "$@"; }
 bad() { echo "$*" >&2; }
 ` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
 			cmd := exec.Command("bash", "-c", harness)

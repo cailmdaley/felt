@@ -130,6 +130,7 @@ func TestRemoteDeployRestartsInactiveSystemdUnit(t *testing.T) {
 	harness := shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "listen_prelude") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "respawn_launcher_restart_cmd") + probe + cycle + `run_on() { /bin/dash -c "$2"; }
 run_on_visible() { /bin/dash -c "$2"; }
 run_value() { run_on_visible "$@"; }
+activation_window() { run_on_visible "$@"; }
 bad() { echo "$*" >&2; }
 remote_host_cycle remote "$SHUTTLE_DIR"
 `
@@ -188,6 +189,7 @@ listen_prelude() { printf 'sock=; port=1; dd="$HOME/.shuttle"; '; }
 run_on() { bash -c "$2"; }
 run_on_visible() { bash -c "$2"; }
 run_value() { run_on_visible "$@"; }
+activation_window() { run_on_visible "$@"; }
 bad() { echo "$*" >&2; }
 ` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "daemon_listener_cmd") + shellFunction(t, string(script), "daemon_kill") + shellFunction(t, string(script), "disable_competing_supervisors_cmd") + shellFunction(t, string(script), "remote_host_cycle") + `remote_host_cycle '' "$ROOT"`
 	events := filepath.Join(root, "events")

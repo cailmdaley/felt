@@ -886,11 +886,10 @@ make() {
 export -f make
 config_migration_cmd() { :; }
 refresh_harnesses() { :; }
-remote_host_cycle() { printf 'cycle\n' >> "$EVENTS"; }
+remote_host_cycle() { printf 'cycle\n' >> "$EVENTS"; verify_and_release ''; }
 wait_for_sha() { printf 'verified\n' >> "$EVENTS"; }
 release_verified_deploy() { printf 'released\n' >> "$EVENTS"; }
 finish_verified_deploy() { :; }
-activation_window() { remote_host_cycle; verify_and_release ''; }
 ` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_release") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
 			for _, path := range []string{filepath.Join(dir, "sha", "ui", "dist"), filepath.Join(dir, "stage", "ui", "dist")} {
 				if err := os.MkdirAll(path, 0700); err != nil {
