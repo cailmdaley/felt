@@ -1,6 +1,7 @@
 package shuttlecli
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -115,36 +116,17 @@ func (a *app) eventsMaxBytes() int64 {
 	return eventsDefaultMaxBytes
 }
 
-// appendEventLine rotates if needed, then appends one line.
+// appendEventLine serializes rotation and append against other writers.
 func (a *app) appendEventLine(path, line string) error {
-	if info, err := os.Stat(path); err == nil && info.Size() >= a.eventsMaxBytes() {
-		a.rotateEvents(path)
-	}
-	return appendLine(path, line)
-}
-
-// rotateEvents renames a full stream to <path>.1, once, however many hooks
-// found it full at the same moment. Each takes an exclusive flock on a sidecar
-// lock file and re-checks the size under it: the first renames, and the rest
-// find a fresh file below the threshold and leave it alone. Without the lock
-// a second rename would move that fresh file over .1, discarding the full
-// history it had just replaced.
-//
-// Only a writer that saw the threshold crossed takes the lock, so the common
-// append stays lock-free. The wait for the lock is bounded, because this runs
-// inside a hook the agent harness blocks on: if the lock cannot be taken in
-// time the rotation is skipped and the next append tries again; the stream
-// runs a line over, never loses one.
-func (a *app) rotateEvents(path string) {
 	unlock, ok := lockEventsRotation(path + eventsLockSuffix)
 	if !ok {
-		return
+		return fmt.Errorf("event stream lock timed out")
 	}
 	defer unlock()
-
 	if info, err := os.Stat(path); err == nil && info.Size() >= a.eventsMaxBytes() {
 		_ = os.Rename(path, path+eventsRotatedSuffix)
 	}
+	return appendLine(path, line)
 }
 
 // appendLine appends one line, creating the file if it does not exist.
