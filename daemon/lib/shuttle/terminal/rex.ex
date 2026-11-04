@@ -357,27 +357,41 @@ defmodule Shuttle.Terminal.Rex do
          :ok <- sweep(runner),
          {:ok, sessions} <- Rex.sessions(runner),
          :ok <- prune_bindings(runner, doc, Enum.map(sessions, & &1["session_id"])) do
-      ids = MapSet.new(sessions, & &1["session_id"])
-      bound = for {name, b} <- doc["bindings"], MapSet.member?(ids, b["session_id"]), do: name
-
-      labels =
-        Enum.flat_map(sessions, fn s ->
-          case Rex.blocks(runner, s["session_id"]) do
-            {:ok, blocks} ->
-              for %{"label" => label} <- blocks,
-                  Shuttle.Dispatcher.shuttle_session?(label),
-                  do: label
-
-            _ ->
-              []
-          end
-        end)
-
-      {:ok, Enum.uniq(bound ++ labels)}
+      list_worker_blocks(runner, doc, sessions)
     else
       {:error, :server_absent} -> {:ok, []}
       _ -> {:error, :unknown}
     end
+  end
+
+  # A family session may outlive any individual worker. Only its block
+  # inventory proves a binding live; an unavailable inventory proves nothing.
+  defp list_worker_blocks(runner, doc, sessions) do
+    Enum.reduce_while(sessions, {:ok, []}, fn s, {:ok, names} ->
+      case Rex.blocks(runner, s["session_id"]) do
+        {:ok, blocks} ->
+          ids = MapSet.new(blocks, & &1["block_id"])
+
+          bound =
+            for {name, b} <- doc["bindings"],
+                b["session_id"] == s["session_id"],
+                MapSet.member?(ids, b["block_id"]),
+                do: name
+
+          labels =
+            for %{"label" => label} <- blocks,
+                Shuttle.Dispatcher.shuttle_session?(label),
+                do: label
+
+          {:cont, {:ok, Enum.uniq(names ++ bound ++ labels)}}
+
+        {:error, :not_found} ->
+          {:cont, {:ok, names}}
+
+        {:error, _} ->
+          {:halt, {:error, :unknown}}
+      end
+    end)
   end
 
   defp prune_bindings(runner, snapshot, live_ids) do

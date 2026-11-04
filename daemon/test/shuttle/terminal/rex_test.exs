@@ -16,6 +16,28 @@ defmodule Shuttle.Terminal.RexTest do
     :ok
   end
 
+  @tag :phantom
+  test "a family session alone does not prove its bound worker block exists" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "/tmp/worker.sh", [])
+    assert {:ok, %{"bindings" => %{@name => binding}}} = RexBindings.read()
+
+    FakeRex.sessions(%{
+      binding["session_id"] => %{
+        label: "human sibling",
+        blocks: [%{"block_id" => "block:human", "label" => "human"}]
+      }
+    })
+
+    assert {:ok, []} = Rex.list(FakeRex)
+  end
+
+  @tag :phantom
+  test "a failed block inventory cannot turn a persisted Rex binding into a live worker" do
+    assert :ok = Rex.launch(FakeRex, @name, "/tmp", "/tmp/worker.sh", [])
+    FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
+    assert {:error, :unknown} = Rex.list(FakeRex)
+  end
+
   test "version exposes unusable Rex configuration without probing the server", %{tmp_dir: dir} do
     Env.put_app_env(:terminal_backend, Rex)
     Env.put_env("SHUTTLE_REX_BIN", Path.join(dir, "missing-rex"))
