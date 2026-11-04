@@ -79,6 +79,28 @@ func TestMessageToDormantFiberQueuesForNextWorker(t *testing.T) {
 	}
 }
 
+func TestMessageToOwnerOnlyDormantFiberQueuesBeforeAnyWorkerBinding(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	isolateMessageFiberStore(env, "")
+	deliver, requests := dormantDeliverStub(http.StatusAccepted, `{"delivery":"context","queued":true,"delivered":false}`)
+	feed := `{"fibers":[{"origin":"worker-node","fiber":{"id":"` + messageTargetFiberUID + `","uid":"` + messageTargetFiberUID + `","slug":"science/team/worker","shuttle":{"kind":"oneshot","host":"worker-node"}}}]}`
+	daemonStub(t, env, map[string]http.HandlerFunc{
+		"/api/v1/fibers/composite": jsonBody(feed),
+		"/api/v1/deliver":          deliver,
+	})
+	app := newApp(env)
+	app.messageResolveWait = 0
+	stdout, _, err := runMessage(t, app, "science/team/worker", "read this when you start")
+	if err != nil || !strings.Contains(stdout, "next worker") {
+		t.Fatalf("owner-only queue receipt = %q, %v", stdout, err)
+	}
+	got := requests()
+	if len(got) != 1 || got[0]["fiber_id"] != messageTargetFiberUID || got[0]["origin"] != "worker-node" || got[0]["unless_live"] != true {
+		t.Fatalf("owner-only queue requests = %#v", got)
+	}
+}
+
 func TestMessageToDormantFiberJSONReceiptNeverClaimsDelivery(t *testing.T) {
 	t.Parallel()
 	env := testEnv(t)
