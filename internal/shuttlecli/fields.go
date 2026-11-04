@@ -44,7 +44,7 @@ func unclose(f *felt.Felt, status string) error {
 	if err := setTempered(f, nil); err != nil {
 		return err
 	}
-	if wasClosed || wasResting {
+	if wasClosed || wasResting || (status == felt.StatusActive && shuttle.StoredKind(f) == "standing") {
 		return shuttle.SetRuntimeField(f, "thread_exit_verb", "rearmed")
 	}
 	return nil

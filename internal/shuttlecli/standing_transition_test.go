@@ -3,6 +3,7 @@ package shuttlecli
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,28 @@ func seedStandingTransition(t *testing.T) (*felt.Storage, standingTransitionRequ
 	seedShuttleRole(t, st, "role", felt.StatusActive, map[string]any{"kind": "standing", "host": "test-host", "runtime": map[string]any{"dispatched_at": "2026-01-02T00:00:00Z", "run_id": "scheduled-2"}}, nil)
 	f := mustRead(t, st, "role")
 	return st, standingTransitionRequest{Path: st.Path("role"), UID: f.UID, Host: "test-host", DispatchedAt: "2026-01-02T00:00:00Z", RunID: "scheduled-2", Action: "awaiting", Recovery: true}
+}
+
+func TestPausedHandoffThenHumanArmSurvivesRecovery(t *testing.T) {
+	for _, verb := range []string{"resume", "reopen"} {
+		t.Run(verb, func(t *testing.T) {
+			st, req := seedStandingTransition(t)
+			env := testEnv(t)
+			env.Set("SHUTTLE_HOST", "test-host")
+			if _, err := st.Update("role", func(f *felt.Felt) error { return shuttle.SetField(f, "project_dir", filepath.Dir(st.Root())) }); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"pause", "role", "--no-kill", "--local"}, {"handoff", "role"}, {verb, "role", "--local"}} {
+				if out, err := runIn(t, env, filepath.Dir(st.Root()), args...); err != nil {
+					t.Fatalf("%v: %v %s", args, err, out)
+				}
+			}
+			result, err := applyStandingTransition(req)
+			if err != nil || result.Changed || mustRead(t, st, "role").Status != felt.StatusActive {
+				t.Fatalf("human arm undone: %+v %v", result, err)
+			}
+		})
+	}
 }
 
 func TestStandingExitLockedReloadPreservesConcurrentEdits(t *testing.T) {
