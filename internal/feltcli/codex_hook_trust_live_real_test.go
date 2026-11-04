@@ -1,6 +1,7 @@
 package feltcli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,6 +29,8 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	env.Set("HOME", root)
 	env.Set("CODEX_HOME", filepath.Join(root, ".codex"))
 	env.Chdir(root)
+	var output bytes.Buffer
+	env.Stdout = &output
 	a := testApp(t, env)
 	if version, old := a.codexVersionTooOld(); old {
 		t.Skipf("Codex %s predates plugin content trust", version)
@@ -96,11 +99,40 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 		}
 		return response.Thread.ID
 	}
+	// Reproduce the deployed combined plugin, including in-root provenance,
+	// before invoking the split installer. Approval belongs to the live server.
+	writeManifest("A")
+	current := filepath.Join(root, ".felt", pluginRuntimeDirName, pluginCurrentName)
+	for _, name := range []string{".claude-plugin", "claude-plugin"} {
+		if err := copyTree(filepath.Join(source, name), filepath.Join(current, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(current, "claude-plugin", pluginGenerationMarkerName), []byte(`{"resolved_commit":"old-release"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"plugin", "marketplace", "add", current}, {"plugin", "add", codexPluginRef}} {
+		if out, err := a.runCodexCLIQuiet(args...); err != nil {
+			t.Fatalf("legacy Codex %v: %v %s", args, err, out)
+		}
+	}
+	legacy := open()
+	legacyHooks, err := a.listFeltCodexHooks(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvePrivateCodexHooks(t, legacy, filepath.Join(root, ".codex"), legacyHooks)
+	legacyID := thread(legacy)
+	requirePrivateHookStatus(t, privateCodexHookTurn(t, legacy, legacyID), "completed", "")
 	writeManifest("A")
 	syncTestGit(t, source, "init")
 	syncTestGit(t, source, "add", ".")
 	syncTestGit(t, source, "-c", "user.name=Private probe", "-c", "user.email=probe@example.invalid", "commit", "-m", "plugin baseline")
 	setup()
+	if strings.Count(output.String(), "Codex hook bundle changed:") != 1 {
+		t.Fatalf("migration warning: %s", output.String())
+	}
+	requirePrivateHookStatus(t, privateCodexHookTurn(t, legacy, legacyID), "failed", "plugin contents changed; hook approval required")
 	live := open()
 	id := thread(live)
 	first := privateCodexHookTurn(t, live, id)
@@ -113,25 +145,42 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]os.FileInfo{}
-	if err := filepath.Walk(cache, func(path string, info os.FileInfo, err error) error {
-		if err == nil {
-			files[path] = info
+	beforeDigests := map[string]string{}
+	for _, name := range codexBundleNames {
+		bundle, err := a.verifiedCodexBundleRoot(name)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	beforeDigest, err := pluginPayloadDigest(cache)
-	if err != nil {
-		t.Fatal(err)
+		if err := filepath.Walk(bundle, func(path string, info os.FileInfo, err error) error {
+			if err == nil {
+				files[path] = info
+			}
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+		digest, err := pluginPayloadDigest(bundle)
+		if err != nil {
+			t.Fatal(err)
+		}
+		beforeDigests[bundle] = digest
 	}
 	writeSyncFile(t, source, "cmd/felt/main.go", "package main // Go-only revision\n")
 	syncTestGit(t, source, "add", ".")
 	syncTestGit(t, source, "-c", "user.name=Private probe", "-c", "user.email=probe@example.invalid", "commit", "-m", "Go-only revision")
 	setup()
-	afterDigest, err := pluginPayloadDigest(cache)
-	if err != nil || beforeDigest != afterDigest {
-		t.Fatalf("Go-only release changed hashed bytes: %s -> %s (%v)", beforeDigest, afterDigest, err)
+	for bundle, before := range beforeDigests {
+		after, err := pluginPayloadDigest(bundle)
+		if err != nil || before != after {
+			t.Fatalf("Go-only release changed hashed bytes at %s: %s -> %s (%v)", bundle, before, after, err)
+		}
+	}
+	identity, err := readPluginGeneration(filepath.Join(current, "claude-plugin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.ResolvedCommit != syncTestGit(t, source, "rev-parse", "HEAD") {
+		t.Fatalf("external provenance did not advance: %+v", identity)
 	}
 	for path, before := range files {
 		after, err := os.Stat(path)
@@ -140,8 +189,40 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 		}
 	}
 	requirePrivateHookStatus(t, privateCodexHookTurn(t, live, id), "completed", "")
+	// Refresh skills through the production installer without changing hook bytes
+	// or approval, and keep using the exact same live thread.
+	output.Reset()
+	skill := filepath.Join(source, "claude-plugin", "skills", "felt", "SKILL.md")
+	data, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skill, append(data, []byte("\nPrivate skills revision.\n")...), 0644); err != nil {
+		t.Fatal(err)
+	}
+	setup()
+	if strings.Contains(output.String(), "Codex hook bundle changed:") {
+		t.Fatalf("skills update warned of hook cutover: %s", output.String())
+	}
+	for path, before := range files {
+		if path != cache && !strings.HasPrefix(path, cache+string(filepath.Separator)) {
+			continue
+		}
+		after, err := os.Stat(path)
+		if err != nil || !after.ModTime().Equal(before.ModTime()) {
+			t.Fatalf("skills refresh touched hook bundle: %s (%v)", path, err)
+		}
+	}
+	if err := a.verifyCodexLoadedBundle(current, "felt-skills"); err != nil {
+		t.Fatal(err)
+	}
+	requirePrivateHookStatus(t, privateCodexHookTurn(t, live, id), "completed", "")
+	output.Reset()
 	writeManifest("B")
 	setup()
+	if strings.Count(output.String(), "Codex hook bundle changed:") != 1 {
+		t.Fatalf("hook update warning: %s", output.String())
+	}
 	// The receipt is trusted, but both existing and new threads on the old
 	// server still hold the old definition and approval in memory.
 	for _, id := range []string{id, thread(live)} {
@@ -155,19 +236,7 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var edits []map[string]any
-	for _, h := range hooks {
-		definition, content, err := codexTrustHashes(h.CurrentHash)
-		if err != nil {
-			t.Fatal(err)
-		}
-		key, _ := json.Marshal(h.Key)
-		edits = append(edits, map[string]any{"keyPath": "hooks.state." + string(key), "value": map[string]string{"trusted_hash": definition, "trusted_content_hash": content}, "mergeStrategy": "upsert"})
-	}
-	var written json.RawMessage
-	if err := live.call("config/batchWrite", map[string]any{"edits": edits, "reloadUserConfig": true, "filePath": filepath.Join(root, ".codex", "config.toml")}, &written); err != nil {
-		t.Fatal(err)
-	}
+	approvePrivateCodexHooks(t, live, filepath.Join(root, ".codex"), hooks)
 	requirePrivateHookStatus(t, privateCodexHookTurn(t, live, id), "completed", "")
 	// Release the original writer before resuming the saved conversation.
 	live.close()
@@ -180,9 +249,27 @@ func TestCodexHookTrustRealLiveRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(fired) != "A\nA\nA\nB\nB\nB\n" {
+	if string(fired) != "A\nA\nA\nA\nA\nA\nB\nB\nB\n" {
 		t.Fatalf("unexpected hook executions: %q", fired)
 	}
+}
+
+func approvePrivateCodexHooks(t *testing.T, rpc *codexTrustRPC, home string, hooks []codexTrustHook) {
+	t.Helper()
+	var edits []map[string]any
+	for _, h := range hooks {
+		definition, content, err := codexTrustHashes(h.CurrentHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		key, _ := json.Marshal(h.Key)
+		edits = append(edits, map[string]any{"keyPath": "hooks.state." + string(key), "value": map[string]string{"trusted_hash": definition, "trusted_content_hash": content}, "mergeStrategy": "upsert"})
+	}
+	var written json.RawMessage
+	if err := rpc.call("config/batchWrite", map[string]any{"edits": edits, "reloadUserConfig": true, "filePath": filepath.Join(home, "config.toml")}, &written); err != nil {
+		t.Fatal(err)
+	}
+
 }
 
 type privateCodexHookRun struct {

@@ -326,30 +326,9 @@ func (a *app) codexHome() (string, error) {
 // verifiedCodexCacheRoot proves that Codex's plugin cache holds the active
 // promoted generation and returns its resolved path. `codex plugin list`
 // reports the marketplace source rather than the cache Codex loads and
-// hashes, so the cache is located from Codex's layout and its sealed marker
-// and payload digest are checked directly.
+// hashes, so its bytes are checked against external provenance directly.
 func (a *app) verifiedCodexCacheRoot() (string, error) {
-	runtimeDir, err := a.pluginRuntimeDir()
-	if err != nil {
-		return "", err
-	}
-	current := filepath.Join(runtimeDir, pluginCurrentName)
-	expected, present, err := promotedGenerationForVerify(current)
-	if err != nil {
-		return "", err
-	}
-	if !present {
-		return "", fmt.Errorf("the promoted plugin at %s carries no %s marker", filepath.Join(current, "claude-plugin"), pluginGenerationMarkerName)
-	}
-	codexHome, err := a.codexHome()
-	if err != nil {
-		return "", err
-	}
-	cache := filepath.Join(codexHome, "plugins", "cache", marketplaceName, "felt", expected.PluginVersion)
-	if err := verifyLoadedGeneration("codex", expected, cache); err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(cache)
+	return a.verifiedCodexBundleRoot("felt")
 }
 
 // requireHooksUnder rejects any felt hook Codex loads from outside root.

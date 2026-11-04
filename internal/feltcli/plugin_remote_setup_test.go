@@ -101,7 +101,7 @@ func (f *remoteSetupFixture) remotePayload(t *testing.T, generation string) stri
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "claude-plugin", "generation.txt"), []byte(generation), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "claude-plugin", "hooks", "generation.txt"), []byte(generation), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if remotePayloads.roots == nil {
@@ -132,30 +132,35 @@ materialize_cache() {
   verb="${1:-install}"
   cache="$FAKE_NATIVE_STATE/cache"
   src=$(cat "$source_file")
+  payload="$src/claude-plugin"
   if [ "${FAKE_CODEX_CACHE:-0}" = 1 ]; then
-    version=$(grep '"version"' "$src/claude-plugin/.codex-plugin/plugin.json" | head -1 | cut -d '"' -f 4)
-    cache="$HOME/.codex/plugins/cache/cailmdaley-felt/felt/$version"
+    name="${2:-felt}"
+    directory=codex-hooks
+    if [ "$name" = felt-skills ]; then directory=codex-skills; fi
+    if [ -d "$src/$directory" ]; then payload="$src/$directory"; fi
+    version=$(grep '"version"' "$payload/.codex-plugin/plugin.json" | head -1 | cut -d '"' -f 4)
+    cache="$HOME/.codex/plugins/cache/cailmdaley-felt/$name/$version"
   fi
   case "${FAKE_NATIVE_TAMPER:-}" in
     stale)
       if [ ! -d "$cache" ]; then
         mkdir -p "$cache"
-        cp -R "$src/claude-plugin/." "$cache/"
+        cp -R "$payload/." "$cache/"
       fi
       ;;
     stale-update)
       if [ "$verb" = install ] || [ ! -d "$cache" ]; then
         rm -rf "$cache"
         mkdir -p "$cache"
-        cp -R "$src/claude-plugin/." "$cache/"
+        cp -R "$payload/." "$cache/"
       fi
       ;;
     *)
       rm -rf "$cache"
       mkdir -p "$cache"
-      cp -R "$src/claude-plugin/." "$cache/"
+      cp -R "$payload/." "$cache/"
       case "${FAKE_NATIVE_TAMPER:-}" in
-        alter) printf 'tampered\n' >> "$cache/skills/felt/SKILL.md";;
+        alter) printf 'tampered\n' >> "$cache/.tampered";;
         release-metadata) printf '{"resolved_commit":"unexpected"}\n' > "$cache/.felt-generation.json";;
       esac
       ;;
@@ -229,7 +234,9 @@ fi
 if [ "$1" = plugin ] && [ "$2" = list ]; then
   if [ -f "$installed_file" ]; then
     source=$(cat "$source_file")
-    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","enabled":true,"source":{"path":"%s/claude-plugin"}}]}\n' "$source"
+    printf '{"installed":[{"pluginId":"felt@cailmdaley-felt","version":"1.0.0","enabled":true,"source":{"path":"%s/claude-plugin"}}' "$source"
+    if [ -f "$FAKE_NATIVE_STATE/installed-felt-skills" ]; then printf ',{"pluginId":"felt-skills@cailmdaley-felt","version":"1.0.0","enabled":true}'; fi
+    printf ']}\n'
   else
     printf '%s\n' '{"installed":[]}'
   fi
@@ -250,11 +257,14 @@ if [ "$1" = plugin ] && [ "$2" = add ]; then
     echo 'reported Codex plugin failure' >&2
     exit 92
   fi
+  name="${3%@*}"
+  if [ "$name" = felt-skills ]; then installed_file="$FAKE_NATIVE_STATE/installed-felt-skills"; fi
   : > "$installed_file"
-  materialize_cache
+  materialize_cache install "$name"
   exit 0
 fi
 if [ "$1" = plugin ] && [ "$2" = remove ]; then
+  if [ "$3" = felt-skills@cailmdaley-felt ]; then installed_file="$FAKE_NATIVE_STATE/installed-felt-skills"; fi
   rm -f "$installed_file"
   exit 0
 fi
@@ -269,7 +279,7 @@ func (f *remoteSetupFixture) setGeneration(t *testing.T, generation string) {
 
 func (f *remoteSetupFixture) currentGeneration(t *testing.T) string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName, "claude-plugin", "generation.txt"))
+	data, err := os.ReadFile(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginCurrentName, "claude-plugin", "hooks", "generation.txt"))
 	if err != nil {
 		t.Fatalf("read promoted generation: %v", err)
 	}

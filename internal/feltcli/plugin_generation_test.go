@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -64,13 +65,13 @@ func TestPluginGenerationProvenanceStaysOutsideHarnessPayload(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got != identity {
+	if !reflect.DeepEqual(got, identity) {
 		t.Fatalf("marker = %#v, want %#v", got, identity)
 	}
 	if digest, err := pluginPayloadDigest(filepath.Join(candidate, "claude-plugin")); err != nil || digest != identity.PayloadSHA256 {
 		t.Fatalf("marker changed payload digest: %q (%v), want %q", digest, err, identity.PayloadSHA256)
 	}
-	if got, err := validatePluginGeneration(filepath.Join(candidate, "claude-plugin")); err != nil || got != identity {
+	if got, err := validatePluginGeneration(filepath.Join(candidate, "claude-plugin")); err != nil || !reflect.DeepEqual(got, identity) {
 		t.Fatalf("validated identity = %#v (%v), want %#v", got, err, identity)
 	}
 	if err := os.WriteFile(filepath.Join(candidate, "claude-plugin", "skills", "felt", "SKILL.md"), []byte("tampered\n"), 0o644); err != nil {

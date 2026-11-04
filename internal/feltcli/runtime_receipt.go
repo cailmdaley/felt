@@ -75,6 +75,7 @@ type ReceiptFeltCopy struct {
 }
 
 type ReceiptBundle struct {
+	Name    string `json:"name,omitempty"`
 	Harness string `json:"harness"`
 	Source  string `json:"source,omitempty"`
 	Path    string `json:"path,omitempty"`
@@ -101,6 +102,7 @@ type ReceiptGenerationReceipt struct {
 }
 
 type ReceiptHarnessGeneration struct {
+	Name       string                    `json:"name,omitempty"`
 	Harness    string                    `json:"harness"`
 	Path       string                    `json:"path,omitempty"`
 	Status     receiptStatus             `json:"status"`
@@ -151,7 +153,11 @@ machine-readable receipt.`,
 				fmt.Fprintf(a.env.Stdout, "runtime %s\n", receipt.Status)
 				fmt.Fprintf(a.env.Stdout, "felt: %s\n", receipt.Felt.Status)
 				for _, bundle := range receipt.Bundles {
-					fmt.Fprintf(a.env.Stdout, "%s plugin: %s\n", bundle.Harness, bundle.Status)
+					fmt.Fprintf(a.env.Stdout, "%s plugin: %s", bundle.Harness, bundle.Status)
+					if bundle.Name != "" {
+						fmt.Fprintf(a.env.Stdout, " (%s)", bundle.Name)
+					}
+					fmt.Fprintln(a.env.Stdout)
 				}
 				fmt.Fprintf(a.env.Stdout, "hooks: %s\n", receipt.Hooks.Status)
 				if trust := receipt.Hooks.CodexTrust; trust != nil {
@@ -287,19 +293,8 @@ func (a *app) collectCodexBundle() []ReceiptBundle {
 				Installed []receiptInstalledPlugin `json:"installed"`
 			}
 			if json.Unmarshal(out, &response) == nil {
-				for _, plugin := range response.Installed {
-					if plugin.PluginID != codexPluginRef && !(plugin.Name == "felt" && plugin.MarketplaceName == marketplaceName) {
-						continue
-					}
-					if !plugin.Enabled {
-						return nil
-					}
-					root, err := a.verifiedCodexCacheRoot()
-					if err != nil {
-						return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionConfirmed, Evidence: "codex plugin list and cache", Status: receiptMismatch, Repair: fmt.Sprintf("%v; run `felt setup codex`", err)}}
-					}
-					plugin.Source.Path = root
-					return []ReceiptBundle{a.bundleFromActivePlugin("codex", plugin)}
+				if bundles, found := a.codexBundlesFromList(response.Installed); found {
+					return bundles
 				}
 				// A host may intentionally use only Claude (or only Codex). The
 				// authoritative list omitting Felt is therefore not itself a
@@ -316,20 +311,31 @@ func (a *app) collectCodexBundle() []ReceiptBundle {
 }
 
 func (a *app) collectCodexBundleFallback() []ReceiptBundle {
+	var bundles []ReceiptBundle
+	for _, name := range codexBundleNames {
+		bundles = append(bundles, a.collectCodexBundleFallbackNamed(name)...)
+	}
+	return bundles
+}
+
+func (a *app) collectCodexBundleFallbackNamed(name string) []ReceiptBundle {
 	home, _ := a.env.UserHomeDir()
 	cfg, err := a.readCodexConfig()
 	if err != nil {
+		if name != "felt" {
+			return nil
+		}
 		return []ReceiptBundle{{Harness: "codex", Enabled: true, Inspection: inspectionUnknown, Status: receiptMismatch, Repair: "repair ~/.codex/config.toml, then rerun `felt setup codex`"}}
 	}
 	plugins, _ := cfg["plugins"].(map[string]interface{})
 	enabled, configured := false, false
-	if value, ok := plugins[codexPluginRef]; ok {
+	if value, ok := plugins[name+"@"+marketplaceName]; ok {
 		configured = true
 		if plugin, ok := value.(map[string]interface{}); ok {
 			enabled, _ = plugin["enabled"].(bool)
 		}
 	}
-	root := filepath.Join(home, ".codex", "plugins", "cache", marketplaceName, "felt")
+	root := filepath.Join(home, ".codex", "plugins", "cache", marketplaceName, name)
 	manifestPaths, _ := filepath.Glob(filepath.Join(root, "*", ".codex-plugin", "plugin.json"))
 	if !enabled && len(manifestPaths) == 0 {
 		return nil // Codex is not part of this host's enabled installation.
@@ -341,6 +347,7 @@ func (a *app) collectCodexBundleFallback() []ReceiptBundle {
 		return []ReceiptBundle{{Harness: "codex", Path: root, Enabled: true, Inspection: inspectionConfigured, Status: receiptMissing, Repair: "run `felt setup codex` to materialize exactly one active plugin cache"}}
 	}
 	b := a.bundleFromManifest("codex", manifestPaths[0], codexSource(cfg))
+	b.Name = name
 	b.Evidence = "config/cache fallback"
 	b.Inspection = inspectionConfigured
 	if b.Status == receiptHealthy {
@@ -489,17 +496,24 @@ func (a *app) bundleFromManifest(harness, path, source string) ReceiptBundle {
 		return b
 	}
 	var manifest pluginManifest
-	if err := json.Unmarshal(data, &manifest); err != nil || manifest.Name != "felt" || manifest.Version == "" {
+	if err := json.Unmarshal(data, &manifest); err != nil || (manifest.Name != "felt" && !(harness == "codex" && manifest.Name == "felt-skills")) || manifest.Version == "" {
 		b.Status, b.Repair = receiptMismatch, "install the felt plugin again; its manifest is malformed or belongs to another plugin"
 		return b
 	}
+	b.Name = manifest.Name
 	b.Version = manifest.Version
 	b.Status = receiptHealthy
+	if harness == "codex" && manifest.Name == "felt" && manifest.Hooks != "" && manifest.Skills == "" {
+		if !hookFilesCompatible(pluginRoot) {
+			b.Status, b.Repair = receiptMissing, "restore the hook bundle with `felt setup codex`"
+		}
+		return b
+	}
 	if !skillFilesCompatible(pluginRoot) {
 		b.Status, b.Repair = receiptMissing, "restore the felt and shuttle skill files with the matching setup command"
 		return b
 	}
-	if a.version != "dev" && a.version != "" && manifest.Version != a.version {
+	if harness != "codex" && a.version != "dev" && a.version != "" && manifest.Version != a.version {
 		b.Status, b.Repair = receiptStale, fmt.Sprintf("plugin %s is stale for felt %s; rerun `felt setup %s`", manifest.Version, a.version, harness)
 	}
 	return b
@@ -510,10 +524,15 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 		return ReceiptComponent{Status: receiptMissing, Repair: "enable a felt Claude or Codex plugin with `felt setup claude` or `felt setup codex`"}
 	}
 	var codexTrust *ReceiptCodexTrust
+	hookBundlePresent := false
 	for _, b := range bundles {
 		if b.Status != receiptHealthy {
 			return ReceiptComponent{Status: b.Status, Repair: b.Repair}
 		}
+		if b.Harness == "codex" && b.Name == "felt-skills" {
+			continue
+		}
+		hookBundlePresent = true
 		root := b.Path
 		if !hookFilesCompatible(root) {
 			return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: fmt.Sprintf("rerun `felt setup %s` to restore Felt and Shuttle hook files and their SessionStart, PreToolUse, and PostToolUse wiring", b.Harness)}
@@ -525,6 +544,9 @@ func (a *app) collectHookReceipt(bundles []ReceiptBundle) ReceiptComponent {
 				return ReceiptComponent{Status: receiptMismatch, Path: root, Repair: repair, CodexTrust: codexTrust}
 			}
 		}
+	}
+	if !hookBundlePresent {
+		return ReceiptComponent{Status: receiptMissing, Repair: "enable the felt hook bundle with `felt setup codex`"}
 	}
 	return ReceiptComponent{Status: receiptHealthy, CodexTrust: codexTrust}
 }
@@ -638,14 +660,26 @@ func (a *app) collectGenerationReceipt(bundles []ReceiptBundle, felt ReceiptComp
 			continue
 		}
 		harnessCount++
-		check := ReceiptHarnessGeneration{Harness: bundle.Harness, Path: bundle.Path, Status: receiptHealthy}
+		expected := active
+		check := ReceiptHarnessGeneration{Name: bundle.Name, Harness: bundle.Harness, Path: bundle.Path, Status: receiptHealthy}
 		if activePresent {
-			if err := verifyLoadedGeneration(bundle.Harness, active, bundle.Path); err != nil {
+			if bundle.Harness == "codex" && active.CodexPayloadSHA256 != nil {
+				name := bundle.Name
+				if name == "" {
+					name = "felt"
+				}
+				var err error
+				expected, err = codexBundleGeneration(active, name)
+				if err != nil {
+					return generationReceiptWithHarnesses(receipt, receiptMismatch, err.Error())
+				}
+			}
+			if err := verifyLoadedGeneration(bundle.Harness, expected, bundle.Path); err != nil {
 				check.Status, check.Repair = receiptMismatch, err.Error()+"; rerun the matching felt setup command"
 				receipt.Harnesses = append(receipt.Harnesses, check)
 				return generationReceiptWithHarnesses(receipt, receiptMismatch, joinReceiptRepairs(check.Repair, buildSkew))
 			}
-			check.Generation = &active
+			check.Generation = &expected
 		}
 		receipt.Harnesses = append(receipt.Harnesses, check)
 

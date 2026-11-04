@@ -21,14 +21,15 @@ import (
 const pluginGenerationMarkerName = ".felt-generation.json"
 
 type pluginGenerationIdentity struct {
-	Schema         int    `json:"schema"`
-	SourceKind     string `json:"source_kind"`
-	Source         string `json:"source"`
-	RequestedRef   string `json:"requested_ref,omitempty"`
-	ResolvedCommit string `json:"resolved_commit,omitempty"`
-	PluginVersion  string `json:"plugin_version"`
-	FeltBuild      string `json:"felt_build"`
-	PayloadSHA256  string `json:"payload_sha256"`
+	Schema             int               `json:"schema"`
+	SourceKind         string            `json:"source_kind"`
+	Source             string            `json:"source"`
+	RequestedRef       string            `json:"requested_ref,omitempty"`
+	ResolvedCommit     string            `json:"resolved_commit,omitempty"`
+	PluginVersion      string            `json:"plugin_version"`
+	FeltBuild          string            `json:"felt_build"`
+	PayloadSHA256      string            `json:"payload_sha256"`
+	CodexPayloadSHA256 map[string]string `json:"codex_payload_sha256,omitempty"`
 }
 
 func (a *app) localPluginGeneration(source, candidate string) (pluginGenerationIdentity, error) {
@@ -53,6 +54,17 @@ func (a *app) remotePluginGeneration(source, checkout, candidate string) (plugin
 }
 
 func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidate string) (pluginGenerationIdentity, error) {
+	if err := materializeCodexBundles(candidate); err != nil {
+		return pluginGenerationIdentity{}, err
+	}
+	codexDigests := map[string]string{}
+	for _, name := range codexBundleNames {
+		digest, err := pluginPayloadDigest(codexBundleSource(candidate, name))
+		if err != nil {
+			return pluginGenerationIdentity{}, err
+		}
+		codexDigests[name] = digest
+	}
 	manifest, err := readJSONFile[pluginManifest](filepath.Join(candidate, "claude-plugin", ".claude-plugin", "plugin.json"))
 	if err != nil {
 		return pluginGenerationIdentity{}, fmt.Errorf("reading promoted plugin version: %w", err)
@@ -62,14 +74,15 @@ func (a *app) buildPluginGeneration(kind, source, requestedRef, commit, candidat
 		return pluginGenerationIdentity{}, err
 	}
 	return pluginGenerationIdentity{
-		Schema:         1,
-		SourceKind:     kind,
-		Source:         source,
-		RequestedRef:   requestedRef,
-		ResolvedCommit: commit,
-		PluginVersion:  manifest.Version,
-		FeltBuild:      a.feltBuildIdentity(),
-		PayloadSHA256:  digest,
+		Schema:             1,
+		SourceKind:         kind,
+		Source:             source,
+		RequestedRef:       requestedRef,
+		ResolvedCommit:     commit,
+		PluginVersion:      manifest.Version,
+		FeltBuild:          a.feltBuildIdentity(),
+		PayloadSHA256:      digest,
+		CodexPayloadSHA256: codexDigests,
 	}, nil
 }
 
@@ -139,6 +152,15 @@ func validatePluginGeneration(pluginRoot string) (pluginGenerationIdentity, erro
 	}
 	if manifest.Version != identity.PluginVersion {
 		return pluginGenerationIdentity{}, fmt.Errorf("plugin manifest version %q disagrees with generation marker %q", manifest.Version, identity.PluginVersion)
+	}
+	for name, digest := range identity.CodexPayloadSHA256 {
+		actual, err := pluginPayloadDigest(codexBundleSource(filepath.Dir(pluginRoot), name))
+		if err != nil {
+			return pluginGenerationIdentity{}, err
+		}
+		if actual != digest {
+			return pluginGenerationIdentity{}, fmt.Errorf("%s bundle payload digest disagrees with external provenance", name)
+		}
 	}
 	return identity, nil
 }
