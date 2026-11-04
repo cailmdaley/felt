@@ -2146,6 +2146,35 @@ defmodule Shuttle.ThreadsTest do
                Threads.tree("new-root", "/local-child-store", entries, MapSet.new())
     end
 
+    test "an empty fleet report marks remote armed threads unreachable, unlike no report" do
+      entries = [
+        thread("hub", %{"status" => "active"}),
+        thread("hub/local", %{"status" => "active", "shuttle" => %{"host" => "test-host"}}),
+        thread("hub/remote", %{"status" => "active", "shuttle" => %{"host" => "peer-a"}})
+      ]
+
+      local_live = MapSet.new(["u-hub"])
+      assert {^local_live, nil} = Threads.with_fleet(local_live, "test-host", nil)
+
+      assert {^local_live, reachable} = Threads.with_fleet(local_live, "test-host", %{})
+      assert reachable == MapSet.new(["test-host"])
+
+      assert [
+               %{"id" => "hub/local", "state" => "Armed", "host_unreachable" => false},
+               %{"id" => "hub/remote", "state" => "Armed", "host_unreachable" => true}
+             ] = Threads.tree("hub", "/s", entries, local_live, reachable)
+
+      assert [
+               %{"id" => "hub/local", "host_unreachable" => false},
+               %{"id" => "hub/remote", "host_unreachable" => false}
+             ] = Threads.tree("hub", "/s", entries, local_live, nil)
+
+      assert Threads.roster("hub", "/s", entries, local_live, reachable) =~
+               "2 armed (1 on an unreachable host)"
+
+      refute Threads.roster("hub", "/s", entries, local_live, nil) =~ "unreachable host"
+    end
+
     test "the fleet view adds fresh remotes' workers and names the hosts it covers" do
       remote = fn name ->
         %Shuttle.Remote{

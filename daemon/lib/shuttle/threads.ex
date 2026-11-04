@@ -914,9 +914,11 @@ defmodule Shuttle.Threads do
   Widen this host's liveness to the fleet's: `{live, reachable}`, where `live`
   adds the running workers of every remote polled within its staleness window
   and `reachable` is this host with those remotes. `fleet` is the remote
-  registry's last report (`%{name => %{remote, last_polled_at, running}}`), or
-  nil before its first, when no host but this one is known and `reachable` is
-  nil.
+  registry's last report (`%{name => %{remote, last_polled_at, running}}`).
+  An empty report means only this host is reachable; remote-armed threads
+  are marked host-unreachable until their hosts have a fresh poll.
+  Before the first report, `fleet` and `reachable` are nil and host
+  reachability is unknown, so threads are not marked host-unreachable.
   """
   def with_fleet(live, own_host, fleet, now \\ DateTime.utc_now())
 
