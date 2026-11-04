@@ -7450,6 +7450,20 @@ defmodule Shuttle.PollerTest do
     assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == "claimed-uuid"
   end
 
+  test "claimed standing worker exit observes its claim dispatch stamp" do
+    id = "tests/claim-standing"
+    Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())
+    MockRunner.set_shuttle(id, "kind: standing\nhost: test-host\nagent: claude-sonnet\nruntime:\n  dispatched_at: 2026-01-02T00:00:00Z\n  run_id: adhoc-123\n", "active")
+    MockRunner.add_tmux_session("capture-standing")
+    {:ok, poller} = start_poller!(runner: MockRunner, felt_stores: [MockRunner.felt_root()], boot_quarantine: true, poll_interval_ms: 600_000)
+    await_boot_cycle!(poller)
+    assert {:ok, _} = Poller.claim_session(poller, id, "capture-standing", session_uuid: "claimed-standing-uuid")
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) != "2026-01-02T00:00:00Z"
+    notify_worker_exit(poller, id)
+    :sys.get_state(poller, @state_timeout)
+    assert MockRunner.fiber(id)["status"] == "closed"
+  end
+
   # ── Claim (write-and-claim) ──
 
   defmodule CrashAfterCreateRunner do

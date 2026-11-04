@@ -5292,7 +5292,15 @@ defmodule Shuttle.Poller do
         state =
           case log_worker_claim(state, fiber_id, opts) do
             :ok ->
-              state
+              case fetch_fiber_full(fiber_id, state) do
+                {:ok, current} ->
+                  key = running_key(state, fiber_id)
+                  running = Map.update!(state.running, key, &Map.put(&1, :run_observation, current))
+                  %{state | running: running}
+
+                {:error, _} ->
+                  state
+              end
 
             {:error, reason} ->
               # Receiver authority is already durable and owns live recovery.
