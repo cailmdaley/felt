@@ -87,6 +87,22 @@ func TestBoardDigestCursorFilteringAndCap(t *testing.T) {
 	}
 }
 
+func TestBoardDeliveredOnlyDigestRetainsCursor(t *testing.T) {
+	env := messageHookEnv(t, "host")
+	delivered := true
+	daemonStub(t, env, map[string]http.HandlerFunc{"/api/v1/board/family": func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"family": map[string]any{"label": "family"}, "records": []map[string]any{{"id": "received", "kind": "post", "text": "already received", "delivered": delivered}}})
+	}})
+	a := newApp(env)
+	if text, _ := a.boardDigest("pi", "s"); text != "" {
+		t.Fatalf("delivered digest = %q", text)
+	}
+	delivered = false
+	if text, _ := a.boardDigest("pi", "s"); text != "" {
+		t.Fatalf("received row replayed after viewer change: %q", text)
+	}
+}
+
 func TestHumanPromptAnswersOwnedAsk(t *testing.T) {
 	for _, harness := range []string{"claude", "codex", "pi"} {
 		t.Run(harness, func(t *testing.T) {

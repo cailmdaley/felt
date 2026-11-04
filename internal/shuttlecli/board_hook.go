@@ -204,6 +204,7 @@ func (a *app) boardDigest(harness, session string) (text string, acknowledge fun
 		}
 	}
 	if len(fresh) == 0 {
+		acknowledge()
 		return "", nil
 	}
 	label := ""
