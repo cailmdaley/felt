@@ -63,6 +63,7 @@ fi
 sha=$(git -C "${TEST_RELEASE%/bin/rel}" rev-parse HEAD)
 printf '{"git_short_sha":"%.7s","git_sha":"%s","release_path":"%s","booted_at":"2099-01-01T00:00:00Z","ready":true}\n' "$sha" "$sha" "$TEST_RELEASE" > "$STATE"
 echo cycle >> "$EVENTS"
+if [ "${BOOTING_LAUNCHER:-0}" = 1 ]; then sed 's/"ready":true/"ready":false/' "$STATE" > "$STATE.next"; mv "$STATE.next" "$STATE"; fi
 if [ "${BACKGROUND_LAUNCHER:-0}" = 1 ]; then
  nohup sleep 300 >/dev/null 2>&1 &
  echo $! > "$FLEET_ROOT/background.pid"
@@ -78,11 +79,24 @@ fi
 		t.Fatal(err)
 	}
 	write(filepath.Join(f.bin, "go"), "#!/bin/sh\nif [ \"${CHECK_LOCK_BUILD:-0}\" = 1 ]; then\n [ \"$1\" = build ] && [ \"$GOMAXPROCS\" = 2 ] && [ \"$GOFLAGS\" = -p=2 ] || { echo 'uncapped lock bootstrap' >&2; exit 31; }\n case \"$3\" in \"$HOME\"/.shuttle/deploy/tools/*/lock) ;; *) echo 'lock executable depends on tmp mount' >&2; exit 32;; esac\nfi\nexec '"+realGo+"' \"$@\"\n")
+	realSleep, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(f.bin, "sleep"), "#!/bin/sh\nif [ \"${CHECK_POLL:-0}\" = 1 ]; then\n echo \"poll-interval $1\" >> \"$EVENTS\"\n sed 's/\"ready\":false/\"ready\":true/' \"$STATE\" > \"$STATE.next\"; mv \"$STATE.next\" \"$STATE\"\nelse exec '"+realSleep+"' \"$@\"; fi\n")
+	cache, err := exec.Command(realGo, "env", "GOCACHE").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.env = append(f.env, "GOCACHE="+strings.TrimSpace(string(cache)))
 	write(filepath.Join(f.bin, "ssh"), `#!/bin/sh
 echo ssh >> "$EVENTS"
 if [ "${SSH_GATE:-0}" = 1 ]; then touch "$FLEET_ROOT/ssh-entered"; while [ ! -f "$FLEET_ROOT/ssh-go" ]; do sleep .02; done; fi
 shift
-exec bash -c "$*"
+exec /usr/bin/env -i HOME="$HOME" PATH="$PATH" GOCACHE="$GOCACHE" GOTOOLCHAIN=local \
+ FAKE_BIN="$FAKE_BIN" FLEET_ROOT="$FLEET_ROOT" EVENTS="$EVENTS" STATE="$STATE" BUILD_GATE="$BUILD_GATE" \
+ FAIL_BUILD="${FAIL_BUILD:-0}" BACKGROUND_LAUNCHER="${BACKGROUND_LAUNCHER:-0}" CHECK_LOCK_BUILD="${CHECK_LOCK_BUILD:-0}" \
+ CHECK_OLD_PRUNE="${CHECK_OLD_PRUNE:-0}" PI_CHECKOUT="${PI_CHECKOUT:-}" BOOTING_LAUNCHER="${BOOTING_LAUNCHER:-0}" CHECK_POLL="${CHECK_POLL:-0}" bash -c "$*"
 `)
 	write(filepath.Join(f.bin, "make"), `#!/bin/sh
 case "$1" in
@@ -147,7 +161,7 @@ fi
 `)
 	// No listener PID can ever reach xargs/kill; the fake returns an empty list.
 	write(f.state, `{"git_short_sha":"0000000","release_path":"/old","ready":true,"booted_at":"2026-01-01T00:00:00Z"}`)
-	f.env = append(os.Environ(), "HOME="+f.home, "PATH="+f.bin+":"+os.Getenv("PATH"), "FAKE_BIN="+f.bin, "FLEET_ROOT="+f.root, "EVENTS="+f.events, "STATE="+f.state, "BUILD_GATE="+f.gate, "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0", "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1", "SHUTTLE_AGENTS_FILE="+filepath.Join(f.root, "absent"), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
+	f.env = append(append(os.Environ(), f.env...), "HOME="+f.home, "PATH="+f.bin+":"+os.Getenv("PATH"), "FAKE_BIN="+f.bin, "FLEET_ROOT="+f.root, "EVENTS="+f.events, "STATE="+f.state, "BUILD_GATE="+f.gate, "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=0", "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1", "SHUTTLE_AGENTS_FILE="+filepath.Join(f.root, "absent"), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.invalid", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.invalid")
 	f.git(t, f.repo, "init", "-b", "main")
 	f.git(t, f.repo, "add", ".")
 	f.git(t, f.repo, "commit", "-m", "target")
@@ -221,6 +235,25 @@ func fleetTouch(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDeployForwardsRemoteReadinessOverrides(t *testing.T) {
+	t.Parallel()
+	for _, timeout := range []string{"0", "30"} {
+		t.Run(timeout, func(t *testing.T) {
+			f := newDeployFleet(t)
+			fleetTouch(t, f.gate)
+			cmd, log := f.start(t, "remote-ready", "BOOTING_LAUNCHER=1", "CHECK_POLL=1", "SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS="+timeout, "SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=1")
+			err := cmd.Wait()
+			if timeout == "0" {
+				if err == nil || !strings.Contains(fleetRead(log), "after 0s") {
+					t.Fatalf("remote timeout override lost: %v %s", err, fleetRead(log))
+				}
+			} else if err != nil || !strings.Contains(fleetRead(f.events), "poll-interval 1\n") {
+				t.Fatalf("remote poll override lost: %v %s %s", err, fleetRead(log), fleetRead(f.events))
+			}
+		})
 	}
 }
 

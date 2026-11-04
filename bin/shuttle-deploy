@@ -892,6 +892,8 @@ transaction_script() {
   for name in TARGET_COMMIT TARGET_SHA DEPLOY_REF DEPLOY_VERSION BOLD GREEN RED RESET; do
     printf '%s=%s\n' "$name" "$(shell_quote "${!name}")"
   done
+  printf 'SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS=%s\nSHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS=%s\n' \
+    "$(shell_quote "${SHUTTLE_DEPLOY_READY_TIMEOUT_SECONDS:-900}")" "$(shell_quote "${SHUTTLE_DEPLOY_READY_POLL_INTERVAL_SECONDS:-5}")"
   printf 'HOST=%s\nSOURCE=%s\nMODE=%s\nSTAGE=%s\nSKIP_UI=%s\nBUILD_WRAP=%s\nSNAPSHOT=%s\n' \
     "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
@@ -917,7 +919,7 @@ tmp=\$(mktemp -d \"\$HOME/.shuttle/deploy/tools/lock.XXXXXX\")
 trap $(shell_quote "rm -rf \"\$tmp\" $(shell_quote "$stage")") EXIT
 printf '%s' $(shell_quote "$LOCK_SOURCE") > \"\$tmp/main.go\"
 GOMAXPROCS=2 GOFLAGS=-p=2 go build -o \"\$tmp/lock\" \"\$tmp/main.go\"
-SHUTTLE_DEPLOY_BOOTSTRAP_DIR=\"\$tmp\" exec \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
+SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS=$(shell_quote "${SHUTTLE_DEPLOY_LOCK_TIMEOUT_SECONDS:-3600}") SHUTTLE_DEPLOY_BOOTSTRAP_DIR=\"\$tmp\" exec \"\$tmp/lock\" \"\$HOME/.shuttle/deploy.lock\" \"\$HOME/.shuttle/deploy/leases/$TARGET_COMMIT.lock\" \
   $(shell_quote "host=${host:-local} target=$TARGET_COMMIT deployer=$DEPLOYER") bash -c $(shell_quote "$script")"
   run_on_visible "$host" "$bootstrap" || { bad "${host:-local}: host transaction failed"; return 1; }
 }
