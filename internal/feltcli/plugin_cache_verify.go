@@ -52,6 +52,11 @@ func (a *app) verifyClaudeLoadedGeneration(current string) error {
 
 // verifyCodexLoadedGeneration checks the installed plugin and its versioned cache.
 func (a *app) verifyCodexLoadedGeneration(current string) error {
+	return a.verifyCodexLoadedBundle(current, "felt")
+}
+
+func (a *app) verifyCodexLoadedBundle(current, name string) error {
+	ref := name + "@" + marketplaceName
 	_, present, err := promotedGenerationForVerify(current)
 	if err != nil || !present {
 		return err
@@ -67,18 +72,18 @@ func (a *app) verifyCodexLoadedGeneration(current string) error {
 		return fmt.Errorf("verifying Codex cache: decoding plugin list: %w", err)
 	}
 	for _, plugin := range document.Installed {
-		if plugin.PluginID != codexPluginRef && plugin.ID != codexPluginRef {
+		if plugin.PluginID != ref && plugin.ID != ref {
 			continue
 		}
 		if !plugin.Enabled {
 			// Same call as the Claude path: a disable is user preference, not
 			// a materialization failure; verify the bytes and surface the gap.
-			fmt.Fprintf(a.env.Stdout, "⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", codexPluginRef)
+			fmt.Fprintf(a.env.Stdout, "⚠ %s is installed but disabled; the verified plugin will not load until you re-enable it in Codex\n", ref)
 		}
-		_, err := a.verifiedCodexCacheRoot()
+		_, err := a.verifiedCodexBundleRoot(name)
 		return err
 	}
-	return fmt.Errorf("verifying Codex cache: plugin list does not report %s as installed", codexPluginRef)
+	return fmt.Errorf("verifying Codex cache: plugin list does not report %s as installed", ref)
 }
 
 // promotedGenerationForVerify reads the sealed marker for a promoted path.

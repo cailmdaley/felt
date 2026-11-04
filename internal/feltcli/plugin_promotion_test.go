@@ -60,9 +60,10 @@ func TestRestoreCodexInstallationRemovesCandidateBeforeAddingPrevious(t *testing
 		t.Fatalf("restoreCodexInstallation: %v", err)
 	}
 	data := calls()
-	want := "plugin marketplace remove " + marketplaceName + "\n" +
-		"plugin marketplace add /last-known-good\n" +
-		"plugin remove " + codexPluginRef + "\n"
+	want := "plugin remove " + codexPluginRef + "\n" +
+		"plugin remove " + codexSkillsPluginRef + "\n" +
+		"plugin marketplace remove " + marketplaceName + "\n" +
+		"plugin marketplace add /last-known-good\n"
 	if string(data) != want {
 		t.Fatalf("restore command order:\n%s\nwant:\n%s", data, want)
 	}

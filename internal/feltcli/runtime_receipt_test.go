@@ -47,7 +47,7 @@ func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
 	a.version = "1.2.3"
 
 	root := t.TempDir()
-	manifest := filepath.Join(root, ".codex-plugin", "plugin.json")
+	manifest := filepath.Join(root, ".claude-plugin", "plugin.json")
 	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestBundleFromManifestRejectsWrongAndStaleBundles(t *testing.T) {
 		if err := os.WriteFile(manifest, []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		return a.bundleFromManifest("codex", manifest, "/source")
+		return a.bundleFromManifest("claude", manifest, "/source")
 	}
 	if got := write(`{"name":"felt","version":"1.2.3"}`); got.Status != receiptHealthy {
 		t.Fatalf("matching bundle = %#v, want healthy", got)

@@ -53,8 +53,8 @@ type marketplaceManifest struct {
 type pluginManifest struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	Skills  string `json:"skills"`
-	Hooks   string `json:"hooks"`
+	Skills  string `json:"skills,omitempty"`
+	Hooks   string `json:"hooks,omitempty"`
 }
 
 type claudeInstallationState struct {
@@ -64,9 +64,10 @@ type claudeInstallationState struct {
 }
 
 type codexInstallationState struct {
-	Source     string
-	Configured bool
-	Installed  bool
+	Source          string
+	Configured      bool
+	Installed       bool
+	SkillsInstalled bool
 }
 
 func (a *app) captureClaudeInstallation() claudeInstallationState {
@@ -138,7 +139,7 @@ func (a *app) captureCodexInstallation() codexInstallationState {
 		return codexInstallationState{}
 	}
 	source, configured := a.codexMarketplaceState()
-	return codexInstallationState{Source: source, Configured: configured, Installed: a.codexPluginInstalled()}
+	return codexInstallationState{Source: source, Configured: configured, Installed: a.codexPluginInstalled(), SkillsInstalled: a.codexPluginRefInstalled(codexSkillsPluginRef)}
 }
 
 func (a *app) recoverPluginRuntimeBeforeNativeCapture() bool {
@@ -181,7 +182,9 @@ func (a *app) codexMarketplaceState() (string, bool) {
 	return "", false
 }
 
-func (a *app) codexPluginInstalled() bool {
+func (a *app) codexPluginInstalled() bool { return a.codexPluginRefInstalled(codexPluginRef) }
+
+func (a *app) codexPluginRefInstalled(ref string) bool {
 	out, err := a.runCodexCLIQuiet("plugin", "list", "--json")
 	if err != nil {
 		return false
@@ -191,7 +194,7 @@ func (a *app) codexPluginInstalled() bool {
 	}
 	if json.Unmarshal([]byte(out), &document) == nil && document.Installed != nil {
 		for _, entry := range document.Installed {
-			if entry.PluginID == codexPluginRef || entry.ID == codexPluginRef {
+			if entry.PluginID == ref || entry.ID == ref {
 				return true
 			}
 		}
@@ -203,8 +206,10 @@ func (a *app) restoreCodexInstallation(state codexInstallationState) error {
 	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI unavailable while restoring native installation: %w", err)
 	}
+	for _, ref := range []string{codexPluginRef, codexSkillsPluginRef} {
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", ref)
+	}
 	if !state.Configured || state.Source == "" {
-		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
 		out, err := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
 		return a.reportCodexRemoval(out, err)
 	}
@@ -222,9 +227,14 @@ func (a *app) restoreCodexInstallation(state codexInstallationState) error {
 		if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 			return fmt.Errorf("restoring Codex plugin: %w", err)
 		}
+	}
+	if state.SkillsInstalled {
+		if err := a.runHarnessCLI("codex", "plugin", "add", codexSkillsPluginRef); err != nil {
+			return fmt.Errorf("restoring Codex skills: %w", err)
+		}
+	}
+	if state.Installed {
 		a.refreshCodexHookTrust()
-	} else {
-		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
 	}
 	return nil
 }
@@ -698,6 +708,7 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 		return fmt.Errorf("codex CLI unavailable: %w", err)
 	}
 	if !intent.Configured {
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexSkillsPluginRef)
 		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
 		out, err := a.runCodexCLIQuiet("plugin", "marketplace", "remove", marketplaceName)
 		if err := a.reportCodexRemoval(out, err); err != nil {
@@ -713,9 +724,12 @@ func (a *app) reconcileCodexInstallation(intent codexInstallationState, current 
 			}
 		}
 	}
+	if !intent.SkillsInstalled {
+		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexSkillsPluginRef)
+	}
 	source, configured := a.codexMarketplaceState()
 	installed := a.codexPluginInstalled()
-	if configured != intent.Configured || installed != intent.Installed {
+	if configured != intent.Configured || installed != intent.Installed || a.codexPluginRefInstalled(codexSkillsPluginRef) != intent.SkillsInstalled {
 		return fmt.Errorf("Codex native state did not reconcile (configured=%t installed=%t, want configured=%t installed=%t)", configured, installed, intent.Configured, intent.Installed)
 	}
 	if intent.Configured && !a.samePluginSource(source, current) {

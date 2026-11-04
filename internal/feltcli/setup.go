@@ -404,7 +404,7 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 	}
 	// The CLI's zero exit is not trusted as proof of materialization: the
 	// promotion only commits (and discards `previous`) after the cache Claude
-	// reports as loaded carries the promoted generation marker and digest.
+	// reports as loaded matches the externally recorded payload digest.
 	// `plugin update` on an unchanged manifest version can legitimately leave
 	// the old versioned cache directory in place, so a failed verify gets one
 	// uninstall+install retry — which forces a fresh cache copy — before the
@@ -724,8 +724,10 @@ func (a *app) feltCodexInstalled() bool {
 	cfg, err := a.readCodexConfig()
 	if err == nil {
 		if plugins, ok := cfg["plugins"].(map[string]interface{}); ok {
-			if _, has := plugins[codexPluginRef]; has {
-				return true
+			for _, ref := range []string{codexPluginRef, codexSkillsPluginRef} {
+				if _, has := plugins[ref]; has {
+					return true
+				}
 			}
 		}
 	}
@@ -813,7 +815,7 @@ func (a *app) homePath(parts ...string) (string, error) {
 
 // codexPluginRef is the plugin identifier used in `~/.codex/config.toml`'s
 // `[plugins."<ref>"]` block. Matches the marketplace name declared in the
-// repo's marketplace.json so `claude` and `codex` see the same plugin.
+// generated marketplace. The hook identity is stable across packaging changes.
 const codexPluginRef = "felt@" + marketplaceName
 
 // codexMarketplaceSource adapts a Claude-flavored marketplace ref
@@ -840,10 +842,9 @@ func isLocalPath(source string) bool {
 }
 
 // installCodexPluginViaCLI points the marketplace at `marketplaceSource`, then
-// installs the plugin with `codex plugin add` — which materializes the plugin
-// cache under ~/.codex/plugins/cache/ and writes the
-// `[plugins."felt@…"] enabled = true` entry itself, so felt never touches
-// ~/.codex/config.toml. Both verbs are idempotent; re-running is safe.
+// installs independently verified hook and skills bundles with Codex's native
+// plugin commands. Codex owns cache/config writes; Felt owns the promoted
+// source and external provenance. Matching caches are left untouched.
 func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
 	if _, err := a.env.LookPath("codex"); err != nil {
 		return fmt.Errorf("codex CLI not found in PATH; install Codex first: %w", err)
@@ -857,35 +858,43 @@ func (a *app) installCodexPluginViaCLI(marketplaceSource string) error {
 }
 
 func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
+	hooksInstalled := a.codexPluginInstalled()
 	if err := a.repointCodexMarketplace(codexMarketplaceSource(marketplaceSource)); err != nil {
 		return err
 	}
 
-	if _, present, err := promotedGenerationForVerify(marketplaceSource); err == nil && present && a.verifyCodexLoadedGeneration(marketplaceSource) == nil {
-		fmt.Fprintln(a.env.Stdout, "✓ Codex plugin payload unchanged; left installed bytes intact")
-		a.refreshCodexHookTrust()
-		return nil
+	hooksChanged := hooksInstalled && a.verifyCodexLoadedGeneration(marketplaceSource) != nil
+	expected, present, err := promotedGenerationForVerify(marketplaceSource)
+	if err != nil {
+		return err
 	}
-	if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
-		return fmt.Errorf("installing %s: %w\n"+
-			"  felt installs through Codex's native plugin commands and trusts its\n"+
-			"  hooks through Codex's App Server API, which need codex-cli ≥ %s.\n"+
-			"  Upgrade Codex if `codex plugin add` is unknown.",
-			codexPluginRef, err, codexHookTrustMinimum)
+	names := codexBundleNames
+	if expected.CodexPayloadSHA256 == nil {
+		names = []string{"felt"}
 	}
-
-	// Same trust boundary as the Claude path: a promotion may only commit
-	// after Codex's reported cache proves it holds the promoted generation.
-	// A failed verify gets one remove+add retry to force a fresh cache before
-	// the promotion is refused.
-	if err := a.verifyCodexLoadedGeneration(marketplaceSource); err != nil {
-		_, _ = a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)
-		if addErr := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); addErr != nil {
-			return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", codexPluginRef, err, addErr)
+	for _, name := range names {
+		ref := name + "@" + marketplaceName
+		if present && a.verifyCodexLoadedBundle(marketplaceSource, name) == nil {
+			fmt.Fprintf(a.env.Stdout, "✓ Codex %s payload unchanged; left installed bytes intact\n", name)
+			continue
 		}
-		if err := a.verifyCodexLoadedGeneration(marketplaceSource); err != nil {
-			return err
+		if err := a.runHarnessCLI("codex", "plugin", "add", ref); err != nil {
+			return fmt.Errorf("installing %s: %w; Codex ≥ %s is required", ref, err, codexHookTrustMinimum)
 		}
+		if err := a.verifyCodexLoadedBundle(marketplaceSource, name); err != nil {
+			if _, removeErr := a.runCodexCLIQuiet("plugin", "remove", ref); removeErr != nil {
+				return fmt.Errorf("removing unverified %s: %w", ref, removeErr)
+			}
+			if addErr := a.runHarnessCLI("codex", "plugin", "add", ref); addErr != nil {
+				return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", ref, err, addErr)
+			}
+			if err := a.verifyCodexLoadedBundle(marketplaceSource, name); err != nil {
+				return err
+			}
+		}
+	}
+	if hooksChanged {
+		fmt.Fprintln(a.env.Stdout, "⚠ Codex hook bundle changed: live processes will refuse hooks until restarted; exit the affected session, then run `codex --no-daemon resume <session-id>`.")
 	}
 
 	// Direct ~/.codex/hooks.json entries would fire the same hooks a second
@@ -1120,6 +1129,9 @@ func (a *app) uninstallCodexPlugin() error {
 		// plugin directory; `marketplace remove` unregisters the source.
 		// A failure here doesn't stop the legacy pruning below, but it is
 		// carried to the end so uninstall doesn't claim to have finished.
+		if err := a.reportCodexRemoval(a.runCodexCLIQuiet("plugin", "remove", codexSkillsPluginRef)); err != nil {
+			failures = append(failures, fmt.Errorf("removing plugin %s: %w", codexSkillsPluginRef, err))
+		}
 		if err := a.reportCodexRemoval(a.runCodexCLIQuiet("plugin", "remove", codexPluginRef)); err != nil {
 			failures = append(failures, fmt.Errorf("removing plugin %s: %w", codexPluginRef, err))
 		}

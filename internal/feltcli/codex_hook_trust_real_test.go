@@ -53,12 +53,12 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 	}
 	reseal := func() {
 		t.Helper()
-		digest, err := pluginPayloadDigest(plugin)
+		var err error
+		identity, err = a.localPluginGeneration(source, candidate)
 		if err != nil {
 			t.Fatal(err)
 		}
-		identity.PayloadSHA256 = digest
-		if err := writePluginGeneration(candidate, identity); err != nil {
+		if err := sealPluginGeneration(candidate, identity); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -166,7 +166,7 @@ func TestCodexHookTrustRealPrivateAppServer(t *testing.T) {
 		mutate func()
 	}{
 		{"unrelated file", func() {
-			if err := os.WriteFile(filepath.Join(plugin, "unused.txt"), []byte("content"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(plugin, "hooks", "unused.txt"), []byte("content"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			reseal()
