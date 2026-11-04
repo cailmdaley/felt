@@ -26,6 +26,84 @@ defmodule Shuttle.Test.MeetingRunner do
   defp default(_command, _args, _opts, custom), do: {{"", 0}, custom}
 end
 
+defmodule Shuttle.MeetingRexTest do
+  use ExUnit.Case, async: true
+  alias Shuttle.RetainedTerminal
+  alias Shuttle.Terminal.Rex
+  alias Shuttle.Test.IsolatedRex
+  @moduletag :tmp_dir
+  @moduletag skip: IsolatedRex.skip?()
+
+  test "a Hark block exit is shown as failed with its transcript intact", %{tmp_dir: root} do
+    IsolatedRex.start(root)
+    hark_dir = Path.join(root, "hark")
+    File.mkdir_p!(Path.join(hark_dir, "meetings"))
+    transcript = Path.join(hark_dir, "meetings/capture.txt")
+    File.write!(transcript, "The lensing result is stable.\n")
+    launch = "rex-meeting-#{System.unique_integer([:positive])}"
+    script = Path.join(root, "hark-bin")
+
+    File.write!(
+      script,
+      "#!/bin/bash\nprintf '{\"launch\":\"%s\",\"phase\":\"live\",\"pid\":%s,\"title\":\"Test\",\"transcript\":\"%s\",\"started\":\"2026-11-04T12:00:00Z\"}' '#{launch}' \"$$\" '#{transcript}' > \"$HARK_DIR/meeting.json\"\nexit 9\n"
+    )
+
+    File.chmod!(script, 0o755)
+    state_dir = Path.join(root, "retained")
+
+    opts = [
+      terminal: Rex,
+      runner: Shuttle.Runner.Default,
+      state_dir: state_dir,
+      hark_dir: hark_dir
+    ]
+
+    assert :ok =
+             RetainedTerminal.start(
+               "hark-meeting",
+               root,
+               [script],
+               %{"launch" => launch, "fiber" => "project/meeting"},
+               Shuttle.Runner.Default,
+               Keyword.put(opts, :env, %{"HARK_DIR" => hark_dir})
+             )
+
+    wait_for(fn -> File.exists?(Path.join(state_dir, "hark-meeting.json")) end)
+
+    wait_for(fn ->
+      match?(
+        {:ok, %{dead: true}},
+        RetainedTerminal.observe("hark-meeting", Shuttle.Runner.Default, opts)
+      )
+    end)
+
+    assert {:ok, %{meeting: meeting}} = Shuttle.Meeting.show(opts)
+
+    assert %{
+             state: "failed",
+             title: "Test",
+             launch: ^launch,
+             transcript: ^transcript,
+             fiber: "project/meeting",
+             joined: true
+           } = meeting
+
+    assert meeting.tail == ["The lensing result is stable."]
+  end
+
+  defp wait_for(fun, attempts \\ 100)
+  defp wait_for(fun, 0), do: assert(fun.(), "Rex meeting observation did not arrive")
+
+  defp wait_for(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(50)
+      wait_for(fun, attempts - 1)
+    end
+  end
+end
+
 defmodule Shuttle.Test.MeetingCaptureForwardClient do
   use Agent
 

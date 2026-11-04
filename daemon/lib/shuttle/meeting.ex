@@ -25,9 +25,9 @@ end
 
 defmodule Shuttle.Meeting do
   @moduledoc """
-  Starts and observes the local hark capture in a dedicated tmux session.
+  Starts and observes the local hark capture in a retained terminal session.
   The transcript and `meeting.json` remain owned by hark; this module controls
-  the local capture and derives its state from hark's lifecycle and tmux.
+  the local capture and derives its state from hark's lifecycle and terminal.
 
   A meeting starts for a target: `:capture` hands it to a new
   capture agent, `{:fiber, id}` joins it to an existing constitution, and
@@ -51,6 +51,7 @@ defmodule Shuttle.Meeting do
 
   alias Shuttle.{HostCapabilities, Remote, Remotes, Runner}
   alias Shuttle.Terminal.Tmux
+  alias Shuttle.RetainedTerminal
   require Logger
 
   @session "hark-meeting"
@@ -136,7 +137,7 @@ defmodule Shuttle.Meeting do
     with_meeting_lock(fn -> do_start(meeting, target, note, origin, opts) end)
   end
 
-  @doc "Stop the local meeting once, or dismiss a dead tmux pane."
+  @doc "Stop the local meeting once, or dismiss a failed capture."
   @spec stop(keyword()) :: {:ok, map()} | {:error, term()}
   def stop(opts \\ []) do
     with_meeting_lock(fn ->
@@ -273,6 +274,8 @@ defmodule Shuttle.Meeting do
         error
     end
   end
+
+  def rex?(opts \\ []), do: RetainedTerminal.rex?(opts)
 
   @doc false
   @spec parse_tmux_result(String.t(), non_neg_integer() | :timeout) ::
@@ -448,6 +451,21 @@ defmodule Shuttle.Meeting do
   defp mode_flag("call"), do: []
 
   defp create_session(argv, launch_id, fiber, opts) do
+    if rex?(opts) do
+      RetainedTerminal.start(
+        @session,
+        home_dir(opts),
+        argv,
+        %{"launch" => launch_id, "fiber" => fiber},
+        meeting_runner(opts),
+        Keyword.merge(opts, env: %{"HARK_DIR" => hark_dir(opts)})
+      )
+    else
+      create_tmux_session(argv, launch_id, fiber, opts)
+    end
+  end
+
+  defp create_tmux_session(argv, launch_id, fiber, opts) do
     command = "exec " <> Enum.map_join(argv, " ", &shell_quote/1)
 
     args =
@@ -593,9 +611,13 @@ defmodule Shuttle.Meeting do
 
   defp shell_quote(value), do: "'" <> String.replace(value, "'", "'\\''") <> "'"
 
-  # The tmux session, hark's lifecycle file as read and as trusted for that
-  # session, and whether its pid is still hark.
+  # The retained session, hark's lifecycle file as read and as trusted for that
+  # launch, and whether its pid is still hark.
   defp observe(opts) do
+    if rex?(opts), do: observe_retained(opts), else: observe_tmux(opts)
+  end
+
+  defp observe_tmux(opts) do
     with {:ok, tmux} <- tmux_status(opts) do
       raw_meeting = read_meeting_json(opts)
       usable_meeting = if compatible_launch?(tmux, raw_meeting), do: raw_meeting, else: nil
@@ -610,11 +632,63 @@ defmodule Shuttle.Meeting do
     end
   end
 
+  defp observe_retained(opts) do
+    case RetainedTerminal.observe(@session, meeting_runner(opts), opts) do
+      :gone ->
+        {:ok, %{tmux: :absent, raw_meeting: nil, meeting_json: nil, pid_alive?: false}}
+
+      {:ok, retained} ->
+        metadata = retained.metadata
+        launch = metadata["launch"]
+        fiber = metadata["fiber"]
+        raw_meeting = read_meeting_json(opts)
+
+        usable_meeting =
+          if is_map(raw_meeting) and raw_meeting["launch"] == launch,
+            do: raw_meeting,
+            else: nil
+
+        tmux = %{
+          state: if(retained.dead, do: {:dead, retained.exit_status || 1}, else: :alive),
+          session_created: retained.created,
+          launch: launch,
+          fiber: fiber
+        }
+
+        {:ok,
+         %{
+           tmux: tmux,
+           raw_meeting: usable_meeting,
+           meeting_json: usable_meeting,
+           pid_alive?: not retained.dead and pid_mentions_hark?(usable_meeting, opts),
+           retained: retained
+         }}
+
+      {:error, reason} ->
+        {:error, {:retained_terminal, reason}}
+    end
+  end
+
+  defp meeting_runner(opts),
+    do: Keyword.get(opts, :runner, Shuttle.Env.app(:meeting_runner, Runner.Default))
+
   defp inspect_current(opts) do
     with {:ok, %{tmux: tmux, raw_meeting: raw_meeting, meeting_json: usable_meeting} = observed} <-
            observe(opts) do
       pid_alive? = observed.pid_alive?
-      tail = if failed_dead_pane?(tmux, usable_meeting), do: pane_tail(opts), else: nil
+
+      tail =
+        cond do
+          rex?(opts) and failed_dead_pane?(tmux, usable_meeting) ->
+            get_in(observed, [:retained, :screen]) |> Enum.join("\n") |> blank_to_nil()
+
+          failed_dead_pane?(tmux, usable_meeting) ->
+            pane_tail(opts)
+
+          true ->
+            nil
+        end
+
       {meeting, reap?} = derive(tmux, raw_meeting, pid_alive?, tail)
       :ok = Shuttle.Meeting.Control.reconcile(meeting_identity(tmux, usable_meeting, pid_alive?))
 
@@ -635,7 +709,13 @@ defmodule Shuttle.Meeting do
            available: available,
            modes: HostCapabilities.meeting_modes(available, opts),
            meeting: meeting
-         }, %{tmux: tmux, meeting_json: usable_meeting, meeting: meeting}}
+         },
+         %{
+           tmux: tmux,
+           meeting_json: usable_meeting,
+           meeting: meeting,
+           retained: observed[:retained]
+         }}
       end
     end
   end
@@ -658,16 +738,28 @@ defmodule Shuttle.Meeting do
 
   defp stop_current(%{meeting: %{state: state}}, context, opts)
        when state in ["starting", "failed"] do
-    if pid_mentions_hark?(context.meeting_json, opts) do
-      signal_stop(context, opts)
+    if rex?(opts) do
+      if is_integer(context.retained && context.retained.pid) and not context.retained.dead do
+        signal_stop(context, opts, context.retained.pid, context.tmux.launch)
+      else
+        with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+      end
     else
-      with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+      if pid_mentions_hark?(context.meeting_json, opts) do
+        signal_stop(context, opts)
+      else
+        with :ok <- kill_launch(context.tmux, opts), do: show(opts)
+      end
     end
   end
 
   defp signal_stop(context, opts) do
-    with pid when not is_nil(pid) <- valid_pid(context.meeting_json),
-         :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch_from(context.meeting_json)}),
+    signal_stop(context, opts, valid_pid(context.meeting_json), launch_from(context.meeting_json))
+  end
+
+  defp signal_stop(_context, opts, pid, launch) do
+    with pid when not is_nil(pid) <- if(is_integer(pid), do: Integer.to_string(pid), else: pid),
+         :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch}),
          {_output, 0} <- run(opts, "kill", ["-INT", pid]) do
       show(opts)
     else
@@ -818,9 +910,19 @@ defmodule Shuttle.Meeting do
   # Kill the hark-meeting session only while it is still the launch that was
   # inspected; an unlocked reader (GET) must never kill a newer launch.
   defp kill_launch(%{launch: launch}, opts) do
-    case tmux_status(opts) do
-      {:ok, %{launch: ^launch}} -> kill_session(opts)
-      _ -> :ok
+    if rex?(opts) do
+      case RetainedTerminal.observe(@session, meeting_runner(opts), opts) do
+        {:ok, %{metadata: %{"launch" => ^launch}}} ->
+          RetainedTerminal.stop(@session, meeting_runner(opts), opts)
+
+        _ ->
+          :ok
+      end
+    else
+      case tmux_status(opts) do
+        {:ok, %{launch: ^launch}} -> kill_session(opts)
+        _ -> :ok
+      end
     end
   end
 
