@@ -41,6 +41,28 @@ beforeEach(async () => {
 })
 afterEach(() => { dock.reset(); document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
+describe('composer input budget', () => {
+  it('preserves labels and header nodes and does not synchronously measure layout on input', async () => {
+    const field = band.el.querySelector<HTMLTextAreaElement>('textarea')!
+    const label = button('New session').firstChild
+    const title = band.el.querySelector('.ws-chat-title')?.firstChild
+    const records: MutationRecord[] = []
+    const observer = new MutationObserver(next => records.push(...next))
+    observer.observe(band.el, { childList: true, subtree: true })
+    const style = vi.spyOn(window, 'getComputedStyle')
+    for (const text of ['h', 'he', 'hello', 'hello again']) {
+      field.value = text
+      field.dispatchEvent(new Event('input'))
+      await flush()
+    }
+    expect(style).not.toHaveBeenCalled()
+    expect(button('New session').firstChild).toBe(label)
+    if (title) expect(band.el.querySelector('.ws-chat-title')?.firstChild).toBe(title)
+    expect(records).toHaveLength(0)
+    observer.disconnect()
+  })
+})
+
 describe('header action placement', () => {
   it('× returns directly to Desk and writes nothing', () => {
     const transition = vi.fn()

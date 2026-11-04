@@ -1,4 +1,5 @@
 import type { KanbanCard } from '../KanbanTypes.js'
+import { APPEARANCE_CHANGED } from '../appearance.js'
 import { threadState, THREAD_LABEL } from '../threads.js'
 import { turnOf, type Turn } from '../turn.js'
 import { fiberIndex, resolveWikilink, type FiberIndexEntry } from '../wikilinks.js'
@@ -152,6 +153,8 @@ export function mentionRuntime(root: HTMLElement, open: (id: string, origin: str
       requested = key
       queueMicrotask(() => { if (!disposed) request(list) })
     }
+    // Our chip writes are already resolved; don't scan them a second time.
+    observer.takeRecords()
     if (layoutChanged) root.dispatchEvent(new Event('shuttle:mention-layout', { bubbles: true }))
   }
   const click = (event: Event): void => {
@@ -190,6 +193,8 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
   opts: MentionBindingOptions = { shuttleBase: '', frameActive: () => null }) {
   const surfaces = new Map<HTMLElement, { surface: ReturnType<typeof mentionRuntime>; candidates: string[] }>()
   const reports = new Map<HTMLIFrameElement, Set<string>>()
+  let sent = new WeakMap<HTMLIFrameElement, string>()
+  let colors: Record<string, string> | undefined
   const protocol = 'shuttle-constitution-mentions'
   let disposed = false, scheduled = false, index: FiberIndexEntry[] | undefined
   let indexRequest: Promise<void> | null = null
@@ -206,7 +211,13 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
     if (!candidates) return
     if (candidates.size > 0 && index === undefined) ensureIndex()
     const resolved = resolveConstitutionCandidates([...candidates], rows(), index)
-    const colors = Object.fromEntries(['ink', 'ink-muted', 'sheet', 'hairline', 'agent', 'owed', 'tempered'].map(name => [name, getComputedStyle(root).getPropertyValue(`--kbn-${name}`)]))
+    const signature = JSON.stringify(resolved)
+    if (sent.get(frame) === signature) return
+    sent.set(frame, signature)
+    if (!colors) {
+      const style = getComputedStyle(root)
+      colors = Object.fromEntries(['ink', 'ink-muted', 'sheet', 'hairline', 'agent', 'owed', 'tempered'].map(name => [name, style.getPropertyValue(`--kbn-${name}`)]))
+    }
     frame.contentWindow?.postMessage({ protocol, type: 'resolved', ...resolved, colors }, '*')
   }
   const paint = (entry: { surface: ReturnType<typeof mentionRuntime>; candidates: string[] }, next = rows()): void => {
@@ -234,12 +245,16 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
     const frame = [...root.querySelectorAll<HTMLIFrameElement>('iframe')].find(frame => frame.contentWindow === event.source)
     if (!frame || opts.frameActive(frame) === null) return
     if (data.protocol === 'shuttle-document') {
-      if (data.version === 1 && data.type === 'ready') frame.contentWindow?.postMessage({ protocol, type: 'scan' }, '*')
+      if (data.version === 1 && data.type === 'ready') {
+        sent.delete(frame)
+        frame.contentWindow?.postMessage({ protocol, type: 'scan' }, '*')
+      }
       return
     }
     if (data.type === 'candidates' && Array.isArray(data.candidates) && data.candidates.length <= 500
       && typeof data.reset === 'boolean' && typeof data.done === 'boolean'
       && Array.from(data.candidates).every((candidate: unknown) => typeof candidate === 'string' && candidate.length <= 256)) {
+      if (data.reset === true) sent.delete(frame)
       const candidates = data.reset === true ? new Set<string>() : reports.get(frame) ?? new Set<string>()
       for (const candidate of data.candidates) candidates.add(candidate)
       reports.set(frame, candidates)
@@ -249,12 +264,20 @@ export function bindConstitutionMentions(root: HTMLElement, cards: () => readonl
       if (permitted.some(row => row.id === data.id && row.origin === data.origin)) open(data.id, data.origin)
     }
   }
-  const observer = new MutationObserver(() => {
-    if (scheduled || disposed) return
+  // Surface observers own content changes. Only changes to the set of surfaces
+  // or report frames require rediscovery; controls and chips aren't topology.
+  const surfaceSelector = '.ws-prose-body,.kbn-detail-lede,.ws-transcript,.ws-transcript-pane,iframe'
+  const hasSurface = (node: Node): boolean => node instanceof Element
+    && (node.matches(surfaceSelector) || !!node.querySelector(surfaceSelector))
+  const observer = new MutationObserver(records => {
+    if (scheduled || disposed || !records.some(record =>
+      [...record.addedNodes, ...record.removedNodes].some(hasSurface))) return
     scheduled = true; queueMicrotask(() => { scheduled = false; refresh() })
   })
   observer.observe(root, { childList: true, subtree: true })
+  const appearanceChanged = (): void => { colors = undefined; sent = new WeakMap(); refresh() }
   window.addEventListener('message', receive)
+  window.addEventListener(APPEARANCE_CHANGED, appearanceChanged)
   refresh()
-  return { refresh, dispose() { disposed = true; observer.disconnect(); window.removeEventListener('message', receive); for (const entry of surfaces.values()) entry.surface.dispose(); surfaces.clear(); reports.clear() } }
+  return { refresh, dispose() { disposed = true; observer.disconnect(); window.removeEventListener('message', receive); window.removeEventListener(APPEARANCE_CHANGED, appearanceChanged); for (const entry of surfaces.values()) entry.surface.dispose(); surfaces.clear(); reports.clear() } }
 }

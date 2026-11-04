@@ -13,6 +13,39 @@ const update = (runtime: ReturnType<typeof mentionRuntime>, cards = [work()], ca
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); document.body.replaceChildren() })
 
 describe('constitution mentions', () => {
+  it('keeps control mutations off the transcript scanning path as a fleet grows', async () => {
+    const root = document.createElement('div')
+    root.innerHTML = '<div class="ws-transcript"><p>Transcript prose without mentions.</p></div><div class="controls"><button>Send</button></div>'
+    const cards = vi.fn(() => Array.from({ length: 500 }, (_, i) => work({ id: `work/task-${i}` })))
+    const binding = bindConstitutionMentions(root, cards, vi.fn())
+    const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() }
+    await settle()
+    const walks = vi.spyOn(document, 'createTreeWalker')
+    cards.mockClear()
+    for (let i = 0; i < 20; i++) {
+      root.querySelector('button')!.textContent = `Search result ${i}`
+      await settle()
+    }
+    expect(walks).not.toHaveBeenCalled()
+    expect(cards).not.toHaveBeenCalled()
+    // Discovery still owns added and removed surfaces; each surface owns its text.
+    const prose = document.createElement('div'); prose.className = 'ws-prose-body'
+    root.append(prose); await settle()
+    expect(cards).toHaveBeenCalled()
+    walks.mockClear()
+    prose.textContent = 'New prose to scan'; await settle()
+    expect(walks).toHaveBeenCalledTimes(1)
+    binding.dispose()
+  })
+  it('does not rescan its own chip writes', async () => {
+    const root = document.createElement('div'); root.textContent = 'work/child'
+    const runtime = mentionRuntime(root, vi.fn())
+    const walks = vi.spyOn(document, 'createTreeWalker')
+    update(runtime)
+    for (let i = 0; i < 5; i++) await Promise.resolve()
+    expect(walks).toHaveBeenCalledTimes(1)
+    runtime.dispose()
+  })
   it('resolves wikilinks, exact paths and returned ids, preserving other links and unsafe near-matches', () => {
     const root = document.createElement('div')
     root.innerHTML = '<p>[[child]] <code>shuttle thread work/child "ask"</code> work/child, https://example/work/child /work/childish [[missing]] <a href="https://example.org">ordinary</a></p>'
@@ -197,6 +230,14 @@ describe('constitution mentions', () => {
     expect(() => binding.refresh()).not.toThrow()
     expect(post.mock.lastCall?.[0].rows.map((row: { id: string }) => row.id)).toEqual(['work/501'])
     expect(JSON.stringify(post.mock.lastCall)).not.toContain('Private outcome 0')
+    post.mockClear()
+    const style = vi.spyOn(window, 'getComputedStyle')
+    for (let i = 0; i < 30; i++) binding.refresh()
+    expect(post).not.toHaveBeenCalled()
+    expect(style).not.toHaveBeenCalled()
+    window.dispatchEvent(new Event('shuttle-appearance-changed'))
+    expect(post).toHaveBeenCalledOnce()
+    expect(style).toHaveBeenCalledOnce()
     const intent = { type: 'open', id: 'work/501', origin: work().originId }
     emit(intent); expect(open).not.toHaveBeenCalled()
     active = true
