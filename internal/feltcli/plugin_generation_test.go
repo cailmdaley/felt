@@ -38,6 +38,28 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 	}
 }
 
+func TestPluginPayloadDigestIncludesEmptyDirectories(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "hook.sh"), []byte("exit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := pluginPayloadDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	after, err := pluginPayloadDigest(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == after {
+		t.Fatal("empty directory changes Codex content but not the verifier digest")
+	}
+}
+
 func TestPluginGenerationProvenanceStaysOutsideHarnessPayload(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
