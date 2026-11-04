@@ -1662,7 +1662,10 @@ func (s *Storage) find(scopeID, query string, mode ParseMode) (*Felt, resolution
 // The caller gates it on LooksLikeUID so the scan only runs for UID-shaped
 // queries that slug resolution already failed to resolve.
 func (s *Storage) findByUIDWithMode(files []fiberFile, query string, mode ParseMode) (*Felt, bool, error) {
-	matches := s.uidMatches(files, query)
+	matches, err := s.uidMatches(files, query)
+	if err != nil {
+		return nil, true, err
+	}
 	if len(matches) == 0 {
 		return nil, false, nil
 	}
@@ -1687,8 +1690,12 @@ func (s *Storage) ListMetadataByUID(uid string) ([]*Felt, error) {
 	if err != nil {
 		return nil, err
 	}
+	matches, err := s.uidMatches(files, uid)
+	if err != nil {
+		return nil, err
+	}
 	var felts []*Felt
-	for _, m := range s.uidMatches(files, uid) {
+	for _, m := range matches {
 		m.meta.EntryPoint = m.file.entryPoint
 		m.meta.ReportPath = m.file.reportPath
 		felts = append(felts, m.meta)
@@ -1710,8 +1717,9 @@ const uidScanWorkers = 16
 // Each frontmatter is read once, concurrently, and YAML-parsed only when its
 // raw bytes hold the UID, so a scan costs one read per fiber and one parse
 // per match.
-func (s *Storage) uidMatches(files []fiberFile, uid string) []uidMatch {
+func (s *Storage) uidMatches(files []fiberFile, uid string) ([]uidMatch, error) {
 	found := make([]*Felt, len(files))
+	failures := make([]error, len(files))
 	next := make(chan int)
 	var wg sync.WaitGroup
 	for range min(uidScanWorkers, len(files)) {
@@ -1719,7 +1727,7 @@ func (s *Storage) uidMatches(files []fiberFile, uid string) []uidMatch {
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				found[i] = s.readUIDCandidate(files[i], uid)
+				found[i], failures[i] = s.readUIDCandidate(files[i], uid)
 			}
 		}()
 	}
@@ -1731,24 +1739,34 @@ func (s *Storage) uidMatches(files []fiberFile, uid string) []uidMatch {
 
 	var matches []uidMatch
 	for i, meta := range found {
+		if failures[i] != nil {
+			return nil, failures[i]
+		}
 		if meta != nil {
 			matches = append(matches, uidMatch{file: files[i], meta: meta})
 		}
 	}
-	return matches
+	return matches, nil
 }
 
-// readUIDCandidate returns file's metadata when its UID matches uid, or nil.
-func (s *Storage) readUIDCandidate(file fiberFile, uid string) *Felt {
+// readUIDCandidate returns matching metadata, absence, or an unreadable candidate.
+// A parse failure after a prefilter hit cannot establish that the UID is absent.
+func (s *Storage) readUIDCandidate(file fiberFile, uid string) (*Felt, error) {
 	frontmatter, err := readFrontmatterFile(file.path)
-	if err != nil || !frontmatterMayHoldUID(frontmatter, uid) {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("reading UID candidate %s: %w", file.path, err)
+	}
+	if !frontmatterMayHoldUID(frontmatter, uid) {
+		return nil, nil
 	}
 	meta, err := s.readPathWithMode(file.path, file.id, ParseMetadataOnly)
-	if err != nil || !meta.MatchesUID(uid) {
-		return nil
+	if err != nil {
+		return nil, err
 	}
-	return meta
+	if !meta.MatchesUID(uid) {
+		return nil, nil
+	}
+	return meta, nil
 }
 
 // frontmatterMayHoldUID is a byte-level prefilter: a UID is a plain ASCII
