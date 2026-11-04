@@ -175,6 +175,9 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 				if reason == nil {
 					reason = context.Cause(ctx)
 				}
+				if feed != nil {
+					return reason
+				}
 				stop(reason)
 				done = nil
 			} else {
@@ -183,7 +186,10 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 		case <-stopped:
 			stopped = nil
 			reason = context.Cause(ctx)
-			if critical {
+			if feed != nil {
+				fmt.Fprintln(os.Stderr, "deploy-lock: closing attached transport:", reason)
+				feed.Close()
+			} else if critical {
 				fmt.Fprintln(os.Stderr, "deploy-lock: cancellation deferred through activation")
 			} else {
 				stop(reason)
@@ -191,6 +197,9 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 		case <-hard.C:
 			stop(errors.New("overall host deadline exceeded"))
 		case event := <-events:
+			if reason == nil && ctx.Err() != nil {
+				reason = context.Cause(ctx)
+			}
 			switch event {
 			case 'B':
 				if reason == nil {
@@ -205,6 +214,8 @@ func owned(ctx context.Context, until time.Time, cmd *exec.Cmd, control *os.File
 				critical = false
 				if reason != nil {
 					stop(reason)
+				} else if _, err := control.Write([]byte("ok\n")); err != nil {
+					stop(err)
 				}
 			}
 		case <-grace:

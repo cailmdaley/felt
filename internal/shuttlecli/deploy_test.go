@@ -804,7 +804,7 @@ refresh_harnesses() { [ "$HARNESS_FAILED" = 0 ]; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo "$HARNESS_FAILED"
+` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy local && finish_verified_deploy local /repo "$HARNESS_FAILED"
 `
 			cmd := exec.Command("bash", "-c", harness)
 			release := "0"
@@ -842,7 +842,7 @@ refresh_harnesses() { :; }
 ok() { :; }
 bad() { :; }
 prune_deploy_cmd() { printf prune; }
-` + shellFunction(t, string(script), "finish_verified_deploy") + `finish_verified_deploy local /repo 0`
+` + shellFunction(t, string(script), "release_verified_deploy") + shellFunction(t, string(script), "finish_verified_deploy") + `release_verified_deploy local && finish_verified_deploy local /repo 0`
 	cmd := exec.Command("bash", "-c", harness)
 	cmd.Env = append(os.Environ(), "DEPLOY_REF=sha", "TARGET_SHA=sha", "TARGET_COMMIT=sha", "EVENTS="+events)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -888,8 +888,10 @@ config_migration_cmd() { :; }
 refresh_harnesses() { :; }
 remote_host_cycle() { printf 'cycle\n' >> "$EVENTS"; }
 wait_for_sha() { printf 'verified\n' >> "$EVENTS"; }
-finish_verified_deploy() { printf 'released\n' >> "$EVENTS"; }
-` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_finish") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
+release_verified_deploy() { printf 'released\n' >> "$EVENTS"; }
+finish_verified_deploy() { :; }
+activation_window() { remote_host_cycle; verify_and_release ''; }
+` + shellFunction(t, string(script), "shell_quote") + shellFunction(t, string(script), "build_checkout_cmd") + shellFunction(t, string(script), "verify_and_release") + shellFunction(t, string(script), "host_transaction") + `host_transaction`
 			for _, path := range []string{filepath.Join(dir, "sha", "ui", "dist"), filepath.Join(dir, "stage", "ui", "dist")} {
 				if err := os.MkdirAll(path, 0700); err != nil {
 					t.Fatal(err)
@@ -950,8 +952,8 @@ func TestDeployFailedVersionDoesNotPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 	harness := `wait_for_sha() { return 1; }
-finish_verified_deploy() { echo should-not-finish; }
-` + shellFunction(t, string(script), "verify_and_finish") + `verify_and_finish remote /repo 0 /previous`
+release_verified_deploy() { echo should-not-release; }
+` + shellFunction(t, string(script), "verify_and_release") + `verify_and_release remote`
 	out, err := exec.Command("bash", "-c", harness).CombinedOutput()
 	if err == nil || len(out) != 0 {
 		t.Fatalf("failed version check reached cleanup: %q, %v", out, err)
