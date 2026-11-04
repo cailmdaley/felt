@@ -40,7 +40,9 @@ export type FileViewerState =
 
 export interface FileViewerOptions {
   /** A document model can supply its classification instead of suffix dispatch. */
-  kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other'
+  kind?: 'html' | 'text' | 'image' | 'pdf' | 'audio' | 'video' | 'other' | 'change'
+  /** The document host binds this to its fiber, not to the currently selected page. */
+  onReview?: (message: string) => Promise<void>
   /** Inert previews use the same kind dispatch within their host's load budget. */
   thumbnail?: boolean
   /** Captioned previews keep the filename outside the miniature page. */
@@ -92,8 +94,33 @@ export function buildFileViewer(
   const ext = fileExt(fullPath)
   const src = fileBytesUrl(shuttleBase, fullPath, originId)
   const classified = fileKind(fullPath)
-  const kind = options.kind ?? (classified === 'markdown' ? 'text' : classified)
+  const kind = options.kind ?? (/\.change\.json$/i.test(fullPath) ? 'change' : classified === 'markdown' ? 'text' : classified)
   if (options.thumbnail) return buildThumbnail(src, fullPath, kind, options)
+
+  if (kind === 'change') {
+    const wrap = document.createElement('div')
+    wrap.className = 'kbn-fileview-change'
+    const controller = new AbortController()
+    let dispose: (() => void) | undefined
+    void Promise.all([
+      documentText(src, RESOURCE_PRIORITY.selected, { signal: controller.signal }),
+      import('./workspace/ChangeReader.js'),
+    ]).then(([body, { mountChangeReader }]) => {
+      if (controller.signal.aborted) return
+      if (!body) throw new Error('file request failed: 404')
+      const bundle = JSON.parse(body.text)
+      options.onThumbnailSource?.(body.text, body.etag)
+      if (bundle.version !== 1) throw new Error(`Unsupported change version: ${bundle.version}`)
+      const mounted = mountChangeReader(wrap, bundle, `${originId}:${fullPath}`, options.onReview)
+      dispose = mounted.dispose
+      onTextPane?.(mounted.scroller)
+      options.onState?.({ status: 'ready' })
+    }).catch(error => {
+      if (!controller.signal.aborted) options.onState?.({ status: 'error', error, hasContent: false })
+    })
+    viewerDisposers.set(wrap, () => { controller.abort(); dispose?.() })
+    return wrap
+  }
 
   if (kind === 'image') {
     // Mount the plate on a vellum mat so it reads as a mounted figure, centered
@@ -296,7 +323,7 @@ function buildThumbnail(src: string, path: string, kind: NonNullable<FileViewerO
   const glyph = document.createElement('div')
   glyph.className = 'kbn-thumbnail-glyph'
   const kindMark = document.createElement('span'); kindMark.className = 'kbn-thumbnail-kind'
-  kindMark.textContent = { audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡' }[kind]
+  kindMark.textContent = { audio: '♪', video: '▹', pdf: '▧', other: '□', image: '▨', html: '▣', text: '≡', change: '±' }[kind]
   const name = document.createElement('span'); name.className = 'kbn-thumbnail-name'; name.textContent = options.thumbnailLabel === false ? '' : basename(path)
   const duration = document.createElement('span'); duration.className = 'kbn-thumbnail-duration'
   glyph.append(kindMark, name, duration)

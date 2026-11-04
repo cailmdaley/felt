@@ -17,7 +17,13 @@ export interface ChangeHunk { oldStart: number; oldCount: number; newStart: numb
 export interface ChangeFile { path: string; role: ChangeRole; status: string; additions: number; deletions: number; header: string; hunks: ChangeHunk[] }
 export interface ChangeLanes { chapters: ChangeChapter[]; tests: ChangeFile[]; remaining: ChangeFile[] }
 
-function unquote(path: string): string { return path.startsWith('"') ? JSON.parse(path) as string : path }
+function unquote(path: string): string {
+  if (!path.startsWith('"')) return path
+  const escapes: Record<string, string> = { a: '\u0007', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\u000b' }
+  return path.slice(1, -1).replace(/(?:\\[0-7]{3})+|\\(.)/g, (match, char: string | undefined) => char === undefined
+    ? new TextDecoder().decode(Uint8Array.from(match.match(/[0-7]{3}/g)!, octal => parseInt(octal, 8)))
+    : escapes[char] ?? char)
+}
 
 /** Keep Git's file and hunk boundaries; cursors also anchor rows absent on the other side. */
 export function changeFiles(bundle: ChangeBundle): ChangeFile[] {
@@ -77,9 +83,12 @@ export function assignLanes(bundle: ChangeBundle, files = changeFiles(bundle)): 
 /** A stop contains only its requested line interval, preserving file line numbers on both sides. */
 export function stopHunks(file: ChangeFile, stop: ChangeRange): ChangeHunk[] {
   return file.hunks.filter(hunk => overlaps(hunk, stop)).flatMap(hunk => {
+    let selected = false
     const rows = hunk.rows.filter(row => {
+      if (row.text.startsWith('\\')) return selected
       const line = stop.side === 'old' ? row.old : row.new
-      return line >= (stop.from ?? 1) && line <= (stop.to ?? stop.from ?? Infinity)
+      selected = line >= (stop.from ?? 1) && line <= (stop.to ?? stop.from ?? Infinity)
+      return selected
     })
     return rows.length ? [hunkFromRows(rows)] : []
   })
@@ -91,12 +100,15 @@ function hunkFromRows(rows: PatchRow[]): ChangeHunk {
 }
 
 /** Small independently mounted windows keep long files out of the DOM without nested scrollers. */
-export function diffWindows(file: ChangeFile, hunks = file.hunks, size = 120): { patch: string; rows: number }[] {
+export function diffWindows(file: ChangeFile, hunks = file.hunks, size = 120): { patch: string; rows: number; hunk: ChangeHunk }[] {
   return hunks.flatMap(hunk => {
-    const windows: { patch: string; rows: number }[] = []
-    for (let i = 0; i < hunk.rows.length; i += size) {
-      const slice = hunkFromRows(hunk.rows.slice(i, i + size))
-      windows.push({ patch: `${file.header}\n@@ -${slice.oldStart},${slice.oldCount} +${slice.newStart},${slice.newCount} @@\n${slice.rows.map(row => row.text).join('\n')}\n`, rows: slice.rows.length })
+    const windows: { patch: string; rows: number; hunk: ChangeHunk }[] = []
+    for (let i = 0; i < hunk.rows.length;) {
+      let end = Math.min(hunk.rows.length, i + size)
+      if (hunk.rows[end]?.text.startsWith('\\')) end++
+      const slice = hunkFromRows(hunk.rows.slice(i, end))
+      i = end
+      windows.push({ patch: `${file.header}\n@@ -${slice.oldStart},${slice.oldCount} +${slice.newStart},${slice.newCount} @@\n${slice.rows.map(row => row.text).join('\n')}\n`, rows: slice.rows.length, hunk: slice })
     }
     return windows
   })

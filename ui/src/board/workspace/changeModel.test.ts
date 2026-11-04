@@ -44,6 +44,31 @@ describe('change lanes and coverage', () => {
     expect(diffWindows(file, early)[0].patch).toContain('@@ -11,1 +11,1 @@')
     expect(diffWindows(file, file.hunks, 2).every(w => w.rows <= 2)).toBe(true)
   })
+  it('preserves a final empty context line and decodes Git’s quoted UTF-8 paths', () => {
+    const change = bundle(); change.files = [{ ...change.files[0], path: 'é.ts' }]
+    change.patch = 'diff --git "a/\\303\\251.ts" "b/\\303\\251.ts"\n--- "a/\\303\\251.ts"\n+++ "b/\\303\\251.ts"\n@@ -1,2 +1,2 @@\n-old\n+new\n \n'
+    const file = changeFiles(change)[0]
+    expect(file.hunks[0].rows.at(-1)?.text).toBe(' ')
+    expect(diffWindows(file)[0].patch).toContain('@@ -1,2 +1,2 @@')
+  })
+  it('round-trips every row, side and no-newline marker through independent windows', () => {
+    const change = bundle(); change.files = change.files.slice(0, 1)
+    change.patch = 'diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -1,3 +1,3 @@\n same\n-old\n+new\n-tail\n\\ No newline at end of file\n+tail\n\\ No newline at end of file\n'
+    const file = changeFiles(change)[0]
+    for (const size of [1, 2, 3, 120]) {
+      const rows = diffWindows(file, file.hunks, size).flatMap(window => changeFiles({ ...change, patch: window.patch })[0].hunks.flatMap(hunk => hunk.rows))
+      expect(rows).toEqual(file.hunks[0].rows)
+    }
+  })
+  it('keeps a deletion-only hunk visible until an old-side stop covers it', () => {
+    const change = bundle(); change.files = change.files.slice(0, 1)
+    change.patch = 'diff --git a/app.ts b/app.ts\n--- a/app.ts\n+++ b/app.ts\n@@ -10,1 +9,0 @@\n-old\n'
+    change.story = { overview: '', flags: [], chapters: [{ id: 'remove', title: '', narrative: '', why_here: '', stops: [{ file: 'app.ts', from: 10 }] }] }
+    expect(assignLanes(change).remaining).toHaveLength(1)
+    change.story.chapters[0].stops[0].side = 'old'
+    expect(assignLanes(change).remaining).toHaveLength(0)
+    expect(stopHunks(changeFiles(change)[0], change.story.chapters[0].stops[0])[0].rows[0].text).toBe('-old')
+  })
   it('sends one review with the exact head and old-side anchors', () => {
     expect(reviewMessage(bundle(), { note: 'Check this', comments: [{ file: 'app.ts', line: 11, side: 'old', text: 'Why remove it?' }] })).toBe('Review of A change\n\nHead: head\n\nCheck this\n\napp.ts:11 (old)\nWhy remove it?')
   })

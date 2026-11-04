@@ -40,7 +40,17 @@ describe('document identity and kinds', () => {
     for (const ext of ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'flac', 'opus']) expect(documentKind(`/x/sound.${ext}`)).toBe('audio')
     for (const ext of ['mp4', 'm4v', 'mov', 'webm']) expect(documentKind(`/x/movie.${ext}`)).toBe('video')
     expect(documentKind('/x/archive.zip')).toBe('other')
+    expect(documentKind('/x/review.CHANGE.JSON')).toBe('change')
+    expect(documentKind('/x/ordinary.json')).toBe('text')
   })
+})
+
+it('opens a change declared by embed and deduplicates its sent receipt', () => {
+  const channel = buildChannel({ ...base, body: ':::{embed} snapshot.change.json\n:title: Read the change\n:::\n', sent: [{ path: 'snapshot.change.json', time: 1 }] })
+  const change = channel.documents.find(doc => doc.kind === 'change')!
+  expect(change.owner).toBe('host-a')
+  expect(change.path).toBe('/store/project/task/snapshot.change.json')
+  expect(change.provenance.map(p => p.kind)).toEqual(['embed', 'sent'])
 })
 
 describe('frame metadata', () => {

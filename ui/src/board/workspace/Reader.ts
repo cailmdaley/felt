@@ -39,6 +39,7 @@ export interface ReaderOptions {
   onRefreshProse(doc: WorkspaceDocument): void | Promise<void>
   onSelect(key: DocKey): void
   onNavigate?(source: WorkspaceDocument, href: string): void
+  onReview?(source: WorkspaceDocument, message: string): Promise<void>
   onCrossing?(travel: number): void
   onReturn(): void
   onOpenDocument(key: DocKey): void
@@ -124,6 +125,7 @@ export class Reader {
   private readonly returnButton: HTMLButtonElement
   private backDestination = 'Desk'
   private reportChip: { key: DocKey; view: ReportChip } | null = null
+  private changeChips = new Map<DocKey, ReportChip>()
   /** The one worker control: the card's own pill, drawn bare in the head's right end. */
   private readonly headWorker = element('span', 'ws-head-worker')
   private workerClock = 0
@@ -264,12 +266,14 @@ export class Reader {
       shuttleBase: opts.shuttleBase,
       buildProse: opts.buildProse,
       disposeProse: opts.disposeProse,
+      onReview: opts.onReview,
       onRefreshProse: opts.onRefreshProse,
       onSelect: key => this.openDocument(key),
       onNavigate: (source, href) => this.opts.onNavigate?.(source, href),
       onFrame: frame => this.prepareFrame(frame),
       onViewerReady: () => this.layout(false),
-      onScroll: (key, y) => this.topbar.scroll(key, y),
+      // Review navigation stays visible while diff windows change their measured heights.
+      onScroll: (key, y) => { if (this.document?.kind !== 'change') this.topbar.scroll(key, y) },
       onSwipe: signal => this.swipe(signal),
     })
     this.stopSwipe = installPageSwipe(this.el, signal => this.swipe(signal), () => this.swipeable, SWIPE)
@@ -364,6 +368,8 @@ export class Reader {
     if (this.expanded) this.setExpanded(false)
     this.active = false
     this.reportChip?.view.dispose(); this.reportChip = null
+    for (const chip of this.changeChips.values()) chip.dispose()
+    this.changeChips.clear()
     this.threadRail.setArtifactLive(false)
     this.sidebarPicker.refresh(false)
     this.opts.themes?.unbind(this.el)
@@ -532,6 +538,13 @@ export class Reader {
     const head = chatFrame?.content.querySelector('.ws-chat-head')
     const refs = head?.querySelector('.ws-chat-refs')
     if (refs && this.reportChip && this.reportChip.view.el.parentElement !== refs) refs.append(this.reportChip.view.el)
+    const changes = ch.documents.filter(doc => doc.kind === 'change' && doc.key !== chipKey)
+    for (const [key, chip] of this.changeChips) if (!changes.some(doc => doc.key === key) || this.selected !== chat?.key) { chip.dispose(); this.changeChips.delete(key) }
+    if (refs && this.selected === chat?.key) for (const doc of changes) {
+      let chip = this.changeChips.get(doc.key)
+      if (!chip) { chip = new ReportChip(doc, () => this.openDocument(doc.key)); this.changeChips.set(doc.key, chip) }
+      if (chip.el.parentElement !== refs) refs.append(chip.el)
+    }
     const doc = ch.documents[index]
     if (doc) this.el.dataset.page = doc.kind
     else delete this.el.dataset.page
@@ -567,7 +580,7 @@ export class Reader {
   private fillLabel(frame: DocumentFrame, label: string): void {
     const doc = frame.doc
     const metadata = documentLabelMetadata(doc, label, this.channel?.owner ?? doc.owner)
-    const glyph = { chat: '', fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□' }[doc.kind]
+    const glyph = { chat: '', fiber: '▤', html: '▣', pdf: '▧', image: '▨', audio: '♪', video: '▹', text: '≡', other: '□', change: '±' }[doc.kind]
     const parts = this.labels.get(frame)
     if (!parts) return
     parts.glyph.hidden = doc.kind === 'fiber'
@@ -591,6 +604,7 @@ export class Reader {
     if (this.phone.matches) return max
     // The chat is the widest page of the run: it takes the room the stage gives it, up to its measure.
     if (doc.kind === 'chat') return Math.min(max, this.measure('chat-width', 960))
+    if (doc.kind === 'change') return Math.min(max, this.measure('change-width', 1200))
     let width = this.measure(doc.kind === 'html' ? 'html-width' : doc.kind === 'pdf' ? 'pdf-width' : 'prose-width', doc.kind === 'html' ? 1040 : doc.kind === 'pdf' ? 900 : 760)
     const content = this.host.get(doc.key)?.content
     const img = content?.querySelector('img')
@@ -1211,8 +1225,8 @@ export class Reader {
   private scrollDocument(intent: KeyIntent, repeat: boolean): void {
     const doc = this.document
     const viewer = doc && this.host.get(doc.key)?.viewer
-    if (!doc || !viewer || !['chat', 'fiber', 'html', 'markdown', 'text', 'code'].includes(doc.kind)) return
-    let scroller = viewer.querySelector<HTMLElement>(doc.kind === 'chat' ? '.ws-transcript-scroll' : '.ws-prose-scroll,.kbn-fileview-text')
+    if (!doc || !viewer || !['chat', 'fiber', 'html', 'markdown', 'text', 'code', 'change'].includes(doc.kind)) return
+    let scroller = viewer.querySelector<HTMLElement>(doc.kind === 'chat' ? '.ws-transcript-scroll' : '.ws-prose-scroll,.kbn-fileview-text,.change-scroll')
     if (doc.kind === 'fiber') scroller = viewer.matches('.ws-prose-scroll') ? viewer : scroller
     if (doc.kind === 'html') {
       scrollHtmlViewer(viewer, intent, this.motion.matches || repeat)
@@ -1225,6 +1239,8 @@ export class Reader {
     scroller.scrollBy?.({ top: (up ? -1 : 1) * amount, behavior: this.motion.matches || repeat ? 'instant' : 'smooth' })
   }
   dispose(): void {
+    for (const chip of this.changeChips.values()) chip.dispose()
+    this.changeChips.clear()
     this.reportChip?.view.dispose()
     this.threadRail.dispose()
     window.clearInterval(this.workerClock)

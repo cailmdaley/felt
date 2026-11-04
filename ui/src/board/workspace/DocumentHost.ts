@@ -89,6 +89,7 @@ export class DocumentHost {
     disposeProse?: (doc: WorkspaceDocument) => void
     onSelect: (key: DocKey) => void
     onNavigate?: (source: WorkspaceDocument, href: string) => void
+    onReview?: (source: WorkspaceDocument, message: string) => Promise<void>
     /** Active-document positions, including restoration, from local or validated bridge scrolls. */
     onScroll?: (key: DocKey, y: number) => void
     /** Page swipes recognised inside the selected HTML document. */
@@ -355,6 +356,7 @@ export class DocumentHost {
       },
       {
         quietLoading: true,
+        onReview: this.options.onReview ? message => this.options.onReview!(doc, message) : undefined,
         active: state.active,
         kind: doc.kind === 'fiber' || doc.kind === 'chat' ? undefined : doc.kind,
         decorateAudio: audio => {

@@ -8,6 +8,8 @@
 :root[data-ws-appearance='light'] iframe { color-scheme: light; }
 :root[data-ws-appearance='dark'] iframe { color-scheme: dark; }
 
+.kbn-fileview-change { flex: 1; min-height: 0; min-width: 0; height: 100%; overflow: hidden; container-type: inline-size; }
+
 .kbn-fileview-frame-wrap {
   position: relative;
   flex: 1 1 auto;

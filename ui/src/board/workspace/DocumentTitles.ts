@@ -66,6 +66,10 @@ const clean = (text: string): string => text.replace(/\0/g, '').replace(/\s+/g, 
 export function extractDocumentTitle(path: string, whole: string | Uint8Array): Omit<DocumentTitle, 'etag'> {
   const source = typeof whole === 'string' ? whole.slice(0, VERSION_HEAD) : whole.subarray(0, VERSION_HEAD)
   if (typeof source === 'string') {
+    if (/\.change\.json$/i.test(path)) {
+      const title = /"title"\s*:\s*("(?:\\.|[^"\\])*")/.exec(source)?.[1]
+      return { title: title ? clean(JSON.parse(title)) : undefined, preview: 'Change review' }
+    }
     if (/\.html?$/i.test(path)) {
       const parsed = new DOMParser().parseFromString(source, 'text/html')
       for (const node of parsed.querySelectorAll('script,style,nav')) node.remove()

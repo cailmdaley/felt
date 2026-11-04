@@ -9,12 +9,14 @@ export class ReportChip {
   constructor(doc: WorkspaceDocument, open: () => void) {
     this.el.type = 'button'
     this.el.className = 'ws-report-chip'
+    this.el.dataset.documentKey = doc.key
     this.el.addEventListener('click', open)
     this.el.innerHTML = headerIcon('artifact')
+    if (doc.kind === 'change') this.el.textContent = '±'
     const name = (): void => {
-      const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || 'Artifact'
+      const title = declaredTitle(doc.key)?.title || doc.provenance.find(p => p.kind === 'embed')?.title || (doc.kind === 'change' ? doc.name.replace(/\.change\.json$/i, '') : 'Artifact')
       this.el.title = title
-      this.el.setAttribute('aria-label', `Read artifact: ${title}`)
+      this.el.setAttribute('aria-label', `Read ${doc.kind === 'change' ? 'change' : 'artifact'}: ${title}`)
     }
     name(); this.stopTitle = watchDocumentTitles(key => { if (key === doc.key) name() })
   }

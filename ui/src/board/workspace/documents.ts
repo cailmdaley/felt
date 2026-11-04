@@ -18,7 +18,7 @@ export interface WorkspaceDocument {
   path: string
   name: string
   /** `chat` is the worker's conversation; `fiber` the fiber's own prose. */
-  kind: 'chat' | 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other'
+  kind: 'chat' | 'fiber' | 'html' | 'pdf' | 'image' | 'audio' | 'video' | 'text' | 'other' | 'change'
   provenance: Provenance[]
   /** Owner-daemon file modification time; absent when unknown. */
   modifiedAt?: string
@@ -115,10 +115,11 @@ export function chatKey(owner: string, uid: string): DocKey {
 }
 
 /** Each kind of page's mark, shared by thumbnails and the reader's tabs. */
-export const KIND_GLYPH: Record<Exclude<WorkspaceDocument['kind'], 'chat'>, string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□' }
+export const KIND_GLYPH: Record<Exclude<WorkspaceDocument['kind'], 'chat'>, string> = { fiber: '§', html: '▣', image: '▨', pdf: '▧', text: '≡', audio: '♪', video: '▹', other: '□', change: '±' }
 
 /** Reuse the extension vocabulary that drives FileViewerPanel. A path is never a conversation. */
 export function documentKind(path: string): Exclude<WorkspaceDocument['kind'], 'chat'> {
+  if (/\.change\.json$/i.test(path)) return 'change'
   const kind = fileKind(path)
   if (kind === 'markdown' || kind === 'text') return 'text'
   return kind
