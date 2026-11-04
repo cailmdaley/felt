@@ -613,22 +613,12 @@ func UpdateFiberFile(path, id string, mutate func(*Felt) error) (*Felt, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Body-only edits retain the authored frontmatter, including comments.
-	_, _, beforeBody, _ := frontmatterBounds(original)
-	_, _, afterBody, _ := frontmatterBounds(updated)
-	if bytes.Equal(original[:beforeBody], updated[:afterBody]) {
-		_, _, rawBody, err := frontmatterBounds(data)
-		if err != nil {
-			return nil, err
-		}
-		body := string(data[rawBody:])
-		if originalBody != "" {
-			start := strings.Index(body, originalBody)
-			body = body[:start] + f.Body + body[start+len(originalBody):]
-		} else {
-			body = "\n" + f.Body + "\n"
-		}
-		updated = append(append([]byte(nil), data[:rawBody]...), []byte(body)...)
+	if bytes.Equal(original, updated) {
+		return f, nil
+	}
+	updated, err = mutationBytes(data, original, updated, originalBody, f.Body)
+	if err != nil {
+		return nil, err
 	}
 	if err := WriteFiberFile(path, updated); err != nil {
 		return nil, err

@@ -3138,6 +3138,41 @@ defmodule Shuttle.PollerTest do
     end)
   end
 
+  test "poll-discovered rapid exits open the same resume-loop breaker" do
+    fiber_id = "tests/poll-first-resume-loop"
+    MockRunner.set_shuttle(fiber_id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+
+    {:ok, poller} =
+      start_poller!(
+        runner: MockRunner,
+        poll_interval_ms: 60_000,
+        max_concurrent_workers: 0,
+        felt_stores: [MockRunner.felt_root()]
+      )
+
+    sync_poll_cycle!(poller)
+
+    for _ <- 1..5 do
+      :sys.replace_state(poller, fn state ->
+        meta = %{
+          fiber_id: fiber_id,
+          uid: FiberUid.for(fiber_id),
+          pid: nil,
+          session: FiberUid.session(fiber_id),
+          agent_id: "claude-sonnet",
+          started_at: DateTime.utc_now(),
+          last_activity_at: DateTime.utc_now()
+        }
+
+        %{state | running: Map.put(state.running, FiberUid.for(fiber_id), meta)}
+      end)
+
+      sync_poll_cycle!(poller)
+    end
+
+    assert loop_blocked?(poller, fiber_id)
+  end
+
   test "resume-loop breaker pauses a oneshot whose workers keep dying instantly, and force-dispatch overrides it" do
     # The kill-and-resume churn: a still-active oneshot whose worker dies almost
     # immediately (stale/unresumable session, wrong project_dir, TCC-blocked cwd)
@@ -6202,7 +6237,9 @@ defmodule Shuttle.PollerTest do
            end)
   end
 
-  test "an older handoff belongs to the preceding run and a dirty dead run closes for review" do
+  test "a second scheduled run that dies dirty awaits review despite its prior handoff" do
+    # A dispatch retains the preceding run's handoff. The later dirty death
+    # still owes review; recovery cannot manufacture a human conclusion.
     fiber_id = "tests/standing-inverted-markers"
 
     Env.put_env("SHUTTLE_STORES", MockRunner.felt_root())

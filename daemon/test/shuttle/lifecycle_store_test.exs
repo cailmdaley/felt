@@ -3,6 +3,37 @@ defmodule Shuttle.LifecycleStoreTest do
 
   alias Shuttle.LifecycleStore
 
+  test "standing exit preserves an explicit pause" do
+    with_doc_awaiting_role(
+      fn fiber_id, path ->
+        before = File.read!(path)
+        assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+        assert File.read!(path) == before
+      end,
+      status: "open"
+    )
+  end
+
+  test "standing exit preserves a current human rearm" do
+    with_doc_awaiting_role(
+      fn fiber_id, path ->
+        text = File.read!(path)
+
+        text =
+          String.replace(
+            text,
+            "  runtime:",
+            "  runtime:\n    dispatched_at: 2026-01-01T00:00:00Z\n    handed_off_at: 2026-01-02T00:00:00Z\n    thread_exit_verb: rearmed"
+          )
+
+        File.write!(path, text)
+        assert {:ok, _} = LifecycleStore.mark_awaiting(fiber_id)
+        assert File.read!(path) == text
+      end,
+      status: "active"
+    )
+  end
+
   describe "mark_awaiting/1 — the standing-exit writer (active → closed, untempered)" do
     test "flips status:active → closed with closed-at, no verdict, and reads as doc-awaiting" do
       with_doc_awaiting_role(
@@ -191,7 +222,7 @@ defmodule Shuttle.LifecycleStoreTest do
     description: Root fiber and analysis hub.
     shuttle:
       kind: standing
-      host: testhost
+      host: test-host
       agent: claude-opus
       runtime:
         custom_marker: keep
@@ -295,7 +326,7 @@ defmodule Shuttle.LifecycleStoreTest do
     status: #{status}
     #{tempered_line}shuttle:
       kind: standing
-      host: testhost
+      host: test-host
       agent: claude-sonnet
       runtime:
         custom_marker: keep
@@ -341,7 +372,7 @@ defmodule Shuttle.LifecycleStoreTest do
     status: #{status}
     #{tempered_line}shuttle:
       kind: #{kind}
-      host: testhost
+      host: test-host
       agent: claude-opus
     ---
 

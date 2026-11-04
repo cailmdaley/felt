@@ -198,7 +198,7 @@ defmodule Shuttle.Test.FeltStoreRunner do
   # Runtime-key fields nest under `shuttle.runtime`, matching Shuttle's
   # `mark-runtime` writer. Any non-runtime key in `fields` still merges at the
   # top level.
-  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id)
+  @runtime_key_names ~w(dispatched_at session_uuid handed_off_at run_id thread_exit_verb)
 
   def put_shuttle_fields(id, fields) do
     {runtime_fields, config_fields} = Map.split(fields, @runtime_key_names)
@@ -215,6 +215,23 @@ defmodule Shuttle.Test.FeltStoreRunner do
 
       put_in(state.fibers[id], Map.put(fiber, "shuttle", shuttle))
     end)
+
+    # Runtime facts served by the mock are the facts the locked CLI reads too.
+    case fiber(id) do
+      %{"path" => path, "shuttle" => block} ->
+        case Shuttle.FiberDoc.read_path(path) do
+          {:ok, _, raw, _, body} ->
+            ops = [{:put_nested, "shuttle", "runtime", block["runtime"]}]
+            fm = Shuttle.FrontmatterEdit.apply(raw, ops)
+            File.write!(path, "---\n" <> String.trim_trailing(fm, "\n") <> "\n---" <> body)
+
+          _ ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
   end
 
   # The full fiber map for `id` (carries `path`), for tests that read back what
@@ -520,6 +537,40 @@ defmodule Shuttle.Test.FeltStoreRunner do
         if File.dir?(resolved),
           do: {resolved <> "\n", 0},
           else: {"project dir \"#{resolved}\": stat #{resolved}: no such file or directory\n", 1}
+
+      command == "shuttle" and match?(["standing-transition" | _], drop_cli_store(args)) ->
+        result = Shuttle.Runner.Default.cmd(command, args, opts)
+
+        case drop_cli_store(args) do
+          ["standing-transition", "--request-json", request] ->
+            %{"path" => path} = Jason.decode!(request)
+
+            case Shuttle.FiberDoc.read_path(path) do
+              {:ok, _, _, fm, _} ->
+                Agent.update(server(), fn state ->
+                  fibers =
+                    Map.new(state.fibers, fn {id, fiber} ->
+                      if fiber["path"] == path,
+                        do:
+                          {id,
+                           fiber
+                           |> Map.put("status", fm["status"])
+                           |> Map.put("shuttle", fm["shuttle"])},
+                        else: {id, fiber}
+                    end)
+
+                  %{state | fibers: fibers}
+                end)
+
+              _ ->
+                :ok
+            end
+
+          _ ->
+            :ok
+        end
+
+        result
 
       # `shuttle reopen <id> [--project-dir <raw>] [--conclude-run] --local`:
       # answers the result a test set; else, like the CLI, expands a given

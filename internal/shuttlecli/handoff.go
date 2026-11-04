@@ -2,7 +2,6 @@ package shuttlecli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -155,54 +154,29 @@ func (a *app) successorAgentKnown(f *felt.Felt) error {
 // stampHandedOff stamps handed_off_at once check accepts the fiber as read
 // under its lock; a nil check accepts every fiber.
 func stampHandedOff(path string, check func(*felt.Felt) error) (string, error) {
-	unlock, err := felt.LockFiberFile(path)
-	if err != nil {
-		return "", err
-	}
-	defer unlock()
-
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	f, err := felt.Parse(idFromPath(path), content)
-	if err != nil {
-		return "", err
-	}
-	if check != nil {
-		if err := check(f); err != nil {
-			return "", err
-		}
-	}
-	var markers map[string]any
-	if runtime := felt.MappingValueNode(f.ExtraFields[shuttle.FacetKey], shuttle.RuntimeKey); runtime != nil {
-		if err := runtime.Decode(&markers); err != nil {
-			return "", err
-		}
-	}
-	// A handoff after acceptance keeps that run's re-arm. A later dispatch
-	// makes its previous handoff older, so a new run publishes its own result.
-	dispatch := shuttle.RuntimeTimestamp(markers["dispatched_at"])
-	handoff := shuttle.RuntimeTimestamp(markers["handed_off_at"])
-	accepted := !handoff.IsZero() && !handoff.Before(dispatch) &&
-		(markers["thread_exit_verb"] == "tempered" || markers["thread_exit_verb"] == "rearmed")
 	at := time.Now().UTC().Format(time.RFC3339Nano)
-	if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
-		return "", err
-	}
-	if !accepted {
-		if err := shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off"); err != nil {
-			return "", err
+	_, err := felt.UpdateFiberFile(path, idFromPath(path), func(f *felt.Felt) error {
+		if check != nil {
+			if err := check(f); err != nil {
+				return err
+			}
 		}
-	}
-	data, err := f.Marshal()
-	if err != nil {
-		return "", err
-	}
-	if err := felt.WriteFiberFile(path, data); err != nil {
-		return "", err
-	}
-	return at, nil
+		// A human can conclude a standing run while its worker is finishing.
+		// The worker's later handoff cannot revoke that current-run verdict.
+		if shuttle.StandingRunDisposition(shuttle.RunFacts{
+			DispatchedAt: runtimeString(f, "dispatched_at"),
+			HandedOffAt:  runtimeString(f, "handed_off_at"),
+			ExitVerb:     runtimeString(f, "thread_exit_verb"),
+		}) == shuttle.RunRearmed {
+			at = runtimeString(f, "handed_off_at")
+			return nil
+		}
+		if err := shuttle.SetRuntimeField(f, "handed_off_at", at); err != nil {
+			return err
+		}
+		return shuttle.SetRuntimeField(f, "thread_exit_verb", "handed off")
+	})
+	return at, err
 }
 
 // endOwnTerminal closes this terminal after a durable exit write. Rex requires

@@ -20,8 +20,8 @@ defmodule Shuttle.Contract do
   require Logger
 
   # Matches internal/shuttlecli/contract.go's ShuttleContractLevel.
-  # Fiber reads and creation use exact enclosing-store namespace paths.
-  @expected_level 32
+  # Standing transitions use the locked, conditional run-disposition writer.
+  @expected_level 33
 
   # The daemon-shelled surface each recent level introduced. A skew reason
   # names every surface above the CLI's level, so an operator sees which verb
@@ -51,7 +51,8 @@ defmodule Shuttle.Contract do
     31 =>
       "felt show --exact and felt add --namespace; lifecycle --fiber-path (verified UID path hints); " <>
         "resolved lifecycle reads remain exact for UID-less documents",
-    32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)"
+    32 => "reopen --occurrence (locked conditional standing re-arm with clean service markers)",
+    33 => "standing-transition (locked conditional run disposition and force rearm)"
   }
 
   @doc "The daemon's expected `shuttle contract` level."

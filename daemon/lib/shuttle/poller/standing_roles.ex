@@ -94,72 +94,18 @@ defmodule Shuttle.Poller.StandingRoles do
       MapSet.member?(live_sessions, Dispatcher.session_name(fiber_id, Map.get(fiber, "uid"))) ->
         state
 
-      # The marker discriminator: only a role that was actually DISPATCHED but
-      # never cleanly handed off is a dead orphan. The dispatch marker records
-      # `dispatched_at`; the handoff marker records a clean exit — written by the
-      # worker on a clean exit OR by a human accept/resume (which concludes the
-      # run). A dispatch with no newer handoff is the daemon-down-across-exit
-      # case. An armed role whose last run already handed
-      # off (the "armed, not-yet-due" shape) is left alone so its next cron tick
-      # fires.
-      not standing_role_dispatched_unexited?(fiber) ->
-        state
-
-      # A dead ADHOC extra-run must not close the SCHEDULED standing constitution. An
-      # ad-hoc (force-dispatched) run carries an `adhoc-<ms>` run_id; its dirty
-      # death (daemon down across the exit) is caught here. Closing the scheduled
-      # constitution on the strength of a crashed EXTRA run would postpone it
-      # until acceptance or an occurrence after that close. An observed ad-hoc
-      # exit publishes review through `handle_worker_exit` unless accepted;
-      # this reconciler leaves a crashed extra run's schedule armed.
-      dead_run_is_adhoc?(fiber) ->
-        Logger.info(
-          "Standing constitution #{fiber_id} has a dead ADHOC extra-run (daemon down across its exit) — " <>
-            "leaving the scheduled role armed instead of marking awaiting"
-        )
-
-        state
-
-      # Daemon-down analog of handle_worker_exit. Only reached for a DIRTY
-      # exit — the `standing_role_dispatched_unexited?` gate above already
-      # skipped any run that handed off cleanly. Publish Awaiting review until
-      # acceptance or a scheduled occurrence after the close.
+      # The locked writer derives disposition from the current document.
+      # A stale candidate proves absence for its observed run only.
       true ->
-        Logger.info(
-          "Standing constitution #{fiber_id} armed with an un-exited dispatch but no live tmux " <>
-            "session/watcher — worker exited while daemon was down; marking awaiting (status:closed)"
+        mark_standing_awaiting(fiber_id,
+          observed: fiber,
+          recovery: true,
+          runner: state.runner,
+          own_host_id: state.own_host_id
         )
 
-        mark_standing_awaiting(fiber_id)
         state
     end
-  end
-
-  # True iff the role was DISPATCHED but never cleanly handed off — a run that
-  # began but whose exit the daemon never observed (it was down across the exit).
-  # Read straight off the fiber's `shuttle:` block (`Shuttle.Continuation`):
-  #
-  #   • no dispatched_at             → never ran (or a human resolved it) → not an orphan.
-  #   • handed_off_at >= dispatched  → clean exit observed                → not an orphan.
-  #   • otherwise (dispatched, no newer handoff)                          → orphan (true).
-  #
-  # A human accept / resume / force-rearm supersedes the dead-orphan inference by
-  # concluding the run — each stamps `handed_off_at = now` as it re-arms (Shuttle's
-  # accept/resume in the same write, `LifecycleStore.rearm` just after), the same
-  # signal a clean worker exit leaves, since a human
-  # accepting the run IS concluding it. This is what stops the standing-role
-  # temper oscillation observed on standing constitutions like morning-post / weekly-arxiv
-  # (a worker that died without handing off was re-closed to awaiting on every reconcile).
-  # Git-native, durable across a daemon restart, and needs no separate re-arm
-  # field — the same `handed_off_at` covers both worker exit and human re-arm.
-  # Exactly the negation of `Continuation.clean_handoff_since_dispatch?/1`.
-  defp standing_role_dispatched_unexited?(fiber),
-    do: not Shuttle.Continuation.clean_handoff_since_dispatch?(fiber)
-
-  # True iff the dead run's `run_id` marks it an ad-hoc (force-dispatched extra)
-  # run — `StandingRole.ad_hoc_run_id/1`'s `adhoc-<ms>` form.
-  defp dead_run_is_adhoc?(fiber) do
-    StandingRole.ad_hoc_run_id?(Shuttle.Continuation.run_id(fiber))
   end
 
   # Mark a standing constitution awaiting (`status: closed`, untempered) by writing its
@@ -167,8 +113,8 @@ defmodule Shuttle.Poller.StandingRoles do
   # the exit-handling state machine (the worker is already gone; the dead-orphan
   # reconciler is the backstop), so we log and continue. No exit event is written
   # to any log — clean-exit is signalled by the worker's handoff marker.
-  def mark_standing_awaiting(fiber_id) do
-    case LifecycleStore.mark_awaiting(fiber_id) do
+  def mark_standing_awaiting(fiber_id, opts \\ []) do
+    case LifecycleStore.mark_awaiting(fiber_id, opts) do
       {:ok, _} ->
         :ok
 

@@ -4756,7 +4756,11 @@ defmodule Shuttle.Poller do
   # spawns it now and leaves it armed for its schedule. A failed re-arm is
   # logged and the start proceeds.
   defp rearm_standing(state, fiber_id) do
-    case LifecycleStore.rearm(fiber_id, runner: state.runner, felt_stores: state.felt_stores) do
+    case LifecycleStore.rearm(fiber_id,
+           runner: state.runner,
+           felt_stores: state.felt_stores,
+           own_host_id: state.own_host_id
+         ) do
       {:ok, msg} -> Logger.info("force-dispatch re-arm #{fiber_id}: #{String.trim(msg)}")
       {:error, reason} -> Logger.warning("force-dispatch re-arm #{fiber_id} failed: #{reason}")
     end
@@ -4903,9 +4907,15 @@ defmodule Shuttle.Poller do
            threads: cached_thread_inputs(state)
          ) do
       {:ok, session} ->
+        dispatched_fiber =
+          case fetch_fiber_full(fiber_id, state) do
+            {:ok, current} -> current
+            {:error, _} -> fiber
+          end
+
         running_meta =
           fiber_id
-          |> new_running_meta(fiber, session, agent_id_from_fiber(fiber), felt_store)
+          |> new_running_meta(dispatched_fiber, session, agent_id_from_fiber(fiber), felt_store)
           |> Map.merge(running_prompt_metadata(prompt_context))
           |> Map.put(:identity_token, identity_token)
           |> Map.put(:session_uuid, nil)
@@ -5456,7 +5466,7 @@ defmodule Shuttle.Poller do
   end
 
   defp reconcile_missing_running_sessions(%State{} = state) do
-    Enum.reduce(state.running, state, fn {runtime_key, %{session: session} = meta}, state_acc ->
+    Enum.reduce(state.running, state, fn {_runtime_key, %{session: session} = meta}, state_acc ->
       fiber_id = fiber_address(meta)
 
       if already_running_session?(state_acc, session) do
@@ -5465,23 +5475,15 @@ defmodule Shuttle.Poller do
         Logger.info("Detected missing worker session: #{fiber_id} session=#{session}")
         stop_watcher(meta)
 
-        state_acc
-        |> record_orphaned_running_worker(fiber_id, meta)
-        |> remove_running(runtime_key)
+        record_orphaned_running_worker(state_acc, fiber_id, meta)
       end
     end)
   end
 
   defp record_orphaned_running_worker(%State{} = state, fiber_id, meta) do
-    # Daemon-down analog of handle_worker_exit's standing branch. The caller —
-    # `reconcile_missing_running_sessions` (the watcher missed the exit) —
-    # lands here for a running entry whose tmux session is gone. For an
-    # ordinary oneshot that's just an orphan to record; for a standing constitution it
-    # is the exit that `handle_worker_exit` never got to run, so the armed
-    # document would re-fire on the next poll. Mark it awaiting (status:closed,
-    # untempered) here, keyed on the running-worker entry — a role with no
-    # running row never reaches this path and cannot be regressed.
-    mark_dead_standing_role_awaiting(state, fiber_id)
+    # Positive absence and watcher notifications consume the same running row,
+    # including its lifetime accounting. A later notification finds no row.
+    state = handle_worker_exit(state, fiber_id)
 
     orphan = %{
       fiber_id: fiber_id,
@@ -5492,33 +5494,6 @@ defmodule Shuttle.Poller do
     }
 
     %{state | orphans: [orphan | state.orphans]}
-  end
-
-  # Write `status: closed` (untempered) to a standing constitution's document when its
-  # worker died unobserved and the document is still armed. An owned active
-  # standing run without a verdict is closed for review unless it was already
-  # re-armed cleanly. Acceptance or an occurrence after the close can re-arm it.
-  # Oneshots, foreign-owned, paused, closed and reviewed documents are left alone.
-  # The mark is
-  # idempotent: once status flips to closed the running entry is gone (the
-  # caller removes it) and the `status == "active"` guard short-circuits any
-  # later pass.
-  defp mark_dead_standing_role_awaiting(%State{} = state, fiber_id) do
-    with {:ok, fiber} <- fetch_fiber_full(fiber_id, state),
-         shuttle when is_map(shuttle) <- Map.get(fiber, "shuttle"),
-         true <- host_owned?(shuttle, state.own_host_id),
-         true <- standing?(fiber),
-         "active" <- Map.get(fiber, "status", ""),
-         true <- is_nil(Map.get(fiber, "tempered")) do
-      Logger.info(
-        "Standing constitution #{fiber_id} worker died unobserved (daemon-down or unwatched " <>
-          "exit); marking awaiting review (status:closed) until acceptance or the next occurrence"
-      )
-
-      StandingRoles.mark_standing_awaiting(fiber_id)
-    else
-      _ -> :ok
-    end
   end
 
   # A shuttle block's dispatch kind: `kind:`, else "oneshot". A retired kind
@@ -5654,14 +5629,16 @@ defmodule Shuttle.Poller do
             status = Map.get(fiber, "status", "")
 
             cond do
-              status == "closed" ->
+              status != "active" or
+                  not host_owned?(Map.get(fiber, "shuttle", %{}), state.own_host_id) ->
                 state
 
-              standing?(fiber) and status == "active" ->
-                # An active standing run that has not been accepted publishes
-                # Awaiting review on exit. The next occurrence after this close
-                # may supersede its unreviewed result.
-                StandingRoles.mark_standing_awaiting(fiber_id)
+              standing?(fiber) ->
+                StandingRoles.mark_standing_awaiting(fiber_id,
+                  observed: Map.get(meta, :run_observation, fiber),
+                  runner: state.runner,
+                  own_host_id: state.own_host_id
+                )
 
                 state
 
@@ -6162,6 +6139,7 @@ defmodule Shuttle.Poller do
       session: session,
       agent_id: agent_id,
       context_harness: worker_cli(nil, fiber),
+      run_observation: fiber,
       # Keep the office snapshot with the worker across identity retries and
       # session succession; document edits do not change this run's provenance.
       role: get_in(fiber, ["shuttle", "role"]),
