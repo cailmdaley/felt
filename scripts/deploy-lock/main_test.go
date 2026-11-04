@@ -41,7 +41,8 @@ func start(t *testing.T, binary, root, label, script string, env ...string) (*ex
 	if e != nil {
 		t.Fatal(e)
 	}
-	cmd := exec.Command(binary, filepath.Join(root, "host.lock"), filepath.Join(root, label+".lease"), "target="+label, "bash", "-c", script, "transaction", root)
+	leasePath := filepath.Join(root, label+".lease")
+	cmd := exec.Command(binary, filepath.Join(root, "host.lock"), leasePath, "target="+label, "bash", "-c", script, "transaction", root)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = r, log, log
 	cmd.Env = append(os.Environ(), env...)
@@ -51,9 +52,16 @@ func start(t *testing.T, binary, root, label, script string, env ...string) (*ex
 	r.Close()
 	t.Cleanup(func() {
 		w.Close()
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 		if cmd.ProcessState == nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Wait()
+		} else if lease, err := os.OpenFile(leasePath, os.O_RDWR, 0600); err == nil {
+			// A retained private lease identifies surviving fixture children;
+			// otherwise the reaped group's numeric id is no longer ours.
+			if syscall.Flock(int(lease.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) == syscall.EWOULDBLOCK {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
+			lease.Close()
 		}
 		log.Close()
 	})
@@ -80,8 +88,18 @@ func free(t *testing.T, path string) {
 		t.Fatal(e)
 	}
 	defer f.Close()
-	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		t.Fatalf("lock retained: %v", e)
+	// Group members close their descriptors independently after group KILL;
+	// reaping the helper is not a barrier for the final descendant's exit.
+	until := time.Now().Add(2 * time.Second)
+	for {
+		e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if e == nil {
+			return
+		}
+		if e != syscall.EWOULDBLOCK || !time.Now().Before(until) {
+			t.Fatalf("lock retained: %v", e)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 func TestObserverEOFAndSignalsCancelGroup(t *testing.T) {
@@ -194,7 +212,12 @@ func TestLostOutputObserverClosesTransport(t *testing.T) {
 	if e = cmd.Start(); e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) })
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Wait()
+		}
+	})
 	if e = result(t, cmd); e == nil {
 		t.Fatal("closed output observer reported success")
 	}

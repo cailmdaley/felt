@@ -16,6 +16,7 @@ func TestDeployLateDisconnectCompletesOnlyActivation(t *testing.T) {
 		t.Run(host, func(t *testing.T) {
 			t.Parallel()
 			f := newDeployFleet(t)
+			defer fleetTouch(t, filepath.Join(f.root, "activation-go"))
 			fleetTouch(t, f.gate)
 			cmd, log := f.startHost(t, "activation-cancel", host, "ACTIVATION_GATE=1")
 			deployAwait(t, "activation: "+log, func() bool { _, e := os.Stat(filepath.Join(f.root, "activation-entered")); return e == nil })
