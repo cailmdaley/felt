@@ -10,6 +10,30 @@ import (
 	"testing"
 )
 
+func TestArmedThreadRequiresOwnerWriteConfirmation(t *testing.T) {
+	for _, confirmation := range []string{`"host":"elsewhere","status":"active"`, `"host":"worker","status":"open"`, `"status":"active"`} {
+		t.Run(confirmation, func(t *testing.T) {
+			env := remoteLifecycleEnv(t)
+			loom, st := newStore(t)
+			seedShuttleRole(t, st, "hub", felt.StatusActive, map[string]any{"kind": "oneshot", "host": "worker", "project_dir": "/remote/project"}, nil)
+			serveDaemon(t, env, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/v1/fiber/create" {
+					fmt.Fprintf(w, `{"id":"hub/measure","uid":"01ARZ3NDEKTSV4RRFFQ69G5FAX","path":"/owner/hub/measure/measure.md",%s}`, confirmation)
+				} else {
+					fmt.Fprint(w, `{}`)
+				}
+			}))
+			out, _, err := executeIn(t, env, loom, "thread", "hub", "Measure")
+			if err == nil {
+				t.Fatalf("unconfirmed owner reply reported success: %s", out)
+			}
+			if !strings.Contains(err.Error(), "did not confirm") {
+				t.Fatalf("unexpected refusal: %v", err)
+			}
+		})
+	}
+}
+
 func TestThreadStorageMatchesParentNamespace(t *testing.T) {
 	for _, topology := range []string{"remote-parent", "project-canonical"} {
 		t.Run(topology, func(t *testing.T) {
