@@ -439,7 +439,10 @@ defmodule Shuttle.FeltStores do
           {:ok, %{"path" => path} = fiber} when is_binary(path) and path != "" ->
             owner = owning_store(stores, path) || namespace_store(store)
 
-            resolved_from(owner, felt_for_path(owner, fiber)) || acc
+            case felt_for_path(owner, fiber) do
+              {:ok, canonical} -> resolved_from(owner, canonical) || acc
+              {:error, _} = error -> error
+            end
 
           {:error, :timeout} ->
             :timeout
@@ -501,10 +504,16 @@ defmodule Shuttle.FeltStores do
   # Re-resolving a view's id in another store can select a different document.
   defp felt_for_path(owner, fiber) do
     relative = Path.relative_to(fiber["path"], store_felt_realpath(owner))
-    leaf = relative |> Path.basename() |> Path.rootname()
-    parent = Path.dirname(relative)
-    id = if Path.basename(parent) == leaf, do: parent, else: Path.rootname(relative)
-    Map.put(fiber, "id", id)
+
+    if Path.type(relative) == :absolute or relative == ".." or
+         String.starts_with?(relative, "../") do
+      {:error, {:outside_store, fiber["path"]}}
+    else
+      leaf = relative |> Path.basename() |> Path.rootname()
+      parent = Path.dirname(relative)
+      id = if Path.basename(parent) == leaf, do: parent, else: Path.rootname(relative)
+      {:ok, Map.put(fiber, "id", id)}
+    end
   end
 
   defp felt_show_json(store, identifier, exact) do
