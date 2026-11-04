@@ -616,14 +616,16 @@ SH
 }
 
 release_verified_deploy() {
-  release_quarantine "$1" && ok "live on $TARGET_SHA, quarantine released" \
-    || { bad "quarantine release failed"; return 1; }
+  release_quarantine "$1" || { bad "quarantine release failed"; return 1; }
+  run_on_visible "$1" "$(remember_previous_cmd "${2:-}" "${EXPECTED_RELEASE%/bin/rel}")" >/dev/null \
+    || { bad 'rollback receipt: could not retain previous release'; return 1; }
+  ok "live on $TARGET_SHA, quarantine released"
 }
 
 finish_verified_deploy() { # host, regular checkout, previous live tree
   local host="$1" checkout="$2" previous="${3:-}"
-  previous="$(run_value "$host" "$(remember_previous_cmd "$previous" "${EXPECTED_RELEASE%/bin/rel}")")" \
-    || { bad 'rollback receipt: could not retain previous release'; return 1; }
+  previous="$(run_value "$host" 'if [ -f "$HOME/.shuttle/deploy/previous" ]; then cat "$HOME/.shuttle/deploy/previous"; fi')" \
+    || { bad 'rollback receipt: could not read previous release'; return 1; }
   run_on_visible "$host" "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
   refresh_harnesses "$host" "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
   run_on_visible "$host" "$(prune_deploy_cmd "$checkout" "$previous" "${EXPECTED_RELEASE%/bin/rel}/shuttle")" || {
@@ -634,14 +636,14 @@ finish_verified_deploy() { # host, regular checkout, previous live tree
 
 verify_and_release() {
   wait_for_sha "$1" || return 1
-  release_verified_deploy "$1"
+  release_verified_deploy "$1" "${2:-}"
 }
 
 activation_window() { # host, prepared activation command
-  local host="$1" command="$2" status=0 ack
+  local host="$1" command="$2" previous="$3" status=0 ack
   printf B >&5 && IFS= read -r ack <&5 || return 1
   trap ':' TERM INT HUP
-  run_on_visible "$host" "$command" && verify_and_release "$host" || status=$?
+  run_on_visible "$host" "$command" && verify_and_release "$host" "$previous" || status=$?
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
   printf E >&5 && IFS= read -r ack <&5 || return 1
@@ -880,7 +882,7 @@ deploy_local() {
 }
 
 remote_host_cycle() { # $1 = host, $2 = deployed checkout
-  local host="$1" checkout="$2" supervisor=""
+  local host="$1" checkout="$2" previous="$3" supervisor=""
   supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
   EXPECTED_RELEASE="$(run_value "$host" "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
   local cycle
@@ -904,7 +906,7 @@ $(respawn_launcher_restart_cmd "$checkout" "$supervisor")"
   fi
   cycle='[ "${SHUTTLE_ACTIVATION_CYCLED:-0}" != 1 ] || exit 0
 '"$cycle"
-  activation_window "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" \
+  activation_window "$host" "$(shell_quote "$checkout/shuttle") daemon activate-release $(shell_quote "$EXPECTED_RELEASE") -- bash -c $(shell_quote "$cycle")" "$previous" \
     || { bad "could not activate, verify and release on ${host:-local}"; return 1; }
 }
 
@@ -959,10 +961,10 @@ host_transaction() { # Runs entirely on the target, under host and tree locks.
   bash -c "$(config_migration_cmd)" 3>&- 4>&- 5>&- || { bad 'config migration: failed'; return 1; }
   if ! target_is_live "$before"; then
     deploy_step 'activate/verify/release'
-    remote_host_cycle "" "$tree" || { bad 'activate/verify/release: failed'; return 1; }
+    remote_host_cycle "" "$tree" "$previous" || { bad 'activate/verify/release: failed'; return 1; }
   else
     deploy_step 'release coalesced daemon'
-    release_verified_deploy "" || return 1
+    release_verified_deploy "" "$previous" || return 1
   fi
   deploy_step 'checkout/harness/prune'
   finish_verified_deploy "" "$SOURCE" "$previous"

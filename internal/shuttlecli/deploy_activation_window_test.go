@@ -10,6 +10,37 @@ import (
 	"time"
 )
 
+func TestDeployCancelledActivationRetainsRollbackBeforeAcknowledgement(t *testing.T) {
+	f := newDeployFleet(t)
+	fleetTouch(t, f.gate)
+	first, log := f.start(t, "rollback-base")
+	if e := first.Wait(); e != nil {
+		t.Fatalf("base: %v %s", e, fleetRead(log))
+	}
+	previous, e := filepath.EvalSymlinks(filepath.Join(f.remote+".deploy", f.sha))
+	if e != nil {
+		t.Fatal(e)
+	}
+	os.WriteFile(filepath.Join(f.repo, "tracked"), []byte("next\n"), 0600)
+	f.git(t, f.repo, "add", "tracked")
+	f.git(t, f.repo, "commit", "-m", "next")
+	f.git(t, f.repo, "push", "origin", "main")
+	defer fleetTouch(t, filepath.Join(f.root, "activation-go"))
+	next, log := f.start(t, "cancelled-activation", "ACTIVATION_GATE=1")
+	deployAwait(t, "activation: "+log, func() bool { _, e := os.Stat(filepath.Join(f.root, "activation-entered")); return e == nil })
+	client, _ := strconv.Atoi(strings.TrimSpace(fleetRead(filepath.Join(f.root, "ssh.pid"))))
+	syscall.Kill(client, syscall.SIGKILL)
+	last := filepath.Join(f.home, ".shuttle/deploy/last-run.log")
+	deployAwait(t, "deferred cancellation", func() bool { return strings.Contains(fleetRead(last), "deferred through activation") })
+	fleetTouch(t, filepath.Join(f.root, "activation-go"))
+	if e := next.Wait(); e == nil {
+		t.Fatal("cancelled activation succeeded")
+	}
+	if got := strings.TrimSpace(fleetRead(filepath.Join(f.home, ".shuttle/deploy/previous"))); got != previous {
+		t.Fatalf("lost previous release before E acknowledgement: got %q want %q", got, previous)
+	}
+}
+
 func TestDeployLateDisconnectCompletesOnlyActivation(t *testing.T) {
 	t.Parallel()
 	for _, host := range []string{"fake", "local"} {
