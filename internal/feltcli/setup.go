@@ -878,14 +878,14 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 			fmt.Fprintf(a.env.Stdout, "✓ Codex %s payload unchanged; left installed bytes intact\n", name)
 			continue
 		}
-		if err := a.runHarnessCLI("codex", "plugin", "add", ref); err != nil {
-			return fmt.Errorf("installing %s: %w; Codex ≥ %s is required", ref, err, codexHookTrustMinimum)
+		if err := a.addCodexPlugin(ref); err != nil {
+			return err
 		}
 		if err := a.verifyCodexLoadedBundle(marketplaceSource, name); err != nil {
 			if _, removeErr := a.runCodexCLIQuiet("plugin", "remove", ref); removeErr != nil {
 				return fmt.Errorf("removing unverified %s: %w", ref, removeErr)
 			}
-			if addErr := a.runHarnessCLI("codex", "plugin", "add", ref); addErr != nil {
+			if addErr := a.addCodexPlugin(ref); addErr != nil {
 				return fmt.Errorf("reinstalling %s after unverified cache (%v): %w", ref, err, addErr)
 			}
 			if err := a.verifyCodexLoadedBundle(marketplaceSource, name); err != nil {
@@ -913,6 +913,15 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 
 	fmt.Fprintln(a.env.Stdout)
 	a.refreshCodexHookTrust()
+	return nil
+}
+
+func (a *app) addCodexPlugin(ref string) error {
+	out, err := a.runCodexCLIQuiet("plugin", "add", ref)
+	if err != nil {
+		return fmt.Errorf("installing %s: %w\n%s", ref, err, strings.TrimSpace(out))
+	}
+	fmt.Fprint(a.env.Stdout, out)
 	return nil
 }
 
