@@ -143,8 +143,21 @@ func BuildChange(env *sysenv.Env, repo, base, head string, story *ChangeStory) (
 		return nil, nil, err
 	}
 	c.Title = strings.TrimSpace(subject)
-	if story != nil && story.Title != "" {
-		c.Title = story.Title
+	if story != nil {
+		if story.Title != "" {
+			c.Title = story.Title
+		}
+		if story.Flags == nil {
+			story.Flags = []ChangeFlag{}
+		}
+		if story.Chapters == nil {
+			story.Chapters = []ChangeChapter{}
+		}
+		for i := range story.Chapters {
+			if story.Chapters[i].Stops == nil {
+				story.Chapters[i].Stops = []ChangeStop{}
+			}
+		}
 	}
 	log, err := git("log", "--reverse", "--no-show-signature", "--no-notes", "--format=%H%x00%s%x00%an%x00%aI%x00", baseSHA+".."+headSHA, "--")
 	if err != nil {

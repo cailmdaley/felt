@@ -108,6 +108,17 @@ func TestBuildChangeRealGit(t *testing.T) {
 	if !report.Valid || report.Total != 5 || report.Covered != 0 || len(report.Uncovered) != 5 {
 		t.Fatalf("report: %+v", report)
 	}
+	minimal, _, err := BuildChange(env, repo, base, "HEAD", &ChangeStory{Overview: "Overview"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(minimal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"flags":[]`) || !strings.Contains(string(encoded), `"chapters":[]`) {
+		t.Fatalf("story arrays: %s", encoded)
+	}
 	// A side branch advances main; explicit merge-base remains the snapshot base.
 	git("checkout", "--", "modified.go")
 	git("checkout", "main")
