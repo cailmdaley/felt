@@ -69,6 +69,21 @@ func TestMeetingStartDefaultsAndJSON(t *testing.T) {
 	}
 }
 
+func TestMeetingMicOnlyStart(t *testing.T) {
+	t.Parallel()
+	env := testEnv(t)
+	var got map[string]any
+	serveDaemon(t, env, meetingDaemon(t, "/api/v1/meeting/start", 200, meetingStartAnswer, &got))
+	_, _, err := executeIn(t, env, "", "meeting", "start", "--mic-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	meeting := got["meeting"].(map[string]any)
+	if meeting["system_audio"] != false || meeting["mode"] != "call" {
+		t.Fatalf("request %v", got)
+	}
+}
+
 func TestMeetingStartFailures(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
