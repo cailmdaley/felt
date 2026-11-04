@@ -288,6 +288,20 @@ func run(args []string) error {
 			}
 			if e != nil {
 				cause(e)
+				return
+			}
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if _, e = fmt.Fprintln(keepalive); e != nil {
+						cause(e)
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
 			}
 		}()
 		err = owned(ctx, until, cmd, nil, keepalive)

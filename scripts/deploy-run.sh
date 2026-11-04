@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Read the framed bootstrap before a login profile can read stdin. FD 7 carries
 # only observer lifetime; the login shell and every build see /dev/null on stdin.
+# Heartbeats expire after 60 seconds even when a lost transport stays open.
 set -u
 TOKEN=$1
 child= watcher= logger= tmp=
@@ -45,10 +46,13 @@ case "$size" in ''|*[!0-9]*) echo 'deploy: invalid bootstrap frame' >&8; exit 1;
 dd bs=1 count="$size" of="$tmp/bootstrap.sh" 2>/dev/null || exit 1
 [ "$(wc -c < "$tmp/bootstrap.sh")" -eq "$size" ] || exit 1
 owner=$$
-(while IFS= read -r line; do :; done; kill -TERM "$owner") <&0 &
+mkfifo "$tmp/lifetime" || exit 1
+(while IFS= read -r -t 60 line; do printf '\n'; done; kill -TERM "$owner") <&0 > "$tmp/lifetime" &
 watcher=$!
-SHUTTLE_DEPLOY_TMP="$tmp" SHUTTLE_DEPLOY_TOKEN="$TOKEN" bash -lc 'exec bash "$1"' bootstrap "$tmp/bootstrap.sh" 7<&0 </dev/null >&8 2>&1 8>&- &
+exec 7< "$tmp/lifetime"
+SHUTTLE_DEPLOY_TMP="$tmp" SHUTTLE_DEPLOY_TOKEN="$TOKEN" bash -lc 'exec bash "$1"' bootstrap "$tmp/bootstrap.sh" 7<&7 </dev/null >&8 2>&1 8>&- &
 child=$!
+exec 7<&-
 wait "$child"
 status=$?
 child=
