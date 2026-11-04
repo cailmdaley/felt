@@ -88,7 +88,7 @@ func (a *app) verifyCodexLoadedGeneration(current string) error {
 // this build is sealed before promotion, so a fresh install always verifies.
 func promotedGenerationForVerify(current string) (pluginGenerationIdentity, bool, error) {
 	root := filepath.Join(current, "claude-plugin")
-	if !isRegularFile(filepath.Join(root, pluginGenerationMarkerName)) {
+	if !isRegularFile(filepath.Join(current, pluginGenerationMarkerName)) {
 		return pluginGenerationIdentity{}, false, nil
 	}
 	expected, err := validatePluginGeneration(root)
@@ -99,12 +99,12 @@ func promotedGenerationForVerify(current string) (pluginGenerationIdentity, bool
 }
 
 func verifyLoadedGeneration(harness string, expected pluginGenerationIdentity, loadedPath string) error {
-	loaded, err := validatePluginGeneration(loadedPath)
+	digest, err := pluginPayloadDigest(loadedPath)
 	if err != nil {
 		return fmt.Errorf("verifying %s cache at %s: %w", harness, loadedPath, err)
 	}
-	if status, repair := comparePluginGenerations(expected, loaded); status != receiptHealthy {
-		return fmt.Errorf("verifying %s cache at %s: %s", harness, loadedPath, repair)
+	if digest != expected.PayloadSHA256 {
+		return fmt.Errorf("verifying %s cache at %s: payload digest %s disagrees with promoted %s", harness, loadedPath, digest, expected.PayloadSHA256)
 	}
 	return nil
 }

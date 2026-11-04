@@ -327,7 +327,7 @@ func TestCollectGenerationReceiptRejectsSameVersionDifferentDigest(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, pluginGenerationMarkerName), data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(root), pluginGenerationMarkerName), data, 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -369,7 +369,7 @@ func TestCollectGenerationReceiptBindsFeltBuildToResolvedExecutable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(activeRoot, pluginGenerationMarkerName), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(filepath.Dir(activeRoot), pluginGenerationMarkerName), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
 

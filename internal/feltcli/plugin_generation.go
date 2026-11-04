@@ -1,9 +1,8 @@
 package feltcli
 
-// A promoted marketplace path is only the source of truth until a native
-// harness copies it into its own cache.  The marker travels with that copy so
-// setup receipt can prove that current and the loaded cache are the same
-// generation even when their manifest versions happen to match.
+// Provenance belongs to the promoted marketplace, outside every plugin root.
+// Harness caches are verified directly against its payload digest; copying
+// release identity into a plugin would invalidate Codex's content approval.
 
 import (
 	"crypto/sha256"
@@ -97,7 +96,7 @@ func writePluginGeneration(candidate string, identity pluginGenerationIdentity) 
 		return fmt.Errorf("encoding plugin generation: %w", err)
 	}
 	data = append(data, '\n')
-	path := filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)
+	path := filepath.Join(candidate, pluginGenerationMarkerName)
 	// The marker is what recovery and the receipt trust after a crash, so its
 	// write must be atomic and durable.
 	if err := atomicfile.Write(path, data, 0o644); err != nil {
@@ -107,7 +106,7 @@ func writePluginGeneration(candidate string, identity pluginGenerationIdentity) 
 }
 
 func readPluginGeneration(pluginRoot string) (pluginGenerationIdentity, error) {
-	path := filepath.Join(pluginRoot, pluginGenerationMarkerName)
+	path := filepath.Join(filepath.Dir(pluginRoot), pluginGenerationMarkerName)
 	identity, err := readJSONFile[pluginGenerationIdentity](path)
 	if err != nil {
 		return pluginGenerationIdentity{}, err
@@ -162,8 +161,7 @@ func (a *app) gitResolvedCommit(root string) string {
 }
 
 // pluginPayloadDigest hashes relative path, executable mode, and contents for
-// every regular payload file. The generation marker itself is excluded so its
-// digest can describe the bytes which the marker accompanies.
+// every regular payload file. Release provenance is forbidden in this tree.
 func pluginPayloadDigest(root string) (string, error) {
 	var paths []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
@@ -176,12 +174,10 @@ func pluginPayloadDigest(root string) (string, error) {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("unsupported plugin payload entry %q", path)
 		}
-		// A SIGKILL between the marker's temp-file creation and its rename can
-		// strand a temp file in the same tree — atomicfile's, or the
-		// `.felt-generation-*` one a tree written by an older felt may hold;
-		// neither it nor the marker belongs to the described payload.
+		// Codex hashes the entire root, including unrelated metadata and
+		// temporary files. Nothing release-specific may enter that boundary.
 		if base := filepath.Base(path); base == pluginGenerationMarkerName || atomicfile.IsTemp(base, pluginGenerationMarkerName) || strings.HasPrefix(base, ".felt-generation-") {
-			return nil
+			return fmt.Errorf("release metadata is forbidden inside plugin payload: %s", path)
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {

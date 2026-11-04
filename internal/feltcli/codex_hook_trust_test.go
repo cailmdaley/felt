@@ -496,7 +496,7 @@ func TestCodexHookTrustRefusesUnverifiedBytes(t *testing.T) {
 			case "cache-tampered":
 				os.WriteFile(filepath.Join(f.cache, "hooks", "hooks.json"), []byte(`{"hooks":{"SessionStart":[]}}`), 0o644)
 			case "unsealed-promotion":
-				os.Remove(filepath.Join(promoted, pluginGenerationMarkerName))
+				os.Remove(filepath.Join(filepath.Dir(promoted), pluginGenerationMarkerName))
 			case "cache-missing":
 				os.RemoveAll(f.cache)
 			}

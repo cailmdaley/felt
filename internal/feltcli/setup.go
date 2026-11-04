@@ -391,6 +391,10 @@ func (a *app) installClaudePluginAtSource(repoRoot string) error {
 		return fmt.Errorf("registering marketplace: %w", err)
 	}
 
+	if _, present, err := promotedGenerationForVerify(repoRoot); err == nil && present && a.verifyClaudeLoadedGeneration(repoRoot) == nil {
+		fmt.Fprintln(a.env.Stdout, "✓ Claude plugin payload unchanged; left installed bytes intact")
+		return nil
+	}
 	op, gerund := "install", "installing"
 	if installed {
 		op, gerund = "update", "updating"
@@ -857,6 +861,11 @@ func (a *app) installCodexPluginAtSource(marketplaceSource string) error {
 		return err
 	}
 
+	if _, present, err := promotedGenerationForVerify(marketplaceSource); err == nil && present && a.verifyCodexLoadedGeneration(marketplaceSource) == nil {
+		fmt.Fprintln(a.env.Stdout, "✓ Codex plugin payload unchanged; left installed bytes intact")
+		a.refreshCodexHookTrust()
+		return nil
+	}
 	if err := a.runHarnessCLI("codex", "plugin", "add", codexPluginRef); err != nil {
 		return fmt.Errorf("installing %s: %w\n"+
 			"  felt installs through Codex's native plugin commands and trusts its\n"+

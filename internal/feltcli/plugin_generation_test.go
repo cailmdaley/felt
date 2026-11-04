@@ -37,7 +37,7 @@ func TestPluginGenerationMarkerBindsSameVersionPayloadChanges(t *testing.T) {
 	}
 }
 
-func TestPluginGenerationMarkerLivesInsideHarnessPayload(t *testing.T) {
+func TestPluginGenerationProvenanceStaysOutsideHarnessPayload(t *testing.T) {
 	t.Parallel()
 	env, _ := testEnv(t)
 	a := testApp(t, env)
@@ -55,7 +55,7 @@ func TestPluginGenerationMarkerLivesInsideHarnessPayload(t *testing.T) {
 	if err := writePluginGeneration(candidate, identity); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(candidate, "claude-plugin", pluginGenerationMarkerName)
+	path := filepath.Join(candidate, pluginGenerationMarkerName)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
