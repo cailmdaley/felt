@@ -1477,9 +1477,10 @@ export class KanbanModal {
       this.announce(`${card.name} runs on its schedule; drag it to In flight to run it now.`)
       return
     }
-    // A future day on a non-snoozing card changes only its date, not its
-    // lifecycle. An explicit Now placement has no date (or clears it).
-    if (horizon === 'now' && typeof opts.due === 'string') {
+    // A future day preserves open or active work's lifecycle. Closed work
+    // reopens as a draft so the planned date can leave the past column.
+    // An explicit Now placement has no date (or clears it).
+    if (horizon === 'now' && typeof opts.due === 'string' && card.status !== 'closed') {
       void this.scheduleDue(card, opts.due)
       return
     }

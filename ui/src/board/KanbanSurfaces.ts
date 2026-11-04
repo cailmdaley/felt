@@ -2033,8 +2033,8 @@ export function formatDue(iso: string): string {
  *     Composing the two fields is what snooze IS — there is no third stored
  *     state, so nothing new has to be migrated, classified, or cleaned up.
  *   • Anything else — an In-flight card, a closed run in the past lane → `now`.
- *     These are being *scheduled*: they keep their column and take the date as
- *     a bare `due:`, which is all scheduling has ever meant.
+ *     In-flight work keeps its column and takes a bare `due:`. A closed run
+ *     reopens as a draft so its planned date can leave the past lane.
  *
  * A drop on TODAY never routes here: today means "onto the desk now", which is
  * `setSurface(card, 'now', { due: null })` at the call sites.

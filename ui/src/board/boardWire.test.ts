@@ -300,6 +300,16 @@ describe('setSurface → commitSurface — the due key is the whole protocol', (
     expect(wire.calls).toEqual([])
   })
 
+  it('reopens a closed card as a draft when dropped on a future day', async () => {
+    const due = dayFromNow(7)
+    asPrivate(makeBoard()).setSurface(card({ status: 'closed' }), 'now', { due })
+    await wire.settled()
+    expect(wire.bodiesTo('/api/v1/transition')).toEqual([
+      { fiber_id: 'fiber-1', origin: 'local', target: 'drafts' },
+    ])
+    expect(wire.bodiesTo('/api/v1/felt-edit')[0]).toMatchObject({ due })
+  })
+
   it('adds a future day to live work without killing or changing its lifecycle', async () => {
     const due = dayFromNow(7)
     asPrivate(makeBoard()).setSurface(card({
