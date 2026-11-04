@@ -3,8 +3,10 @@ package shuttlecli
 import (
 	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -373,7 +375,16 @@ func (a *app) launchdSupervisor(home string) tunnelSupervisor {
 			// the name is the only option, and it is exact by construction.
 			label := jobFile[:len(jobFile)-len(".plist")]
 			target := fmt.Sprintf("gui/%d/%s", uid, label)
-			_ = a.runSupervisor("launchctl", "bootout", target)
+			if err := a.runSupervisor("launchctl", "bootout", target); err != nil {
+				// A missing service establishes absence only while its
+				// enclosing domain is reachable.
+				_, probeErr := a.env.Command("launchctl", "print", target).CombinedOutput()
+				var exit *exec.ExitError
+				absent := errors.As(probeErr, &exit) && exit.ExitCode() == 113
+				if !absent || a.runSupervisor("launchctl", "print", fmt.Sprintf("gui/%d", uid)) != nil {
+					return err
+				}
+			}
 			path := filepath.Join(jobDir, jobFile)
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
@@ -415,19 +426,23 @@ func (a *app) systemdSupervisor(home string) tunnelSupervisor {
 			return nil
 		},
 		Deactivate: func(jobFile, jobDir string) error {
-			// Errors from stop/disable are swallowed the same way the
-			// launchd arm swallows bootout: a unit systemd has already
-			// forgotten (never loaded this boot, or already stopped) fails
-			// both calls harmlessly, and that is not a reason to leave its
-			// file behind.
-			_ = a.runSupervisor("systemctl", "--user", "stop", jobFile)
-			_ = a.runSupervisor("systemctl", "--user", "disable", jobFile)
 			path := filepath.Join(jobDir, jobFile)
+			if err := a.runSupervisor("systemctl", "--user", "stop", jobFile); err != nil {
+				out, probeErr := a.env.Command("systemctl", "--user", "show", "--property=LoadState", "--value", jobFile).CombinedOutput()
+				if probeErr != nil || string(bytes.TrimSpace(out)) != "not-found" {
+					return err
+				}
+				if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+					return nil
+				}
+			}
+			if err := a.runSupervisor("systemctl", "--user", "disable", jobFile); err != nil {
+				return err
+			}
 			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			_ = a.runSupervisor("systemctl", "--user", "daemon-reload")
-			return nil
+			return a.runSupervisor("systemctl", "--user", "daemon-reload")
 		},
 		Note: "tunnels survive logout and start at boot after:  loginctl enable-linger $(id -un)",
 	}
