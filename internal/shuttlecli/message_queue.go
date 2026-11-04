@@ -29,7 +29,7 @@ type nextWorkerReceipt struct {
 }
 
 // queueForNextWorker routes attachment-free fiber context to its durable
-// mailbox. Wake requests queue only without a live worker; otherwise the
+// mailbox. Wake and idle-notification requests queue only without a live worker; otherwise the
 // caller resolves and messages that worker. Session targets and attachments
 // always take the session path.
 func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt, error) {
@@ -79,7 +79,7 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 		"message_id":       request.MessageID,
 		"wake":             request.Wake,
 		"context_only":     true,
-		"unless_live":      request.Wake,
+		"unless_live":      request.Wake || request.NotifyWhenIdle,
 	})
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (a *app) queueForNextWorker(request messaging.Request) (*nextWorkerReceipt,
 	}
 	_ = json.Unmarshal(body, &answer)
 	switch {
-	case resp.StatusCode == http.StatusConflict && answer.Live && request.Wake:
+	case resp.StatusCode == http.StatusConflict && answer.Live && (request.Wake || request.NotifyWhenIdle):
 		return nil, nil
 	case resp.StatusCode < 300 && answer.Queued:
 		if !request.Wake {
