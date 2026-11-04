@@ -117,6 +117,7 @@ Shuttle's service and board are optional; recording and searching notes with fel
 | Decide when to track a task, nest notes, or link them | [Organizing](concepts/organizing.md) |
 | Understand the file format | [Fibers](concepts/fibers.md) and [Frontmatter](concepts/frontmatter.md) |
 | Keep plots, PDFs, and reports with a note | [Companion files](concepts/companions.md) |
+| Package a Git diff with a reading story | [Changes](concepts/changes.md) |
 | Give your coding agent project context | [Agent integration](agents.md) |
 | Assign work to agents and follow it on a board | [Shuttle](shuttle/index.md) |
 | Look up a command | [CLI reference](reference/cli.md) |

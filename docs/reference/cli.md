@@ -247,6 +247,7 @@ constitution open; activating it could launch another worker.
 | `shuttle ls [query]` | Felt-compatible fiber listing/search with Shuttle's resolved facet in JSON output |
 | `shuttle show <id>` | Felt-compatible fiber read with Shuttle's resolved facet in JSON output |
 | `shuttle check` | Validate every `shuttle:` block in the selected store and report host drift |
+| `shuttle change <fiber> --base B` | Write a committed Git snapshot and optional reading story as a `.change.json` companion (`--head`, `--repo`, `--story`, `--name`, `--check`, `--json`) |
 | `shuttle status [fiber]` | One line per shuttle-managed fiber, with remote state read from its owner; unavailable owners permit a labeled stale local copy, while authoritative not-found never does. `--all`/`--remote` include the complete owner inventory, including closed and rested constitutions absent from the local archive. Closed ones hidden from the table (`--closed` shows them; `--json` always includes them; `--all`, `--remote <name>` — mutually exclusive, `--include-orphans`); with a fiber, a detailed single-fiber report ending in a dispatch verdict: eligible on which host (status and host ownership, noting a missing `project_dir`), or the verb that makes it so. Its `--json` adds the board's `column` (`drafts`, `in_flight`, `awaiting_review`, `tempered`, `discarded`, `resting`, `roles`) and the review `verdict` (`tempered`, `discarded` or null), and for a rest that waits, `blocked_on` and the `until` name it reads as. A block naming an agent the registry does not know is flagged, `!` in the table with a line naming the fix, and `agent_problem` in `--json`; the daemon maps no other name to an agent, so such a block fails every dispatch until fixed |
 | `shuttle ps` | Live terminal worker sessions |
 | `shuttle snapshot` | Print the local daemon's state snapshot |
@@ -262,6 +263,44 @@ constitution open; activating it could launch another worker.
 
 `attach`, `session-name`, and fiber message targets require one exact match across
 configured stores; they refuse guessed paths and duplicate matches.
+
+### `shuttle change <fiber> --base B`
+
+Bake a change on the host holding the fiber and worktree:
+
+```bash
+shuttle change review-task --base origin/main --story story.json
+shuttle change review-task --base origin/main --head topic/change \
+  --repo "$PWD" --name walkthrough --story story.json --check --json
+```
+
+| Option | Meaning |
+|---|---|
+| `--base B` | Required commit or ref; compare this exact tree to head |
+| `--head H` | Head commit or ref, default `HEAD` |
+| `--repo DIR` | Git worktree directory, default fiber's `shuttle.project_dir`, else cwd |
+| `--story FILE` | Optional JSON reading story with chapters, stops, flags and role overrides |
+| `--name NAME` | Companion filename stem, default slugified head ref, else fiber slug for detached `HEAD` |
+| `--check` | Validate and report without writing |
+| `--json`, `-j` | Output the validation and hunk-coverage report as JSON |
+
+The command resolves base and head to SHAs and writes `<name>.change.json` atomically beside the fiber's Markdown file.
+Only committed content enters the snapshot; dirty and untracked files are excluded.
+Base is not implicitly replaced with a merge base: use `--base "$(git merge-base origin/main HEAD)"` when that is the comparison you want.
+The bundle contains the commits, unified patch, file inventory with path-derived roles, and `story: null` when no story is supplied.
+The title comes from the story's optional `title`, otherwise the head commit subject.
+A fiber doesn't need a Shuttle block; a block naming another host requires running the command there.
+The CLI invokes Git directly and makes no model calls.
+
+With a story, validation reports every unknown file and every range that overlaps no hunk on the chosen side.
+Invalid stories exit nonzero and don't replace an existing bundle.
+Stops count toward coverage; flags don't.
+Text output lists hunks covered of total and each uncovered hunk as `Remaining: path:line`.
+Uncovered hunks don't fail validation.
+`--json` emits `{valid, covered, total, uncovered, errors}`, with `path` added after a successful write.
+Each uncovered entry has `file`, `old_from`, `old_lines`, `new_from` and `new_lines`.
+`--check` emits the same report without writing or adding `path`.
+See [Changes](../concepts/changes.md) for the full bundle schema and story-authoring format.
 
 ### Daemon and host operations
 

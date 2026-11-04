@@ -69,6 +69,7 @@ nav:
       - Frontmatter: concepts/frontmatter.md
       - Roles: concepts/roles.md
       - Companions: concepts/companions.md
+      - Changes: concepts/changes.md
       - Constitution themes: concepts/themes.md
       - Cross-Project: concepts/cross-project.md
   - Agents & Plugin: agents.md

@@ -107,6 +107,12 @@ It plays the channel's audio-page element without leaving the tapestry, changes 
 Press it again to pause.
 Only one recording plays at a time; changing pages or leaving the reader pauses inline playback.
 
+## Git changes (shuttle only)
+
+`shuttle change <fiber> --base B` writes a `<name>.change.json` companion containing a committed Git diff, commit metadata and file roles.
+An optional story supplies a reading order with mechanically checked line references and hunk coverage.
+See [Changes](changes.md) for the schema, authoring format and validation workflow.
+
 ## Sent files (shuttle only)
 
 A shuttle worker can also push a file at you directly, with
