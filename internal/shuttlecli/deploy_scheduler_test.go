@@ -17,7 +17,7 @@ func TestDeploySchedulerQueueIsBoundedAndCancelled(t *testing.T) {
 		t.Fatal(e)
 	}
 	script := `#!/bin/sh
-[ "$1" = --partition=test ] && [ "$2" = --immediate=60 ] || { echo unbounded-srun >&2; exit 91; }
+[ "$1" = --partition=test ] && [ "$2" = --immediate=900 ] || { echo unbounded-srun >&2; exit 91; }
 trap 'echo srun-cancelled >> "$EVENTS"; exit 143' TERM INT HUP
 echo srun-queued >> "$EVENTS"
 while :; do sleep 300; done
@@ -26,7 +26,12 @@ while :; do sleep 300; done
 		t.Fatal(e)
 	}
 	cmd, log := f.start(t, "queued")
-	deployAwait(t, "queued scheduler: "+log, func() bool { return strings.Contains(fleetRead(f.events), "srun-queued") })
+	deployAwait(t, "queued scheduler: "+log, func() bool {
+		return strings.Contains(fleetRead(f.events), "srun-queued") || strings.Contains(fleetRead(log), "unbounded-srun")
+	})
+	if strings.Contains(fleetRead(log), "unbounded-srun") {
+		t.Fatalf("scheduler queue limit is not 900s: %s", fleetRead(log))
+	}
 	cmd.Process.Signal(syscall.SIGINT)
 	if e := cmd.Wait(); e == nil {
 		t.Fatalf("cancelled queue reported success: %s", fleetRead(log))
