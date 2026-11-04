@@ -11,9 +11,33 @@ const makeView = () => {
     writeCycleEdge(band: CycleBand, edge: 'start' | 'due', day: string, ctx: ViewContext): Promise<void>
     dueEdits: Map<string, string>
     cycleEdits: Map<string, object>
+    installDueMarkDrag(mark: HTMLElement, row: { cardId: string; dueIdx: number }, ctx: ViewContext): void
+    installDrawToCreate(track: HTMLElement, ctx: ViewContext): void
+    dayAt(track: HTMLElement, x: number): string | null
+    draft: unknown
   }
 }
 afterEach(() => vi.unstubAllGlobals())
+
+it('does not start a cycle draw when a due mark is pressed during a date write', async () => {
+  let finish!: (value: Response) => void
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+  const view = makeView()
+  const ctx = { shuttleBase: 'https://board.example', requestRefresh: vi.fn() } as unknown as ViewContext
+  const track = document.createElement('div')
+  const mark = document.createElement('div')
+  track.append(mark)
+  vi.spyOn(view, 'dayAt').mockReturnValue('2026-12-01')
+  view.installDrawToCreate(track, ctx)
+  view.installDueMarkDrag(mark, { cardId: 'task', dueIdx: 0 }, ctx)
+  const write = view.writeDue('task', 'owner', '2026-12-01', ctx)
+  mark.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }))
+  finish(new Response('{}'))
+  await write
+  expect(view.draft).toBeNull()
+  expect(track.querySelector('.chr-band-ghost')).toBeNull()
+  vi.restoreAllMocks()
+})
 
 it.each(['due', 'cycle'] as const)('holds all date writes for a fiber while its %s write is pending', async kind => {
   let reject!: (error: Error) => void

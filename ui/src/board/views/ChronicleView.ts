@@ -2631,9 +2631,10 @@ class ChronicleView implements TemporalView {
     ctx: ViewContext,
   ): void {
     grip.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || this.dateWrites.has(band.id)) return
+      if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation() // not a click on the band, and not a new draw
+      if (this.dateWrites.has(band.id)) return
 
       const lane = bandEl.parentElement
       const days = this.currentDays
@@ -2737,9 +2738,10 @@ class ChronicleView implements TemporalView {
     const cardId = row.cardId
     if (!cardId) return
     mark.addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || this.dateWrites.has(cardId)) return
+      if (e.button !== 0) return
       e.preventDefault()
       e.stopPropagation() // not a click on the row, and not a new cycle draw
+      if (this.dateWrites.has(cardId)) return
 
       const track = mark.parentElement
       const days = this.currentDays
