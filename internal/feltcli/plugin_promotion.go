@@ -732,8 +732,12 @@ func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, curren
 	if err != nil {
 		return err
 	}
+	_, verifiable, err := promotedGenerationForVerify(current)
+	if err != nil {
+		return err
+	}
 	if a.claudeInstallationMatches(state, intent, current) {
-		if !intent.Installed || a.verifyClaudeLoadedGeneration(current) == nil {
+		if !intent.Installed || (verifiable && a.verifyClaudeLoadedGeneration(current) == nil) {
 			return nil
 		}
 	}
@@ -762,6 +766,12 @@ func (a *app) reconcileClaudeInstallation(intent claudeInstallationState, curren
 	}
 	if intent.Configured && !a.samePluginSource(claudeMarketplaceSource(state.Marketplace), current) {
 		return fmt.Errorf("Claude marketplace source %q does not point at restored current %q", claudeMarketplaceSource(state.Marketplace), current)
+	}
+	if intent.Installed {
+		if !verifiable {
+			return fmt.Errorf("cannot verify restored Claude cache: source %q has no sealed generation marker", current)
+		}
+		return a.verifyClaudeLoadedGeneration(current)
 	}
 	return nil
 }

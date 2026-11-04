@@ -2,6 +2,7 @@ package feltcli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -323,6 +324,20 @@ func TestRecoverPluginPromotionPrefersLastKnownGoodAfterInterruption(t *testing.
 	}
 }
 
+func sealRecoveryFixture(t *testing.T, a *app, source, target string) {
+	t.Helper()
+	if err := copyTree(filepath.Join(source, "claude-plugin"), filepath.Join(target, "claude-plugin")); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := a.localPluginGeneration(source, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sealPluginGeneration(target, identity); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "claude")
@@ -341,6 +356,7 @@ func TestRecoverPluginPromotionRestoresFilesystemBeforeNativeReconciliation(t *t
 	if err := os.WriteFile(filepath.Join(previous, "generation.txt"), []byte("good"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	sealRecoveryFixture(t, f.a, f.source, previous)
 	// Native state has already been mutated to the interrupted candidate.
 	if err := os.WriteFile(filepath.Join(f.stateDir, "source"), []byte(current), 0o644); err != nil {
 		t.Fatal(err)
@@ -423,6 +439,7 @@ func TestInterruptedPromotionRecoveryPrecedesAcquisitionFailureAndRetry(t *testi
 	if err := os.WriteFile(filepath.Join(previous, "generation"), []byte("good"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	sealRecoveryFixture(t, f.a, f.source, previous)
 	if err := os.WriteFile(filepath.Join(f.stateDir, "source"), []byte(current), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -785,10 +802,67 @@ func TestFailedPromotionRestoresExternalInstallationWithoutCurrent(t *testing.T)
 			if readErr != nil || strings.TrimSpace(string(restored)) != f.source {
 				t.Fatalf("native source after rollback = %q, %v; want %s", restored, readErr, f.source)
 			}
-			if _, err := os.Stat(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginJournalName)); !os.IsNotExist(err) {
-				t.Fatalf("verified external rollback left journal: %v", err)
+			_, journalErr := os.Stat(filepath.Join(f.home, ".felt", pluginRuntimeDirName, pluginJournalName))
+			if harness == "claude" {
+				if journalErr != nil || !strings.Contains(err.Error(), "no sealed generation marker") {
+					t.Fatalf("unverified Claude rollback must retain journal: promotion=%v journal=%v", err, journalErr)
+				}
+			} else if !os.IsNotExist(journalErr) {
+				t.Fatalf("verified external rollback left journal: %v", journalErr)
 			}
 		})
+	}
+}
+
+func TestExternalClaudeRollbackRetainsUnverifiedCacheJournal(t *testing.T) {
+	t.Parallel()
+	for _, sourceKind := range []string{"directory", "github"} {
+		for _, interrupted := range []bool{false, true} {
+			t.Run(sourceKind+"/interrupted="+fmt.Sprint(interrupted), func(t *testing.T) {
+				f := newRemoteSetupFixture(t, "claude")
+				source := f.source
+				if sourceKind == "github" {
+					source = "example/felt"
+				}
+				for name, data := range map[string][]byte{"source": []byte(source), "installed": nil} {
+					if err := os.WriteFile(filepath.Join(f.stateDir, name), data, 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				func() {
+					defer func() {
+						if r := recover(); r != nil && !interrupted {
+							panic(r)
+						}
+					}()
+					err := f.a.withStagedPluginCandidateWithRestore(f.source, func(current string) error {
+						if err := f.a.installClaudePluginAtSource(current); err != nil {
+							t.Fatal(err)
+						}
+						// The update reports success but leaves the rejected candidate cached.
+						f.env.Set("FAKE_NATIVE_TAMPER", "stale-update")
+						if interrupted {
+							panic("interrupted promotion")
+						}
+						return os.ErrPermission
+					}, nil)
+					if err == nil {
+						t.Fatal("failed candidate was accepted")
+					}
+				}()
+				runtimeDir := filepath.Join(f.home, ".felt", pluginRuntimeDirName)
+				if err := f.a.recoverPluginPromotion(runtimeDir); err == nil {
+					t.Error("recovery accepted an unverifiable external cache")
+				}
+				journal, err := readJSONFile[pluginPromotionJournal](filepath.Join(runtimeDir, pluginJournalName))
+				if err != nil || journal.Phase != "pending_reconciliation" || journal.Native == nil {
+					t.Fatalf("unverified rollback lost retry intent: %#v, %v", journal, err)
+				}
+				if _, err := validatePluginGeneration(filepath.Join(f.stateDir, "cache")); err != nil {
+					t.Fatalf("expected rejected candidate still cached: %v", err)
+				}
+			})
+		}
 	}
 }
 

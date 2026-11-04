@@ -87,10 +87,10 @@ func (a *app) verifyCodexLoadedBundle(current, name string) error {
 }
 
 // promotedGenerationForVerify reads the sealed marker for a promoted path.
-// A missing marker means a legacy generation restored during recovery: those
-// predate sealing and cannot be verified, so verification is skipped rather
-// than turning recovery into a permanent failure. Every candidate staged by
-// this build is sealed before promotion, so a fresh install always verifies.
+// A missing marker identifies an unsealed source, not a verified cache.
+// Install verification skips such sources; Claude recovery requires a marker
+// before discarding its reconciliation journal. Every staged candidate is sealed
+// before promotion, so a fresh install always verifies.
 func promotedGenerationForVerify(current string) (pluginGenerationIdentity, bool, error) {
 	root := filepath.Join(current, "claude-plugin")
 	if !isRegularFile(filepath.Join(current, pluginGenerationMarkerName)) {
