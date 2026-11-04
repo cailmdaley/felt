@@ -134,7 +134,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       )
 
     assert conn.status == 200
-    assert File.read!(args_file) == "-C\n#{store}\nrest\ntests/operator\n--local\n"
+
+    assert File.read!(args_file) ==
+             "-C\n#{store}\nrest\ntests/operator\n--fiber-path\ntests/operator\n--local\n"
   end
 
   test "dated and undated rest pass the date through the serialized writer" do
@@ -152,7 +154,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       assert conn.status == 200
 
       assert File.read!(args_file) ==
-               "-C\n#{store}\nrest\ntests/operator\n--until\n#{until}\n--local\n"
+               "-C\n#{store}\nrest\ntests/operator\n--until\n#{until}\n--fiber-path\ntests/operator\n--local\n"
     end
   end
 
@@ -311,7 +313,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
 
       assert conn.status == 200
       flag = if quiet, do: "--quiet\n", else: ""
-      assert File.read!(args_file) == "-C\n#{store}\nclose\ntests/quiet-close\n#{flag}--local\n"
+
+      assert File.read!(args_file) ==
+               "-C\n#{store}\nclose\ntests/quiet-close\n#{flag}--fiber-path\ntests/quiet-close\n--local\n"
     end
   end
 
@@ -329,7 +333,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       body = Map.merge(%{"action" => action, "fiber" => "tests/actor", "actor" => "chair"}, extra)
       conn = post(api_conn(), "/api/v1/lifecycle", Jason.encode!(body))
       assert conn.status == 200
-      assert File.read!(args_file) == "-C\n#{store}\n#{action}\ntests/actor\n#{flags}--local\n"
+
+      assert File.read!(args_file) ==
+               "-C\n#{store}\n#{action}\ntests/actor\n#{flags}--fiber-path\ntests/actor\n--local\n"
     end
   end
 
@@ -349,7 +355,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert close_conn.status == 200
 
     assert File.read!(close_args) ==
-             "-C\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n--local\n"
+             "-C\n#{close_store}\nclose\ntests/close-route\n--tempered=true\n--fiber-path\ntests/close-route\n--local\n"
 
     reopen_store =
       fixture_store!("shuttle-lifecycle-reopen-route", "tests/reopen-route", "Reopen route")
@@ -371,7 +377,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert reopen_conn.status == 200
 
     assert File.read!(reopen_args) ==
-             "-C\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n--local\n"
+             "-C\n#{reopen_store}\nreopen\ntests/reopen-route\n--as-draft\n--project-dir\n/tmp/project\n--fiber-path\ntests/reopen-route\n--local\n"
   end
 
   # set-interactive is retired: the controller no longer allows the action, so a
@@ -437,7 +443,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "-C\n#{store}\npause\ntests/pause-edit\n--local\n"
+             "-C\n#{store}\npause\ntests/pause-edit\n--fiber-path\ntests/pause-edit\n--local\n"
   end
 
   test "pause --no-kill appends the flag after the verb and fiber id" do
@@ -456,7 +462,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
     assert conn.status == 200
 
     assert File.read!(args_file) ==
-             "-C\n#{store}\npause\ntests/pause-nokill\n--no-kill\n--local\n"
+             "-C\n#{store}\npause\ntests/pause-nokill\n--no-kill\n--fiber-path\ntests/pause-nokill\n--local\n"
   end
 
   # set-agent composes base agent × effort × chrome in one validated write.
@@ -526,7 +532,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       )
 
     assert conn.status == 200
-    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--local\n"
+
+    assert File.read!(args_file) ==
+             "-C\n#{store}\nseat\ntests/hub\n--fiber-path\ntests/hub\n--local\n"
 
     conn =
       post(
@@ -536,7 +544,9 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       )
 
     assert conn.status == 200
-    assert File.read!(args_file) == "-C\n#{store}\nseat\ntests/hub\n--clear\n--local\n"
+
+    assert File.read!(args_file) ==
+             "-C\n#{store}\nseat\ntests/hub\n--clear\n--fiber-path\ntests/hub\n--local\n"
   end
 
   defmodule SeatRunner do
@@ -609,7 +619,10 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       assert conn.status == 200
       assert_receive {:seat_writer, writer, args}
       assert writer == poller
-      assert args == ["-C", store, action, "tests/hub"] ++ office_args ++ ["--local"]
+
+      assert args ==
+               ["-C", store, action, "tests/hub"] ++
+                 office_args ++ ["--fiber-path", "tests/hub", "--local"]
     end
   end
 
@@ -718,7 +731,7 @@ defmodule ShuttleWeb.LifecycleControllerTest do
       assert conn.resp_body == "ok\n"
 
       assert File.read!(args_file) ==
-               "-C\n#{store}\n#{unquote(verb)}\ntests/standing\n--local\n"
+               "-C\n#{store}\n#{unquote(verb)}\ntests/standing\n--fiber-path\ntests/standing\n--local\n"
     end
   end
 

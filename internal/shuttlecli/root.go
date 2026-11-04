@@ -215,7 +215,7 @@ func (a *app) rootCmd() *cobra.Command {
 	)
 	root.SetHelpCommandGroupID(groupOperations)
 	root.PersistentFlags().BoolVarP(&a.json, "json", "j", false, "Output in JSON format")
-	root.PersistentFlags().StringVar(&a.fiberPathHint, "fiber-path", "", "Exact namespace path to verify before walking for a fiber UID")
+	root.PersistentFlags().StringVar(&a.fiberPathHint, "fiber-path", "", "Exact namespace path for a resolved write (verified against its UID when present)")
 	root.PersistentFlags().StringVarP(&a.dir, "store", "C", "", "Felt store root (directory containing .felt/)")
 	for _, command := range []*cobra.Command{
 		a.shuttleAgentsCmd(),

@@ -107,6 +107,7 @@ fields, and runs the matching `shuttle <action>` on the owning host:
 `uninstall`.
 Lifecycle requests can carry `fiber_path`, an exact namespace path verified against the requested UID before a full UID search.
 A stale or mismatched hint falls back to UID resolution; it never changes the requested identity.
+The writer reads the resolved address directly, without convenient lookup or remote fallback. UID-less documents retain exact path addressing even if the file disappears between resolution and the write.
 An authoritative miss returns 404 with `{error_code: "fiber_not_found", host, fiber, error}`.
 Ambiguous identities and resolution failures are not misses and never authorize a draft transfer.
 The `role` action takes `role: <role-slug>`, or `clear: true` to remove both role and seat.

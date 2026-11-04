@@ -24,6 +24,26 @@ defmodule Shuttle.FeltIdentityReviewTest do
     path
   end
 
+  defmodule LostPathRunner do
+    def cmd("shuttle", ["-C", store, _verb, "worker" | _] = args, opts) do
+      File.rm!(Path.join(store, ".felt/worker/worker.md"))
+      Shuttle.Runner.Default.cmd("shuttle", args, opts)
+    end
+  end
+
+  @tag :tmp_dir
+  test "a UID-less target lost after resolution cannot become a same-leaf write", %{tmp_dir: tmp} do
+    store = Path.join(tmp, "store")
+    write_fiber(store, "worker", nil)
+    trap = write_fiber(store, "elsewhere/worker", nil)
+    Env.put_env("SHUTTLE_STORES", store)
+    Env.put_app_env(:felt_runner, LostPathRunner)
+    Env.put_env("SHUTTLE_DAEMON_URL", "http://127.0.0.1:1")
+    result = Shuttle.LifecycleService.transition(:pause, "worker", ["--no-kill"])
+    assert File.read!(trap) =~ "status: active"
+    assert {:command_error, _, _} = result
+  end
+
   defmodule HintOnlyRunner do
     def cmd("felt", ["-C", _store, "show", id | _] = args, opts) do
       if Shuttle.ULID.valid?(id),

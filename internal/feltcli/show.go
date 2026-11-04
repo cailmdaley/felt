@@ -75,18 +75,18 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 			// the fiber addressed by its resolved id in that store's coordinates:
 			// an id naming a fiber in the enclosing store is shown from there,
 			// and a UID is read directly instead of walked for a second time.
-			read := func(find func(*felt.Storage, string, string) (*felt.Felt, error)) (*felt.Felt, error) {
+			read := func(mode felt.ParseMode) (*felt.Felt, error) {
 				var target felt.Ref
 				var f *felt.Felt
 				var err error
 				if showExact {
 					target, err = felt.ResolveAddressRefWithHint(storage, args[0], showPathHint)
 					if err == nil {
-						f, err = find(target.Storage, "", target.ID)
+						f, err = felt.ReadRef(target, mode)
 					}
 				} else {
 					target, f, err = felt.ReadResolved(storage, scopeID, args[0], func(r felt.Ref) (*felt.Felt, error) {
-						return find(r.Storage, "", r.ID)
+						return felt.ReadRef(r, mode)
 					})
 				}
 				if err == nil {
@@ -108,11 +108,11 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				// Both levels skip the relationship scan and the body-ref graph.
 				// Compact still reads the body — it reports the body's line count —
 				// but that is one extra file read, not a walk.
-				find := (*felt.Storage).FindMetadataInScope
+				mode := felt.ParseMetadataOnly
 				if detail == DepthCompact {
-					find = (*felt.Storage).FindInScope
+					mode = felt.ParseFull
 				}
-				f, err := read(find)
+				f, err := read(mode)
 				if err != nil {
 					return err
 				}
@@ -120,7 +120,7 @@ scalars one per line, anything else as YAML, and nothing for a missing key.`,
 				return nil
 			}
 
-			f, err := read((*felt.Storage).FindInScope)
+			f, err := read(felt.ParseFull)
 			if err != nil {
 				return err
 			}

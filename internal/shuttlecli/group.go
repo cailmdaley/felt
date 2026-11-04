@@ -26,15 +26,15 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 	}
 	storage := felt.NewStorage(root)
 	var ref felt.Ref
-	if a.fiberPathHint != "" && felt.LooksLikeUID(query) {
+	if a.fiberPathHint != "" {
 		ref, err = felt.ResolveAddressRefWithHint(storage, query, a.fiberPathHint)
 	} else {
 		ref, err = felt.ResolveRef(storage, felt.CommandScope(a.env, root, a.dir), query)
 	}
 	if err != nil {
-		// Only an established miss permits owner lookup. Ambiguous queries and
-		// local read failures must keep their original meaning.
-		if _, missing := err.(*felt.NoFiberMatchError); !missing {
+		// Interactive misses can ask an owner. Exact writer addresses remain
+		// local; ambiguity and read failures never become another lookup.
+		if _, missing := err.(*felt.NoFiberMatchError); !missing || a.fiberPathHint != "" {
 			return nil, nil, felt.Ref{}, err
 		}
 		remote, remoteRef, remoteErr := a.remoteFiber(query, full)
@@ -46,12 +46,11 @@ func (a *app) shuttleResolveFiberRef(query string, full bool) (*felt.Felt, *felt
 		}
 		return remote, nil, remoteRef, nil
 	}
-	var fiber *felt.Felt
+	mode := felt.ParseMetadataOnly
 	if full {
-		fiber, err = ref.Storage.FindInScope("", ref.ID)
-	} else {
-		fiber, err = ref.Storage.FindMetadataInScope("", ref.ID)
+		mode = felt.ParseFull
 	}
+	fiber, err := felt.ReadRef(ref, mode)
 	if err != nil {
 		return nil, nil, felt.Ref{}, err
 	}

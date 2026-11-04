@@ -198,6 +198,16 @@ func ResolveAddressRefWithHint(storage *Storage, query, hint string) (Ref, error
 	return ResolveAddressRef(storage, query)
 }
 
+// ReadRef reads a resolved address without repeating convenient lookup. A lost
+// path or replaced UID is an error, never permission to select another document.
+func ReadRef(ref Ref, mode ParseMode) (*Felt, error) {
+	f, err := ref.Storage.readPathWithMode(ref.Storage.Path(ref.ID), ref.ID, mode)
+	if err == nil && ref.UID != "" && !f.MatchesUID(ref.UID) {
+		return nil, fmt.Errorf("fiber at %q no longer has UID %q", ref.ID, ref.UID)
+	}
+	return f, err
+}
+
 // ReadResolved resolves query and reads the fiber it names with read. A UID
 // resolves to an id first, and the fiber can move before the read: when the
 // fiber read there is missing or carries another UID, the UID is resolved and
