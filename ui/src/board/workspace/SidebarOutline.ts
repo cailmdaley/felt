@@ -71,7 +71,10 @@ export function sidebarOutline(index: ThreadIndex, desk: KanbanCard[], current: 
       rows.push(...(state.more ? asks : asks.slice(0, 3)))
       if (state.working) rows.push(...working.map(row => row.card))
     }
-    if (current && rootIdentity(index.family(current).root) === rootIdentity(root) && !rows.some(card => cardIdentity(card) === cardIdentity(current))) rows.push(current)
+    if (current && rootIdentity(index.family(current).root) === rootIdentity(root) && !rows.some(card => cardIdentity(card) === cardIdentity(current))) {
+      const live = index.card(current)
+      rows.push(cardIdentity(live) === cardIdentity(current) ? live : current)
+    }
     rows = [...new Map(rows.map(card => [cardIdentity(card), card])).values()]
     return { root, asks, working, rows, folded, expandable: !!(asks.length || working.length), more: Math.max(0, asks.length - 3) }
   })

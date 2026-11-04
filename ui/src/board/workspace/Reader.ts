@@ -794,13 +794,14 @@ export class Reader {
     }
     for (const family of this.sidebarFamilies()) {
       const { root, asks, working } = family, rootRow = rowFor(root)
+      const workingCount = working.filter(item => index.state(item.card) === 'working').length
       rootRow?.setAttribute('aria-level', '1')
       if (rootRow && family.expandable && !query) {
         const fold = toggle(root, 'collapsed', family.folded ? '▸' : '▾', !family.folded)
         fold.setAttribute('aria-label', `${family.folded ? 'Expand' : 'Collapse'} ${root.name}`)
         rootRow.prepend(fold)
       }
-      if (rootRow && family.folded && asks.length) rootRow.append(element('span', 'ws-sidebar-count', `${asks.length} ${asks.length === 1 ? 'needs' : 'need'} you`))
+      if (rootRow && family.folded && (asks.length || workingCount)) rootRow.append(element('span', 'ws-sidebar-count', asks.length ? `${asks.length} ${asks.length === 1 ? 'needs' : 'need'} you` : `${workingCount} working`))
       const workingDepth = new Map(working.map(item => [cardIdentity(item.card), item.depth]))
       for (const card of family.rows) {
         if (rootIdentity(card) === rootIdentity(root)) continue
@@ -819,8 +820,7 @@ export class Reader {
         const more = toggle(root, 'more', open ? 'Show fewer' : `+${family.more} more`, open)
         anchor.after(more); anchor = more
       }
-      const n = working.filter(item => index.state(item.card) === 'working').length
-      if (n) anchor.after(toggle(root, 'working', `Working ${n}`, this.sidebarPreferences.folds[rootIdentity(root)]?.working ?? false))
+      if (workingCount) anchor.after(toggle(root, 'working', `Working ${workingCount}`, this.sidebarPreferences.folds[rootIdentity(root)]?.working ?? false))
     }
   }
   /** One state dot and the name; details belong to the open page. */

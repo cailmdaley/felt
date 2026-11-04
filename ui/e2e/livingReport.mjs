@@ -41,7 +41,7 @@ export function registerLivingReportJourneys(test) {
       const errors = []
       page.on('pageerror', error => errors.push(String(error)))
       await page.goto(url)
-      await page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+      await page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').click()
       // The family tree keeps the report's owning constitution at its root.
       if (phone) await page.locator('.ws-rail-toggle').click()
       const family = page.locator(phone ? '.ws-page-sheet[open] .ws-phone-threads' : '.ws-thread-rail .ws-thread-tree')
@@ -178,7 +178,7 @@ export function registerLivingReportJourneys(test) {
   for (const hasTouch of [false, true]) {
     test(`Persistent rail (${hasTouch ? 'coarse' : 'fine'} pointer)`, async page => {
       await page.goto(url)
-      const enter = () => page.locator('.kbn-desk .kbn-card').filter({ hasText: 'Calibrate the shear response' }).click()
+      const enter = () => page.locator('.kbn-desk .kbn-card[data-fiber-id="research/workspace/calibration-report"]').click()
       await enter()
       await page.getByRole('button', { name: 'Hide threads and sent files', exact: true }).click()
       assert.equal(await page.locator('.ws-thread-rail').isVisible(), false)

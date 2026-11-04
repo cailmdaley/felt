@@ -18,6 +18,11 @@ describe('sidebar family outline', () => {
     expect(outline([...asks, work], folds, work).rows.map(c => c.id)).toEqual(['hub', 'work'])
     expect(folds).toEqual({ root: { collapsed: true } })
   })
+  it('reveals the fresh feed copy of a current page hidden by a fold', () => {
+    const live = child('work', { status: 'active' })
+    const stale = { ...live, status: 'closed' }
+    expect(outline([live], { root: { collapsed: true } }, stale).rows[1]).toBe(live)
+  })
   it('keeps a non-working ancestor as context of working descendants', () => {
     const mid = child('mid', { uid: 'mid', tempered: true })
     const work = child('work', { orchestrator: 'mid', status: 'active' })
