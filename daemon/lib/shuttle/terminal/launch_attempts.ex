@@ -13,7 +13,7 @@ defmodule Shuttle.Terminal.LaunchAttempts do
 
     case FS.read(target) do
       {:ok, script} ->
-        if FS.stat(script) == {:error, :enoent} do
+        if script_path?(script) and FS.stat(script) == {:error, :enoent} do
           FS.rm(target)
           false
         else
@@ -44,15 +44,17 @@ defmodule Shuttle.Terminal.LaunchAttempts do
     target = path(name)
 
     case FS.read(target) do
-      {:ok, script} ->
-        with :ok <- remove(script), do: remove(target)
-
-      {:error, :enoent} ->
-        :ok
-
-      error ->
-        error
+      {:ok, script} -> if script_path?(script), do: FS.rm(script)
+      {:error, _} -> :ok
     end
+
+    remove(target)
+  end
+
+  defp script_path?(script) do
+    String.valid?(script) and not String.contains?(script, <<0>>) and
+      Path.type(script) == :absolute and
+      Regex.match?(~r/^shuttle-run-.+\.[0-9]+\.sh$/, Path.basename(script))
   end
 
   defp remove(path) do

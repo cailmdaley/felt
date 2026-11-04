@@ -11,6 +11,51 @@ defmodule Shuttle.Terminal.LaunchAttemptsTest do
     {:ok, script: script}
   end
 
+  for kind <- [:nul, :non_utf8, :under_file, :directory, :relative, :absolute, :script_directory] do
+    @tag :reservation_corrupt
+    test "confirmed absence retires a #{kind} record without deleting unrelated paths", %{
+      script: script,
+      tmp_dir: dir
+    } do
+      assert :ok = LaunchAttempts.record("worker", script)
+      [file] = Path.wildcard(Path.join(dir, "terminals/launch-attempts/*"))
+      keep = Path.join(dir, "keep")
+      File.write!(keep, "keep")
+
+      corrupt =
+        case unquote(kind) do
+          :nul ->
+            <<0>>
+
+          :non_utf8 ->
+            <<255>>
+
+          :under_file ->
+            Path.join(keep, "child")
+
+          :directory ->
+            dir
+
+          :relative ->
+            Path.relative_to_cwd(keep)
+
+          :absolute ->
+            keep
+
+          :script_directory ->
+            path = Path.join(dir, "shuttle-run-worker.99.sh")
+            File.mkdir_p!(path)
+            path
+        end
+
+      File.write!(file, corrupt)
+      assert :ok = LaunchAttempts.clear("worker")
+      refute File.exists?(file)
+      assert File.read!(keep) == "keep"
+      assert File.exists?(script)
+    end
+  end
+
   @tag :reservation_exit
   test "the run script's exit trap retires its reservation even without liveness probes", %{
     script: script,
