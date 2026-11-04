@@ -9,9 +9,22 @@ defmodule Shuttle.Terminal.LaunchAttempts do
   end
 
   def pending?(name) do
-    case FS.stat(path(name)) do
-      {:error, :enoent} -> false
-      _ -> true
+    target = path(name)
+
+    case FS.read(target) do
+      {:ok, script} ->
+        if FS.stat(script) == {:error, :enoent} do
+          FS.rm(target)
+          false
+        else
+          true
+        end
+
+      {:error, :enoent} ->
+        false
+
+      {:error, _} ->
+        true
     end
   end
 
