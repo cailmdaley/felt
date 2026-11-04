@@ -4,6 +4,8 @@ felt keeps shared hook and skill sources in `claude-plugin/`. **Claude Code**
 installs that combined payload. **Codex** installs two independently refreshed
 plugins from a generated `.agents/plugins/marketplace.json`: `felt` contains
 only hooks and its manifest; `felt-skills` contains only skills and its manifest.
+The Codex hook root contains exactly its manifest, `hooks.json`, and the
+`pluginHookBasenames` shell adapters; Pi-only JavaScript is not copied.
 Their adapter-format version is independent of the CLI release. **pi** uses
 its native package and the same skill sources.
 
@@ -85,7 +87,14 @@ Go-only and skills-only releases leave the installed hook root untouched and do 
 **The combined-to-split migration is a hook-bundle change.** The first setup removes skills and release provenance from the hook approval boundary and installs the separate skills bundle.
 On Codex 0.166.0, an already-live combined-plugin runtime refuses its next hook with `plugin contents changed; hook approval required`, even when the hook commands themselves are identical and setup has persisted the new approval.
 The conversation and process remain alive, but refused hooks do not deliver context, mailbox messages, activity records, or handoff nudges.
-A fresh runtime loads the approved split bundles; recover an existing conversation with the exit-and-resume procedure above.
+The skills are named `felt-skills:felt` and `felt-skills:shuttle`. Old skill paths
+in the removed combined cache become unreadable. Codex 0.166.0's live
+`skills/list` discovers the new names and paths without forced reload, even
+while hooks still refuse execution; previously read skill text in conversation
+context is not replaced. A fresh runtime loads the approved split bundles;
+recover an existing conversation with the exit-and-resume procedure above.
+When manually rolling back to the combined plugin, first run
+`codex plugin remove felt-skills@cailmdaley-felt` to avoid duplicate skills.
 A healthy receipt describes installed bytes and persisted approval, not the stale live process.
 
 Other plugins' definition-only approvals can also fail after their contents change.
@@ -135,8 +144,10 @@ missing provenance, or source/cache disagreement are unhealthy, with a setup
 command to repair them. Marker and journal writes are fsynced and renamed with
 a parent-directory sync, preserving crash recovery.
 
-`TestCodexPluginPayloadClassificationGate` classifies every source plugin file
-as hook-bundle or skills-bundle and rejects release metadata in generated roots.
+`TestCodexPluginPayloadClassificationGate` explicitly classifies source plugin
+files as hook-bundle, skills-bundle, or Pi-only. An exact hook source allowlist
+and a generated-tree equality gate reject unreviewed files and release metadata
+without relying on a metadata filename or JSON-key convention.
 Real-Codex tests exercise successive Go-only revisions, skills-only refreshes,
 combined-to-split migration, and genuine hook changes against a live thread.
 

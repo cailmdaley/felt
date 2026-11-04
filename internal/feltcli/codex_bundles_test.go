@@ -274,6 +274,21 @@ func TestCodexProjectionIgnoresPiOnlyHookSources(t *testing.T) {
 	}
 }
 
+func TestCodexSetupDocsNameSkillsAndRollbackCleanup(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{"docs/agents.md", "docs/dev/releasing.md"} {
+		data, err := os.ReadFile(filepath.Join(repoRoot(t), path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{"felt-skills:felt", "felt-skills:shuttle", "codex plugin remove felt-skills@cailmdaley-felt"} {
+			if !strings.Contains(string(data), required) {
+				t.Errorf("%s omits %s", path, required)
+			}
+		}
+	}
+}
+
 func TestCodexRollbackVerifiesSkillsCache(t *testing.T) {
 	t.Parallel()
 	f := newRemoteSetupFixture(t, "codex")
