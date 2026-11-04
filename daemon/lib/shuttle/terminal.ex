@@ -13,7 +13,7 @@ defmodule Shuttle.Terminal do
   """
 
   alias Shuttle.{Dispatcher, WorkerProcess}
-  alias Shuttle.Terminal.Tmux
+  alias Shuttle.Terminal.{LaunchAttempts, Tmux}
 
   @type status :: :alive | :gone | :unknown
 
@@ -117,9 +117,15 @@ defmodule Shuttle.Terminal do
   @doc "Unknown liveness holds an existing assignment, never invents a first launch."
   def present?(runner, name, opts \\ []) do
     case status(runner, name) do
-      :alive -> true
-      :gone -> false
-      :unknown -> Keyword.get(opts, :launch_evidence, true) or rex_bound?(name)
+      :alive ->
+        true
+
+      :gone ->
+        false
+
+      :unknown ->
+        Keyword.get(opts, :launch_evidence, true) or rex_bound?(name) or
+          LaunchAttempts.pending?(name)
     end
   end
 
@@ -170,23 +176,38 @@ defmodule Shuttle.Terminal do
     if not present?(runner, name, opts) do
       backend = primary()
 
-      with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)) do
+      with :ok <- if(opts[:preflighted], do: :ok, else: backend.ensure_ready(runner)),
+           :ok <- LaunchAttempts.clear(name) do
         path = WorkerProcess.script_path(name)
         Shuttle.FS.write!(path, script_text)
         Shuttle.FS.chmod!(path, 0o755)
 
-        case backend.launch(runner, name, cwd, path, opts) do
+        case LaunchAttempts.record(name, path) do
           :ok ->
-            refresh_layout(runner, backend)
-            :ok
+            launch_backend(runner, backend, name, cwd, path, opts)
 
-          {:error, _} = error ->
+          error ->
             Shuttle.FS.rm(path)
             error
         end
       end
     else
       {:error, :already_running}
+    end
+  end
+
+  defp launch_backend(runner, backend, name, cwd, path, opts) do
+    case backend.launch(runner, name, cwd, path, opts) do
+      :ok ->
+        refresh_layout(runner, backend)
+        :ok
+
+      {:error, {:unknown, _}} = error ->
+        error
+
+      {:error, _} = error ->
+        LaunchAttempts.clear(name)
+        error
     end
   end
 

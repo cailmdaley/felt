@@ -28,8 +28,14 @@ defmodule Shuttle.Terminal.Tmux do
         Shuttle.Terminal.RuntimeEnv.tmux_args() ++ ["-c", cwd, "bash", "-l", script_path]
 
     case runner.cmd("tmux", args, stderr_to_stdout: true) do
-      {_, 0} -> :ok
-      {output, _} -> {:error, "tmux failed: #{output}"}
+      {_, 0} ->
+        :ok
+
+      {output, status} when status in [:timeout, :output_limit] ->
+        {:error, {:unknown, "tmux failed: #{output}"}}
+
+      {output, _} ->
+        {:error, "tmux failed: #{output}"}
     end
   end
 

@@ -7,8 +7,9 @@ defmodule Shuttle.Terminal.Backend do
   @callback id() :: String.t()
   @callback available?() :: boolean()
   @callback ensure_ready(runner()) :: :ok | {:error, {atom(), String.t()}}
+  @doc "Tag ambiguous launches {:error, {:unknown, reason}}; other errors confirm this attempt left no worker."
   @callback launch(runner(), String.t(), String.t(), String.t(), keyword()) ::
-              :ok | {:error, String.t()}
+              :ok | {:error, term()}
   @callback probe(runner(), String.t()) :: probe()
   @callback list(runner()) :: {:ok, [String.t()]} | {:error, :unknown}
   @callback close(runner(), String.t()) :: :ok | :absent | {:error, String.t()}

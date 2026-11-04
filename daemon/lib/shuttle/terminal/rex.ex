@@ -214,7 +214,7 @@ defmodule Shuttle.Terminal.Rex do
        }),
        do: window_binding(sid, window)
 
-  defp created_binding(_), do: {:error, :invalid_create_reply}
+  defp created_binding(_), do: {:error, {:unknown, :invalid_create_reply}}
 
   defp window_binding(sid, %{
          "window_id" => "window:" <> _ = wid,
@@ -222,7 +222,7 @@ defmodule Shuttle.Terminal.Rex do
        }),
        do: {:ok, Map.put(binding(sid, bid), "window_id", wid)}
 
-  defp window_binding(_, _), do: {:error, :invalid_window_reply}
+  defp window_binding(_, _), do: {:error, {:unknown, :invalid_window_reply}}
 
   defp family_lock(root, fun),
     do: Shuttle.Terminal.with_lock({__MODULE__, Bindings.path(), :family, root}, fun)
@@ -269,8 +269,7 @@ defmodule Shuttle.Terminal.Rex do
                   {:ok, b}
 
                 error ->
-                  Rex.destroy(runner, b["session_id"])
-                  error
+                  launch_cleanup(error, fn -> Rex.destroy(runner, b["session_id"]) end)
               end
             end
           end
@@ -284,13 +283,25 @@ defmodule Shuttle.Terminal.Rex do
               {:ok, b}
 
             error ->
-              Rex.close_window(runner, b["session_id"], b["window_id"])
+              result =
+                launch_cleanup(error, fn ->
+                  Rex.close_window(runner, b["session_id"], b["window_id"])
+                end)
+
               cleanup_family(runner, root, b["session_id"])
-              error
+              result
           end
         end
       end
     end)
+  end
+
+  defp launch_cleanup(error, cleanup) do
+    case cleanup.() do
+      {:ok, _} -> error
+      {:error, reason} when reason in [:not_found, :server_absent] -> error
+      failure -> {:error, {:unknown, "Rex launch cleanup was not confirmed: #{inspect(failure)}"}}
+    end
   end
 
   @impl true

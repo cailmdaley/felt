@@ -4807,7 +4807,42 @@ defmodule Shuttle.PollerTest do
 
   defmodule PhantomRunner do
     def cmd("/bin/echo", args, opts), do: Shuttle.Test.FakeRex.cmd("/bin/echo", args, opts)
-    def cmd(command, args, opts), do: MockRunner.cmd(command, args, opts)
+
+    def cmd(command, args, opts) do
+      if command == "shuttle" and "mark-runtime" in args and
+           Shuttle.Env.app(:phantom_runtime_write_fails, false),
+         do: {"runtime write failed", 1},
+         else: MockRunner.cmd(command, args, opts)
+    end
+  end
+
+  @tag :launch_attempt
+  test "a failed runtime write cannot lose a successful launch across a poller restart" do
+    id = "tests/lost-runtime-marker"
+    MockRunner.set_fiber(id, make_fiber(id))
+    MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
+    Env.put_app_env(:phantom_runtime_write_fails, true)
+
+    opts = [
+      runner: PhantomRunner,
+      felt_stores: [MockRunner.felt_root()],
+      boot_quarantine: true,
+      poll_interval_ms: 600_000
+    ]
+
+    {:ok, poller} = start_poller!(opts)
+    await_boot_cycle!(poller)
+    assert {:ok, session} = Poller.dispatch_fiber(poller, id, force: true)
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == nil
+    assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
+    GenServer.stop(poller)
+    MockRunner.remove_tmux_session(session)
+    MockRunner.set_ps_result({"ps timed out", :timeout})
+    {:ok, restarted} = start_poller!(opts)
+    await_boot_cycle!(restarted)
+    assert {:error, :already_running} = Poller.dispatch_fiber(restarted, id, force: true)
+    assert length(new_session_scripts()) == 1
+    assert Poller.worker_status(restarted, id) == nil
   end
 
   describe "launch evidence on a Rex host with an unavailable process scan" do
@@ -4832,6 +4867,73 @@ defmodule Shuttle.PollerTest do
       MockRunner.set_fiber(id, make_fiber(id))
       MockRunner.set_shuttle(id, "kind: oneshot\nagent: claude-sonnet\n", "active")
       {:ok, fiber_id: id}
+    end
+
+    @tag :launch_attempt
+    test "a timed-out Rex create cannot launch a second worker during uncertain observation", %{
+      fiber_id: id
+    } do
+      alias Shuttle.Test.FakeRex
+      session = FiberUid.session(id)
+
+      opts = [
+        runner: PhantomRunner,
+        felt_stores: [MockRunner.felt_root()],
+        boot_quarantine: true,
+        poll_interval_ms: 600_000
+      ]
+
+      {:ok, poller} = start_poller!(opts)
+      await_boot_cycle!(poller)
+      counter = :counters.new(1, [])
+
+      Env.put_app_env(:fake_rex_hook, fn
+        "server.start" ->
+          FakeRex.clear_reply("session.list")
+
+        "session.create" ->
+          :counters.add(counter, 1, 1)
+
+          if :counters.get(counter, 1) == 1 do
+            FakeRex.sessions(%{
+              "session:hidden" => %{
+                label: session,
+                blocks: [%{"block_id" => "block:hidden", "label" => session}]
+              }
+            })
+
+            FakeRex.reply("session.create", {"request timed out", :timeout})
+          else
+            FakeRex.clear_reply("session.create")
+          end
+
+        _ ->
+          :ok
+      end)
+
+      MockRunner.set_ps_result({"", 0})
+      assert {:error, {:unknown, _}} = Poller.dispatch_fiber(poller, id, force: true)
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "dispatched_at"]) == nil
+      assert get_in(MockRunner.fiber(id), ["shuttle", "runtime", "session_uuid"]) == nil
+      MockRunner.set_ps_result({"ps timed out", :timeout})
+      FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
+      assert {:error, :already_running} = Poller.dispatch_fiber(poller, id, force: true)
+      assert :counters.get(counter, 1) == 1
+      assert Poller.worker_status(poller, id) == nil
+
+      [{_, _, launch_opts}] =
+        Enum.filter(FakeRex.calls(), fn {_, args, _} -> "session.create" in args end)
+
+      [window] = Jason.decode!(launch_opts[:input])["initial_windows"]
+      ["bash", "-l", script] = window["layout"]["block"]["options"]["command"]
+      assert File.exists?(script)
+
+      GenServer.stop(poller)
+      {:ok, restarted} = start_poller!(opts)
+      await_boot_cycle!(restarted)
+      assert {:error, :already_running} = Poller.dispatch_fiber(restarted, id, force: true)
+      assert :counters.get(counter, 1) == 1
+      assert File.exists?(script)
     end
 
     for automatic? <- [false, true] do

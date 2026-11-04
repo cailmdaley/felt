@@ -317,10 +317,13 @@ defmodule Shuttle.TerminalTest do
       :ok
     end
 
-    test "writes an executable script and launches bash -l at its tracked path" do
+    @tag :tmp_dir
+    test "writes an executable script and launches bash -l at its tracked path", %{
+      tmp_dir: data_dir
+    } do
       name = "terminal-test-#{System.unique_integer([:positive])}"
       Env.put_env("SHUTTLE_HOST", "worker-host")
-      Env.put_env("SHUTTLE_DATA_DIR", "/daemon/state")
+      Env.put_env("SHUTTLE_DATA_DIR", data_dir)
       Env.put_env("CODEX_HOME", "/operator/codex")
       assert :ok = Terminal.launch(stub(@absent), name, "/tmp", "echo worker\n")
 
@@ -333,7 +336,7 @@ defmodule Shuttle.TerminalTest do
 
       assert Enum.any?(
                Enum.chunk_every(args, 2, 1, :discard),
-               &(&1 == ["-e", "SHUTTLE_DATA_DIR=/daemon/state"])
+               &(&1 == ["-e", "SHUTTLE_DATA_DIR=#{data_dir}"])
              )
 
       assert Enum.any?(
@@ -354,6 +357,100 @@ defmodule Shuttle.TerminalTest do
       assert {:ok, %{mode: mode}} = File.stat(path)
       assert Bitwise.band(mode, 0o777) == 0o755
       assert Path.basename(path) =~ "shuttle-run-#{name}."
+    end
+
+    @tag :launch_attempt
+    @tag :tmp_dir
+    test "a reservation write failure cannot reach the terminal backend", %{tmp_dir: dir} do
+      Env.put_env("SHUTTLE_DATA_DIR", dir)
+      File.write!(Path.join(dir, "terminals"), "not a directory")
+      name = "unreserved-attempt-#{System.unique_integer([:positive])}"
+
+      assert {:error, :enotdir} =
+               Terminal.launch(stub(@absent), name, "/tmp", "sleep 30\n", launch_evidence: false)
+
+      refute_received {:tmux_args, ["new-session" | _]}
+      assert Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{name}.*.sh")) == []
+    end
+
+    @tag :launch_attempt
+    test "a successful launch remains evidence without a binding or runtime marker" do
+      name = "successful-attempt-#{System.unique_integer([:positive])}"
+
+      assert :ok =
+               Terminal.launch(stub(@absent), name, "/tmp", "sleep 30\n", launch_evidence: false)
+
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | args]}
+      path = List.last(args)
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:error, :already_running} =
+               Terminal.launch(
+                 stub({"timed out", :timeout}, {"ps timed out", :timeout}),
+                 name,
+                 "/tmp",
+                 "duplicate",
+                 launch_evidence: false
+               )
+
+      refute_received {:tmux_args, ["new-session" | _]}
+    end
+
+    @tag :launch_attempt
+    test "a confirmed failed launch leaves a never-launched name free even when ps later times out" do
+      name = "confirmed-failure-#{System.unique_integer([:positive])}"
+      Process.put(:launch_result, {"launch refused", 1})
+
+      assert {:error, "tmux failed: launch refused"} =
+               Terminal.launch(stub(@absent), name, "/tmp", "sleep 30\n", launch_evidence: false)
+
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | args]}
+      refute File.exists?(List.last(args))
+      Process.put(:launch_result, {"", 0})
+
+      assert :ok =
+               Terminal.launch(
+                 stub(@absent, {"ps timed out", :timeout}),
+                 name,
+                 "/tmp",
+                 "sleep 30\n",
+                 launch_evidence: false
+               )
+
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | retried]}
+      on_exit(fn -> File.rm(List.last(retried)) end)
+    end
+
+    @tag :launch_attempt
+    test "confirmed absence releases an ambiguous tmux launch and its retained script" do
+      name = "ambiguous-attempt-#{System.unique_integer([:positive])}"
+      Process.put(:launch_result, {"new-session timed out", :timeout})
+
+      assert {:error, {:unknown, _}} =
+               Terminal.launch(stub(@absent), name, "/tmp", "sleep 30\n", launch_evidence: false)
+
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | args]}
+      path = List.last(args)
+      assert File.exists?(path)
+
+      assert {:error, :already_running} =
+               Terminal.launch(
+                 stub(@absent, {"ps timed out", :timeout}),
+                 name,
+                 "/tmp",
+                 "duplicate",
+                 launch_evidence: false
+               )
+
+      refute_received {:tmux_args, ["new-session" | _]}
+      Process.put(:launch_result, {"", 0})
+
+      assert :ok =
+               Terminal.launch(stub(@absent), name, "/tmp", "sleep 30\n", launch_evidence: false)
+
+      assert_received {:tmux_args, ["new-session", "-d", "-s", ^name | retried]}
+      refute File.exists?(path)
+      on_exit(fn -> File.rm(List.last(retried)) end)
     end
 
     test "a failed launch removes its script" do

@@ -17,6 +17,46 @@ defmodule Shuttle.Terminal.RexFamiliesTest do
     :ok
   end
 
+  @tag :launch_attempt
+  test "an ambiguous sibling-window launch reserves its name without a Rex binding", %{
+    tmp_dir: dir
+  } do
+    Env.put_app_env(:terminal_backend, Backend)
+
+    on_exit(fn ->
+      for name <- ["attempt-sibling-a", "attempt-sibling-b"],
+          path <- Path.wildcard(Path.join(System.tmp_dir!(), "shuttle-run-#{name}.*.sh")),
+          do: File.rm(path)
+    end)
+
+    assert :ok =
+             Shuttle.Terminal.launch(FakeRex, "attempt-sibling-a", dir, "sleep 60\n",
+               fiber: @root <> "/a",
+               launch_evidence: false
+             )
+
+    FakeRex.reply("session.new_window", {"request timed out", :timeout})
+
+    assert {:error, {:unknown, _}} =
+             Shuttle.Terminal.launch(FakeRex, "attempt-sibling-b", dir, "sleep 60\n",
+               fiber: @root <> "/b",
+               launch_evidence: false
+             )
+
+    assert {:ok, %{"bindings" => bindings}} = RexBindings.read()
+    refute Map.has_key?(bindings, "attempt-sibling-b")
+    FakeRex.reply("session.list_blocks", {"request timed out", :timeout})
+    FakeRex.reply("ps", {"ps timed out", :timeout})
+
+    assert {:error, :already_running} =
+             Shuttle.Terminal.launch(FakeRex, "attempt-sibling-b", dir, "duplicate",
+               fiber: @root <> "/b",
+               launch_evidence: false
+             )
+
+    assert Enum.count(FakeRex.calls(), fn {_, args, _} -> "session.new_window" in args end) == 1
+  end
+
   test "a new server instance retires restored worker and viewer windows before recovery" do
     assert :ok = launch("a", @root <> "/a")
     assert {:ok, sid} = Backend.viewer(FakeRex, "b@remote", ["sleep", "60"], fiber: @root <> "/b")
