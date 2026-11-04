@@ -918,14 +918,19 @@ defmodule Shuttle.RemoteRegistryTest do
       assert [{"ssh", _}] = MockRunner.calls()
     end
 
-    test "a live daemon behind a tunnel retries the tunnel bounce" do
+    test "a live daemon behind a broken tunnel reaches backoff and trips" do
+      {clock, advance} = fake_clock()
       MockClient.set("http://localhost:4001/api/v1/state", {:error, :econnrefused})
       MockRunner.set("launchctl", [{"", 0}])
-      MockRunner.set("ssh", [{"daemon=alive\n", 0}])
+      MockRunner.set("ssh", List.duplicate({"daemon=alive\n", 0}, 100))
 
       {:ok, _pid} =
         RemoteRegistry.start_link(
           name: :reg_live_tunnel,
+          clock: clock,
+          trip_threshold: 2,
+          backoff_schedule_ms: [10],
+          restart_wait_ms: 10,
           remotes: [candide_remote(poll_interval_ms: 1)],
           client: MockClient,
           runner: MockRunner,
@@ -936,17 +941,26 @@ defmodule Shuttle.RemoteRegistryTest do
           user_uid: "501"
         )
 
-      # Initial failure -> tunnel bounce -> failed probe -> SSH says daemon is
-      # alive. The route still needs its locally-managed tunnel bounced again.
-      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
-      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
-      Process.sleep(2)
-      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
-      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      Enum.each(1..4, fn _ ->
+        advance.(20)
+        :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      end)
 
+      waiting = RemoteRegistry.snapshot(:reg_live_tunnel, "candide").recovery
+      assert waiting.last_action == "remote daemon alive; waiting for route"
+
+      advance.(20)
+      :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      assert RemoteRegistry.snapshot(:reg_live_tunnel, "candide").recovery.state == :unreachable
+
+      Enum.each(1..7, fn _ ->
+        advance.(20)
+        :ok = RemoteRegistry.poll_now(:reg_live_tunnel)
+      end)
       recovery = RemoteRegistry.snapshot(:reg_live_tunnel, "candide").recovery
-      assert recovery.last_action == "remote daemon alive; retrying tunnel bounce"
-      assert Enum.count(MockRunner.calls(), &(elem(&1, 0) == "launchctl")) == 1
+      assert recovery.state == :tripped
+      assert recovery.attempt == 2
+      assert Enum.count(MockRunner.calls(), &(elem(&1, 0) == "launchctl")) == 2
     end
 
     test "a bound daemon with readiness-gated state waits through boot" do
