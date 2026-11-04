@@ -477,13 +477,29 @@ daemon_kill() {
 }
 
 run_on() { # $1 = "" (local) | host, $2 = shell snippet (login shell, so both CLIs are on PATH)
-  if [ -z "$1" ]; then bash -lc "$2"
-  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi 2>/dev/null
+  run_value "$@" 2>/dev/null
 }
 
 run_on_visible() { # Like run_on, preserving remote stderr for operator diagnostics.
-  if [ -z "$1" ]; then bash -lc "$2"
-  else ssh $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2")"; fi
+  if [ -z "$1" ]; then bash -lc "$2" </dev/null
+  else ssh -n -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 $(fleet_flags "$1") "$(fleet_ssh "$1")" "bash -lc $(shell_quote "$2") </dev/null"; fi
+}
+
+run_value() { # Profile stdout is not command output; require both frame ends.
+  local marker="SHUTTLE_DEPLOY_VALUE_$$" out status
+  out=$(run_on_visible "$1" "printf '\\n%s BEGIN\\n' '$marker'
+bash -c $(shell_quote "$2")
+status=\$?
+printf '\\n%s END %s\\n' '$marker' \"\$status\"
+exit \"\$status\"")
+  status=$?
+  [ "$status" = 0 ] || return "$status"
+  case "$out" in
+    *"$marker BEGIN"$'\n'*"$marker END 0") ;;
+    *) printf 'deploy: missing value completion frame on %s\n' "${1:-local}" >&2; return 1;;
+  esac
+  out="${out#*"$marker BEGIN"$'\n'}"
+  printf '%s' "${out%$'\n'"$marker END 0"}"
 }
 
 version_json() { # $1 = "" (local) | host
@@ -599,7 +615,7 @@ finish_verified_deploy() { # host, regular checkout, previous live tree
   local host="$1" checkout="$2" previous="${3:-}"
   release_quarantine "$host" && ok "live on $TARGET_SHA, quarantine released" \
     || { bad "quarantine release failed"; return 1; }
-  previous="$(run_on_visible "$host" "$(remember_previous_cmd "$previous" "${EXPECTED_RELEASE%/bin/rel}")")" \
+  previous="$(run_value "$host" "$(remember_previous_cmd "$previous" "${EXPECTED_RELEASE%/bin/rel}")")" \
     || { bad 'rollback receipt: could not retain previous release'; return 1; }
   run_on_visible "$host" "$(refresh_checkout_cmd "$checkout")" || ok "checkout freshness: could not inspect $checkout; left unchanged"
   refresh_harnesses "$host" "${EXPECTED_RELEASE%/bin/rel}" || { bad "harness setup failed"; return 1; }
@@ -848,7 +864,7 @@ deploy_local() {
 remote_host_cycle() { # $1 = host, $2 = deployed checkout
   local host="$1" checkout="$2" supervisor=""
   supervisor="$(run_on "$host" "$(supervisor_probe_cmd)")" || { bad "could not inspect $host's supervisor"; return 1; }
-  EXPECTED_RELEASE="$(run_on_visible "$host" "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
+  EXPECTED_RELEASE="$(run_value "$host" "cd $(shell_quote "$checkout/bin/rel") && pwd -P")" || return 1
   local cycle
   if [ "$supervisor" = tmux ]; then
     # Keep the live loop; only its listener needs a graceful cycle. Recreating
@@ -948,7 +964,7 @@ transaction_script() {
   printf 'HOST=%s\nSOURCE=%s\nMODE=%s\nSTAGE=%s\nSKIP_UI=%s\nBUILD_WRAP=%s\nSNAPSHOT=%s\n' \
     "$(shell_quote "${1:-local}")" "$(shell_quote "$2")" "$(shell_quote "$3")" \
     "$(shell_quote "$4")" "$(shell_quote "$5")" "$(shell_quote "$6")" "$(shell_quote "$7")"
-  declare -f shell_quote ok bad deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
+  declare -f shell_quote ok bad run_value deploy_step deploy_root_cmd seed_deploy_cache_cmd revision_checkout_cmd \
     build_checkout_cmd config_migration_cmd listen_prelude daemon_call version_json previous_deploy \
     version_ready target_is_live wait_for_sha release_quarantine finish_verified_deploy verify_and_finish prune_deploy_cmd \
     remember_previous_cmd refresh_checkout_cmd harness_setup_cmd refresh_harnesses supervisor_probe_cmd daemon_listener_cmd disable_competing_supervisors_cmd daemon_kill respawn_launcher_restart_cmd \
@@ -1030,7 +1046,7 @@ deploy_remote() {
   say "$host ($dest:$dir)"
   ssh $flags "$dest" true 2>/dev/null || try_handshake "$host" \
     || { bad 'ssh: unreachable; authenticate first'; return 1; }
-  stage="$(run_on_visible "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
+  stage="$(run_value "$host" 'mktemp -d')" || { bad 'stage: failed'; return 1; }
   if ! builds_ui "$host"; then
     ship_ui "$host" "$dest" "$stage" "$flags" || return 1
   fi
