@@ -590,6 +590,22 @@ defmodule Shuttle.TerminalTest do
   end
 
   @tag :tmp_dir
+  test "conversation scans ignore atomic temporaries and diagnose unrelated corrupt records", %{tmp_dir: dir} do
+    Env.put_env("SHUTTLE_DATA_DIR", dir)
+    attempts = Path.join([dir, "terminals", "launch-attempts"])
+    File.mkdir_p!(attempts)
+    File.write!(Path.join(attempts, "abc.123.tmp"), "")
+    assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
+    File.write!(Path.join(attempts, "corrupt"), "not json")
+    assert ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
+    end) =~ "corrupt"
+    File.write!(Path.join(attempts, "known"), Jason.encode!(%{"conversation_uuid" => "held"}))
+    assert {:ok, []} = Shuttle.Terminal.LaunchAttempts.for_conversation("other")
+    assert {:error, :unknown} = Shuttle.Terminal.LaunchAttempts.for_conversation("held")
+  end
+
+  @tag :tmp_dir
   test "an exited script releases its conversation even if its terminal name is reused", %{
     tmp_dir: dir
   } do

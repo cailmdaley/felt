@@ -1,6 +1,7 @@
 defmodule Shuttle.Terminal.LaunchAttempts do
   @moduledoc "Durable launch reservations, retired by exit evidence, confirmed absence, or explicit operator release."
   alias Shuttle.FS
+  require Logger
 
   defp path(name) do
     key = :crypto.hash(:sha256, name) |> Base.encode16(case: :lower)
@@ -127,16 +128,34 @@ defmodule Shuttle.Terminal.LaunchAttempts do
 
     case FS.ls(directory) do
       {:ok, files} ->
-        Enum.reduce_while(files, {:ok, []}, fn file, {:ok, found} ->
-          with {:ok, raw} <- FS.read(Path.join(directory, file)),
-               {:ok, %{"worker" => worker, "script" => script} = info} <- Jason.decode(raw),
-               true <- is_binary(worker) and is_binary(script) do
-            if info["conversation_uuid"] == uuid and FS.stat(script) != {:error, :enoent},
-              do: {:cont, {:ok, [info | found]}},
-              else: {:cont, {:ok, found}}
+        files
+        |> Enum.reject(&String.ends_with?(&1, ".tmp"))
+        |> Enum.reduce_while({:ok, []}, fn file, {:ok, found} ->
+          target = Path.join(directory, file)
+
+          with {:ok, raw} <- FS.read(target),
+               {:ok, info} when is_map(info) <- Jason.decode(raw) do
+            case info do
+              %{"conversation_uuid" => ^uuid, "worker" => worker, "script" => script}
+              when is_binary(worker) and is_binary(script) ->
+                if FS.stat(script) != {:error, :enoent},
+                  do: {:cont, {:ok, [info | found]}},
+                  else: {:cont, {:ok, found}}
+
+              %{"conversation_uuid" => ^uuid} ->
+                Logger.warning("Cannot read conversation launch reservation #{target}")
+                {:halt, {:error, :unknown}}
+
+              _ ->
+                {:cont, {:ok, found}}
+            end
           else
-            {:error, :enoent} -> {:cont, {:ok, found}}
-            _ -> {:halt, {:error, :unknown}}
+            {:error, :enoent} ->
+              {:cont, {:ok, found}}
+
+            _ ->
+              Logger.warning("Cannot read launch reservation #{target}; conversation unknown")
+              {:cont, {:ok, found}}
           end
         end)
 
