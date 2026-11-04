@@ -8,7 +8,16 @@ const MEETING_MODES = new Set<MeetingMode>(['call', 'phone'])
 
 export type MeetingState = 'starting' | 'loading' | 'live' | 'stopping' | 'failed'
 
+export interface MeetingHandoff {
+  status: string
+  kind: string | null
+  target: string | null
+  origin: string | null
+  prompt: string | null
+}
+
 export interface MeetingRecord {
+  handoff?: MeetingHandoff | null
   /** The daemon recording this meeting, independent of its scribe's owner. */
   recorder?: string | null
   state: MeetingState
@@ -60,6 +69,7 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
   const nullableString = (key: string): string | null =>
     typeof raw[key] === 'string' ? raw[key] as string : null
   return {
+    handoff: parseMeetingHandoff(raw.handoff),
     recorder: nullableString('recorder'),
     state: raw.state as MeetingState,
     title: nullableString('title'),
@@ -75,6 +85,22 @@ export function parseMeetingRecord(value: unknown): MeetingRecord | null {
     tmux_session: nullableString('tmux_session'),
     error: nullableString('error'),
   }
+}
+
+function parseMeetingHandoff(value: unknown): MeetingHandoff | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (typeof raw.status !== 'string') return null
+  const text = (key: string): string | null => typeof raw[key] === 'string' ? raw[key] as string : null
+  return { status: raw.status, kind: text('kind'), target: text('target'), origin: text('origin'), prompt: text('prompt') }
+}
+
+export function meetingHandoffWarning(meeting: MeetingRecord): string | null {
+  const receipt = meeting.handoff
+  if (!receipt || !['unconfirmed', 'reported-failure'].includes(receipt.status)) return null
+  const outcome = receipt.status === 'unconfirmed' ? 'is unconfirmed' : 'failed'
+  const destination = [receipt.target, receipt.origin].filter(Boolean).join(' on ')
+  return `Scribe delivery ${outcome}${destination ? ` to ${destination}` : ''}. Recording continues. Check the target worker before manually sending the meeting prompt; don't blindly retry.`
 }
 
 export function parseMeetingStatus(value: unknown): MeetingStatus | null {

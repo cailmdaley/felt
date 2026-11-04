@@ -370,7 +370,8 @@ defmodule Shuttle.Meeting do
          :ok <- dismiss_failed(context, opts),
          {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
-         :ok <- write_handoff_intent(launch_id, target, origin, opts),
+         prompt <- agent_prompt(mode, paths.transcript, target, note),
+         :ok <- write_handoff_intent(launch_id, target, origin, prompt, opts),
          fiber <- target_fiber(target),
          argv <- hark_argv(executable, paths, title, mode, launch_id, language, system_audio),
          :ok <- create_session(argv, launch_id, fiber, opts),
@@ -382,7 +383,7 @@ defmodule Shuttle.Meeting do
       {:ok,
        %{
          meeting: row,
-         prompt: agent_prompt(mode, paths.transcript, target, note),
+         prompt: prompt,
          launch: launch_id,
          transcript: paths.transcript,
          mirror_host: paths.mirror_host
@@ -393,7 +394,7 @@ defmodule Shuttle.Meeting do
     end
   end
 
-  @doc "Log the agent delivery outcome for a recording on this host."
+  @doc "Record the delivery response and return the updated row; success does not prove the worker followed the transcript."
   def log_delivery(row, status, outcome) do
     launch = row[:launch] || row["launch"]
 
@@ -416,22 +417,24 @@ defmodule Shuttle.Meeting do
     Logger.info(
       "meeting delivery launch=#{launch} status=#{status} outcome=#{Jason.encode!(outcome)}"
     )
+
+    Map.put(row, :handoff, visible_handoff(launch, []))
   end
 
-  defp write_handoff_intent(_launch, :record, _origin, _opts), do: :ok
-
-  defp write_handoff_intent(launch, target, origin, opts) do
+  defp write_handoff_intent(launch, target, origin, prompt, opts) do
     {kind, destination} =
       case target do
+        :record -> {"record", nil}
         :capture -> {"capture", Keyword.get(opts, :capture_destination)}
         {:fiber, id} -> {"fiber", id}
       end
 
     receipt = %{
-      "status" => "pending",
+      "status" => if(target == :record, do: "record-only", else: "pending"),
       "kind" => kind,
       "target" => destination,
-      "origin" => origin
+      "origin" => origin,
+      "prompt" => prompt
     }
 
     case write_handoff(launch, receipt, opts) do
@@ -681,7 +684,12 @@ defmodule Shuttle.Meeting do
         observed
 
       System.monotonic_time(:millisecond) >= deadline ->
-        {:ok, starting_row(paths, title, fiber, mode, launch_id)}
+        {:ok,
+         Map.put(
+           starting_row(paths, title, fiber, mode, launch_id),
+           :handoff,
+           visible_handoff(launch_id, opts)
+         )}
 
       true ->
         Process.sleep(@launch_poll_ms)

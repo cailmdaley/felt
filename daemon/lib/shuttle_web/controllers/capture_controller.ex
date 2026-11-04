@@ -160,7 +160,7 @@ defmodule ShuttleWeb.CaptureController do
 
   defp relay_capture(conn, {:forwarded, status, body}, meeting_row) do
     outcome = decode_capture_body(body)
-    Meeting.log_delivery(meeting_row, status, outcome)
+    meeting_row = Meeting.log_delivery(meeting_row, status, outcome)
     payload = Map.put(outcome, "meeting", meeting_row)
     payload = if status >= 400, do: Map.put(payload, "recording", true), else: payload
     conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
@@ -168,7 +168,7 @@ defmodule ShuttleWeb.CaptureController do
 
   defp relay_capture(conn, {:error, {:forward_failed, name, reason}}, meeting_row) do
     outcome = capture_failed(name, reason)
-    Meeting.log_delivery(meeting_row, 502, outcome)
+    meeting_row = Meeting.log_delivery(meeting_row, 502, outcome)
 
     payload =
       outcome
@@ -189,7 +189,7 @@ defmodule ShuttleWeb.CaptureController do
   defp capture_json(conn, payload, nil), do: json(conn, payload)
 
   defp capture_json(conn, payload, row) do
-    Meeting.log_delivery(row, 200, payload)
+    row = Meeting.log_delivery(row, 200, payload)
     json(conn, MeetingRouter.stamp(Map.put(payload, "meeting", row)))
   end
 
@@ -203,7 +203,7 @@ defmodule ShuttleWeb.CaptureController do
     do: conn |> put_status(status) |> json(payload)
 
   defp capture_error(conn, status, payload, row) do
-    Meeting.log_delivery(row, status, payload)
+    row = Meeting.log_delivery(row, status, payload)
     payload = payload |> Map.put("meeting", row) |> Map.put("recording", true)
     conn |> put_status(status) |> json(MeetingRouter.stamp(payload))
   end

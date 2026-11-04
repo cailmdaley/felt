@@ -301,6 +301,12 @@ The snapshot's running-worker rows carry the same checklist, and the owner feed 
 
 `GET /meeting?recorder=<host>` returns `{available, modes, recorder, meeting}` from the addressed daemon.
 `origin=<host>` also supports host-addressed reads.
+A meeting's optional `handoff` receipt retains its intended `kind` (`capture`, `fiber`, or `record`), `target` (project directory or fiber), `origin`, and full agent `prompt` for manual recovery.
+The recorder saves this host-local, launch-keyed receipt before launching hark, under its Hark directory's `handoffs/<launch>.json`.
+Reads expose a pending delivery as `status: "unconfirmed"`; completed requests report `reported-success` or `reported-failure`, while intentional recording without a scribe reports `record-only`.
+Reported success describes the delivery response, not whether a worker followed the transcript.
+The board warns on unconfirmed or failed delivery; inspect the intended worker before manually sending the saved prompt, because an interrupted request may already have delivered it.
+The daemon never automatically replays a handoff.
 `modes` lists the recording inputs that host supports: `call` (its microphone and system audio) or `phone` (streamed phone microphone).
 Without hark, the list is empty.
 `GET /meeting?prefer=phone` asks the serving daemon to select a reachable remote recorder advertising `available: true` and `call`; it uses the local recorder if no remote qualifies.

@@ -151,7 +151,7 @@ defmodule ShuttleWeb.MeetingController do
           end
         end
 
-        Meeting.log_delivery(row, status, delivery)
+        row = Meeting.log_delivery(row, status, delivery)
         body = MeetingRouter.stamp(%{meeting: row, delivery: delivery})
 
         body =

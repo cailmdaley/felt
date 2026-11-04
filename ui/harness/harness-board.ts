@@ -119,6 +119,10 @@ let mockMeeting: Record<string, unknown> | null = meetingScenario === 'live' || 
       title: 'Shear telecon',
       recorder: recorderHost,
       launch: 'harness-meeting',
+      handoff: search.has('handoff') ? {
+        status: search.get('handoff'), kind: 'capture', target: '/work/shear',
+        origin: 'project-host', prompt: 'Follow the shear telecon transcript.',
+      } : null,
       phone: search.get('audio') === 'phone',
       system_audio: systemAudioEnabled,
       mirror_host: meetingScenario === 'joined' ? (workspaceFixture ? WORKSPACE_HOST : FOREIGN_HOST) : 'project-host',

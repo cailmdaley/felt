@@ -47,7 +47,7 @@ import {
   type BandId,
 } from './deskMobile.js'
 import type { CycleLens } from './KanbanReadModel.js'
-import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, paintTranscript, seatMeetingHost, type MeetingRecord } from './meeting.js'
+import { formatMeetingDuration, meetingActions, meetingDuration, meetingStateWord, meetingHandoffWarning, paintTranscript, seatMeetingHost, type MeetingRecord } from './meeting.js'
 
 export const FALLBACK_DEFAULT_AGENT = 'claude-opus'
 
@@ -1453,8 +1453,8 @@ export class KanbanSurfaceRenderer {
     duration.hidden = value === null
     paintTranscript(block.querySelector<HTMLOListElement>('.kbn-meeting-tail')!, meeting.tail)
     const error = block.querySelector<HTMLElement>('.kbn-meeting-error')!
-    error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : ''
-    error.hidden = meeting.state !== 'failed'
+    error.textContent = meeting.state === 'failed' ? meeting.error || 'The meeting failed.' : meetingHandoffWarning(meeting) ?? ''
+    error.hidden = !error.textContent
 
     const phone = this.o.getPhoneMeeting?.()
     if (phone) paintPhoneMeetingControls(block, meeting, phone)

@@ -2000,6 +2000,48 @@ defmodule Shuttle.MeetingTest do
     refute Enum.any?(calls, fn {command, _, _} -> command == "kill" end)
   end
 
+  test "an interrupted capture retains the destination and prompt for manual recovery", %{
+    hark_dir: dir
+  } do
+    set_starting_meeting_handler(dir)
+
+    caller = self()
+
+    task =
+      Task.async(fn ->
+        result =
+          Meeting.start(%{"mode" => "call"}, :capture, "Review the shear cuts", nil,
+            capture_destination: "/work/project"
+          )
+
+        send(caller, {:recorder_started, result})
+        receive do: (:continue_delivery -> :ok)
+      end)
+
+    assert_receive {:recorder_started, {:ok, %{launch: launch, prompt: prompt}}}, 30_000
+    # Kill the request before it invokes capture dispatch or reports delivery.
+    assert nil == Task.shutdown(task, :brutal_kill)
+    assert {:ok, %{meeting: %{handoff: receipt}}} = Meeting.show()
+
+    assert %{
+             "status" => "unconfirmed",
+             "kind" => "capture",
+             "target" => "/work/project",
+             "prompt" => ^prompt
+           } = receipt
+
+    assert %{"status" => "pending"} =
+             dir |> Path.join("handoffs/#{launch}.json") |> File.read!() |> Jason.decode!()
+  end
+
+  test "record-only intent is explicit on later reads", %{hark_dir: dir} do
+    set_starting_meeting_handler(dir)
+    assert {:ok, _} = Meeting.start(%{"mode" => "call"}, :record, nil, nil)
+
+    assert {:ok, %{meeting: %{handoff: %{"kind" => "record", "status" => "record-only"}}}} =
+             Meeting.show()
+  end
+
   test "a recording exposes an interrupted agent handoff on later reads", %{hark_dir: dir} do
     set_starting_meeting_handler(dir)
 
@@ -2015,7 +2057,9 @@ defmodule Shuttle.MeetingTest do
             }} =
              Meeting.show()
 
-    Meeting.log_delivery(%{launch: launch}, 202, %{delivered: nil})
+    assert %{handoff: %{"status" => "reported-success"}} =
+             Meeting.log_delivery(%{launch: launch}, 202, %{delivered: nil})
+
     assert {:ok, %{meeting: %{handoff: %{"status" => "reported-success"}}}} = Meeting.show()
     Meeting.log_delivery(%{launch: launch}, 502, %{error: "unreachable"})
     assert {:ok, %{meeting: %{handoff: %{"status" => "reported-failure"}}}} = Meeting.show()

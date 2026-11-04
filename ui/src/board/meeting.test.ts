@@ -8,6 +8,7 @@ import {
   meetingDuration,
   meetingPollDelay,
   meetingStateWord,
+  meetingHandoffWarning,
   MeetingStopGuard,
   parseMeetingStatus,
   parseTranscriptLine,
@@ -213,6 +214,19 @@ describe('a meeting on its card', () => {
     const { now, host } = seatMeetingHost(desk(), meeting({ fiber: 'loom/scribe', joined: false }))
     expect(host?.id).toBe('loom/scribe')
     expect(now.awaitingReview.map((c) => c.id)).toEqual(['loom/review'])
+  })
+
+  it('preserves interrupted handoff intent and warns without promising a scribe', () => {
+    const handoff = { status: 'unconfirmed', kind: 'capture', target: '/work/project', origin: 'project-host', prompt: 'Follow the transcript' }
+    const row = parseMeetingStatus({ available: true, meeting: { ...meeting(), handoff } })!.meeting!
+    expect(row.handoff).toEqual(handoff)
+    expect(meetingHandoffWarning(row)).toContain('Scribe delivery is unconfirmed')
+    expect(meetingHandoffWarning(row)).toContain('/work/project')
+    expect(meetingHandoffWarning(row)).toContain('project-host')
+    expect(meetingHandoffWarning({ ...row, handoff: { ...handoff, status: 'reported-failure' } })).toContain('Scribe delivery failed')
+    for (const status of ['record-only', 'reported-success']) {
+      expect(meetingHandoffWarning({ ...row, handoff: { ...handoff, status } })).toBeNull()
+    }
   })
 
   it('leaves the desk alone when the meeting has no card on it', () => {
