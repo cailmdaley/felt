@@ -7,6 +7,7 @@ defmodule Shuttle.Meeting.Control do
 
   def reconcile(identity), do: GenServer.call(__MODULE__, {:reconcile, identity})
   def claim_stop(identity), do: GenServer.call(__MODULE__, {:claim_stop, identity})
+  def release_stop(identity), do: GenServer.call(__MODULE__, {:release_stop, identity})
 
   @impl true
   def init(state), do: {:ok, state}
@@ -21,6 +22,9 @@ defmodule Shuttle.Meeting.Control do
 
   def handle_call({:claim_stop, identity}, _from, _claim),
     do: {:reply, :claimed, identity}
+
+  def handle_call({:release_stop, identity}, _from, claim),
+    do: {:reply, :ok, if(claim == identity, do: nil, else: claim)}
 end
 
 defmodule Shuttle.Meeting do
@@ -797,7 +801,9 @@ defmodule Shuttle.Meeting do
   end
 
   defp signal_stop(_context, opts, pid, launch) do
-    with pid when not is_nil(pid) <- if(is_integer(pid), do: Integer.to_string(pid), else: pid),
+    pid = if is_integer(pid), do: Integer.to_string(pid), else: pid
+
+    with pid when not is_nil(pid) <- pid,
          :claimed <- Shuttle.Meeting.Control.claim_stop({pid, launch}),
          {_output, 0} <- run(opts, "kill", ["-INT", pid]) do
       show(opts)
@@ -809,6 +815,7 @@ defmodule Shuttle.Meeting do
         {:error, {:operation, "meeting process has no valid pid"}}
 
       {output, status} ->
+        if is_integer(status), do: Shuttle.Meeting.Control.release_stop({pid, launch})
         {:error, {:operation, "could not signal hark (#{status}): #{String.trim(output)}"}}
     end
   end

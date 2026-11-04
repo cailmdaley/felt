@@ -1672,6 +1672,24 @@ defmodule Shuttle.MeetingTest do
            end)
   end
 
+  test "a failed signal releases the stop claim for retry", %{hark_dir: hark_dir} do
+    write_meeting(hark_dir, %{"launch" => "retry", "pid" => 321, "phase" => "live"})
+
+    Shuttle.Test.MeetingRunner.set_handler(fn
+      "tmux", ["display-message" | _], _, state -> {{"0|0|1234|retry|\n", 0}, state}
+      "ps", _, _, state -> {{"hark capture", 0}, state}
+      "kill", _, _, nil -> {{"signal failed", 1}, :retried}
+      _, _, _, state -> {{"", 0}, state}
+    end)
+
+    assert {:error, {:operation, _}} = Meeting.stop()
+    assert {:ok, _} = Meeting.stop()
+    assert Enum.count(Shuttle.Test.MeetingRunner.calls(), fn
+      {"kill", ["-INT", "321"], _} -> true
+      _ -> false
+    end) == 2
+  end
+
   test "concurrent and repeated stop requests signal a live pid only once", %{hark_dir: hark_dir} do
     write_meeting(hark_dir, %{
       "launch" => "launch-current",
