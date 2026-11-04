@@ -149,6 +149,35 @@ defmodule Shuttle.Meeting do
     end)
   end
 
+  @doc "Enable or mute system transcription for the addressed live desktop meeting."
+  def system_audio(enabled, opts \\ []) when is_boolean(enabled) do
+    with_meeting_lock(fn ->
+      with {:ok, snapshot, _context} <- inspect_current(opts),
+           :ok <- validate_stop_launch(snapshot, Keyword.get(opts, :launch)),
+           %{state: state, phone: false} = row when state in ["loading", "live"] <-
+             snapshot.meeting,
+           executable when is_binary(executable) <- find_hark(opts),
+           {_output, 0} <-
+             run(opts, "env", [
+               "HARK_DIR=" <> hark_dir(opts),
+               executable,
+               if(enabled, do: "resume", else: "pause"),
+               "--system"
+             ]) do
+        {:ok, %{snapshot | meeting: Map.put(row, :system_audio, enabled)}}
+      else
+        {:error, _} = error ->
+          error
+
+        {_output, status} when is_integer(status) ->
+          {:error, {:operation, "could not change hark system audio (#{status})"}}
+
+        _ ->
+          {:error, {:validation, "system audio requires a live desktop meeting"}}
+      end
+    end)
+  end
+
   @doc """
   Derive the meeting name and title from the first line of a note, skipping
   `[Image: <path>]` / `[File: <path>]` lines.
@@ -310,6 +339,7 @@ defmodule Shuttle.Meeting do
   defp do_start(meeting, target, note, origin, opts) do
     with {:ok, mode} <- validate_meeting(meeting),
          {:ok, language} <- validate_language(meeting),
+         {:ok, system_audio} <- validate_system_audio(meeting),
          {:ok, note} <- validate_note(note),
          :ok <- validate_target(target),
          :ok <- validate_origin(origin, opts),
@@ -330,7 +360,7 @@ defmodule Shuttle.Meeting do
          {:ok, paths} <- reserve_meeting_paths(name, origin, opts),
          launch_id <- launch_id(),
          fiber <- target_fiber(target),
-         argv <- hark_argv(executable, paths, title, mode, launch_id, language),
+         argv <- hark_argv(executable, paths, title, mode, launch_id, language, system_audio),
          :ok <- create_session(argv, launch_id, fiber, opts),
          :ok <-
            Logger.info(
@@ -379,6 +409,13 @@ defmodule Shuttle.Meeting do
 
   defp validate_meeting(_),
     do: {:error, {:validation, "meeting.mode must be 'call' or 'phone'"}}
+
+  defp validate_system_audio(meeting) do
+    case Map.get(meeting, "system_audio", true) do
+      enabled when is_boolean(enabled) -> {:ok, enabled}
+      _ -> {:error, {:validation, "meeting.system_audio must be a boolean"}}
+    end
+  end
 
   defp validate_language(meeting) do
     case Map.get(meeting, "language", "auto") do
@@ -437,9 +474,10 @@ defmodule Shuttle.Meeting do
 
   defp dismiss_failed(_context, _opts), do: :ok
 
-  defp hark_argv(executable, paths, title, mode, launch_id, language) do
+  defp hark_argv(executable, paths, title, mode, launch_id, language, system_audio) do
     [executable, "-o", paths.local_transcript, "--launch=" <> launch_id, "--title=" <> title] ++
       mode_flag(mode) ++
+      if(mode == "call" and not system_audio, do: ["--mic-only"], else: []) ++
       language_flag(language) ++
       if(paths.mirror, do: ["--mirror", paths.mirror], else: [])
   end
@@ -983,6 +1021,7 @@ defmodule Shuttle.Meeting do
       fiber: joined_fiber,
       joined: not is_nil(joined_fiber),
       phone: not is_nil(phone_path(data)),
+      system_audio: data["system_audio"],
       launch: launch_from(data) || tmux_launch(tmux),
       tmux_session: if(tmux_exists?, do: @session, else: nil),
       error: error || data["error"]

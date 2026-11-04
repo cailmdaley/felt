@@ -153,6 +153,41 @@ defmodule ShuttleWeb.MeetingController do
     end
   end
 
+  def system_audio(conn, params) do
+    cond do
+      not is_boolean(params["enabled"]) or params["launch"] in [nil, ""] ->
+        conn |> put_status(422) |> json(%{error: "launch and boolean enabled are required"})
+
+      true ->
+        case MeetingRouter.select(Map.delete(params, "prefer")) do
+          {:ok, :local} ->
+            case Meeting.system_audio(params["enabled"], launch: params["launch"]) do
+              {:ok, snapshot} ->
+                json(conn, MeetingRouter.stamp(%{meeting: snapshot.meeting}))
+
+              {:error, reason} ->
+                {status, body} = system_audio_error(reason)
+                conn |> put_status(status) |> json(MeetingRouter.stamp(body))
+            end
+
+          {:ok, {:remote, remote}} ->
+            {status, body} =
+              MeetingRouter.forward_control(remote, "/api/v1/meeting/system-audio", params)
+
+            conn |> put_status(status) |> json(body)
+
+          {:error, message} ->
+            conn |> put_status(400) |> json(%{error: message})
+        end
+    end
+  end
+
+  defp system_audio_error({:stale_launch, row}),
+    do: {409, %{error: "a different meeting is recording now", meeting: row}}
+
+  defp system_audio_error({:validation, message}), do: {422, %{error: message}}
+  defp system_audio_error(reason), do: {503, %{error: error_message(reason)}}
+
   def stop(conn, params) do
     cond do
       params["recorder"] not in [nil, ""] and params["launch"] in [nil, ""] ->

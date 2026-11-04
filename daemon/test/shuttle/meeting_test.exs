@@ -1548,6 +1548,71 @@ defmodule Shuttle.MeetingTest do
     assert message =~ "unknown origin"
   end
 
+  test "system audio control is launch-bound and preserves the mic", %{hark_dir: dir} do
+    write_meeting(dir, %{
+      "launch" => "current",
+      "pid" => 321,
+      "phase" => "live",
+      "system_audio" => true
+    })
+
+    set_current_meeting_handler("current", 321)
+
+    for enabled <- [false, true] do
+      conn =
+        post(
+          api_conn(),
+          "/api/v1/meeting/system-audio",
+          Jason.encode!(%{launch: "current", enabled: enabled})
+        )
+
+      assert conn.status == 200
+      assert Jason.decode!(conn.resp_body)["meeting"]["system_audio"] == enabled
+    end
+
+    commands = for {"env", args, _} <- Shuttle.Test.MeetingRunner.calls(), do: args
+
+    assert Enum.map(commands, &Enum.take(&1, -2)) == [
+             ["pause", "--system"],
+             ["resume", "--system"]
+           ]
+
+    assert Enum.all?(commands, &(hd(&1) == "HARK_DIR=" <> dir))
+
+    conn =
+      post(
+        api_conn(),
+        "/api/v1/meeting/system-audio",
+        Jason.encode!(%{launch: "old", enabled: false})
+      )
+
+    assert conn.status == 409
+    assert length(for {"env", _, _} <- Shuttle.Test.MeetingRunner.calls(), do: :command) == 2
+  end
+
+  test "mic-only start is explicit and the desktop default keeps system audio", %{hark_dir: dir} do
+    for enabled <- [true, false] do
+      File.rm(Path.join(dir, "meeting.json"))
+      set_starting_meeting_handler(dir)
+
+      assert {:ok, _} =
+               Meeting.start(
+                 %{"mode" => "call", "system_audio" => enabled},
+                 :record,
+                 "Audio",
+                 "local"
+               )
+
+      {"tmux", ["new-session" | args], _} =
+        Enum.find(Shuttle.Test.MeetingRunner.calls(), fn {cmd, args, _} ->
+          cmd == "tmux" and match?(["new-session" | _], args)
+        end)
+
+      command = List.last(Enum.take_while(args, &(&1 != ";")))
+      assert String.contains?(command, "--mic-only") == not enabled
+    end
+  end
+
   test "addressed stale stop cannot signal or dismiss a newer launch", %{hark_dir: hark_dir} do
     write_meeting(hark_dir, %{
       "launch" => "new",

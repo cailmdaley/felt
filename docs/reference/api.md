@@ -58,6 +58,7 @@ time.
 | `POST /capture` | recorder-routed meeting; owner-routed agent | Launch a session from a free-text prompt; meeting mode starts hark on the selected recorder before routing the scribe capture |
 | `POST /meeting/join` | recorder-routed; delivery owner-routed | Record on the selected recorder and join the meeting to an existing constitution's worker |
 | `POST /meeting/start` | recorder-routed | Record on the selected recorder, mirrored toward `origin`, with no agent; answers the transcript's path on `origin` |
+| `POST /meeting/system-audio` | recorder-addressed | Enable or mute system transcription in a live desktop meeting with `{recorder?, launch, enabled}` |
 | `POST /meeting/stop` | recorder-addressed | Stop the addressed recording or dismiss its failed tmux pane |
 | `POST /attachments` | owner-routed | Store files attached in the board's composer on the fiber's host and return their paths |
 | `POST /deliver` | owner-routed | Put text in front of a fiber's worker: message a live session, else resume (or dispatch, if it never ran) with the text as From User. With `context_only` and a `message_id` it queues the text in the fiber's context mailbox instead; adding `unless_live` answers 409 `{live: true}` while a worker is live, else queues for the next worker (`status: queued_for_next_worker`) |
@@ -422,7 +423,7 @@ through `/deliver` on its owner. The answer is `{meeting, delivery}`, where
 the delivery's status with `recording: true` and `error`, and the recording
 continues. Start errors are the same as meeting capture's.
 
-`POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode}, note?}`
+`POST /meeting/start` accepts `{origin?, recorder?, meeting: {mode, system_audio?}, note?}`
 and records without any agent: no capture is routed and nothing goes to
 `/deliver`. It is for a caller that follows the transcript itself, such as a
 session the daemon did not launch (`shuttle meeting start`, then
@@ -792,3 +793,10 @@ A reviewed close has a distinct quiet notice naming the verdict.
 Unreachable owners and failed reads return 503, so the mailbox retains the notice for retry.
 Existing notices without structured signal metadata are checked by their lifecycle message ID and the thread address in their text.
 Mailbox delivery validates notices before emitting them and durably acknowledges each successful direct delivery independently.
+
+Desktop meeting requests accept `meeting.system_audio` (boolean, default `true`).
+Set it to `false` to start with only mic transcription.
+`POST /meeting/system-audio` accepts `{recorder?, launch, enabled}` and changes system transcription during the addressed live desktop meeting.
+The raw system reference remains available for mic echo cancellation.
+A stale launch returns 409; phone meetings reject this control.
+The meeting row reports `system_audio` from hark’s lifecycle state.

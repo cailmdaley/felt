@@ -55,7 +55,12 @@ with recording_unknown: inspect that recorder before starting another.`,
 			if mode != "call" && mode != "phone" {
 				return fmt.Errorf("--mode must be call or phone")
 			}
-			request := map[string]any{"meeting": map[string]string{"mode": mode}}
+			micOnly, _ := cmd.Flags().GetBool("mic-only")
+			meeting := map[string]any{"mode": mode}
+			if micOnly {
+				meeting["system_audio"] = false
+			}
+			request := map[string]any{"meeting": meeting}
 			if recorder = strings.TrimSpace(recorder); recorder != "" {
 				request["recorder"] = recorder
 			}
@@ -87,6 +92,7 @@ with recording_unknown: inspect that recorder before starting another.`,
 	}
 	start.Flags().String("recorder", "", "Host whose daemon records (default: this host; for phone, the daemon selects one)")
 	start.Flags().String("mode", "call", "Audio input: call (the recorder's mic and system audio) or phone (a phone's mic)")
+	start.Flags().Bool("mic-only", false, "Start with system transcription off (desktop meetings)")
 	start.Flags().String("note", "", "Note whose first line names the recording")
 	return start
 }

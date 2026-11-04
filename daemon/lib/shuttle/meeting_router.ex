@@ -156,7 +156,9 @@ defmodule Shuttle.MeetingRouter do
     end
   end
 
-  def forward_stop(remote, params) do
+  def forward_stop(remote, params), do: forward_control(remote, "/api/v1/meeting/stop", params)
+
+  def forward_control(remote, path, params) do
     payload = params |> Map.put("recorder", remote.name) |> Map.put("recorder_forwarded", true)
 
     client = OriginRouter.forward_client()
@@ -164,7 +166,7 @@ defmodule Shuttle.MeetingRouter do
     post = if function_exported?(client, :post_once, 4), do: :post_once, else: :post
 
     case apply(client, post, [
-           Remote.url_for(remote, "/api/v1/meeting/stop"),
+           Remote.url_for(remote, path),
            Jason.encode!(payload),
            "application/json",
            OriginRouter.default_forward_timeout_ms()
@@ -176,7 +178,7 @@ defmodule Shuttle.MeetingRouter do
         {502,
          %{
            recorder: remote.name,
-           error: "stop was not confirmed; inspect this recorder: #{inspect(reason)}"
+           error: "meeting control was not confirmed; inspect this recorder: #{inspect(reason)}"
          }}
     end
   end
