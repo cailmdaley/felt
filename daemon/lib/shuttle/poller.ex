@@ -3511,7 +3511,7 @@ defmodule Shuttle.Poller do
         fallback_signal: signal
       ]
 
-      with true <- cli == "pi",
+      with true <- cli in ["codex", "pi"],
            {:ok, dispatched_at, _} <- DateTime.from_iso8601(boundary) do
         cond do
           signal != nil and not Shuttle.FS.exists?(signal) ->

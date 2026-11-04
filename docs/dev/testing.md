@@ -42,6 +42,12 @@ The daemon suite launches sibling workers without a live family root, checks one
 `terminal/rex_families_test.exs` covers family resolution, concurrent sibling launches, window-local close, exact-window reveal, viewer tabs and human-window preservation with the fixture-backed runner.
 Point all test CLI calls at that socket, stop the isolated server in cleanup, and never create or destroy sessions on the operator's server.
 
+`terminal/codex_rex_real_test.exs` is an opt-in native Codex messaging check.
+With the checkout's Go CLIs first on `PATH`, run it with
+`SHUTTLE_TEST_CODEX_AUTH="${CODEX_HOME:-$HOME/.codex}/auth.json" mix test test/shuttle/terminal/codex_rex_real_test.exs --include integration`.
+It copies only that auth file into a temporary `CODEX_HOME`, starts a private Rex server, and sends short model prompts in a temporary workspace outside the repository.
+It delays Codex startup beyond capture timeout, restarts the Poller, and requires the acquired UUID in both the fiber and ledger before sending real CLI messages by address and fiber.
+
 ## What a test is for
 
 **A test names the failure it catches.** Before writing one, say what bug

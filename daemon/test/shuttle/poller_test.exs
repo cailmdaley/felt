@@ -1422,7 +1422,11 @@ defmodule Shuttle.PollerTest do
         {"pi", "pi-luna", :absolute},
         {"pi", "pi-luna", :tilde},
         {"pi", "pi-luna", :empty},
-        {"pi", "pi-luna", :old}
+        {"pi", "pi-luna", :old},
+        {"codex", "codex", :absolute},
+        {"codex", "codex", :tilde},
+        {"codex", "codex", :empty},
+        {"codex", "codex", :old}
       ] do
     @tag :pr53_identity
     @tag :timing
@@ -1431,6 +1435,7 @@ defmodule Shuttle.PollerTest do
       id = "tests/recover-#{cli}"
       root = MockRunner.felt_root()
       Env.put_env("SHUTTLE_PI_SESSIONS_DIR", Path.join(root, "pi-sessions"))
+      Env.put_env("SHUTTLE_CODEX_SESSIONS_DIR", Path.join(root, "codex-sessions"))
       Env.put_app_env(:session_capture_timeout_ms, 25)
       Env.put_app_env(:session_capture_poll_ms, 5)
       Env.put_app_env(:session_capture_retry_ms, 100)
@@ -1512,8 +1517,20 @@ defmodule Shuttle.PollerTest do
       uuid = "recovered-#{cli}"
       header = %{"id" => uuid, "cwd" => root, "timestamp" => boundary}
 
-      path = Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl")
-      event = Map.put(header, "type", "session")
+      {path, wrap_header} =
+        case cli do
+          "pi" ->
+            {Path.join(Shuttle.HarnessPaths.pi_sessions_dir(root), "session.jsonl"),
+             &Map.put(&1, "type", "session")}
+
+          "codex" ->
+            day = dispatched_at |> DateTime.to_date() |> Calendar.strftime("%Y/%m/%d")
+
+            {Path.join([root, "codex-sessions", day, "rollout-session.jsonl"]),
+             &%{"type" => "session_meta", "payload" => &1}}
+        end
+
+      event = wrap_header.(header)
 
       File.mkdir_p!(Path.dirname(path))
 
@@ -1532,7 +1549,7 @@ defmodule Shuttle.PollerTest do
 
           File.write!(
             Path.join(Path.dirname(path), "rollout-zzzz-#{label}.jsonl"),
-            Jason.encode!(Map.put(candidate, "type", "session")) <>
+            Jason.encode!(wrap_header.(candidate)) <>
               "\n" <> Jason.encode!(%{"text" => "Fiber: #{prompt}"}) <> "\n"
           )
         end
